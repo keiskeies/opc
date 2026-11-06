@@ -1,0 +1,7 @@
+packages:
+  - packages/*
+
+# better-sqlite3 仅供 Task 0.1 固化的 PoC 使用（官方 SqliteSaver 依赖它）。
+# Task 0.4b 自研 Saver 落地后移除 —— 见 docs/decisions/0001-sqlite-driver.md。
+onlyBuiltDependencies:
+  - better-sqlite3

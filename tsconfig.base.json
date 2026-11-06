@@ -1,0 +1,18 @@
+{
+  "compilerOptions": {
+    "target": "ES2023",
+    "lib": ["ES2023"],
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "exactOptionalPropertyTypes": true,
+    "skipLibCheck": true,
+    "types": ["node"],
+    "verbatimModuleSyntax": true,
+    "isolatedModules": true,
+    "resolveJsonModule": true
+  },
+  "$comment": "不要在此加 noEmit：被 composite 项目引用时会报 TS6310（may not disable emit）。类型检查统一用根脚本 `tsc -b --noEmit`，已实测确认它不产出 dist，但仍生成 .tsbuildinfo（已 gitignore）。"
+}

@@ -1,0 +1,17 @@
+{
+  "files": [],
+  "references": [
+    {
+      "path": "packages/contracts"
+    },
+    {
+      "path": "packages/hub"
+    },
+    {
+      "path": "packages/desktop"
+    },
+    {
+      "path": "packages/web"
+    }
+  ]
+}

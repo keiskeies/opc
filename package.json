@@ -9,13 +9,21 @@
   },
   "scripts": {
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "lint": "biome check .",
+    "lint:fix": "biome check --write .",
+    "typecheck": "tsc -b",
+    "verify": "pnpm lint && pnpm typecheck && pnpm test"
   },
   "devDependencies": {
-    "vitest": "^4.0.12",
+    "@biomejs/biome": "^2.6.5",
     "@langchain/langgraph": "^1.7.1",
     "@langchain/langgraph-checkpoint": "^1.2.2",
-    "@langchain/langgraph-checkpoint-sqlite": "^1.1.0"
+    "@langchain/langgraph-checkpoint-sqlite": "^1.1.0",
+    "@types/node": "^26.6.6",
+    "tsx": "^4.23.15",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.12"
   },
   "pnpm": {
     "onlyBuiltDependencies": [

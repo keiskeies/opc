@@ -1,0 +1,12 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "composite": true,
+    "rootDir": "src",
+    "outDir": "dist",
+    "noEmit": false,
+    "tsBuildInfoFile": "dist/.tsbuildinfo"
+  },
+  "include": ["src/**/*.ts"],
+  "$comment": "composite 项目必须能 emit：`tsc -b --noEmit` 会把 --noEmit 传播给引用项目并报 TS6310，所以 noEmit 只能 false（实测）。类型检查产物落在 dist/，已 gitignore；Electron 的真实构建产物在 out/（electron-vite），与此处 dist/ 无关。"
+}

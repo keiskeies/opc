@@ -1,0 +1,74 @@
+{
+  "$schema": "https://biomejs.dev/schemas/2.6.5/schema.json",
+  "vcs": {
+    "enabled": true,
+    "clientKind": "git",
+    "useIgnoreFile": true
+  },
+  "files": {
+    "includes": [
+      "packages/**/*.{ts,tsx,js,mjs,json}",
+      "test/**/*.{ts,tsx}",
+      "*.json"
+    ],
+    "ignoreUnknown": true
+  },
+  "formatter": {
+    "enabled": true,
+    "indentStyle": "space",
+    "indentWidth": 2,
+    "lineEnding": "lf"
+  },
+  "javascript": {
+    "formatter": {
+      "quoteStyle": "double",
+      "semicolons": "always"
+    }
+  },
+  "assist": {
+    "enabled": true,
+    "actions": {
+      "source": {
+        "organizeImports": "on"
+      }
+    }
+  },
+  "linter": {
+    "enabled": true,
+    "rules": {
+      "preset": "recommended",
+      "style": {
+        "noRestrictedImports": {
+          "level": "error",
+          "options": {
+            "paths": {
+              "node:sqlite": "SQLite 只允许出现在 packages/hub —— 规格 §5.6.1 / 计划 §2 依赖边界",
+              "node:sqlite/promise": "SQLite 只允许出现在 packages/hub —— 规格 §5.6.1 / 计划 §2 依赖边界",
+              "better-sqlite3": "SQLite 只允许出现在 packages/hub —— 规格 §5.6.1 / 计划 §2 依赖边界"
+            }
+          }
+        },
+        "useTemplate": "off"
+      },
+      "suspicious": {
+        "noConsole": {
+          "level": "off"
+        }
+      }
+    }
+  },
+  "overrides": [
+    {
+      "includes": ["packages/hub/**", "packages/hub/**/*.ts"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "off"
+            }
+          }
+        }
+      }
+    }
+  ]
+}

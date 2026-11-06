@@ -3,6 +3,11 @@ dist/
 out/
 .vite/
 coverage/
+# 兜底：包根若直接生成 tsconfig.tsbuildinfo 也能被忽略。
+# 注：gitignore 的 `*` 【会】匹配前导点（实测 `*.tsbuildinfo` 命中 `.tsbuildinfo`），与 shell glob 的约定相反。
+*.tsbuildinfo
+
+
 
 # 数据库文件及其 WAL/SHM —— 绝不入库（规格 §6.1）
 *.db
