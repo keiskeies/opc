@@ -29,7 +29,12 @@ export function build(saver) {
   return new StateGraph(State)
     .addNode("producer", () => ({ doc: "draft-v1", trail: "producer" }))
     .addNode("gateA", () => ({ trail: "gateA-pass" }))
-    .addNode("gateB", () => ({ trail: "gateB-pass" }))
+    // gateB 故意慢 30ms：让「merge 是否等齐两个门控」成为可观测的时序事实。
+    // 若框架不做 fan-in（merge 不等 gateB），merge 会插到 gateB-pass 之前。
+    .addNode("gateB", async () => {
+      await new Promise(r => setTimeout(r, 300));
+      return { trail: "gateB-pass" };
+    })
     .addNode("merge", () => ({ trail: "merge" }))
     .addNode("debate", async () => {
       const sub = await debate.invoke({ trail: [], verdict: "" }, { configurable: { thread_id: "debate-1" } });
@@ -42,7 +47,7 @@ export function build(saver) {
     .addEdge("__start__", "producer")
     .addEdge("producer", "gateA")
     .addEdge("producer", "gateB")
-    .addEdge(["gateA", "gateB"], "merge")
+    .addEdge("gateA", "merge")
     .addEdge("merge", "debate")
     .addEdge("debate", "approval")
     .addEdge("approval", END)

@@ -55,18 +55,30 @@ beforeAll(() => {
 afterAll(() => rmSync(TMP, { recursive: true, force: true }));
 
 describe('门禁 #1 并行分支与汇聚节点', () => {
-  it('两个并行门控都执行过，且 merge 在两者之后', () => {
-    const t = phase1.trail;
-    expect(t).toContain('gateA-pass');
-    expect(t).toContain('gateB-pass');
-    expect(t.indexOf('merge')).toBeGreaterThan(
-      Math.max(t.indexOf('gateA-pass'), t.indexOf('gateB-pass')),
-    );
+  // 注意：这里【故意不断言 trail 顺序】。
+  // 变异测试（2026-11-06）证明：把 addEdge(["gateA","gateB"], "merge") 改成
+  // addEdge("gateA", "merge")，trail 顺序完全不变 —— 因为 Pregel 超步调度会把同一
+  // superstep 的兄弟节点（gateA 立即完成、gateB 慢 300ms）整批收尾后才进下一超步。
+  // 所以「顺序」对 fan-in 语义【没有鉴别力】，断言它只会制造虚假安全感。
+  // 「汇聚节点确实等齐了多方写入」这件事由门禁 #5 的 judge:2 负责 —— 它读的是
+  // 【汇聚节点看到的 state 值】，那才是可观测证据。
+  //
+  // 对 Phase 1 门控的直接含义：不要以为写了数组边就一定等齐，必须断言汇聚节点
+  // 真的读到了每个上游的产物（见 Task 1.2 evaluateGate 的入参校验）。
+  it('两个并行门控都执行过（含慢分支 gateB 被等到）', () => {
+    expect(phase1.trail).toContain('gateA-pass');
+    expect(phase1.trail).toContain('gateB-pass');   // gateB 故意慢 300ms，仍被等到
+    expect(phase1.trail.filter(x => x === 'gateB-pass')).toHaveLength(1);
   });
 
   it('汇聚与产出各只发生一次（不重复计费的前提）', () => {
     expect(phase1.trail.filter(x => x === 'merge')).toHaveLength(1);
     expect(phase1.trail.filter(x => x === 'producer')).toHaveLength(1);
+  });
+
+  it('图最终停在审批节点，没有绕过审批直达 END', () => {
+    expect(phase1.next).toEqual(['approval']);
+    expect(phase1.trail.some(x => x.startsWith('approval:'))).toBe(false);
   });
 });
 
