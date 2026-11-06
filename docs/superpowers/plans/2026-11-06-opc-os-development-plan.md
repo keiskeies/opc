@@ -61,7 +61,7 @@
 
 | # | 事实 | 对实现的约束 |
 |---|---|---|
-| V1 | `@langchain/langgraph@1.7.1` 的条件边、并行边、汇聚节点（`addEdge([a, b], c)`）实测可用 | 委派规则图可直接表达，无需自建 DSL |
+| V1 | `@langchain/langgraph@1.7.1` 的条件边、并行边、汇聚节点（`addEdge([a, b], c)`）实测可用（**但顺序不可依赖，见 V10**） | 委派规则图可直接表达，无需自建 DSL |
 | V2 | **`interrupt()` 不抛异常**：`invoke()` 正常返回，暂停信息在返回值 `__interrupt__` 数组里；`getState(cfg).next` 给出待执行节点 | 审批拦截**不能**用 try/catch 写，必须检查 `__interrupt__`（Task 0.6） |
 | V3 | 进程 A 退出（模拟崩溃）后，进程 B 用同一 DB 重建 saver 与图，`next`、`values` 完整恢复，resume 后**已完成节点未重复执行** | 「不重复计费」成立；重启续跑可直接实现（Task 0.6） |
 | V4 | 子图（编译后的图在节点内部 `invoke`）可嵌套，子图内部并行 + 汇聚正常，父子状态不串 | §10.2 辩论会、§13 调研子图都可作为节点内子图实现 |
@@ -70,8 +70,12 @@
 | V7 | `node:sqlite`（Node 24 内置）：WAL 生效；**checkpoint + writes + events 三表同一事务提交成功**；append-only 触发器拦下 UPDATE；失败后整体回滚、无半提交行；`db.function()` 可用；BLOB 往返为 `Uint8Array` | §25-D6-a 可行（Task 0.3 判据） |
 | V8 | `node:sqlite` **不提供 `db.backup()`**（`typeof` 为 undefined） | 备份只能用 `VACUUM INTO`，代码中不得调用 `db.backup()`（Task 6.3） |
 | V9 | 吞吐：事务内 2000 行 ≈ 1 ms；逐条自动提交在测试库中同样快，但那是无 fsync 压力场景；规格 §6.5 的磁盘实测为约 2 ms/行 | 事件写入一律走写队列 + 批量事务（Task 0.5），禁止节点内逐条 `INSERT` |
+| V10 | **Pregel 超步调度让 trail 顺序对 fan-in 没有鉴别力**：把 `addEdge([gateA, gateB], merge)` 改成 `addEdge("gateA", merge)` 后，即使 gateB 慢 300 ms，trail 顺序**完全不变**（同一超步的兄弟节点整批收尾后才进下一超步） | **门控不能靠「边顺序」保证等齐**。可观测证据是**汇聚节点读到的 state 值**（实测里是子图的 `judge:2`）。直接约束 Task 1.2 的入参校验与 Task 0.8 的断言写法 |
+| V11 | **重复 `invoke` 不是「什么都不做」，而是整图重放**：producer / 两个门控 / merge / 子图**全部第二次执行**，图却依然停在 `approval`，审批并未推进 | 「恢复」必须走 `new Command({ resume })`；重复 `invoke` = **重复烧钱 + 状态错乱**。Task 0.6 / 0.8 必须各带一条反例守卫（已实现在 `test/poc/resume.test.ts`） |
+| V12 | 框架编译期会抛 `UnreachableNodeError`（节点**完全不可达**时）；但**动态跳转绕过审批能编译通过** —— 条件边声明 `ends: ["approval", "__end__"]` 却总返回 `END`，编译无误，只有运行时断言（`next === ["approval"]`）抓得到 | 规格 §18.3「升级路径可达 CEO」**框架帮不上忙**，必须在保存组织图时自建校验（Task 3.1），并保留一条「审批不可绕过」的行为测试 |
+| V13 | **lint 规则降为 `warn` 后退出码仍是 0**：biome 照样打印违规（`Found 2 warnings`）但 `biome check` 返回 0，CI 就此变绿 —— 变异测试实测（把 `noRestrictedImports` 改 `warn`，拦截类断言 2 条变红，原因 `expected +0 not to be +0`） | **门禁类断言必须断言退出码，不能只看输出里有没有违规字样**。`noRestrictedImports` 必须是 `error` 级；同理任何「CI 挡住」的验收，判据是退出码而非日志文本。直接约束 Task 0.11 / 1.8 等出口门禁的写法 |
 
-**仍未验证（保留为风险）**：`node:sqlite` 属实验性内置模块，API 可能变动；**Electron 内嵌 Node 是否暴露 `node:sqlite` 未经验证** —— 故架构规定 `node:sqlite` 只允许出现在 `packages/hub/**`（规格 §5.6.1），由 Task 0.2 在编译期强制。
+**仍未验证（保留为风险）**：`node:sqlite` 属实验性内置模块，API 可能变动；**Electron 内嵌 Node 是否暴露 `node:sqlite` 未经验证** —— 故架构规定 `node:sqlite` 只允许出现在 `packages/hub/**`（规格 §5.6.1），由 Task 0.2 在编译期强制。另：`AsyncLocalStorage` 传递同一连接已在 **Node 原生调度**下验证（跨 `await` / `setTimeout` / `Promise.all`），**但未经 LangGraph 内部调度验证** —— 这是 Task 0.4a 的存在理由。
 
 ---
 ## 2. 工程骨架（所有 Phase 共用，在 Task 0.2 一次建好）
@@ -99,7 +103,10 @@ opc-os/
   test/            跨包集成测试、确定性门控测试、回放一致性测试
 ```
 
-**目录归属由两条机制强制**（Task 0.2）：`packages/*/tsconfig.json` 只声明本包可引用的依赖；biome 的 `noRestrictedImports` 在 `desktop` / `web` / `mobile` 中禁止 `node:sqlite` 与 `better-sqlite3`。
+**目录归属由两条机制强制**（Task 0.2）：`packages/*/tsconfig.json` 只声明本包可引用的依赖；biome 的
+`noRestrictedImports` 禁止 `node:sqlite` 与 `better-sqlite3`。注意方向是**默认禁止、`packages/hub` 用
+`overrides` 单点放行**，而不是逐个点名 desktop / web / mobile 去禁止 —— 后者会在新增包（如 Task 4.x 的
+移动端壳）时因忘记点名而静默失守，前者即使忘记配置也是安全的一侧（fail-closed）。
 
 **根 package.json scripts（固定命名，后续任务直接引用）**：
 
@@ -110,12 +117,23 @@ opc-os/
   test:       vitest run
   test:watch: vitest
   lint:       biome check .
-  typecheck:  tsc -b --noEmit
+  typecheck:  tsc -b            ← 不要加 --noEmit，见下方注记
   migrate:    tsx packages/hub/src/db/migrate.ts
   backup:     tsx packages/hub/src/db/backup.ts
   verify:     pnpm lint && pnpm typecheck && pnpm test
 }
 ```
+
+> **`typecheck` 不能写成 `tsc -b --noEmit`（实测）**：项目用了 `composite: true`（跨包引用所必需），
+> 而 `tsc -b` 会把 `--noEmit` 传播给被引用的项目，composite 项目一旦禁用 emit 就报 
+> `TS6310: Referenced project ... may not disable emit` —— 无论各包 tsconfig 怎么写 `noEmit` 都躲不开。
+> 因此 `typecheck` 就是 `tsc -b`，各包 `outDir` 指向包内 `dist/`（已 `.gitignore`，且被 biome 经 
+> `vcs.useIgnoreFile` 排除，不会污染 lint）；Electron 的真实产物在 `out/`，与这个 `dist/` 无关。
+> 曾试过把 `outDir` 统一指到仓库根的 `.tsbuild/`，结果四个包抢同一个 `tsconfig.tsbuildinfo`，
+> 报 `TS6377` —— 跨包共享输出根时 `tsBuildInfoFile` 会撞名，别这么干。
+
+> **lint 门禁必须是 error 级**：实测把 `noRestrictedImports` 降成 `warn` 后，biome 仍打印违规但
+> **退出码为 0**，CI 就此变绿（见 V13）。所以「有没有真的挡住」不能靠肉眼看输出，必须断言退出码。
 
 约定：每个任务结尾的 **Commit** 用 `git commit -m "<type>(<scope>): <summary>"`；提交前必须 `pnpm verify` 全绿。**开工第一个动作是 `git init`**（当前工作区无仓库，见 §7 执行注意事项）。
 
@@ -695,7 +713,7 @@ export interface HarnessAdapter {
 - **Task 1.7**：门控行为验收 —— 需要 CEO 真实判断「这套拦截是不是我想要的」。
 
 ### 10.4 执行注意事项
-1. **当前工作区没有 git 仓库**（已确认 `D:/item/opc`、`D:/item`、`D:/` 均无 `.git`），因此 **Task 0.1 的第一件事是 `git init`**；在此之前本计划与各证据文件不受版本控制。
+1. **git 仓库已在 Task 0.1 建好**（`main` 分支，`user.name/email` 用 `--local` 配置 —— 本机 `$HOME` 未设置，`git config --global` 会报 `fatal: $HOME not set`）。若在新机器上重跑，第一件事仍是 `git init -b main` 加两条 `--local` 配置，外加 `core.autocrlf=false` 与 `core.longpaths=true`。
 2. **Node 主版本必须锁死**（Node 24 LTS）。`node:sqlite` 属实验性模块（V8、规格 §24 风险 12），随意升 Node 可能改 API。
 3. **`node:sqlite` 只允许出现在 `packages/hub`**（V5/V6 边界 + 规格 §5.6.1），由 Task 0.2 的 lint 与分目录 tsconfig 强制，不靠人自觉。
 4. **`interrupt` 检查 `__interrupt__`，不要 try/catch**（V2）—— 这条写错会让审批链路整体失效且不报错。
