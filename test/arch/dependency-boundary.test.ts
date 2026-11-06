@@ -97,6 +97,11 @@ const dynamicProbe = [
   "export const probed = mod;",
 ].join("\n");
 
+/*
+ * 探针名是跨测试契约：no-native-deps.test.ts 按文件名排除这些运行期夹具（它扫的是
+ * packages/ 下的全部源码，与本测试并行时会撞上这里故意写入的 better-sqlite3）。
+ * 改这个名字必须同步改那边的 TEST_FIXTURE。
+ */
 const PROBE = "__boundary_probe.ts";
 const probePath = (pkg: string) => join(ROOT, "packages", pkg, "src", PROBE);
 const probeArg = (pkg: string) => "packages/" + pkg + "/src/" + PROBE;
