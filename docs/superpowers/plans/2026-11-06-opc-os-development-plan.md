@@ -74,6 +74,8 @@
 | V11 | **重复 `invoke` 不是「什么都不做」，而是整图重放**：producer / 两个门控 / merge / 子图**全部第二次执行**，图却依然停在 `approval`，审批并未推进 | 「恢复」必须走 `new Command({ resume })`；重复 `invoke` = **重复烧钱 + 状态错乱**。Task 0.6 / 0.8 必须各带一条反例守卫（已实现在 `test/poc/resume.test.ts`） |
 | V12 | 框架编译期会抛 `UnreachableNodeError`（节点**完全不可达**时）；但**动态跳转绕过审批能编译通过** —— 条件边声明 `ends: ["approval", "__end__"]` 却总返回 `END`，编译无误，只有运行时断言（`next === ["approval"]`）抓得到 | 规格 §18.3「升级路径可达 CEO」**框架帮不上忙**，必须在保存组织图时自建校验（Task 3.1），并保留一条「审批不可绕过」的行为测试 |
 | V13 | **lint 规则降为 `warn` 后退出码仍是 0**：biome 照样打印违规（`Found 2 warnings`）但 `biome check` 返回 0，CI 就此变绿 —— 变异测试实测（把 `noRestrictedImports` 改 `warn`，拦截类断言 2 条变红，原因 `expected +0 not to be +0`） | **门禁类断言必须断言退出码，不能只看输出里有没有违规字样**。`noRestrictedImports` 必须是 `error` 级；同理任何「CI 挡住」的验收，判据是退出码而非日志文本。直接约束 Task 0.11 / 1.8 等出口门禁的写法 |
+| V14 | **`PRAGMA busy_timeout` 的返回列名是 `timeout`，不是 `busy_timeout`**（journal_mode / foreign_keys / synchronous 才与名字同名；实测） | 读 PRAGMA 一律**取第一列**，别按名字取 key：取错得 `undefined`，`Number(undefined)` = `NaN`，失败现象看着像实现坏了其实是断言写错。约束 Task 0.5 的 `openDb` 自检与任何 PRAGMA 断言 |
+| V15 | **`node:sqlite` 的默认值与 `sqlite3` CLI 相反**：裸构造 `foreign_keys = 1`（CLI 默认 OFF），`busy_timeout = 0`（完全不等待）；且 `exec()` 里的 `PRAGMA foreign_keys = ON` 会**覆盖**构造函数选项的 `false`（均实测） | **不得依赖驱动默认值**：`openDb()` 必须同时显式设构造选项与 PRAGMA（双层兜底，`driver.ts` 已如此并写明理由）。`busy_timeout` 不设则并发下直接 `SQLITE_BUSY` —— Task 0.5 建库与 Task 0.6 写队列都受影响 |
 
 **仍未验证（保留为风险）**：`node:sqlite` 属实验性内置模块，API 可能变动；**Electron 内嵌 Node 是否暴露 `node:sqlite` 未经验证** —— 故架构规定 `node:sqlite` 只允许出现在 `packages/hub/**`（规格 §5.6.1），由 Task 0.2 在编译期强制。另：`AsyncLocalStorage` 传递同一连接已在 **Node 原生调度**下验证（跨 `await` / `setTimeout` / `Promise.all`），**但未经 LangGraph 内部调度验证** —— 这是 Task 0.4a 的存在理由。
 

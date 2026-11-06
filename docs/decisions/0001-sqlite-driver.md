@@ -10,7 +10,7 @@
 
 ## 2. 实测依据
 
-**说明证据状态**：下列结论来自临时探针脚本（已归档至 `docs/superpowers/evidence/phase0-poc/`）。**仓库内的 `test/db/driver-preflight.test.ts` 尚未创建** —— 它是计划 Task 0.3 的交付物，本决策把它作为「先定案、随即固化为测试」处理，见 §6 的待办。
+**证据状态（Task 0.3 后更新）**：下列结论最初来自临时探针脚本（已归档至 `docs/superpowers/evidence/phase0-poc/`）。现已固化为仓库内测试 `packages/hub/test/db/driver-preflight.test.ts`（16 例，`pnpm verify` 每次都会重跑），所以这些结论不再只存在于归档脚本里 —— 驱动一旦不可用，CI 会立刻知道。
 
 ### 2.1 `d6a.mjs`（详见 `POC-OUTPUT.txt`）
 
@@ -57,6 +57,12 @@
 
 ## 6. 本决策遗留的待办（进入 Task 0.3 时必须完成）
 
-- [ ] 建 `packages/hub/test/db/driver-preflight.test.ts`，把 §2.1 / §2.2 的断言固化为仓库内测试（当前**仅有探针脚本，无仓库测试**）。
-- [ ] 该测试必须针对**目标运行时**执行；若运行时无 `node:sqlite`，测试应显式失败并提示「改判 D6-b」，而不是 skip。
-- [ ] 在 `driver.ts` 中把批量分片常量写死并加注释指向 §2.2。
+- [x] 建 `packages/hub/test/db/driver-preflight.test.ts`（Task 0.3 已完成：16 例通过，§2.1 / §2.2 每一行都有对应断言，测试里逐行标注了来源）。
+- [x] 该测试针对**目标运行时**执行：`node:sqlite` 导入失败时在文件顶层抛错并提示「改判 D6-b」，**没有 skip**（skip 会让驱动不可用在 CI 里静默通过）。
+- [x] `packages/hub/src/db/driver.ts` 提供 `BATCH_ROWS = 1000` 与 `openDb()`（统一 PRAGMA），注释指向本文件 §2.2；常量由测试守住（变异 M5 一改值就红）。
+
+**固化过程中新增的实测事实**（原探针未覆盖，会直接影响实现写法）：
+
+1. `PRAGMA busy_timeout` 的返回列名是 **`timeout`**，不是 `busy_timeout`；另外三条（journal_mode / foreign_keys / synchronous）才与名字同名。读错列名得到 `undefined`，`Number(undefined)` = `NaN` —— 失败现象看着像实现坏了，其实是断言取错 key。故 PRAGMA 一律读第一列。
+2. `node:sqlite` 裸构造默认 `foreign_keys = 1`，**与 `sqlite3` CLI 默认 OFF 相反**；且 `exec()` 里的 `PRAGMA foreign_keys = ON` 会覆盖构造函数选项的 `false`。外键开关因此有三层兜底，但**不可依赖默认值**：测试已把默认值本身钉住。
+3. `busy_timeout` 裸构造默认 **0**（完全不等待），必须由 `openDb` 显式设定，否则并发下会直接 `SQLITE_BUSY`。

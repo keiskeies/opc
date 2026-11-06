@@ -54,6 +54,9 @@
         "noConsole": {
           "level": "off"
         }
+      },
+      "complexity": {
+        "useLiteralKeys": "off"
       }
     }
   },

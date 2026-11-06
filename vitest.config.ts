@@ -4,7 +4,8 @@ import { defineConfig } from "vitest/config";
 export default defineConfig({
   test: {
     environment: "node",
-    include: ["test/**/*.test.ts", "test/**/*.test.tsx"],
+    // 根 test/ 放跨包与 PoC 测试；包内 test/ 放只依赖本包的测试（如 Task 0.3 的驱动预检）。
+    include: ["test/**/*.test.{ts,tsx}", "packages/*/test/**/*.test.{ts,tsx}"],
     // 每个文件独立进程：PoC 用文件级 SQLite，共享 worker 会互相锁库
     pool: "forks",
     testTimeout: 180_000,
