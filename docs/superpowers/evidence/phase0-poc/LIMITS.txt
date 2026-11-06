@@ -1,0 +1,14 @@
+node:sqlite 绑定参数上限 + AsyncLocalStorage 探针（2026-11-06，Node 24.21.0，Win32）
+脚本：als-and-bind-limits.mjs
+
+原始输出：
+BIND_LIMIT_ROWS 4096 => params 8192
+COL_LIMIT_1000 true
+ALS_SAME_CONNECTION_ACROSS_AWAITS [true,true,true,true,true,true]
+ALS_IN_CONCURRENT_CHILDREN [CONN-X,CONN-X]
+
+解读：
+- 绑定参数：二分上界 4096 行（即 8192 个参数）仍成功，真实上限未穷尽（未测到失败点）。
+  据此：事件批量写入按 1000 行/批 分片安全；禁止一次传数千参数不分片。
+- AsyncLocalStorage：同一连接可跨多层 await、setTimeout、Promise.all 并发子任务传递成功。
+  注意：仅验证 Node 原生调度；LangGraph 内部调度是否保持 ALS 上下文，仍需 Task 0.4a 实测。

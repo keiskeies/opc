@@ -1,0 +1,33 @@
+node_modules/
+dist/
+out/
+.vite/
+coverage/
+
+# 数据库文件及其 WAL/SHM —— 绝不入库（规格 §6.1）
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+
+# 运行时产物与凭据（规格 §20.4）
+.opc-os/
+.env
+.env.*
+*.token
+artifacts/
+backups/
+
+# 测试临时产物
+.tmp/
+
+# 编辑器与系统
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.log
+.pnpm-store/
+.turbo/

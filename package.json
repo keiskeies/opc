@@ -1,0 +1,26 @@
+{
+  "name": "opc-os",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.33.0",
+  "engines": {
+    "node": ">=24.0.0 <25.0.0"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "devDependencies": {
+    "vitest": "^4.0.12",
+    "@langchain/langgraph": "^1.7.1",
+    "@langchain/langgraph-checkpoint": "^1.2.2",
+    "@langchain/langgraph-checkpoint-sqlite": "^1.1.0"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "better-sqlite3"
+    ],
+    "_comment": "临时：Task 0.1 固化的 PoC 用官方 SqliteSaver（依赖 better-sqlite3）。Task 0.4b 自研 Saver 落地后本项移除，见计划 §1 V5 与决策 0001。"
+  }
+}
