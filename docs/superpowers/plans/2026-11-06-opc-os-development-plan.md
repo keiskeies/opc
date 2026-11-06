@@ -13,7 +13,7 @@
 |---|---|---|
 | 编排内核 | LangGraph.js 1.7.1 的条件边、并行汇聚、interrupt/resume、跨进程恢复、子图嵌套**已实测通过**，不是假设 | `evidence/phase0-poc/POC-OUTPUT.txt`（V1–V4） |
 | 持久化 | 单文件 SQLite + WAL + 单写者；驱动定为 `node:sqlite`，Windows 开发机**不需要 MSVC Build Tools** | `decisions/0001-sqlite-driver.md` §2、§3 |
-| 审计完整性 | 「Checkpoint 与 events 同事务」在**手工路径**已证实；**框架调用路径未证实** → 单独设 Task 0.4a 作设计门，失败则降级为外键关联 + 启动对账（降级需立决策文档，不允许静默） | `decisions/0001` §2.2、§4 风险 3 |
+| 审计完整性 | 手工路径与**框架调用路径均已证实**（Task 0.4a 判定：原方案成立，无需降级）。事务粒度定为**每超步一个事务**，非每次 invoke —— 整图一个事务会废掉崩溃恢复并长期持库级写锁 | `decisions/0003`、`decisions/0001` §2.2 |
 | 前端 | 一套 React 组件、桌面与浏览器两个入口；渲染进程无业务状态机，状态跃迁只能由 Hub 事件驱动 | 计划 §5、规格 §5.7、§5.8 |
 | 移动端 | 本地不落库、不缓存证据包正文；批准走与桌面完全相同的鉴权与审计路径（无第二条更弱通道） | 计划 §7 |
 | 安全 | harness 调用四层防护 + `forbidden_flags` 硬拦截；权限**只能收窄不能放宽** | 计划 §8、规格 §12.7、§20.2 |
@@ -76,6 +76,8 @@
 | V13 | **lint 规则降为 `warn` 后退出码仍是 0**：biome 照样打印违规（`Found 2 warnings`）但 `biome check` 返回 0，CI 就此变绿 —— 变异测试实测（把 `noRestrictedImports` 改 `warn`，拦截类断言 2 条变红，原因 `expected +0 not to be +0`） | **门禁类断言必须断言退出码，不能只看输出里有没有违规字样**。`noRestrictedImports` 必须是 `error` 级；同理任何「CI 挡住」的验收，判据是退出码而非日志文本。直接约束 Task 0.11 / 1.8 等出口门禁的写法 |
 | V14 | **`PRAGMA busy_timeout` 的返回列名是 `timeout`，不是 `busy_timeout`**（journal_mode / foreign_keys / synchronous 才与名字同名；实测） | 读 PRAGMA 一律**取第一列**，别按名字取 key：取错得 `undefined`，`Number(undefined)` = `NaN`，失败现象看着像实现坏了其实是断言写错。约束 Task 0.5 的 `openDb` 自检与任何 PRAGMA 断言 |
 | V15 | **`node:sqlite` 的默认值与 `sqlite3` CLI 相反**：裸构造 `foreign_keys = 1`（CLI 默认 OFF），`busy_timeout = 0`（完全不等待）；且 `exec()` 里的 `PRAGMA foreign_keys = ON` 会**覆盖**构造函数选项的 `false`（均实测） | **不得依赖驱动默认值**：`openDb()` 必须同时显式设构造选项与 PRAGMA（双层兜底，`driver.ts` 已如此并写明理由）。`busy_timeout` 不设则并发下直接 `SQLITE_BUSY` —— Task 0.5 建库与 Task 0.6 写队列都受影响 |
+| V16 | **外层事务持写锁期间，另一条连接写入不会排队而是 `SQLITE_BUSY`**（变异 M7：让 Saver 自带连接、仿官方 SqliteSaver 写法 → 抛 `database is locked`；写锁是库级而非 thread 级）| ① 任何绕过 `txScope()` 自开连接写库的代码都会被数据库拒绝，架构上的「单写者」由此获得机制保证；② 反之**任何忘记提交的路径会把整个库写死**到 busy 超时 —— `tx()` 必须是回调式、不给调用方留漏提交的机会。见 `decisions/0003` §3.1 |
+| V17 | **基类 `putWrites` 的文档注释要求 `getTuple` / `list` 返回的 `pendingWrites` 按 `writesSortKey`（`task_path, task_id, idx`）排序**，且明确警告：乱序会让顺序敏感的 reducer 在重放时重建出**不同的值**（读 `@langchain/langgraph-checkpoint@1.2.2` 的 `base.d.ts` 所得；计划原稿的契约清单漏了这条）| Task 0.4b 的契约测试必须新增「`pendingWrites` 顺序」用例，并对 `MemorySaver` 与本实现双向对拍；这不是性能问题，是正确性问题 |
 
 **仍未验证（保留为风险）**：`node:sqlite` 属实验性内置模块，API 可能变动；**Electron 内嵌 Node 是否暴露 `node:sqlite` 未经验证** —— 故架构规定 `node:sqlite` 只允许出现在 `packages/hub/**`（规格 §5.6.1），由 Task 0.2 在编译期强制。另：`AsyncLocalStorage` 传递同一连接已在 **Node 原生调度**下验证（跨 `await` / `setTimeout` / `Promise.all`），**但未经 LangGraph 内部调度验证** —— 这是 Task 0.4a 的存在理由。
 
@@ -171,6 +173,8 @@ opc-os/
 - **Commit**：`test(db): pin D6 preflight assertions into the repo`
 
 ### Task 0.4a　框架路径同事务探针（**阻塞 0.4b 的设计门**，1 天）
+> **当前状态（2026-11-06）**：已完成，判定为**原方案**，规格 §6.3 无需降级。实测依据、变异测试记录与两条会改变实现的副作用见 `decisions/0003-checkpoint-transaction-scope.md`；后续执行者不必重跑本探针。
+
 **为什么单独成任务**：规格 §6.3 要求 Checkpoint 与 `events` 同一事务提交。探针已证明**手工**把三张表写进同一事务可行（V7），也证明 `AsyncLocalStorage` 能在 Node 原生调度下跨 `await` / `setTimeout` / `Promise.all` 传递同一连接（见决策文档 §2.2）。**但没有证明 LangGraph 的内部调度不会打断 ALS 上下文** —— 而 `put()` / `putWrites()` 是框架在我们代码之外调用的，我们拿不到它的事务边界。这是规格 §24 风险 6 的真实缺口，不能靠假设跨过。
 
 - **Files**：`packages/hub/test/checkpoint/tx-scope-probe.test.ts`、`docs/decisions/0003-checkpoint-transaction-scope.md`
@@ -216,6 +220,8 @@ export declare class SqliteWALSaver implements BaseCheckpointSaver {
   - `putWrites` 的 `(thread, ckpt, task, idx)` 主键去重生效；
   - `deleteThread` 后 `getTuple` 返回 `undefined`；
   - **同事务原子性**：`put` 成功、`putWrites` 抛错 → 两者都不可见（0.4a 方案的直接回归）。
+  - **`pendingWrites` 排序**（V17，基类契约要求）：以乱序 `(task_path, task_id, idx)` 写入多组 writes，`getTuple` 与 `list` 返回时必须已按 `writesSortKey` 排好；顺序敏感 reducer 靠这个顺序重放，乱序会重建出不同的值。与 `MemorySaver` 对拍同一输入的输出顺序。
+  - **无 ALS 作用域时的行为**：`put` 在框架外被直接调用（无 `txScope()`）时按 `decisions/0003` §6.2 抛错，而非静默自开短事务 —— 静默自提会让 §6.3 的原子性在最常见路径上失效。
 - **Run**：`pnpm test test/checkpoint/`
 - **验收**：契约测试对 `MemorySaver` 与自研 Saver **双向通过**；`typecheck` 通过（V6 的 `put` 四参数签名以基类为准，不得照抄官方 SqliteSaver 的三参数）。
 - **Commit**：`feat(checkpoint): sqlite checkpoint saver with contract tests`
@@ -774,7 +780,7 @@ export interface HarnessAdapter {
 | 风险 | 影响 | 对策 |
 |---|---|---|
 | Task 0.9（CEO 定义验收标准）拖延 | Phase 1 空转 | 提前排日历；允许 Phase 1 的 Task 1.1–1.6 先行（不依赖 CEO 内容） |
-| PoC 四项通过但 Phase 0 后期发现新的框架能力缺口（**含 Task 0.4a 的同事务探针失败**） | 编排返工 | Task 0.8 之后再设一次 D7 复查点（10.2）；届时返工面限于 `src/graph/` |
+| PoC 四项通过但 Phase 0 后期发现新的框架能力缺口（~~含 Task 0.4a 的同事务探针失败~~ —— 该项已于 Task 0.4a 实测排除，见 `decisions/0003`；其余缺口仍需警惕） | 编排返工 | Task 0.8 之后再设一次 D7 复查点（10.2）；届时返工面限于 `src/graph/` |
 | 自研 Saver（D6-a）实现受阻 | Phase 0 延期 | 契约测试（Task 0.4b）设计为对 `MemorySaver` 与自研 Saver 双向通过，可**当天切换 D6-b**，不阻塞后续任务 |
 | Electron ABI / 原生模块拖慢 CI | 每次升版都要 rebuild | 依赖边界测试（Task 0.2）把原生依赖限制在 `packages/hub`，桌面与 Web 构建永不受影响 |
 | 门控测试覆盖率不足导致静默失效 | 核心防线失效 | Task 1.2 把覆盖率阈值写进 vitest config（≥ 95%），CI 强制 |
