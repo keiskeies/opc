@@ -78,6 +78,11 @@
 | V15 | **`node:sqlite` 的默认值与 `sqlite3` CLI 相反**：裸构造 `foreign_keys = 1`（CLI 默认 OFF），`busy_timeout = 0`（完全不等待）；且 `exec()` 里的 `PRAGMA foreign_keys = ON` 会**覆盖**构造函数选项的 `false`（均实测） | **不得依赖驱动默认值**：`openDb()` 必须同时显式设构造选项与 PRAGMA（双层兜底，`driver.ts` 已如此并写明理由）。`busy_timeout` 不设则并发下直接 `SQLITE_BUSY` —— Task 0.5 建库与 Task 0.6 写队列都受影响 |
 | V16 | **外层事务持写锁期间，另一条连接写入不会排队而是 `SQLITE_BUSY`**（变异 M7：让 Saver 自带连接、仿官方 SqliteSaver 写法 → 抛 `database is locked`；写锁是库级而非 thread 级）| ① 任何绕过 `txScope()` 自开连接写库的代码都会被数据库拒绝，架构上的「单写者」由此获得机制保证；② 反之**任何忘记提交的路径会把整个库写死**到 busy 超时 —— `tx()` 必须是回调式、不给调用方留漏提交的机会。见 `decisions/0003` §3.1 |
 | V17 | **基类 `putWrites` 的文档注释要求 `getTuple` / `list` 返回的 `pendingWrites` 按 `writesSortKey`（`task_path, task_id, idx`）排序**，且明确警告：乱序会让顺序敏感的 reducer 在重放时重建出**不同的值**（读 `@langchain/langgraph-checkpoint@1.2.2` 的 `base.d.ts` 所得；计划原稿的契约清单漏了这条）| Task 0.4b 的契约测试必须新增「`pendingWrites` 顺序」用例，并对 `MemorySaver` 与本实现双向对拍；这不是性能问题，是正确性问题 |
+| V18 | **checkpoint 表结构在规格里从未被定义**：附录 C 的 18 条 `CREATE TABLE` 里没有 `checkpoints` / `writes`，§C.1 只说「自建**同名**表结构以保持可迁移性」却不给出 DDL；全计划也没有任何任务定义它 | DDL 以官方 `@langchain/langgraph-checkpoint-sqlite` 为准（见 V19），由 `src/checkpoint/schema.ts` 导出常量，Saver 构造时执行 `IF NOT EXISTS`，**Task 0.5 的迁移引用同一份常量** —— 两处各写一遍必然漂移 |
+| V19 | **官方 DDL 的两个易漏点**（读 `dist/index.cjs` 所得）：① `type` 列存的是 `serde.dumpsTyped()` 返回的**类型标签**，读回时必须 `loadsTyped(type, bytes)` 才能还原自定义类型 —— 只存 BLOB 不存 type 的实现在遇到非 JSON 载荷时会静默降级；② `writes` 主键是 `(thread_id, checkpoint_ns, checkpoint_id, task_id, idx)`，而 V17 要求按 `(task_path, task_id, idx)` 排序，**主键顺序 ≠ 排序顺序**，必须另建索引 | 表名列名列序一律照抄官方（列名见 schema.ts）；`type` 与 `checkpoint` / `value` 成对存取；为 `task_path` 排序建索引 |
+| V20 | **`MemorySaver.put` 只声明三个形参**（`config, checkpoint, metadata`，忽略 `newVersions`），且基类 `put` 是四参数 —— 官方参考实现自己就不读第四个参数 | 契约测试**不得**断言 `newVersions` 被持久化（`MemorySaver` 不存它，双向对拍时这条永远对不上）；自研实现收下第四个参数即可，`channel_versions` 本就在 `checkpoint` 载荷里 |
+| V21 | **零原生模块这条 D6 判据目前只有测试在守，没有构建期强制**：官方 `@langchain/langgraph-checkpoint-sqlite` 仍是根 devDependency，`packages/hub/src/poc/*.mjs` 与 Phase 0 证据脚本 import 它（门禁 #2 的可复现证据），因而它的传递依赖 `better-sqlite3@12.11.1` 已被编译出 `build/Release/better_sqlite3.node`（实测 1,919,488 字节，仅存在于 `.pnpm` 深处，顶层 `node_modules/better-sqlite3` 不存在，`require.resolve` 失败） | 根 `package.json` 的 `pnpm.onlyBuiltDependencies` **不能**按原计划「0.4b 落地即移除」——移除会让门禁 #2 的 8 条测试当场失败；改由 `test/arch/no-native-deps.test.ts` 扫 `packages/**` 生产源码（PoC 目录显式豁免并写明理由），把「生产代码零原生」变成可执行断言 |
+| V22 | **`putWrites` 的冲突语义按通道分裂，且两家实现一致**（实测 `MemorySaver` + 读官方 SQL）：普通通道是 `INSERT OR IGNORE`（**先写胜出**），特殊通道（`__error__`/`__scheduled__`/`__interrupt__`/`__resume__`，`idx` 为负）是 `INSERT OR REPLACE`（**后写覆盖**）；官方用 `writes.every(([channel]) => channel in WRITES_IDX_MAP)` 二选一 | 写反不会报错，只会在重放时静默重建出不同的状态——最难查的那类 bug。`allSpecial` 必须按整批 writes 判断，不是逐条；契约测试两条用例分别守住这两个方向（变异测试 A1/A2 已验证二者可独立翻转） |
 
 **仍未验证（保留为风险）**：`node:sqlite` 属实验性内置模块，API 可能变动；**Electron 内嵌 Node 是否暴露 `node:sqlite` 未经验证** —— 故架构规定 `node:sqlite` 只允许出现在 `packages/hub/**`（规格 §5.6.1），由 Task 0.2 在编译期强制。另：`AsyncLocalStorage` 传递同一连接已在 **Node 原生调度**下验证（跨 `await` / `setTimeout` / `Promise.all`），**但未经 LangGraph 内部调度验证** —— 这是 Task 0.4a 的存在理由。
 
@@ -191,7 +196,7 @@ opc-os/
 - **Commit**：`test(checkpoint): framework-path same-transaction probe and decision`
 
 ### Task 0.4b　Checkpoint Saver 实现（2–3 天，依赖 0.4a 的结论）
-- **Files**：`packages/hub/src/checkpoint/saver.ts`、`packages/hub/src/checkpoint/tx-scope.ts`、`test/checkpoint/saver.contract.test.ts`
+- **Files**：`packages/hub/src/checkpoint/saver.ts`、`packages/hub/src/checkpoint/tx-scope.ts`、`packages/hub/src/checkpoint/schema.ts`、`packages/hub/test/checkpoint/saver.contract.test.ts`（注意：计划原稿写的是 `test/checkpoint/`，但 hub 的测试在 `packages/hub/test/` 下才会被 vitest 的 `packages/*/test/**` 收进来 —— 见 Task 0.3 的 include 调整）
 - **接口（以 V6 基类签名为准，五个抽象方法一个都不能少；注意 `deleteThread` 极易漏）**：
 
 ```ts
@@ -213,7 +218,9 @@ export declare class SqliteWALSaver implements BaseCheckpointSaver {
 ```
 
 - **实现约束**：`put` 与 `putWrites` **不得自行开事务**，必须使用 `txScope()` 提供的连接（0.4a 通过时）；若 0.4a 判定降级，则它们自带短事务并被 Task 3.4 的对账覆盖。两种情况下都**不得**在 `put` 内部 `BEGIN` 后不提交。
-- **序列化**：Checkpoint 载荷按 `Uint8Array` 存 BLOB（V7 已验证往返类型）。
+- **序列化**：Checkpoint 载荷按 `Uint8Array` 存 BLOB（V7 已验证往返类型），**并连带存下 `dumpsTyped` 返回的类型标签到 `type` 列**（V19），读回走 `loadsTyped(type, bytes)`。
+- **表结构**：`schema.ts` 导出官方同名的 `checkpoints` / `writes` DDL 常量（V18、V19），Saver 构造时 `CREATE TABLE IF NOT EXISTS`；**Task 0.5 的迁移必须引用这份常量而不是另抄一遍**。列序照抄官方，别按自己喜好重排。
+- **对拍基线**：`MemorySaver` 是参考实现，但它忽略 `newVersions`（V20），契约测试的断言范围要以此为界。
 - **契约测试（同一套用例跑 `MemorySaver` 与自研 Saver，证明可互换）**：
   - `put` 后 `getTuple` 返回同一 `checkpoint_id`，且 `parentConfig` 链正确；
   - `list` 按时间倒序并支持 `before`；
@@ -782,7 +789,7 @@ export interface HarnessAdapter {
 | Task 0.9（CEO 定义验收标准）拖延 | Phase 1 空转 | 提前排日历；允许 Phase 1 的 Task 1.1–1.6 先行（不依赖 CEO 内容） |
 | PoC 四项通过但 Phase 0 后期发现新的框架能力缺口（~~含 Task 0.4a 的同事务探针失败~~ —— 该项已于 Task 0.4a 实测排除，见 `decisions/0003`；其余缺口仍需警惕） | 编排返工 | Task 0.8 之后再设一次 D7 复查点（10.2）；届时返工面限于 `src/graph/` |
 | 自研 Saver（D6-a）实现受阻 | Phase 0 延期 | 契约测试（Task 0.4b）设计为对 `MemorySaver` 与自研 Saver 双向通过，可**当天切换 D6-b**，不阻塞后续任务 |
-| Electron ABI / 原生模块拖慢 CI | 每次升版都要 rebuild | 依赖边界测试（Task 0.2）把原生依赖限制在 `packages/hub`，桌面与 Web 构建永不受影响 |
+| Electron ABI / 原生模块拖慢 CI | 每次升版都要 rebuild | 两道独立守卫：`test/arch/dependency-boundary.test.ts`（Task 0.2）按 package 划界，`desktop`/`web` 永不接触 SQLite；`test/arch/no-native-deps.test.ts`（Task 0.4b 增补）在 hub 内部再切一刀——hub 生产代码只许 `node:sqlite`，出现 `better-sqlite3` 即红。见 V21 |
 | 门控测试覆盖率不足导致静默失效 | 核心防线失效 | Task 1.2 把覆盖率阈值写进 vitest config（≥ 95%），CI 强制 |
 | 一周试运行暴露大量真实缺陷 | Phase 6 超期 | Task 6.5 明确为 5 天日历且允许滚动；试运行的目的就是把问题暴露在这里 |
 

@@ -36,7 +36,17 @@
 
 ### 3.1 外层事务持写锁期间，另一条连接写入直接被阻塞到 `SQLITE_BUSY`
 
-> **证据性质说明**：本节结论来自一次**一次性变异实验**（临时给记录器加「自带连接」开关跑出 `database is locked`，随即把开关删掉）。**仓库里没有对应的可重放测试** —— 该行为要等到 Task 0.4b 有真实 Saver 实现后，由其契约测试的「同事务原子性」用例覆盖。在此之前，它是一条已被观测到、但未被自动化的事实。
+> **证据性质说明（Task 0.4b 更新）**：本节结论最初来自一次**一次性变异实验**（临时给
+> 记录器加「自带连接」开关跑出 `database is locked`，随即删掉开关）。现在，本节依赖的
+> 【机制】——外层事务持写锁期间、另一条连接的写入被拒——已由可重放测试覆盖：
+> `packages/hub/test/checkpoint/saver.contract.test.ts` 的
+> 「外层事务持写锁期间，另一条连接写入被数据库拒绝」用例，断言 `errcode === 5`
+> （SQLITE_BUSY）。变异 E1（不开事务）与 E2（`BEGIN DEFERRED`）均由该用例的【断言】
+> 杀死，见 §7。
+>
+> 仍未被自动化的部分是 M7 那个【具体形态】：在框架回调内部让 Saver 自带连接。它要靠
+> 给记录器加开关才能触发，而生产实现已不再提供这种写法的可能（`put` / `putWrites`
+> 强制走 `requireScopeDb()`，见 §6.2）。故保留 M7 行的 △ 分级，不追认为断言功劳。
 
 变异 M7（让 Saver 自带一条连接，即官方 `SqliteSaver` 的自然写法）没有让断言变红，
 而是抛 `database is locked`。这条错误本身就是结论：
@@ -80,7 +90,7 @@ events 是一个原子单位**，超步之间分别提交。这也是探针断�
 | M3 txRun 失败时不回滚 | ✓ 断言杀死 | 回滚后 checkpoints 必须为 0：expected 3 to be 0 |
 | M5 撤掉哨兵行 | ✓ 断言杀死 | 观察连接必须看得见已提交的哨兵行 |
 | M4 观察连接改读另一个空文件（复刻 4.1 的假通过） | △ 运行时异常杀死 | 该变异代码自身崩溃（EPERM），不能证明断言有效；它的有效性由 M5 侧面证明 —— 撤掉哨兵后同一位置立刻变红 |
-| M7 让 Saver 自带一条连接（官方 SqliteSaver 的写法） | △ 运行时异常杀死 | 抛 `database is locked`，见 §3.1。该实验所需的临时开关已在收尾时作为死代码删除，故**本行不可重放**；它不是断言的功劳，只是恰好被数据库挡住 |
+| M7 让 Saver 自带一条连接（官方 SqliteSaver 的写法） | △ 运行时异常杀死 | 抛 `database is locked`，见 §3.1。**这个具体变异仍不可重放**：它需要给记录器临时加「自带连接」开关，该开关收尾时已作为死代码删除。它不是断言的功劳，只是恰好被数据库挡住 —— 但它所依赖的【机制】现已可重放，见 §3.1 与 §7 |
 | M8 断言 4a 里 B 复用 A 的库 | △ 运行时异常杀死 | cannot start a transaction within a transaction（同连接嵌套 BEGIN），是 SQLite 性质挡住了，不是断言的功劳。真正的交叉污染由 M12 正面证伪 |
 | M6 txRun 忘记 BEGIN | △ 运行时异常杀死 | cannot commit - no transaction is active（4 条红）；不是断言的功劳，但故障确实进不了主干 |
 | M9 并行节点自开连接写 events | ✓ 断言杀死 | 并行节点拿到的连接必须就是事务连接：left 与 right 皆为假 |
@@ -131,3 +141,40 @@ events 是一个原子单位**，超步之间分别提交。这也是探针断�
    对应用例（计划原文未列，见本次核对）。
 5. 不要让 Saver 自己持连接写库（§3.1：与外层事务不共存，会 busy）。
 
+
+## 7. Task 0.4b 落地后的验证记录（2026-11-06）
+
+实现见 `packages/hub/src/checkpoint/`（`schema.ts` / `tx-scope.ts` / `saver.ts`）与
+`packages/hub/test/checkpoint/saver.contract.test.ts`（同一套用例同时跑 `MemorySaver`
+与 `SqliteWALSaver`）。§6 的六条约束全部落实，其中：
+
+- §6.2（事务外调用抛错，不得静默自提）由契约测试「事务外调用 put / putWrites 直接抛错」
+  覆盖；变异 A5（改成静默用构造连接）被断言杀死。
+- §6.5（pendingWrites 必须排序）由两条用例覆盖，且刻意构造【主键序与框架序相反】的数据：
+  实测若给 `writes` 建 `(thread_id, ns, checkpoint_id, task_path, task_id, idx)` 索引，
+  SQLite 会选它做扫描索引，于是【不带 ORDER BY 的 SELECT 碰巧返回正确顺序】—— 漏掉内存
+  排序也能过测试。该索引已从 `schema.ts` 删除并在注释里记下原因，变异 A3（去掉内存排序）
+  由此被断言杀死。
+
+契约测试自身的鉴别力也做过变异验证（E 系列为事务相关，A 系列为 Saver 语义，B 系列为
+测试结构）：
+
+| 变异 | 结果 |
+|---|---|
+| A1 普通通道 `OR IGNORE` → `OR REPLACE` | 断言杀 |
+| A2 特殊通道两边都 `OR IGNORE` | 断言杀 |
+| A3 去掉 `pendingWrites` 内存排序 | 断言杀（建索引时曾存活，删索引后修复） |
+| A4 读回时忽略 `type` 列 | 运行时异常杀（`loadsTyped` 把 bytes 当 json 解析失败） |
+| A5 `put` 不再要求事务作用域 | 断言杀 |
+| A6 键防护（原型污染）失效 | 断言杀（先 `not.toBeNull()` 再匹配，避免运行时错冒充断言失败） |
+| A10 idx 映射 `?? `→ `\|\|` | **等价变异**：`WRITES_IDX_MAP` 实测只有 -1/-2/-3/-4，无可达输入使两者分叉 |
+| A11/A12 空串键校验放松或收紧 | 断言杀（`MemorySaver` 实测拒绝空串 `thread_id`/`checkpoint_id`/`task_id`，但放行 `checkpoint_ns`） |
+| B1 `deleteThread` 忽略外层事务 | 断言杀 |
+| B2/B3 `itSqlite` 判定恒假/恒真 | 断言杀（由文件末尾的元守卫抓到：专属用例条数必须是常量，静默 skip 会红） |
+| B4 计数器不递增 | 断言杀 |
+| E1 `txScope` 不开事务 | 断言杀 |
+| E2 `BEGIN IMMEDIATE` → `BEGIN DEFERRED` | 断言杀（第一版曾存活：观察点在 `put` 之后，两种事务此刻都已持锁；把观察点提前到事务内首次写入之前才区分开） |
+| E3 去掉 observer 的 `busy_timeout=0` | **等价变异**：实测 node:sqlite 默认 `busy_timeout` 就是 0 |
+
+两条等价变异没有硬凑成「被杀」：它们的结论是【这段代码在当前输入下无法与原版分叉】，
+记下来比假装杀掉了更有用。
