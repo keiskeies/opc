@@ -78,7 +78,20 @@ afterAll(() => {
       /* 已关闭过，忽略 */
     }
   }
-  rmSync(TMP, { recursive: true, force: true });
+  // Windows：SQLite 句柄的 OS 级释放会落后于 close() 的 promise，rmSync 于是偶发
+  // EPERM / EBUSY。断言此时已全部通过，让清理失败冒充测试失败会掩盖真实信号
+  // （变异测试时真的踩过一次：一个变异被误判成「已杀死」）。阻塞等待而不是 await ——
+  // afterAll 有的是 async 有的是 sync，Atomics.wait 两者都不依赖。
+  let cleared = false;
+  for (let attempt = 0; attempt < 40 && !cleared; attempt++) {
+    try {
+      rmSync(TMP, { recursive: true, force: true });
+      cleared = true;
+    } catch (e) {
+      if (attempt === 39) throw e;
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50);
+    }
+  }
 });
 
 describe("运行时身份守卫", () => {

@@ -1,4 +1,5 @@
 import { DatabaseSync } from "node:sqlite";
+import { applyPragmas, pragmaConstructorOptions } from "./pragmas.js";
 
 /**
  * 唯一的 SQLite 入口（规格 §5.6.1：全仓库只有 packages/hub 可以碰 SQLite）。
@@ -19,9 +20,6 @@ import { DatabaseSync } from "node:sqlite";
  */
 export const BATCH_ROWS = 1000;
 
-/** busy_timeout（毫秒）：Hub 是单写者，出现锁等待通常意味着有旁路进程打开了同一个库。 */
-const BUSY_TIMEOUT_MS = 5000;
-
 /**
  * 打开（必要时创建）OPC-OS 的数据库文件，并施加统一 PRAGMA。
  *
@@ -40,24 +38,14 @@ export function openDb(path: string): DatabaseSync {
     );
   }
 
-  // 构造函数选项与下方 PRAGMA【故意重复设置】，不是冗余：
-  // - node:sqlite 裸构造默认 enableForeignKeyConstraints = true（实测，与 sqlite3 CLI 默认
-  //   OFF 相反）。所以只删 PRAGMA 不会改变当前行为 —— 但一旦 Node 改掉默认值，
-  //   外键就会静默失效，规格 §6.1 的引用完整性随之失去，且不报错。
-  // - busy_timeout 裸构造默认 0（实测），即无等待。两处都设是为了既不依赖默认值，
-  //   也不依赖哪个先执行。
-  // 相关变异测试结论见 test/db/driver-preflight.test.ts 末尾注释。
-  const db = new DatabaseSync(path, {
-    // 与下方 PRAGMA 保持一致；两边都设是为避免依赖 node:sqlite 的默认值
-    enableForeignKeyConstraints: true,
-    timeout: BUSY_TIMEOUT_MS,
-  });
+  // PRAGMA 与构造选项都来自 ./pragmas.ts —— 全仓库唯一权威源。
+  // 为什么要抽出去：写队列（写连接 + 只读连接）、迁移都要同一套设置。留下副本就等于
+  // 允许「主连接外键 ON、旁路连接外键 OFF」这种最难查的分叉：外键约束恰好只在某条
+  // 写入路径上静默失效，不报错。两处重复设置（构造选项 + PRAGMA）的理由见 pragmas.ts。
+  const db = new DatabaseSync(path, pragmaConstructorOptions());
 
   try {
-    db.exec("PRAGMA journal_mode = WAL;");
-    db.exec("PRAGMA synchronous = NORMAL;"); // = 1：WAL 下的推荐档
-    db.exec("PRAGMA foreign_keys = ON;");
-    db.exec("PRAGMA busy_timeout = " + BUSY_TIMEOUT_MS + ";");
+    applyPragmas(db);
   } catch (e) {
     db.close();
     throw e;

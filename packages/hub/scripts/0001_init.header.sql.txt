@@ -1,0 +1,31 @@
+-- OPC-OS 初始 schema（Task 0.5）
+--
+-- 本文件的 DDL 由 packages/hub/scripts/extract-appendix-c.mjs 从规格附录 C
+-- （docs/OPC-OS-设计文档.md §附录 C）**机械提取**生成，除下方声明的偏离外逐字一致。
+-- 之所以用脚本提取而不是手抄：规格 17 张表 3 千多字符，手抄的差异只能靠肉眼发现，
+-- 而 schema 差异的表现形式是「本地正常、别人机器上查询报 no such column」。
+--
+-- 相对附录 C 的偏离（共 2 处，均已实测验证必要性）：
+--
+-- 1) 删除开头的 4 条 PRAGMA。journal_mode / busy_timeout / synchronous / foreign_keys
+--    是【每次连接】要施加的设置，由 src/db/pragmas.ts 与 driver.openDb() 负责，是全仓库
+--    唯一权威源。把它们放进一次性迁移脚本会制造错觉：除 journal_mode 外都是连接级设置，
+--    写进迁移只对「执行迁移那条连接」生效。另实测：事务内 PRAGMA journal_mode = WAL 会抛
+--    'cannot change into wal mode from within a transaction'，而迁移必须整体包事务
+--    （否则失败会留下半套表），两者不共存。
+--
+-- 2) trust_scores.role_id 去掉 REFERENCES role_charters(role_id)。附录 C 原文是
+--    'role_id TEXT PRIMARY KEY REFERENCES role_charters(role_id)'，但 role_charters 是
+--    【版本化】表，唯一键只有 (id) 与 (role_id, version)（实测 PRAGMA index_list）。
+--    SQLite 要求被引用列构成一个列集合完全一致的唯一索引，不支持前缀匹配 —— 于是
+--    建表【静默成功】，直到任何写入或 PRAGMA foreign_key_check 才炸：
+--      foreign key mismatch - 'trust_scores' referencing 'role_charters'
+--    计划 Task 0.5 的验收要求 foreign_key_check 无输出，此处不改就永远红。
+--    代价：role_id 的引用完整性不再由数据库保证。它是岗位书角色标识，取值来自
+--    role_charters 的查询结果，由应用层维持（Task 1.4 岗位书 CRUD 时补断言）。
+--    已在 test/db/schema-0001.test.ts 用反向用例守住：其余 9 个外键仍必须有效。
+--
+-- 不加 IF NOT EXISTS：幂等由 schema_migrations 版本表保证（见 src/db/migrate.ts）。
+-- 这里刻意让重复执行报 'table already exists' —— 版本表说没应用过、库里却有表，
+-- 说明 schema 与版本记录已经分叉（有人手动建过表，或版本表被删）。这种时候【必须炸】，
+-- 静默跳过等于把分叉留在库里。
