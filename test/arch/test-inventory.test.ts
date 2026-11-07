@@ -1,32 +1,39 @@
-// 磁盘上的测试文件是否真的会进 vitest 的执行清单。
+// 这个守卫防的是【比假绿更隐蔽】的一类失效：一个长得像测试的文件被写了、提交了、
+// CI 报了绿，但它一次都没有被执行 —— 因为没有任何一个【已配置】的 runner 认领它。
+// 没有任何断言被写坏，只是根本没人跑它，所以也没有任何断言会红。
 //
-// 动机不是假设。vitest.config.ts 的 include 是两条模式。原文照抄在下面，
-// 但只能放在行注释里：其中星号紧跟斜杠的那个组合，出现在块注释中会提前闭合注释，
-// 动机不是假设。vitest.config.ts 的 include 是两条模式，原文照抄如下。放在行注释里是安全的：
-// 双斜杠之后整行都是注释；但同样的 glob 写进块注释就会出事 —— 其中的星号紧跟斜杠会提前闭合
-// 注释，本文件第一版正是那样炸的（biome 报 Expected a statement）。这个坑我在归档里记过，
-// 下笔时没检索，所以还是踩了两次（第二次是把这段说明写进另一个文件的块注释时）。
+// vitest.config.ts 的 include 是两条模式。原文照抄在这里是安全的（双斜杠之后整行都是
+// 注释），但同样的 glob 不能写进块注释：其中星号紧跟斜杠的那个组合会提前闭合注释。
+// 我第一版就是那么写的，代价是 biome 报 Expected a statement 而后 vitest 报 Transform
+// failed —— 这个坑归档里明令禁止过，我下笔时没检索，同一个错误在本轮踩了两次。
 //   test/**/*.test.{ts,tsx}
 //   packages/*/test/**/*.test.{ts,tsx}
-// 它不收 .spec.ts，也不收 .mjs 与 .js。而计划 Task 4.7（Phase 4 出口门禁）明确要求产出
-// test/e2e/mobile-approval.spec.ts。到那天它会被写出来、一次都不会跑，CI 照报
-// Test Files 全绿。这比假绿更隐蔽：没有任何断言被写坏，只是根本没人执行它。
-// 它不收 .spec.ts，也不收 .mjs 与 .js。而计划 Task 4.7（Phase 4 出口门禁）明确要求产出
-// test/e2e/mobile-approval.spec.ts。到那天它会被写出来、一次都不会跑，CI 照报
-// Test Files 全绿。这比假绿更隐蔽：没有任何断言被写坏，只是根本没人执行它。
 //
-// 实测依据（本轮三个探针，文件名各不相同，避免 0006 第 7 节第 11 条的 basename 恒真）：
-//   test/e2e/probeA_specname.spec.ts 静默忽略
-//   test/e2e/probeB_testname.test.mjs 静默忽略
-//   packages/hub/src/probeC_intestdir.test.ts 静默忽略，但会被 production-deps 抓到，
-//   因为那里 import 了 vitest；而 test/e2e 下的 .spec.ts 属于全仓无人发现的那种。
+// 关键边界（决定本守卫将来会不会假红）：计划第 507 行写的是「Playwright E2E：
+// test/e2e/ceo-loop.spec.ts」，第 38 行的选型是「vitest + Playwright + biome」。也就是说
+// .spec.ts 归 Playwright 自己的 runner，vitest 不收它是【正确分工】，不是遗漏。
+// 我一度把这件事当成计划内在不一致、还提议往 include 里加一条 .spec.ts —— 那个修法会
+// 让 vitest 去收集 Playwright 的规格文件，反而引入新缺陷。判断与更正都记在 0007 §9。
 //
-// 防恒真：下面的 includedByVitest 必须对已知盲区返回 false（反向 canary）。它若哪天被放宽
-// 成恒真，主断言「每一项都被收集」立刻退化成恒绿装饰。这条 canary 就是防这一手的。
+// 所以本守卫此刻判红的根据是【Playwright 尚未安装】：根与四个子包的 package.json 里
+// 测试类依赖只有 vitest，仓库里没有 playwright.config.*（本轮实测）。于是 test/e2e 下的
+// .spec.ts 当下【谁都不认】。等到 Task 2.9 真的引入 Playwright，同一条断言会变成假红 ——
+// 那时正确的做法是把「认领者」从 vitest 的 include 扩成「vitest include ∪ Playwright
+// config 的 testDir」，而不是把这条守卫关掉。改它的人请先读 0007 §9.2。
 //
-// 已知限制（刻意）：本守卫不 spawn vitest list 去拿真实清单。那样要在测试里起一个 vitest，
-// 会重触发 globalSetup（build-contracts）并与并行测试争写同一产物，属 0006 第 6.4 节记过的
-// 竞态族。与真实清单的交叉留作 Phase 1 候选。
+// 探针实测（三个文件名各不相同，避免 0006 第 7 节第 11 条那种 basename 恒真）：
+//   test/e2e/probeA_specname.spec.ts 被静默忽略
+//   test/e2e/probeB_testname.test.mjs 被静默忽略
+//   packages/hub/src/probeC_intestdir.test.ts 被静默忽略，但会被 production-deps 抓到，
+//     因为那里 import 了 vitest；而 test/e2e 下的 .spec.ts 是【全仓无人发现】的那种。
+//
+// 防恒真：下面 includedByVitest 必须对已知盲区返回 false（反向 canary）。它若哪天被放宽
+// 成恒真，主断言「每一项都被认领」立刻退化成恒绿装饰；这条 canary 就是防这一手的。
+// 宽枚举 looksLikeTest 与 include【不是】同一套规则，这是整条守卫不退化为恒真的唯一根据。
+//
+// 已知限制（刻意）：本守卫不 spawn vitest list 去拿真实执行清单。那样要在测试里再起一个
+// vitest，会重触发 globalSetup（build-contracts）并与并行测试争写同一产物，属 0006 第 6.4
+// 节记过的竞态族。与真实清单的交叉留作 Phase 1 候选。
 
 import { readdirSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
