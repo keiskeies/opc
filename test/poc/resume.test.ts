@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { mkdirSync, rmSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
@@ -20,7 +20,18 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 const POC = fileURLToPath(
   new URL("../../packages/hub/src/poc/", import.meta.url),
 );
-const TMP = ".tmp/poc";
+// TMP 锚定仓库根，而不是跟随 process.cwd()。原先写成相对量 ".tmp/poc"，
+// 于是它成立的前提是「从仓库根启动」—— 这个前提没写进任何断言，属 0006 第 7 节第 20 条那族。
+// 实测（本轮）：npx vitest run --root <仓库根> 但 cwd 换成别处时，这棵树真的会建到启动目录去
+// （对照组 test-inventory.test.ts 在同样条件下什么都不留，故不是 vitest 自己的产物）。
+// 与紧邻上一行的 POC 用同一种绝对化方式；解析结果与原来的 <仓库根>/.tmp/poc 逐字相同。
+const TMP = join(
+  dirname(fileURLToPath(import.meta.url)),
+  "..",
+  "..",
+  ".tmp",
+  "poc",
+);
 
 type Phase1 = {
   phase: string;
