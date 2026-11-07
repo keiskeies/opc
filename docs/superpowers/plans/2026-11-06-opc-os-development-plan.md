@@ -83,6 +83,9 @@
 | V20 | **`MemorySaver.put` 只声明三个形参**（`config, checkpoint, metadata`，忽略 `newVersions`），且基类 `put` 是四参数 —— 官方参考实现自己就不读第四个参数 | 契约测试**不得**断言 `newVersions` 被持久化（`MemorySaver` 不存它，双向对拍时这条永远对不上）；自研实现收下第四个参数即可，`channel_versions` 本就在 `checkpoint` 载荷里 |
 | V21 | **零原生模块这条 D6 判据目前只有测试在守，没有构建期强制**：官方 `@langchain/langgraph-checkpoint-sqlite` 仍是根 devDependency，`packages/hub/src/poc/*.mjs` 与 Phase 0 证据脚本 import 它（门禁 #2 的可复现证据），因而它的传递依赖 `better-sqlite3@12.11.1` 已被编译出 `build/Release/better_sqlite3.node`（实测 1,919,488 字节，仅存在于 `.pnpm` 深处，顶层 `node_modules/better-sqlite3` 不存在，`require.resolve` 失败） | 根 `package.json` 的 `pnpm.onlyBuiltDependencies` **不能**按原计划「0.4b 落地即移除」——移除会让门禁 #2 的 8 条测试当场失败；改由 `test/arch/no-native-deps.test.ts` 扫 `packages/**` 生产源码（PoC 目录显式豁免并写明理由），把「生产代码零原生」变成可执行断言 |
 | V22 | **`putWrites` 的冲突语义按通道分裂，且两家实现一致**（实测 `MemorySaver` + 读官方 SQL）：普通通道是 `INSERT OR IGNORE`（**先写胜出**），特殊通道（`__error__`/`__scheduled__`/`__interrupt__`/`__resume__`，`idx` 为负）是 `INSERT OR REPLACE`（**后写覆盖**）；官方用 `writes.every(([channel]) => channel in WRITES_IDX_MAP)` 二选一 | 写反不会报错，只会在重放时静默重建出不同的状态——最难查的那类 bug。`allSpecial` 必须按整批 writes 判断，不是逐条；契约测试两条用例分别守住这两个方向（变异测试 A1/A2 已验证二者可独立翻转） |
+| V23 | **`node:sqlite` 对「少绑参数」零保护**：2 个占位符只绑 1 个 → 可空列**静默写 NULL**（无警告）；多绑才报 `column index out of range`(errcode 25)；少绑遇 NOT NULL 报 `NOT NULL constraint failed`(1299)。另：`prepare("stmt1; stmt2")` **静默只执行第一条** | 写队列必须自己数占位符、自己拦多语句；`prepare` 绝不可当「批量执行」用（`decisions/0004` §4、§7） |
+| V24 | **`?::text` 不是 SQLite 语法**（实测 `unrecognized token: ":"`，那是 PostgreSQL 方言）。`a::b` 的冒号若被当成命名参数前缀置起 `otherStyle`，会**静默关掉整条少绑校验** | 占位符扫描必须显式识别并跳过 `::`；变异 S5 证明该断言可被证伪（`decisions/0004` §5） |
+| V25 | **写队列尾去毒对「下一次写」不可见**：`#tail` 中毒与否后续写都正常（`#tail.then(job, job)` 两分支皆走 job）；唯一 externally visible 的后果是 `close()` 里 `await this.#tail` 重抛早已处理的失败 → 跳过 `db.close()`，WAL 不 checkpoint、Windows 上库文件被永久占用 | 去毒断言必须**失败后立刻 `close()`**；中间只要成功写一次就洗白尾巴（W1 最初因此抓不到，`decisions/0004` §3） |
 
 **仍未验证（保留为风险）**：`node:sqlite` 属实验性内置模块，API 可能变动；**Electron 内嵌 Node 是否暴露 `node:sqlite` 未经验证** —— 故架构规定 `node:sqlite` 只允许出现在 `packages/hub/**`（规格 §5.6.1），由 Task 0.2 在编译期强制。另：`AsyncLocalStorage` 传递同一连接已在 **Node 原生调度**下验证（跨 `await` / `setTimeout` / `Promise.all`），**但未经 LangGraph 内部调度验证** —— 这是 Task 0.4a 的存在理由。
 
@@ -196,6 +199,10 @@ opc-os/
 - **Commit**：`test(checkpoint): framework-path same-transaction probe and decision`
 
 ### Task 0.4b　Checkpoint Saver 实现（2–3 天，依赖 0.4a 的结论）
+> **当前状态（2026-11-07）**：已完成（提交 `2cf71ff`、`a956d10`）。契约测试同一套用例跑
+> `MemorySaver` 与自研 Saver：39 passed | 6 skipped。落地后的验证记录见 `decisions/0003` §7；
+> 该任务测出的两条硬事实记为 V21、V22。
+
 - **Files**：`packages/hub/src/checkpoint/saver.ts`、`packages/hub/src/checkpoint/tx-scope.ts`、`packages/hub/src/checkpoint/schema.ts`、`packages/hub/test/checkpoint/saver.contract.test.ts`（注意：计划原稿写的是 `test/checkpoint/`，但 hub 的测试在 `packages/hub/test/` 下才会被 vitest 的 `packages/*/test/**` 收进来 —— 见 Task 0.3 的 include 调整）
 - **接口（以 V6 基类签名为准，五个抽象方法一个都不能少；注意 `deleteThread` 极易漏）**：
 
@@ -234,6 +241,17 @@ export declare class SqliteWALSaver implements BaseCheckpointSaver {
 - **Commit**：`feat(checkpoint): sqlite checkpoint saver with contract tests`
 
 ### Task 0.5　迁移框架 + schema + 写队列（3 天）
+> **当前状态（2026-11-07）**：已完成（提交 `7bd8f0e`，14 文件 +2504）。`pnpm verify` = 10 文件 / 
+> 113 passed | 6 skipped。19 项变异：**15 项断言级杀死、1 项异常杀死（△，见 `decisions/0004` §11.2）、
+> 3 项存活** —— 存活的 P1/P3/R1 是「构造选项 + 显式 PRAGMA」的冗余双保险，已各补一条**复合变异**
+> （X1/X2：同时拆掉两处）证明冗余本身在保险，而不是测试没测到。
+>
+> **本任务两处计划措辞与实测不符，按实测落地**：① append-only 触发器的报错不是 `immutable`，实测是
+> `events table is append-only`（errcode **1811**）；② 附录 C 的 trigram 结论测于 SQLite 3.53.4，本机
+> `node:sqlite` 内嵌 **3.51.2**，已重测并留活文档。
+> schema 的 2 处 SQL 偏离、`WriteQueue` 的 4 处 C.2 偏离、以及「`node:sqlite` 对少绑参数零保护」
+> 见 `decisions/0004-migrations-and-write-queue.md`。
+
 - **Files**：`packages/hub/resources/migrations/0001_init.sql`（内容取自规格附录 C，**FTS5 必须带 `tokenize = 'trigram'`**）、`src/db/migrate.ts`、`src/db/write-queue.ts`、`src/db/pragmas.ts`、`test/db/*.test.ts`
 - **写队列接口**（对应附录 C.2 的 `WriteQueue`）：
 
