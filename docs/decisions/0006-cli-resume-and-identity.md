@@ -485,3 +485,26 @@ TEST_FIXTURE。" 0.7 已经踩过同一个坑，当时的解法是写下这段�
    可重放：三处提到【顺序/先于/最后一个】的注释（`write-queue.test.ts:276`、`:364`、`step-tx.test.ts:150`）逐个读下来都有
    断言守着前提，不是缺陷；其中 `step-tx.test.ts:151` 那条经产品侧变异证实有效 —— 删掉 `events/recorder.ts:344` 的收尾提交，
    `step-tx` 立刻报 `expected 1 to be 2` 与 `[1, 2] ≠ [1, 2, 3]`，全量 4 个文件 17 条红。
+24. **我拿【并发下的完成顺序】当【调度顺序】用，于是把探针抖动读成【shuffle 生效】；实测 vitest 4.1.12 的
+   seed 根本不控制文件顺序 —— 我此前写的【三个 seed 各绿一次】不是三次可复现的验证，只是三次随机重排。**
+   起因是收尾要确认【顺序无关性仍成立】。我先用 `npx vitest run --sequence.shuffle --sequence.shuffle.seed=11`，它直接崩
+   （`TypeError: Cannot create property 'seed' on boolean 'true'`）—— 若这条写法进 CI，红的原因与产品无关。换成只给 seed 后跑出三次
+   【顺序两两不同且全绿】，我据此宣布 shuffle 生效。但这个顺序是我从 stdout 抓【文件名首次出现的位置】得到的：
+   pool 为 forks 时它是【完成顺序】，本身带并发抖动。也就是说这个判据在【shuffle 完全没生效】时同样会返回
+   【顺序不同】—— 第 22 条那族又一次命中，这次的载体是顺序指纹。决定性反证来自探针自检：串行 + 同 seed 连跑
+   三次得到【三个不同的顺序】，而串行 + 同配置（不加 shuffle）两次【逐字同序】。前者说明 seed 没在控制文件
+   顺序，后者说明探针在串行下是可信的 —— 两者必须成对看，只跑前者会把【探针不可信】误读成【世界在随机】。
+   实测到的 CLI 事实（vitest 4.1.12，串行 `--no-file-parallelism` + `test/arch` 小样本，5 个文件；机制未查，不猜，留给 Phase 1）：
+   ① `--sequence.shuffle --sequence.shuffle.seed=N` 崩；② 只给 `--sequence.shuffle.seed=N` 完全不打乱（与默认逐字同序）——
+   所以我早几轮用【只给 seed】那批 seed 跑出来的【绿】，跑的其实是默认顺序，那次验证没有覆盖顺序；③ 必须显式
+   `--sequence.shuffle.files`（或 `.tests`）才真的打乱：默认 vs seed=7 有 3/5 位置不同，seed7 vs seed8 有 4/5 不同；
+   ④ 但 `.seed` 不影响文件顺序，不给 seed 时同样每次不同 ⇒ 顺序相关的失败【目前无法靠 seed 重放】，只能多跑几次去撞。
+   对已提交内容的影响：第 20 条里【seed=11、seed=202 把那条 it 排到被它计数的用例之前，seed=987 恰好不红】
+   那三个观测是【当时真实看到的】，那条论证（顺序不是机制、会被开关打掉）不但成立，还因为【连 seed 都锁不住
+   顺序】而更强；所以要修的不是那条结论，而是【seed 能定位到某个具体顺序】这个我当时隐含的假设 —— 它现在
+   被实测否掉。同理，本会话此前【三个 shuffle seed 全绿】这句话仍然说明【打乱状态下全过】，但不能再被读成
+   【这三组 seed 各自可复现】。自查句，从本轮起与第 23 条并列使用：判据若依赖【顺序】或【时序】这类量，先测
+   它在【不加被测因素】时是否恒定；不恒定，就先把判据丢掉，别拿它去判性质。
+   可重放：串行探针 = `npx vitest run test/arch --no-file-parallelism --reporter=json --outputFile=…` 连跑两次比 `testResults` 的
+   name 序列（同配置两次同序 = 探针可信）；打乱 = 加 `--sequence.shuffle.files`；seed 无用 = 再加 `--sequence.shuffle.seed=7` 连跑三次
+   看是否仍同序。注意 `--outputFile` 的相对路径落在仓库根而不是当前目录（第 22 条：找不到文件不等于没生成）。
