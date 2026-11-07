@@ -94,7 +94,7 @@ invoke 未抛错
 
 - `currentNode` 这类【多余键】是类型问题：若 `test/` 参与检查，`TS2353`（多余属性）会当场报。
   实测分布里确实有 `TS2353:5`。
-- `events.state_snapshot` 全库 0/14 是【需求缺口】，不是类型错误：`recorder.ts` 的
+- `events.state_snapshot` 0/14 是【需求缺口】，不是类型错误：`recorder.ts` 的
   `stateSnapshot` 本来就是可选参数，不传完全合法，类型系统对「该传没传」一无所知。
   只有断言能抓，而计划里没有任何一条任务的验收标准提到它（见 Phase 0 出口门禁汇报）。
 
