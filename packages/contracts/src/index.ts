@@ -16,4 +16,5 @@ export {
   charterSchema,
   JUDGMENT_MODES,
   MODEL_TIERS,
+  type ModelTier,
 } from "./charter.js";

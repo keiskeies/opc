@@ -21,6 +21,12 @@ export const CHARTER_PLACEHOLDER_ACCEPTANCE = "CEO-PLACEHOLDER-ACCEPTANCE";
 export const MODEL_TIERS = ["management", "execution"] as const;
 
 /**
+ * 档位的类型形态。派生自 MODEL_TIERS —— 常量和类型若各写一份，
+ * 加档位时最先漂移的一定是类型（z.infer 出来的字段会变成 string，校验静默失效）。
+ */
+export type ModelTier = (typeof MODEL_TIERS)[number];
+
+/**
  * acceptance_criteria 的动作只有 reject | escalate —— 规格里 action 还出现过
  * create_approval_card / pause_and_escalate / create_decision_meeting，但那属于
  * escalation_triggers（§4.2.2），是另一个字段，不能混进来当本字段的合法值。
