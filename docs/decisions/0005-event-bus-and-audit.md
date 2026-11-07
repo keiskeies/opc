@@ -187,13 +187,41 @@ LangGraph 的 interrupt 是靠**重放节点直到 `interrupt()` 那一行**实�
   会再发一条，实测三次 invoke 后库里 **3 条 `action=approval`，`target` 逐字相同**
   （`interrupt:<32位hex>` —— 中断 id 在 checkpoint 里稳定，所以重复项可按 `target` 辨认）。
   崩溃重启 N 次，CEO 就看到 N 条一模一样的审批。
-- **缺陷 C（接口不可组合）**：`auditedInvoke` 内部调 `recorder.run`，`SuperStepAuditor.invoke` 也调
+- **缺陷 C（接口不可组合）——已修，见 §11.3**：`auditedInvoke` 内部调 `recorder.run`，`SuperStepAuditor.invoke` 也调
   `recorder.run`，嵌套即撞 `AuditRecorder.run` 的嵌套守卫（「一次图执行只能有一个事务责任方」）。
   而真实图执行**同时需要**两者：saver 要 auditor 建的事务作用域，中断审计要 `auditedInvoke`。
   实测两条路都不通 —— 嵌套撞守卫，不嵌套则 `SqliteWALSaver.put` 报「必须在 txScope() 内调用」。
   三套测试各自全绿，**却组装不出一个可用的整体**；`audit-interrupt.test.ts` 用 `FakeTx` 绕开了真实
   嵌套，所以没人发现。**教训**：只测零件不测装配，绿灯不代表机器能开。
 
+
+### 11.3 缺陷 C 的修法（当场修掉，因为修法唯一、不改 schema）
+
+`auditedInvoke` 先问 `recorder.inStepTx()`：外层已有活动超步事务就**复用当前事务**写审批，
+否则（独立使用）才自己 `run` 开一个。为什么这个修法是唯一正确的：
+
+- 缺陷 C 的本质不是「嵌套守卫太严」，而是**同一次图执行出现了两个事务责任方**。守卫是对的，
+  该改的是「内层不该自己开事务」。把守卫放宽（比如允许嵌套、内层只记账）会把 §4 那个
+  「COMMIT 被静默跳过」的坑重新打开。
+- 复用当前超步事务还**顺带修正了语义**：审批事件于是与该超步的 checkpoint 同事务原子提交
+  （规格 §6.3），而不是散在另一个事务里。回归测试直接断言 `committedSteps === 1`。
+- 两条路径写入的内容抽成同一个 `writeApprovals()`，避免复制粘贴后各自漂移。
+
+`inStepTx()` 是 `AuditRecorder` 新增的公开谓词（回答**数据库状态**，与 `#tx.inTx()` 同一谓词，
+不是「代码位置」—— §4 那两个谓词不可合并）。为什么必须由 recorder 暴露而不是让调用方自己
+判断：调用方无从知道外层有没有开事务，猜错就是运行时抛错。
+
+变异测试（4 个变异，全部由 `interrupt-resume` 组合例 + `step-tx` 独立路径例杀死）：
+
+| 变异 | 位置 | 结果 |
+| --- | --- | --- |
+| 复用分支条件恒假 `if (false)` | `auditedInvoke` | **KILLED** —— 真实图执行撞嵌套守卫 |
+| 复用分支条件恒真 `if (true)` | `auditedInvoke` | **KILLED** —— 独立使用路径没有事务 |
+| `inStepTx()` 恒真 | `recorder` | **KILLED** |
+| `inStepTx()` 恒假 | `recorder` | **KILLED** |
+
+缺陷 A、B 仍然**未修**：它们要动语义或 schema（见下表），且「同一中断该发几条审批」是产品
+决策，不是实现层能单方面定的，已登记为 §11.4 的待 CEO 决策项。
 ### 11.2 为什么写到这里而不是当场修
 
 缺陷 A、B 的修法要动**语义或 schema**，三个方向各有代价，不是实现层能单方面定的：
@@ -209,6 +237,21 @@ LangGraph 的 interrupt 是靠**重放节点直到 `interrupt()` 那一行**实�
 而不是留一条永远绿着的「测了个寂寞」。其中「`record` 在 `interrupt()` 之后不重复」那条是对照，
 用来验证将来的修复**不过宽** —— 修复若把合法的第二条事件也吞了，那条对照会红。
 
+### 11.4 待 CEO 决策（缺陷 A、B）
+
+编号 **D10**：一次「进入待审批」在审计里该有几条记录、一次审批请求在 UI 上该出现几条。
+
+| 选项 | 做法 | 代价 |
+| --- | --- | --- |
+| A | `events` 加幂等键，写入改 `INSERT OR IGNORE` | 改 Task 0.5 已定稿的迁移 SQL；去重键选错会把**真实的**重复状态跃迁吞掉（状态机合法地 A→B→A→B 就是四条） |
+| B | 编码约定：节点不得在 `interrupt()` 之前写审计 | 零 schema 改动，但正确性寄托在纪律上，编译期与测试期都不设防 —— 与 §9 的立场相反 |
+| C | 审批维持「invoke 返回后统一发」，另按 `target` 建唯一索引去重 | 不改迁移 SQL，只加一个索引；能收住缺陷 B（重复审批），但**收不住缺陷 A**（节点内的 `TaskStateChanged` 仍会重放写两遍） |
+
+**建议 C 叠加对 A 的专项处理**：审批走 `target` 唯一索引；节点内状态事件的去重键则要用
+**业务语义键**（如 `(task_id, action, from, to, 超步序号)`）而不是 payload 文本，才能既吞掉重放
+又保住合法的重复跃迁。此项**不阻塞** Task 0.8 / 0.10 / 0.11（桩图无 interrupt、无崩溃恢复），
+但 Task 0.8 的「`process.kill` 后重启续跑，轨迹正确」一条会**如实测出重复**，届时不许为了让测试
+变绿而放宽断言 —— 那正是本条要防的事。
 ## 12. LangGraph JS **没有** middleware 概念 —— 文件名的妥协
 
 计划写的是 `audit-middleware.ts`。LangGraph JS 1.7.1 里**不存在**中间件：只有
