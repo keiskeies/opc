@@ -79,7 +79,9 @@ export async function auditedInvoke<T>(o: {
   const interrupts = detectInterrupts(result);
   if (interrupts.length === 0) return result;
 
-  await o.recorder.run(async () => {
+  // 两条路径，差别只在【谁负责 COMMIT】；写进去的内容完全相同，所以抽成一个函数，
+  // 避免复制粘贴后两条路径的语义各自漂移。
+  const writeApprovals = async (): Promise<void> => {
     for (const hit of interrupts) {
       // 系统事件：没有人做过这个动作，是图停下来了。actor 用 recorder 的
       // 默认 { system, hub } —— 伪造一个 agent 身份是审计污染。
@@ -90,7 +92,20 @@ export async function auditedInvoke<T>(o: {
         payload: hit.value,
       } satisfies DomainEvent);
     }
-  });
+  };
+
+  if (o.recorder.inStepTx()) {
+    // 外层（SuperStepAuditor.invoke）已负责事务 —— 复用当前超步事务，绝不再 run 一次：
+    // 嵌套会让「谁负责 COMMIT」变成两个答案（守卫会直接抛，见 0005 §11 缺陷 C）。
+    // 复用的语义也是对的：审批与该超步的 checkpoint 同事务原子提交（规格 §6.3），
+    // 提交与广播仍由外层在收尾时统一做。
+    await writeApprovals();
+    return result;
+  }
+
+  // 独立使用（没有外层图执行事务）：自己开一个事务。原子性边界就是「这些
+  // ApprovalRequired 要么都写进去、要么都不写」，它不属于任何一个超步。
+  await o.recorder.run(writeApprovals);
   return result;
 }
 

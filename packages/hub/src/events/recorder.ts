@@ -315,6 +315,20 @@ export class AuditRecorder {
     return id;
   }
 
+  /**
+   * 外层是否已有【活动超步事务】。给 auditedInvoke 判断「该不该自己开事务」用。
+   *
+   * 为什么必须暴露：真实图执行同时需要两件事 —— saver 要 SuperStepAuditor.invoke
+   * （= recorder.run）建的事务作用域，中断审计要 auditedInvoke 写 ApprovalRequired。
+   * 若 auditedInvoke 无脑再 run 一次就撞嵌套守卫（0005 §11 缺陷 C）。不暴露这个谓词，
+   * 调用方只能靠【猜】外层开没开事务 —— 猜错就是运行时抛错。
+   *
+   * 注意它回答的是【数据库状态】（BEGIN 已发出且未 COMMIT/ROLLBACK），不是【代码位置】，
+   * 与 #tx.inTx() 同一谓词（§4：这两个谓词不能合并）。
+   */
+  inStepTx(): boolean {
+    return this.#tx.inTx();
+  }
   /** 包住一次图执行：负责首尾事务与异常回滚。 */
   async run<T>(fn: () => Promise<T>): Promise<T> {
     if (this.#depth > 0) {

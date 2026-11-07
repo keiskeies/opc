@@ -14,7 +14,10 @@ import { afterAll, describe, expect, it } from "vitest";
 import { SqliteWALSaver } from "../../src/checkpoint/saver.js";
 import { CHECKPOINT_TABLES } from "../../src/checkpoint/schema.js";
 import type { DomainEvent, EventBus } from "../../src/events/bus.js";
-import { SuperStepAuditor } from "../../src/graph/audit-middleware.js";
+import {
+  auditedInvoke,
+  SuperStepAuditor,
+} from "../../src/graph/audit-middleware.js";
 
 const dirs: string[] = [];
 const dbs: DatabaseSync[] = [];
@@ -173,5 +176,32 @@ describe("interrupt resume 重放对 events 的影响（当前行为 = 缺陷，
     );
     // resume 后才执行后半段：恰好一条，不重复。
     expect(h.rows().length).toBe(1);
+  });
+
+  it("缺陷 C 的回归锁：真实 auditor.invoke + 真实图 + auditedInvoke 必须能组合", async () => {
+    // 【修好后本例应当变绿。】此前它是【红】的：auditedInvoke 内部 recorder.run，
+    // SuperStepAuditor.invoke 也 recorder.run，嵌套撞「一次图执行只能有一个事务
+    // 责任方」守卫；不嵌套则 SqliteWALSaver.put 报「必须在 txScope() 内调用」。
+    // 0.8 的真实图执行【同时需要】两者（saver 要 auditor 建的事务作用域，中断要
+    // auditedInvoke 发审批），所以这不是边缘用法，是主路径 —— 三套零件测试各自
+    // 全绿却组装不出可用整体，因为 audit-interrupt 用 FakeTx 绕开了真实嵌套。
+    const h = make(false); // record 在 interrupt 之后：本例只关心审批，不掺 A 的重复
+    const out = await h.auditor.invoke(() =>
+      auditedInvoke({
+        invoke: () => h.graph.invoke({ trail: [] }, h.cfg),
+        recorder: h.auditor.recorder,
+        taskId: "T-COMBO",
+      }),
+    );
+    // 中断确实被识别（返回体带 __interrupt__）
+    expect(Array.isArray((out as Record<string, unknown>).__interrupt__)).toBe(
+      true,
+    );
+    // 审批落库了，且已提交（只读连接可见）
+    const rows = h.rows();
+    const approvals = rows.filter((r) => r.action === "approval");
+    expect(approvals.length).toBe(1);
+    // 关键：审批写进【当前超步事务】，不是另开一个事务 —— 一次 invoke 只有一次提交
+    expect(h.auditor.committedSteps).toBe(1);
   });
 });
