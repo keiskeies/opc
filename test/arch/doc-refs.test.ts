@@ -171,6 +171,10 @@ const SNAP: Record<string, string> = {
   // §7-39 里为了举证【真正的消费者一掏空就红】而写下的坐标；登记同轮完成，不留红过夜。
   "0006-cli-resume-and-identity.md>production-deps.test.ts:225":
     "expect(isRuntimeFixture(BOUNDARY_PROBE)).toBe(true);",
+  // 同一轮里第二次被 doc-refs 抓住：正文写了坐标却没登记快照；连着两次 => 【登记快照】
+  // 已是写文档的固定动作，见 0006 §7-40。
+  "0006-cli-resume-and-identity.md>doc-ids.test.ts:92":
+    "expect(findMissing(docs, existing, reserved)).toEqual([]);",
   "0007-test-type-coverage-blindspot.md>cli.ts:478": "try {",
   "0007-test-type-coverage-blindspot.md>db/driver.ts:64": "try {",
   "0007-test-type-coverage-blindspot.md>db/migrate.ts:120": "try {",
