@@ -2,6 +2,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join, posix } from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, it } from "vitest";
+import { BOUNDARY_PROBE } from "./run-fixtures.js";
 
 /**
  * D6-a 的机械防线：生产源码不得依赖任何原生 SQLite 模块。
@@ -72,7 +73,7 @@ function walk(dir: string, out: string[] = []): string[] {
  * 排除它的理由不是「让测试变绿」：本守卫守的是【可能进产物的源码】，而夹具不在构建
  * 输入里、也不进 Electron 包。名字由两边各自写死并互相注释指向，改名时两边都撞得见。
  */
-const TEST_FIXTURE = "__boundary_probe.ts";
+const TEST_FIXTURE = BOUNDARY_PROBE;
 
 function isExempt(file: string): boolean {
   const rel = file

@@ -17,6 +17,7 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { BOUNDARY_PROBE, isRuntimeFixture } from "./run-fixtures.js";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "../..");
 
@@ -67,6 +68,9 @@ const BARE_BUILTIN = new Set([
 function tsFiles(dir: string): string[] {
   const out: string[] = [];
   for (const name of readdirSync(dir)) {
+    // 并发运行期夹具不是源码：dependency-boundary 会并行往 src/ 里写一个故意越界的
+    // better-sqlite3 import（见 test/arch/run-fixtures.ts）。不排除就是随机红。
+    if (isRuntimeFixture(name)) continue;
     const p = join(dir, name);
     if (statSync(p).isDirectory()) out.push(...tsFiles(p));
     else if (name.endsWith(".ts") || name.endsWith(".tsx")) out.push(p);
@@ -195,5 +199,31 @@ describe("依赖边界：src/ 的 import 必须在 dependencies", () => {
       leaked,
       "Phase 0 引入了真实 LLM provider 依赖：" + leaked.join(", "),
     ).toEqual([]);
+  });
+});
+
+describe("运行期夹具名单本身", () => {
+  // 拆分写法是有意的：本测试检查的正是这个字面量，写成一整串就自我命中了。
+  const LIT = "__boundary" + "_probe";
+
+  it("探针名只允许定义在 run-fixtures.ts 里（防止再出现硬编码的消费者）", () => {
+    const dir = join(ROOT, "test", "arch");
+    const hits: string[] = [];
+    for (const name of readdirSync(dir)) {
+      if (!name.endsWith(".ts") || name === "run-fixtures.ts") continue;
+      if (readFileSync(join(dir, name), "utf8").includes(LIT)) hits.push(name);
+    }
+    expect(
+      hits,
+      "探针名被重新硬编码，改名时会静默漏掉这些文件：" + hits.join(", "),
+    ).toEqual([]);
+  });
+
+  it("名单不为空，也不吞掉真实源文件", () => {
+    // 名单一旦被清空，排除就变成了"什么都不排除"，上面的竞态立刻复活；
+    // 名单一旦写成通配或误伤，越界文件就会被永久漏检。两头都锁住。
+    expect(isRuntimeFixture(BOUNDARY_PROBE)).toBe(true);
+    expect(isRuntimeFixture("cli.ts")).toBe(false);
+    expect(isRuntimeFixture("index.ts")).toBe(false);
   });
 });

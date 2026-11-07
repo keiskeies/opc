@@ -3,6 +3,7 @@ import { existsSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, expect, it } from "vitest";
+import { BOUNDARY_PROBE } from "./run-fixtures.js";
 
 /**
  * Task 0.2 验收：越界 import SQLite 会被 lint 挡住（规格 §5.6.1 / 计划 §2）。
@@ -98,11 +99,11 @@ const dynamicProbe = [
 ].join("\n");
 
 /*
- * 探针名是跨测试契约：no-native-deps.test.ts 按文件名排除这些运行期夹具（它扫的是
- * packages/ 下的全部源码，与本测试并行时会撞上这里故意写入的 better-sqlite3）。
- * 改这个名字必须同步改那边的 TEST_FIXTURE。
+ * 探针名是跨测试契约，定义在 ./run-fixtures.ts（唯一真相）。扫描型测试要用
+ * isRuntimeFixture() 排除它：它活在 packages/<pkg>/src/ 里，引用 better-sqlite3 是故意的，
+ * 与本测试并行的源码扫描会把这个越界 import 当成真实缺陷。
  */
-const PROBE = "__boundary_probe.ts";
+const PROBE = BOUNDARY_PROBE;
 const probePath = (pkg: string) => join(ROOT, "packages", pkg, "src", PROBE);
 const probeArg = (pkg: string) => "packages/" + pkg + "/src/" + PROBE;
 
