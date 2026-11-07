@@ -663,6 +663,39 @@ describe("seq = events.id，且只在提交后广播", () => {
     expect(rows(db).length).toBe(1);
   });
 
+  // 前提断言（0007 §4.1）：「catch 把失败交给 onBroadcastError」此前只写在 recorder.ts 的注释里
+  // （默认必须可见而不是静默）。变异实测：ME 删掉 this.#onBroadcastError(e) 这一行、MF 把参数改成
+  // undefined，补这两条之前【32 条测试全绿】—— 即【广播失败必须可见】没有任何断言守着。
+  it("广播失败必须原样交给 onBroadcastError（可见性不许被静默替换）", async () => {
+    const db = openDb();
+    const tx = new FakeTx(db);
+    const bus = new FakeBus();
+    const boom = new Error("SSE 写失败");
+    bus.publishPersisted = (): never => {
+      throw boom;
+    };
+    const seen: unknown[] = [];
+    const rec = new AuditRecorder({
+      tx,
+      bus,
+      now: () => 1,
+      onBroadcastError: (e) => {
+        seen.push(e);
+      },
+    });
+    await rec.run(async () => {
+      await rec.record(evt());
+      await rec.record(evt({ taskId: "T-10" }));
+    });
+    // 两条事件 ⇒ 两次广播失败 ⇒ 回调必须被调用两次（删掉 catch 里的调用 ⇒ 0 次）
+    expect(seen.length, "每条广播失败都必须上报，不得静默丢弃").toBe(2);
+    // 必须原样交出异常（改传 undefined 或换成包装类型 ⇒ 这条红）
+    expect(seen[0]).toBe(boom);
+    expect(seen[1]).toBe(boom);
+    // 可见性不以牺牲审计为代价：两行仍必须落库
+    expect(rows(db).length).toBe(2);
+  });
+
   it("payload 存【完整事件】含 kind：只存 kind 或只存字段都无法回放", async () => {
     const db = openDb();
     const { rec } = make(db);
