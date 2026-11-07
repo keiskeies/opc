@@ -6,7 +6,8 @@
   "dependencies": {
     "@langchain/core": "^1.3.5",
     "@langchain/langgraph-checkpoint": "^1.2.2",
-    "@opc/contracts": "workspace:*"
+    "@opc/contracts": "workspace:*",
+    "yaml": "2.8.0"
   },
   "devDependencies": {
     "@langchain/langgraph": "^1.7.1",
