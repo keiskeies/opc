@@ -152,9 +152,15 @@ describe("测试文件的执行清单覆盖", () => {
     const real = (c.test?.include ?? []).map(String);
     // 比对规则本身（含【两边都空要报前提问题】那一态）由 config-match.test.ts 的 7 个用例守着，
     // 那里还带对 checkConfigMatch 的变异实验。这里只是把真数据灌进去。
-    // 残留风险（如实记）：若有人删掉 config-match.test.ts、把 checkConfigMatch 留成恒返回空数组，
+    // 本条只灌真数据，判据若被掏空它会假绿 —— 所以下面紧接一条自足的正对照，不依赖别的文件。
     // 这条 it 会假绿。彻底堵死要让 test-inventory 与 config-match.test.ts 共存亡，暂未做。
     expect(checkConfigMatch(real, INCLUDE_PATTERNS)).toEqual([]);
+    // 正对照：合成一份【已知必然不一致】的输入，判据必须报出问题。
+    // 它不依赖 config-match.test.ts 是否存在 —— 判据被掏空成恒返回空数组，这里当场红。
+    const knownBad = checkConfigMatch(["a.test.ts"], ["b.test.ts"]);
+    expect(knownBad.length).toBeGreaterThan(0);
+    // 反过来，已知一致必须为空，否则上面那条 toBeGreaterThan(0) 会因【永远非空】而失去意义。
+    expect(checkConfigMatch(["a.test.ts"], ["a.test.ts"])).toEqual([]);
   });
 
   it("磁盘上每个测试样文件都在 include 覆盖范围内", () => {

@@ -168,6 +168,9 @@ const SNAP: Record<string, string> = {
     'io.error("错误：" + p.error + "\\n\\n" + USAGE + "\\n");',
   "0006-cli-resume-and-identity.md>write-queue.test.ts:207":
     'it("失败之后立刻 close()：不得重抛旧失败，且必须真的关掉连接", async () => {',
+  // §7-39 里为了举证【真正的消费者一掏空就红】而写下的坐标；登记同轮完成，不留红过夜。
+  "0006-cli-resume-and-identity.md>production-deps.test.ts:225":
+    "expect(isRuntimeFixture(BOUNDARY_PROBE)).toBe(true);",
   "0007-test-type-coverage-blindspot.md>cli.ts:478": "try {",
   "0007-test-type-coverage-blindspot.md>db/driver.ts:64": "try {",
   "0007-test-type-coverage-blindspot.md>db/migrate.ts:120": "try {",
