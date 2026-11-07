@@ -651,11 +651,20 @@ for (const [label, make] of factories) {
 /*
  * 元守卫。B2 变异实测：把 itSqlite 的判定改成恒假后，Sqlite 专属保护全部静默变成
  * it.skip，测试报告依然全绿 —— 那种绿灯是假的。这条把「保护确实执行了」变成断言。
- * 顶层 it 注册在两个 describe 之后，vitest 按注册序执行，故此处计数已完整。
+ *
+ * 为什么是 afterAll 而不是顶层 it：原先它是最后一个顶层 it，靠的是「vitest 按注册序
+ * 执行」这个假设 —— 注释不是机制，它没能挡住 --sequence.shuffle。实测（本轮）打开
+ * shuffle 后 seed=11 与 seed=202 都会把这条 it 排到六个 Sqlite 专属用例之前，于是计数
+ * 还是 0，报出一条与产品无关的红；seed=987 则恰好不红。一条【有时红有时绿、且红得很
+ * 误导人】的守卫比没守卫更糟。afterAll 绑定的是文件而不是注册位置，与 it 的排列无关。
+ *
+ * 形态变化，看见时不要误解：afterAll 里的断言失败被记作 Failed Suites，不是 Failed
+ * Tests —— 报告里 Tests 那行会显示全 passed，只有 exit code 是 1、并有 FAIL 行。所以
+ * 判绿必须看 exit code，不能只 grep Tests 那行（本轮实测：ok 夹具 exit=0，坏夹具 exit=1
+ * 而两者 Tests 行都是 passed）。
  */
-it(
-  "元守卫：Sqlite 专属用例真的执行了 " + SQLITE_EXCLUSIVE_CASES + " 条",
-  () => {
-    expect(exclusiveRuns).toBe(SQLITE_EXCLUSIVE_CASES);
-  },
-);
+afterAll(() => {
+  expect(exclusiveRuns, "Sqlite 专属用例的执行条数").toBe(
+    SQLITE_EXCLUSIVE_CASES,
+  );
+});
