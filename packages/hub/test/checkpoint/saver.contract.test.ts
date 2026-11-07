@@ -27,8 +27,8 @@ import {
   SCHEDULED,
 } from "@langchain/langgraph-checkpoint";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { SqliteWALSaver } from "../../src/checkpoint/saver";
-import { txScope } from "../../src/checkpoint/tx-scope";
+import { SqliteWALSaver } from "../../src/checkpoint/saver.js";
+import { txScope } from "../../src/checkpoint/tx-scope.js";
 
 const HUB = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const TMP = join(HUB, ".tmp", "saver-contract");

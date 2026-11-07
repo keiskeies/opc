@@ -54,7 +54,8 @@ function headingSets(lines: string[]): HeadingSets {
     const mSub: RegExpExecArray | null =
       /^#{1,4}[ \t]+([0-9]+[.][0-9]+(?:[.][0-9]+)*)[ \t]/.exec(l);
     if (mSub) {
-      sub.add(mSub[1]);
+      const num: string | undefined = mSub[1];
+      if (num !== undefined) sub.add(num);
       continue;
     }
     const mTop: RegExpExecArray | null =
@@ -110,17 +111,25 @@ function extractRefs(doc: string, lines: string[]): Ref[] {
   const out: Ref[] = [];
   lines.forEach((l: string, i: number) => {
     for (const m of l.matchAll(SEC_RE)) {
+      // 捕获组在类型上是 string | undefined（noUncheckedIndexedAccess）：这里的组都是必需组，
+      // 运行时不可能缺失；显式收窄是为了让【判据输入】处在类型保护之下，而不是靠类型谎言。
+      const num: string | undefined = m[2];
+      if (num === undefined) continue;
       out.push({
         doc,
         line: i + 1,
         targetDoc: m[1] ?? doc,
-        num: m[2],
+        num,
         kind: "sec",
       });
     }
     for (const m of l.matchAll(ITEM_RE)) {
-      for (const tok of m[2].split(/[、,， \t]+/).filter(Boolean)) {
-        out.push({ doc, line: i + 1, targetDoc: m[1], num: tok, kind: "item" });
+      // targetDoc 在这里【不能】兜底成本篇：ITEM_RE 的篇号组是必需组，裸形条目引用根本不匹配。
+      const targetDoc: string | undefined = m[1];
+      const nums: string | undefined = m[2];
+      if (targetDoc === undefined || nums === undefined) continue;
+      for (const tok of nums.split(/[、,， \t]+/).filter(Boolean)) {
+        out.push({ doc, line: i + 1, targetDoc, num: tok, kind: "item" });
       }
     }
   });
@@ -401,7 +410,7 @@ describe("决策文档里的坐标（节号 / §7 条目号 / 短哈希）指向
     expect(found.length).toBe(6);
     // 撤回豁免必须真的咬住一条，否则它是装饰
     expect(retracted.length).toBe(1);
-    expect(retracted[0].endsWith("0008 " + SEC + "5.2")).toBe(true);
+    expect(retracted[0]?.endsWith("0008 " + SEC + "5.2")).toBe(true);
     expect(
       found.some((s: string) => s.includes("那一节在目标篇里不存在")),
     ).toBe(true);
@@ -432,7 +441,7 @@ describe("决策文档里的坐标（节号 / §7 条目号 / 短哈希）指向
       w.hashes,
     );
     expect(hp.length).toBe(1);
-    expect(hp[0].ref.endsWith("deadbee")).toBe(true);
+    expect(hp[0]?.ref.endsWith("deadbee")).toBe(true);
   });
 
   it("全部坐标引用与设计文档、计划、仓库提交对得上", () => {
