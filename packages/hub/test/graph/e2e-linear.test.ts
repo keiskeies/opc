@@ -32,14 +32,10 @@ import {
   legalTransitionsFrom,
   type TaskState,
 } from "../../src/graph/status.js";
-import {
-  loadRoles,
-  runsOfNode,
-  tierOfNode,
-  traceFromRows,
-} from "./fixtures/company-fixtures.js";
+import { StubRegistry, stringifyContent } from "../../src/graph/stub-model.js";
+import { loadPresetRoles, tierOfNode } from "../../src/roles/preset.js";
+import { runsOfNode, traceFromRows } from "./fixtures/company-fixtures.js";
 import { runChild } from "./fixtures/run-child.js";
-import { StubRegistry, stringifyContent } from "./fixtures/stub-model.js";
 
 /** §7.1 主链 + §7.2 走查走到的那 14 条边，顺序即图应当产生的顺序。 */
 const EXPECTED_TRACE: readonly [TaskState, TaskState][] = [
@@ -184,7 +180,7 @@ describe("Task 0.8 —— 最小可运行公司图", () => {
       db: h.db,
       recorder: h.auditor.recorder,
       saver: h.saver,
-      roles: loadRoles(),
+      roles: loadPresetRoles(),
       models: reg,
       taskId: "T-E2E",
     });
@@ -240,7 +236,7 @@ describe("Task 0.8 —— 最小可运行公司图", () => {
       db: h.db,
       recorder: h.auditor.recorder,
       saver: h.saver,
-      roles: loadRoles(),
+      roles: loadPresetRoles(),
       models: new StubRegistry(),
       taskId: "T-E2E-LOOP",
     });
@@ -300,7 +296,7 @@ describe("Task 0.8 —— 最小可运行公司图", () => {
       db: h.db,
       recorder: h.auditor.recorder,
       saver: h.saver,
-      roles: loadRoles(),
+      roles: loadPresetRoles(),
       models: new StubRegistry(),
       taskId: "T-E2E-TRACE",
     });
@@ -338,7 +334,7 @@ describe("Task 0.8 —— 最小可运行公司图", () => {
       db: h.db,
       recorder: h.auditor.recorder,
       saver: h.saver,
-      roles: loadRoles(),
+      roles: loadPresetRoles(),
       models: reg,
       taskId: "T-E2E-TIER",
     });
@@ -391,7 +387,7 @@ describe("Task 0.8 —— 最小可运行公司图", () => {
       db: h.db,
       recorder: h.auditor.recorder,
       saver: h.saver,
-      roles: loadRoles(),
+      roles: loadPresetRoles(),
       models: new StubRegistry(),
       taskId: "T-E2E-NOGATE",
     });

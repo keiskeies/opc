@@ -24,8 +24,8 @@ import { migrate } from "../../../src/db/migrate.js";
 import type { DomainEvent, EventBus } from "../../../src/events/bus.js";
 import { SuperStepAuditor } from "../../../src/graph/audit-middleware.js";
 import { buildCompanyGraph } from "../../../src/graph/company.js";
-import { loadRoles } from "./company-fixtures.js";
-import { StubRegistry } from "./stub-model.js";
+import { StubRegistry } from "../../../src/graph/stub-model.js";
+import { loadPresetRoles } from "../../../src/roles/preset.js";
 
 class ChildBus implements EventBus {
   publishPersisted(_e: DomainEvent, _seq: number): void {}
@@ -100,7 +100,7 @@ const graph = buildCompanyGraph({
   db,
   recorder: auditor.recorder,
   saver,
-  roles: loadRoles(),
+  roles: loadPresetRoles(),
   models: new StubRegistry(),
   taskId,
   observe: {

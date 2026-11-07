@@ -1,29 +1,27 @@
 /**
- * 桩模型（Task 0.8 验收要求：测试用桩模型，不联网、不计费）。
+ * Phase 0 专用【桩模型】：不联网、不计费、确定性返回。
  *
- * 单独成文件而不是留在测试里，是因为崩溃续跑测试要在**另一个进程**里用同一个桩：
- * 桩若有两份实现，子进程跑的就不是被测路径，"已完成节点不重复执行"会退化成自我确认。
+ * 为什么住在 src/ 而不是 test/：CLI（hub run）在 Phase 0 也必须能跑完图，而真实
+ * 模型接入是 Phase 1 的事。留在 test/ 就会诱导出"CLI 里另写一个桩"，于是"节点级
+ * 档位由 model_tier 驱动"这条断言（§5.9、§24 风险 1）可能测的是 A 桩、跑的是 B 桩。
  *
- * 为什么真继承 BaseChatModel 而不是随手写个 { invoke } 对象：规格 §5.9 第 2 条要求
- * 模型 Provider 统一走 @langchain/core 的 message API。桩不继承它，节点里就能塞进
- * 任意对象而测试照样绿 —— 那条约束就没有任何测试守着。
- *
- * 为什么必须返回标准 ChatResult：实测把 SimpleChatModel 的 _generate 写成直接返回
- * content 时，LangChain 在 result.generations is not iterable 处炸掉。也就是说
- * "看着像模型"不够，桩要按真实契约返回。
+ * ⚠ 这个文件【只】放桩。真实 provider 到 Phase 1 进独立的 registry，不往这里加
+ * 一个 if —— "生产代码里藏着假东西"是后期最难查的一类故障。
+ * 装配时 CLI 会显式打印「模型：桩（Phase 0，不计费不联网）」，不给人误以为真跑了模型。
  */
 import type { CallbackManagerForLLMRun } from "@langchain/core/callbacks/manager";
 import { BaseChatModel } from "@langchain/core/language_models/chat_models";
-import {
-  AIMessage,
-  type BaseMessage,
-  type ChatResult,
-} from "@langchain/core/messages";
-import type { ChatGeneration } from "@langchain/core/outputs";
+import { AIMessage, type BaseMessage } from "@langchain/core/messages";
+// ChatResult / ChatGeneration 都在 @langchain/core/outputs —— 【不在 messages】。
+// 这里原先写的是从 messages 引 ChatResult，一路没被编译抓到，只因为 tsc -b 的
+// solution 不覆盖 test/ 目录：本文件在 Task 0.10 之前住在 test/graph/fixtures/，
+// 这个 TS2305 潜伏了整整一个任务，是"把它搬进 src/"才把它照出来的。
+import type { ChatGeneration, ChatResult } from "@langchain/core/outputs";
+// 档位类型的唯一权威来源是 @opc/contracts（§668：zod schema 是唯一来源）。
+// 曾在这里重复声明过一份，于是 contracts 改了档位、桩这边还旧着，类型层面看不出来。
+import type { ModelTier } from "@opc/contracts";
 
-// 类型来自 @opc/contracts（唯一权威来源）；曾在这里重复声明过一份，
-// 于是 contracts 改了档位、桩这边还旧着 —— 类型层面看不出来，只有行为会偏。
-export type { ModelTier } from "@opc/contracts";
+export type { ModelTier };
 
 export interface StubCall {
   readonly tier: ModelTier;
@@ -75,7 +73,13 @@ export class StubChatModel extends BaseChatModel {
     this.calls.push({ tier: this.tier, text });
     const out = "stub:" + this.tier;
     const gen: ChatGeneration = { text: out, message: new AIMessage(out) };
-    return { generations: [gen], result: {} };
+    // ChatResult 的真实形状是 { generations: ChatGeneration[]; llmOutput?: object }
+    // （@langchain/core/dist/outputs.d.ts:58）。这里原先多带了一个 `result: {}` 键 ——
+    // 它不属于任何契约，纯属噪声。为什么没人发现：本文件此前住在 test/，而 tsc -b 的
+    // solution 不覆盖 test/，多余键的 excess-property 检查根本没跑过。
+    // ⚠ 别把它跟运行时那句 result.generations is not iterable 混为一谈：那句里的
+    //   result 是 LangChain 内部的局部变量名，与返回对象里的这个键毫无关系。
+    return { generations: [gen] };
   }
 }
 
