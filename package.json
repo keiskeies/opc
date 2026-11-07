@@ -14,7 +14,8 @@
     "lint:fix": "biome check --write .",
     "typecheck": "tsc -b",
     "verify": "pnpm lint && pnpm typecheck && pnpm test",
-    "migrate": "tsx packages/hub/src/db/migrate-cli.ts"
+    "migrate": "tsx packages/hub/src/db/migrate-cli.ts",
+    "hub": "tsx packages/hub/src/cli.ts"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.6.5",
