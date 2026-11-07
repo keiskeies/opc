@@ -122,6 +122,44 @@ function make() {
  * 平行扇出时同一超步的多个节点共享一次 put（3 节点 4 次 put）。
  */
 describe("SuperStepAuditor：Saver.put 就是超步边界", () => {
+  // 前提断言（0007 §4.1 / §4.3 第三例）：SuperStepAuditor 构造里那段条件展开的唯一作用，就是把
+  // 调用方传的 onBroadcastError 接到内部的 AuditRecorder 上。变异实测 MJ —— 把这三行条件展开整块
+  // 删掉（类型合法、biome 过、不会崩，只是【忘记透传】），补这条之前【全量 256 条全绿】。
+  // 后果与 recorder 那条同源但更隐蔽：Electron 主进程正是通过 SuperStepAuditor 传这个回调的，
+  // 透传一断，它注入的落日志 / 上报入口全部失效，前端断连造成的进度丢失静默消失。
+  it("调用方传给 SuperStepAuditor 的 onBroadcastError 必须真的接得到（忘记透传无人守）", async () => {
+    const db = openDb();
+    const boom = new Error("SSE 写失败");
+    const bus = new FakeBus();
+    bus.publishPersisted = (): never => {
+      throw boom;
+    };
+    const seen: unknown[] = [];
+    const auditor = new SuperStepAuditor({
+      db,
+      bus,
+      now: () => 1700000000000,
+      onBroadcastError: (e) => {
+        seen.push(e);
+      },
+    });
+    const saver = auditor.instrumentSaver(new SqliteWALSaver(db));
+    await auditor.invoke(async () => {
+      await saver.put(cfg("cp-passthru"), ck("cp-passthru", null), META, {});
+      await auditor.recorder.record({
+        kind: "TaskStateChanged",
+        taskId: "T-STEP",
+        from: "start",
+        to: "dev",
+      });
+    });
+    // 一次超步一条事件 ⇒ 一次广播失败 ⇒ 调用方的回调必须被喂到（忘记透传 ⇒ 0 次）
+    expect(
+      seen.length,
+      "调用方注入的失败出口必须接得到，透传断了没人报警",
+    ).toBe(1);
+    expect(seen[0], "必须交出原异常，不能只留一句笼统提示").toBe(boom);
+  });
   it("put 切事务 + events 同事务提交；提交前另一个连接什么都看不见（§6.3）", async () => {
     const { auditor, saver, events, cps, bus } = make();
     await auditor.invoke(async () => {
