@@ -139,9 +139,16 @@ const graph = buildCompanyGraph({
 
 const cfg = { configurable: { thread_id: threadId } };
 const resumed = killAfterNodes === null && killEventIndex === null;
-const input = resumed
-  ? null
-  : { idea, currentNode: "intake", current: "CHARTER_PENDING" };
+/*
+ * 图的 state 通道只有 idea / current / passed / reworkUsed / trail（见
+ * src/graph/company.ts 的 Annotation.Root）。这里不能多塞键：LangGraph 1.7.1 对
+ * 未声明通道【静默丢弃】，既不报错也不透传（实测最小图探针：节点里 Object.keys(state)
+ * 只得到 current,idea，多余键在返回值里是 undefined）。之前这里写过
+ * currentNode: "intake" 之类，删掉后全部用例仍然全绿 —— 它从未生效。
+ * 名字尤其容易误会：tasks 表确实有 current_node 列（hub status 靠它显示"当前节点"），
+ * 但那是节点自己 UPDATE 出来的，不是图传进来的。
+ */
+const input = resumed ? null : { idea, current: "CHARTER_PENDING" };
 
 /**
  * 装配要点（实测得来，两处都是【静默失效】的坑，改回去不会报错、只会让测试假绿）：

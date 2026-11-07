@@ -12,10 +12,11 @@
  * 再**另外**用 status.ts 的边表逐条复核 —— 两份独立真相互相牵制：期望序列写错了，
  * 边表复核会抓住；边表被改坏了，期望序列会抓住。
  */
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join, relative, sep } from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { SqliteWALSaver } from "../../src/checkpoint/saver.js";
 import { openDb } from "../../src/db/driver.js";
@@ -189,7 +190,6 @@ describe("Task 0.8 —— 最小可运行公司图", () => {
       graph.invoke(
         {
           idea: "做一个 AI 笔记应用",
-          currentNode: "intake",
           current: "CHARTER_PENDING",
         },
         { configurable: { thread_id: "th-e2e-1" } },
@@ -242,7 +242,7 @@ describe("Task 0.8 —— 最小可运行公司图", () => {
     });
     const result = await h.auditor.invoke(() =>
       graph.invoke(
-        { idea: "回退用例", currentNode: "intake", current: "CHARTER_PENDING" },
+        { idea: "回退用例", current: "CHARTER_PENDING" },
         { configurable: { thread_id: "th-e2e-loop" } },
       ),
     );
@@ -302,7 +302,7 @@ describe("Task 0.8 —— 最小可运行公司图", () => {
     });
     await h.auditor.invoke(() =>
       graph.invoke(
-        { idea: "轨迹用例", currentNode: "intake", current: "CHARTER_PENDING" },
+        { idea: "轨迹用例", current: "CHARTER_PENDING" },
         { configurable: { thread_id: "th-e2e-trace" } },
       ),
     );
@@ -342,7 +342,6 @@ describe("Task 0.8 —— 最小可运行公司图", () => {
       graph.invoke(
         {
           idea: "做一个 AI 笔记应用",
-          currentNode: "intake",
           current: "CHARTER_PENDING",
         },
         { configurable: { thread_id: "th-e2e-tier" } },
@@ -395,7 +394,6 @@ describe("Task 0.8 —— 最小可运行公司图", () => {
       graph.invoke(
         {
           idea: "无门控用例",
-          currentNode: "intake",
           current: "CHARTER_PENDING",
         },
         { configurable: { thread_id: "th-e2e-nogate" } },
@@ -534,5 +532,103 @@ describe("Task 0.8 —— 最小可运行公司图", () => {
 
       expect(readTasks(dbPath)[0]?.status).toBe("ARCHIVED");
     }, 180_000);
+  });
+});
+
+/**
+ * 找出把【未声明通道】当图 state 字段传出去的代码行。
+ *
+ * 返回行号（1 起）。注释行不参与判定：守卫要拦的是【把死键传给图】的代码，
+ * 而注释里解释"为什么不能用这个键"恰恰是防复发的手段（实测：不豁免注释时，
+ * fixtures/e2e-crash-child.ts 里那段教学注释会被判违规）。
+ *
+ * 为什么不用类型系统查：tsc -b 的 solution 只含 packages/<pkg>/src，test/ 整体
+ * 不在覆盖范围（实测：一个语法彻底坏掉的测试文件，tsc -b 仍然 exit 0，只有
+ * vitest 会报 Tests  no tests）。类型层面的"多余属性"检查在测试里根本不执行。
+ */
+function findDeadKeyLines(text: string, key: string): number[] {
+  return text
+    .split("\n")
+    .map((raw, idx) => ({ t: raw.trim(), n: idx + 1 }))
+    .filter(
+      (x) =>
+        !x.t.startsWith("//") && !x.t.startsWith("*") && !x.t.startsWith("/*"),
+    )
+    .filter((x) => x.t.includes(key + ":"))
+    .map((x) => x.n);
+}
+
+/** 图里真实存在的通道；唯一真相在 src/graph/company.ts 的 Annotation.Root。 */
+const STATE_CHANNELS = ["current", "idea", "passed", "reworkUsed", "trail"];
+
+describe("图 state 字面量守卫", () => {
+  /*
+   * 键名分两段拼是必要的：本守卫扫的就是这个字面量，写成一整串会命中自己。
+   * 下面构造正/负样本时同样分段，理由一致。
+   */
+  const DEAD_KEY = "current" + "Node";
+
+  it("测试里没有把未声明的通道传给图（LangGraph 会静默丢弃）", () => {
+    const dir = dirname(fileURLToPath(import.meta.url));
+    const offenders: string[] = [];
+    const walk = (d: string): void => {
+      for (const ent of readdirSync(d, { withFileTypes: true })) {
+        const p = join(d, ent.name);
+        if (ent.isDirectory()) walk(p);
+        else if (ent.name.endsWith(".ts")) {
+          const bad = findDeadKeyLines(readFileSync(p, "utf8"), DEAD_KEY);
+          if (bad.length > 0) {
+            offenders.push(
+              relative(dir, p).split(sep).join("/") + ":" + bad.join(","),
+            );
+          }
+        }
+      }
+    };
+    walk(dir);
+    expect(
+      offenders,
+      DEAD_KEY + " 不是图通道，会被静默丢弃：\n  " + offenders.join("\n  "),
+    ).toEqual([]);
+  });
+
+  /*
+   * 【自证有效性】这条才是上一版真正缺的东西。守卫一旦静默失效（键名被改错、
+   * 判定被短路、目录走错），它自己永远"绿"，比没有守卫更糟 —— 提供虚假的安全感。
+   * 所以在这里种一个人工违规样本，要求扫描器必须抓到它。
+   */
+  it("扫描器能抓到种下的违规（否则它是恒绿装饰）", () => {
+    const violation = [
+      'const s = { idea: "x", cur',
+      "rentNode",
+      ': "n" };',
+    ].join("");
+    expect(findDeadKeyLines(violation, DEAD_KEY)).toEqual([1]);
+  });
+
+  it("扫描器不把注释里的解释当违规", () => {
+    const note = ["// 别写 currentNode", ": 它进不了图"].join("");
+    expect(findDeadKeyLines(note, DEAD_KEY)).toEqual([]);
+  });
+
+  /*
+   * 键名分段的写法本身也要守：一旦被合并成一整串，上面两条样本会被源码扫描
+   * 命中，第一条守卫立刻红 —— 那时失败信息会直接指出本文件，不需要额外断言。
+   * 这里改而锁住通道清单，因为"守卫能否抓到东西"已由上面两条覆盖。
+   */
+  it("通道清单与 src 的 Annotation.Root 同步", () => {
+    const src = readFileSync(
+      join(
+        dirname(fileURLToPath(import.meta.url)),
+        "../../src/graph/company.ts",
+      ),
+      "utf8",
+    );
+    for (const ch of STATE_CHANNELS) {
+      expect(src, "company.ts 里找不到通道 " + ch).toContain(
+        ch + ": Annotation<",
+      );
+    }
+    expect(STATE_CHANNELS.length).toBe(5);
   });
 });
