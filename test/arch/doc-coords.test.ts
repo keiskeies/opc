@@ -135,6 +135,21 @@ type World = {
   lines: Map<string, string[]>;
 };
 
+/**
+ * 这个 § 引用是否已被【外部限定词】锚定：同一子句内（到最近一个子句终止符为止）出现过
+ * 规格 / 设计文档 / 计划 / spec，就认为它指的是设计文档而不是本篇。中文技术写作里枚举是
+ * 【规格 §5.8、§6.3、§22.1】这样共享前缀的，所以限定词向后可传递到子句结束 —— 要求每处都
+ * 重复【规格】既不现实也没人会写；代价是同子句内后面那个引用不再受本篇校验，如实记在这里。
+ */
+function qualifiedAsExternal(pre: string): boolean {
+  const cut: number = Math.max(
+    ...["。", "；", ";", "！", "？", String.fromCharCode(10)].map((t: string) =>
+      pre.lastIndexOf(t),
+    ),
+  );
+  const clause: string = pre.slice(cut + 1);
+  return /(规格|设计文档|计划|spec)/.test(clause);
+}
 function verify(refs: Ref[], w: World, retracted: string[]): Problem[] {
   const problems: Problem[] = [];
   for (const r of refs) {
@@ -170,6 +185,42 @@ function verify(refs: Ref[], w: World, retracted: string[]): Problem[] {
           why: "那一篇的 §7 没有第 " + r.num + " 条",
         });
       continue;
+    }
+    // 形状歧义（本轮抓出的假绿）：裸形 §N.M，本篇有父节 §N 却没有 §N.M，而设计文档/计划有 §N.M。
+    // 这种写法既可能是【本篇 §N 下的一个不存在的子节号】（真错号），也可能是【指设计文档但漏了
+    // 限定词】。旧版按【设计文档有就算对】放行，于是【本篇内的错号】会被设计文档的同名节洗白：
+    // 0003 写 §6.2 / §6.5 指自己 §6 下的有序列表项，被设计文档 §6.2 兜住，错号一路绿灯。
+    // 判据不确定时不要猜，报出来让人写成不会歧义的形状。
+    if (r.kind === "sec" && r.targetDoc === r.doc && r.num.includes(".")) {
+      const own: { sets: HeadingSets; items: Set<number> } | undefined =
+        w.byDoc.get(r.doc);
+      const parent: string = r.num.slice(0, r.num.lastIndexOf("."));
+      const parentHere: boolean =
+        own !== undefined &&
+        (own.sets.sub.has(parent) || own.sets.top.has(Number(parent)));
+      const notHere: boolean = own === undefined || !secExists(own.sets, r.num);
+      const elsewhere: boolean =
+        secExists(w.spec, r.num) || secExists(w.plan, r.num);
+      if (parentHere && notHere && elsewhere) {
+        const src: string = (w.lines.get(r.doc) ?? [])[r.line - 1] ?? "";
+        const pre: string = src.slice(0, Math.max(0, src.indexOf(SEC + r.num)));
+        if (!qualifiedAsExternal(pre)) {
+          problems.push({
+            ref: shown,
+            why:
+              "形状歧义：本篇有 §" +
+              parent +
+              " 但没有 §" +
+              r.num +
+              "，而设计文档或计划有 §" +
+              r.num +
+              "；要指本篇就写成本篇 §" +
+              parent +
+              " 第 N 项，要指外部就加【规格】这类限定词",
+          });
+          continue;
+        }
+      }
     }
     if (r.targetDoc === r.doc) {
       const own = w.byDoc.get(r.doc);
@@ -299,9 +350,18 @@ describe("决策文档里的坐标（节号 / §7 条目号 / 短哈希）指向
     // 提取与判定：目标篇、本篇、以及不存在三种情形各来一条
     const rows: Row[] = [
       { doc: "0006", lines: ["## 7. 失误", "1. **甲**"] },
+      // byDoc 是 Map：同一个 doc 写两行，后一行会【静默覆盖】前一行 —— 上一轮我就
+      // 这么把新增的 §6 覆盖没了，规则永远不触发，canary 红在计数上而不是红在规则上。
+      // 所以同一个 doc 的 fixture 只能有一行，且必须把该篇所有需要的节都写全。
       {
         doc: "0007",
-        lines: ["## 4. 甲", "### 4.1 乙", "## 7. 失误", "5. **丙**"],
+        lines: [
+          "## 4. 甲",
+          "### 4.1 乙",
+          "## 6. 本篇有此节",
+          "## 7. 失误",
+          "5. **丙**",
+        ],
       },
     ];
     // canaryLines 既是被扫描的正文，也是 World.lines：行号必须对得上，否则撤回豁免测不到。
@@ -314,22 +374,31 @@ describe("决策文档里的坐标（节号 / §7 条目号 / 短哈希）指向
       "0008 " + SEC + "1 目标篇根本不存在",
       SEC + "9 本篇没有，但设计文档有",
       "【撤回】本节初稿曾写 0008 " + SEC + "5.2 云云",
+      // fixture 自身不要引入多余坐标：那句话原本写着【本篇有 §6 但无 6.2】，
+      // 里面的 §6 又是一条真引用，凭空把 refs 数抬 1 —— 断言的数字就变得不可解释。
+      "裸引用形状歧义（本篇有该父节、无该子节）：" + SEC + "6.2 云云",
+      "有前缀就明确：" + "规格 " + SEC + "6.2 云云",
+      // 限定词的传递边界：前一句的【规格】不该豁免下一句的裸形引用
+      "上一句提过规格 §9 的事。跨句的裸形仍须报：" + SEC + "6.2 云云",
+      // 同一句里的枚举共享限定词（【规格 §9、§6.3】是常规中文写法），必须放行
+      "同句共享限定词：规格 §9、" + SEC + "6.2 云云",
     ];
     const w: World = {
       byDoc: world(rows, new Set<string>()).byDoc,
-      spec: headingSets(["# 9. 设计节"]),
+      spec: headingSets(["# 9. 设计节", "## 6.2 设计文档里有同名子节"]),
       plan: headingSets([]),
       hashes: new Set<string>(["abc1234"]),
       lines: new Map<string, string[]>([["0007", canaryLines]]),
     };
     const refs: Ref[] = extractRefs("0007", canaryLines);
     const retracted: string[] = [];
-    const found: string[] = verify(refs, w, retracted).map(
-      (p: Problem) => p.why,
-    );
-    // 8 = 六个 §引用 + 两个 §7 条目 token（§7 第 N 条 只由 ITEM_RE 计一次，不双计）
-    expect(refs.length).toBe(8);
-    expect(found.length).toBe(4);
+    const probs: Problem[] = verify(refs, w, retracted);
+    const found: string[] = probs.map((p: Problem) => p.why);
+    // 14 = 十二条 §引用 + 两个 §7 条目 token（§7 第 N 条 只由 ITEM_RE 计一次，不双计）。
+    // 注释里的数字必须跟断言一致 —— 上一版这里注释写【8】而断言是【10】，本身就是
+    // 0007 §4.1 要消灭的【注释说了一套、断言做了另一套】。
+    expect(refs.length).toBe(14);
+    expect(found.length).toBe(6);
     // 撤回豁免必须真的咬住一条，否则它是装饰
     expect(retracted.length).toBe(1);
     expect(retracted[0].endsWith("0008 " + SEC + "5.2")).toBe(true);
@@ -340,6 +409,21 @@ describe("决策文档里的坐标（节号 / §7 条目号 / 短哈希）指向
     expect(found.some((s: string) => s.includes("目标决策文档不存在"))).toBe(
       true,
     );
+    // 形状歧义：本篇有父节 §6、无 §6.2，设计文档有 §6.2 ⇒ 这个 §6.2 到底是【本篇的 6.2】
+    // 还是【设计文档的 6.2】，光看形状挣不出来。守卫旧版靠【设计文档有就算对】兜住了它，
+    // 于是【本篇内的错号】会被设计文档的同名节洗白 —— 这就是那条假绿。
+    expect(found.some((s: string) => s.includes("形状歧义"))).toBe(true);
+    // 限定词的传递范围两个方向都要钉住（变异 M5：去掉子句截断，远处一个【规格】就能
+    // 豁免后面每一句的裸形 —— 那是漏报；反过来把限定词收紧成只许紧邻，又会误伤
+    // 【规格 §9、§6.3】这种常规枚举 —— 那是误报）。l.11 必须报，l.12 必须不报。
+    expect(probs.some((p: Problem) => p.ref.includes("l.11"))).toBe(true);
+    expect(probs.some((p: Problem) => p.ref.includes("l.12"))).toBe(false);
+    // 变异 M4：本篇有父节、本篇无该子节、外部【也没有】时，正确文案是【不存在】而不是
+    // 【形状歧义】—— 报成歧义会把人支使去找一个根本不存在的目标，方向就指错了。
+    const pNoTarget: Problem | undefined = probs.find((p: Problem) =>
+      p.ref.includes("l.2"),
+    );
+    expect(pNoTarget?.why.includes("形状歧义")).toBe(false);
     // 短哈希一条样例覆盖四个边界：合法的哈希不报；坏哈希报；7 位纯数字是普通数字不报；
     // 8 位以上不是【恰好 7 位】也不报（实测文档里那种 32 位 interrupt id 就是靠这条不受伤）。
     const hp: Problem[] = hashProblems(

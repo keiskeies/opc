@@ -46,7 +46,7 @@
 >
 > 仍未被自动化的部分是 M7 那个【具体形态】：在框架回调内部让 Saver 自带连接。它要靠
 > 给记录器加开关才能触发，而生产实现已不再提供这种写法的可能（`put` / `putWrites`
-> 强制走 `requireScopeDb()`，见 §6.2）。故保留 M7 行的 △ 分级，不追认为断言功劳。
+> 强制走 `requireScopeDb()`，其出处是本篇 §6 第 2 项）。故保留 M7 行的 △ 分级，不追认为断言功劳。
 
 变异 M7（让 Saver 自带一条连接，即官方 `SqliteSaver` 的自然写法）没有让断言变红，
 而是抛 `database is locked`。这条错误本身就是结论：
@@ -75,7 +75,7 @@
   SQLite 的写锁是**库级**的，不是 thread 级 —— 一个长事务会冻住整个 Hub 的全部写入，
   而且 `busy_timeout` 只有 5 秒（决策 0001），其他写者必然报 busy 而非排队等待。
 
-所以 §6.3 里的「同一事务」应理解为：**一个超步的 checkpoint + 它的 writes + 它对应的
+所以规格 §6.3 里的「同一事务」应理解为：**一个超步的 checkpoint + 它的 writes + 它对应的
 events 是一个原子单位**，超步之间分别提交。这也是探针断言真正证明的东西 —— ALS 让
 作用域能贯穿框架调度，至于作用域开多大是实现的自由，粒度由本条约束。
 
@@ -132,7 +132,7 @@ events 是一个原子单位**，超步之间分别提交。这也是探针断�
 
 1. txScope() 提供连接；Saver 的 put 与 putWrites **不得自行 BEGIN**，只从作用域取连接。
 2. 无作用域时的行为必须显式决定：短事务自提（用于 Hub 自己的读写）还是抛错（禁止
-   框架外的裸写）。默认抛错更安全 —— 静默自提会让 §6.3 的原子性在最常见路径上失效。
+   框架外的裸写）。默认抛错更安全 —— 静默自提会让规格 §6.3 的原子性在最常见路径上失效。
 3. 粒度按 §3.2：每个超步一个事务。
 4. 五个抽象方法一个都不能少（含极易漏的 deleteThread）；put 是**四参数**，以基类
    为准，不得照抄官方 SqliteSaver 的三参数。基类 putWrites 的文档注释额外要求：
@@ -146,11 +146,11 @@ events 是一个原子单位**，超步之间分别提交。这也是探针断�
 
 实现见 `packages/hub/src/checkpoint/`（`schema.ts` / `tx-scope.ts` / `saver.ts`）与
 `packages/hub/test/checkpoint/saver.contract.test.ts`（同一套用例同时跑 `MemorySaver`
-与 `SqliteWALSaver`）。§6 的六条约束全部落实，其中：
+与 `SqliteWALSaver`）。§6 的五条约束全部落实，其中：
 
-- §6.2（事务外调用抛错，不得静默自提）由契约测试「事务外调用 put / putWrites 直接抛错」
+- §6 第 2 项（事务外调用抛错，不得静默自提）由契约测试「事务外调用 put / putWrites 直接抛错」
   覆盖；变异 A5（改成静默用构造连接）被断言杀死。
-- §6.5（pendingWrites 必须排序）由两条用例覆盖，且刻意构造【主键序与框架序相反】的数据：
+- §6 第 4 项（pendingWrites 必须排序）由两条用例覆盖，且刻意构造【主键序与框架序相反】的数据：
   实测若给 `writes` 建 `(thread_id, ns, checkpoint_id, task_path, task_id, idx)` 索引，
   SQLite 会选它做扫描索引，于是【不带 ORDER BY 的 SELECT 碰巧返回正确顺序】—— 漏掉内存
   排序也能过测试。该索引已从 `schema.ts` 删除并在注释里记下原因，变异 A3（去掉内存排序）
