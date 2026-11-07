@@ -232,9 +232,12 @@ export class SuperStepAuditor {
     this.recorder = new AuditRecorder({
       tx: this.#tx,
       bus: o.bus,
-      // 条件展开而不是直接传：RecorderOptions 的可选属性在
-      // exactOptionalPropertyTypes 下不接受显式 undefined，
-      // 而且传 undefined 会盖掉 recorder 自己的默认值语义。
+      // 条件展开而不是直接传，理由只有一条、而且是【编译期】的：本仓库开了
+      // exactOptionalPropertyTypes，恒传（onBroadcastError: o.onBroadcastError）会被 tsc 拒绝
+      // —— 实测 error TS2379。【不要】把这条改成运行期理由：recorder 那边用的是 ??，
+      // 实测显式传 undefined 时 ?? 照样落到默认回调（默认仍被调用一次），并不会盖掉默认值。
+      // 透传本身是否有测试守着：见 test/graph/step-tx.test.ts 的【忘记透传无人守】那条
+      //（变异 MJ / MK 实测：删掉这段条件展开在补断言前全量 256 条全绿）。
       ...(o.now === undefined ? {} : { now: o.now }),
       ...(o.actor === undefined ? {} : { actor: o.actor }),
       ...(o.onBroadcastError === undefined
