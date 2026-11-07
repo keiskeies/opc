@@ -117,7 +117,7 @@ function make() {
 }
 
 /*
- * 调用序列取自 .tmp/probe-step-tx.mjs 的实测结论（LangGraph JS 1.7.1）：
+ * 调用序列取自 docs/decisions/0005-event-bus-and-audit.md §1 的实测结论（LangGraph JS 1.7.1）：
  *   put(超步) → 该超步所有节点执行 → putWrites → put(下一超步) → …
  * 平行扇出时同一超步的多个节点共享一次 put（3 节点 4 次 put）。
  */

@@ -20,7 +20,7 @@ export interface InterruptInfo {
 /**
  * 从 invoke 的返回值里取出中断。
  *
- * 为什么是【返回值】而不是 catch：实测（.tmp/probe-interrupt-shape.mjs）
+ * 为什么是【返回值】而不是 catch：实测见 docs/decisions/0005-event-bus-and-audit.md §10
  * interrupt() 让 graph.invoke 正常 resolve，返回对象里多一个 __interrupt__ 数组，
  * 【不抛异常】。把它当异常处理 = 审计里永远看不到"等待批准"这件事，
  * 而任务已经停在 need_approval 上，前端只能靠轮询猜。
@@ -217,7 +217,7 @@ export interface SuperStepAuditorOptions {
 /**
  * 把超步事务协调接到 Saver 上（计划 Task 0.6 硬规定 1 的落地）。
  *
- * 为什么拦 Saver.put：实测（.tmp/probe-step-tx.mjs）put 是【唯一可靠的超步边界】——
+ * 为什么拦 Saver.put：实测见 docs/decisions/0005-event-bus-and-audit.md §1 —— put 是【唯一可靠的超步边界】：
  * 严格发生在该超步所有节点执行之前，平行扇出时同超步的多个节点共享一次 put。
  * stream(updates) 的 chunk 不是边界（一次超步可能给多个 chunk、也可能合并），
  * 且 producer 与 consumer 之间【没有背压】：consumer 睡 250ms，后面节点的 INSERT
