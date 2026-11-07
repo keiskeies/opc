@@ -40,8 +40,10 @@
 // import 真配置，断言手抄模式与它逐字相同。之所以必须这样补，是因为 vitest.config.ts 自己【不在任何
 // 比对逻辑在 config-match.ts 而不是内联：本守卫有自指性 —— include 改空会把承载断言的
 // 一根柱子的射程内】，本轮实测（两条都配了正对照）：
-//   · biome 显式点名它 → Checked 0 files / These paths were provided but ignored
-//     （biome.json files.includes 只有 packages/**、test/**、*.json，根目录的 .ts 不在内）
+//   · biome 曾经照不到它（显式点名回答 Checked 0 files）。本轮已修：根目录的 .ts 加进 files
+//     的 includes，实测 Checked 76 变 77 —— 该 glob 不递归，所以只多这一个文件，不宽。
+//     它同时是全仓 60 个 .ts 里唯一不以换行结尾的文件（末字节 0x3b），本轮一并补上：
+//     这个缺陷能活到今天，正因为没有一根柱子照它，本身即本节主题的实例。tsc 仍不覆盖它。
 //   · tsc -b --force 给它注入一个类型错误 → exit 0；同一探针注入 packages/hub/src/index.ts → exit 2
 //     且错误行指向那个文件。它又不被任何文件 import（孤立），所以 tsc 也永远不会顺带看它。
 

@@ -9,7 +9,8 @@
     "includes": [
       "packages/**/*.{ts,tsx,js,mjs,json}",
       "test/**/*.{ts,tsx}",
-      "*.json"
+      "*.json",
+      "*.ts"
     ],
     "ignoreUnknown": true
   },
