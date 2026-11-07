@@ -494,8 +494,9 @@ it("并行兄弟节点与框架 Saver 共用同一个连接，不被并行调度
   for (const name of ["left", "right"]) {
     g.addNode(name, async () => {
       const st = als.getStore();
-      seen.push({ name, same: st && st.db === db });
+      seen.push({ name, phase: "start", same: st && st.db === db });
       await sleep(2 + Math.floor(Math.random() * 12));
+      seen.push({ name, phase: "end", same: st && st.db === db });
       st.db
         .prepare(
           "INSERT INTO events (thread_id, checkpoint_id, src) VALUES (?, ?, ?)",
@@ -515,7 +516,31 @@ it("并行兄弟节点与框架 Saver 共用同一个连接，不被并行调度
     compiled.invoke({ trail: [] }, { configurable: { thread_id: "t-4b" } }),
   );
 
-  expect(seen.length, "两个并行节点都要跑到").toBe(2);
+  /*
+   * 前提（与 4a 的交错断言同构）：两个兄弟节点必须真的在时间上重叠。
+   * 缺了它，下面每条断言在【并行退化成顺序执行】时都照样全绿 —— 那等于
+   * 在测试一个不存在的并发。实测（本轮）：现在的 LangGraph 1.7.1 每次都
+   * 重叠，且把 sleep 改成 0 或纯 microtask 也照样重叠，所以这条断言不会
+   * 因机器快慢而误红；它是拿来挡【将来并行退化】的回归的。
+   */
+  const at = (name: string, phase: string) =>
+    seen.findIndex(
+      (s: { name: string; phase: string }) =>
+        s.name === name && s.phase === phase,
+    );
+  const overlapped =
+    at("left", "start") < at("right", "end") &&
+    at("right", "start") < at("left", "end");
+  expect(
+    overlapped,
+    "并行退化成了顺序执行，本例形同虚设：" +
+      JSON.stringify(
+        seen.map(
+          (s: { name: string; phase: string }) => s.name[0] + s.phase[0],
+        ),
+      ),
+  ).toBe(true);
+  expect(seen.length, "两个并行节点各留 start / end 共 4 条记录").toBe(4);
   expect(
     seen.every((s) => s.same),
     "并行节点拿到的连接必须就是事务连接：" + JSON.stringify(seen),
