@@ -9,6 +9,7 @@
     "@opc/contracts": "workspace:*"
   },
   "devDependencies": {
+    "@langchain/langgraph": "^1.7.1",
     "@types/node": "^24.10.1",
     "typescript": "^5.9.3"
   }

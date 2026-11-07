@@ -159,12 +159,55 @@ invoke 级事务有两个后果，都不报错：
 非空字符串，全都 throw。理由是一句话：静默返回空数组的表现是**审批永远不来**，且没有任何报错。
 `id` 为空也要抛 —— 审批要靠它 resume，空 id 的审批行是废行。
 
-## 11. `invoke(null)` 续跑不重跑节点 ⇒ `events` 不需要去重列（V3）
+## 11. 【撤回】`events` 不需要去重列 —— 原结论基于一个没测 interrupt 的探针（V3）
 
-实测（探针 `probe-resume-null`）：`invoke(null)` 从 checkpoint 续跑时**不会再执行**被中断的节点，
-只把 resume 值喂回 `interrupt()` 那一行。既然节点不重跑，节点内的 `INSERT INTO events` 也不会
-重来 ⇒ 幂等性由框架免费提供，不需要 `(task_id, dedup_key)` 之类的列。这是**决定 schema 的实测**，
-所以记在这里；若哪天升级 LangGraph 改变了续跑语义，本文这条就是回归的靶子。
+> **本条原来的结论是错的，结论作废，但错误本身比结论更值得记。** 原文写「`invoke(null)` 续跑
+> 不重跑节点 ⇒ 幂等性由框架免费提供 ⇒ 不需要 `(task_id, dedup_key)` 之类的列」，并据此定 schema。
+> 错在探针方法：那条探针的图**里没有 `interrupt()`** —— 而 Phase 0 的核心场景（审批）恰恰就是
+> interrupt。测了一个不相关的形状，就把结论推广到 schema，这是本轮最贵的一次错误。
+
+### 11.1 实测矩阵（LangGraph JS 1.7.1 + `SqliteWALSaver` + `SuperStepAuditor`）
+
+| 场景 | 节点执行次数 | `events` 已提交行数 |
+| --- | --- | --- |
+| 无 `interrupt` 的节点 + `invoke(null)` | 不变（1 → 1） | 不变 |
+| 含 `interrupt` 的节点 + `Command({resume})` | **重跑**（1 → 2） | — |
+| 含 `interrupt` 的节点 + `invoke(null)` | **重跑**（1 → 2） | **重复**（1 → 2） |
+| 中断后误传 input（V11） | 全重跑（plain 1→2、节点 1→2） | 重复 |
+| `record` 在 `interrupt()` **之前** + resume | — | **1 → 2，payload 逐字相同** |
+| `record` 在 `interrupt()` **之后** + resume | — | **0 → 1，不重复** |
+
+LangGraph 的 interrupt 是靠**重放节点直到 `interrupt()` 那一行**实现的。于是：
+
+- **缺陷 A（已固化成回归测试）**：节点在中断**之前**写的 `TaskStateChanged`，恢复时被重放写第二遍，
+  两条 payload 逐字相同（实测 id=1、id=2）。而 §9 的 append-only 触发器使「事后删掉多余那条」
+  不可能 —— 审计里凭空多出一次「进入待审批」，且完全无法事后清理。计划 Task 0.6 验收第 4 项
+  「崩溃恢复（V3）不产生重复 `TaskStateChanged`」**实测不通过**。
+- **缺陷 B**：`ApprovalRequired` 由 `auditedInvoke` 在 invoke 返回后发出。同一个中断被再次检测到时
+  会再发一条，实测三次 invoke 后库里 **3 条 `action=approval`，`target` 逐字相同**
+  （`interrupt:<32位hex>` —— 中断 id 在 checkpoint 里稳定，所以重复项可按 `target` 辨认）。
+  崩溃重启 N 次，CEO 就看到 N 条一模一样的审批。
+- **缺陷 C（接口不可组合）**：`auditedInvoke` 内部调 `recorder.run`，`SuperStepAuditor.invoke` 也调
+  `recorder.run`，嵌套即撞 `AuditRecorder.run` 的嵌套守卫（「一次图执行只能有一个事务责任方」）。
+  而真实图执行**同时需要**两者：saver 要 auditor 建的事务作用域，中断审计要 `auditedInvoke`。
+  实测两条路都不通 —— 嵌套撞守卫，不嵌套则 `SqliteWALSaver.put` 报「必须在 txScope() 内调用」。
+  三套测试各自全绿，**却组装不出一个可用的整体**；`audit-interrupt.test.ts` 用 `FakeTx` 绕开了真实
+  嵌套，所以没人发现。**教训**：只测零件不测装配，绿灯不代表机器能开。
+
+### 11.2 为什么写到这里而不是当场修
+
+缺陷 A、B 的修法要动**语义或 schema**，三个方向各有代价，不是实现层能单方面定的：
+
+| 方向 | 代价 |
+| --- | --- |
+| 给 `events` 加幂等键（`INSERT OR IGNORE`） | 改 Task 0.5 已定稿的迁移 SQL；且「谁该去重」要说清 —— 状态机真跳转两次就该是两条，去重键选错会把真实事件吞掉 |
+| 约定节点不许在 `interrupt()` 之前写审计 | 不改 schema，但把正确性寄托在编码纪律上，编译期和测试期都不设防（§9 的反面） |
+| 中断前只写 checkpoint、审批事件统一延到 invoke 返回后发 | 目前就是这个形态，它能躲开缺陷 A，但躲不开缺陷 B；要靠 `target` 做唯一索引才收得住 |
+
+回归测试 `packages/hub/test/graph/interrupt-resume.test.ts`（3 例）断言的是**当前真实行为**并逐条
+注明「这不是期望行为，是缺陷的回归锁」：去重机制一旦落地，测试立刻变红，逼后来的人读这条，
+而不是留一条永远绿着的「测了个寂寞」。其中「`record` 在 `interrupt()` 之后不重复」那条是对照，
+用来验证将来的修复**不过宽** —— 修复若把合法的第二条事件也吞了，那条对照会红。
 
 ## 12. LangGraph JS **没有** middleware 概念 —— 文件名的妥协
 
@@ -228,3 +271,15 @@ invoke 级事务有两个后果，都不报错：
    机器上是死链。改为引用本决策文档，实测数字抄进文档（见开头那条说明）。
 6. **把 `grep` 无匹配与 `vitest <不存在的目录>` 的 `exit 1` 误当测试失败**两次。**教训**：读 exit
    code 之前先读输出正文（前者是「没找到」，后者是「No test files found」）。
+
+7. **测了一个不相关的形状，就把结论推广到 schema**（见 §11）：断言「`events` 不需要去重列」的探针
+   图里**根本没有 `interrupt()`** —— 而 Phase 0 的核心恰恰是审批。**教训**：推广结论前先问「我的
+   样本覆盖了结论涉及的那个形状吗」。这条错得最贵，因为它决定 schema 而且写进了决策文档。
+8. **用带 `WHERE` 的查询去证明「不存在」**，而那个 `WHERE` 因为参数绑错位置（写成
+   `db.prepare(sql, [v])`，node:sqlite 的绑定要在 `.all(...)` 上）根本没生效 —— 一次查询写错，让我
+   先报「审批一条都没落库」，随后又差点反过来断言「审批不会重发」。**教训**：证明「不存在」之前，
+   先去掉所有过滤条件数一遍总数；一条本身可能有问题的查询，配不上「不存在」这个结论。
+9. **两次探针误用（参数绑错位、把 `target` 塞进 `DomainEvent` 而不是 `record` 的第二个参数 `extra`）
+   却两次都先指控实现有缺陷**。**教训**：先怀疑探针，再怀疑被测代码 —— 尤其当「缺陷」恰好是
+   「我预期它该长成的样子没长成」时，很可能只是我调错了。区分办法是：把返回值、无过滤的行数、
+   以及写连接与只读连接两个视角一起打出来（§11.1 的矩阵就是这么得到的）。
