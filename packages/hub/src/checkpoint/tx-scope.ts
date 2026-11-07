@@ -44,13 +44,35 @@ export function requireScopeDb(caller: string): DatabaseSync {
 }
 
 /**
+ * 只建立事务【作用域】，不开事务：把 db 作为 ALS 帧内容交给 body。
+ *
+ * 为什么要把「建帧」与「开事务」拆成两个原语：LangGraph 一次 invoke 里，ALS 帧必须
+ * 覆盖整个 invoke ——实测依据与完整推理见 docs/decisions/0005-event-bus-and-audit.md。
+ * 一句话版本：
+ * saver 在每次 put / putWrites 里都要 requireScopeDb()，而相邻两个超步事务之间也存在
+ * 这种调用。若帧与事务同生共死，两次 COMMIT 之间就会出现「saver 需要连接但没有帧」
+ * 的空窗，报「必须在 txScope() 内调用」。
+ *
+ * 反过来也成立：事务按超步滚动、帧按 invoke 存续，两者粒度不同，不能互相代替。
+ * 这就是 recorder 的 StepTx 把 inTx() 与 db() 分成两个谓词的根本原因。
+ *
+ * 危险提示：这个原语【不开事务】。单独用它写库就是 autocommit —— 只有超步协调器
+ * 这种自己管事务生命周期的调用方该用，业务代码请用 txScope()。
+ */
+export function scopeFrame<T>(
+  db: DatabaseSync,
+  body: () => Promise<T>,
+): Promise<T> {
+  return storage.run({ db }, body);
+}
+
+/**
  * 在 db 上开一个事务，并把这条连接作为作用域内容交给 body。
  *
  * 嵌套调用会直接撞 SQLite 的「cannot start a transaction within a transaction」——
  * 这是故意保留的 fail-fast：嵌套意味着外层忘记提交，或者有人在框架回调里偷偷再开一层。
  * 与其静默复用外层事务（提交时机就说不清了），不如让它显式失败。
- */
-export async function txScope<T>(
+ */ export async function txScope<T>(
   db: DatabaseSync,
   body: () => Promise<T>,
 ): Promise<T> {
