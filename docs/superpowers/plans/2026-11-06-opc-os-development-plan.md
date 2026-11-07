@@ -325,7 +325,11 @@ export interface EventBus {
 ### Task 0.9　CEO 验收：岗位书「做完了」定义（阻塞型任务，2 天日历）
 - **产出物**：每个预设角色的 `acceptance_criteria` 由 **CEO 本人**签字确认（不是开发者代写）。
 - **文件路径**：直接改进 Task 0.7 已建的 `packages/hub/resources/charter-templates/{ceo,assistant,product,tech,dev,test,ops}.yaml` 的 `acceptance_criteria` 段（模板由 Task 0.7 提供骨架与占位示例，此处由 CEO 逐条替换为真实标准）；每个 YAML 顶部加 `signed_by: ceo` 与 `signed_at: <日期>` 两个字段。
-- **自动化护栏**：Task 0.7 的 `charter.test.ts` 增加一条 —— 断言 7 个模板全部含 `signed_by: ceo`，且 `acceptance_criteria.must[].check` 不是 Task 0.7 的占位示例文本（用固定占位串比对）。**这条测试会一直红着，直到 CEO 真的签完** —— 用 CI 的红灯代替催办。
+- **自动化护栏**：Task 0.7 的 `charter.test.ts` 增加一条 —— 断言 7 个模板全部含 `signed_by: ceo`，且 `acceptance_criteria` 各条不是 Task 0.7 的占位示例文本（用固定占位串比对）
+  <!-- 原文此处的字段名写作 acceptance_criteria.must[].check：该形状在 charterSchema 里不存在
+       （实际字段是 condition / action / target / message，见 packages/contracts/src/charter.ts，
+       规格 §668 规定 zod schema 是唯一来源）。此处保留原文可追溯，同时指向唯一真源 ——
+       不改它就会有人照 must[].check 去改 schema，把唯一来源变成两处真相。 -->。**这条测试会一直红着，直到 CEO 真的签完** —— 用 CI 的红灯代替催办。
 - **为什么是任务而不是文档工作**：规格 §23.2 指出这是系统能否替 CEO 过滤审阅负担的前提。开发者不得代笔。
 - **验收**：每个角色至少 3 条**可机械判定**的标准（例：『落地页任务：Lighthouse 性能 ≥ 80 且移动端首屏 ≤ 2s』），且 Phase 1 的门控能直接消费这些标准。
 - **未完成的后果**：Phase 1 的门控会退化成主观判断，§8 的全部设计失效 —— **此时宁可推迟 Phase 1，不可代写**。
@@ -739,6 +743,7 @@ export interface HarnessAdapter {
 | ~~D6~~ **已定案** | Task 0.3 | 已选 **D6-a**（`node:sqlite` + 自研 Saver），见 `docs/decisions/0001-sqlite-driver.md` | 剩余工作是把探针固化成仓库测试；改判仍可行但立即引入 node-gyp 与 MSVC |
 | **D7** | Task 0.1 / 0.8 之后 | 编排框架是否需要换成 Mastra 或自研 | 只在 §5.4 五项 PoC 门禁**失败**时触发；本计划已实测四项通过，故默认不换 |
 | **D9** | Phase 4 开工前 | Hub 跑在桌面机还是常驻主机 | 决定 Phase 4 全部远程端在桌面关机后是否可用（规格 §24 风险 10） |
+| **D11** | Task 0.8 画委派图【之前】 | 7 个预设角色的 `role_id` 用哪套名字：本仓模板现按文件名（`test` / `dev` / `tech`），而规格附录 B 用语义名（`test_engineer` / `tech_director` / `product_manager`），且规格里还出现计划 7 个之外的 `product_director` / `chief_of_staff` / `architect`。两套名字并存会让委派边指向不存在的节点 | 不定也能写 0.8 的桩图（桩图不用真角色名），但 **0.8 一旦要接真 charter 就必须先定**；届时不得由实现者单方面改名 —— 角色名会同时出现在 charter 模板、委派规则图、审计载荷三处 |
 | **D10** | Task 0.8 期间（不阻塞 0.8 开工） | 一次「进入待审批」在审计里该有几条、一次审批请求在 UI 上该出现几条（Task 0.6 实测发现，选项与代价见 `docs/decisions/0005` §11.4） | 不拍板也能继续，但 Task 0.8 的「`process.kill` 后重启续跑、轨迹正确」会**如实测出重复**；届时**不得为了让测试变绿而放宽断言** |
 
 ### 10.3 两处 CEO 阻塞（提前排入日历）
