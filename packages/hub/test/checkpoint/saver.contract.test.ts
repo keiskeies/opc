@@ -428,10 +428,16 @@ for (const [label, make] of factories) {
       ).rejects.toThrow(/checkpoint_id/);
     });
 
-    // —— 以下仅对 SqliteWALSaver 成立 ——
+    // —— 以下是在 Sqlite 变体里跑的专属用例组 ——
+    // 这组原先整块标着【仅对 SqliteWALSaver 成立】，实测只对 5 条成立：取消 skip 让
+    // MemorySaver 也跑一遍（0007 §6.1 的 V4 实验）—— 5 条失败、1 条通过。通过的那条是
+    // 【中文与嵌套对象在 channel_values 里完整往返】，它验的是我们的序列化往返，不靠
+    // Sqlite 特有机制。留在本组是有意为之，不是漏网：把它改成常态双实现断言等于锁定
+    // LangGraph 自带的 MemorySaver 行为，属扩大锁定面，要单独决定（同一结论见 0007 §6.1）。
     // 包一层而不是直接用三元：变异测试（B2）实测，一旦这个判定被写坏（标签改名、
-    // 重构改条件），下面所有 Sqlite 专属保护会静默变成 it.skip，整套测试仍然全绿 ——
-    // 绿灯不等于保护生效。计数让「真的跑了」变成可断言的事实，见文件末尾元守卫。
+    // 重构改条件），下面所有专属保护会静默变成 it.skip，整套测试仍然全绿 ——
+    // 绿灯不等于保护生效。计数让「真的跑了」变成可断言的事实，见文件末尾元守卫；
+    // 常量与真实调用数漂移（6 改成 7）实测会红在元守卫上，所以这个数不是装饰。
     const itSqlite = (title: string, fn: () => Promise<void>): void => {
       if (label === SQLSAVER_LABEL) {
         it(title, async () => {

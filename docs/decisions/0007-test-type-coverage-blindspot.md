@@ -335,7 +335,7 @@ D-1 的红必须由断言产生而不是缺 import 报 `ReferenceError` —— �
 第 1 条我原先只数了用例数（251 ≥ 25）。但报告里同时写着 `6 skipped`，我从没查过那 6 条
 跳过的是什么 —— 如果某个 skip 恰好覆盖门禁要求的行为，「251」就是个虚数。
 
-查法与结果：全仓 `git grep` 只有【一处】动态 skip（`saver.contract.test.ts:442`），
+查法与结果：全仓 `git grep` 只有【一处】动态 skip（`saver.contract.test.ts:448`），
 6 条全部来自它，都是 Checkpoint Saver 契约里「仅对 SqliteWALSaver 成立」的那组：
 同事务原子性、外层写锁期间另一条连接被拒、事务内 deleteThread 随外层回滚、事务外调用
 put/putWrites 直接抛错、type 列真被使用、中文与嵌套对象往返。

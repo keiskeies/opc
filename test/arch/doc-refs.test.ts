@@ -186,7 +186,7 @@ const SNAP: Record<string, string> = {
     'type Db = InstanceType<typeof import("node:sqlite")["DatabaseSync"]>;',
   "0007-test-type-coverage-blindspot.md>migrate.test.ts:17": "type Db = {",
   "0007-test-type-coverage-blindspot.md>schema-0001.test.ts:19": "type Db = {",
-  "0007-test-type-coverage-blindspot.md>saver.contract.test.ts:442":
+  "0007-test-type-coverage-blindspot.md>saver.contract.test.ts:448":
     "it.skip(title, fn);",
 };
 
