@@ -34,11 +34,24 @@
 // 已知限制（刻意）：本守卫不 spawn vitest list 去拿真实执行清单。那样要在测试里再起一个
 // vitest，会重触发 globalSetup（build-contracts）并与并行测试争写同一产物，属 0006 第 6.4
 // 节记过的竞态族。与真实清单的交叉留作 Phase 1 候选。
+//
+// 下方 includedByVitest 是【手抄】的两条 include：真配置改窄时它不会自己跟着变，于是本守卫会继续
+// 宣布【每个测试文件都被收集】，而 vitest 实际已不再收集它们 —— 这是假绿。所以下面新增一条 it，直接
+// import 真配置，断言手抄模式与它逐字相同。之所以必须这样补，是因为 vitest.config.ts 自己【不在任何
+// 比对逻辑在 config-match.ts 而不是内联：本守卫有自指性 —— include 改空会把承载断言的
+// 一根柱子的射程内】，本轮实测（两条都配了正对照）：
+//   · biome 显式点名它 → Checked 0 files / These paths were provided but ignored
+//     （biome.json files.includes 只有 packages/**、test/**、*.json，根目录的 .ts 不在内）
+//   · tsc -b --force 给它注入一个类型错误 → exit 0；同一探针注入 packages/hub/src/index.ts → exit 2
+//     且错误行指向那个文件。它又不被任何文件 import（孤立），所以 tsc 也永远不会顺带看它。
 
 import { readdirSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+// vitest.config.ts 是【被检查对象】而非安全依赖，故意 import 它，理由见文件头。
+import config from "../../vitest.config";
+import { checkConfigMatch } from "./config-match.js";
 import { diffInventory, explain, looksLikeTest } from "./test-inventory.js";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "../..");
@@ -71,7 +84,14 @@ function enumerate(relDir: string): string[] {
 /**
  * vitest 两条 include 的独立复刻（写成字符串判断而非正则，避免反斜杠带来的转义歧义）。
  * 刻意与 looksLikeTest 不是一套规则：见文件头，同规则会让差集恒为空。
+ * 它与 INCLUDE_PATTERNS 的一致性由【与真配置逐字比对】那条 it 守着，不靠任何人记得同步。
  */
+/** includedByVitest 所依据的两条模式。改这里不算数 —— 与真配置不一致就会红。 */
+const INCLUDE_PATTERNS: string[] = [
+  "test/**/*.test.{ts,tsx}",
+  "packages/*/test/**/*.test.{ts,tsx}",
+];
+
 function includedByVitest(rel: string): boolean {
   const name = rel.split("/").pop() ?? "";
   const named = name.endsWith(".test.ts") || name.endsWith(".test.tsx");
@@ -123,6 +143,16 @@ describe("测试文件的执行清单覆盖", () => {
       uncollected: [],
       phantom: [],
     });
+  });
+
+  it("手抄常量与 vitest.config.ts 的 include 逐字一致", () => {
+    const c = config as unknown as { test?: { include?: string[] } };
+    const real = (c.test?.include ?? []).map(String);
+    // 比对规则本身（含【两边都空要报前提问题】那一态）由 config-match.test.ts 的 7 个用例守着，
+    // 那里还带对 checkConfigMatch 的变异实验。这里只是把真数据灌进去。
+    // 残留风险（如实记）：若有人删掉 config-match.test.ts、把 checkConfigMatch 留成恒返回空数组，
+    // 这条 it 会假绿。彻底堵死要让 test-inventory 与 config-match.test.ts 共存亡，暂未做。
+    expect(checkConfigMatch(real, INCLUDE_PATTERNS)).toEqual([]);
   });
 
   it("磁盘上每个测试样文件都在 include 覆盖范围内", () => {
