@@ -3,7 +3,7 @@ import { mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { assertParamCount } from "../../src/db/write-queue.js";
 import type {
   DomainEvent,
@@ -694,6 +694,48 @@ describe("seq = events.id，且只在提交后广播", () => {
     expect(seen[1]).toBe(boom);
     // 可见性不以牺牲审计为代价：两行仍必须落库
     expect(rows(db).length).toBe(2);
+  });
+
+  // 前提断言（0007 §4.1）：recorder.ts 注释写着「默认必须【可见】而不是静默」。变异实测：把默认
+  // 回调换成【合法的静默函数】（((e) => { void e; })，tsc 与 biome 都过、不会崩），补这两条之前
+  // 【255 条测试全绿】—— 也就是【默认可见】只存在于注释里，不在任何断言里。
+  // 为什么值得锁：调用方【不传】onBroadcastError 才是常态（CLI、Electron 主进程都不传）；默认一旦
+  // 变静默，前端断连造成的进度丢失就没有任何人在任何地方看到，而且不会有任何测试变红。
+  it("不传 onBroadcastError 时默认出口必须真的可见（原异常要出得来）", async () => {
+    const db = openDb();
+    const tx = new FakeTx(db);
+    const bus = new FakeBus();
+    const boom = new Error("SSE 写失败");
+    bus.publishPersisted = (): never => {
+      throw boom;
+    };
+    /* 只 spy 不替换实现：要验的就是【默认实现本身】有没有在做事 */
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const rec = new AuditRecorder({ tx, bus, now: () => 1 }); // 故意不传 onBroadcastError
+      await rec.run(async () => {
+        await rec.record(evt());
+      });
+      expect(
+        spy,
+        "默认若是静默 ⇒ 前端断连造成的进度丢失无人可见",
+      ).toHaveBeenCalledTimes(1);
+      const args = spy.mock.calls[0] ?? [];
+      /* 原异常必须出得来：只留一句笼统提示，排障时无从知道为什么失败 */
+      expect(
+        args.some((a) => a === boom),
+        "默认出口必须带上原异常本体",
+      ).toBe(true);
+      /* 还要同时给人话说明（含关键词即可，不锁死整句文案，便于以后改措辞） */
+      expect(
+        args.some((a) => typeof a === "string" && a.includes("投影广播失败")),
+        "必须给出人话说明",
+      ).toBe(true);
+      // 可见性不以牺牲审计为代价
+      expect(rows(db).length).toBe(1);
+    } finally {
+      spy.mockRestore();
+    }
   });
 
   it("payload 存【完整事件】含 kind：只存 kind 或只存字段都无法回放", async () => {
