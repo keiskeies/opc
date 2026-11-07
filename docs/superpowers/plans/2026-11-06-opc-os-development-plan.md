@@ -294,7 +294,6 @@ export interface EventBus {
   latestSeq(): number;
   // 每个订阅者持有独立有界队列；慢消费者丢最旧并标记 degraded（规格 §5.8）
 }
-}
 ```
 
 - **两条硬规定**：
