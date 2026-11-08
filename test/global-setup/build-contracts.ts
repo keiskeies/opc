@@ -1,6 +1,13 @@
 import { execFileSync } from "node:child_process";
+import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+
+import {
+  checkHarness,
+  readBiomeIncludes,
+  readVitestInclude,
+} from "../arch/harness-invariants.js";
 
 /**
  * 构建 @opc/contracts，早于【任何】测试模块被解析。
@@ -15,6 +22,27 @@ import { fileURLToPath } from "node:url";
  */
 export default function setup(): void {
   const root = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
+  /* 测试装置自检：判据在 test/arch/harness-invariants.ts，那边有 12 条 canary 钉着。
+     为什么放这里而不是写进某个 it 里：任何【由测试执行】的检查都防不住【测试不被执行】
+     —— 把 vitest 的 include 改窄，做这种检查的守卫自己就先不跑了（0006 §7-41 实测）。
+     globalSetup 在测试发现之前执行，且不受 include 管辖（同一轮实测：include 只剩三个
+     文件时它照样跑），是目前唯一能报警【测试面被改窄】的位置。 */
+  const problems = checkHarness({
+    vitestInclude: readVitestInclude(
+      readFileSync(join(root, "vitest.config.ts"), "utf8"),
+    ),
+    biomeIncludes: readBiomeIncludes(
+      readFileSync(join(root, "biome.json"), "utf8"),
+    ),
+    diskTestFiles: listTestFiles(root),
+  });
+  if (problems.length > 0) {
+    throw new Error(
+      "测试装置自检失败（globalSetup）：\n" +
+        problems.map((p) => "  - " + p.why).join("\n"),
+    );
+  }
+
   const project = join(root, "packages", "contracts");
   try {
     execFileSync("npx", ["tsc", "-b", project], {
@@ -41,4 +69,37 @@ export default function setup(): void {
         String(err.stderr ?? err.message ?? ""),
     );
   }
+}
+
+/**
+ * 列出仓库里的 *.test.ts(x)，返回相对路径。跳过依赖与产物目录。
+ * 只用于给 checkHarness 的规模下限喂数，不做任何判断。
+ */
+function listTestFiles(rootDir: string): string[] {
+  const SKIP = new Set<string>([
+    "node_modules",
+    ".git",
+    "dist",
+    ".tmp",
+    "coverage",
+    ".next",
+  ]);
+  const out: string[] = [];
+  const walk = (dir: string): void => {
+    for (const e of readdirSync(dir, { withFileTypes: true })) {
+      const rel = dir
+        .slice(rootDir.length + 1)
+        .split("\\")
+        .join("/");
+      const relPath = rel === "" ? e.name : rel + "/" + e.name;
+      if (e.isDirectory()) {
+        if (SKIP.has(e.name)) continue;
+        walk(join(dir, e.name));
+        continue;
+      }
+      if (/\.test\.[cm]?[jt]sx?$/.test(e.name)) out.push(relPath);
+    }
+  };
+  walk(rootDir);
+  return out;
 }
