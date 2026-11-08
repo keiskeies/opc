@@ -350,6 +350,40 @@ for (let k = 1; k <= 4; k++) {
   console.log(k, approvals().length);
 }
 ```
+上面那段 harness **不能直接跑**。我按本节口径重建并实跑过一次，先说结果再说它缺什么 —— 因为本节的原话是
+【探针跑完即删，所以你复现不了，只能照本节末那段自己重建】，而那段本身不完整，等于把复算通道写成一条走不通
+的路。缺的是四处自备语句（都不是产品代码，是探针要自己备的件）：
+
+```text
+const db = new DatabaseSync(":memory:");
+for (const t of CHECKPOINT_TABLES) db.exec(t);
+db.exec(EVENTS_DDL);   // 上面那条 events 建表语句，贴的 harness 里只声明了字符串、没执行
+const State = Annotation.Root({ trail: Annotation({ reducer: (_a, b) => b ?? [], default: () => [] }) });
+```
+
+补齐这四处后，按本节口径（同一 thread 连 invoke 四次，第一次给初始输入、后三次 invoke(null)，只数
+action 等于 approval 的行，【一模一样】按 payload 逐字判）实跑，输出与本节原样记录逐字吻合：
+
+```text
+counts = [1,2,3,4]
+rows = 4   distinct payload = 1
+row1 === rowLast byte-equal = true
+distinct target = 1
+```
+
+- 所以 N=4 那个数复查后仍成立，且现在它【可以被重建】：补齐上面四处即可，不必等我重造探针。这条修订把本节从
+  【只能信我】改成【可以不信我】，我认为它比结论本身重要 —— 这是第二处复算通道打不通的实例，前一处的写法是
+  【贴了输出，但没贴能产出那串输出的完整代码】。
+- 边界我没有扩大：仍只证到 N=4、仍是单节点单中断、仍未测真实多节点图连崩 N 次的形状，缺陷 A 也仍未重测。
+  若按 C 拍板，这三条边界加【C 收不住 A】就是验收要补的。
+- 重建过程中我先犯了三次探测形状错，三项初步读数全错，且都是【假阴性】—— 把存在的东西报成不存在：
+  其一，查 auditedInvoke 是否导出只试了 export class 与 export const，没试 export async function，于是报成
+  【未找到】；它在 audit-middleware.ts 第 71 行。其二，查 events 表列时取的是【第一个 CREATE TABLE 块】，
+  而迁移里 CREATE TABLE 不止一张表，于是把六列全报成【迁移里没有】；实际 events 定义里六列都在。其三，用
+  符号名在测试目录搜到命中就断定【已有测试覆盖这个形状】；实际那两处记号出现在另一件事的上下文里（已完成
+  thread 上 invoke(null) 不推进），与本节形状无关 —— 同一行同时含 approval 与该记号的有 0 处。三个假阴性
+  同族：我都在用【我的形状没命中】去证明【东西不存在】。判【不存在】之前，形状必须先被证明对【存在】敏感。
+- 本轮没有标【撤回】：那三项误读只出现在对话里，从未写进本文档或入口，没有错误事实进入交付物。
 
 ## 12. LangGraph JS **没有** middleware 概念 —— 文件名的妥协
 
