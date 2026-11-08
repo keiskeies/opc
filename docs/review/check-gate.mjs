@@ -124,6 +124,93 @@ const dirty = (git(["status", "--porcelain", "--untracked-files=all"]) ?? "").sp
 say("  未提交改动 " + dirty.length + " 项" + (dirty.length ? "（说明你手上正有改动，下面结论以工作区为准）" : ""));
 say("  HEAD = " + (git(["log", "-1", "--format=%h %s"]) ?? "").trim().slice(0, 92));
 
+// —— C6 判据 2 的事实前提：CLI 真正跑的那张图里，到底有没有可打断的点。
+//   口径必须从代码推导，不许硬编码文件名：先读 cli.ts 找出它 import 的图构建函数，
+//   再定位该函数所在源文件，数其中【非注释行】的 interrupt( 调用。
+//   我复算时先数到 2、差点判这条主张错；两处都能解释掉，解释靠的就是这条 import 链。
+say(NL + "C6 判据 2 的前提：CLI 可达的那张图里有没有可打断的点（读法之争的事实根）");
+const countCalls = (text) => {
+  let n = 0;
+  let inBlock = false;
+  for (const raw of String(text).split(NL)) {
+    const t = raw.trim();
+    if (inBlock) {
+      if (t.includes("*/")) inBlock = false;
+      continue;
+    }
+    if (t.startsWith("/*")) {
+      if (!t.includes("*/")) inBlock = true;
+      continue;
+    }
+    if (t.startsWith("//") || t.startsWith("*") || t.startsWith("*/")) continue;
+    n += (t.match(/\binterrupt\(/g) ?? []).length;
+  }
+  return n;
+};
+const cliSrc = rel("packages/hub/src/cli.ts");
+if (cliSrc) {
+  const joined = cliSrc.join(NL);
+  const m = joined.match(/import\s*\{[^}]*\bbuild(\w*Graph)\b[^}]*\}\s*from\s*["']([^"']+)["']/);
+  ok(Boolean(m), "从 cli.ts 推导出 CLI 用的图构建函数（推不出即判不了，不算通过）", m ? m[1] + " ← " + m[2] : "★没推导出来");
+  if (m) {
+    const mod = String(m[2]).replace(/\.js$/, "") + ".ts";
+    const graphRel = "packages/hub/src/" + mod.replace(/^\.\//, "");
+    const gsrc = rel(graphRel);
+    ok(Boolean(gsrc), "定位到图构建函数所在文件", graphRel);
+    if (gsrc) {
+      const n = countCalls(gsrc.join(NL));
+      ok(n === 0, "CLI 那张图里可执行的 interrupt 调用 = 0", String(n) + " 处");
+    }
+  }
+  // 阳性对照：计数函数若坏掉（恒返回 0），上面那条会永远 PASS。
+  // 样本【内联合成】而非取自仓库文件 —— 我两次凭记忆挑文件都挑错（一次挑了个不含该调用的文件，
+  // 一次把注释行和 it() 标题字符串也算成可执行调用）。内联样本能精确控制期望值，
+  // 且三种注释形态各对应计数函数里一个失效分支，坏在哪一分支就报得出来。
+  // 样本只放【可执行 1 行 + 注释 3 种形态】，期望精确为 1。
+  // （上一版我多放了一行【节点在 interrupt() 之前写的 events】想模拟测试标题里的字符串，
+  //  却没写引号 —— 那是货真价实的裸文本，计数函数数到 2 是正确的，错的是我的期望值。）
+  const SAMPLE = [
+    "  interrupt({ reason: 1 });",
+    " * interrupt() 文档注释里提到",
+    " // interrupt( 行注释里提到",
+    " /* interrupt( 块注释里提到",
+    " 这行在块注释内部",
+    "  */",
+  ].join(NL);
+  const sampleCounted = countCalls(SAMPLE);
+  ok(sampleCounted === 1, "阳性对照：数出可执行调用并排除三种注释形态", "期望 1，实数 " + sampleCounted);
+  // 明文记录一个已知局限，不假装能排除它：字符串字面量里的 interrupt( 也会被计入，
+  // 所以本计数【只会虚高、不会漏报】。对本检查是安全方向 —— 它答的是【有没有可打断点】，
+  // 宁可多报也不许漏报。真实语料那条断言就是用具体数字钉住这个虚高的。
+  say("  已知局限：字符串字面量内的 interrupt 也会计入 ⇒ 此计数只虚高、不漏报（对本检查是安全方向）");
+  // 第二道：真实语料里确有可执行调用 ⇒ 计数函数对真文件也数得出来（不只是对内联样本有效）。
+  const POSF = "packages/hub/test/graph/interrupt-resume.test.ts";
+  const posSrc = rel(POSF);
+  if (posSrc) {
+    const txt = posSrc.join(NL);
+    const rawHits = txt.split(NL).filter((l) => l.includes("interrupt(")).length;
+    const counted = countCalls(txt);
+    ok(rawHits > 0 && counted > 0, "阳性对照：真实测试语料里也数得出调用", "原文 " + rawHits + " 行，计数 " + counted);
+    ok(counted < rawHits, "阳性对照：注释行没被算进可执行计数（字符串仍计入，见上面那条已知局限）", rawHits + " 行原文 → 计数 " + counted);
+  }
+  // 同一次复算查出的、判读法时该摆在桌面上的事实（不计入失败）：
+  // src 树里确有一处可执行 interrupt，但它在 poc 里，不在 tsc 的 include，也无编译范围内文件引用它。
+  const pocRel = "packages/hub/src/poc/graph.mjs";
+  const pocSrc = rel(pocRel);
+  if (pocSrc) {
+    say("  已知事实（不计入失败）：" + pocRel + " 确有可执行 interrupt 调用 " + countCalls(pocSrc.join(NL)) + " 处");
+    say("  它不在 tsc 的 include（src/**/*.ts）内，且编译范围内无任何文件引用它，故不影响上面那条。");
+  }
+  const compileRefs = (git(["ls-files", "packages/hub/src"]) ?? "")
+    .split(NL)
+    .filter((f) => /\.tsx?$/.test(f))
+    .filter((f) => {
+      const t = rel(f);
+      return t !== null && /poc\//.test(t.join(NL));
+    });
+  ok(compileRefs.length === 0, "编译范围内没有任何文件引用 poc（上述已知事实确实不可达）", compileRefs.length ? "★有人引用：" + compileRefs.join(",") : "0 个引用者");
+}
+
 say(NL + "—— 判不了或不符的项：" + fail.length + (fail.length ? NL + fail.map((x) => "  ★ " + x).join(NL) : " 无"));
 say("  未覆盖、须由你亲自跑的：pnpm verify（全量测试+静态检查）、审计日志可读性人工核对。");
 say("  这两项我报过结果，但属于【你能复算、我无法替你复算】的那类，故不在此脚本内代跑。");
