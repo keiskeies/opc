@@ -252,6 +252,105 @@ LangGraph 的 interrupt 是靠**重放节点直到 `interrupt()` 那一行**实�
 又保住合法的重复跃迁。此项**不阻塞** Task 0.8 / 0.10 / 0.11（桩图无 interrupt、无崩溃恢复），
 但 Task 0.8 的「`process.kill` 后重启续跑，轨迹正确」一条会**如实测出重复**，届时不许为了让测试
 变绿而放宽断言 —— 那正是本条要防的事。
+
+**本轮实测过本节那句『崩溃重启 N 次你会看到 N 条一模一样的审批』—— 在那之前我从没实测过它，**
+只在入口把它写给了你。证据级别是 0006 第 10.4 节定义的 **L3**（我这次实测看到，且当下没有测试直接
+断言它），探针跑完即删、未入库，所以你复现不了，只能照本节末那段自己重建 —— 这也是我把探针的输出
+原样贴在这里、而不是只报结论的原因。
+
+口径（必须写清，因为『一模一样』有好几种判法）：同一个 thread_id 连续 invoke 四次，第一次给初始
+输入，后三次给 invoke(null)，即计划 V3 的崩溃续跑姿势；只数 events 里 action 等于 approval 的行；
+『一模一样』按 payload 逐字相同判 —— 沿用 `interrupt-resume.test.ts` 里已经确立的判据（payload 不同
+就是两个真实事件，不该去重），不按整行字节判。探针只有一个节点一条中断，且把 record 放在 interrupt
+之后，为的是只测审批重复（缺陷 B），不掺节点内状态事件的重放（缺陷 A）；**A 本轮没有重测**，上面
+关于 A 的说法仍是上一轮的实测。
+
+实测输出（原样，未编辑）：
+
+```text
+k=1 (initial) approval rows = 1
+k=2 (invoke(null)) approval rows = 2
+k=3 (invoke(null)) approval rows = 3
+k=4 (invoke(null)) approval rows = 4
+
+counts after each invoke = [1,2,3,4]
+monotone +1 each time = true
+rows = 4   distinct payload = 1
+distinct target = 1
+distinct created_at = 1
+full payload of row 1 = {"kind":"ApprovalRequired","taskId":"T-DUP","interruptId":"64e089380c436daff50997e56d8d15b4","payload":{"reason":"请批准"}}
+row1 === rowLast byte-equal = true
+target === payload.interruptId = true
+all rows share that target = true
+```
+
+**结论：N 取到 4 时确实是 4 条，每次 invoke 恰好多一条，四条 payload 逐字相同。那句描述为真。**
+
+三件从上面的表格里看不出来、但对拍板有用的事：
+
+1. **四条的 target 相同，且等于 payload 里的 interruptId**（不是我把输出截断后肉眼猜的 —— 截断处的
+   字节我看不见，所以这次把相等性写成了显式判断再跑）。这正面支撑了 **C 的前提**：C 说按 target 建
+   唯一索引能收住审批重复，成立的前提就是同一个中断的 target 恒定。本轮这个形状下成立。
+2. **探针里 created_at 也相同，但那是我的桩造成的，不是产品性质** —— 探针把时钟固定成一个常量。
+   真实时钟下四条的 created_at 必然不同。推论有二：判『重复』只能按 payload 判，按整行判会漏；
+   而 C 用 target 建唯一索引去重，去重的正是【内容相同、只有时间不同】的那几条，所以 C 不会误伤
+   真实世界里时间不同、内容也不不同的两次审批。
+3. **我只证到 N=4 的单调递增，没有外推到任意 N**，而且探针是单节点单中断，**没说清真实多节点图里
+   连崩 N 次的形状**。若你按 C 拍板，这两条边界连同『C 收不住 A』这一点，就是验收要补的。
+
+重建探针的最小 harness（用真实的 auditor 与真实的 saver，不复制被测代码，否则测的就不是产品路径）：
+
+```typescript
+// 放 .tmp/ 下重建；.tmp 已 gitignore，跑完自己删
+import { DatabaseSync } from "node:sqlite";
+import { Annotation, END, interrupt, START, StateGraph } from "@langchain/langgraph";
+import { SqliteWALSaver } from "../packages/hub/src/checkpoint/saver.js";
+import { CHECKPOINT_TABLES } from "../packages/hub/src/checkpoint/schema.js";
+import { SuperStepAuditor, auditedInvoke } from "../packages/hub/src/graph/audit-middleware.js";
+
+const EVENTS_DDL = "CREATE TABLE events (id INTEGER PRIMARY KEY AUTOINCREMENT, task_id TEXT, "
+  + "actor_type TEXT NOT NULL, actor_id TEXT NOT NULL, action TEXT NOT NULL, target TEXT, "
+  + "payload TEXT NOT NULL, state_snapshot TEXT, created_at INTEGER NOT NULL)";
+
+class FakeBus {
+  publishPersisted(_e: unknown, _seq: number): void {}
+  latestSeq(): number { return 0; }
+  subscribe(): never { throw new Error("不该订阅"); }
+}
+
+// 时钟固定成常量：这是上面第 2 条的来源，别当成产品观察
+const auditor = new SuperStepAuditor({ db, bus: new FakeBus() as never, now: () => 1700000000000 });
+const saver = auditor.instrumentSaver(new SqliteWALSaver(db));
+const graph = new StateGraph(State)
+  .addNode("approval", async () => {
+    interrupt({ reason: "请批准" }); // record 放它之后：只测审批重复，不掺状态事件重放
+    await auditor.recorder.record({
+      kind: "TaskStateChanged", taskId: "T-DUP", from: "running", to: "need_approval",
+    });
+    return { trail: ["resumed"] };
+  })
+  .addEdge(START, "approval")
+  .addEdge("approval", END)
+  .compile({ checkpointer: saver });
+
+const cfg = { configurable: { thread_id: "dup-1" } };
+const approvals = (): Record<string, unknown>[] =>
+  db.prepare("SELECT id, target, payload, created_at FROM events"
+    + " WHERE action = 'approval' ORDER BY id").all() as Record<string, unknown>[];
+
+for (let k = 1; k <= 4; k++) {
+  const input = k === 1 ? { trail: [] } : null; // 后三次 = 崩溃续跑姿势
+  await auditor.invoke(() =>
+    auditedInvoke({
+      invoke: () => graph.invoke(input, cfg),
+      recorder: auditor.recorder,
+      taskId: "T-DUP",
+    }),
+  );
+  console.log(k, approvals().length);
+}
+```
+
 ## 12. LangGraph JS **没有** middleware 概念 —— 文件名的妥协
 
 计划写的是 `audit-middleware.ts`。LangGraph JS 1.7.1 里**不存在**中间件：只有
