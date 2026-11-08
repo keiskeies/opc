@@ -211,6 +211,60 @@ if (cliSrc) {
   ok(compileRefs.length === 0, "编译范围内没有任何文件引用 poc（上述已知事实确实不可达）", compileRefs.length ? "★有人引用：" + compileRefs.join(",") : "0 个引用者");
 }
 
+// —— C7 决策入口里不许出现【轮次相对指称】：轮次在仓库里数不出来，指称就落不了地。
+//   词表来自实测枚举（不靠记忆）。只有入口是我承诺过的范围；其余文档的存量只报数、不判失败 ——
+//   那多数是失误记录的正文，「本轮」在那里是作者的第一人称时间锚点，批量重写等于替 CEO
+//   决定改掉他已经读过的决策记录，不是我单方面能做的动作。
+say(NL + "C7 决策入口里的轮次相对指称（轮次数不出来 ⇒ 指称落不了地）");
+const ROUND_WORDS = [
+  "本轮", "上一稿", "这轮", "同轮", "这一轮", "前一轮", "上一轮", "下轮", "本轮次", "此次改动", "这次改动", "本次改动", "后一轮",
+];
+const hasRoundWord = (line) => {
+  for (const w of ROUND_WORDS) if (String(line).includes(w)) return w;
+  return null;
+};
+const ENTRY = "docs/INDEX.md";
+const entryLines = rel(ENTRY);
+if (entryLines) {
+  const hits = [];
+  entryLines.forEach((l, n) => {
+    const w = hasRoundWord(l);
+    if (w) hits.push("l." + (n + 1) + " 含 " + w);
+  });
+  ok(hits.length === 0, "入口里的轮次相对指称 = 0", hits.length ? hits.join(" ; ") : "0 处");
+  // 阳性对照：词表若空、或判定函数坏掉（恒不命中），上面那条会永远 PASS。
+  // 关键是【两处都用同一个 hasRoundWord】—— 否则判定坏了对照也抓不到（这本身就是我犯过的形状）。
+  const POS = "本轮与上一稿与这一轮与前一轮与同轮";
+  const posWord = hasRoundWord(POS);
+  ok(Boolean(posWord), "阳性对照：判定函数命中得出来（与上面用的是同一个函数）", posWord ? "命中 " + posWord : "★没命中 ⇒ 判定或词表已坏");
+  ok(ROUND_WORDS.length >= 10, "阳性对照：词表非空且规模合理", ROUND_WORDS.length + " 个词");
+  const rest = (git(["ls-files", "docs"]) ?? "")
+    .split(NL)
+    .filter((f) => /\.md$/.test(f) && f !== ENTRY);
+  let total = 0;
+  const perDoc = [];
+  let headings = 0;
+  for (const f of rest) {
+    const ls = rel(f);
+    if (!ls) continue;
+    let n = 0;
+    ls.forEach((l) => {
+      if (hasRoundWord(l)) {
+        n += 1;
+        if (/^#{2,4}\s/.test(String(l))) headings += 1;
+      }
+    });
+    if (n) {
+      total += n;
+      perDoc.push(f.replace("docs/", "") + " " + n);
+    }
+  }
+  say("  其余决策文档的存量（只报数，不判失败）：共 " + total + " 行，其中小节标题 " + headings + " 处");
+  say("  分布：" + perDoc.join(" ; "));
+  say("  为什么不判它失败：那多数是失误记录正文，那里的【本轮】是作者的第一人称时间锚点；");
+  say("  批量重写等于替你决定改掉你已经读过的决策记录 —— 那不该我单方面做。要清就得你点头。");
+}
+
 say(NL + "—— 判不了或不符的项：" + fail.length + (fail.length ? NL + fail.map((x) => "  ★ " + x).join(NL) : " 无"));
 say("  未覆盖、须由你亲自跑的：pnpm verify（全量测试+静态检查）、审计日志可读性人工核对。");
 say("  这两项我报过结果，但属于【你能复算、我无法替你复算】的那类，故不在此脚本内代跑。");
