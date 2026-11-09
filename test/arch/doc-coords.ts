@@ -130,6 +130,16 @@ export function qualifiedAsExternal(pre: string): boolean {
   const clause: string = pre.slice(cut + 1);
   return /(规格|设计文档|计划|spec)/.test(clause);
 }
+/**
+ * 【撤回】行的判据：整行以该标记开头，不是【这一行含该标记】。实测四行同时含该标记与坐标，
+ * 只有 1 行真是撤回记录，另 3 行只是提到那个词 —— 按【含】判会让【写一段解释豁免的文字】
+ * 就悄悄扩大豁免范围，不需要任何人主动滥用。决策文档与非决策 markdown 共用这一份：
+ * 两处各写一遍迟早漂移（0006 §7 第 55、56 条同族）。
+ */
+export function isRetracted(line: string | undefined): boolean {
+  return line?.trimStart().startsWith("【撤回】") === true;
+}
+
 export function verify(refs: Ref[], w: World, retracted: string[]): Problem[] {
   const problems: Problem[] = [];
   for (const r of refs) {
@@ -149,7 +159,7 @@ export function verify(refs: Ref[], w: World, retracted: string[]): Problem[] {
     // 判据是【整行以该标记开头】，不是【这一行含该标记】：实测四行含该标记又含坐标，只有 1 行真是撤回记录，
     // 另外 3 行只是【提到了这个词】（其中一行就是本守卫的说明文字本身）。按【含】判会把讨论豁免的那行
     // 也变成豁免区 —— 不需要任何人主动滥用，写一段解释豁免的文字就会悄悄扩大豁免范围。
-    if (srcLine?.trimStart().startsWith("【撤回】") === true) {
+    if (isRetracted(srcLine)) {
       retracted.push(shown);
       continue;
     }
@@ -340,6 +350,46 @@ export function repoShortHashes(): Set<string> {
         " 个提交，不是【没有坏引用】",
     );
   return new Set<string>(full.map((h: string) => h.slice(0, 7)));
+}
+
+/**
+ * 决策目录之外、git 跟踪的每一个 markdown：入口 README、索引、评审说明、溯源、规格、计划。
+ * 取材走 git 而不是维护名单 —— 名单会漏新文件（0006 §7 第 57 条同族）。docs/decisions 整篇排除，
+ * 因为那批由 doc-coords.test.ts 用更强口径核对（连裸形引用一起判），重复扫会让两份判据抢话。
+ * 比较基准必须是仓库相对路径：git ls-files 输出的就是相对路径，拿绝对 DECISIONS 去比【前缀对不上】，
+ * 决策文档会全数混进来 —— 本轮实测过一次，12 行而不是 6 行，靠行数对不上才发现。
+ * git 失败或结果为空都抛【判据失效】而不是返回空数组：第 22 条，没扫到不等于没问题。
+ */
+const DECISIONS_REL: string = "docs/decisions/";
+
+export function markdownRows(rootDir: string = ROOT): Row[] {
+  let raw: Uint8Array;
+  try {
+    raw = execFileSync(
+      "git",
+      ["-c", "core.quotepath=off", "ls-files", "-z", "--", "*.md"],
+      { cwd: rootDir, maxBuffer: 100000000 },
+    ) as unknown as Uint8Array;
+  } catch {
+    throw new Error("判据失效：git ls-files 跑不起来，不是【没有坏引用】");
+  }
+  const paths: string[] = Buffer.from(raw)
+    .toString("utf8")
+    .split(String.fromCharCode(0))
+    .filter(Boolean)
+    .filter((p: string) => p.slice(0, DECISIONS_REL.length) !== DECISIONS_REL)
+    .sort();
+  if (paths.length === 0) {
+    throw new Error(
+      "判据失效：跟踪的 *.md 里一个非决策文档都没有（跟踪口径变了？）",
+    );
+  }
+  return paths.map(
+    (p: string): Row => ({
+      doc: p,
+      lines: readFileSync(join(rootDir, p), "utf8").split(NL),
+    }),
+  );
 }
 
 export function world(rows: Row[], hashes: Set<string>): World {
