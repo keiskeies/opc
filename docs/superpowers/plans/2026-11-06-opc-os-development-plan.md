@@ -328,7 +328,7 @@ export interface EventBus {
 - **自动化护栏**：Task 0.7 的 `charter.test.ts` 增加一条 —— 断言 7 个模板全部含 `signed_by: ceo`，且 `acceptance_criteria` 各条不是 Task 0.7 的占位示例文本（用固定占位串比对）
   <!-- 原文此处的字段名写作 acceptance_criteria.must[].check：该形状在 charterSchema 里不存在
        （实际字段是 condition / action / target / message，见 packages/contracts/src/charter.ts，
-       规格 §668 规定 zod schema 是唯一来源）。此处保留原文可追溯，同时指向唯一真源 ——
+       规格 §5.11 规定 zod schema 是唯一来源）。此处保留原文可追溯，同时指向唯一真源 ——
        不改它就会有人照 must[].check 去改 schema，把唯一来源变成两处真相。 -->。**这条测试会一直红着，直到 CEO 真的签完** —— 用 CI 的红灯代替催办。
 - **为什么是任务而不是文档工作**：规格 §23.2 指出这是系统能否替 CEO 过滤审阅负担的前提。开发者不得代笔。
 - **验收**：每个角色至少 3 条**可机械判定**的标准（例：『落地页任务：Lighthouse 性能 ≥ 80 且移动端首屏 ≤ 2s』），且 Phase 1 的门控能直接消费这些标准。

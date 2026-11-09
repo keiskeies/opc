@@ -17,7 +17,7 @@ import { AIMessage, type BaseMessage } from "@langchain/core/messages";
 // solution 不覆盖 test/ 目录：本文件在 Task 0.10 之前住在 test/graph/fixtures/，
 // 这个 TS2305 潜伏了整整一个任务，是"把它搬进 src/"才把它照出来的。
 import type { ChatGeneration, ChatResult } from "@langchain/core/outputs";
-// 档位类型的唯一权威来源是 @opc/contracts（§668：zod schema 是唯一来源）。
+// 档位类型的唯一权威来源是 @opc/contracts（§5.11：zod schema 是唯一来源）。
 // 曾在这里重复声明过一份，于是 contracts 改了档位、桩这边还旧着，类型层面看不出来。
 import type { ModelTier } from "@opc/contracts";
 
