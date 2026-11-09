@@ -59,23 +59,21 @@ import { describe, expect, it } from "vitest";
 // vitest.config.ts 是【被检查对象】而非安全依赖，故意 import 它，理由见文件头。
 import config from "../../vitest.config";
 import { checkConfigMatch } from "./config-match.js";
-import { diffInventory, explain, looksLikeTest } from "./test-inventory.js";
+import {
+  diffInventory,
+  explain,
+  IGNORED_DIRS,
+  looksLikeTest,
+} from "./test-inventory.js";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "../..");
-const IGNORED = new Set<string>([
-  "node_modules",
-  ".git",
-  "dist",
-  "out",
-  "build",
-  ".tmp",
-]);
+/** 忽略目录不在此处手抄：与判定侧共用 test-inventory.ts 导出的同一份名单。 */
 
 /** 宽枚举：仓库里所有「名字长得像测试」的文件，规则见 looksLikeTest（比 include 宽）。 */
 function enumerate(relDir: string): string[] {
   const out: string[] = [];
   for (const e of readdirSync(join(ROOT, relDir), { withFileTypes: true })) {
-    if (IGNORED.has(e.name)) {
+    if (IGNORED_DIRS.has(e.name)) {
       continue;
     }
     const rel = relDir === "" ? e.name : relDir + "/" + e.name;
@@ -125,6 +123,30 @@ describe("测试文件的执行清单覆盖", () => {
     // 宽枚举与 include 不是同一套规则 —— 这是守卫不退化为恒真的唯一根据
     expect(looksLikeTest("test/e2e/x.spec.ts")).toBe(true);
     expect(includedByVitest("test/e2e/x.spec.ts")).toBe(false);
+
+    // 忽略名单此前是【死名单】：把判定侧那份整体掏空，三条用例照样全绿 —— 没有任何一条用例
+    // 喂过带忽略目录的路径。修法分两层，缺一不可：
+    // 一层防行为坏掉：逐个目录都得真的被挡下，不是只认名单第一项（§7-56 那一族）。
+    // 一层防名单漂移：循环若改成遍历模块导出的那份名单，期望值会跟着名单一起变。实测两刀
+    // 都过 —— 把 .tmp 改名成 .tmpX、往名单里多加一个目录，遍历活名单的写法一个都抓不到，
+    // 它只有 size 下限能抓到【删项】。所以循环必须钉在下面的字面量上，再用一条逐字比对把
+    // 模块那份钉回这个字面量（同 INCLUDE_PATTERNS 与真配置比对那一层）：放宽名单必须同时
+    // 改这里，不许悄悄只改判定侧。
+    const EXPECTED_IGNORED = [
+      "node_modules",
+      ".git",
+      "dist",
+      "out",
+      "build",
+      ".tmp",
+    ];
+    expect([...IGNORED_DIRS].sort()).toEqual([...EXPECTED_IGNORED].sort());
+    for (const dir of EXPECTED_IGNORED) {
+      expect(looksLikeTest(dir + "/nested/x.test.ts")).toBe(false);
+      expect(looksLikeTest("a/" + dir + "/x.spec.mjs")).toBe(false);
+    }
+    // 反向：不在名单里的目录必须放行，否则上面两行会因为【一律返回 false】而失去意义。
+    expect(looksLikeTest("packages/hub/test/x.test.ts")).toBe(true);
 
     // 主断言依赖的是 diffInventory，不是上面两个谓词。只测谓词而放过比对函数本身，
     // 它就可能返回恒空、把主断言变成恒绿装饰（变异 N-4 实测到这一点）。

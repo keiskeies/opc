@@ -8,7 +8,11 @@
  */
 
 const TEST_NAME = /\.(test|spec)\.[cm]?[jt]sx?$/;
-const IGNORED_DIRS = new Set<string>([
+/**
+ * 忽略目录的唯一来源。此前测试文件里另抄了一份完全相同的名单，两份各自演化没有任何
+ * 东西会红（同 §7-56：真扫描恰好走不到分歧那天）；现在两边都从这里取。
+ */
+export const IGNORED_DIRS = new Set<string>([
   "node_modules",
   ".git",
   "dist",
