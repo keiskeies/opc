@@ -239,14 +239,27 @@ if (cliSrc) {
     say("  已知事实（不计入失败）：" + pocRel + " 确有可执行 interrupt 调用 " + countCalls(pocSrc.join(NL)) + " 处");
     say("  它不在 tsc 的 include（src/**/*.ts）内，且编译范围内无任何文件引用它，故不影响上面那条。");
   }
-  const compileRefs = (git(["ls-files", "packages/hub/src"]) ?? "")
+  // 谓词与主检查共用同一个（README 记的设计：否则判定坏掉时对照也跟着绿）。
+  // 这个零命中此前没有任何对照：实测两个变异体都能存活 —— 把 ls-files 的路径写成不存在的目录
+  // （枚举悄悄变空）、把谓词正则改成永不命中，主检查都照样 PASS；git 对拼错的路径退出码是 0，
+  // 所以【退出码非零就记失败】那道防线管不到它。下面两条对照就是补这两扇：
+  // 一条钉住枚举非空，一条钉住同一个谓词在已知含 poc/ 的真实语料上数得出来。
+  const refersToPoc = (text) => /poc\//.test(text);
+  const compileTs = (git(["ls-files", "packages/hub/src"]) ?? "")
     .split(NL)
-    .filter((f) => /\.tsx?$/.test(f))
-    .filter((f) => {
-      const t = rel(f);
-      return t !== null && /poc\//.test(t.join(NL));
-    });
-  ok(compileRefs.length === 0, "编译范围内没有任何文件引用 poc（上述已知事实确实不可达）", compileRefs.length ? "★有人引用：" + compileRefs.join(",") : "0 个引用者");
+    .filter((f) => /\.tsx?$/.test(f));
+  const compileRefs = compileTs.filter((f) => {
+    const t = rel(f);
+    return t !== null && refersToPoc(t.join(NL));
+  });
+  ok(compileRefs.length === 0, "编译范围内没有任何文件引用 poc（上述已知事实确实不可达）", compileRefs.length ? "★有人引用：" + compileRefs.join(",") : compileTs.length + " 个 .ts/.tsx 里 0 个引用者");
+  ok(compileTs.length >= 10, "阳性对照：主检查扫到的文件集非空（枚举路径写错时这条先红）", compileTs.length + " 个 .ts/.tsx");
+  const pocPeers = (git(["ls-files", "packages/hub/src/poc"]) ?? "").split(NL).filter((f) => f !== "");
+  const peerRefs = pocPeers.filter((f) => {
+    const t = rel(f);
+    return t !== null && refersToPoc(t.join(NL));
+  });
+  ok(peerRefs.length > 0, "阳性对照：同一个谓词在已知含 poc/ 的真实文件上数得出来", peerRefs.length + " / " + pocPeers.length + " 个命中");
 }
 
 // —— C7 决策入口里不许出现【轮次相对指称】：轮次在仓库里数不出来，指称就落不了地。
