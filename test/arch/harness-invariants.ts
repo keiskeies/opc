@@ -19,6 +19,8 @@ export interface HarnessProblem {
 
 export interface HarnessInput {
   readonly vitestInclude: readonly string[];
+  /** vitest.config.ts 的 test.globalSetup 数组。 */
+  readonly globalSetup: readonly string[];
   readonly biomeIncludes: readonly string[];
   readonly diskTestFiles: readonly string[];
 }
@@ -39,6 +41,17 @@ export const REQUIRED_BIOME_INCLUDES: readonly string[] = [
   "test/**/*.{ts,tsx}",
 ];
 
+/**
+ * globalSetup 里必须有这一个。
+ *
+ * 为什么这条只能由【测试】守、不能由 globalSetup 自己守：那一行被删掉时，globalSetup
+ * 里这段代码根本不会执行，让它报告【我没被注册】是循环。而测试照常全绿 —— 实测只删
+ * vitest.config.ts 那一行：91 个文件 / 312 例全过 / 退出码 0，没有任何一条用例变红。
+ * 所以兜底只能来自【被 include 管辖的用例去读真配置】。
+ */
+export const REQUIRED_GLOBAL_SETUP: readonly string[] = [
+  "test/global-setup/build-contracts.ts",
+];
 /** 下限取保守值：只防【扫描通路整个坏掉】，不当【测试文件数目的账本】用。 */
 export const MIN_TEST_FILES: number = 15;
 
@@ -73,6 +86,7 @@ function missing(
 export interface RequiredLists {
   readonly vitestInclude: readonly string[];
   readonly biomeIncludes: readonly string[];
+  readonly globalSetup: readonly string[];
 }
 
 /**
@@ -85,13 +99,15 @@ export function checkHarness(
   required: RequiredLists = {
     vitestInclude: REQUIRED_VITEST_INCLUDE,
     biomeIncludes: REQUIRED_BIOME_INCLUDES,
+    globalSetup: REQUIRED_GLOBAL_SETUP,
   },
 ): HarnessProblem[] {
   /* 必需项清单自己为空 = 这份守卫被掏空，不能当成【没有要求所以全过】。
      必须抢在逐条比对之前：清单为空时下面那两个循环一条也数不出来。 */
   if (
     required.vitestInclude.length === 0 ||
-    required.biomeIncludes.length === 0
+    required.biomeIncludes.length === 0 ||
+    required.globalSetup.length === 0
   ) {
     return [{ why: "必需项清单本身是空的，判据已被掏空" }];
   }
@@ -108,6 +124,11 @@ export function checkHarness(
       input.biomeIncludes,
       required.biomeIncludes,
       "biome.json 的 files.includes",
+    ),
+    ...missing(
+      input.globalSetup,
+      required.globalSetup,
+      "vitest.config.ts 的 test.globalSetup",
     ),
   );
   if (input.diskTestFiles.length < MIN_TEST_FILES) {
@@ -138,6 +159,19 @@ export function readVitestInclude(configText: string): string[] {
   );
 }
 
+/**
+ * 从 vitest.config.ts 的文本里读 test.globalSetup。读法与 readVitestInclude 同：
+ * 认双引号对。
+ * 那一行被整条删掉时返回空数组 —— 这里的【空】是真事故（没注册），必须走 missing() 的
+ * 【一条都没读出来】，不许当成零发现（§7-38）。
+ */
+export function readVitestGlobalSetup(configText: string): string[] {
+  const seg = /globalSetup:\s*\[([\s\S]*?)\]/.exec(configText)?.[1] ?? "";
+  if (seg === "") return [];
+  return [...seg.matchAll(/"([^"]*)"/g)].map((m: RegExpExecArray): string =>
+    String(m[1]),
+  );
+}
 /** 从 biome.json 的文本里读 files.includes。JSON 坏了就当读不出来，不猜。 */
 export function readBiomeIncludes(jsonText: string): string[] {
   let parsed: unknown;

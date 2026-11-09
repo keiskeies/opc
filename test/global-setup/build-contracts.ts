@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import {
   checkHarness,
   readBiomeIncludes,
+  readVitestGlobalSetup,
   readVitestInclude,
 } from "../arch/harness-invariants.js";
 
@@ -27,10 +28,12 @@ export default function setup(): void {
      —— 把 vitest 的 include 改窄，做这种检查的守卫自己就先不跑了（0006 §7-41 实测）。
      globalSetup 在测试发现之前执行，且不受 include 管辖（同一轮实测：include 只剩三个
      文件时它照样跑），是目前唯一能报警【测试面被改窄】的位置。 */
+  const configText = readFileSync(join(root, "vitest.config.ts"), "utf8");
   const problems = checkHarness({
-    vitestInclude: readVitestInclude(
-      readFileSync(join(root, "vitest.config.ts"), "utf8"),
-    ),
+    // 这一样只防【数组被改成别的】，防不住【整行被删】—— 整行被删时这段根本
+    // 不会执行。后者由测试那一侧兜（harness-invariants.test.ts 里那条）。
+    globalSetup: readVitestGlobalSetup(configText),
+    vitestInclude: readVitestInclude(configText),
     biomeIncludes: readBiomeIncludes(
       readFileSync(join(root, "biome.json"), "utf8"),
     ),

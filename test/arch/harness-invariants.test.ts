@@ -11,9 +11,11 @@ import {
   type HarnessInput,
   MIN_TEST_FILES,
   REQUIRED_BIOME_INCLUDES,
+  REQUIRED_GLOBAL_SETUP,
   REQUIRED_VITEST_INCLUDE,
   type RequiredLists,
   readBiomeIncludes,
+  readVitestGlobalSetup,
   readVitestInclude,
 } from "./harness-invariants.js";
 
@@ -21,6 +23,7 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), "../..");
 
 const OK: HarnessInput = {
   vitestInclude: [...REQUIRED_VITEST_INCLUDE],
+  globalSetup: [...REQUIRED_GLOBAL_SETUP],
   biomeIncludes: [
     ...REQUIRED_BIOME_INCLUDES,
     "packages/**/*.{ts,tsx,js,mjs,json}",
@@ -98,7 +101,11 @@ describe("测试装置不变量判据", () => {
   // 清单一旦被掏空，逐条比对永远数不到缺失 —— 全绿而什么都没查，和「空对空」同族。
   // 实测：把该分支改成永不触发，本文件其余各条全绿，所以它此前没有任何测试断过它的输出。
   it("必需项清单被掏空时只报一条【判据已被掏空】，不得退化成逐条比对", () => {
-    const empty: RequiredLists = { vitestInclude: [], biomeIncludes: [] };
+    const empty: RequiredLists = {
+      vitestInclude: [],
+      biomeIncludes: [],
+      globalSetup: [],
+    };
     const got = reasonsFor(OK, empty);
     expect(got.length).toBe(1);
     expect(got[0]).toContain("掏空");
@@ -107,15 +114,26 @@ describe("测试装置不变量判据", () => {
     const onlyVitest: RequiredLists = {
       vitestInclude: [],
       biomeIncludes: [...REQUIRED_BIOME_INCLUDES],
+      globalSetup: [...REQUIRED_GLOBAL_SETUP],
     };
     const onlyBiome: RequiredLists = {
       vitestInclude: [...REQUIRED_VITEST_INCLUDE],
       biomeIncludes: [],
+      globalSetup: [...REQUIRED_GLOBAL_SETUP],
     };
     expect(reasonsFor(OK, onlyVitest).length).toBe(1);
     expect(reasonsFor(OK, onlyBiome).length).toBe(1);
+    // 第三样同样要单独测：这一侧当初就是这么漏掉的（把子句改成永不触发，
+    // 只有两侧的用例全绿，第三侧无人问津）。
+    const onlySetup: RequiredLists = {
+      vitestInclude: [...REQUIRED_VITEST_INCLUDE],
+      biomeIncludes: [...REQUIRED_BIOME_INCLUDES],
+      globalSetup: [],
+    };
+    expect(reasonsFor(OK, onlySetup).length).toBe(1);
     // 且必须抢在逐条比对之前：输入同时坏掉时也只该有这一条。
     const broken: HarnessInput = {
+      globalSetup: [],
       vitestInclude: [],
       biomeIncludes: [],
       diskTestFiles: [],
@@ -123,16 +141,45 @@ describe("测试装置不变量判据", () => {
     expect(reasonsFor(broken, empty).length).toBe(1);
   });
 
-  it("真仓库的三样输入必须全过（正向：整条守卫在真配置上不空转）", () => {
-    const vi = readVitestInclude(
-      readFileSync(join(ROOT, "vitest.config.ts"), "utf8"),
+  // 钉的是【套件中止通道自己的开关】。那条【必需清单被掏空】的变异，靠 globalSetup
+  // 抛错中止全套来报警；而注册那一行若被删，中止通道本身就没有一条用例能红 ——
+  // 让 globalSetup 报告【我没被注册】是循环：它没执行，就没有任何东西替它说话。
+  // 实测只删 vitest.config.ts 那一行：全套照常全绿、退出码 0，无人报警。所以
+  // 兜底必须在用例这一侧读真配置。
+  it("真配置必须仍注册 globalSetup，否则【测试面被改窄】这件事没有报警者", () => {
+    const cfg = readFileSync(join(ROOT, "vitest.config.ts"), "utf8");
+    // 读法认双引号对：读出来的必须逐字等于必需项，不是【非空就算】
+    expect(readVitestGlobalSetup(cfg)).toEqual([...REQUIRED_GLOBAL_SETUP]);
+    // 真配置在判据上不空转
+    expect(reasons({ ...OK, globalSetup: readVitestGlobalSetup(cfg) })).toEqual(
+      [],
     );
+    // 那一行被整条删掉：读出来是空数组，而空必须报，不许当成零发现
+    const removed = cfg.replace(/^ {4}globalSetup:.*$/m, "");
+    expect(removed).not.toMatch(/^ {4}globalSetup:/m);
+    expect(readVitestGlobalSetup(removed)).toEqual([]);
+    // 注意：不能断言整份文本【不含 globalSetup】—— 配置里的散文注释也提这个词。
+    expect(reasons({ ...OK, globalSetup: [] })).toEqual([
+      expect.stringContaining("globalSetup"),
+    ]);
+    // 被改成别的脚本路径同样要报：只有必需项那一条算完好
+    expect(
+      reasons({ ...OK, globalSetup: ["test/global-setup/other.ts"] }),
+    ).toEqual([expect.stringContaining("globalSetup")]);
+  });
+
+  // 标题不写【几样输入】：加一样就得改数字，那和 canary 条数同属会漂的计数。
+  it("真仓库的配置输入必须全过（正向：整条守卫在真配置上不空转）", () => {
+    const cfgText = readFileSync(join(ROOT, "vitest.config.ts"), "utf8");
+    const vi = readVitestInclude(cfgText);
+    const gsRead = readVitestGlobalSetup(cfgText);
     const bi = readBiomeIncludes(
       readFileSync(join(ROOT, "biome.json"), "utf8"),
     );
     const n = countTestFiles(ROOT);
     expect(
       reasons({
+        globalSetup: gsRead,
         vitestInclude: vi,
         biomeIncludes: bi,
         diskTestFiles: Array.from(
