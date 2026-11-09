@@ -37,15 +37,20 @@
 //
 // 下方 includedByVitest 是【手抄】的两条 include：真配置改窄时它不会自己跟着变，于是本守卫会继续
 // 宣布【每个测试文件都被收集】，而 vitest 实际已不再收集它们 —— 这是假绿。所以下面新增一条 it，直接
-// import 真配置，断言手抄模式与它逐字相同。之所以必须这样补，是因为 vitest.config.ts 自己【不在任何
-// 比对逻辑在 config-match.ts 而不是内联：本守卫有自指性 —— include 改空会把承载断言的
-// 一根柱子的射程内】，本轮实测（两条都配了正对照）：
-//   · biome 曾经照不到它（显式点名回答 Checked 0 files）。本轮已修：根目录的 .ts 加进 files
-//     的 includes，实测 Checked 76 变 77 —— 该 glob 不递归，所以只多这一个文件，不宽。
-//     它同时是全仓 60 个 .ts 里唯一不以换行结尾的文件（末字节 0x3b），本轮一并补上：
-//     这个缺陷能活到今天，正因为没有一根柱子照它，本身即本节主题的实例。tsc 仍不覆盖它。
+// import 真配置，断言手抄模式与它逐字相同。之所以必须这样补，是因为 vitest.config.ts 自己
+// 【不在任何一根柱子的射程内】，本轮实测（两条都配了正对照）：
+//   · biome 曾经照不到它（显式点名回答 Checked 0 files）。本轮已修：根目录的 .ts 加进
+//     files.includes，实测点名它之后统计数比点名之前多 1 —— 该 glob 不递归，只多这一个。
+//     它同时是全仓唯一不以换行结尾的 .ts（末字节 0x3b），一并补上：
+//     这个缺陷能活到今天，正因为没有一根柱子照它，本身即本节主题的实例。
 //   · tsc -b --force 给它注入一个类型错误 → exit 0；同一探针注入 packages/hub/src/index.ts → exit 2
 //     且错误行指向那个文件。它又不被任何文件 import（孤立），所以 tsc 也永远不会顺带看它。
+//     tsc 至今不覆盖它：根 tsconfig 是 files: [] 加四个包引用，test/** 一个都不在里面。
+//
+// 比对逻辑在 config-match.ts 而不是内联：本守卫有自指性 —— 想测【真配置读不出 include】
+// 这一态，就得把 include 改空，而那会同时把承载断言的文件自己从收集范围里摘掉，于是既
+// 看不到红也看不到绿，只看到 No test files found。抽成纯函数后四态都能用普通单测固定住，
+// 不依赖运行时配置。同类先例见 test/arch/index-diff.ts。
 
 import { readdirSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -153,7 +158,6 @@ describe("测试文件的执行清单覆盖", () => {
     // 比对规则本身（含【两边都空要报前提问题】那一态）由 config-match.test.ts 的 7 个用例守着，
     // 那里还带对 checkConfigMatch 的变异实验。这里只是把真数据灌进去。
     // 本条只灌真数据，判据若被掏空它会假绿 —— 所以下面紧接一条自足的正对照，不依赖别的文件。
-    // 这条 it 会假绿。彻底堵死要让 test-inventory 与 config-match.test.ts 共存亡，暂未做。
     expect(checkConfigMatch(real, INCLUDE_PATTERNS)).toEqual([]);
     // 正对照：合成一份【已知必然不一致】的输入，判据必须报出问题。
     // 它不依赖 config-match.test.ts 是否存在 —— 判据被掏空成恒返回空数组，这里当场红。
