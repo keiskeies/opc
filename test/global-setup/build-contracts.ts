@@ -8,6 +8,7 @@ import {
   readBiomeIncludes,
   readVitestGlobalSetup,
   readVitestInclude,
+  readVitestRequireAssertions,
 } from "../arch/harness-invariants.js";
 
 /**
@@ -30,6 +31,7 @@ export default function setup(): void {
      文件时它照样跑），是目前唯一能报警【测试面被改窄】的位置。 */
   const configText = readFileSync(join(root, "vitest.config.ts"), "utf8");
   const problems = checkHarness({
+    requireAssertions: readVitestRequireAssertions(configText),
     // 这一样只防【数组被改成别的】，防不住【整行被删】—— 整行被删时这段根本
     // 不会执行。后者由测试那一侧兜（harness-invariants.test.ts 里那条）。
     globalSetup: readVitestGlobalSetup(configText),

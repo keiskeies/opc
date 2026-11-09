@@ -12,6 +12,11 @@ export default defineConfig({
     include: ["test/**/*.test.{ts,tsx}", "packages/*/test/**/*.test.{ts,tsx}"],
     // 每个文件独立进程：PoC 用文件级 SQLite，共享 worker 会互相锁库
     pool: "forks",
+    // 空跑的 it 必须红：把某条用例的整个 body 掏空（标题与条数一字未动），
+    // 默认配置下它照样绿 —— 实测过。开这个开关后同一条刀当场失败，而全仓 307 条
+    // 真用例无一误伤，包括体内不写 expect、只 await fn() 委托的包装用例
+    // （判定发生在运行时，委托里跑到的 expect 也算）。见 0006 §7 第 59 条。
+    expect: { requireAssertions: true },
     testTimeout: 180_000,
     // 覆盖率阈值写进配置（计划 Task 1.2：门控分支 ≥ 95%），CI 强制而非靠自觉
     coverage: {

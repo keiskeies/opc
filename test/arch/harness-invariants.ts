@@ -13,6 +13,8 @@ import { join } from "node:path";
 //
 // 判据只查【必需项还在】，不查有没有多余项：误报会让整套 verify 挂掉，代价比漏报高
 //（0007 §4.1）。解码失败必须报问题，不许当成【没发现问题】（§7-38）。
+const NL_TEXT = String.fromCharCode(10);
+
 export interface HarnessProblem {
   readonly why: string;
 }
@@ -23,6 +25,16 @@ export interface HarnessInput {
   readonly globalSetup: readonly string[];
   readonly biomeIncludes: readonly string[];
   readonly diskTestFiles: readonly string[];
+  /**
+   * vitest.config.ts 是否开着 test.expect.requireAssertions。
+   *
+   * 为什么要有这一样：把某条用例的整个 body 掏空（标题与条数一字未动），
+   * 默认配置下它照样绿 —— 实测 test/arch/decision-index.test.ts 第一条掏空后
+   * 2 例全过、退出码 0。开关开着时同一条刀当场失败，而其余 307 例无一误伤，
+   * 包括体内只 await fn() 委托的包装用例（判定在运行时，委托里跑到的 expect 也算）。
+   * 见 0006 §7 第 59 条。
+   */
+  readonly requireAssertions: boolean;
 }
 
 /**
@@ -52,6 +64,16 @@ export const REQUIRED_BIOME_INCLUDES: readonly string[] = [
 export const REQUIRED_GLOBAL_SETUP: readonly string[] = [
   "test/global-setup/build-contracts.ts",
 ];
+/**
+ * 这一样必须是 true。写成常量供比对，不在判据里写裸字面量。
+ *
+ * 为什么放进模块常量而不是 RequiredLists：布尔值没有【清单为空】那一态，
+ * 放进注入结构里就得为【false 表示不要求】多开一条分支，而那条分支没人走 ——
+ * 新增未测分支正是 §7-53、§7-54 记过的错。写成常量后，把它翻成 false 会让
+ * 真配置（读到 true）不匹配，正向那条用例立刻红，翻不动。
+ */
+export const REQUIRED_REQUIRE_ASSERTIONS = true;
+
 /** 下限取保守值：只防【扫描通路整个坏掉】，不当【测试文件数目的账本】用。 */
 export const MIN_TEST_FILES: number = 15;
 
@@ -131,6 +153,13 @@ export function checkHarness(
       "vitest.config.ts 的 test.globalSetup",
     ),
   );
+  if (input.requireAssertions !== REQUIRED_REQUIRE_ASSERTIONS) {
+    out.push({
+      why:
+        "vitest.config.ts 的 test.expect.requireAssertions 不为 true" +
+        " —— 被掏空断言的用例将以绿灯蒙过去",
+    });
+  }
   if (input.diskTestFiles.length < MIN_TEST_FILES) {
     out.push({
       why:
@@ -172,6 +201,25 @@ export function readVitestGlobalSetup(configText: string): string[] {
     String(m[1]),
   );
 }
+/**
+ * 从 vitest.config.ts 的文本里读 test.expect.requireAssertions。
+ *
+ * 只认【行首缩进后紧跟 expect: {】那一行及其后四行：配置里的散文注释也提到
+ * 这个词，按全文搜会把注释当开关（§7 里同类错误记过不止一次）。读不到开关行、
+ * 值不是 true、整行被删，一律返回 false —— 这里的 false 是真事故，不许当成零发现。
+ * 读后面四行而不是只看一行，是为了让 biome 把对象展开成多行时不产生假红。
+ */
+export function readVitestRequireAssertions(configText: string): boolean {
+  const lines = configText.split(/\r?\n/);
+  const i = lines.findIndex((l: string): boolean =>
+    /^\s*expect:\s*\{/u.test(l),
+  );
+  if (i < 0) {
+    return false;
+  }
+  return /requireAssertions:\s*true/u.test(lines.slice(i, i + 5).join(NL_TEXT));
+}
+
 /** 从 biome.json 的文本里读 files.includes。JSON 坏了就当读不出来，不猜。 */
 export function readBiomeIncludes(jsonText: string): string[] {
   let parsed: unknown;

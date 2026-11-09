@@ -12,16 +12,19 @@ import {
   MIN_TEST_FILES,
   REQUIRED_BIOME_INCLUDES,
   REQUIRED_GLOBAL_SETUP,
+  REQUIRED_REQUIRE_ASSERTIONS,
   REQUIRED_VITEST_INCLUDE,
   type RequiredLists,
   readBiomeIncludes,
   readVitestGlobalSetup,
   readVitestInclude,
+  readVitestRequireAssertions,
 } from "./harness-invariants.js";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "../..");
 
 const OK: HarnessInput = {
+  requireAssertions: REQUIRED_REQUIRE_ASSERTIONS,
   vitestInclude: [...REQUIRED_VITEST_INCLUDE],
   globalSetup: [...REQUIRED_GLOBAL_SETUP],
   biomeIncludes: [
@@ -133,6 +136,7 @@ describe("测试装置不变量判据", () => {
     expect(reasonsFor(OK, onlySetup).length).toBe(1);
     // 且必须抢在逐条比对之前：输入同时坏掉时也只该有这一条。
     const broken: HarnessInput = {
+      requireAssertions: false,
       globalSetup: [],
       vitestInclude: [],
       biomeIncludes: [],
@@ -168,17 +172,46 @@ describe("测试装置不变量判据", () => {
     ).toEqual([expect.stringContaining("globalSetup")]);
   });
 
+  // 开关本身也要有人守：把某条用例的整个 body 掏空，标题与条数一字未动，
+  // 默认配置下 2 例全绿（实测 test/arch/decision-index.test.ts 第一条）。
+  // 这一行被删掉后那把刀就没人接得住，而删掉它【不会有任何一条用例变红】——
+  // 与上一条 globalSetup 的处境同构，所以读法也一样：由用例去读真配置。
+  it("真配置必须仍开着 requireAssertions，否则【断言被整条掏空】没有报警者", () => {
+    const cfg = readFileSync(join(ROOT, "vitest.config.ts"), "utf8");
+    expect(readVitestRequireAssertions(cfg)).toBe(true);
+    expect(reasons({ ...OK, requireAssertions: true })).toEqual([]);
+    // 整行被删：读到 false，且必须报，不许当成零发现
+    const removed = cfg.replace(/^ {4}expect: \{[^\n]*\},\n/mu, "");
+    expect(removed).not.toContain("requireAssertions:");
+    expect(readVitestRequireAssertions(removed)).toBe(false);
+    expect(reasons({ ...OK, requireAssertions: false })).toEqual([
+      expect.stringContaining("requireAssertions"),
+    ]);
+    // 值被改成 false 同样要报：只有 true 算完好
+    expect(
+      readVitestRequireAssertions(
+        cfg.replace("requireAssertions: true", "requireAssertions: false"),
+      ),
+    ).toBe(false);
+    // 归因必须是【这一样坏了】，不许顺带把别的输入也判坏
+    expect(
+      reasons({ ...OK, globalSetup: [], requireAssertions: false }).length,
+    ).toBe(2);
+  });
+
   // 标题不写【几样输入】：加一样就得改数字，那和 canary 条数同属会漂的计数。
   it("真仓库的配置输入必须全过（正向：整条守卫在真配置上不空转）", () => {
     const cfgText = readFileSync(join(ROOT, "vitest.config.ts"), "utf8");
     const vi = readVitestInclude(cfgText);
     const gsRead = readVitestGlobalSetup(cfgText);
+    const raRead = readVitestRequireAssertions(cfgText);
     const bi = readBiomeIncludes(
       readFileSync(join(ROOT, "biome.json"), "utf8"),
     );
     const n = countTestFiles(ROOT);
     expect(
       reasons({
+        requireAssertions: raRead,
         globalSetup: gsRead,
         vitestInclude: vi,
         biomeIncludes: bi,
@@ -245,5 +278,29 @@ describe("配置解码器", () => {
       k("test/**/*.{ts,tsx}") +
       ", 7] } }";
     expect(readBiomeIncludes(withJunk)).toEqual([...REQUIRED_BIOME_INCLUDES]);
+  });
+
+  // 读法必须【结构性】：配置里出现这个词不等于开关开着。
+  it("注释里写着同一个开关名的配置，必须读成 false", () => {
+    expect(
+      readVitestRequireAssertions(
+        "  // expect: { requireAssertions: true }" + NL_TEXT + "};",
+      ),
+    ).toBe(false);
+  });
+
+  // 只看一行会把 biome 展开成的多行对象读成 false —— 那是假红，
+  // 而假红会让人去改配置而不是改读法，比漏报更难查。
+  it("开关被格式化器展开成多行时仍必须读成 true", () => {
+    const multi = [
+      "export default {",
+      "  test: {",
+      "    expect: {",
+      "      requireAssertions: true,",
+      "    },",
+      "  },",
+      "};",
+    ].join(NL_TEXT);
+    expect(readVitestRequireAssertions(multi)).toBe(true);
   });
 });
