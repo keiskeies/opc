@@ -4,7 +4,7 @@
  * 这里刻意【不】复刻 vitest 的 glob 语义 —— collected 一侧来自 `vitest list --files-only`，
  * 是 vitest 自己给出的权威清单。expected 一侧用一条【比 include 更宽】的命名规则枚举磁盘：
  * 两侧若用同一套规则，规则本身的盲区会同时作用于两侧，差集恒为空 —— 那是恒真判定，
- * 见 0006 §7 第 11 条。所以规则必须单向放宽：多算只会多报，绝不会漏报。
+ * 见 0006 §7 第 58 条与 0007 §4。所以规则必须单向放宽：多算只会多报，绝不会漏报。
  */
 
 const TEST_NAME = /\.(test|spec)\.[cm]?[jt]sx?$/;
@@ -33,11 +33,17 @@ export function looksLikeTest(rel: string): boolean {
   return TEST_NAME.test(segs[segs.length - 1] ?? "");
 }
 
-/** `vitest list --files-only` 的输出：每行一条仓库相对路径，顺序不保证。 */
+/**
+ * `vitest list --files-only` 的输出：每行一条仓库相对路径，顺序不保证。
+ *
+ * 这里曾写 `new RegExp(String.fromCharCode(92), "g")` 来归一化反斜杠 —— 那是【非法正则】
+ * （单个反斜杠在模式末尾即报错），而此函数当时零调用者，所以从写下那天起每次调用都会抛。
+ * 现在主扫描真的调用它，这一条由那次实测固定，不再靠读代码相信。
+ */
 export function parseFilesOnly(out: string): string[] {
   return out
     .split(String.fromCharCode(10))
-    .map((l) => l.trim().replace(new RegExp(String.fromCharCode(92), "g"), "/"))
+    .map((l) => l.trim().split(String.fromCharCode(92)).join("/"))
     .filter((l) => TEST_NAME.test(l))
     .sort();
 }

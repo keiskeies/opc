@@ -31,12 +31,16 @@
 // 成恒真，主断言「每一项都被认领」立刻退化成恒绿装饰；这条 canary 就是防这一手的。
 // 宽枚举 looksLikeTest 与 include【不是】同一套规则，这是整条守卫不退化为恒真的唯一根据。
 //
-// 已知限制（刻意）：本守卫不 spawn vitest list 去拿真实执行清单。那样要在测试里再起一个
-// vitest，会重触发 globalSetup（build-contracts）并与并行测试争写同一产物，属 0006 第 6.4
-// 节记过的竞态族。与真实清单的交叉留作 Phase 1 候选。
+// 与真实清单的交叉【已经做了】，做法与下面这三行旧注释相反 —— 旧注释是错的，实测否证：
+//   · `vitest list --files-only` 不触发 globalSetup：把 contracts/src 弄旧后跑 list，dist
+//     时间戳一字不动；同一条件下跑 `vitest run` 会重建。争写同一产物的竞态并不存在。
+//   · 在测试进程内 spawnSync 它是通的（临时探针实测 passed），单次约 250 ms，输出 29 行。
+// 必须做它的理由：主扫描原先写 collected = expected.filter(...)，collected 由 expected
+// 派生 ⇒ phantom 恒为空，那条断言在这条 it 里【永远不可能失败】。代价是实测过的：
+// 放进 test/dist/ghost.test.ts，vitest 确实收集它（314 例变 315 例），而守卫三例全绿。
 //
-// 下方 includedByVitest 是【手抄】的两条 include：真配置改窄时它不会自己跟着变，于是本守卫会继续
-// 宣布【每个测试文件都被收集】，而 vitest 实际已不再收集它们 —— 这是假绿。所以下面新增一条 it，直接
+// includedByVitest 是对真配置两条 include 的【手抄解读】。它不再决定 collected（那改成直接
+// 问 vitest），但解读读窄了会在主扫描里红：见下面那条与真实清单的交叉比对。
 // import 真配置，断言手抄模式与它逐字相同。之所以必须这样补，是因为 vitest.config.ts 自己
 // 【不在任何一根柱子的射程内】，本轮实测（两条都配了正对照）：
 //   · biome 曾经照不到它（显式点名回答 Checked 0 files）。本轮已修：根目录的 .ts 加进
@@ -52,6 +56,7 @@
 // 看不到红也看不到绿，只看到 No test files found。抽成纯函数后四态都能用普通单测固定住，
 // 不依赖运行时配置。同类先例见 test/arch/index-diff.ts。
 
+import { spawnSync } from "node:child_process";
 import { readdirSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -64,6 +69,7 @@ import {
   explain,
   IGNORED_DIRS,
   looksLikeTest,
+  parseFilesOnly,
 } from "./test-inventory.js";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "../..");
@@ -191,11 +197,29 @@ describe("测试文件的执行清单覆盖", () => {
 
   it("磁盘上每个测试样文件都在 include 覆盖范围内", () => {
     const expected = enumerate("").sort();
-    const collected = expected.filter(includedByVitest);
+    // 独立来源：vitest 自己给出的清单，不从 expected 派生，phantom 才可能非空。
+    const r = spawnSync(
+      process.execPath,
+      ["node_modules/vitest/vitest.mjs", "list", "--files-only"],
+      { cwd: ROOT, encoding: "utf8", timeout: 120000 },
+    );
+    if (r.status !== 0) {
+      throw new Error("vitest list --files-only 退出码 " + r.status);
+    }
+    const collected = parseFilesOnly(String(r.stdout));
+    expect(collected.length).toBeGreaterThanOrEqual(21);
     const diff = diffInventory({ expected, collected });
     for (const u of diff.uncollected) {
       console.log("[未被 vitest 收集] " + u + " —— " + explain(u));
     }
+    for (const p of diff.phantom) {
+      console.log("[vitest 收集了但宽枚举剪掉了] " + p);
+    }
+    // 我对两条 include 的【解读】必须与 vitest 自己给的清单一致。上面那条逐字比对只保证模式
+    // 字符串相同，保证不了我把 glob 读对了 —— 读错时两边照样逐字一致。
+    expect(expected.filter(includedByVitest).sort()).toEqual(
+      collected.slice().sort(),
+    );
     // 下限：枚举根写错会让 expected 为空，于是 0 == 0 假绿
     expect(expected.length).toBeGreaterThanOrEqual(21);
     expect(diff.uncollected).toEqual([]);
