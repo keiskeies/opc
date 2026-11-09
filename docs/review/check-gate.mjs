@@ -75,10 +75,14 @@ const POS_WORDS = [
   String.fromCharCode(103, 97, 116, 101),
 ];
 ok(gateType.length > 0 && gateType === EXPECT_GATE, "阳性对照：门禁类型搜索串两路互证", gateType === EXPECT_GATE ? "一致" : "★不一致：" + gateType);
+// 必须先判非空：只要这个清单被删空，.every 在空集合上恒真，
+// 这条对照就自己变成恒绿装饰 —— 它本来是专门防「搜索串退化成永远数到 0」的。
 ok(
+  POS_WORDS.length > 0 &&
   POS_WORDS.every((w) => new RegExp(words).test(w)),
-  "阳性对照：三个英文词的正则确实各自命中自己",
-  POS_WORDS.filter((w) => !new RegExp(words).test(w)).join(",") || "全部命中",
+  "阳性对照：每个英文词的正则确实各自命中自己",
+  POS_WORDS.filter((w) => !new RegExp(words).test(w)).join(",") ||
+    POS_WORDS.length + " 词全部命中",
 );
 const t2 = subjects.filter((s) => new RegExp(words).test(s)).length;
 ok(t1 === 0, "主题以门禁提交类型前缀开头 = 0", String(t1));
