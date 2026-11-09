@@ -62,31 +62,84 @@ ok(subjects.length > 0, "主题样本非空", String(subjects.length));
 const gateType = ["chor", "e(phase0)"].join(""); // 拆拼：避免这份文件自身成为被搜索的样本
 
 const t1 = subjects.filter((s) => s.trim().startsWith(gateType)).length;
-const words = ["mar", "passed", "ga", "te"].join("|").replace("|ga|te", "|gate");
-// —— 阳性对照：搜索串若退化（拆拼写错 / 正则拼错），上面两条会【永远数到 0】＝永远 PASS。
-// 这里用第二条独立推导路径（ASCII 码位）各自构造一遍，两路必须互证；不一致即判 FAIL。
-// 码位数组不是被搜索的字面串 ⇒ 本文件自身不会污染它要检查的那些口径。
+// 词臂：判【合取】—— 主题里既要出现门禁那个词，又要出现一个标记用的词。
+// 旧口径把 mark/passed/gate 当【子串】数任意一个，于是 markdown、benchmark、
+// gateway 这类正常词全中招：实测在本仓报出一条假阳，而被误报的那条是一次正当的
+// arch 提交。长期误报的门禁会被当成噪音关掉，比不装更糟，所以这里收窄。
+// 词表仍由码位构造 + 拆拼：本文件自身不会成为被搜样本。
+const W_MARK = String.fromCharCode(109, 97, 114, 107);
+const W_PASSED = String.fromCharCode(112, 97, 115, 115, 101, 100);
+const W_GATE = String.fromCharCode(103, 97, 116, 101);
+const W_ED = String.fromCharCode(101, 100);
+const W_ING = String.fromCharCode(105, 110, 103);
+
+// 分词而不是正则：非字母数字即切。CJK 因此天然成为分隔符，
+// markdown / markup / benchmark 各是一个整词，不会被切成 mark。
+const wordsOf = (s) =>
+  String(s)
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter((w) => w !== "");
+const hasWord = (list, w) => list.includes(w);
+const MARK_FORMS = [W_MARK, W_MARK + W_ED, W_MARK + W_ING, W_PASSED];
+const claimsGatePassed = (s) => {
+  const ws = wordsOf(s);
+  return hasWord(ws, W_GATE) && MARK_FORMS.some((w) => hasWord(ws, w));
+};
+
 const EXPECT_GATE = String.fromCharCode(
   99, 104, 111, 114, 101, 40, 112, 104, 97, 115, 101, 48, 41,
 );
-const POS_WORDS = [
-  String.fromCharCode(109, 97, 114, 107),
-  String.fromCharCode(112, 97, 115, 115, 101, 100),
-  String.fromCharCode(103, 97, 116, 101),
-];
-ok(gateType.length > 0 && gateType === EXPECT_GATE, "阳性对照：门禁类型搜索串两路互证", gateType === EXPECT_GATE ? "一致" : "★不一致：" + gateType);
-// 必须先判非空：只要这个清单被删空，.every 在空集合上恒真，
-// 这条对照就自己变成恒绿装饰 —— 它本来是专门防「搜索串退化成永远数到 0」的。
 ok(
-  POS_WORDS.length > 0 &&
-  POS_WORDS.every((w) => new RegExp(words).test(w)),
-  "阳性对照：每个英文词的正则确实各自命中自己",
-  POS_WORDS.filter((w) => !new RegExp(words).test(w)).join(",") ||
-    POS_WORDS.length + " 词全部命中",
+  gateType.length > 0 && gateType === EXPECT_GATE,
+  "阳性对照：门禁类型搜索串两路互证",
+  gateType === EXPECT_GATE ? "一致" : "★不一致",
 );
-const t2 = subjects.filter((s) => new RegExp(words).test(s)).length;
+
+// 词臂的两条对照方向相反：判据退化成恒假则 POS 红，退化成恒真则 NEG 红；
+// 少任何一边，这条对照自己就成了恒绿装饰。样本清单也必须非空。
+const POS_SUBJECTS = [
+  EXPECT_GATE + ": " + W_MARK + " phase 0 exit " + W_GATE + " " + W_PASSED,
+  "docs: " + W_MARK + " phase 0 exit " + W_GATE + " " + W_PASSED,
+  "feat: " + W_GATE + " " + W_PASSED,
+  "docs: " + W_GATE + " is " + W_PASSED,
+  EXPECT_GATE + ": " + W_MARK + W_ED + " phase 0 exit " + W_GATE + ".",
+  "chore: " + W_MARK + W_ING + " the exit " + W_GATE + ".",
+  "chore: " + W_MARK + "-up exit " + W_GATE + " now",
+];
+const NEG_SUBJECTS = [
+  "feat(arch): " + W_MARK + "down " + String.fromCharCode(20837, 20185, 36335, 29256),
+  "feat: markdown table renderer",
+  "feat: benchmark suite for the tokenizer",
+  "fix: gateway timeout on retry",
+  "docs: remark on market data schema",
+  "feat: landmark detection",
+  "chore: bump markup dependency",
+  "docs: benchmark the gateway",
+  "test: gate the rollout behind a flag",
+  "feat: marketing copy for the passkey module",
+  // 含标记词但不含门禁词的合法主题：少了 gate 这一环就杀不掉（刀下实测）。
+  "docs: " + String.fromCharCode(112, 97, 115, 115, 101, 100) + " the retry test",
+  "chore: " + String.fromCharCode(109, 97, 114, 107) + "ed as in progress",
+  "feat: " + String.fromCharCode(109, 97, 114, 107) + "ing notes for the sprint",
+];
+ok(
+  POS_SUBJECTS.length > 0 && POS_SUBJECTS.every((s) => claimsGatePassed(s)),
+  "阳性对照：禁用写法样本全部被词臂命中",
+  POS_SUBJECTS.filter((s) => !claimsGatePassed(s)).length === 0
+    ? POS_SUBJECTS.length + " 条全中"
+    : "★漏掉 " + POS_SUBJECTS.filter((s) => !claimsGatePassed(s)).length,
+);
+ok(
+  NEG_SUBJECTS.length > 0 && NEG_SUBJECTS.every((s) => !claimsGatePassed(s)),
+  "阴性对照：含相关片段的合法主题一条不误报",
+  NEG_SUBJECTS.filter((s) => claimsGatePassed(s)).length === 0
+    ? NEG_SUBJECTS.length + " 条全不误报"
+    : "★误报 " + NEG_SUBJECTS.filter((s) => claimsGatePassed(s)).length,
+);
+const t2 = subjects.filter(claimsGatePassed).length;
 ok(t1 === 0, "主题以门禁提交类型前缀开头 = 0", String(t1));
-ok(t2 === 0, "主题含 mark/passed/gate 任一词 = 0", String(t2));
+ok(t2 === 0, "主题把门禁说成已标记通过 = 0", String(t2));
 say("  口径说明：这两条只取每条消息的【第一行】，正文一字不读。任何【读提交正文】的搜索都会被我自己的复述污染，故一律不作证据。");
 
 // —— C2 判据 1 的验收权归谁：直接看设计文档那一列的表头
