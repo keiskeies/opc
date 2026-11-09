@@ -35,7 +35,7 @@ const TMP = join(HUB, ".tmp", "saver-contract");
 
 /*
  * 每个实现包一层「怎么执行一次调用」：SqliteWALSaver 的 put / putWrites 必须在
- * txScope() 内（0.4a 判定 + 0003 §6.2 的抛错约定），MemorySaver 无此要求。
+ * txScope() 内（0.4a 判定 + 0003 §6 第 2 项的抛错约定），MemorySaver 无此要求。
  * 这套用例本身对两者是同一份 —— 差异只体现在这个包装器里。
  */
 interface Harness {

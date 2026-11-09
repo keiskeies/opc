@@ -248,8 +248,16 @@ const SKIP_DIRS: ReadonlySet<string> = new Set<string>([
   ".next",
 ]);
 
-export function countTestFiles(rootDir: string): number {
-  let n = 0;
+/**
+ * 遍历一棵目录树，按谓词收文件，返回【相对 rootDir、用 / 分隔】的路径。
+ * 只有一份跳过语义：SKIP_DIRS。本仓出现过好几个文件各写一份目录遍历的情况，
+ * 跳过清单从此只在这里长，别处复用。
+ */
+export function walkFiles(
+  rootDir: string,
+  accept: (name: string) => boolean,
+): string[] {
+  const out: string[] = [];
   const walk = (dir: string): void => {
     for (const e of readdirSync(dir, { withFileTypes: true })) {
       if (e.isDirectory()) {
@@ -257,9 +265,20 @@ export function countTestFiles(rootDir: string): number {
         walk(join(dir, e.name));
         continue;
       }
-      if (/\.test\.[cm]?[jt]sx?$/.test(e.name)) n += 1;
+      if (accept(e.name)) {
+        const rel: string = dir.slice(rootDir.length);
+        out.push(
+          (rel + "/" + e.name).replace(/^[/\\]+/, "").replace(/\\/g, "/"),
+        );
+      }
     }
   };
   walk(rootDir);
-  return n;
+  return out.sort();
+}
+
+export function countTestFiles(rootDir: string): number {
+  return walkFiles(rootDir, (name: string) =>
+    /\.test\.[cm]?[jt]sx?$/.test(name),
+  ).length;
 }

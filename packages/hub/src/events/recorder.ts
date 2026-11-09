@@ -177,7 +177,7 @@ export interface StepTx {
    * 当前事务作用域里的写连接；不在作用域里必须抛错。
    *
    * 为什么不给一个「常驻连接」：recorder 与 checkpoint saver 必须落在【同一次事务】
-   * 里（0003 §6.2、规格 §6.3）。常驻连接会让 recorder 在事务边界之外 autocommit，
+   * 里（0003 §6 第 2 项、规格 §6.3）。常驻连接会让 recorder 在事务边界之外 autocommit，
    * 于是「节点失败 ⇒ 事件增量为 0」直接失效 —— 而且没人会报错。
    * 真实实现里这个方法就是 requireScopeDb()，与 saver 走同一条取用路径。
    */
