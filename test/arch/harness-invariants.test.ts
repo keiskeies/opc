@@ -12,6 +12,7 @@ import {
   MIN_TEST_FILES,
   REQUIRED_BIOME_INCLUDES,
   REQUIRED_VITEST_INCLUDE,
+  type RequiredLists,
   readBiomeIncludes,
   readVitestInclude,
 } from "./harness-invariants.js";
@@ -32,6 +33,11 @@ const OK: HarnessInput = {
 
 const reasons = (input: HarnessInput): string[] =>
   checkHarness(input)
+    .map((p: { why: string }): string => p.why)
+    .sort();
+
+const reasonsFor = (input: HarnessInput, required: RequiredLists): string[] =>
+  checkHarness(input, required)
     .map((p: { why: string }): string => p.why)
     .sort();
 
@@ -86,6 +92,35 @@ describe("测试装置不变量判据", () => {
     expect(REQUIRED_VITEST_INCLUDE.length).toBeGreaterThanOrEqual(2);
     expect(REQUIRED_BIOME_INCLUDES.length).toBeGreaterThanOrEqual(1);
     expect(MIN_TEST_FILES).toBeGreaterThan(0);
+  });
+
+  // 这一段钉的是判据里【必需项清单本身为空就提前返回】那个分支。
+  // 清单一旦被掏空，逐条比对永远数不到缺失 —— 全绿而什么都没查，和「空对空」同族。
+  // 实测：把该分支改成永不触发，本文件其余各条全绿，所以它此前没有任何测试断过它的输出。
+  it("必需项清单被掏空时只报一条【判据已被掏空】，不得退化成逐条比对", () => {
+    const empty: RequiredLists = { vitestInclude: [], biomeIncludes: [] };
+    const got = reasonsFor(OK, empty);
+    expect(got.length).toBe(1);
+    expect(got[0]).toContain("掏空");
+    expect(got[0]).not.toContain("空对空");
+    // 守卫的条件是【或】：只认两侧同时为空，就漏掉单边掏空那种坏法。
+    const onlyVitest: RequiredLists = {
+      vitestInclude: [],
+      biomeIncludes: [...REQUIRED_BIOME_INCLUDES],
+    };
+    const onlyBiome: RequiredLists = {
+      vitestInclude: [...REQUIRED_VITEST_INCLUDE],
+      biomeIncludes: [],
+    };
+    expect(reasonsFor(OK, onlyVitest).length).toBe(1);
+    expect(reasonsFor(OK, onlyBiome).length).toBe(1);
+    // 且必须抢在逐条比对之前：输入同时坏掉时也只该有这一条。
+    const broken: HarnessInput = {
+      vitestInclude: [],
+      biomeIncludes: [],
+      diskTestFiles: [],
+    };
+    expect(reasonsFor(broken, empty).length).toBe(1);
   });
 
   it("真仓库的三样输入必须全过（正向：整条守卫在真配置上不空转）", () => {

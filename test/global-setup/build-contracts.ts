@@ -22,7 +22,7 @@ import {
  */
 export default function setup(): void {
   const root = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
-  /* 测试装置自检：判据在 test/arch/harness-invariants.ts，那边有 12 条 canary 钉着。
+  /* 测试装置自检：判据在 test/arch/harness-invariants.ts，那边有 canary 钉着，条数以那个文件当场为准。
      为什么放这里而不是写进某个 it 里：任何【由测试执行】的检查都防不住【测试不被执行】
      —— 把 vitest 的 include 改窄，做这种检查的守卫自己就先不跑了（0006 §7-41 实测）。
      globalSetup 在测试发现之前执行，且不受 include 管辖（同一轮实测：include 只剩三个

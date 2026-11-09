@@ -66,14 +66,32 @@ function missing(
 }
 
 /**
+ * 必需项清单本身。默认取模块里那两个常量，测试可注入别的值 ——
+ * 没有这个注入口，【清单被掏空】那条分支就只能靠改模块源码才能触发，
+ * 于是它从来没有被任何测试断过（实测：把它改成永不触发，本文件其余各条全绿）。
+ */
+export interface RequiredLists {
+  readonly vitestInclude: readonly string[];
+  readonly biomeIncludes: readonly string[];
+}
+
+/**
  * @param input 由调用方读好的三样东西。本函数不碰文件系统，所以能被单测喂合成输入。
+ * @param required 必需项清单；默认用模块常量，注入空清单即模拟【判据被掏空】。
  * @returns 问题列表；空列表表示测试装置完好。
  */
-export function checkHarness(input: HarnessInput): HarnessProblem[] {
-  /* 必需项清单自己为空 = 这份守卫被掏空，不能当成【没有要求所以全过】。 */
+export function checkHarness(
+  input: HarnessInput,
+  required: RequiredLists = {
+    vitestInclude: REQUIRED_VITEST_INCLUDE,
+    biomeIncludes: REQUIRED_BIOME_INCLUDES,
+  },
+): HarnessProblem[] {
+  /* 必需项清单自己为空 = 这份守卫被掏空，不能当成【没有要求所以全过】。
+     必须抢在逐条比对之前：清单为空时下面那两个循环一条也数不出来。 */
   if (
-    REQUIRED_VITEST_INCLUDE.length === 0 ||
-    REQUIRED_BIOME_INCLUDES.length === 0
+    required.vitestInclude.length === 0 ||
+    required.biomeIncludes.length === 0
   ) {
     return [{ why: "必需项清单本身是空的，判据已被掏空" }];
   }
@@ -81,14 +99,14 @@ export function checkHarness(input: HarnessInput): HarnessProblem[] {
   out.push(
     ...missing(
       input.vitestInclude,
-      REQUIRED_VITEST_INCLUDE,
+      required.vitestInclude,
       "vitest.config.ts 的 test.include",
     ),
   );
   out.push(
     ...missing(
       input.biomeIncludes,
-      REQUIRED_BIOME_INCLUDES,
+      required.biomeIncludes,
       "biome.json 的 files.includes",
     ),
   );
