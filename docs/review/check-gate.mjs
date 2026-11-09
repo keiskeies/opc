@@ -25,10 +25,38 @@ const ok = (cond, label, detail) => {
   say((cond ? "  PASS  " : "  ★FAIL ") + label + (detail ? "   → " + detail : ""));
   if (!cond) fail.push(label);
 };
+// 主题取《消息内存的第一行》，不取 git 的 %s：%s 给的是首个段落，第二行没留空行时
+// 它会把正文拼进主题，「绝不读正文」就成了错话 —— 实测两路径差在六条折叠消息上。
+// 记录分隔符用 git 展开的 %x1e；消息文本若含它，下面的数量自检会报错，不静默错切。
+const RECORD_SEP = String.fromCharCode(30);
 
-// —— C1 门禁是否被标记通过：只看【主题】，绝不读正文（读正文的量一律不作证据，见 0006 §7 第 48 条）
+function subjectOf(raw) {
+  const first = String(raw).replace(/^\n+/, "").split(NL)[0];
+  return first === undefined ? "" : first.trim();
+}
+
+
+// —— C1 门禁是否被标记通过：只看【主题】，绝不读正文；主题由 subjectOf 切第一行得到
 say(NL + "C1 出口门禁有没有被标记通过（只看提交主题）");
-const subjects = (git(["log", "--all", "--format=%s"]) ?? "").split(NL).filter(Boolean);
+const rawLog = git(["log", "--all", "--format=%x1e%B"]);
+let subjects = [];
+if (rawLog !== null) {
+  const records = rawLog.split(RECORD_SEP).filter((x) => x.trim() !== "");
+  const claimed = Number((git(["rev-list", "--all", "--count"]) ?? "NaN").trim());
+  if (records.length !== claimed) {
+    fail.push("C1 记录数与 rev-list 数不合（" + records.length + " vs " + claimed + "），主题可能被错切");
+    subjects = [];
+  } else {
+    subjects = records.map(subjectOf);
+  }
+}
+// 正面对照：折叠与未折叠两种消息形状都只取得到第一行；subjectOf 退化成「整段当主题」就会红。
+ok(
+  subjectOf("docs(t): 主题行\n紧跟的正文行") === "docs(t): 主题行" &&
+    subjectOf("docs(t): 主题行\n\n空行后的正文行") === "docs(t): 主题行",
+  "阳性对照：主题切取在两种消息形状下都只取第一行",
+  "两例各半",
+);
 say("  扫描到的主题数：" + subjects.length);
 ok(subjects.length > 0, "主题样本非空", String(subjects.length));
 const gateType = ["chor", "e(phase0)"].join(""); // 拆拼：避免这份文件自身成为被搜索的样本
@@ -55,7 +83,7 @@ ok(
 const t2 = subjects.filter((s) => new RegExp(words).test(s)).length;
 ok(t1 === 0, "主题以门禁提交类型前缀开头 = 0", String(t1));
 ok(t2 === 0, "主题含 mark/passed/gate 任一词 = 0", String(t2));
-say("  口径说明：这两条只读 %s（主题）。任何【读提交正文】的搜索都会被我自己的复述污染，故一律不作证据。");
+say("  口径说明：这两条只取每条消息的【第一行】，正文一字不读。任何【读提交正文】的搜索都会被我自己的复述污染，故一律不作证据。");
 
 // —— C2 判据 1 的验收权归谁：直接看设计文档那一列的表头
 say(NL + "C2 判据 1 的验收权在谁的列里（看表头原文，不必信我转述）");
@@ -125,7 +153,14 @@ const n = git(["rev-list", "--count", "HEAD"]);
 ok(n !== null && Number(n) > 0, "提交总数可由 rev-list 复算", String(Number(n)) + " 条");
 const dirty = (git(["status", "--porcelain", "--untracked-files=all"]) ?? "").split(NL).filter(Boolean);
 say("  未提交改动 " + dirty.length + " 项" + (dirty.length ? "（说明你手上正有改动，下面结论以工作区为准）" : ""));
-say("  HEAD = " + (git(["log", "-1", "--format=%h %s"]) ?? "").trim().slice(0, 92));
+// HEAD 那行同样不再用 %s：它打印的是「主题」，就得用同一个切取函数，不能两处两个口径。
+const headRaw = git(["log", "-1", "--format=%h%x1e%B"]);
+let headLine = "(取不到)";
+if (headRaw !== null) {
+  const parts = headRaw.split(RECORD_SEP);
+  headLine = parts[0] + " " + subjectOf(parts[1] === undefined ? "" : parts[1]);
+}
+say("  HEAD = " + headLine.trim().slice(0, 92));
 
 // —— C6 判据 2 的事实前提：CLI 真正跑的那张图里，到底有没有可打断的点。
 //   口径必须从代码推导，不许硬编码文件名：先读 cli.ts 找出它 import 的图构建函数，
