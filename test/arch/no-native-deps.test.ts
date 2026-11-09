@@ -2,6 +2,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join, posix } from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, it } from "vitest";
+import { isExemptPosix } from "./no-native-deps.js";
 import { BOUNDARY_PROBE } from "./run-fixtures.js";
 
 /**
@@ -80,10 +81,41 @@ function isExempt(file: string): boolean {
     .slice(ROOT.length + 1)
     .split(/[\\/]/u)
     .join(posix.sep);
-  if (rel.split(posix.sep).includes(...EXEMPT_DIRS)) return true;
-  // 并发夹具不是源码：见 TEST_FIXTURE 的注释
-  return rel.endsWith(TEST_FIXTURE);
+  return isExemptPosix(rel, EXEMPT_DIRS, TEST_FIXTURE);
 }
+
+/*
+ * 豁免判定本身的单元测试。之所以要在【这里】测而不是只靠真扫描：
+ * 真扫描的输入里 EXEMPT_DIRS 只有一个目录，而历史上的写法
+ *   rel.split(posix.sep).includes(...EXEMPT_DIRS)
+ * 在只有一个元素时【恰好正确】—— includes 只吃一个参数，展开一个元素就等于没展开。
+ * 于是真数据永远照不出它：没有任何一次扫描会因为第二个豁免目录而变红。
+ * 下面这条用合成输入专门钉住【第二个及以后的元素也必须生效】。
+ */
+it("豁免名单的第二个目录也必须生效（历史上这一条无人可测）", () => {
+  const TWO = ["poc", "e2e"];
+  // 第一个元素：新旧写法都得对
+  expect(
+    isExemptPosix("packages/hub/src/poc/graph.mjs", TWO, TEST_FIXTURE),
+  ).toBe(true);
+  // 第二个元素：只有【逐元素判断】的写法才对。历史上写成 includes(...名单)，
+  // 等价于 includes("poc")，e2e 会被判成【不豁免】，而当时没有任何测试会发现。
+  expect(
+    isExemptPosix("packages/hub/src/e2e/thing.mjs", TWO, TEST_FIXTURE),
+  ).toBe(true);
+  // 名单外的目录不许被豁免 —— 否则上面两条会因为【恒真】而失去意义。
+  expect(isExemptPosix("packages/hub/src/db/real.ts", TWO, TEST_FIXTURE)).toBe(
+    false,
+  );
+  // 空名单必须谁都不豁免（恒真的判据在这里就会露出）
+  expect(
+    isExemptPosix("packages/hub/src/poc/graph.mjs", [], TEST_FIXTURE),
+  ).toBe(false);
+  // 并发夹具走的是尾巴匹配，与目录名单是两条独立的通道
+  expect(
+    isExemptPosix("packages/hub/src/" + TEST_FIXTURE, [], TEST_FIXTURE),
+  ).toBe(true);
+});
 
 it("生产源码不依赖任何原生 SQLite 模块（D6-a）", () => {
   const files = walk(PACKAGES).filter((f) => !isExempt(f));
