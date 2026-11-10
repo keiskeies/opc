@@ -8,6 +8,7 @@
   "files": {
     "includes": [
       "packages/**/*.{ts,tsx,js,mjs,json}",
+      "docs/review/**/*.{js,mjs}",
       "test/**/*.{ts,tsx}",
       "*.json",
       "*.ts"
