@@ -28,6 +28,7 @@ import {
   decodeSseFrame,
   encodeSseFrame,
   isImplemented,
+  UNIMPLEMENTED_ENDPOINTS,
   type SseFrame,
 } from "@opc/contracts";
 import type { DomainEvent } from "../../src/events/bus.js";
@@ -36,6 +37,7 @@ import { migrate } from "../../src/db/migrate.js";
 import {
   handleRequest,
   matchRoute,
+  notImplementedMessage,
   titleOf,
   type HubDeps,
   type HubRequest,
@@ -326,7 +328,7 @@ describe("② 鉴权：无 token 请求 401", () => {
     }
   });
 
-  it("已鉴权后：未知路径 404，未实现端点 501（两种「没有」可区分）", async () => {
+  it("已鉴权后：未知路径 404，回放端点 200（两种「没有」仍可区分）", async () => {
     const h = await harness();
     expect(
       (
@@ -336,12 +338,88 @@ describe("② 鉴权：无 token 请求 401", () => {
         )
       ).status,
     ).toBe(404);
+    /*
+     * 这一条【原本是】「GET /replay 回 501」。Task 3.4 把它落地了，于是这里换断言。
+     * 换的时候有个偷懒的选择值得记下来：把 expect(501) 改成 expect(200) 就完事，
+     * 而那样会把这条用例的【名字与性质】留在原地 —— 标题写着「两种没有可区分」，
+     * 内容却再也不提 501。那是文档债，不是测试。
+     *
+     * 现在的处境：UNIMPLEMENTED_ENDPOINTS 为空 ⇒ 【没有任何一条真请求】能走到 501。
+     * 我没有去造一条能走到的（那要往契约清单里塞一个假端点，
+     * 而那张清单是对外契约面，不能为了测试好看而脏）。
+     * 所以 501 那一侧改成【直接问判据】，并且把「此刻没有活的分母」这句话
+     * 留在断言旁边而不是注释里 —— 下一个人读到这条用例时得知道它为什么少了半边。
+     */
     const res = await handleRequest(
       h.deps,
       h.req({ method: "GET", path: "/replay/task-1", headers: h.sign("GET", "/replay/task-1") }),
     );
-    expect(res.status).toBe(501);
-    expect(isImplemented("GET /replay/:taskId")).toBe(false);
+    expect(res.status).toBe(200);
+    expect(isImplemented("GET /replay/:taskId")).toBe(true);
+    const view = res.body as { task: { id: string }; entries: unknown[]; complete: boolean };
+    expect(view.task.id).toBe("task-1");
+    expect(view.entries).toHaveLength(0);
+
+    // 「404 与 501 可区分」这条口径本身仍被守着，只是换了问法。
+    expect(UNIMPLEMENTED_ENDPOINTS).toHaveLength(0);
+    const msg = notImplementedMessage("GET /replay/:taskId");
+    // 报错里必须带端点名：501 的价值就是「告诉你哪个还没做」，
+    // 只回一句 not implemented 会让调用方去猜。
+    expect(msg).toContain("GET /replay/:taskId");
+    expect(msg).toContain("501");
+  });
+
+  it("?keyword= 在路由层：过滤、空串=不过滤、超长 422", async () => {
+    /*
+     * 三条一起测，因为它们各自对应一种【界面会替用户做错的事】：
+     *  - 不过滤：搜索框白写；
+     *  - 空串当搜索：用户清掉搜索框 ⇒ 看到一条【空时间线】，读起来是
+     *    「这个任务什么都没发生过」（§22.2 的回放是给决定用的，这种空最危险）；
+     *  - 超长不挡：兜底那一档是全表扫，一次输入拖住只读连接。
+     */
+    const h = await harness();
+    const audit = (payload: string): void => {
+      h.db
+        .prepare(
+          "INSERT INTO events (task_id, actor_type, actor_id, action, target, payload, " +
+            "state_snapshot, created_at) VALUES ('task-1','agent','dev','state_change'," +
+            "'task-1',?,NULL,?)",
+        )
+        .run(payload, NOW);
+    };
+    audit(JSON.stringify({ text: "审阅决定：通过" }));
+    audit(JSON.stringify({ text: "预算消耗 12 分" }));
+
+    const hit = await handleRequest(
+      h.deps,
+      h.req({ method: "GET", path: "/replay/task-1", query: { keyword: "审阅决定" } }),
+    );
+    expect(hit.status).toBe(200);
+    const view = hit.body as { entries: { payload: { text: string } }[] };
+    expect(view.entries).toHaveLength(1);
+    expect(view.entries[0]?.payload.text).toContain("审阅决定");
+
+    const cleared = await handleRequest(
+      h.deps,
+      h.req({ method: "GET", path: "/replay/task-1", query: { keyword: "" } }),
+    );
+    expect((cleared.body as { entries: unknown[] }).entries).toHaveLength(2);
+
+    const tooLong = await handleRequest(
+      h.deps,
+      h.req({ method: "GET", path: "/replay/task-1", query: { keyword: "覆".repeat(201) } }),
+    );
+    expect(tooLong.status).toBe(422);
+    // 422 而不是 400：调用方能自己修（改短一点），服务端没做错任何事。
+    // 与 limit/offset 那两条同一个口径，别在这里发明新状态码。
+    expect(String((tooLong.body as { error: string }).error)).toContain("200");
+
+    // 反向对照：200 个字符【不】被拒（边界在 201，不是 200）。
+    const edge = await handleRequest(
+      h.deps,
+      h.req({ method: "GET", path: "/replay/task-1", query: { keyword: "覆".repeat(200) } }),
+    );
+    expect(edge.status).toBe(200);
   });
 });
 

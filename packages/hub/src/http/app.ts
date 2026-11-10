@@ -30,6 +30,7 @@ import {
   HTTP_UNAUTHORIZED,
   HTTP_UNPROCESSABLE,
   isImplemented,
+  type ApiEndpoint,
   type ApprovalDecisionRequest,
   type ResumeValue,
   type TaskView,
@@ -39,6 +40,7 @@ import type { DatabaseSync } from "node:sqlite";
 import type { EventBus } from "../events/bus.js";
 import { legalTransitionsFrom, type TaskState } from "../graph/status.js";
 import { ResumeStream, type SnapshotSource } from "./sse.js";
+import { buildReplayView } from "../replay/query.js";
 import { verifyRequest, type VerifyInput } from "./auth.js";
 
 export interface HubRequest {
@@ -201,12 +203,18 @@ async function route(
 
   const routeHit = matchRoute(method, req.path);
   if (routeHit === null) return json(HTTP_NOT_FOUND, { error: "no such route" });
+  // 501 这一支【此刻没有活的分母】：UNIMPLEMENTED_ENDPOINTS 在 Task 3.4 之后是空的
+  // （GET /replay/:taskId 是它唯一一项，现已落地）。
+  // 分支【保留】而不是删掉，两个理由：
+  //  ① 它是「契约先行」这条做法的落地端 —— 契约里有、服务端还没做，靠它回一个
+  //     与 404 可区分的答复。删掉之后再加契约先行的端点，会得到一个 404，
+  //     而 404 把调用方支去检查自己的参数（这条口径见 contracts/api.ts 的状态码注释）。
+  //  ② 判据本身被 isImplemented501() 抽出来单独测了（contract.test.ts 那条
+  //     「状态码口径」）。一个【永不被触发的分支 + 一条恒真的判据】才是真绿，
+  //     而「恒真的判据」正是本仓反复抓的那类东西（0007 §4.1）。
   if (!isImplemented(routeHit.endpoint)) {
     return json(HTTP_NOT_IMPLEMENTED, {
-      error:
-        routeHit.endpoint +
-        " 尚未实现（计划 Task 3.4 回放时间线）。501 而不是 404：" +
-        "404 会让调用方去检查自己的参数，而真相是服务端还没做。",
+      error: notImplementedMessage(routeHit.endpoint),
     });
   }
 
@@ -221,26 +229,39 @@ async function route(
       return decide(deps, routeHit.id, req.body);
     case "events":
       return events(deps, req);
+    case "replay":
+      return replay(deps, routeHit.id, req.query);
     default: {
-      // 走到这里意味着【有人把某个端点加进了 IMPLEMENTED_ENDPOINTS，却没在这里加分支】
-      // （目前只有 replay 会到这里，而它上面已被 isImplemented 拦掉）。
-      // 三选一里选了【抛】：
-      //  - 回 501：读起来像「还没实现」，而实现【就在同一个文件里、就在下一个 case】——
-      //    前端会一直等效地等一个已经存在的东西，这条线索会指向错误的方向；
-      //  - return undefined：类型上不允许（返回类型不含 undefined），
-      //    而 TS 现在能报这一条恰恰是因为我把分支写全了；
-      //  - 抛：一次编译期无警告、运行期一次带原文的 500，指向唯一的成因。
-      // 这一行的真正作用是【让上面的 switch 保持穷尽】：写了 default，
-      // 就等于给「加端点忘了加分支」留了一个会响的地方。
-      const where: string = routeHit.kind;
+      // 走到这里意味着【有人加了一种 Route 却没在这里加分支】。
+      //
+      // ★ 这一段本轮被 tsc 逼着重写过，因为原来那版是【反向】的穷尽守卫。
+      //   原文写的是 `const where: string = routeHit.kind`，注释声称本行的作用是
+      //   『让上面的 switch 保持穷尽』。实测正好相反：
+      //    - Route 联合里【有一种没写 case】时，default 里的 routeHit 是那一型，
+      //      .kind 合法 ⇒ 编译通过；
+      //    - 全部 kind 都写了 case 之后（本轮给 replay 补上分支就触发了这一格），
+      //      routeHit 收窄成 never ⇒ 读 .kind 报 TS2339。
+      //   也就是说它【只在漏分支时不报错】—— 与它自己注释里写的那个用途完全相反，
+      //   而它一直「正常编译」恰恰是因为 replay 一直没有分支。
+      //   Task 3.4 把最后一个 kind 补上，它当场编译不过 —— 症状看着像「我把代码改坏了」，
+      //   真相是守卫一直是反的。
+      //
+      // 正向写法是赋值给 never：漏分支 ⇒ 这一行编译不过；分支齐全 ⇒ 通过。
+      // 运行期仍然抛，因为「编译期守卫」挡的是【加 kind 的人】，
+      // 挡不了运行时从别处（未来某次重构）流进来的意外值。
+      // 抛的形态与代价沿用原注释的判断：
+      //  - 回 501：读起来像「还没实现」，而实现【就在同一个文件里】——
+      //    前端会一直等效地等一个已经存在的东西，这条线索指向错误的方向；
+      //  - return undefined：类型上不允许，而 TS 现在能报这一条恰恰因为分支写全了；
+      //  - 抛：运行期一次带原文的 500，指向唯一的成因。
+      const impossible: never = routeHit;
       throw new Error(
-        "端点 [" +
-          routeHit.endpoint +
-          "] 已登记为已实现（IMPLEMENTED_ENDPOINTS），但 handleRequest 里" +
-          "没有 kind=" +
-          where +
-          " 的分支。补分支，而不是把它从清单里删掉 —— 后者会把「已经做好的东西」" +
-          "伪装成「还没做」。",
+        "matchRoute 返回了一个 handleRequest 没有分支的 Route：" +
+          JSON.stringify(impossible) +
+          "。它能在类型上走到这里，说明 Route 加了一种 kind 而 switch 没跟上" +
+          "（正常情况下上面的 never 赋值会在编译期就拦住）。" +
+          "补分支，而不是把它从 IMPLEMENTED_ENDPOINTS 里删掉 —— 后者会把" +
+          "「已经做好的东西」伪装成「还没做」。",
       );
     }
   }
@@ -500,6 +521,88 @@ async function events(deps: HubDeps, req: HubRequest): Promise<HubResponse> {
     stream: stream.frames(),
     onClose: () => stream.close(),
   };
+}
+
+/**
+ * 501 的报错文案。单独抽出来【不是为了复用】，是为了让它能被测：
+ * 此刻 UNIMPLEMENTED_ENDPOINTS 为空 ⇒ 上面那个 501 分支没有活的分母，
+ * 于是「未实现端点回 501 而不是 404」这条口径在 route() 里【无法】被用例触发。
+ * 抽出来之后判据本身仍然可测（contract.test.ts 直接喂一个未实现端点），
+ * 而不是变成一条「代码写着、而没有任何输入能走到」的死逻辑。
+ */
+export function notImplementedMessage(endpoint: ApiEndpoint): string {
+  return (
+    endpoint +
+    " 尚未实现。501 而不是 404：404 会让调用方去检查自己的参数，" +
+    "而真相是服务端还没做。"
+  );
+}
+
+/**
+ * GET /replay/:taskId —— 回放时间线（计划 Task 3.4，规格 §22.2）。
+ *
+ * 三条口径：
+ *  ① 读走 deps.db，而那是 queue.readConnection()（real-deps.ts:457）。
+ *     于是【搜索与回放不排队】：一次超过 busy_timeout（5000ms，见 pragmas.ts:19）
+ *     的模型调用期间，CEO 打开回放页照旧能看。若哪天有人把它改成写连接，
+ *     0010 §7 那个「图在跑时批准必失败」的症状会复制到回放上，
+ *     而那属等 CEO 拍板的锁问题，本不该外溢到只读路径。
+ *  ② 任务不存在 ⇒ 404。与 GET /tasks/:id 同一个口径。
+ *  ③ 坏行不 500。这是 app.ts 里 toTaskView 那段注释【点名给 Task 3.4】的方案
+ *     （『真要做容错，正确形态是给那一行加 degraded 标记 + 照常返回原始值』），
+ *     所以这里不套 toTaskView 那种「契约与库不一致就抛」的处理 ——
+ *     回放的用途是【理解发生了什么】，一段少了两条的时间线仍有用，
+ *     而一个 500 让 CEO 对那个任务完全失明。少的那部分由 degraded + complete=false 说出去。
+ */
+/** 回放关键词上限。URL 整体受 MAX_BODY 之外的服务器行长限制，这里再收一道：
+ * 关键词会进 LIKE 的全表扫（兜底那一档），一条十万字的关键词是一次没人会等的扫描。 */
+export const MAX_REPLAY_KEYWORD_CHARS = 200;
+
+function replay(
+  deps: HubDeps,
+  taskId: string,
+  query: HubRequest["query"],
+): HubResponse {
+  for (const key of ["limit", "offset"]) {
+    const raw = query[key];
+    if (raw !== undefined && !/^\d+$/u.test(raw)) {
+      return json(HTTP_UNPROCESSABLE, {
+        error: key + " 必须是非负整数，实到 " + raw,
+      });
+    }
+  }
+  /*
+   * ?keyword= 空串 ⇒ 【不过滤】，而不是「搜空串」。
+   * 这两个语义在界面上必须分开：地址栏里 `?keyword=` 是「我清掉了搜索框」，
+   * 用户期待看到完整时间线；如果这时候回一条空时间线，读起来是
+   * 「这个任务什么都没发生过」。searchEvents 内部也是同一口径（空关键词返回空集），
+   * 所以这一层必须【根本不下发】keyword，否则两者会叠成「空时间线」。
+   */
+  const rawKeyword = query["keyword"];
+  if (rawKeyword !== undefined && [...rawKeyword].length > MAX_REPLAY_KEYWORD_CHARS) {
+    return json(HTTP_UNPROCESSABLE, {
+      error:
+        "keyword 最长 " +
+        MAX_REPLAY_KEYWORD_CHARS +
+        " 个字符，实到 " +
+        [...rawKeyword].length +
+        " 个。关键词建议 ≥3 个汉字（trigram 的分词窗口，规格附录 C.3）。",
+    });
+  }
+  const view = buildReplayView(deps.db, {
+    taskId,
+    ...(rawKeyword === undefined || rawKeyword === ""
+      ? {}
+      : { keyword: rawKeyword }),
+    ...(query["limit"] === undefined ? {} : { limit: Number(query["limit"]) }),
+    ...(query["offset"] === undefined
+      ? {}
+      : { offset: Number(query["offset"]) }),
+  });
+  if (view === null) {
+    return json(HTTP_NOT_FOUND, { error: "task not found", id: taskId });
+  }
+  return json(200, view);
 }
 
 function json(status: number, body: unknown): HubResponse {

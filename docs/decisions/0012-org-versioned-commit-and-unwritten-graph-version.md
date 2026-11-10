@@ -270,8 +270,10 @@ import 一个 http 模块），往下挪了 23 行。行内容一字未变。
   > 「**契约自己要求加端点这件事走一次 review**」—— 这条改的是**该找谁**（走契约变更），
   > 不是**能不能做**。
   > 顺带量到一件影响**动手顺序**的事：那张表里已经有 `GET /replay/:taskId`
-  > （`packages/contracts/src/api.ts:56` 的 `UNIMPLEMENTED_ENDPOINTS`，
-  > 注释写明「Phase 3（Task 3.4 回放时间线）填充，本期返回 501」），
+  > （`packages/contracts/src/api.ts:64` 的 `UNIMPLEMENTED_ENDPOINTS`，
+  > 当时注释写明「Phase 3（Task 3.4 回放时间线）填充，本期返回 501」，
+  > **那句话到 Task 3.4 落地时已经不成立** —— 端点进了 IMPLEMENTED，那张表变成空的，
+  > 见 0013 §6（以及它 §11 那条「本轮没做到」里的 UI 缺口），
   > 而**组织图一个端点都没有**（`delegation_graphs` 在 src 里只被 `org/commit.ts` 与
   > `http/real-deps.ts` 提到，后者只读 `MAX(version)`）。
   > ⇒ Task 3.4 的对外契约**已经备好在等实现**，org 这一侧则要**先立约**再实现：

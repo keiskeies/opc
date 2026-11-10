@@ -50,12 +50,18 @@ export const IMPLEMENTED_ENDPOINTS: readonly ApiEndpoint[] = [
   "GET /tasks/:id",
   "POST /approvals/:interruptId",
   "GET /events",
-];
-
-/** Phase 3（Task 3.4 回放时间线）填充，本期返回 501。 */
-export const UNIMPLEMENTED_ENDPOINTS: readonly ApiEndpoint[] = [
   "GET /replay/:taskId",
 ];
+
+/**
+ * 还没有实现的端点。本期为空。
+ *
+ * 这一格【保留而不是删掉】：`isImplemented` 靠它把「契约里有」与「能用」分开，
+ * 而 app.ts 对未实现端点回 501 而不是 404（404 会让调用方去检查自己的参数，
+ * 真相却是服务端还没做 —— 两种「没有」的修法完全不同）。
+ * 哪天再加契约先行的端点，位置就是这里。
+ */
+export const UNIMPLEMENTED_ENDPOINTS: readonly ApiEndpoint[] = [];
 
 export function isImplemented(e: ApiEndpoint): boolean {
   return IMPLEMENTED_ENDPOINTS.includes(e);

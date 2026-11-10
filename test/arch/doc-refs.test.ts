@@ -230,10 +230,14 @@ const SNAP: Record<string, string> = {
   // 注：`api.ts` 这个基名【有歧义】（另有 packages/desktop/src/preload/api.ts），
   // 所以两条都得写全路径 —— 只写 `api.ts:56` 会被 resolveTarget 判成歧义并报错。
   // 这是本守卫抓的第三类问题：前两类是行号漂移与目标行改写，这一类是【同名文件没指定目录】。
+  //
+  // 第二条的**行号在本篇写完后动过一次**（56 → 64）：Task 3.4 把 replay 搬进
+  // IMPLEMENTED 之后，那张表头上多注释了一段。这正是活坐标该有的反应 ——
+  // 快照当场红，逼人重读那段论证，而不是让文档继续指着一句 `/**` 讲 UNIMPLEMENTED。
   "0012-org-versioned-commit-and-unwritten-graph-version.md>packages/contracts/src/api.ts:29":
     "export const API_ENDPOINTS = [",
-  "0012-org-versioned-commit-and-unwritten-graph-version.md>packages/contracts/src/api.ts:56":
-    "export const UNIMPLEMENTED_ENDPOINTS: readonly ApiEndpoint[] = [",
+  "0012-org-versioned-commit-and-unwritten-graph-version.md>packages/contracts/src/api.ts:64":
+    "export const UNIMPLEMENTED_ENDPOINTS: readonly ApiEndpoint[] = [];",
 };
 
 describe("决策文档里的「文件:行号」引用不漂移", () => {

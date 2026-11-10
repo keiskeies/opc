@@ -284,10 +284,100 @@ describe("真 socket 上的 HTTP", () => {
     expect("graph_checkpoint_id" in (body.tasks[0] as object)).toBe(false);
   });
 
-  it("未实现的端点 ⇒ 501，未授权问同一句 ⇒ 401（顺序在真线上成立）", async () => {
+  it("回放端点在真线上：未授权 ⇒ 401，授权后 ⇒ 200（鉴权仍排在路由之后）", async () => {
+    // 这一条原本是拿 /replay 回 501 来验「鉴权在路由之前」：未授权者拿
+    // 401 / 404 / 501 三种答复就能枚举出哪些路径存在。Task 3.4 把 replay 落地之后
+    // 它不再回 501，于是【这条用例的探针换了、性质没换】——
+    // 未授权那一问仍然是【唯一一种形状】（401），这才是它守的东西。
+    // 换成 200 之后探针其实【更强】了：501 时代只验到「没泄漏实现状态」，
+    // 现在验到「未授权连任务内容都拿不到」（body 是空的）。
     const h = await harness();
-    expect((await raw(h.port, { method: "GET", path: "/replay/task-1" })).status).toBe(401);
-    expect((await signed(h, "GET", "/replay/task-1")).status).toBe(501);
+    const unauth = await raw(h.port, { method: "GET", path: "/replay/task-1" });
+    expect(unauth.status).toBe(401);
+    expect(unauth.body).not.toContain("IN_PROGRESS");
+
+    const auth = await signed(h, "GET", "/replay/task-1");
+    expect(auth.status).toBe(200);
+    const view = JSON.parse(auth.body) as {
+      task: { id: string };
+      entries: unknown[];
+      complete: boolean;
+    };
+    expect(view.task.id).toBe("task-1");
+    // 夹具里这条任务一条审计都没有 ⇒ 空时间线是【正确答复】，
+    // 而它必须与「任务不存在」（404）可区分。
+    expect(view.entries).toHaveLength(0);
+    expect(view.complete).toBe(true);
+  });
+
+  it("回放搜索在真线上：?keyword= 经 URL 编码后仍然命中，且 % 不会被当通配符", async () => {
+    /*
+     * 这一条【只能】在真传输层测，contract 层测不到：
+     * 那边是把 keyword 直接塞进 HubRequest.query，而真线上要过一遍
+     * URLSearchParams 的百分号解码（server.ts:75）。两道之间最容易断的是【% 本身】：
+     * 用户在搜索框打一个百分号，浏览器发的是 keyword=%25，服务端解回 "%"。
+     * 解出来之后它就是 searchEvents 的关键词，而 LIKE 里 % 是通配符 ——
+     * 那一层靠 escapeLikePattern + ESCAPE 兜住（见 test/replay/search.test.ts 那条
+     * 「本轮最值钱」的用例）。所以这条测的是【接线】：编码 → 解码 → 转义 这三段
+     * 首尾相接，任何一段单独对、接起来错，都会在这里红。
+     */
+    const h = await harness();
+    (h.deps.db as unknown as Db)
+      .prepare(
+        "INSERT INTO events (task_id, actor_type, actor_id, action, target, payload, " +
+          "state_snapshot, created_at) VALUES ('task-1','agent','dev','state_change'," +
+          "'task-1',?,NULL,?)",
+      )
+      .run(JSON.stringify({ text: "覆盖率 92% 达标" }), NOW);
+    (h.deps.db as unknown as Db)
+      .prepare(
+        "INSERT INTO events (task_id, actor_type, actor_id, action, target, payload, " +
+          "state_snapshot, created_at) VALUES ('task-1','agent','dev','state_change'," +
+          "'task-1',?,NULL,?)",
+      )
+      .run(JSON.stringify({ text: "另一条没有百分号" }), NOW);
+
+    // 中文按浏览器那样编码；'%25' 是字面百分号。
+    const target = "/replay/task-1?keyword=" + encodeURIComponent("92%");
+    const res = await signed(h, "GET", target);
+    expect(res.status).toBe(200);
+    const view = JSON.parse(res.body) as { entries: { payload: { text: string } }[] };
+    expect(view.entries).toHaveLength(1);
+    expect(view.entries[0]?.payload.text).toContain("92%");
+
+    // 只搜一个百分号 ⇒ 命中【含百分号的那一条】，而不是全表。
+    const pct = await signed(h, "GET", "/replay/task-1?keyword=%25");
+    const pctView = JSON.parse(pct.body) as { entries: unknown[] };
+    expect(pctView.entries).toHaveLength(1);
+
+    // 反向对照：同一发请求【不带 keyword】时两条都在。
+    // 少了这一格，上面那个 1 可能来自「keyword 被解码成空 ⇒ 恒 0 命中」这种错法。
+    const all = await signed(h, "GET", "/replay/task-1");
+    expect((JSON.parse(all.body) as { entries: unknown[] }).entries).toHaveLength(2);
+  });
+
+  it("未知路径 ⇒ 404；未实现端点的判据本身仍然成立（清单为空 ⇒ 只能直接问函数）", async () => {
+    // Task 3.4 之后 UNIMPLEMENTED_ENDPOINTS 是空的，于是【没有任何一条真请求】
+    // 能走到 501 那一支。这里不假装还有一条能走：
+    //  - 路由侧照旧测 404（未知路径）；
+    //  - 501 侧改成直接问那个判据函数（notImplementedMessage + isImplemented），
+    //    并【明写】这一支此刻没有活的分母。
+    // 为什么不能就这么删掉这条用例：那等于把「404 与 501 可区分」这条口径
+    // 从测试里抹掉，而下一次加契约先行的端点时没人提醒要保持它。
+    const h = await harness();
+    const missing = await signed(h, "GET", "/nope");
+    expect(missing.status).toBe(404);
+
+    const { isImplemented, UNIMPLEMENTED_ENDPOINTS, API_ENDPOINTS } = await import(
+      "@opc/contracts"
+    );
+    const { notImplementedMessage } = await import("../../src/http/app.js");
+    expect(UNIMPLEMENTED_ENDPOINTS).toHaveLength(0);
+    // 清单为空 ⇒ IMPLEMENTED 必须等于全表，否则就有端点【两边都不在】，
+    // 那种端点会被 isImplemented 判成未实现而永远 501，且没有任何测试看得见。
+    const implemented = API_ENDPOINTS.filter((e) => isImplemented(e));
+    expect([...API_ENDPOINTS].sort()).toEqual([...implemented].sort());
+    expect(notImplementedMessage("GET /replay/:taskId")).toContain("501");
   });
 
   it("POST /approvals 的 404 在真线上也【不写审计】", async () => {
