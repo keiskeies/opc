@@ -152,7 +152,13 @@ it("schema_migrations 记录版本与 Unix 毫秒时间戳", async () => {
       "SELECT version, applied_at FROM schema_migrations ORDER BY version",
     )
     .all() as { version: string; applied_at: number }[];
-  expect(rows.map((r) => r.version)).toEqual(["0001_init"]);
+  // 版本清单【硬编码】而不是从目录扫出来再比对自己 —— 扫出来比对等于永远通过，
+  // 这一维要拦的恰恰是「多了一个迁移却没人核对过它该不该存在」。
+  // 加新迁移时必须同时改这一行，这是刻意的摩擦（见 test/arch 的同类立场）。
+  expect(rows.map((r) => r.version)).toEqual([
+    "0001_init",
+    "0002_phase1_evidence_and_budget",
+  ]);
   // applied_at 必须是 Unix 毫秒整数：审计要能还原「这张表什么时候建的」
   for (const r of rows) {
     expect(Number.isInteger(r.applied_at)).toBe(true);
