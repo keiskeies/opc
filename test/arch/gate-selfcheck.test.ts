@@ -92,28 +92,65 @@ function runGate(cwd: string): Run {
   return { code: r.status ?? -1, printedFails, listedFails, claimed, out };
 }
 
-// 探针乙的落点：仓库根的上一级。它本身必须不在任何 git 仓库内，否则【仓库外】
-// 这个态根本没测到 —— 前提破了就直接抛错，绝不让它静默退化成一桩空对空。
-const OUTSIDE = join(ROOT, "..");
+// 探针乙的落点：从仓库根向上逐级问 git，取第一个「它不在任何
+// 仓库里」的现存目录。
+//
+// 不写死 ROOT 的上一级：那等于假定克隆的父目录恰好不在任何仓库内。
+// 把仓库克隆进家目录、而家目录本身是 dotfiles 仓库的开发者，会
+// 得到一条永远呵哚的守卫（0007 §4.1）。逐级问 git 而不猜深度。
+//
+// 候选必须经 git 亲口认账才能用：「仓库外」这个态是验证出来的，
+// 不是靠目录长得像。选择逻辑抽成纯函数（probe 泥入），是为了
+// 「父目录是仓库、祖目录不是」这种态能用普通单测钉住，
+// 不必真去造一个仓库来测这条守卫自己。
+function pickOutsideRepo(
+  candidates: string[],
+  probe: (dir: string) => boolean,
+): string | null {
+  for (const dir of candidates) {
+    if (probe(dir)) {
+      return dir;
+    }
+  }
+  return null;
+}
 
-function assertOutsideIsNoRepo(): void {
+function isNoRepo(dir: string): boolean {
   const p = spawnSync("git", ["rev-parse", "--show-toplevel"], {
-    cwd: OUTSIDE,
+    cwd: dir,
     encoding: "utf8",
     timeout: 60000,
     shell: false,
   });
-  if (p.status === 0) {
-    throw new Error(
-      "探针前提破了：" +
-        OUTSIDE +
-        " 也在某个 git 仓库内（" +
-        String(p.stdout).trim() +
-        "），【仓库外】这个态没测到。",
-    );
-  }
+  return p.status !== 0;
 }
 
+let outsideCache: string | null = null;
+
+function outsideRepoDir(): string {
+  if (outsideCache !== null) {
+    return outsideCache;
+  }
+  const candidates: string[] = [];
+  let dir = join(ROOT, "..");
+  for (let i = 0; i < 12; i++) {
+    if (existsSync(dir)) {
+      candidates.push(dir);
+    }
+    const up = dirname(dir);
+    if (up === dir) {
+      break;
+    }
+    dir = up;
+  }
+  const found = pickOutsideRepo(candidates, isNoRepo);
+  if (found === null) {
+    const tried = candidates.join(" ; ");
+    throw new Error("探针乙无处可去：找不到仓库外的目录，试过：" + tried);
+  }
+  outsideCache = found;
+  return found;
+}
 it("门禁脚本存在，否则下面全是空对空", () => {
   expect(existsSync(GATE), "找不到门禁脚本：" + GATE).toBe(true);
 });
@@ -133,8 +170,7 @@ it("探针甲：退出码与不符项数同为零（双向蕴含，不预设现�
 });
 
 it("探针乙：仓库外必须把读不到与外部命令失败都记上账并非零退出", () => {
-  assertOutsideIsNoRepo();
-  const r = runGate(OUTSIDE);
+  const r = runGate(outsideRepoDir());
   expect(r.code, "仓库外还能 exit 0 = 门禁对【读不到】视而不见").not.toBe(0);
   expect(
     r.listedFails.filter((x) => x.includes(WORD_UNREADABLE)).length,
@@ -150,8 +186,7 @@ it("探针乙：仓库外必须把读不到与外部命令失败都记上账并�
 });
 
 it("打印出来的每条 ★FAIL 都得在失败清单里，不许只打印不记账", () => {
-  assertOutsideIsNoRepo();
-  const r = runGate(OUTSIDE);
+  const r = runGate(outsideRepoDir());
   if (r.printedFails.length === 0) {
     throw new Error("探针乙没产生 ★FAIL 样本，断言无从发生，检查解析或前提。");
   }
@@ -161,3 +196,22 @@ it("打印出来的每条 ★FAIL 都得在失败清单里，不许只打印不�
     "这些不符项只打印未记账，退出码因此可能仍为 0",
   ).toBe("");
 });
+
+it(
+  "探针落点的选择逻辑：父目录是仓库时必须继续向上" +
+    "（写死上一级的写法在 dotfiles 仓库场景下会永呵哚）",
+  () => {
+    // 父目录是仓库、祖目录不是：必须选祖目录，不能取第一个候选。
+    const seen: string[] = [];
+    const pick = pickOutsideRepo(["a", "b", "c"], (d) => {
+      seen.push(d);
+      return d !== "a";
+    });
+    expect(pick).toBe("b");
+    expect(seen).toEqual(["a", "b"]);
+    // 全是仓库：返回 null，由调用方抛错，绝不静默拿一个仓库内目录交差。
+    expect(pickOutsideRepo(["a", "b"], () => false)).toBeNull();
+    // 空候选：同样不得编造落点。
+    expect(pickOutsideRepo([], () => true)).toBeNull();
+  },
+);
