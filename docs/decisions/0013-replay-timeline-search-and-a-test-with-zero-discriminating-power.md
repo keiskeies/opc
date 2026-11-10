@@ -242,7 +242,7 @@ M10 一开始报「全绿」时我的第一反应是「这条测试真守不住�
 | §22.3 那条 | 数据源 | 现状 | 本轮能否实现 |
 |---|---|---|---|
 | 蒸馏 skill 生成的判断要标 skill 版本/来源/置信边界 | `skill_mounts` 表 | 表存在；**src 里写入方 0**；而计划 §11 末尾明写 Skills 层（规格 §14）是**唯一未排任务的能力** | **不能** |
-| 策略引擎自动通过要标「基于模式的自动批准」 | `approvals` 有写入方；`auto_approved_by` 无人写 | 策略引擎自动审批是 Task 3.5（未做） | **能，但等 3.5** |
+| 策略引擎自动通过要标「基于模式的自动批准」 | 【撤回，见 §10.1】原文「`approvals` 有写入方；`auto_approved_by` 无人写」—— 实测 src 里**零 INSERT**；`auto_approved_by` 那一列**根本不存在** | 策略引擎自动审批是 Task 3.5（未做） | 原报「能，但等 3.5」是**高估**：等 3.5 之前先得有人创建卡片 |
 | harness 调用要标名称/版本/参数摘要/session_id/退出码/diff 哈希 | `harness_calls` 表 | 表存在；**src 里写入方 0**；计划里 `harness_calls` **零命中**（无任务写它） | **不能** |
 | 组织图版本要标运行时的 `graph_version` 及汇报关系 | `tasks.graph_version` + `delegation_graphs` | 本轮做完（缺那一版时给带原因的缺口，不退回当前图） | **已做** |
 | 审阅者模型家族要能分析「同源审阅通过率是否异常偏高」 | `review_gates.reviewer_model_family` | 表存在；**src 里写入方 0**；计划里 `review_gates` **零命中** | **不能** |
@@ -280,6 +280,58 @@ M10 一开始报「全绿」时我的第一反应是「这条测试真守不住�
 
 这一项**卡** §22.3 与 §22.4 的验收，**不卡** Phase 3 剩下的任务。
 
+### 10.1 【撤回 + 重写】上面第二行的依据是假的：`approvals` 在 src 里连一次 INSERT 都没有
+
+拍板要读的那张表，第二行我写的是「**`approvals` 有写入方**；`auto_approved_by` 无人写」，
+据此判「策略引擎自动通过这一格**能**实现，但等 Task 3.5」。
+
+**「有写入方」这句错，而且我发表它的同一节里就贴着能证伪它的原文。**
+写完之后去数写入方，`approvals` 那一栏报 1 —— 但 grep 命中数不等于写入方数：
+唯一的命中是 `packages/hub/src/http/real-deps.ts:7` 的一句**注释**，
+而那句注释自己写的就是「⇒ 0 命中」和「全仓唯一写 approvals 的代码在两个测试文件的
+**【夹具】**里」（`:8`）。也就是说 **src 里没有任何一条 `INSERT INTO approvals`**，
+唯一的写是 `real-deps.ts:147` 的
+`CLAIM_APPROVAL_SQL = "UPDATE approvals SET status = ?, decided_by = ?, decided_at = ?, decision_note = ? WHERE id = ? AND status = 'pending'"`。
+UPDATE 不创建行。全仓的 `INSERT INTO approvals` 只出现在三个测试文件的夹具里
+（`http/contract.test.ts`、`http/real-deps.test.ts`、`db/schema-0001.test.ts`）。
+
+**为什么这条错值得单独一节，而不只是改两个字**：UPDATE-with-`status = 'pending'` 是
+**条件写**，库里没有那一行时它匹配 0 行。实测（`real-deps.ts:213` 那一行
+`if (Number(info.changes) === 0) return null; // 没抢到：不写审计`，由
+`real-deps.test.ts` 覆盖）说明它的行为是
+「安静地什么也没发生」，而**没有任何东西创建那张卡片**：
+起草方 `decideEscalation` 是纯函数（文件头 `:14` 明写「落库（`approvals` 那一行 +
+ESCALATED_TO_CEO 状态边）由调用方在同事务内做」），而它在 src 里的调用方是
+**0 条**（计划里只有 Task 1.4 那句接口签名，没有任何任务补那个调用方）——
+同一个函数第二次以「零生产调用方」的形态出现，是 §7 那族缺陷的第四次。
+
+⇒ 事实不是「有写入方、只差 `auto_approved_by` 这一列」，
+而是「**pending 的审批卡片在生产里一张都不存在**」。
+连带的三条口径要跟着改：
+
+| 受影响处 | 原话 | 准确的读法 |
+|---|---|---|
+| 本节表格第二行 | 「`approvals` 有写入方」 | **`approvals` 在 src 里零 INSERT**；「能，但等 3.5」这个「能」是**高估**（见下） |
+| 上面 §10 的 A/B/C 三选项报价 | 只谈四张表 | `approvals` 的缺口**不在那四张表里**，所以 A 的半天报价不含「让卡片真的存在」 |
+| Task 3.5 的前置 | —— | 规格 §9.1 那句「模式自动通过」的**被作用对象**是 pending 审批。它现在**恒为空集** ⇒ 任何按模式自动批准的实现都只能对**测试夹具造的卡片**生效 |
+
+对 Task 3.5 的具体后果，说准：**没有一条验收会因为「卡片不存在」而自动失败** ——
+夹具能造出卡片，用例能全绿。这正是 §7 那族缺陷的标准形态：**绿的程度掩盖没接上**。
+所以 3.5 收尾时必须有一条**存在性断言**（src 里 `"INSERT INTO approvals (` 的命中数 > 0），
+而不是只断言「给定一张 pending 卡片，模式匹配 ⇒ 状态变 approved」。
+后者在今天的库上永远只能通过自己插行来测。
+
+至于 §10 那三个选项本身：**结论不变**（`review_gates` 那半仍然是四条里唯一
+「字段在判定现场就有、只差落库」的一条），变的只是第二行的证据与 A 的报价范围。
+
+**仪器层面的修法（这一条是本轮第三次撞到同一判据，见 §9）**：
+§11 那条复算命令用 `grep -rn "INSERT INTO $t"`，**它把注释算成写入方** ——
+于是它对一张**没人写的表报 1**，也就是**结构上不可能报出「零写入方」**，
+只能虚高。§8 那节的判据是「反向对照根本没经过被测代码」，§9 是「变异脚本没变异」，
+这一条同族：**能给出非零答案的那次 grep，从来没有给出过答案**。
+现在改成 SQL 形状（`'"INSERT INTO '"$t"'[ (]'` 与 `'"UPDATE '"$t"' SET'`），
+并在注释里写明它为什么必须带引号与括号 —— **不带就退化成一次全文搜索**。
+
 ## 11. 复算方式，以及本轮**没做到**的事
 
 ```sh
@@ -295,10 +347,19 @@ PATH=~/.nvm/versions/node/v24.14.0/bin:$PATH node --experimental-transform-types
 **§10 那张表的依据，三条命令**（不需要读我的转述）：
 
 ```sh
-# ① 四张表在 src 里有几个写入方
-for t in skill_mounts harness_calls review_gates trust_scores; do
-  echo "$t: $(grep -rn "INSERT INTO $t" packages/*/src --include='*.ts' | grep -v dist | wc -l)"
+# ① 五张表在 src 里有几个写入方。SQL 形状【必须带引号 + INSERT 后的空格 + 左括号】：
+#    裸 `grep "INSERT INTO approvals"` 会把注释算成写入方（实测对一张零写入方的表报 1，
+#    那唯一命中就是 real-deps.ts:7 那句自己写着「0 命中」的注释）——
+#    那种写法结构上不可能报出「零写入方」，只能虚高。理由详见 §10.1 末段。
+for t in approvals skill_mounts harness_calls review_gates trust_scores; do
+  ins=$(grep -rnE "\"INSERT INTO $t[ (]" packages/*/src --include='*.ts' | grep -v dist | wc -l | tr -d ' ')
+  upd=$(grep -rnE "\"UPDATE $t SET" packages/*/src --include='*.ts' | grep -v dist | wc -l | tr -d ' ')
+  echo "$t  INSERT=$ins  UPDATE=$upd"
 done
+# 实测：approvals 0/1（那一条 UPDATE 就是 CLAIM_APPROVAL_SQL，它不创建行）；
+#       skill_mounts 0/0；harness_calls 0/0；review_gates 0/0；trust_scores 0/0。
+# 谁创建 approvals 行：grep -rln "INSERT INTO approvals" packages/*/test test
+#   ⇒ 只有三个测试文件的夹具。
 # ② 计划里有没有任务写它们
 for t in review_gates harness_calls trust_scores skill_mounts; do
   echo "$t: $(grep -c "$t" docs/superpowers/plans/2026-11-06-opc-os-development-plan.md)"

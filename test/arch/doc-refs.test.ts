@@ -238,6 +238,26 @@ const SNAP: Record<string, string> = {
     "export const API_ENDPOINTS = [",
   "0012-org-versioned-commit-and-unwritten-graph-version.md>packages/contracts/src/api.ts:64":
     "export const UNIMPLEMENTED_ENDPOINTS: readonly ApiEndpoint[] = [];",
+  // 0013 §10.1 那次【撤回】的三块砖。这一组与前面几组的性质不同：前面抓的是
+  // 「文档引用的那行代码挪了」，这一组抓的是「文档引用的那条**注释**不再成立」。
+  // real-deps.ts:7 那句注释是本篇结论的**反方证据**（它写着「0 命中」，
+  // 而我曾据同一份文件写出「approvals 有写入方」）—— 注释一旦被改，
+  // §10.1 整段论证要么已过期要么曾经就错，所以它必须是活坐标。
+  // 同一条注释在 0013 里被引用两次（§10.1 用全路径、§11 用基名），
+  // 守卫按字面提两个 key，所以这里也登记两条 —— 少一条就红，这是设计而非冗余。
+  "0013-replay-timeline-search-and-a-test-with-zero-discriminating-power.md>packages/hub/src/http/real-deps.ts:7":
+    '*   · `grep -rn "INSERT INTO approvals\\|UPDATE approvals" packages/hub/src` ⇒ 0 命中',
+  "0013-replay-timeline-search-and-a-test-with-zero-discriminating-power.md>real-deps.ts:7":
+    '*   · `grep -rn "INSERT INTO approvals\\|UPDATE approvals" packages/hub/src` ⇒ 0 命中',
+  // 全仓唯一那句「写 approvals」的 SQL：它是 UPDATE 而不是 INSERT，
+  // 所以「有写入方」这句话错在这里。行内容改写（比如补一列 auto_approved_by）
+  // 会当场让 0013 §10 那张表的第二行变红 —— 而那正是应该重读它的时刻。
+  "0013-replay-timeline-search-and-a-test-with-zero-discriminating-power.md>real-deps.ts:147":
+    '"UPDATE approvals SET status = ?, decided_by = ?, decided_at = ?, decision_note = ? " +',
+  // 「条件写匹配 0 行 ⇒ 安静地什么都不发生」这一条实测的出处。
+  // 它是 §10.1 末段那条「Task 3.5 必须带存在性断言」的判据来源。
+  "0013-replay-timeline-search-and-a-test-with-zero-discriminating-power.md>real-deps.ts:213":
+    "if (Number(info.changes) === 0) return null; // 没抢到：不写审计",
 };
 
 describe("决策文档里的「文件:行号」引用不漂移", () => {
