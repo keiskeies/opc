@@ -300,6 +300,12 @@ const SNAP: Record<string, string> = {
   // 它是 §10.1 末段那条「Task 3.5 必须带存在性断言」的判据来源。
   "0013-replay-timeline-search-and-a-test-with-zero-discriminating-power.md>real-deps.ts:213":
     "if (Number(info.changes) === 0) return null; // 没抢到：不写审计",
+  // 0002 §4 那条「schema 看着开放」论证的唯一落点：platform 那一列的注释枚举了三个平台。
+  // 它必须是活坐标 —— 那篇的排除理由里【最硬的一条】依赖「这套形状从第一天起没给个人微信留位」，
+  // 而那件事的全部证据就是这一行的注释。注释一改（加第四个平台、或干脆删掉注释），
+  // 那条论证就需要重读，而不是继续被引用。
+  "0002-no-personal-wechat.md>packages/hub/resources/migrations/0001_init.sql:251":
+    "platform TEXT NOT NULL,                    -- 'feishu'|'wecom'|'qq'",
 };
 
 describe("决策文档里的「文件:行号」引用不漂移", () => {
