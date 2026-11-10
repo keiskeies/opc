@@ -58,6 +58,7 @@ import {
   backupName,
   createBackup,
   isBackupName,
+  isSamePath,
   listBackups,
   pruneBackups,
   restoreBackup,
@@ -753,5 +754,147 @@ describe("⑥ 恢复演练：备份成功 ≠ 恢复可用", () => {
     expect(d.backup.ok).toBe(false);
     expect(d.restore.ok).toBe(false);
     expect(warnings.length).toBeGreaterThanOrEqual(1);
+  });
+
+  /**
+   * ⭐ 演练目标算成源库 ⇒ 必须【抛】，而且必须在删任何东西之前就抛。
+   *
+   * 这条用例防的是本模块唯一能毁掉现网库的一条路（文件头第 4 条，实测过）：
+   * 守卫不存在时 `restoreDrill` **返回 ok:true**，而它已经把源库删了、
+   * 用备份覆盖了它、删了它的 -wal。也就是说**没有这条用例时，那个 bug 的表现是「全绿」**。
+   *
+   * 三种写法都要覆盖，因为它们的失效方式不同：
+   *  ① 一模一样的字符串 —— 只有「字符串比较」的实现能挡住这一种；
+   *  ② 带 `..` 的另一种写法（`sub/../x.db`）—— 只有【归一化之后】的比较才挡得住，
+   *     而这正是真实形状：路径是从 CLI 拼出来的，没人保证它是规范形式；
+   *  ③ 反向对照 —— 同名而不同目录必须【照常跑】，否则这条判据可以是「永远抛」，
+   *     那就把一个可用参数判成不可用（本仓那条「一条判据要有反向对照」的口径）。
+   */
+  it("⭐ 演练目标 = 源库（含 `..` 那种写法）⇒ 抛 TypeError 且源库毫发无损", () => {
+    const src = migratedDb(9);
+    const dir = freshDir("drill-selfguard");
+
+    // ① 同一个字符串
+    expect(() =>
+      restoreDrill({ dbPath: src, backupDir: dir, drillTargetPath: src, onWarning: warn }),
+    ).toThrow(TypeError);
+    expect(existsSync(src)).toBe(true);
+    expect(countEvents(src)).toBe(9);
+    // 抛在 createBackup 之前 ⇒ 连备份都不该写出来。这一条把「先备份再报错」那种写法拒掉：
+    // 那种写法会把一次自毁变成「一份备份 + 一次失败」，而库已经被删了。
+    expect(readdirSync(dir)).toEqual([]);
+
+    // ② 同一个文件的另一种写法。dir 就在 TMP 里面，所以 dir/sub/../.. 回到 TMP，
+    // 拼上同一个 basename 就是 src 本身 —— 归一化之后相等，字符串不等。
+    const sub = join(dir, "sub");
+    mkdirSync(sub, { recursive: true });
+    const base = src.slice(TMP.length + 1);
+    expect(base).not.toContain("/"); // 夹具就在 TMP 根下，否则下面那个 `..` 的层数不对
+    // ⚠ 必须用【字符串拼接】而不是 join 造这个路径：join 内部就调 normalize，
+    // 会把 `/sub/../..` 直接折掉，得到与 src 一模一样的字符串 ——
+    // 那一条断言（「字符串确实不同」）当场红，而红的原因在夹具不在判据。
+    // 我第一版就是写成了 join，红在那里；换成拼接才是真在测归一化。
+    const viaDotDot = sub + "/../.." + "/" + base;
+    expect(viaDotDot).not.toBe(src); // 字符串确实不同 —— 所以这条测的是归一化本身
+    expect(isSamePath(src, viaDotDot)).toBe(true);
+    expect(() =>
+      restoreDrill({ dbPath: src, backupDir: dir, drillTargetPath: viaDotDot, onWarning: warn }),
+    ).toThrow(TypeError);
+    expect(countEvents(src)).toBe(9);
+
+    // ③ 反向对照：同名、另一个目录 ⇒ 不是同一个文件，必须照常演练
+    const other = freshDir("drill-selfguard-other");
+    const sameNameElsewhere = join(other, src.slice(TMP.length + 1));
+    expect(sameNameElsewhere.slice(sameNameElsewhere.lastIndexOf("/") + 1))
+      .toBe(src.slice(src.lastIndexOf("/") + 1));
+    expect(isSamePath(src, sameNameElsewhere)).toBe(false);
+    const d = restoreDrill({
+      dbPath: src,
+      backupDir: dir,
+      drillTargetPath: sameNameElsewhere,
+      onWarning: warn,
+    });
+    expect(d.ok).toBe(true);
+    expect(countEvents(src)).toBe(9);
+    expect(warnings).toEqual([]);
+  });
+
+  /**
+   * 演练目标位置上躺着一个【目录】。这不是编的形状：演练失败时那个目标会被
+   * 【留在原地当现场】（maintenance.ts 里那条决定），于是它进入人的视野，
+   * 而人被它绊到的第二天可能把它换成同名目录再排查一遍。
+   *
+   * 这一发守的是一条【跨模块契约】：runMaintenance 承诺「不抛」，
+   * 而它只接 TypeError 那一类异常。rmSync 对目录抛的是 ERR_FS_EISDIR ——
+   * 不在那一条里，会一路冒到进程外，把「巡检顺手跑一次」变成一次崩溃。
+   * 出口是 restoreBackup 那个有名字的失败态 target_not_writable。
+   *
+   * ⚠ 断言写的是【实测的形状】而不是我设想的样子：备份【会】落地（restoreDrill
+   * 必须先备份才有东西可恢复），失败如实报在 restore 那一侧，那个目录【不会被删】。
+   * 我第一版给它配了一条「备份目录里必须还是空的」的断言并在 restoreDrill 里前置一道
+   * 抛门 —— 那条断言当场红了，而我起初以为是判据写错。真相是这个函数【兑现不了】那条：
+   * 「跑不了」这件事只能在备份之后知道。⇒ 记下这一处，免得下一次我又给它许同一个承诺。
+   */
+  it("演练目标是一位目录 ⇒ 不崩、如实报 target_not_writable、那个目录不被递归删", () => {
+    const src = migratedDb(4);
+    const dir = freshDir("drill-dir");
+    const target = join(dir, "drill-target.db");
+    mkdirSync(target);
+
+    const d = restoreDrill({ dbPath: src, backupDir: dir, drillTargetPath: target, onWarning: warn });
+    expect(d.ok).toBe(false);
+    expect(d.backup.ok).toBe(true); // 备份那一步真的成功了 —— 这一格必须如实，不能顺势报 false
+    expect(d.restore.ok).toBe(false);
+    if (d.restore.ok) return;
+    expect(d.restore.reason).toBe("target_not_writable");
+    // 那个目录还在：删它需要 recursive，而「递归删调用方给的路径」正是同路径守卫防的形状
+    expect(statSync(target).isDirectory()).toBe(true);
+    expect(countEvents(src)).toBe(4);
+    // 告警恰好一次（restoreDrill 失败那一支），不多不少
+    expect(warnings.length).toBe(1);
+    expect(warnings[0]).toContain("恢复演练失败");
+  });
+
+  it("restoreBackup 遇到目录目标 ⇒ 一个有名字的失败态，而不是一段裸 IO 报错", () => {
+    const src = migratedDb(3);
+    const dir = freshDir("restore-dir");
+    const b = createBackup({
+      dbPath: src,
+      backupDir: dir,
+      onWarning: warn,
+      now: () => Date.UTC(2026, 10, 12, 6, 0, 0, 0),
+    });
+    expect(b.ok).toBe(true);
+    if (!b.ok) return;
+    const target = join(dir, "不是文件");
+    mkdirSync(target);
+    // 传了 confirmOverwrite 也一样拒 —— 这一格防的就是「照 target_exists 那句去做会二次失败」
+    const r = restoreBackup({ backupPath: b.path, targetPath: target, confirmOverwrite: true });
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.reason).toBe("target_not_writable");
+    expect(r.message).toContain("不是普通文件");
+    // 反向对照：换一个新路径就能恢复，否则这条判据可以是「恢复恒失败」
+    const ok2 = restoreBackup({ backupPath: b.path, targetPath: join(dir, "ok-target.db") });
+    expect(ok2.ok).toBe(true);
+  });
+
+  /**
+   * `isSamePath` 的判据本身。为什么单开一条：上面那条用例里它是【被顺带用到】的，
+   * 而它同时被维护入口的断言引用（那个断言要用【同一个】谓词，见 backup.ts 里
+   * 那段「为什么导出」）。判据自己没人直接测的话，「两边用的是同一个谓词」
+   * 这句话只保证了「两边一起错」。
+   */
+  it("isSamePath：归一化后才可比，而它不许退化成「永远 false」", () => {
+    expect(isSamePath("/a/b.db", "/a/b.db")).toBe(true);
+    expect(isSamePath("/a/b.db", "/a/x/../b.db")).toBe(true);
+    expect(isSamePath("rel/b.db", join(process.cwd(), "rel", "b.db"))).toBe(true);
+    // 反向对照三对，缺一对这条判据就可以是「恒 true」：
+    expect(isSamePath("/a/b.db", "/a/c.db")).toBe(false);
+    expect(isSamePath("/a/b.db", "/a/x/b.db")).toBe(false);
+    // 大小写在判据上是【不同文件】—— 这条与 platform 归一化那一条方向相反，
+    // 因为 macOS 的大小写不敏感只发生在真 open 的时候，而这里是纯字符串归一化。
+    // 宁可多拦一次：这里错的方向是「拒绝跑演练」，不是「跑错文件」。
+    expect(isSamePath("/a/B.db", "/a/b.db")).toBe(false);
   });
 });

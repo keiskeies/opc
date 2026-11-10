@@ -29,6 +29,7 @@ import {
   rmSync,
   statSync,
   truncateSync,
+  writeFileSync,
   writeSync,
 } from "node:fs";
 import { dirname, join } from "node:path";
@@ -36,15 +37,18 @@ import { fileURLToPath } from "node:url";
 import { afterAll, describe, expect, it } from "vitest";
 import { openDb } from "../../src/db/driver.js";
 import { migrate } from "../../src/db/migrate.js";
+import { isBackupName, isSamePath } from "../../src/db/backup.js";
 import { WriteQueue } from "../../src/db/write-queue.js";
 import { InMemoryEventBus } from "../../src/events/bus.js";
 import { appendAudit } from "../../src/events/recorder.js";
 import { openSnapshotReadonlyDb } from "../../src/db/pragmas.js";
 import {
+  DRILL_TARGET_NAME,
   EXIT_OK,
   EXIT_PROBLEM,
   EXIT_USAGE,
   parseMaintenanceArgs,
+  removeDrillTarget,
   runMaintenance,
   runMaintenanceCli,
 } from "../../src/heartbeat/maintenance.js";
@@ -375,6 +379,211 @@ describe("③ 那一条实质决定：页面检查不过就不备份", () => {
     expect(r.backup?.ok).toBe(true);
   });
 });
+
+describe("④ 恢复演练接进来了（0032）", () => {
+  /**
+   * ⭐ 演练跑通了、目标【不留在】备份目录里。
+   *
+   * 这一发的落点是【目录里恰好一份文件、就是那份备份】。它同时钉住三件事：
+   *  ① 演练真的跑了（r.drill 在场且 restore.ok）；
+   *  ② 演练产物被删干净了（没留下第二份库拷贝，否则备份目录体积每次翻倍）；
+   *  ③ 演练产物【没被当成一份备份】—— 如果它的名字匹配备份形状，
+   *     这里会看到两份文件，而 KEEP_BACKUPS=7 的语义会从「留 7 天」变成「留 3.5 天」。
+   * ② 与 ③ 在屏幕上都是「多一个文件」，所以要靠名字把它们分开判。
+   */
+  it("演练通过 ⇒ drill 在场、ok 为真、备份目录里【只有那一份备份】", async () => {
+    const f = fresh();
+    const warnings: string[] = [];
+    const r = await runMaintenance({
+      dbPath: f.path,
+      db: f.q.readConnection(),
+      writer: f.q,
+      bus: f.bus,
+      backupDir: f.backupDir,
+      skipPatrol: true,
+      now: () => T0,
+      onWarning: (m) => warnings.push(m),
+    });
+    expect(r.drill).toBeDefined();
+    expect(r.drill?.ok).toBe(true);
+    expect(r.drill?.restore.ok).toBe(true);
+    expect(r.ok).toBe(true);
+    expect(r.drillSkipped).toBeUndefined();
+    expect(warnings).toEqual([]);
+
+    const files = readdirSync(f.backupDir).sort();
+    expect(files).toEqual(["opc-2026-11-12T03-04-05-123Z.db"]);
+    // 反向对照：演练目标的名字确实【不是】备份名 —— 这一句把上面那个「只有一份」
+    // 从「恰好碰上了」升级成「名字形状决定的」。
+    expect(isBackupName(DRILL_TARGET_NAME)).toBe(false);
+    expect(isBackupName(files[0] ?? "")).toBe(true);
+  });
+
+  it("sidecar 成对删：主文件与 -wal / -shm 都不许留下", () => {
+    // removeDrillTarget 单独判。为什么单开一条：跨用例那条只看得见「目录里没文件」，
+    // 而【留下一个孤零零的 -wal】恰好是 0018 §1 第 3 条实测过的那个静默失效 ——
+    // 下一次恢复会把它采纳进来，得到一份「完整性检查通过而内容不是任何备份」的库。
+    // 「只删 .db」是这里最容易犯的形式，而它比不删更糟。
+    const dir = join(TMP, "sidecar-" + process.pid + "-" + ++seq);
+    mkdirSync(dir, { recursive: true });
+    const target = join(dir, DRILL_TARGET_NAME);
+    for (const p of [target, target + "-wal", target + "-shm"]) writeFileSync(p, "x");
+    removeDrillTarget(target);
+    expect(readdirSync(dir)).toEqual([]);
+    // 反向对照 + 幂等：文件本来不存在时不抛（成功路径每轮都会走到它）
+    removeDrillTarget(target);
+    // 而且它只删这三个名字，不碰邻居
+    writeFileSync(join(dir, "邻居.db"), "y");
+    removeDrillTarget(target);
+    expect(readdirSync(dir)).toEqual(["邻居.db"]);
+  });
+
+  /**
+   * ⭐ runMaintenance 那句「不抛」是**实现**出来的，不是声明出来的。
+   *
+   * 触发条件（0032 §2）：库文件名正好叫 drill-target.db —— 于是备份目录里
+   * 拼出来的演练目标 = 源库本身，restoreDrill 抛 TypeError。
+   * 真实来路是「上一次演练失败留下的那个目标文件被当成现网库跑了」，
+   * 而它之所以危险，是因为 restoreDrill【原本会返回 ok:true】而库里已经被删了重写过。
+   *
+   * 断言的是【三个方向】：不抛、ok=false、告警里说清了「整块没跑」与修法。
+   * 少第一个的话这一发只是在测 ok；少第三个的话它测到的是一个「失败了而没人知道怎么修」的态。
+   */
+  it("演练目标算成源库 ⇒ 不抛、ok=false、告警给得出修法，且【没有备份落地】", async () => {
+    // 库直接建在备份目录里、名字就叫 drill-target.db
+    const dir = join(TMP, "selftarget-" + process.pid + "-" + ++seq);
+    mkdirSync(dir, { recursive: true });
+    const path = join(dir, DRILL_TARGET_NAME);
+    // 这一发【不配】「拼出来的目标 == 源库」这种前置断言 —— 那个等式两边的值
+    // 就是上面那一行 join 出来的，写成断言是恒真的（本仓禁的那类判据）。
+    // 防「守卫恒抛 / 实现退化」的是本节【第一条】用例：正常目录 + 正常库名 ⇒
+    // ok=true 且 drill 在场。一发只判「撞上了要拦住」，另一发判「没撞上别拦」。
+    const db = openDb(path);
+    opened.push(db);
+    migrate(db as never);
+    db.prepare(
+      "INSERT INTO tasks (id, title, status, assigned_role, current_node, created_at, updated_at) " +
+        "VALUES ('T-1', '自指夹具', 'IN_PROGRESS', 'dev', 'implement', ?, ?)",
+    ).run(T0, T0);
+    const q = new WriteQueue(path);
+    queues.push(q);
+
+    const warnings: string[] = [];
+    const r = await runMaintenance({
+      dbPath: path,
+      db: q.readConnection(),
+      writer: q,
+      bus: new InMemoryEventBus(),
+      backupDir: dir,
+      skipPatrol: true,
+      now: () => T0,
+      onWarning: (m) => warnings.push(m),
+    });
+    expect(r.ok).toBe(false);
+    expect(r.drill).toBeUndefined(); // 【没跑】而不是「跑了而失败」
+    expect(r.drillSkipped).toContain("同一个文件");
+    expect(r.backup).toBeUndefined(); // 备份整块没跑 ⇒ 目录里不该有一份「成功」的备份
+    expect(warnings.length).toBe(1);
+    expect(warnings[0]).toContain("整块没跑");
+    expect(warnings[0]).toContain(DRILL_TARGET_NAME); // 报错要能让人看出触发条件
+    // ⭐ 库还在、还能读，而且那条任务一条不少 —— 这一句才是这条用例的落点。
+    // 守卫被拆掉时，这一发【不会】在 ok 上红（那边返回 ok:true），
+    // 会红在这里：库被删掉重建后，这条连接报 "database is not open"。
+    const rows = countTasks(q.readConnection());
+    expect(rows).toBe(1);
+  });
+
+  /**
+   * 「备份成功而演练失败」这一支必须与「备份失败」【分开报】。
+   *
+   * 造法：不给一个正常的备份目录，而是让恢复那一步自己撞上 IO 失败 ——
+   * 最直接的办法是让备份目录【是一位文件】，createBackup 在里面写不出东西。
+   * 但那条测的是「备份失败」那一支（已有用例覆盖），所以这里用另一条路：
+   * 把备份目录做成只读 ⇒ VACUUM INTO 写不进去？实测那条走的是「备份失败」不是「演练失败」。
+   * 因此本发用【真正能落地的备份 + 一个不能落地的演练目标】：目标位置上放一个目录，
+   * restoreBackup 就会报 target_not_writable（backup.test.ts 里那条同源夹具）。
+   *
+   * 期望的形状：backup.ok=true（备份【真的】落地了）、drill.restore.ok=false、
+   * ok=false、告警里出现「备份已经落地」这句 —— 少这句，运维会去找备份失败的原因，
+   * 而备份目录里明明躺着一份新的。
+   */
+  it("备份落地而演练失败 ⇒ ok=false、告警里有「备份已经落地」、目标留在原地当现场", async () => {
+    const f = fresh();
+    mkdirSync(join(f.backupDir, DRILL_TARGET_NAME), { recursive: true });
+    const warnings: string[] = [];
+    const r = await runMaintenance({
+      dbPath: f.path,
+      db: f.q.readConnection(),
+      writer: f.q,
+      bus: f.bus,
+      backupDir: f.backupDir,
+      skipPatrol: true,
+      now: () => T0,
+      onWarning: (m) => warnings.push(m),
+    });
+    expect(r.backup?.ok).toBe(true);
+    expect(r.drill?.restore.ok).toBe(false);
+    expect(r.drill?.ok).toBe(false);
+    expect(r.ok).toBe(false);
+    expect(warnings.join("\n")).toContain("备份已经落地");
+    expect(warnings.join("\n")).toContain("恢复演练失败");
+    // 现场留着：失败时那个路径【不许被删】—— 它是排查时唯一的现场
+    expect(existsSync(join(f.backupDir, DRILL_TARGET_NAME))).toBe(true);
+    // 而那份备份还在，且仍是可读的库（这一条把「演练失败」与「备份也坏了」分开）
+    if (r.backup !== undefined && r.backup.ok) {
+      const snap = openSnapshotReadonlyDb(r.backup.path);
+      opened.push(snap);
+      expect(
+        Number((snap.prepare("PRAGMA integrity_check").get() as { integrity_check: string }).integrity_check === "ok" ? 1 : 0),
+      ).toBe(1);
+    }
+  });
+
+  /**
+   * ⭐ 反向对照 + 一条【命名不变式】：生产参数的正常形状下，演练目标永远算不出源库。
+   *
+   * 判据是 `join(backupDir, DRILL_TARGET_NAME)` 与 `dbPath` 走 isSamePath。
+   * 这一发把「什么条件下会相等」写成可执行的判据，而不是留在注释里：
+   * 只要库文件名不等于 DRILL_TARGET_NAME，两者【不可能】相等 ——
+   * 所以那条守卫不会误拦正常用法（正常用法每次都跑演练），
+   * 而它的触发条件窄到只有一句话：`--db` 指的文件正好叫那个名字。
+   *
+   * 顺带钉住真正重要的那半句：`DRILL_TARGET_NAME` 不匹配备份名形状。
+   * 它一旦匹配上，一次演练就产出一份与真备份【完全同权】的「备份」，
+   * 7 份保留位被演练挤掉，KEEP_BACKUPS=7 的语义从「留 7 天」变成「留 3.5 天」。
+   */
+  it("命名不变式：库名不等于演练名 ⇒ 永不误拦；演练名不匹配备份名 ⇒ 不进保留策略", () => {
+    const dir = "/data/backups";
+    const drill = join(dir, DRILL_TARGET_NAME);
+    // 正常库名（含与它同目录那种）⇒ 一律不算同一个文件
+    for (const name of ["opc.db", "hub.db", "drill-target.db.bak", "drill.db", "DRILL-TARGET.DB"]) {
+      expect(isSamePath(join(dir, name), drill)).toBe(false);
+    }
+    // 唯一会算成同一个文件的那一种
+    expect(isSamePath(join(dir, DRILL_TARGET_NAME), drill)).toBe(true);
+    // 演练产物不许被 pruneBackups / listBackups / lastBackupAtMs 看见
+    expect(isBackupName(DRILL_TARGET_NAME)).toBe(false);
+    // 而它得像个 sqlite 库名（否则 sidecar 那三条 -wal / -shm 的名字就说不清）
+    expect(DRILL_TARGET_NAME.endsWith(".db")).toBe(true);
+  });
+
+  it("--no-backup ⇒ drillSkipped 有一行话，而退出码照旧是 0", async () => {
+    // 这一发守的是【输出面】：report() 里演练那一行【无条件】出现。
+    // 一个只在成功时打印的行，与一个「没练」也报出来的行，对读日志的人是两种东西 ——
+    // 前者看不出「今天压根没演练」，而那正是这个模块要防的看不见的失效。
+    const f = fresh();
+    const h = io();
+    const r = await runMaintenanceCli(["--db", f.path, "--no-backup", "--no-patrol"], h.io);
+    expect(r.code).toBe(EXIT_OK);
+    expect(h.out.join("\n")).toContain("恢复演练：没跑");
+  });
+});
+
+/** events 行数。单开一个函数只是为了让上面那条自指用例读起来是一句断言。 */
+function countTasks(db: { prepare(sql: string): { get(): unknown } }): number {
+  const row = db.prepare("SELECT count(*) AS c FROM tasks").get() as { c: number | bigint };
+  return Number(row.c);
+}
 
 /** 把中段 n 个【整页】覆写成 0xAB。page size 从文件头第 16 字节读。 */
 function corruptWholePages(path: string, n: number): void {

@@ -27,6 +27,15 @@
  *    也就是说一次「目标目录里上次恢复留了个 -wal」的普通事故，会得到一份
  *    **通过了完整性检查、内容却不是那个备份**的库，而且没有任何一层会报。
  *    所以 restoreBackup 必须先把目标旁边的 -wal / -shm 清掉，再复制主文件。
+ * 4) **演练目标算成源库本身 ⇒ 一次自毁会被报成一次成功的演练**（实测，接维护入口时撞的）。
+ *    `restoreDrill({dbPath: X, drillTargetPath: X})` 跑完**返回 ok:true**，
+ *    而它做的事是删掉 X、用备份覆盖 X、删掉 X-wal；调用方手上那条连接当场
+ *    "database is not open"。restoreBackup 那道 `target_exists` 闸门拦不住，
+ *    因为本函数【自己传 confirmOverwrite: true】—— 闸门防的是使用者不知情，
+ *    而知情的那一位恰好不知道两格可以是同一个文件。
+ *    ⇒ 判据在下面那个 `isSamePath` 上，而它必须是**归一化后**的比较
+ *    （`/a/b.db` 与 `/a/x/../b.db` 是同一个文件而字符串不等）。
+ *    细节与「为什么抛而不返回失败值」在 restoreDrill 那一段。
  *
  * ── 备份不替代审计 ────────────────────────────────────────────────────
  * 规格 §6.5 末段：备份是灾难恢复，回放依赖 events 表的完整性，两者独立。
@@ -44,7 +53,7 @@ import {
   statSync,
 } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
-import { basename, dirname, join } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { openSnapshotReadonlyDb } from "./pragmas.js";
 
 /** 规格 §6.5：保留最近 7 份。改动它属于改运维口径，不在这里单方面调。 */
@@ -416,6 +425,16 @@ export const RESTORE_FAILURE_REASONS = [
   "backup_missing",
   "backup_unverified",
   "target_exists",
+  /**
+   * 目标路径【存在而不可用作恢复落点】（目前唯一的形状：那是一位目录）。
+   *
+   * 为什么新加一格而不是复用 target_exists：target_exists 的修法就一句话
+   * —— 「传 confirmOverwrite: true」，而恢复演练本来就一直在传它。
+   * 一个目录是【传那个参数也修不好】的：问题不是「要不要覆盖」，是「盖不了」。
+   * 把两种情况写成一个词，运维照那句去做（加上 confirm）会**第二次失败在同一处**，
+   * 而第二次他会以为是自己的参数还没加对 —— 与 0031 §2 那条「把人支去检查自己参数的报错」同一种病。
+   */
+  "target_not_writable",
 ] as const;
 export type RestoreFailureReason = (typeof RESTORE_FAILURE_REASONS)[number];
 
@@ -521,6 +540,20 @@ export function restoreBackup(o: RestoreRequest): RestoreResult {
         "确认要覆盖就显式传 confirmOverwrite: true（或者先把目标库改名留一份）。",
     };
   }
+  // 目标是一位【目录】⇒ 恢复不了，而这与上面那一格不是同一件事。
+  // 不判的话 copyFileSync 会抛 ERR_FS_EISDIR —— 一段裸 IO 报错从「恢复」这个动作里抛出来，
+  // 而调用方（heartbeat 维护入口那边）只接自己那一类失败，于是这一发会一路冒到进程外面。
+  // 判在这里 ⇒ 它变成 RestoreResult 里一个有名字的失败态，与 backup_missing 同族。
+  if (existsSync(o.targetPath) && !statSync(o.targetPath).isFile()) {
+    return {
+      ok: false,
+      reason: "target_not_writable",
+      message:
+        "恢复被拒绝：目标路径存在而【不是普通文件】—— " + o.targetPath + "。" +
+        "传 confirmOverwrite 也没用：这里要覆盖的是一个目录，不是一个库。" +
+        "把那个路径清掉再恢复（它可能是上一次失败演练留下的目标）。",
+    };
+  }
 
   mkdirSync(dirname(o.targetPath), { recursive: true });
   const removedSidecars: string[] = [];
@@ -588,11 +621,60 @@ export function restoreBackup(o: RestoreRequest): RestoreResult {
 }
 
 /**
+ * 两个路径字符串是否指向【同一个文件】。
+ *
+ * 为什么导出而不是就地一句 `resolve(a) === resolve(b)`：**这条判据的消费方需要能
+ * 直接测它**。restoreDrill 那条自毁用例只观察得到「抛了 / 没抛」，看不到判据本身
+ * 是怎么算的；而这条判据的失效方向是【静默放过】（少一次归一化 ⇒ 相对路径或 `..`
+ * 写法被当成两个文件 ⇒ 守卫形同不存在），那种失效在行为用例里【只在特定夹具下】才露出来。
+ * 所以 backup.test.ts 里有一条直接打这个谓词的用例（含三对反向对照，防它退化成恒 true）。
+ *
+ * ⚠ 这一句理由【被我换过一次】，而换的原因值得留着：第一版写的是
+ * 「维护入口那边的断言要用同一个谓词」，而那条断言我最终【没有写】——
+ * 它写成 `expect(isSamePath(path, join(dir, DRILL_TARGET_NAME))).toBe(true)`，
+ * 两边是同一行代码算出来的同一个值，**恒真**（0029 §3 那一族）。删掉它之后，
+ * 「两个消费方」这个理由就不成立了，于是注释跟着改。
+ * ⇒ 记一条顺序：**先写下断言、跑一次反向对照，再决定要不要为它导出**。
+ * 反过来（先想好一个导出理由、再补一条配得上它的断言）就会造出恒真判据。
+ *
+ * 用 `resolve` 而不是字符串比较：`/a/b.db` 与 `/a/x/../b.db` 与相对路径写法
+ * 在字符串上不等、在文件系统上是同一个 inode。归一化之后才可比。
+ * （刻意【不】用 `realpathSync`：那要求文件已存在，而演练目标常常还不存在 ——
+ * 创建它正是恢复要做的事。）
+ */
+export function isSamePath(a: string, b: string): boolean {
+  return resolve(a) === resolve(b);
+}
+
+/** restoreDrill 的返回形状。命名是为了让调用方能把它接进自己的结果类型里。 */
+export type DrillResult = {
+  readonly backup: BackupResult;
+  readonly restore: RestoreResult;
+  readonly ok: boolean;
+};
+
+/**
  * 一次「恢复演练」：备份 → 恢复到临时目标 → 验完整性，并给出可读结论。
  *
  * 计划把恢复演练写成 Test 而不是文档，理由是【没演练过的恢复等于没有备份】：
  * 备份成功只证明能拷出去，恢复成功才证明拷回来还能用。这个函数把两侧串起来，
  * 于是生产入口可以定期跑它（Task 6.5 那一周试运行要巡检「备份成功」就是这一条）。
+ *
+ * ⚠ **演练目标必须与源库不是同一个文件，这是本函数唯一能毁掉现网库的一条路。**
+ * 实测（写这段之前撞的）：把 `drillTargetPath` 传成 `dbPath`，函数**返回 ok:true**，
+ * 而它做的事是 `rmSync(源库)` → 用备份覆盖它 → 顺手删掉 `-wal`。
+ * 更糟的是**调用方手上那条连接当场变成 "database is not open"** —— 于是：
+ *  ① 演练报「成功」，而它其实刚把现网库换成了备份那份（今天的写入全在 -wal 里，已被删）；
+ *  ② 正在跑的进程【下一次写入才炸】，炸在离这次演练很远的一处，报错是「database is not open」，
+ *     没有人会想到去看演练日志。
+ * 为什么 `restoreBackup` 那道 `target_exists` 闸门没拦住：本函数**自己传
+ * `confirmOverwrite: true`** —— 那道闸门防的是「使用者不知情地覆盖」，
+ * 而这里知情的是本函数，而本函数恰好不知道那两格可以是同一个文件。
+ * ⇒ 判据落在下面那条 `sameFile` 上：**同一个文件的两种写法（相对 / 绝对 / `..`）
+ * 由 `resolve` 归一之后必须仍不相等**。只判字符串相等会放过 `/a/../b.db` 这种写法。
+ * ⇒ 抛 TypeError 而不是返回一个失败的 RestoreResult：这是**接错线**，不是运行期状况，
+ * 与 `keep` / `backupName` 那两处同类（那两个也是抛）。返回失败值会让调用方
+ * 有机会「记录一下然后继续」，而这里唯一正确的继续方式是**改代码**。
  */
 export function restoreDrill(o: {
   readonly dbPath: string;
@@ -601,11 +683,16 @@ export function restoreDrill(o: {
   readonly onWarning: (m: string) => void;
   readonly now?: () => number;
   readonly keep?: number;
-}): {
-  readonly backup: BackupResult;
-  readonly restore: RestoreResult;
-  readonly ok: boolean;
-} {
+}): DrillResult {
+  if (isSamePath(o.dbPath, o.drillTargetPath)) {
+    throw new TypeError(
+      "restoreDrill 的演练目标不能就是源库（两处都指向 " +
+        resolve(o.dbPath) +
+        "）。真跑下去会 rmSync 掉现网库、用备份覆盖它、删掉它的 -wal，" +
+        "而函数【返回 ok:true】—— 一次自毁会被报成一次成功的演练。" +
+        "给一个真正独立的临时路径（生产入口用的是备份目录里那个 drill-target.db）。",
+    );
+  }
   const backup = createBackup({
     dbPath: o.dbPath,
     backupDir: o.backupDir,
@@ -619,7 +706,23 @@ export function restoreDrill(o: {
   // 演练目标必须【每次都干净】：上一次演练留下的 -wal 会让这一次读到上一次的库
   // （文件头实测第 3 条）。restoreBackup 自己会清 sidecar，但主文件覆盖需要确认，
   // 而演练目标是本函数自己拥有的临时文件，覆盖它是本函数的职责而不是使用者的决定。
-  if (existsSync(o.drillTargetPath)) {
+  //
+  // ⚠ 【只在它是普通文件时删它】。上一次演练失败时那个目标会被【留在原地当现场】
+  // （maintenance.ts 里那条决定），于是它进入人的视野；有人排查之后把它换成一个同名
+  // 【目录】是完全可能的（甚至只是 mkdir 一个同名目录重新试一遍）。
+  // 那时 `rmSync(dir)` 抛 ERR_FS_EISDIR —— 那是一条**运行期 IO 错**，
+  // 而维护入口只接 TypeError 那一类（见 maintenance.ts 那个 catch），它会一路冒到进程外，
+  // 把「巡检顺手跑一次」变成一次崩溃。
+  // 不 recursive 删是刻意的：递归删调用方给的路径，正是上面那条同路径守卫防的形状
+  // （一个能删掉现网库的递归删除）。删不掉就交给 restoreBackup 报 target_not_writable。
+  //
+  // ⚠ 这一条【不能挪到 createBackup 之前】—— 我第一版就挪在前面，并且给它配了一条
+  // 「备份目录里必须还是空的」的断言，那条断言当场红了，而我一开始以为是判据写错。
+  // 实情是：这个函数【必须】先备份才能恢复，所以「跑不了」这件事只可能在备份之后知道；
+  // 「一份都没写」是我为它【设想】出来的性质，不是它能兑现的性质。
+  // 于是真实的失败形状是：备份落地 + restore.ok=false ⇒ 维护那边报「备份已经落地而演练失败」，
+  // 那份备份【仍然是可用的】，只是没被验过 —— 这与它从未被写出来是两件事，不能混报。
+  if (existsSync(o.drillTargetPath) && statSync(o.drillTargetPath).isFile()) {
     rmSync(o.drillTargetPath);
   }
   const restore = restoreBackup({
