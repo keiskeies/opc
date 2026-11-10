@@ -660,30 +660,43 @@ function callersOf(name: string, ...ownFiles: string[]): string[] {
 }
 
 describe("④ 两条验收各自【不可测的那一半】（登记，不写成已通过）", () => {
-  it("① 的『重跑同类任务』今天无路可跑：evaluateGate 在 src 里零调用方", () => {
+  it("① 的『重跑同类任务』今天仍无路可跑：调用链多了一环，而那一环也没人调", () => {
     /*
      * 「改标准 ⇒ 重跑 ⇒ 结论变化」这句话有三个动词，本文件只证得了中间那两个
-     * （读标准、判结论）。第三个【跑】需要一个调用方，而实测没有。
-     * ⇒ ① 现在成立的是「门控**会**按新标准变」，不是「任务重跑时**会**变」。
-     *   差别不是文字游戏：前者只要 evaluateGate 正确，后者还要有人在对的时机调它。
-     * 与 0016 §7 第三条同一族（同族第八次），发现方式照旧是写文档时顺数据源往下摸。
+     * （读标准、判结论）。第三个【跑】需要一个调用方。
+     *
+     * ⚠ 这条断言**曾经**是 `toEqual([])`，而它在 Task 5.4 变红了 —— 那是它设计出来
+     * 要做的事（下面那段注释写的就是「有人消掉一条缺口，callersOf 那两发就会红」）。
+     * 变红之后不能直接改成新值收工，得先问一句：**缺口真的消了吗**？
+     * 实测没有：`harness/verifier.ts` 开始调 evaluateGate，而 `verifyFix` 自己
+     * 在生产里零调用方。所以缺口**上移了一环**而不是被填上：
+     *   以前是「门控对，但没人对门的时机调它」；
+     *   现在是「有一个正确的调用方，但没人调它」。
+     * 结论强度因此**没有变化**：① 现在成立的仍然是「门控会按新标准变」，
+     * 不是「任务重跑时会变」。改断言的同时把这一格写清楚，
+     * 否则「多了一环」会被读成「前进了一步」，而这一环在接线之前不产生任何行为。
      */
-    expect(callersOf("evaluateGate", "graph/gates/evaluate.ts")).toEqual([]);
+    expect(callersOf("evaluateGate", "graph/gates/evaluate.ts")).toEqual([
+      SRC + "/harness/verifier.ts",
+    ]);
+    // 上面那条**只有在配上下面这条时**才不是一句好消息：
+    expect(callersOf("verifyFix", "harness/verifier.ts")).toEqual([]);
     /*
      * 反向对照（判据本身必须有分辨力）：同一个扫描器扫一个【真有调用方】的函数，
      * 必须捞到那一个文件。少了这一发，「tsFiles 返回空」「路径拼错」「includes 写错」
-     * 都会让上面那条恒绿 —— 而这正是本仓记了三次的「恒绿装饰」。
+     * 都会让上面两条恒绿 —— 而这正是本仓记了三次的「恒绿装饰」。
      * 选 searchEvents 而不是别的：它的调用点在 replay/query.ts，与被扫的模块无关，
-     * 于是这一发同时证明了「扫描器能捞到东西」和「evaluateGate 那条空是真的空」。
+     * 于是这一发同时证明了「扫描器能捞到东西」和「evaluateGate 那条只有一个是真的少」。
      */
     expect(callersOf("searchEvents", "replay/search.ts")).toEqual([
       SRC + "/replay/query.ts",
     ]);
     // 而且这个扫描器数的确实是【调用】而不是【提及】：evaluateGate 这个词在 src 里
-    // 出现 4 处（实测 grep -rn），其中 3 处是注释或类型注解。
+    // 出现多处，其中大部分是注释或类型注解。
     // 用 includes("evaluateGate(") 而不是 includes("evaluateGate") 就是为了这一格差别，
     // 下面这一发把「词确实存在」钉住 —— 否则「整个 src 里根本没有这个词」也会让
-    // 第一条零调用方断言绿，而那是一个**完全不同**的原因（模块被删了 vs 没人调）。
+    // 第一条断言绿（改成 toEqual 之后它会以另一种方式红），而那是一个**完全不同**的原因
+    // （模块被删了 vs 没人调）。
     const mentions = tsFiles(SRC).filter((f) => readFileSync(f, "utf8").includes("evaluateGate"));
     expect(mentions.length).toBeGreaterThan(0);
   });
@@ -718,7 +731,7 @@ describe("④ 两条验收各自【不可测的那一半】（登记，不写成
      * 逼他同时改这份清单 —— 而不是让「门禁没通过」这句话悄悄变成一条假的实话。
      */
     const blockers = [
-      "① 的第三个动词没有实现：evaluateGate 零调用方（上一条当场判的）",
+      "① 的第三个动词仍然没有实现：verifier.ts 开始调 evaluateGate（Task 5.4），但 verifyFix 自己零调用方 —— 缺口上移一环，没被填上（上一条当场判的）",
       "② 的『日报』只有数据面：readAutoApprovalReport 零调用方（上一条当场判的）",
       "② 的自动批准在生产运行期零生产者（0014 §3；本文件②段那些 recordAutoApproval 全由测试自己调）",
       "pnpm verify 未跑：本机装不上依赖（0009 §2）",
@@ -728,7 +741,15 @@ describe("④ 两条验收各自【不可测的那一半】（登记，不写成
     // 前两条与后三条的**性质不同**：前两条本文件当场判了（可复算、会随改动变红），
     // 后三条引的是别处的实测与环境事实。这条区分要钉住 ——
     // 否则这五条看起来像同一类「作者自述」，而其中两条其实是判据。
-    expect(callersOf("evaluateGate", "graph/gates/evaluate.ts")).toHaveLength(0);
+    //
+    // ⚠ 原来这两发是 `toHaveLength(0)`，Task 5.4 让第一发红了一次（verifier.ts 成了
+    // evaluateGate 的调用方）。改法是**换成那条链的真实形状**而不是删掉：
+    // 「门控有人调」这句话本身不推进 ① —— 只有当**链的末端**也有人调时才算。
+    // 所以这里配对判：门控的调用方是 verifier，而 verifier 的调用方是空。
+    expect(callersOf("evaluateGate", "graph/gates/evaluate.ts")).toEqual([
+      SRC + "/harness/verifier.ts",
+    ]);
+    expect(callersOf("verifyFix", "harness/verifier.ts")).toHaveLength(0);
     expect(callersOf("readAutoApprovalReport", "policy/auto-approve.ts")).toHaveLength(0);
   });
 });
