@@ -325,6 +325,17 @@ const SNAP: Record<string, string> = {
   // 那条论证就需要重读，而不是继续被引用。
   "0002-no-personal-wechat.md>packages/hub/resources/migrations/0001_init.sql:251":
     "platform TEXT NOT NULL,                    -- 'feishu'|'wecom'|'qq'",
+  // 0028 §2 那处【我写错的事实】的全部证据就是这一行 —— 那篇说「表在而读写方 0」，
+  // 而「表在」这件事除了这个坐标没有任何别的东西能证。所以它必须是活坐标：
+  // 哪天有人删了这张表（我那句错的注释就【变成对的了】，而那意味着 §2 整节的
+  // 结论「接上去就行」当场作废），这条引用会先红，逼重读那一篇。
+  "0028-channel-abstraction-and-a-table-i-said-did-not-exist.md>resources/migrations/0001_init.sql:249":
+    "CREATE TABLE im_bindings (",
+  // 同一篇里那句结论被引用了【两次】（§0 那张表用全路径、§2 正文用短名）。
+  // 两个键都登记而不是把正文改成不复述 —— 复述是有意为之：那处错的事实就是靠
+  // 「反复去 grep 同一张表」才被抓出来的，让读者在两处都能点回原文是目的的一部分。
+  "0028-channel-abstraction-and-a-table-i-said-did-not-exist.md>0001_init.sql:249":
+    "CREATE TABLE im_bindings (",
 };
 
 describe("决策文档里的「文件:行号」引用不漂移", () => {
