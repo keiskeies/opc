@@ -43,8 +43,26 @@ import { verifyRequest, type VerifyInput } from "./auth.js";
 
 export interface HubRequest {
   readonly method: string;
-  /** 路径，不含 query（? 之前的部分）。 */
+  /**
+   * 路径，不含 query（? 之前的部分）。给路由用。
+   * 【不做 percent 解码】—— 这句是陈述现状，不是设计优点：
+   * 现在 path 段里的 id 全部由服务端生成（randomUUID），
+   * 但「不编码就等价于编码」这件事【本仓没有任何测试覆盖】，别当成已验证性质。
+   * 哪天路径里要塞用户可控的 id（比如按 slug 取任务），这里必须补解码，
+   * 而且要补在【路由侧】而不是鉴权侧 —— 鉴权签的是原始 target，解码后签名必错。
+   */
   readonly path: string;
+  /**
+   * 原始请求目标：路径 + 原样的 query，未解码、未排序。给【鉴权】用。
+   *
+   * 为什么不能拿 path 去签名（这一条是真 socket 上撞出来的，见 auth.ts 的 canonicalString）：
+   * 客户端手上只有自己准备发出的那串字节，服务端手上是剥过 query 又解码过的路径，
+   * 两者对 `/events?cursor=17` 永远算不出同一个串 ⇒ 带 query 的请求恒 401
+   * ⇒ 断线重连整条路是死的。而 contract 层的单测看不见：那里 path 与签名的 path
+   * 是同一个人写的同一个值。
+   * 所以【鉴权看 target，路由看 path】，两份各归各的，不做「统一成一个」。
+   */
+  readonly target: string;
   readonly query: Readonly<Record<string, string | undefined>>;
   readonly headers: Readonly<Record<string, string | undefined>>;
   readonly body: string;
@@ -56,6 +74,17 @@ export interface HubResponse {
   readonly headers?: Readonly<Record<string, string>>;
   /** SSE 用：帧流。存在时 body 被忽略。 */
   readonly stream?: AsyncIterable<unknown>;
+  /**
+   * SSE 用：连接没了【立刻】回收。传输层在 res 的 close/error 上调它。
+   *
+   * 为什么光有 stream 不够（真 socket 上验出来的）：frames() 的 finally 只在
+   * 生成器自己执行时才会跑，而长连接上它一直睡在 await 上 —— 连接断了没人叫醒它，
+   * 订阅就一直挂着，直到【下一条无关事件】把它冲走。CEO 盯着看板不动时可能几小时
+   * 没有事件，于是每个关掉的标签页漏一条订阅。§5.8 要的是「断开即回收」。
+   * 回收动作本身仍只有一份（ResumeStream.close，它再调 Subscription.close），
+   * 这里只是把【发起权】交给唯一知道连接状态的那一层。
+   */
+  readonly onClose?: () => void;
 }
 
 export interface HubDeps {
@@ -139,7 +168,10 @@ async function route(
   const auth = verifyRequest({
     token: deps.token,
     method,
-    path: req.path,
+    // 【target 不是 path】：鉴权签原始请求目标，路由才用剥过 query 的 path。
+    // 见 HubRequest.target 的注释 —— 换成 req.path 编译器不会响，
+    // 响的是「所有带 query 的请求 401」。
+    target: req.target,
     body: req.body,
     headers: req.headers,
     now: deps.now(),
@@ -439,6 +471,7 @@ async function events(deps: HubDeps, req: HubRequest): Promise<HubResponse> {
       "last-event-id": String(stream.cursor),
     },
     stream: stream.frames(),
+    onClose: () => stream.close(),
   };
 }
 

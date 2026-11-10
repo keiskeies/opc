@@ -40,8 +40,22 @@ export function newLocalToken(): string {
 /**
  * 待签名的规范串。
  *
+ * 【target 而不是 path】—— 这一条是被真 socket 上的测试逼出来的，不是措辞偏好：
+ * 服务端做路由要的是【解码后、剥掉 query】的路径，而客户端签名时手上只有
+ * 它准备发出去的那一整个请求目标（"/events?cursor=17"）。
+ * 若规范串里放服务端剥过 query 的那一份，两侧算出来的串【永远不同】，
+ * 于是【任何带 query 的请求都无法通过鉴权】—— 症状不是报错，是 GET /events?cursor=…
+ * 恒 401，也就是【断线重连这条路整个是死的】，而它看起来像「凭据不对」。
+ * （contract 层的单测看不见这件事：那边手写的 path 与签名的 path 是同一个人写的同一个值。
+ * 只有真发一次带 query 的请求才会撞上 —— 见 test/http/server.test.ts。）
+ * 所以签的是【原始 target】：客户端签它实际发出去的那串字节，服务端原样用它算。
+ *
+ * 顺手拿到的第二条性质：query 进了签名，于是【游标不能被中途改】。
+ * 本机回环上其实没有【在路上】这个位置（同机进程要改别人的字节早就有代码执行权了），
+ * 所以这条是白得的，不作为引入它的理由 —— 理由只有一个：两侧必须算同一个东西。
+ *
  * 每一段【为什么在里面】：
- *  - method + path：不带它们，同一个签名就能在【任意】端点之间复用 —— 只读端点上
+ *  - method + target：不带它们，同一个签名就能在【任意】端点之间复用 —— 只读端点上
  *    取到的签名可以拿去 POST /approvals。这是这类实现最常漏的一洞。
  *  - body 的 sha256 而不是 body 原文：规范串要拼成长度可控的一行，
  *    而 body 可以是 4000 字符的想法。
@@ -50,10 +64,13 @@ export function newLocalToken(): string {
  * 【不做 JSON 规范化】：body 按【原始字节】摘要，客户端不对 JSON 重新序列化。
  * 一旦引入「先规范化再签」，两侧各有一套键序/空白规则就会静默签名不匹配，
  * 而那类 bug 的报错长得像「凭据不对」。
+ * 【同样不做 query 规范化】：?a=1&b=2 与 ?b=2&a=1 是两个不同的签名，
+ * 这是刻意的 —— 与 body 那条同一个理由，两侧各有一套排序规则必然漂移。
  */
 export function canonicalString(o: {
   readonly method: string;
-  readonly path: string;
+  /** 原始请求目标：路径 + 原样的 query，未解码、未排序、未剥 query。 */
+  readonly target: string;
   readonly body: string;
   readonly timestamp: number;
   readonly nonce: string;
@@ -61,7 +78,7 @@ export function canonicalString(o: {
   const digest = createHash("sha256").update(o.body, "utf8").digest("hex");
   return [
     o.method.toUpperCase(),
-    o.path,
+    o.target,
     digest,
     String(o.timestamp),
     o.nonce,
@@ -71,7 +88,7 @@ export function canonicalString(o: {
 export function signRequest(o: {
   readonly token: string;
   readonly method: string;
-  readonly path: string;
+  readonly target: string;
   readonly body: string;
   readonly timestamp: number;
   readonly nonce: string;
@@ -91,7 +108,12 @@ export type VerifyFailure =
 export type VerifyInput = {
   readonly token: string;
   readonly method: string;
-  readonly path: string;
+  /**
+   * 原始请求目标（含 query）。【与客户端签名时用的是同一个字段名、同一个值】是
+   * 这一层能工作的前提，所以两侧都叫 target、都不许偷偷换成剥过 query 的 path
+   * —— 换掉的表现不是编译错误，是「带 query 的请求全 401」。
+   */
+  readonly target: string;
   readonly body: string;
   readonly headers: Readonly<Record<string, string | undefined>>;
   readonly now: number;
@@ -130,7 +152,7 @@ export function verifyRequest(i: VerifyInput): { ok: true } | VerifyFailure {
   const want = signRequest({
     token: i.token,
     method: i.method,
-    path: i.path,
+    target: i.target,
     body: i.body,
     timestamp: ts,
     nonce: nonceRaw,
@@ -223,7 +245,8 @@ export class NonceGuard {
 /** 一次请求的签名材料生成器（客户端侧用；放这里以便与服务端共用规范串实现）。 */
 export function signedHeaders(token: string, o: {
   readonly method: string;
-  readonly path: string;
+  /** 要发出去的【那一整个请求目标】，含 query，原样。见 canonicalString 的文件头。 */
+  readonly target: string;
   readonly body: string;
   readonly now: number;
 }): Record<string, string> {
@@ -237,7 +260,7 @@ export function signedHeaders(token: string, o: {
     [HEADER_SIGNATURE]: signRequest({
       token,
       method: o.method,
-      path: o.path,
+      target: o.target,
       body: o.body,
       timestamp: o.now,
       nonce,

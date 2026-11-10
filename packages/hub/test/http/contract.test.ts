@@ -131,8 +131,11 @@ async function harness(taskId = "task-1"): {
       calls.created += 1;
     },
   };
-  const sign = (method: string, path: string, body = ""): Record<string, string> =>
-    signedHeaders(TOKEN, { method, path, body, now: NOW });
+  // 形参就叫 target：调用方传进来的【必须】是它准备发出的那一整个请求目标。
+  // 若签名函数叫 target 而调用方传的是剥过 query 的 path，那是同一个 bug 的两副面孔
+  // —— 名字对齐之后，「我该传哪个」在调用点就能看见。
+  const sign = (method: string, target: string, body = ""): Record<string, string> =>
+    signedHeaders(TOKEN, { method, target, body, now: NOW });
   return {
     deps,
     db,
@@ -145,12 +148,36 @@ async function harness(taskId = "task-1"): {
           "VALUES (?, ?, 'strategic', 's', '{}', ?)",
       ).run(id, taskId, status);
     },
-    req: (o) => ({
-      query: {},
-      headers: {},
-      body: "",
-      ...o,
-    }),
+    /**
+     * 造一个请求。【签名由这里自己做】，用的是由 path+query 派生出来的那一个 target。
+     *
+     * 第一版不是这样的：它让每个用例自己传 headers（`headers: h.sign("GET", "/events")`），
+     * 而我在紧邻的注释里写的恰恰是「让每个调用点自己保证一致 = 安排一次遗忘」。
+     * 写完没照着做，于是【加 query 的那条用例立刻 401】—— 签名签的是 /events，
+     * 发出去的是 /events?cursor=abc。也就是说这条注释当时是【空头支票】，
+     * 而它看起来像在解释一个已经存在的机制。
+     *
+     * 现在只有【故意制造不一致】的用例才传 headers。传【空对象】= 「这条就是要裸发」
+     * （未授权那几条），传一份【签过别的东西】的 headers = 「这条要验签名覆盖范围」
+     * （换端点复用、改 body、伪造签名那几条）。两种偏离都得写下点什么，
+     * 而【默认那条路】是「签名正确」—— 与生产里 99% 的请求一致。
+     */
+    req: (o) => {
+      const q = o.query ?? {};
+      const qs = Object.entries(q)
+        .filter(([, v]) => v !== undefined)
+        .map(([k, v]) => k + "=" + (v as string))
+        .join("&");
+      const target = o.path + (qs === "" ? "" : "?" + qs);
+      const body = o.body ?? "";
+      return {
+        query: {},
+        body: "",
+        ...o,
+        target,
+        headers: o.headers ?? sign(o.method, target, body),
+      };
+    },
   };
 }
 
@@ -186,7 +213,7 @@ describe("② 鉴权：无 token 请求 401", () => {
     const h = await harness();
     const headers = signedHeaders(newLocalToken(), {
       method: "GET",
-      path: "/tasks",
+      target: "/tasks",
       body: "",
       now: NOW,
     });
@@ -227,7 +254,7 @@ describe("② 鉴权：无 token 请求 401", () => {
     const h = await harness();
     const stale = signedHeaders(TOKEN, {
       method: "GET",
-      path: "/tasks",
+      target: "/tasks",
       body: "",
       now: NOW - 61_000,
     });
@@ -235,7 +262,7 @@ describe("② 鉴权：无 token 请求 401", () => {
       (await handleRequest(h.deps, h.req({ method: "GET", path: "/tasks", headers: stale })))
         .status,
     ).toBe(401);
-    const ok = signedHeaders(TOKEN, { method: "GET", path: "/tasks", body: "", now: NOW - 59_000 });
+    const ok = signedHeaders(TOKEN, { method: "GET", target: "/tasks", body: "", now: NOW - 59_000 });
     expect(
       (await handleRequest(h.deps, h.req({ method: "GET", path: "/tasks", headers: ok }))).status,
     ).toBe(200);
@@ -246,12 +273,12 @@ describe("② 鉴权：无 token 请求 401", () => {
     const base = {
       token: TOKEN,
       method: "GET",
-      path: "/tasks",
+      target: "/tasks",
       body: "",
       now: NOW,
       nonces,
     };
-    const good = signedHeaders(TOKEN, { method: "GET", path: "/tasks", body: "", now: NOW });
+    const good = signedHeaders(TOKEN, { method: "GET", target: "/tasks", body: "", now: NOW });
     const first = verifyRequest({ ...base, headers: good });
     expect(first.ok).toBe(true);
     expect(verifyRequest({ ...base, headers: good })).toEqual({
@@ -262,7 +289,7 @@ describe("② 鉴权：无 token 请求 401", () => {
     // 反例，也是这段真正的目的：攻击者【不需要破签名】，只要抢在合法请求之前
     // 用同一个 nonce 打一枪（签名故意错），就能让随后那次合法请求被判成重放。
     // 所以 nonce 只能在【整体通过】之后记账。
-    const victim = signedHeaders(TOKEN, { method: "GET", path: "/tasks", body: "", now: NOW });
+    const victim = signedHeaders(TOKEN, { method: "GET", target: "/tasks", body: "", now: NOW });
     const bogus = { ...victim, "x-opc-signature": "0".repeat(64) };
     expect(verifyRequest({ ...base, headers: bogus })).toEqual({
       ok: false,
@@ -284,8 +311,9 @@ describe("② 鉴权：无 token 请求 401", () => {
     const h = await harness();
     // 鉴权排在路由【之前】。顺序反了的话，未授权者用 401 / 404 / 501 三种答复
     // 就能枚举出哪些路径存在、哪些已实现（501 尤其漏）。
+    // headers: {} 是【显式裸发】的记号（见 harness.req 的注释）—— 这里要的正是没签名。
     for (const p of ["/nope", "/replay/task-1", "/tasks"]) {
-      const res = await handleRequest(h.deps, h.req({ method: "GET", path: p }));
+      const res = await handleRequest(h.deps, h.req({ method: "GET", path: p, headers: {} }));
       expect(res.status).toBe(401);
     }
   });
@@ -617,13 +645,13 @@ describe("① SSE 游标续订", () => {
 
     const bad = await handleRequest(
       h.deps,
-      h.req({ method: "GET", path: "/events", headers: h.sign("GET", "/events"), query: { cursor: "abc" } }),
+      h.req({ method: "GET", path: "/events", query: { cursor: "abc" } }),
     );
     expect(bad.status).toBe(422);
 
     const good = await handleRequest(
       h.deps,
-      h.req({ method: "GET", path: "/events", headers: h.sign("GET", "/events"), query: { cursor: "1" } }),
+      h.req({ method: "GET", path: "/events", query: { cursor: "1" } }),
     );
     expect(good.status).toBe(200);
     expect(good.headers?.["content-type"]).toMatch(/text\/event-stream/u);

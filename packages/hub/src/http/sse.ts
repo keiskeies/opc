@@ -24,7 +24,7 @@
  * 而绕过时类型会缺。这是 §8.2 第 4 条同一种思路：能绕过的那条路不要留在那里。
  */
 
-import type { EventBus, FeedItem } from "../events/bus.js";
+import type { EventBus, EventSubscription, FeedItem } from "../events/bus.js";
 import { encodeSseFrame, type SseFrame } from "@opc/contracts";
 
 /** 快照的形状：一个拉当前状态的函数 + 它对应的资源名（进日志与 degraded 提示）。 */
@@ -135,6 +135,35 @@ export class ResumeStream<T> {
   }
 
   /**
+   * frames() 当前握着的那条订阅（没开始迭代就是 undefined）。
+   * 只给 close() 用，不公开出去 —— 外面拿到它能绕过 finally 那套回收纪律。
+   */
+  #sub: EventSubscription | undefined = undefined;
+
+  /**
+   * 【立刻】归还订阅，不等生成器醒过来。
+   *
+   * 为什么 frames() 自己的 finally 不够（这一条是被真 socket 上的测试逼出来的）：
+   * 生成器【只有在它自己执行代码的时候】才能跑 finally。而一条正常的长连接上，
+   * 它绝大多数时候停在 `for await (const item of sub)` 里的 await 上 ——
+   * 这时候连接断了，服务端知道了（res 的 close 事件），生成器却不知道，
+   * 因为它正等着下一条事件。要等它知道，得【真的再来一条事件】。
+   * 于是【关掉的浏览器标签会一直占着一条订阅 + 一条有界队列】，
+   * 直到下一条无关的事件把它冲走 —— 而 CEO 挂着看板不动时，可能几小时都没有事件。
+   * §5.8 要的是「写失败即回收」，不是「下一条事件到达时回收」。
+   *
+   * 所以回收的【发起权】在传输层（它才知道连接没了），
+   * 而订阅的【所有权】还在这里：传输层只调这一个方法，不碰 sub 本身。
+   * 幂等：底层 Subscription.close() 自己有 #closed 门，
+   * 所以这里与 frames() 的 finally 谁先到都一样，【不构成第二份回收逻辑】——
+   * 两份回收逻辑指的是【两套不同的清理动作】，这里是同一个动作调两次。
+   */
+  close(): void {
+    this.#sub?.close();
+    this.#sub = undefined;
+  }
+
+  /**
    * 逐帧产出：先一帧快照，再按游标续订。
    *
    * limit 是给测试与「只取已有的一批」用的；不传就是长连接语义（一路等下去）。
@@ -159,6 +188,10 @@ export class ResumeStream<T> {
       }),
     };
     const sub = this.#bus.subscribe(this.#cursor);
+    // 挂到实例上，好让 close() 在生成器【睡着的时候】也能够得着它。
+    // 赋在局部变量之外看着多余（finally 里 close 的就是同一个 sub），
+    // 但生成器睡着时 finally 跑不到 —— 见 close() 的注释。
+    this.#sub = sub;
     try {
       let sent = 0;
       for await (const item of sub) {
@@ -173,6 +206,7 @@ export class ResumeStream<T> {
       // 都不会走到函数末尾。漏 close 泄漏的是【连接 + 一条有界队列】，
       // 且 bus.subscribers() 会一路涨（那是本仓认定的唯一回收证据）。
       sub.close();
+      if (this.#sub === sub) this.#sub = undefined;
     }
   }
 
@@ -195,38 +229,23 @@ export class ResumeStream<T> {
 }
 
 /**
- * 断线重连的退避上限（Task 2.3 的「不发疯重连」）。
+ * 退避与放弃策略【不在这里定义】，转发 contracts 那一份。
  *
- * 纯函数、无状态：调用方自己记第几次。指数退避 + 上限，
- * 上限是这条函数存在的意义 —— 没有上限的指数退避会让 Hub 挂了一小时后
- * 重连间隔变成几十分钟，而恢复后 CEO 要点开看板却还要等那一坨；
- * 没有下限（每次都固定 1s）则 Hub 起不来时前端每 1s 撞一次，日志被刷满。
+ * 它们最初写在这个文件里，而那是放错了地方：服务端【永不重连】，
+ * 这段代码的唯一消费者是客户端。留在 hub 侧的话，web 要用它就得 import hub
+ * （§5.6.1 的边界立刻被破，前端还会欠下 node:sqlite），
+ * 或者自己抄一份 —— 两份退避策略漂移的表现是「桌面端 15 秒放弃、Web 无限重试」，
+ * 同一个 Hub 挂掉时两个客户端给出两种说法。
+ * 这里保留转发是为了不破坏 hub 侧既有的 import 路径（含测试），
+ * 新代码请直接 import @opc/contracts。
  */
-export const RECONNECT_BASE_MS = 500;
-export const RECONNECT_MAX_MS = 15_000;
-
-export function reconnectDelayMs(attempt: number): number {
-  if (!Number.isInteger(attempt) || attempt < 0) {
-    throw new Error("attempt 是非负整数（第 0 次重连传 0），实到 " + String(attempt));
-  }
-  // 2**attempt 在 attempt 很大时会溢出成 Infinity，下面与上限取 min 之前先夹一次指数，
-  // 免得「上限」这件事要靠 Infinity 参与运算才成立（能算对，但读不出意图）。
-  const exp = Math.min(attempt, 16);
-  return Math.min(RECONNECT_BASE_MS * 2 ** exp, RECONNECT_MAX_MS);
-}
-
-/**
- * 什么时候该放弃重连、把界面切成「去拉快照」。
- *
- * 为什么要有这一条而不是无限重连：§5.8 的纪律是「事件只做增量，全量状态由 REST 补齐」。
- * 无限重连的前端会在 Hub 崩溃期间一直显示【崩溃前】的状态，而且显示得像实时。
- * 那比一个明确的「连接断开」更坏 —— CEO 会基于一个过期看板做审批决定。
- */
-export const GIVE_UP_AFTER_ATTEMPTS = 8;
-
-export function shouldGiveUp(attempt: number): boolean {
-  return attempt >= GIVE_UP_AFTER_ATTEMPTS;
-}
+export {
+  GIVE_UP_AFTER_ATTEMPTS,
+  RECONNECT_BASE_MS,
+  RECONNECT_MAX_MS,
+  reconnectDelayMs,
+  shouldGiveUp,
+} from "@opc/contracts";
 
 /** 一帧 SSE 的线格式（复用 contracts 里那份编码器，服务端与前端不各写一份）。 */
 export function writeFrame(frame: SseFrame): string {
