@@ -408,6 +408,31 @@ describe("接进门控：让『打回』真的是**门控**打回", () => {
     expect(v.unresolved.join(" ")).toContain("观测");
   });
 
+  it("⭐ 领域名不认识 ⇒ **escalate** 并点名那个名字，而不是 reject 说『你没附来源』", () => {
+    // 这一发钉的是本篇改掉的一个映射。改之前：不认识的名字走 mandatorySourceBlock
+    // ⇒ violated ⇒ 门控报的是岗位书里那条 message（「必须附带可追溯来源」），
+    // 于是**拼错了领域名**的人被告知「补引用」，补完照旧每次打回。
+    // 而 CriterionOutcome 的 violated 分支**没有 why** —— 门控的输出形状不在我手里，
+    // 所以那条不对称只能在**状态选错**这一层修：配置错误 = 判据不成立 = unresolved。
+    const v = gateWith({
+      // 【规格】附录 B.3 那四个名字与 FAST_CHANGING_DOMAINS 交集为空（0033 §2 量过），
+      // 所以这里用的不是编造的坏名字，而是规格里**真的写着**的那一份。
+      mandatoryDomains: ["framework_version_compat", "api_deprecation"],
+      observedSearches: 3,
+      bundle: bundle(), // 包里有 URL、也「搜过」—— 唯一不成立的就是领域名
+    });
+    expect(v.decision).toBe("escalate");
+    expect(v.unresolved.join(" ")).toContain("framework_version_compat");
+    // 反向对照：同一份夹具换成合法名字就必须判得动，否则上面那条 escalate
+    // 是「这一发恒不成立」而不是「领域名不对」。
+    const ok = gateWith({
+      mandatoryDomains: ["framework_versions"],
+      observedSearches: 3,
+      bundle: bundle(),
+    });
+    expect(ok.decision).toBe("pass");
+  });
+
   it("没声明强制领域 ⇒ satisfied 而**不是** unresolved（不适用 ≠ 判不了）", () => {
     const v = gateWith({
       mandatoryDomains: [],

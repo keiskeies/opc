@@ -799,6 +799,86 @@ describe("恢复与消耗上报", () => {
   });
 });
 
+/* ═════════════════ toolSightings（§13.3 第 1 层的观测源）═════════════════ */
+
+describe("toolSightings：第 1 层『搜过没有』的那个数的来源", () => {
+  const WS = (args: unknown): HarnessEvent => ({
+    kind: "tool_call",
+    tool: "WebSearch",
+    redactedArgs: args,
+  });
+
+  it("⭐ 同一发工具被 ask 一次又被通报一次 ⇒ 只算一次", () => {
+    // 这是本组最该有的一发。判定缓存的键是【工具 + 参数】，观测必须用同一个单位，
+    // 否则「一次老实的搜索」会被数成两次，而那个数字会进第 1 层的判据。
+    const asked: ToolApprovalRequest[] = [];
+    return callHarness(
+      fakeAdapter([SESSION, WS({ query: "x" }), WS({ query: "x" }), finished()], { asked }),
+      req({ allowed_tools: ["Read", "WebSearch"] }),
+      deps(),
+      async () => ({ approved: true }),
+    ).then((g) => {
+      if (!g.ok) throw new Error("不应被拒：" + g.code);
+      expect(g.toolSightings.length).toBe(1);
+      // 而两个位置都留着（「问过我们」与「通报了」不是同一件事，0021 §2 那一族）。
+      expect([...(g.toolSightings[0]?.stages ?? [])].sort()).toEqual([
+        "event_stream",
+        "handler",
+      ]);
+    });
+  });
+
+  it("不同参数的同一工具 ⇒ 算两次（否则第一次会替第二次放行）", async () => {
+    const g = await callHarness(
+      fakeAdapter([SESSION, WS({ query: "a" }), WS({ query: "b" }), finished()]),
+      req({ allowed_tools: ["Read", "WebSearch"] }),
+      deps(),
+    );
+    if (!g.ok) throw new Error("不应被拒：" + g.code);
+    expect(g.toolSightings.length).toBe(2);
+  });
+
+  it("被拒那条路也带它 ⇒ 「看不见」这件事在两个出口都可读", async () => {
+    const g = await callHarness(
+      fakeAdapter([SESSION, { kind: "tool_call", tool: "Bash", redactedArgs: {} }, finished()]),
+      req(), // 白名单里没有 Bash ⇒ 观测到一次未授权 ⇒ 中止
+      deps(),
+    );
+    expect(g.ok).toBe(false);
+    if (g.ok) return;
+    // 中止前那一次是真的发生过，所以它在。
+    expect(g.toolSightings.map((s) => s.tool)).toEqual(["Bash"]);
+  });
+
+  it("调用压根没开始（能力不符）⇒ 空数组，而不是 undefined", async () => {
+    const g = await callHarness(
+      fakeAdapter([SESSION, finished()], { caps: { toolApproval: false } }),
+      req({ approval_policy: "on-request" }),
+      deps(),
+    );
+    expect(g.ok).toBe(false);
+    if (g.ok) return;
+    // 空数组与「没这一格」在观测层是两个值（silent 的判据读的就是长度）。
+    expect(g.toolSightings).toEqual([]);
+  });
+
+  it("⭐ 前置那四层命中的那次【不算】一次工具调用", async () => {
+    // 这一发断言的是**出口的形状**（前置拒 ⇒ 观测为空），而不是源码里那句
+    // `if (stage !== "pre_call")` —— 那句今天走不到（toolVerdict 只有两个调用点，
+    // 传的都是 handler / event_stream），所以它红不了也绿不出什么。
+    // 真正的防法是这一发：如果将来有人在前置那条路上也记观测（那是最省事的写法），
+    // 这里当场红。源码里那句守卫只是让那种写法**多一道**兜底。
+    const g = await callHarness(
+      fakeAdapter([SESSION, finished()]),
+      req({ forbidden_flags: ["--yolo", "--dangerously-skip-permissions"] }),
+      deps(),
+    );
+    expect(g.ok).toBe(false);
+    if (g.ok) return;
+    expect(g.toolSightings).toEqual([]);
+  });
+});
+
 /* ═════════════════ 测不出来的那件事 ═════════════════ */
 
 describe("这一层证不了的（写在这里而不是等人踩）", () => {

@@ -25,13 +25,14 @@
  *    （见「请求装配」里那段删除说明）—— 判据引用的东西得先确认真的在输入里。
  */
 import type {
+  Charter,
   CostReport,
   HarnessAdapter,
   HarnessCapabilities,
   HarnessEvent,
   HarnessRequest,
 } from "@opc/contracts";
-import { SHA256_RE, evidenceBundleSchema } from "@opc/contracts";
+import { charterSchema, SHA256_RE, evidenceBundleSchema } from "@opc/contracts";
 import { describe, expect, it } from "vitest";
 import type { AuditRow } from "../../src/events/recorder.js";
 import type { GateCriterion } from "../../src/graph/gates/evaluate.js";
@@ -79,10 +80,17 @@ function adapter(
     exitCode?: number | null;
     caps?: Partial<HarnessCapabilities>;
     seen?: HarnessRequest[];
+    /**
+     * 插在 session_started 之后、usage 之前的事件。
+     * 存在的理由只有一个：让「适配器报了 tool_call」这一形状可测
+     * （第 1 层那条「搜过没有」的观测源就是它，见下面 §搜索那一组）。
+     */
+    toolCalls?: HarnessEvent[];
   } = {},
 ): HarnessAdapter {
   const events: HarnessEvent[] = [
     { kind: "session_started", sessionId: o.sessionId ?? "ver-sess-1" },
+    ...(o.toolCalls ?? []),
     { kind: "usage", cost: COST },
     {
       kind: "finished",
@@ -124,6 +132,38 @@ const COVERAGE_CRITERION: GateCriterion = {
   message: "覆盖率低于 90 不得标记通过（【规格】§12.6 第 2 条的硬约束）",
 };
 
+/**
+ * 一份过 schema 的岗位书，只为了给出 `searchPolicy` 那一格。
+ *
+ * 走 `charterSchema.parse` 而不是 `as Charter` 断言：断言会让「夹具与真实形状不符」
+ * 这件事在测试里**永久隐形**（本仓记过一次夹具说谎，第五次）。
+ * 而且这一格是新增字段，夹具正是它唯一的离线读者 —— 夹具不真，字段就等于没测。
+ */
+function charterWith(searchPolicy?: { tier_1_mandatory?: string[] }): Charter {
+  return charterSchema.parse({
+    role_id: "test",
+    display_name: "测试",
+    version: 1,
+    honesty_boundaries: ["不声称未跑过的测试已通过"],
+    acceptance_criteria: [
+      { condition: "metric:coverage < 90", action: "reject", message: "覆盖率不足" },
+    ],
+    forbidden_actions: [],
+    tool_permissions: ["Read", "Bash", "web_search"],
+    model_tier: "execution",
+    budget: { daily_usd: 1, per_task_usd: 1 },
+    escalation_triggers: [],
+    decision_scope: { autonomous: [], requires_consultation: [], forbidden: [] },
+    judgment_mode: {
+      type: "strict_rules",
+      strict_rules: [],
+      bounded_judgment: [],
+      full_discretion: [],
+    },
+    ...(searchPolicy === undefined ? {} : { search_policy: searchPolicy }),
+  });
+}
+
 function deps(over: Partial<VerifyInput> = {}): VerifyInput {
   const sink: AuditRow[] = [];
   return {
@@ -138,6 +178,11 @@ function deps(over: Partial<VerifyInput> = {}): VerifyInput {
     forbiddenFlags: ["--yolo", "--full-auto"],
     maxBudgetUsd: 1,
     modelFamily: "gpt",
+    // 缺省给 null。理由不是「生产就是这样」（`verifyFix` 今天零生产调用方，
+    // 两支都还没有生产读者），而是**这一格默认成哪一支，下一个人照抄哪一支**：
+    // 默认成一份能过的岗位书，会让新接线的人以为自己已经接好了。
+    // 要测「有岗位书」那两支的用例在下面各自显式传，不靠默认值。
+    verifierCharter: null,
     // 审阅方**自己**跑出来的数字：谎报不参与这里任何东西。
     assemble: () => ({
       artifacts: [{ path: "cov.json", sha256: SHA_A, bytes: 10 }],
@@ -680,5 +725,139 @@ describe("请求装配", () => {
     expect(s.executor).toBe("independent");
     expect(s.approvalPolicy).toBe("on-request");
     expect(s.readOnly).toBe(false); // 审阅要写用例文件
+  });
+});
+
+/* ═════════════════ 第 1 层接进门控（0033）═════════════════ */
+
+describe("§搜索 第 1 层经由 criteriaEvaluator 接进这一层的门控", () => {
+  /** 一条点了第 1 层那把钥匙的标准（action=reject，与【规格】B.2 那条同形）。 */
+  const SEARCH_CRITERION: GateCriterion = {
+    condition: "search:mandatory_sources",
+    action: "reject",
+    message: "强制搜索领域必须附带可追溯来源",
+  };
+  const urlClaim = () => ({
+    artifacts: [{ path: "cov.json", sha256: SHA_A, bytes: 10 }],
+    claims: [{ text: "该框架 3.2 已废弃这个 API", evidence_refs: ["https://example.com/a"] }],
+    metrics: { coverage: 95 },
+  });
+  const WEB_SEARCH: HarnessEvent = {
+    kind: "tool_call",
+    tool: "WebSearch",
+    redactedArgs: { query: "framework 3.2 deprecation" },
+  };
+  const READ: HarnessEvent = { kind: "tool_call", tool: "Read", redactedArgs: { note: "读一眼" } };
+  // ⚠ 参数里刻意**不带** `path` / `file_path` / `target` 任何一格：带了就会被
+  // `pathArg` 取出来送进越界判据，而那发工具调用会变成一次「越权」并中止整次调用
+  // （我第一次就红在这里：报的是 verifier_call_failed，看起来像网关坏了，
+  //  实际是夹具那个 `/x` 不在审阅工作区里 —— 一个与本用例完全无关的原因）。
+
+  /**
+   * ⚠ 授权名单里写的是 **`WebSearch`** 而不是岗位书那种写法 `web_search`，这不是笔误。
+   * `searchGranted`（授予侧）是**子串**匹配，而 `toolAllowed`（白名单侧，逐次工具调用）
+   * 是**精确**匹配 —— 所以适配器报 `WebSearch` 时，名单里必须有 `WebSearch` 这一个串，
+   * 写 `web_search` 会得到一次 `violation_aborted`（我第一次就红在那：报出来是
+   * `verifier_call_failed`，看起来像网关坏了，实际是授权名单与工具名对不上）。
+   * 这格不对称是真存在的（0033 §5 末段），装配时必须按各家**实际报出的名字**写名单。
+   */
+  const GRANTED_SEARCH = ["Read", "WebSearch"];
+
+  it("⭐ 没有岗位书 ⇒ 那条标准判不了 ⇒ escalate，而【不是】放行", async () => {
+    // 这一发钉的是本篇最容易被写反的方向：「读不到岗位书」若按「无强制领域」处理，
+    // 就等于「装配时不接岗位书 ⇒ 第 1 层自动免检」，而不接岗位书不需要改任何代码。
+    const r = await verifyFix(
+      deps({
+        integrityOk: true,
+        verifierCharter: null,
+        criteria: [SEARCH_CRITERION],
+        assemble: urlClaim,
+      }),
+    );
+    if (!r.ok) throw new Error("不应被拒：" + r.code);
+    expect(r.verdict.decision).toBe("escalate");
+    // 授权名单里也没有搜索工具（缺省 allowedTools 是 Read/Bash），所以观测是 not_granted。
+    expect(r.searchObservation.kind).toBe("not_granted");
+  });
+
+  it("声明了领域、包里有 URL 而这次调用没搜过 ⇒ reject", async () => {
+    const r = await verifyFix(
+      deps({
+        integrityOk: true,
+        allowedTools: GRANTED_SEARCH,
+        verifierCharter: charterWith({ tier_1_mandatory: ["framework_versions"] }),
+        criteria: [SEARCH_CRITERION],
+        assemble: urlClaim,
+        adapter: adapter({ toolCalls: [READ] }),
+      }),
+    );
+    if (!r.ok) throw new Error("不应被拒：" + r.code);
+    expect(r.verdict.decision).toBe("reject");
+    if (r.searchObservation.kind !== "counted") throw new Error("应为 counted");
+    expect(r.searchObservation.searches).toBe(0);
+  });
+
+  it("⭐ 同一条标准，这次调用真搜过一次 ⇒ pass（能翻转才叫判据）", async () => {
+    const r = await verifyFix(
+      deps({
+        integrityOk: true,
+        allowedTools: GRANTED_SEARCH,
+        verifierCharter: charterWith({ tier_1_mandatory: ["framework_versions"] }),
+        criteria: [SEARCH_CRITERION],
+        assemble: urlClaim,
+        adapter: adapter({ toolCalls: [WEB_SEARCH] }),
+      }),
+    );
+    if (!r.ok) throw new Error("不应被拒：" + r.code);
+    expect(r.verdict.decision).toBe("pass");
+    if (r.searchObservation.kind !== "counted") throw new Error("应为 counted");
+    expect(r.searchObservation.searches).toBe(1);
+  });
+
+  it("岗位书没声明领域 ⇒ 这条标准不适用 ⇒ pass（不适用 ≠ 判不了）", async () => {
+    const r = await verifyFix(
+      deps({
+        integrityOk: true,
+        verifierCharter: charterWith(),
+        criteria: [SEARCH_CRITERION],
+        assemble: urlClaim,
+      }),
+    );
+    if (!r.ok) throw new Error("不应被拒：" + r.code);
+    expect(r.verdict.decision).toBe("pass");
+  });
+
+  it("⭐ metric 那几条照旧判（接上第 1 层不能把别的标准变成不适用）", async () => {
+    // 若新 evaluator 把未命中的 condition 吞掉（不交回 fallback），覆盖率那条会永远判不出
+    // ⇒ 每次 escalate；而更坏的写法是恒 satisfied ⇒ 恒放行。所以这一发用**能翻转**的那一侧：
+    // 夹具覆盖率 61 ⇒ reject。上一条 pass 的用例证明它不是恒拒。
+    const r = await verifyFix(
+      deps({
+        integrityOk: true,
+        verifierCharter: charterWith(),
+        criteria: [COVERAGE_CRITERION, SEARCH_CRITERION],
+      }),
+    );
+    if (!r.ok) throw new Error("不应被拒：" + r.code);
+    expect(r.verdict.decision).toBe("reject");
+  });
+
+  it("观测那一态进审计（门控输出里没有通道放『成因』，所以它只能走审计）", async () => {
+    const r = await verifyFix(
+      deps({
+        integrityOk: true,
+        verifierCharter: charterWith({ tier_1_mandatory: ["security_advisories"] }),
+        criteria: [SEARCH_CRITERION],
+        assemble: urlClaim,
+      }),
+    );
+    if (!r.ok) throw new Error("不应被拒：" + r.code);
+    // ⚠ 这一发读的是 `verifierAuditRow` 的产出而**不是**测试里那个 audit 收集器：
+    // 本模块自己不写那行审计（写它的是调用方），所以「进了审计」这句话的可证范围是
+    // 「它在这行的 payload 里」，不是「库里有一行」。后者要等 verifyFix 有生产调用方。
+    const row = verifierAuditRow(r, "task-1");
+    const payload = row.payload as { search_observation: { kind: string; why: string } };
+    expect(payload.search_observation.kind).toBe("not_granted");
+    expect(payload.search_observation.why.length).toBeGreaterThan(20);
   });
 });

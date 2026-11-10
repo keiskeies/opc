@@ -238,6 +238,54 @@ describe("charter zod schema（Task 0.7）", () => {
   });
 });
 
+describe("§13.3 搜索策略那一格（0033 新加的可选字段）", () => {
+  it("不写这一格 ⇒ 派生结果里【没有】searchPolicy，而不是一个空对象", () => {
+    const c = loadCharterText(yamlWith({}), "x.yaml");
+    // 「没写过」与「写过而留空」在回放里必须分得开：后者是 CEO 看过那一栏并清空了。
+    expect(c.searchPolicy).toBeUndefined();
+  });
+
+  it("写了 tier_1_mandatory ⇒ 派生成 camelCase 的 mandatoryDomains", () => {
+    const c = loadCharterText(
+      yamlWith({ search_policy: { tier_1_mandatory: ["security_advisories"] } }),
+      "x.yaml",
+    );
+    expect(c.searchPolicy?.mandatoryDomains).toEqual(["security_advisories"]);
+  });
+
+  it("写了这一格而没给名单 ⇒ 空数组（这是「声明了而没有领域」，与缺格不同）", () => {
+    const c = loadCharterText(yamlWith({ search_policy: {} }), "x.yaml");
+    expect(c.searchPolicy?.mandatoryDomains).toEqual([]);
+    // 两态各归其位：缺格是 undefined、声明了而空是 []。若两者都是 []，
+    // 「这个角色的领域还没定」与「定过了、答案是零个」就分不开了。
+    expect(loadCharterText(yamlWith({}), "x.yaml").searchPolicy).toBeUndefined();
+  });
+
+  it("⭐ 只认 tier_1_mandatory：B.3 那两键进来必须被 strict 拒掉", () => {
+    // 收进来而没人读 = 一个「配了而不生效」的键，比没这个键更坏。
+    // 拒掉才是能被人看见的写法（理由在 contracts 里 searchPolicySchema 上面那段）。
+    const e = grab(() =>
+      loadCharterText(
+        yamlWith({
+          search_policy: { tier_1_mandatory: [], tier_2_conditional: true },
+        }),
+        "x.yaml",
+      ),
+    );
+    expect(charterFieldPaths(e).join(" ")).toContain("search_policy");
+  });
+
+  it("领域名拼错在【加载期】放行 —— 报错的活是门控的，不是这里的", () => {
+    // 这不是「不校验」的懒，是校验该落在谁身上：加载 YAML 的是装配代码，
+    // 知道领域写错了的是写岗位书的人。在这里拒会把两者分开。
+    const c = loadCharterText(
+      yamlWith({ search_policy: { tier_1_mandatory: ["framework_version_compat"] } }),
+      "x.yaml",
+    );
+    expect(c.searchPolicy?.mandatoryDomains).toEqual(["framework_version_compat"]);
+  });
+});
+
 describe("7 个预设模板（Task 0.7 交付物）", () => {
   it("每个模板都能被 schema 接受；role_id 必须等于文件名", () => {
     for (const name of SEVEN) {

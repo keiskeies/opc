@@ -53,6 +53,11 @@ import {
 import {
   type AuditRow,
 } from "../events/recorder.js";
+// ⚠ **type-only**，而且这一格必须是 type-only：Gateway 对搜索策略**什么都不判**
+// （它只报告「这次看见过什么」，判不判、怎么判全在 search/ 那一侧）。
+// 一旦这里写成值 import，Gateway 就在运行期依赖了它本该只把数据交给它的那个模块 ——
+// 而那正是 §13.3「Gateway 不为每家 harness 单独实现搜索」这句话的反面。
+import type { ToolSighting } from "../search/observe.js";
 import {
   approvalBlock,
   type ApprovalVerdict,
@@ -89,8 +94,34 @@ export const GATEWAY_REJECT_CODES = [
 export type GatewayRejectCode = (typeof GATEWAY_REJECT_CODES)[number];
 
 export type GatewayOutcome =
-  | { ok: true; result: ExecutionResult; auditEventIds: number[]; settleIdempotencyKey: string }
-  | { ok: false; code: GatewayRejectCode; reason: string; auditEventIds: number[] };
+  | {
+      ok: true;
+      result: ExecutionResult;
+      auditEventIds: number[];
+      settleIdempotencyKey: string;
+      /**
+       * 这次调用里 Gateway **看见过**的工具调用（按 `工具 + 参数` 去重，与判定缓存同键）。
+       *
+       * 它是【规格】§13.3 第 1 层那条「搜过没有」的唯一观测入口（`search/observe.ts`）。
+       * 三条各自的理由：
+       *   · **为什么在 Gateway 而不是让别人数审计库** —— 只有这里同时知道
+       *     「授权了什么」与「发生了什么」；数审计库要在读侧重建一份口径，
+       *     而那份口径与这份必然漂（0020 记过同族）。
+       *   · **为什么每个出口都要有它**（包括被拒那几条）—— 「看不见」这件事本身
+       *     就是第 1 层要读的那个值。缺了被拒那几支，一次被中止的调用会显得
+       *     「从没发生过工具调用」，而 `silent` 与 `counted 0` 的修法不同（见 observe.ts 文件头）。
+       *   · **为什么不去审审计库里那些行** —— 见下面 `toolSightingsOf` 那条注释：
+       *     `approvals` 那一格只装「真的问过人的」，用它当源会让所有 read_only 工具数不到。
+       */
+      toolSightings: readonly ToolSighting[];
+    }
+  | {
+      ok: false;
+      code: GatewayRejectCode;
+      reason: string;
+      auditEventIds: number[];
+      toolSightings: readonly ToolSighting[];
+    };
 
 /**
  * 能力缺口。逐条给出「策略要什么 / 声明有什么」，因为报错要能指到该改哪一格。
@@ -330,6 +361,7 @@ export async function callHarness(
     code,
     reason,
     auditEventIds: auditIds,
+    toolSightings: toolSightings(),
   });
   /**
    * 前置四层（禁止项 / 档位）命中 ⇒ 整个调用不发生。
@@ -374,6 +406,32 @@ export async function callHarness(
    */
   const verdictCache = new Map<string, ApprovalVerdict>();
 
+  /**
+   * 观测记录，键与 `verdictCache` **同一个函数算出来**（`verdictKey`）。
+   *
+   * 同一个键而不是另算一份的理由具体：观测层的计数单位是「一次工具调用」，
+   * 而「一次」在这个文件里已经有一个定义了 —— 就是判定缓存的键（那段注释写的
+   * 「一次尝试两行不是两次尝试」讲的就是它）。另算一份（比如只按工具名）会得到
+   * 两个都对而数字不同的「次数」，那种不一致在审计里读不出来。
+   *
+   * 记在 `toolVerdict` 的**最上面**（缓存检查之前）：两条路同一个键时
+   * stages 要累积成两个（「问过我们」与「它通报了」是两件事），
+   * 而计数仍然是 1 —— 累积与计数读的是同一份 Map 的两个不同侧面。
+   */
+  const seen = new Map<string, ToolSighting & { stages: ("handler" | "event_stream")[] }>();
+
+  function see(tool: string, args: unknown, stage: "handler" | "event_stream"): void {
+    const key: string = verdictKey(tool, args);
+    const hit = seen.get(key);
+    if (hit === undefined) seen.set(key, { tool, stages: [stage] });
+    else if (!hit.stages.includes(stage)) hit.stages.push(stage);
+  }
+
+  /** 交出去的那一份（拷贝，免得调用方改到内部状态 —— 这个 Map 还要被后续出口读）。 */
+  function toolSightings(): ToolSighting[] {
+    return [...seen.values()].map((s) => ({ tool: s.tool, stages: [...s.stages] }));
+  }
+
   /** 缓存键。参数序列化失败（循环引用）时退化成工具名 + 一个不可能的后缀 ⇒ 不共享缓存（宁可多问一次）。 */
   function verdictKey(tool: string, args: unknown): string {
     try {
@@ -415,6 +473,15 @@ export async function callHarness(
     args: unknown,
     stage: HarnessAttemptPayload["stage"],
   ): Promise<ApprovalVerdict> => {
+    // ⚠ 下面那行【今天不改变任何行为】：`toolVerdict` 的全部两个调用点传的是
+    // handler 与 event_stream（`grep -n "toolVerdict(" ` 当场数：2 处，573 与 717 行），
+    // 所以 `pre_call` 这一支**走不到**。它留着只有一个用处：stage 那个类型有三个值，
+    // 而第三个值（前置那四层的判定）语义上不是「一次工具调用」—— 真有人把前置判定
+    // 也接进这个函数时（那是最省事的统一写法），这一行让它不进观测。
+    // ⇒ 这不是一条【被测试证明过】的判据，是一条**为将来的调用点**写的守卫。
+    // 测试那边钉住的是当下这条真事实：前置那四层命中 ⇒ 观测为空
+    // （gateway.test.ts「前置那四层命中的那次不算一次工具调用」，它今天恒绿的原因写在旁边）。
+    if (stage !== "pre_call") see(tool, args, stage);
     const key: string = verdictKey(tool, args);
     const cached: ApprovalVerdict | undefined = verdictCache.get(key);
     if (cached !== undefined) {
@@ -787,7 +854,13 @@ export async function callHarness(
       spentCents: spent,
     });
   }
-  return { ok: true, result, auditEventIds: auditIds, settleIdempotencyKey: key };
+  return {
+    ok: true,
+    result,
+    auditEventIds: auditIds,
+    settleIdempotencyKey: key,
+    toolSightings: toolSightings(),
+  };
 
   /**
    * 落那一行 harness_call。**每个出口都要落**（成功、被拦、适配器坏了），

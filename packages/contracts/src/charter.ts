@@ -40,6 +40,34 @@ export const JUDGMENT_MODES = [
   "full_discretion",
 ] as const;
 
+/**
+ * 【规格】附录 B.3 给技术总监那一份里写的 `search_policy`（§13.3）。
+ *
+ * ⚠ **只认 `tier_1_mandatory` 这一个键**，而这不是漏写。B.3 原文还有
+ * `tier_2_conditional` 与 `tier_3_budget_downgrade_ratio`，本 schema 刻意不收：
+ *   · 第 2 层的判断是**每次任务**由 Agent 显式表态的（`SearchPolicyInput.judgment`），
+ *     不是一格静态开关，收成 boolean 会得到一个「配了而没人读」的键；
+ *   · 第 3 层的阈值是**每次调用注入**的（`searchBudgetTier` 的 `thresholds`，
+ *     理由在它函数头：规格没说那个比例是多少），把它挪进 YAML 等于允许
+ *     「谁改一行 YAML」调整一次运行期的成本闸，而那一格的口径是「不由被约束方现填」。
+ * 一个**没有消费方**的可选字段与一张有码而无返回点的码表是同一种装饰（本仓删过一次那种码表），
+ * 所以等事前那一遍真接上时再一起加，那时它才有读者。这一格记在 0033 §4。
+ *
+ * `tier_1_mandatory` 也不在这里校验取值（不比对那四个领域名）：
+ * 那是 `unknown_mandatory_domain` 的活，而它该在**门控那一刻**报 ——
+ * 那时报错才有人看得到 message。加载期拒掉会把「写岗位书的人」与「看到报错的人」分开。
+ *
+ * 【规格】B.3 那四个名字（`framework_version_compat` / `api_deprecation` /
+ * `security_advisory` / `benchmark`）与本层 `FAST_CHANGING_DOMAINS` **交集为空**，
+ * 所以照抄进 YAML 的后果是每次门控直接打回而不是「拦住了一次不该拦的搜索」
+ * （那条 criteria 的 action 是 reject）。细节与判后处置在 0033 §2。
+ */
+const searchPolicySchema = z
+  .object({
+    tier_1_mandatory: z.array(z.string().min(1)).optional(),
+  })
+  .strict();
+
 /** §4.2.2：升级触发条件在规格里出现【两种形状】—— 附录 B.1 用裸字符串，§4.2.2 用对象。
  *  两种都是合法写法，故 union；只认一种会让合法模板加载失败。 */
 const escalationTriggerSchema = z.union([
@@ -125,6 +153,8 @@ const charterInput = z
       .optional(),
     stance: z.string().min(1).optional(),
     untrusted_inputs: z.array(z.string().min(1)).optional(),
+    /** §13.3 第 1 层那一半的岗位书侧（为什么只有一键见 searchPolicySchema 上面那段）。 */
+    search_policy: searchPolicySchema.optional(),
     harness_defaults: z
       .record(z.string(), z.record(z.string(), z.unknown()))
       .optional(),
@@ -177,6 +207,12 @@ export const charterSchema = charterInput.transform((c) => ({
     : undefined,
   stance: c.stance,
   untrustedInputs: c.untrusted_inputs,
+  // 与 budgetDiscretion / dissentRights 同一个形状（缺省 ⇒ undefined，不编一个空对象）：
+  // 「这个角色的岗位书没说过搜索」与「它说过而领域为空」在回放里必须分得开，
+  // 后者是一个 CEO 决策（他看过那一栏并留空），前者只是还没写过。
+  searchPolicy: c.search_policy
+    ? { mandatoryDomains: c.search_policy.tier_1_mandatory ?? [] }
+    : undefined,
   harnessDefaults: c.harness_defaults,
 }));
 

@@ -28,6 +28,7 @@ import type {
   ExecutionResult,
   EvidenceArtifact,
   EvidenceBundle,
+  Charter,
   HarnessAdapter,
   HarnessCapabilities,
   HarnessRequest,
@@ -37,6 +38,8 @@ import { randomUUID } from "node:crypto";
 import type { AuditRow } from "../events/recorder.js";
 import {
   evaluateGate,
+  metricCriteriaEvaluator,
+  type CriteriaEvaluator,
   type GateCriterion,
   type GateVerdict,
 } from "../graph/gates/evaluate.js";
@@ -44,6 +47,10 @@ import {
   type Party,
   sameFamilyReviewBlock,
 } from "../graph/gates/author-reviewer.js";
+// 【规格】§13.3 第 1 层的那一侧。方向是 harness → search（search 只回依赖 graph 的类型），
+// 所以这一格不会成环；`search/policy.ts` 也不 import harness 里的任何东西。
+import { observeSearchCalls, toObservedSearches, type SearchObservation } from "../search/observe.js";
+import { charterMandatoryDomains, makeSearchCriteriaEvaluator } from "../search/policy.js";
 import {
   callHarness,
   type GatewayDeps,
@@ -394,6 +401,29 @@ export interface VerifyInput {
     readonly grantedForbidden: readonly string[];
   };
   readonly onApproval?: Parameters<typeof callHarness>[3];
+  /**
+   * ⭐ 【规格】§13.3 第 1 层接进这一层门控要的那一格。**必填，没有默认值** ——
+   * 沿用 `harness/gateway.ts` 里 `grantedSandbox` 那条口径（0021 §1）：
+   * 拿不到就说明调用方还没接岗位书，那时该在装配期炸，而不是在运行期静默放行。
+   *
+   * ── 为什么是**审阅方**那份岗位书（这一格我第一版写反了，0033 §3）──
+   * 直觉是「这一层 gate 的是作者的工作，所以当然读作者那份」，而它错在**包里装的是谁的话**：
+   * `evaluateGate` 拿到的 bundle 是本层自己产的 `test_report`，
+   * 里面的 claim 是**审阅方**写的（producer 那一格填作者回答的是「谁的工作在被评审」，
+   * 那是另一问，见下面那段长注释）。`mandatorySourceBlock` 读的是 bundle 的 claim，
+   * 所以第 1 层在这里判的是「**审阅方**那些依赖外部来源的话搜过没有」。
+   * 于是三个入参必须同源，而它们恰好都在本层手上：
+   *   包 = 审阅方产的 · 领域 = 审阅方那份岗位书 · 观测 = 审阅方那一次调用的 toolSightings。
+   * **作者**那一层的第 1 不归本层管：那是 gate 作者自己那份包的人的事。
+   *
+   * 第一版我写的是一发「观测必须出自作者」的核对（还配了一个新拒绝码），
+   * 它会**拒掉唯一正确的接线**并逼调用方交出作者的观测 —— 那种形状不会被测试抓到，
+   * 因为夹具里两个 roleId 常常可以随便写。细节与教训记在 0033 §3。
+   *
+   * `null` 的语义是「运行期没加载岗位书」⇒ 第 1 层那一条判 unresolved（不是放行），
+   * 理由在 `makeSearchCriteriaEvaluator` 那个 null 分支。
+   */
+  readonly verifierCharter: Charter | null;
 }
 
 export type VerifyOutcome =
@@ -409,6 +439,18 @@ export type VerifyOutcome =
        * **只记不拒**，理由写在 verifyFix 的注释里（拒会误伤一句正当提到这句话的指令）。
        */
       instructionFlags: readonly string[];
+      /**
+       * 第 1 层那一条判据**当时看到的是什么**（三态 + 出处）。
+       *
+       * 为什么单独带出来而不是只留那个数字：`criterion` 判成 violated 时，
+       * `evaluateGate` 报的是**岗位书里那条 message**（它写的是「必须附可追溯来源」这类话），
+       * 而我们看到的成因可能是「这次调用根本没被授予搜索工具」——
+       * 那句话在门控输出里**没有通道**（`CriterionOutcome` 的 violated 分支没有 why，
+       * 这是刻意的：内核不让注入方改写门控措辞）。所以它只能走审计。
+       * ⚠ 于是有一条已知代价：只看看板的人会被引导去「让 agent 补引用」，
+       * 而该修的是装配。这一格记在 0033 §5，不在这里掩盖。
+       */
+      searchObservation: SearchObservation;
       result: ExecutionResult;
     }
   | { ok: false; code: VerifyRejectCode; reason: string };
@@ -556,6 +598,25 @@ export async function verifyFix(input: VerifyInput): Promise<VerifyOutcome> {
     ...(made.metrics === undefined ? {} : { metrics: { ...made.metrics } }),
   };
 
+  // ⭐ 【规格】§13.3 第 1 层：把这条标准接成**门控打回**而不是外面判一次。
+  // 走的是 `GateInput.criteriaEvaluator` 那个**已有的注入点**（内核一行没改，
+  // 理由在 policy.ts 那一段：判据住在门控外面躺着 = 拦不拦取决于调用方记不记得判）。
+  //
+  // 三格同源的口径写在 `VerifyInput.verifierCharter` 那一格：
+  // 包是审阅方产的、领域来自审阅方那份岗位书、观测来自审阅方那一次调用。
+  // 第四格 `fallback` 交的是 metric 判据本体：这条 evaluator 只认
+  // `search:mandatory_sources`，其余 condition **必须**原样交回，
+  // 否则接上第 1 层的代价是把岗位书里那些 `metric:` 标准全变成不适用（静默放行）。
+  const observation: SearchObservation = observeSearchCalls({
+    granted: input.allowedTools,
+    sightings: out.toolSightings,
+  });
+  const searchEvaluator: CriteriaEvaluator = makeSearchCriteriaEvaluator({
+    mandatoryDomains: charterMandatoryDomains(input.verifierCharter),
+    observedSearches: toObservedSearches(observation),
+    fallback: metricCriteriaEvaluator,
+  });
+
   const verdict: GateVerdict = evaluateGate({
     // 门控问的是「**谁的工作**在被 gate」，不是「这份包是谁产的」，所以
     // producer 必须是**作者**（dev）而 reviewer 是审阅方。
@@ -576,6 +637,7 @@ export async function verifyFix(input: VerifyInput): Promise<VerifyOutcome> {
     reviewer: { roleId: verifier.roleId, modelFamily: verifier.modelFamily },
     // 只有调用方**明确给了**才传：把 undefined 变成 true 就是我替调用方对账。
     ...(input.integrityOk === undefined ? {} : { integrityOk: input.integrityOk }),
+    criteriaEvaluator: searchEvaluator,
   });
   return {
     ok: true,
@@ -584,6 +646,7 @@ export async function verifyFix(input: VerifyInput): Promise<VerifyOutcome> {
     bundle,
     droppedClaims: strip.dropped.map((d) => d.text),
     instructionFlags,
+    searchObservation: observation,
     result: r,
   };
 }
@@ -633,6 +696,9 @@ export function verifierAuditRow(
       dropped_self_reported_claims: o.droppedClaims,
       // 「我们**知道**指令里有这句话」这件事也得能回放（只记不拒的那一笔）。
       instruction_self_reported_matches: o.instructionFlags,
+      // 第 1 层当时看到的是三态里的哪一态、出处是什么（为什么不只记数字见
+      // VerifyOutcome 那一格的注释；一句话：门控的输出里没有通道放「成因」）。
+      search_observation: o.searchObservation,
     },
   };
 }

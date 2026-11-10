@@ -26,7 +26,7 @@
  *   - 「搜过没有」有两个强度：包里有没有 URL（【规格】字面要求，**可被编造**）
  *     与审计里有没有真的发生过搜索（**编不出来**）。两个都做，差别写在函数注释里。
  */
-import { isExternalSourceRef, type EvidenceBundle } from "@opc/contracts";
+import { isExternalSourceRef, type Charter, type EvidenceBundle } from "@opc/contracts";
 // `metricCriteriaEvaluator` 作为**默认 fallback** 用在下面那条测试里，
 // 而类型 `CriteriaEvaluator` 是这一节的接口本体 —— 都来自门控那一层，不另写一份。
 import type { CriteriaEvaluator } from "../graph/gates/evaluate.js";
@@ -487,6 +487,34 @@ export function searchEvidenceGate(o: {
 
 /* ═════════════════ 接进门控：让「打回」真的是门控打回 ═════════════════ */
 
+/* ═════════════════ 注入那一侧：岗位书 → mandatoryDomains ═════════════════ */
+
+/**
+ * `mandatoryDomains` 的**正牌来源**。文件头那条 ⭐ 说「必须从岗位书注入，
+ * 不接受从证据包内容里推」，而这句话在接线之前一直缺一个具体的读取点 ——
+ * 没有它，接线的人只能自己决定读哪儿，而最省事的那一处恰好就是包（0033 §2）。
+ *
+ * 所以这一发的形状是判据：**入参类型里只有岗位书，没有 bundle**，
+ * 想从包里推就编译不过。这不是装饰，是本层唯一一处能被编译器兑现的立场。
+ *
+ * `null` 的语义是「这个任务没有岗位书可读」，此时交回 `null` 而不是 `[]`：
+ * `[]` 在下游是「无强制领域 ⇒ 第 1 层不适用 ⇒ 放行」，
+ * 而「没有岗位书」不等于「岗位书批准了不搜」。调用方必须自己决定 `null` 怎么办
+ * （本篇的处置与它的代价在 0033 §6）。
+ */
+export function charterMandatoryDomains(
+  c: Pick<Charter, "searchPolicy"> | null | undefined,
+): readonly string[] | null {
+  // `undefined` 与 `null` 合并：两者的语义都是「没有岗位书可读」，
+  // 而合并的方向是**安全**的那一侧 —— 两者都落到 unresolved（吵），不是放行。
+  // 分成两支会得到两条措辞不同的报错，而它们要的修法一模一样。
+  if (c === null || c === undefined) return null;
+  // 缺 searchPolicy 与它有而 mandatoryDomains 为空，到这里都归 `[]`：
+  // 那一格在 YAML 里长什么样是**加载期**的事（contracts 的 transform 负责），
+  // 判定层不问「为什么是空」，只按空处理 —— 少一个分支就少一处能漂的地方。
+  return c.searchPolicy?.mandatoryDomains ?? [];
+}
+
 /**
  * 把第 1 层接成 `evaluateGate` 的一个判据注入点。
  *
@@ -508,8 +536,16 @@ export function searchEvidenceGate(o: {
 export const MANDATORY_SOURCES_CONDITION = "search:mandatory_sources";
 
 export function makeSearchCriteriaEvaluator(o: {
-  /** 本任务命中的强制领域（**注入**，见文件头那条 ⭐）。 */
-  readonly mandatoryDomains: readonly string[];
+  /**
+   * 本任务命中的强制领域（**注入**，见文件头那条 ⭐）。
+   *
+   * `null` = **没有岗位书可读**，与 `[]`（岗位书说过而领域为空）是两件事：
+   * `[]` 判 satisfied（不适用），`null` 判 unresolved（判不了 ⇒ 升级人工）。
+   * 把 `null` 折进 `[]` 就是文件头那条 ⭐ 的反面 —— 那等于
+   * 「拿不到岗位书 ⇒ 自动免检」，而「不接岗位书」不需要改任何代码，
+   * 只需要装配时不传（与 `observedSearches` 那一格同一个攻击面）。
+   */
+  readonly mandatoryDomains: readonly string[] | null;
   /** 审计观测到的搜索次数；`"unobserved"` = 无观测通路。 */
   readonly observedSearches: number | typeof OBSERVATION_UNAVAILABLE;
   /** 内建的 metric 判据兜底（其余 condition 交回给它，不吞掉）。 */
@@ -519,10 +555,44 @@ export function makeSearchCriteriaEvaluator(o: {
     if (criterion.condition.trim() !== MANDATORY_SOURCES_CONDITION) {
       return o.fallback(criterion, bundle);
     }
+    if (o.mandatoryDomains === null) {
+      return {
+        status: "unresolved",
+        why:
+          "这条标准要求知道【本任务那个角色的哪些领域必须搜过】，而这个任务**没有岗位书可读**，" +
+          "所以第 1 层今天判不了。**不**按『无强制领域』放行：那是把『装配时没接岗位书』" +
+          "变成一次免检（不接岗位书不需要改代码，只需要不传）。" +
+          "修法二选一：① 装配时交出这个角色那份岗位书；② 承认这一层判不了，" +
+          "把这条标准从岗位书里摘掉而不是留着让它每次吵。",
+      };
+    }
     if (o.mandatoryDomains.length === 0) {
       // 没声明强制领域 ⇒ 这条标准**不适用**，判 satisfied。
       // 不是 unresolved：不适用与判不了是两件事，后者会触发升级而前者不该。
       return { status: "satisfied" };
+    }
+    // ⭐ 领域名不认识 ⇒ **unresolved**，而不是跟着下面的 violated 走。
+    // 这是本篇接线时改掉的一个映射。理由：`violated` 出门只有岗位书里那条 message
+    // （`CriterionOutcome` 的 violated 分支**没有 why** —— 内核刻意不让注入方改写门控措辞），
+    // 而那条 message 写的是「强制搜索领域必须附带可追溯来源」。
+    // 于是一个**岗位书写错了领域名**的人，看到的报错是「你没附来源」——
+    // 他会去让 agent 补引用，补完照旧每次打回，而该改的是一个 YAML 键值。
+    // （0032 §2 那条「不对症的报错」的又一发，只是这次不对称来自**门控的输出形状**不在我手里。）
+    // `unresolved` 带得出 why，而配置错误本来就不是「作者不合格」而是「这条判据不成立」⇒ escalate 人工。
+    const unknown = o.mandatoryDomains.filter((d) => !isFastChangingDomain(d));
+    if (unknown.length > 0) {
+      return {
+        status: "unresolved",
+        why:
+          "岗位书声明的强制搜索领域里有**这层不认得**的名字 [" + unknown.join(", ") + "]，" +
+          "所以这条标准本身不成立（不是产出不合格）。" +
+          "FAST_CHANGING_DOMAINS 是【规格】§13.3 那张表的四条：" +
+          FAST_CHANGING_DOMAINS.join(" / ") + "。" +
+          "⚠ 已知的一处对不上：【规格】附录 B.3 给技术总监那份写的四个名字 " +
+          "(framework_version_compat / api_deprecation / security_advisory / benchmark) " +
+          "与这四条**一个都不相同**（0033 §2 量过：交集为空）。要么改 YAML 用上面那四条，" +
+          "要么改那张表（= 改规格 = CEO 的事），**别**在这里加一层模糊匹配。",
+      };
     }
     const src = mandatorySourceBlock(o.mandatoryDomains, bundle);
     if (!src.ok) return { status: "violated" };
@@ -546,8 +616,20 @@ export function makeSearchCriteriaEvaluator(o: {
 /* ═════════════════ 一次调用的总判定（事前） ═════════════════ */
 
 export interface SearchPolicyInput {
-  /** 岗位书声明的强制搜索领域（**注入**，见文件头那条 ⭐）。 */
-  readonly charterMandatoryDomains: readonly string[];
+  /**
+   * 岗位书声明的强制搜索领域（**注入**，见文件头那条 ⭐）。`null` = 没有岗位书可读。
+   *
+   * ⚠ 这里 `null` **不**拦下这次搜索，而门控那一遍会因同一个 `null` 判 unresolved。
+   * 这不是口径不一致，是两遍要答的问题本来不同：
+   *   · 事前这一遍答「**这次能不能发起搜索**」。没有岗位书 ⇒ 说不出「这个领域必须搜过」，
+   *     但也没有任何依据说「不许搜」——拦一次合法的联网去要一份岗位书，
+   *     修的人在电话里会被绕住（「那你先给我岗位书我才让 agent 查个版本号」）。
+   *   · 事后那一遍答「**这份产出够不够格往下走**」，那一问**必须有**岗位书才答得出，
+   *     所以那里判不了就该吵（`makeSearchCriteriaEvaluator` 的 null 分支）。
+   * 于是缺岗位书的代价**恰好落一次**，落在有人读的地方，而不是把每次搜索都停掉。
+   * 这一格的选择与代价记在 0033 §6。
+   */
+  readonly charterMandatoryDomains: readonly string[] | null;
   /** 本次任务实际落在这四个领域里的哪几个（由任务声明匹配，见 `matchDomains`）。 */
   readonly taskDomains: readonly string[];
   /** 岗位书是否禁止该角色联网。 */
@@ -588,7 +670,13 @@ export function matchDomains(
 }
 
 export function searchPolicy(input: SearchPolicyInput): SearchPolicyVerdict | SearchBlock {
-  const mandated = matchDomains(input.taskDomains, input.charterMandatoryDomains);
+  // `null`（没有岗位书）在这一遍按**无强制领域**走：理由与代价写在
+  // `SearchPolicyInput.charterMandatoryDomains` 那一格（一句话：事前拦的是「一次合法的联网」，
+  // 事后判不了吵一次才对；两处都拦会把缺装配变成整条链路停工）。
+  const mandated = matchDomains(
+    input.taskDomains,
+    input.charterMandatoryDomains ?? [],
+  );
   const budget = searchBudgetTier(input.spentCents, input.limitCents, input.thresholds);
 
   // 顺序是有语义的（0022 §6 第 7 条：同一个输入命中多条判据时，报哪条取决于顺序）：
