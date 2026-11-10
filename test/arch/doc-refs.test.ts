@@ -169,7 +169,12 @@ const SNAP: Record<string, string> = {
   "0006-cli-resume-and-identity.md>write-queue.test.ts:207":
     'it("失败之后立刻 close()：不得重抛旧失败，且必须真的关掉连接", async () => {',
   // §7-39 里为了举证【真正的消费者一掏空就红】而写下的坐标；登记同轮完成，不留红过夜。
-  "0006-cli-resume-and-identity.md>production-deps.test.ts:225":
+  // 漂过一次：原本是第 225 行，本轮在同文件上方新增一条 it（scoped 子包扫描的回归），
+  // 把它顶到第 258 行 —— 行内容一字未变，只有编号动。这正是本守卫的设计用途：
+  // 【引用没变错、目标没变错，只是行号动了】也要能被看见，不然「行号引用」这件事
+  // 根本没有可靠性可言。0006 正文里那句历史叙述刻意写成「第 225 行」而不是坐标形态，
+  // 因为守卫会把手写的每一个 文件:行号 都当成当下的活坐标来要快照。
+  "0006-cli-resume-and-identity.md>production-deps.test.ts:258":
     "expect(isRuntimeFixture(BOUNDARY_PROBE)).toBe(true);",
   // 同一轮里第二次被 doc-refs 抓住：正文写了坐标却没登记快照；连着两次 => 【登记快照】
   // 已是写文档的固定动作，见 0006 §7-40。

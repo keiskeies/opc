@@ -83,16 +83,27 @@ function tsFiles(dir: string): string[] {
  *   @scope/pkg/sub/file.js → @scope/pkg
  *   pkg/sub                → pkg
  *   node:sqlite / ./x      → null（内置与相对路径不占 dependencies）
+ *
+ * 【带子路径的 scoped 说明符必须照样认出来】。这一条是实现过程中真实写错的形状：
+ * 早先的版本先判 `spec.includes(sep)` 就 return null，于是
+ *   import type { RunnableConfig } from "@langchain/core/runnables"
+ * 被当成【不是包】而完全跳过检查 —— 而本文件的注释一直写着 `@scope/pkg/sub → @scope/pkg`。
+ * 后果正是这条测试存在的理由落空：@langchain/core 若被挪进 devDependencies，
+ * src/ 里唯一引用它的那一行【恰好带子路径】，于是 pnpm install --prod 之后 Hub 起不来，
+ * 而这条测试全绿。分隔符的判断只能对【相对/绝对路径】生效，不能对包名生效 ——
+ * 包名【本来就可能含斜杠】，这是 npm scoped 包的语法，不是路径。
  */
 function packageName(spec: string): string | null {
-  if (spec.startsWith(".") || spec.startsWith("/") || spec.includes(sep))
-    return null;
+  if (spec.startsWith(".") || spec.startsWith("/")) return null;
   if (spec.startsWith("node:")) return null;
-  const head = spec.startsWith("@")
-    ? spec.split("/").slice(0, 2).join("/")
-    : spec.split("/")[0];
-  if (head === undefined || (!spec.startsWith("@") && BARE_BUILTIN.has(head)))
-    return null;
+  const parts = spec.split("/");
+  if (spec.startsWith("@")) {
+    // scoped 包名必须有前两段；"@scope" 或 "@scope/" 这种残缺写法不算包名
+    if (parts.length < 2 || parts[1] === "" || parts[1] === undefined) return null;
+    return (parts as string[]).slice(0, 2).join("/");
+  }
+  const head = parts[0];
+  if (head === undefined || BARE_BUILTIN.has(head)) return null;
   return head;
 }
 
@@ -178,6 +189,28 @@ describe("依赖边界：src/ 的 import 必须在 dependencies", () => {
       "生产代码引用了未进 dependencies 的包（prod 安装会缺模块）：\n  " +
         findings.join("\n  "),
     ).toEqual([]);
+  });
+
+  it("【带子路径的 scoped 包】确实在扫描范围内", () => {
+    // 上面那条 toBeGreaterThan(3) 只保证「扫到了点东西」，挡不住【专扫漏某一类】的
+    // 缺陷：带子路径的 scoped import 被整类跳过时，seen 里照样有 zod、yaml，条数
+    // 也能超过 3，于是扫描器少认一整类包而门禁全绿。
+    // 这里直接点名 Hub 真正依赖的那两个 @langchain 包 —— 它们【只以子路径形式】
+    // 被引用（"@langchain/core/runnables"、"@langchain/langgraph-checkpoint"），
+    // 所以这一条就是 packageName 的回归测试。写法上用 includes 而不是精确比集合：
+    // 换依赖时不该由这条来报红，那由上面那条 findings 负责。
+    const hub = "@opc/hub :: ";
+    const hit = [...seen].filter((s) => s.startsWith(hub));
+    for (const want of ["@langchain/core", "@langchain/langgraph"]) {
+      expect(
+        hit.includes(hub + want),
+        "扫描漏了 " +
+          want +
+          "。它在本仓库只以【带子路径】的形式被 import，" +
+          "漏认说明 packageName 把斜杠当成路径处理了（见其注释）。实到：" +
+          hit.join(", "),
+      ).toBe(true);
+    }
   });
 
   it("Phase 0 不引入真实 LLM provider 依赖", () => {
