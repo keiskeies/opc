@@ -119,6 +119,13 @@ export async function dispatch(
  * 拼字符串而不是 new URL(...)：base 恒是本机固定值，而 new URL 对一个
  * 含 "?" 的 id 会安静地把它解析成 query —— 那等于把「校验漏了一个字符」
  * 变成「请求打到另一个端点上」。宁可在这里显式拼接，让形状闸门成为唯一防线。
+ *
+ * ⚠ 带 query 的通道（hub:listApprovals）【必须返回将要发出去的那一整串】：
+ * signedFetch 签的是【原始 target】（含 query、未解码），而服务端也按原始 target
+ * 验签（http/auth.ts 的 canonicalString，那是真 socket 上撞出来的教训）。
+ * 所以这里拼完的字符串与 encodeURIComponent 后的字节【必须逐字一致】 ——
+ * 若哪天有人在这里做「先拼再 normalize / 排序参数」，签名会与发出的串对不上，
+ * 症状是【所有带 query 的请求 401】，而 IPC 层看到的只是 hub_error 401。
  */
 export function toHttpRequest(
   spec: ChannelSpec,
@@ -136,6 +143,25 @@ export function toHttpRequest(
     case "hub:getTask": {
       const o = (args ?? {}) as { taskId?: string };
       return { path: "/tasks/" + o.taskId, init: { method: "GET" } };
+    }
+    case "hub:listApprovals": {
+      const o = (args ?? {}) as { status?: string; limit?: number };
+      // 【两个键都缺省时不带 "?"】，而不是一发 `/approvals?`。
+      // 后者在服务端会解析出一个 status="" 的空值（URLSearchParams 把一个空段
+      // 给成 ""），而 "" 不是白名单里的取值 ⇒ 触发读侧的回落分支。
+      // 行为上今天等价，但那条分支是【非法取值】的分支 —— 让正常路径去踩它，
+      // 等于让「读侧回落对不对」这件事永远测不到（详见 approvals/query.ts ②）。
+      const qs: string[] = [];
+      if (o.status !== undefined && o.status !== null) {
+        qs.push("status=" + encodeURIComponent(o.status));
+      }
+      if (o.limit !== undefined && o.limit !== null) {
+        qs.push("limit=" + encodeURIComponent(String(o.limit)));
+      }
+      return {
+        path: "/approvals" + (qs.length === 0 ? "" : "?" + qs.join("&")),
+        init: { method: "GET" },
+      };
     }
     case "hub:decideApproval": {
       const o = (args ?? {}) as { approvalId?: string; resume?: string; note?: string };

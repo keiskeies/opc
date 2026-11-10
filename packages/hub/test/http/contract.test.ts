@@ -425,6 +425,93 @@ describe("② 鉴权：无 token 请求 401", () => {
 
 /* ───────────────── ③ 404 且不产生审计事件 ───────────────── */
 
+describe("GET /approvals（收件箱计数的对账源）", () => {
+  /**
+   * 这一组走的是【handler】而不是直接调 query.ts：要验的是 HTTP 边界那三件事
+   * —— query 解析、422 的口径、asOfMs 是谁的时钟。读侧的性质（排序/回落/钳制）
+   * 住在 test/approvals/query.test.ts，这里不重测一遍（两处各测一遍必有一处漂移）。
+   */
+  it("⭐ limit 非整数 ⇒ 422，而不是静默回落到默认值", async () => {
+    /*
+     * query.ts 里 clampLimit 是【回落】的，那服务的是进程内调用方；
+     * HTTP 这一层必须【报】。分工写在那边注释里，这里钉的是「这一层真的报了」——
+     * 若 handler 忘了那条正则，走网络的调用方拿到 200 而拿到的是 200 条，
+     * 他会以为自己传的 limit 生效了。
+     */
+    const h = await harness();
+    for (const bad of ["abc", "1.5", "", "1e3"]) {
+      const res = await handleRequest(
+        h.deps,
+        h.req({ method: "GET", path: "/approvals", query: { limit: bad } }),
+      );
+      expect(res.status, "limit=" + JSON.stringify(bad)).toBe(422);
+    }
+    const ok = await handleRequest(
+      h.deps,
+      h.req({ method: "GET", path: "/approvals", query: { limit: "2" } }),
+    );
+    expect(ok.status).toBe(200);
+  });
+
+  it("⭐ 带 query 的请求【能过鉴权】（签的是原始 target，不是剥过 query 的 path）", async () => {
+    // 这一发是本文件文件头记过的那次假断言的【同类】复现点：
+    // 曾经所有带 query 的请求恒 401，而 contract 层看不见（两侧同一个人写的同一个值）。
+    // 这里 req() 会自己按 target 签名，所以它是【真】通过而不是绕过。
+    const h = await harness();
+    h.approvals("a-q");
+    const res = await handleRequest(
+      h.deps,
+      h.req({ method: "GET", path: "/approvals", query: { status: "pending" } }),
+    );
+    expect(res.status).toBe(200);
+    const body = res.body as { approvals: { id: string }[]; pendingTotal: number };
+    expect(body.approvals.map((a) => a.id)).toEqual(["a-q"]);
+    expect(body.pendingTotal).toBe(1);
+  });
+
+  it("⭐ asOfMs 是【服务端】那个注入的时钟，不是客户端能算的", async () => {
+    // 「这张卡等了多久」「离过期还有多久」必须用服务端时刻算，
+    // 否则一台时钟不准的机器会让卡片显示「已过期 3 小时」而服务端还没到那个点。
+    const h = await harness();
+    const res = await handleRequest(
+      h.deps,
+      h.req({ method: "GET", path: "/approvals" }),
+    );
+    expect((res.body as { asOfMs: number }).asOfMs).toBe(NOW);
+  });
+
+  it("无 token ⇒ 401（新端点【不会】因为「只是个读接口」而漏鉴权）", async () => {
+    const h = await harness();
+    const res = await handleRequest(
+      h.deps,
+      h.req({ method: "GET", path: "/approvals", headers: {} }),
+    );
+    expect(res.status).toBe(401);
+  });
+
+  it("出参【不含】parameters 全文（列表不是「顺手把整行发出去」）", async () => {
+    const h = await harness();
+    h.db.prepare(
+      "INSERT INTO approvals (id, task_id, approval_type, summary, parameters, status) " +
+        "VALUES ('a-p', ?, 'strategic', 's', ?, 'pending')",
+    ).run("task-1", JSON.stringify({ impact_scope: "SECRET-SCOPE" }));
+    const res = await handleRequest(
+      h.deps,
+      h.req({ method: "GET", path: "/approvals" }),
+    );
+    expect(res.status).toBe(200);
+    expect(JSON.stringify(res.body)).not.toContain("SECRET-SCOPE");
+  });
+
+  it("路由本身：GET /approvals 匹到 list_approvals，而 /approvals/ 与 POST 不抢它", () => {
+    expect(matchRoute("GET", "/approvals")?.kind).toBe("list_approvals");
+    expect(matchRoute("GET", "/approvals/")).toBeNull();
+    // 反向对照：带 id 的那一条仍然是 decide，没被列表分支吞掉。
+    expect(matchRoute("POST", "/approvals/a-1")?.kind).toBe("decide");
+    expect(matchRoute("GET", "/approvals/a-1")).toBeNull();
+  });
+});
+
 describe("③ POST /approvals/:id", () => {
   const decideBody = (o: Record<string, unknown>): string => JSON.stringify(o);
 

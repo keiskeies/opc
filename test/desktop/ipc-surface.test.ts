@@ -152,11 +152,13 @@ describe("通道与端点对齐", () => {
     await api.createTask({ idea: "x" });
     await api.listTasks();
     await api.getTask({ taskId: "t-1" });
+    await api.listApprovals();
     await api.decideApproval({ approvalId: "a-1", resume: "approve" });
     expect(f.calls.map((c) => c.channel)).toEqual([
       "hub:createTask",
       "hub:listTasks",
       "hub:getTask",
+      "hub:listApprovals",
       "hub:decideApproval",
     ]);
   });
@@ -220,6 +222,36 @@ describe("参数闸门", () => {
   it("无参通道【不接受】参数，不是默默丢掉", () => {
     expect(checkArgs(none, { anything: 1 })).toMatch(/不接受参数/u);
   });
+
+  it("⭐ listApprovals 闸门：可整体不传，但 status 必须在 contracts 的白名单里", () => {
+    /*
+     * 这一条钉的是【层与层的分工】，不是那几个取值本身：
+     *  ① 整体不传 / 传空对象 ⇒ 过（读侧默认那一档 = 待批）；
+     *  ② 取值白名单【引自 contracts】，不在这里再列一份 ——
+     *     这里放过的 Hub 一定认，这里拒的 Hub 只会回落，两种都不会出现
+     *     「IPC 校验过了、HTTP 报错」那种最误导人的组合；
+     *  ③ limit 必须是【整数】：Hub 对 `limit=abc` 直接 422，
+     *     而 3.5 会被 Hub 那一条 ^-?\d+$ 正则同样拒掉 ⇒ 这一层必须也拒。
+     */
+    const q = specOf("hub:listApprovals")!;
+    expect(q.endpoint).toBe("GET /approvals");
+    expect(q.args).toBe("approvalQuery");
+    for (const ok of [undefined, null, {}, { status: "pending" }, { limit: 20 },
+      { status: "deferred", limit: 1 }]) {
+      expect(checkArgs(q, ok), "实到 " + JSON.stringify(ok)).toBeNull();
+    }
+    expect(checkArgs(q, { status: "all" })).toMatch(/status/u);
+    expect(checkArgs(q, { status: "PENDING" })).toMatch(/status/u);
+    expect(checkArgs(q, { limit: 3.5 })).toMatch(/整数/u);
+    expect(checkArgs(q, { limit: "5" })).toMatch(/整数/u);
+    expect(checkArgs(q, { limit: Number.NaN })).toMatch(/整数/u);
+    expect(checkArgs(q, { taskId: "t-1" })).toMatch(/多出/u);
+    // 取值白名单必须是从 contracts 引进来的，不是这里手抄的（同 MAX_IDEA 那条理由）。
+    const src = readFileSync(join(REPO, "packages/desktop/src/ipc-surface.ts"), "utf8");
+    expect(src).toMatch(/STATUS = new Set<string>\(APPROVAL_STATUS_VALUES\)/u);
+  });
+
+
 
   it("id 形状非法 ⇒ 拒（它会被拼进 URL 路径）", () => {
     for (const bad of ["", "../etc/passwd", "a/b", "a?x=1", "a b", "#frag", "x".repeat(65)]) {
@@ -321,6 +353,7 @@ const INVOKE_METHODS: Record<string, string> = {
   "hub:createTask": "createTask",
   "hub:listTasks": "listTasks",
   "hub:getTask": "getTask",
+  "hub:listApprovals": "listApprovals",
   "hub:decideApproval": "decideApproval",
 };
 
@@ -341,18 +374,43 @@ describe("主进程分发", () => {
     };
   };
 
-  it("四个 invoke 通道映射到【正确的端点与方法】", async () => {
+  it("五个 invoke 通道映射到【正确的端点与方法】", async () => {
     const f = fetchReturning(200, { id: "t-1" });
     const deps: MainDeps = { signedFetch: f.signedFetch };
     await dispatch(deps, "hub:createTask", { idea: "x" });
     await dispatch(deps, "hub:listTasks", undefined);
     await dispatch(deps, "hub:getTask", { taskId: "t-9" });
+    await dispatch(deps, "hub:listApprovals", undefined);
     await dispatch(deps, "hub:decideApproval", { approvalId: "a-9", resume: "approve" });
     expect(f.calls.map((c) => c.method + " " + c.path)).toEqual([
       "POST /tasks",
       "GET /tasks",
       "GET /tasks/t-9",
+      "GET /approvals",
       "POST /approvals/a-9",
+    ]);
+  });
+
+  it("⭐ listApprovals 的 query：两个键都缺省时【不带问号】", async () => {
+    /*
+     * `/approvals?` 与 `/approvals` 在【签名】上不是同一件事：鉴权签原始 target
+     * （含 query），服务端也按原始 target 验签。多发一个空 query 不会 401
+     * （两侧算的是同一个串），但它会在服务端解析出一个 status=""，
+     * 把【读侧那条「非法取值 ⇒ 回落」的分支】变成正常路径。
+     * 那条分支存在的意义是「拼错的人能看到回落」，让正常路径去踩它，
+     * 它就永远测不到了（回落口径见 hub/approvals/query.ts 的判据 2）。
+     */
+    const f = fetchReturning(200, { approvals: [] });
+    const deps: MainDeps = { signedFetch: f.signedFetch };
+    await dispatch(deps, "hub:listApprovals", undefined);
+    await dispatch(deps, "hub:listApprovals", {});
+    await dispatch(deps, "hub:listApprovals", { status: "approved", limit: 5 });
+    await dispatch(deps, "hub:listApprovals", { limit: 1 });
+    expect(f.calls.map((c) => c.path)).toEqual([
+      "/approvals",
+      "/approvals",
+      "/approvals?status=approved&limit=5",
+      "/approvals?limit=1",
     ]);
   });
 
@@ -418,7 +476,24 @@ describe("主进程分发", () => {
     expect(f.calls[1]!.body).not.toMatch(/undefined/u);
   });
 
-  it("推送载荷：有 id 才带 seq（快照帧没有 id，编一个等于伪造游标）", () => {
+  it("⭐ query 里的值【经过编码】：闸门放过 ≠ 可以随意拼进 URL", async () => {
+    /*
+     * status 走的是白名单（编码前后都一样），limit 是数字 —— 所以今天
+     * 这一发【看不出差别】。它的价值在下一个带 query 的通道：那时参数可能是
+     * 人写的字符串（关键词、slug），未编码的 "&" / "#" / "?" 会把一个参数
+     * 变成两个，或者把 query 截断 —— 而签名签的是【拼接后那一串】，
+     * 于是「注入一个参数」与「签名的 target 与实际发出的不一致」会同时发生。
+     * 现在把编码这件事钉在唯一的 query 通道上，下次加通道时有样可循。
+     */
+    const enc = encodeURIComponent("a&b=c");
+    expect(enc).toBe("a%26b%3Dc");
+    expect(enc).not.toContain("&");
+    const f = fetchReturning(200, {});
+    await dispatch({ signedFetch: f.signedFetch }, "hub:listApprovals", { limit: -7 });
+    expect(f.calls[0]!.path).toBe("/approvals?limit=-7");
+  });
+
+    it("推送载荷：有 id 才带 seq（快照帧没有 id，编一个等于伪造游标）", () => {
     expect(toPushPayload({ event: "TaskStateChanged", id: "7", data: "{}" })).toEqual({
       seq: 7,
       event: "TaskStateChanged",

@@ -33,6 +33,7 @@
 
 import {
   API_ENDPOINTS,
+  APPROVAL_STATUS_VALUES,
   IMPLEMENTED_ENDPOINTS,
   MAX_IDEA_CHARS,
   RESUME_VALUES,
@@ -55,6 +56,7 @@ export type IpcChannel =
   | "hub:createTask"
   | "hub:listTasks"
   | "hub:getTask"
+  | "hub:listApprovals"
   | "hub:decideApproval"
   | "hub:subscribeEvents";
 
@@ -69,7 +71,7 @@ export interface ChannelSpec {
    * 而 token 本身拿不到（见 http/auth.ts 的立场）。所以这一层是【真边界】，
    * 不是形式 —— 校验不能只判「有没有传」。
    */
-  readonly args: "idea" | "none" | "taskId" | "decision";
+  readonly args: "idea" | "none" | "taskId" | "decision" | "approvalQuery";
 }
 
 /**
@@ -80,6 +82,21 @@ export const CHANNEL_SPECS: readonly ChannelSpec[] = [
   { channel: "hub:createTask", endpoint: "POST /tasks", kind: "invoke", args: "idea" },
   { channel: "hub:listTasks", endpoint: "GET /tasks", kind: "invoke", args: "none" },
   { channel: "hub:getTask", endpoint: "GET /tasks/:id", kind: "invoke", args: "taskId" },
+  /**
+   * 收件箱那张列表。为什么要有这一条通道，而不让渲染进程自己数事件流：
+   * `events/bus.ts` 里那个由 `ApprovalRequired` +1 / `ApprovalDecided` −1 累计出来的
+   * 角标只能靠「不丢不重」维持正确，而【会丢会重】正是 SSE 在断线重连下的默认行为
+   * （Task 2.3 的投影因此把「发现出洞」当成一等公民）。它需要一个能对账的 REST 源，
+   * 而 `GET /approvals` 的 `pendingTotal` 就是那一个数。
+   * 没有这条通道时，前端唯一的对账办法是把全量列表拉回来自己数 —— 那正是
+   * 「一个页面卡住整个 Hub」那种事故的形状（Hub 主线程上同步跑全表读）。
+   */
+  {
+    channel: "hub:listApprovals",
+    endpoint: "GET /approvals",
+    kind: "invoke",
+    args: "approvalQuery",
+  },
   {
     channel: "hub:decideApproval",
     endpoint: "POST /approvals/:interruptId",
@@ -181,6 +198,38 @@ export function checkArgs(spec: ChannelSpec, args: unknown): string | null {
       }
       return null;
     }
+    case "approvalQuery": {
+      // 两个键【都可缺省】：缺省 = 读侧的默认那一档（待批），不是「不过滤」。
+      // 判据的分界线在这里说清：这一层只管【会不会破坏 URL / 会不会让 Hub 报 422】，
+      // 「非法 status 该回落到哪一档」住在 hub/approvals/query.ts，不在这里重抄。
+      if (args !== undefined && args !== null) {
+        if (typeof args !== "object") {
+          return `${spec.channel} 需要一个 { status?, limit? } 对象或干脆不传，实到 ${describe(args)}`;
+        }
+        const o = args as Record<string, unknown>;
+        const extra = Object.keys(o).filter((k) => k !== "status" && k !== "limit");
+        if (extra.length > 0) {
+          return `${spec.channel} 只接受 status / limit，多出 ${extra.length} 个未登记键`;
+        }
+        const st = o["status"];
+        if (st !== undefined && st !== null) {
+          // 取值【不在这里另列一份】（与 RESUME 同一条理由）：白名单在 contracts，
+          // 读侧用的也是那一份 ⇒ 这一层放过的，Hub 一定认；这一层拒的，Hub 只会回落。
+          if (typeof st !== "string" || !STATUS.has(st)) {
+            return `${spec.channel} 的 status 不是登记过的取值`;
+          }
+        }
+        const lm = o["limit"];
+        if (lm !== undefined && lm !== null) {
+          // 必须是【整数值】而不是数字字面量：Hub 对非整数直接 422，
+          // 放过一个 3.5 就是「IPC 校验过了、HTTP 报 422」那种最误导人的组合。
+          if (typeof lm !== "number" || !Number.isInteger(lm)) {
+            return `${spec.channel} 的 limit 必须是整数`;
+          }
+        }
+      }
+      return null;
+    }
     case "decision": {
       if (typeof args !== "object" || args === null) {
         return `${spec.channel} 需要一个 { approvalId, resume } 对象，实到 ${describe(args)}`;
@@ -227,6 +276,7 @@ const ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/u;
  */
 const MAX_IDEA = MAX_IDEA_CHARS;
 const RESUME = new Set<string>(RESUME_VALUES);
+const STATUS = new Set<string>(APPROVAL_STATUS_VALUES);
 
 function describe(v: unknown): string {
   if (v === null) return "null";

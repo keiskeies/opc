@@ -30,11 +30,13 @@ import {
   shouldGiveUp,
 } from "@opc/contracts";
 import {
+  applyApprovalSnapshot,
   applyEvent,
   applyFrame,
   applySnapshot,
   emptyProjection,
   noteDisconnected,
+  pendingInbox,
   type Projection,
 } from "../../packages/web/src/hub/projection.js";
 
@@ -369,5 +371,181 @@ describe("验收：渲染进程内不存在任何业务状态机", () => {
     expect(r.projection.resnapshotCount).toBe(0);
     // 也不改 tasks：批准不是状态跃迁（status 由 Hub 的图写，见 0010 §4）。
     expect(r.projection.tasks.get("a")?.status).toBe("IN_PROGRESS");
+  });
+});
+
+describe("收件箱角标（§5.8 事件表：ApprovalRequired ⇒ 计数 +1）", () => {
+  /**
+   * 这一组测的不是「会不会加」，而是【什么时候不许显示那个数】。
+   * 加一个计数器谁都会写；难的是知道它什么时候不再可信，
+   * 以及不可信时界面该显示什么 —— 显示 0 是最错的（空的收件箱 = 不再有人看它）。
+   */
+  const req = (seq: number, taskId = "a"): unknown => ({
+    seq,
+    kind: "ApprovalRequired",
+    taskId,
+    interruptId: "i-" + seq,
+    payload: {},
+  });
+  const decided = (seq: number, taskId = "a"): unknown => ({
+    seq,
+    kind: "ApprovalDecided",
+    taskId,
+    interruptId: "i-" + seq,
+    decision: "approved",
+  });
+  const inbox = (p: Projection): number | null => pendingInbox(p);
+
+  it("⭐ 从没对过账 ⇒ 显示「未知」，不是 0", () => {
+    /*
+     * 首屏之前那个角标没有依据。把它显示成 0 等于在【没有任何证据】的时候
+     * 宣称「没有东西等你」，而 §19.1 那条「20 秒完成一次审批」的前提是
+     * CEO 会看到有东西在等。null 一路带到界面，由界面画一个占位而不是数字。
+     */
+    expect(inbox(emptyProjection())).toBeNull();
+  });
+
+  it("⭐ 快照之后：只有【水位线之上】的增量才计 —— 重复投递不双计", () => {
+    // pendingTotal 已经含了 (0, 10] 里那两张卡；事件流随后会把它们再推一遍
+    // （SSE 建连时的续订本来就重投一段，见 sse.ts 文件头那条交错分析）。
+    let p = applyApprovalSnapshot(snapshot(10, [task("a")]), { pendingTotal: 2, asOfSeq: 10 });
+    expect(inbox(p)).toBe(2);
+    p = applyEvent(p, req(9)).projection; // 水位线之下（重投）
+    p = applyEvent(p, req(10)).projection; // 水位线之下（重投）
+    expect(inbox(p)).toBe(2);
+    p = applyEvent(p, req(11)).projection; // 之上
+    expect(inbox(p)).toBe(3);
+    p = applyEvent(p, decided(12)).projection;
+    expect(inbox(p)).toBe(2);
+  });
+
+  it("⭐ 重复帧不改角标（seq <= cursor 在增量之前就被吃掉）", () => {
+    let p = applyApprovalSnapshot(snapshot(10, [task("a")]), { pendingTotal: 1, asOfSeq: 10 });
+    p = applyEvent(p, req(11)).projection;
+    const after = inbox(p);
+    const dup = applyEvent(p, req(11));
+    expect(dup.action).toBe("duplicate");
+    expect(inbox(dup.projection)).toBe(after);
+    expect(dup.projection.inbox).toBe(p.inbox); // 同一个引用：没新东西就不产生新状态
+  });
+
+  it("⭐ 反向对照：REST 读数【跑到 SSE 游标前面】时，只有水位线挡得住双计", () => {
+    /*
+     * 上一发测不到这条判据 —— 本仓反复踩的就是这个形状，所以把它写成独立一发而不是加进上面那发。
+     * 上面那发里 asOfSeq=10 而快照把 cursor 也推到了 10，于是重投的 9、10 先被
+     * `seq <= cursor` 那一关吃掉，applyInboxDelta 里那句水位线判断【一次都没被执行过】
+     * （实测：把 `if (item.seq <= i.totalAsOfSeq) return p` 改成恒不成立，33 条【全绿】）。
+     *
+     * 真正只有水位线能救的场景是【两个来源不同步】那一刻：
+     * `pendingTotal` 是 Hub 在 events.id = 20 那一刻从库里数出来的，
+     * 而 SSE 那条腿还停在 12（13..20 在路上 / 还没推达）。
+     * 这不是构造出来的边角：REST 与 SSE 是两条独立连接，谁先到没有保证，
+     * 而【切到收件箱那一页才会去拉审批快照】本来就不与建连对齐。
+     * 于是 13..20 那八条【能通过重复检查】（seq > cursor），却被 applyInboxDelta 挡住 ——
+     * 挡住是对的：它们已经在 pendingTotal 里了。少了那一挡，角标会显示 5 + 8 = 13，
+     * 一次刷新凭空多出八张卡，而那种角标的下场是没人再信它。
+     */
+    let p = applyApprovalSnapshot(snapshot(12, [task("a")]), { pendingTotal: 5, asOfSeq: 20 });
+    expect(p.cursor).toBe(12); // 游标【不】跟着审批快照走：它只管任务表那一段
+    expect(p.inbox.totalAsOfSeq).toBe(20);
+    for (const s of [13, 14, 15, 16]) p = applyEvent(p, req(s)).projection;
+    expect(p.cursor).toBe(16); // 事件本身照常被应用（cursor 前进、link 转 live）
+    expect(inbox(p)).toBe(5); // 而角标一条都不加 —— 那四条已被总数包含
+    // 反向对照：越过 asOfSeq 之后必须开始计，否则上面那一发只是「永远不加」的恒真断言。
+    // ⚠ 必须【连续】补到 20 再上 21：从 16 直接跳 21 会先撞出【跳号 ⇒ markGap ⇒ 不可信】，
+    //   那条断言就变成在测「出洞那一发」而不是「水位线那一发」（我第一版就是这么错的，
+    //   红在 null 而不是 5 —— 一个失败的原因与判据无关时，它绿了也什么都没说）。
+    for (const s of [17, 18, 19, 20]) p = applyEvent(p, req(s)).projection;
+    expect(inbox(p)).toBe(5); // 水位线之上还没有东西
+    p = applyEvent(p, req(21)).projection;
+    expect(inbox(p)).toBe(6);
+    p = applyEvent(p, decided(22)).projection;
+    expect(inbox(p)).toBe(5);
+  });
+
+  it("⭐ 出洞 ⇒ 角标【不可信】，宁可显示「未知」也不要一个偏小的数", () => {
+    /*
+     * 少一条 ApprovalRequired 会让数偏小，而偏小比偏大危险得多：
+     * 偏大只是多提醒一次，偏小到 0 会让他【不再打开收件箱】。
+     * 这一发是这一整组里唯一直接对着产品后果写的断言。
+     */
+    let p = applyApprovalSnapshot(snapshot(1, [task("a")]), { pendingTotal: 0, asOfSeq: 1 });
+    p = applyEvent(p, req(2)).projection;
+    expect(inbox(p)).toBe(1);
+    const gap = applyEvent(p, req(5)); // 3、4 没来
+    expect(gap.action).toBe("gap");
+    expect(gap.projection.inbox.trusted).toBe(false);
+    expect(inbox(gap.projection)).toBeNull();
+    // 补齐右半边【不算收敛】：与 tasks 那条 stale 的立场同一条理由。
+    const filled = applyEvent(gap.projection, req(3));
+    expect(inbox(filled.projection)).toBeNull();
+  });
+
+  it("⭐ 重新对账 ⇒ 重新可信（一次成功的 REST 读取是唯一能补上洞的东西）", () => {
+    let p = applyApprovalSnapshot(snapshot(1, [task("a")]), { pendingTotal: 0, asOfSeq: 1 });
+    p = applyEvent(applyEvent(p, req(2)).projection, req(6)).projection; // 出洞
+    expect(inbox(p)).toBeNull();
+    p = applyApprovalSnapshot(p, { pendingTotal: 4, asOfSeq: 6 });
+    expect(inbox(p)).toBe(4);
+    expect(p.inbox.requiredAfter).toBe(0); // 旧增量已被新总数包含
+  });
+
+  it("⭐ 更旧的审批快照【整份丢掉】：旧总数 + 新水位线 = 两边都不是的数", () => {
+    // 两次 await 交错就能发生（本机也会）。任务表那边允许旧快照盖回来
+    // （下一份会修好，且每行自足）；角标是跨两次读取算出来的量，没有「下一份会修好」。
+    let p = applyApprovalSnapshot(snapshot(10, [task("a")]), { pendingTotal: 5, asOfSeq: 10 });
+    p = applyEvent(p, req(11)).projection;
+    expect(inbox(p)).toBe(6);
+    // applyApprovalSnapshot 直接返回 Projection（它不是一条事件，没有 applied/gap 之分）。
+    const stale = applyApprovalSnapshot(p, { pendingTotal: 1, asOfSeq: 4 });
+    expect(inbox(stale)).toBe(6);
+    expect(stale.inbox).toBe(p.inbox); // 连对象都没换
+  });
+
+  it("⭐ 算出负数 ⇒ 「未知」而不是夹紧到 0（夹紧等于把丢事件伪装成「没有待批」）", () => {
+    let p = applyApprovalSnapshot(snapshot(1, [task("a")]), { pendingTotal: 0, asOfSeq: 1 });
+    p = applyEvent(p, decided(2)).projection; // 一次没配过 +1 的 −1
+    expect(p.inbox.trusted).toBe(true); // 事件流本身是连续的，没人知道自己丢了东西
+    expect(inbox(p)).toBeNull();
+  });
+
+  it("link=down 不把角标标成不可信（那是「旧」不是「错」，界面该标旧）", () => {
+    let p = applyApprovalSnapshot(snapshot(3, [task("a")]), { pendingTotal: 2, asOfSeq: 3 });
+    const down = noteDisconnected(p, GIVE_UP_AFTER_ATTEMPTS);
+    expect(down.link).toBe("down");
+    expect(down.inbox.trusted).toBe(true);
+    expect(inbox(down)).toBe(2);
+  });
+
+  it("⭐ 反向对照：ApprovalDecided 不能把【别的】事件的计数带跑，也不改 tasks", () => {
+    let p = applyApprovalSnapshot(snapshot(1, [task("a", "IN_PROGRESS")]), {
+      pendingTotal: 1,
+      asOfSeq: 1,
+    });
+    for (const kind of ["BudgetPaused", "ReviewDecided", "HeartbeatStalled"]) {
+      const before = inbox(p);
+      const r = applyEvent(p, { seq: 2, kind, taskId: "a" });
+      expect(inbox(r.projection), kind).toBe(before);
+      expect(r.projection.tasks.get("a")?.status).toBe("IN_PROGRESS");
+      p = applyEvent(p, { seq: 2, kind, taskId: "a" }).projection;
+    }
+    // 未知 kind 同样不动角标（老客户端收到新事件是【照常显示】，不是角标乱跳）。
+    const unknown = applyEvent(p, { seq: 3, kind: "SomethingNew", taskId: "a" });
+    expect(inbox(unknown.projection)).toBe(inbox(p));
+  });
+
+  it("⭐ 源码守卫：全仓只有 hub 那个端点在【数】待批，前端不自己数", () => {
+    /*
+     * 这一条防的是那种「顺手」的重构：有人觉得事件算计数太麻烦，
+     * 于是在前端拉一次 GET /approvals 然后 approvals.length ——
+     * 那会把「页长当总数」这个 bug 请回来（被 limit 截断时它是错的），
+     * 而 query.ts 里 pendingTotal 那一整段的理由就白写了。
+     * 前端只读 pendingTotal 这一个字段；数行数这件事只住在 Hub。
+     */
+    const src = readFileSync(PROJECTION_SRC, "utf8");
+    expect(src).toMatch(/pendingTotal/u);
+    const code = src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, "");
+    expect(code).not.toMatch(/approvals\.length/u);
+    expect(code).not.toMatch(/\.filter\([^)]*pending/u);
   });
 });

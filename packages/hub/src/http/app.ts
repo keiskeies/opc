@@ -39,6 +39,7 @@ import {
 import type { DatabaseSync } from "node:sqlite";
 import type { EventBus } from "../events/bus.js";
 import { legalTransitionsFrom, type TaskState } from "../graph/status.js";
+import { listApprovals as listApprovalsFrom } from "../approvals/query.js";
 import { ResumeStream, type SnapshotSource } from "./sse.js";
 import { buildReplayView } from "../replay/query.js";
 import { verifyRequest, type VerifyInput } from "./auth.js";
@@ -225,6 +226,8 @@ async function route(
       return listTasks(deps);
     case "get_task":
       return getTask(deps, routeHit.id);
+    case "list_approvals":
+      return listApprovals(deps, req);
     case "decide":
       return decide(deps, routeHit.id, req.body);
     case "events":
@@ -271,6 +274,7 @@ export type Route =
   | { kind: "create_task"; endpoint: "POST /tasks"; id?: undefined }
   | { kind: "list_tasks"; endpoint: "GET /tasks"; id?: undefined }
   | { kind: "get_task"; endpoint: "GET /tasks/:id"; id: string }
+  | { kind: "list_approvals"; endpoint: "GET /approvals"; id?: undefined }
   | { kind: "decide"; endpoint: "POST /approvals/:interruptId"; id: string }
   | { kind: "events"; endpoint: "GET /events"; id?: undefined }
   | { kind: "replay"; endpoint: "GET /replay/:taskId"; id: string };
@@ -309,6 +313,9 @@ export function matchRoute(method: string, path: string): Route | null {
     const t = id(segs[1]);
     if (t === null) return null;
     return { kind: "get_task", endpoint: "GET /tasks/:id", id: t };
+  }
+  if (method === "GET" && segs.length === 1 && segs[0] === "approvals") {
+    return { kind: "list_approvals", endpoint: "GET /approvals" };
   }
   if (method === "POST" && segs.length === 2 && segs[0] === "approvals") {
     const a = id(segs[1]);
@@ -354,6 +361,37 @@ async function createTask(
 /** 列出的行数为【什么】不设上限：单用户本机，任务总量在几百量级。 */
 function listTasks(deps: HubDeps): HubResponse {
   return json(200, { tasks: readTasks(deps, "ORDER BY created_at DESC", []) });
+}
+
+/**
+ * `GET /approvals` —— 收件箱那个计数的**唯一对账源**。
+ *
+ * 读侧整条走 approvals/query.ts（那里写了为什么单独成模块、为什么默认只列 pending、
+ * 为什么排序不能让 NULL 靠方言运气）。这里只做三件 HTTP 的事：
+ * query 解析、把 `pendingTotal` 带出去、以及【不吞解析失败】的边界。
+ *
+ * ⚠ 这个端点**不返回**卡片参数全文，也不返回证据链接。收件箱是「扫一眼、按一次键」
+ * 的地方，而 §9.2 那三行里第一行（summary）与「还有多久过期」够它做决定；
+ * 要看参数与证据得进单张卡片的视图 —— 那个视图今天还没有，
+ * 而**它不该被塞进列表接口当作副产品**（一旦列表里有全文，
+ * 就永远有人直接渲染它，§19.4 那条「卡片三行、不画框线」的排版口径从此守不住）。
+ */
+function listApprovals(deps: HubDeps, req: HubRequest): HubResponse {
+  const status = req.query["status"];
+  const limitRaw = req.query["limit"];
+  if (limitRaw !== undefined && !/^-?\d+$/u.test(limitRaw)) {
+    return json(HTTP_UNPROCESSABLE, {
+      error: "limit 必须是整数，实到 " + limitRaw,
+    });
+  }
+  const result = listApprovalsFrom(deps.db, {
+    ...(status === undefined ? {} : { status }),
+    ...(limitRaw === undefined ? {} : { limit: Number(limitRaw) }),
+  });
+  // asOfMs 带着：调用方要算「这张卡等了多久」「离过期还有多久」，
+  // 而拿客户端时钟算这两件事 = 一台时钟不准的机器会让卡片显示「已过期 3 小时」
+  // 而服务端根本还没到那个点。时刻一律以服务端为准（同一个理由见 SSE 快照里的 asOfMs）。
+  return json(200, { ...result, asOfMs: deps.now() });
 }
 
 function getTask(deps: HubDeps, id: string): HubResponse {

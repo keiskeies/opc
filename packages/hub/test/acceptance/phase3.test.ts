@@ -762,16 +762,23 @@ describe("④ 两条验收各自【不可测的那一半】（登记，不写成
       "② 的自动批准在生产运行期零生产者（0014 §3；本文件②段那些 recordAutoApproval 全由测试自己调）",
       "pnpm verify 未跑：本机装不上依赖（0009 §2）",
       "③ 段那条 escalate 接缝没人接（本文件③段钉的就是它没接）",
-      // 这一条是 Task 6.1 之后【新增】的，不是消掉的。写它之前先分清两件容易混的事：
-      //   · 批准的【写路径】今天有了 —— real-deps.ts 有一条 UPDATE approvals（认领 + 落决定），
-      //     常驻 Hub 起来之后它是唯一常驻进程里那条路径的唯一调用方（0025 §1）。
-      //   · 卡片的【生产】今天仍然没有 —— src 里 `INSERT INTO approvals` 命中数是 0
-      //     （当场 grep，0013 §10.1 那句话今天仍然成立）。所以「零生产者」这一格
-      //     的准确说法是【从「连写都没有」变成「有写、没有行可写」】，缺口变窄、没关上。
-      // 而升级卡片额外还缺三类 approval_type（insufficient_evidence /
-      // low_confidence / meeting_escalation）—— 那三格即便有人补了 INSERT 也写不出来，
-      // 所以要的是 schema 决定而不是代码（0025 §8.2）。
-      "② 的卡片仍零 INSERT；升级另有三类 approval_type 无处落（0025 §8.2）",
+      // 这一条在 Task 6.1 之后是「卡片零 INSERT」，0026 把它**改写**了而不是删掉。
+      // 先分清三件容易混的事（第一版在这里只分清了两件，见下）：
+      //   · 批准的【写路径】：real-deps.ts 一条 UPDATE（认领 + 落决定）。早就有。
+      //   · 卡片的【创建】：0026 补了 src/approvals/cards.ts + 迁移 0004。今天有了。
+      //   · 卡片的【生产者】：**还是没有** —— cards.ts 的 createCard 在 src 里
+      //     【零调用方】（当场 grep，本文件下面那条当场判）。也就是说缺口从
+      //     「没有创建路径」上移成了「有创建路径、没人叫它」，与 ① 那条
+      //     「verifier 开始调 evaluateGate，而 verifyFix 零调用方」是**同一个形状**。
+      // 我第一版把这条写成「卡片创建路径有了 ⇒ 缺口消掉」，那是错的，而且错在
+      // 最像对的地方：grep INSERT 确实从 0 变 1 了。真正卡住 Task 2.6 验收
+      // （「收件箱计数与实际待审批数一致」）的从来不是 INSERT 语句在不在，
+      // 而是**有没有人在真运行期建出一张卡**。所以这条留着，只是换了说法。
+      //
+      // 另外那半（0025 §8.2 的 approval_type 缺格）今天**消掉了**：0026 按 CEO
+      // 授权选了「加一个通用 escalation 值 + reason 放 payload」，
+      // 六类升级原因现在都写得进一张卡（cards.test.ts ③ 那发逐类验过）。
+      "② 的卡片有创建路径而【零生产者】：src/approvals/cards.ts 在 src 里无人调用（上一条当场判的）",
     ] as const;
     expect(blockers).toHaveLength(6);
     // 各条的**性质不同**：第 1、2、6 条本文件当场判了（可复算、会随改动变红），
@@ -789,12 +796,21 @@ describe("④ 两条验收各自【不可测的那一半】（登记，不写成
     expect(callersOf("readAutoApprovalReport", "policy/auto-approve.ts")).toHaveLength(0);
     /*
      * 第 6 条 blocker 原来只是作者自述（「卡片仍零 INSERT」）。自述会过期而**过期时不响**，
-     * 所以这里把它也变成判据 —— 谁补上第一条真 INSERT，这一发红，逼他同时改这份清单。
-     * 反向对照同段已有形状：同一个扫描器必须能捞到【真的那条 UPDATE approvals】
-     * （real-deps.ts 与 auto-approve.ts 各一条），否则「捞不到 INSERT」可能只是
-     * 「扫描器坏了 / 注释过滤把代码也滤掉了」。
+     * 所以这里把它也变成判据。0026 落地时它**真的红了一次**（红的就是下面第一发），
+     * 那不是「改动做错了」，是它设计出来要做的事：逼改动的人重写这份清单。
+     *
+     * ⚠ 但**判据的形状要跟着缺口一起改**。第一版红完之后我差点把它改成
+     * `toEqual([SRC + "/approvals/cards.ts"])` 了事 —— 那就把「有创建路径」
+     * 与「有生产者」两件事又并回一个判据，正是上面那段说要分开的东西。
+     * 所以现在是两发配对：INSERT 那一发只证「创建路径存在」，
+     * 而 callersOf("createCard") 才证第 6 条说的**零生产者**。
+     * 反向对照同段已有形状：同一个扫描器必须能捞到【真的那两条 UPDATE approvals】，
+     * 否则「捞不到」可能只是「扫描器坏了 / 注释过滤把代码也滤掉了」。
      */
-    expect(srcFilesMatching(/INSERT\s+INTO\s+approvals/iu)).toEqual([]);
+    expect(srcFilesMatching(/INSERT\s+INTO\s+approvals/iu)).toEqual([
+      SRC + "/approvals/cards.ts",
+    ]);
+    expect(callersOf("createCard", "approvals/cards.ts")).toEqual([]);
     expect(srcFilesMatching(/UPDATE\s+approvals\b/iu)).toEqual([
       SRC + "/http/real-deps.ts",
       SRC + "/policy/auto-approve.ts",

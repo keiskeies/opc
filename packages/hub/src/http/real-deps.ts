@@ -5,6 +5,10 @@
  * app.ts 把副作用收在两个注入点上（recordDecision / createTask），注释写的是
  * 「生产用真 recorder」。把仓库翻一遍的实测结果（三条都是当场 grep 的，不是回忆）：
  *   · `grep -rn "INSERT INTO approvals\|UPDATE approvals" packages/hub/src` ⇒ 0 命中
+ *     ⚠ 这条 grep 在 0026 之后【不再为 0】（approvals/cards.ts 补了创建路径），
+ *     原文按口径留着。它当时量到的是「UPDATE 也没有、INSERT 也没有」里的那一半：
+ *     UPDATE 后来由本文件与 policy/auto-approve.ts 补上，INSERT 由 cards.ts 补上，
+ *     而【零生产者】这件事单独记（该文件与 phase3.test.ts 的 blocker 6）。
  *   · 全仓唯一写 approvals 的代码在两个测试文件的【夹具】里
  *     （contract.test.ts / server.test.ts 各自手搓一条 UPDATE）
  *   · `serveHub(` 在 src/ 与 dist/ 之外【没有任何调用点】

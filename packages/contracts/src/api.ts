@@ -30,6 +30,7 @@ export const API_ENDPOINTS = [
   "POST /tasks",
   "GET /tasks",
   "GET /tasks/:id",
+  "GET /approvals",
   "POST /approvals/:interruptId",
   "GET /events",
   "GET /replay/:taskId",
@@ -48,6 +49,7 @@ export const IMPLEMENTED_ENDPOINTS: readonly ApiEndpoint[] = [
   "POST /tasks",
   "GET /tasks",
   "GET /tasks/:id",
+  "GET /approvals",
   "POST /approvals/:interruptId",
   "GET /events",
   "GET /replay/:taskId",
@@ -162,6 +164,76 @@ export const taskViewSchema = z
   })
   .strict();
 export type TaskView = z.infer<typeof taskViewSchema>;
+
+/**
+ * `GET /approvals` 的条目视图。
+ *
+ * ── 这个端点存在的唯一理由：它是那个数字【唯一能与库对账的地方】 ──────
+ * `events/bus.ts` 里 `ApprovalDecided` 那段注释记着同一件事：收件箱的待批数由
+ * 消费者按事件累计（`ApprovalRequired` +1、`ApprovalDecided` −1），而
+ * 「事件算出来的数」与「库里实际有几张 pending」此前**没有任何一处可比**，
+ * 所以那个计数是【无从校验】的 —— 一个只能靠自己不丢不重来维持正确性的数字。
+ * 本端点就是那条 REST 源（【规格】§5.8：事件只做增量，全量状态由 REST 补齐）。
+ *
+ * ── 字段表为什么长这样 ──────────────────────────────────────────────
+ * 与 taskViewSchema 同一条口径：**不是 approvals 那行的整行直译**。
+ *  ① 不带 `parameters` 的全文。它是 JSON 文本，里面常有 diff 摘要、缺陷清单，
+ *     收件箱是「扫一屏、按一次键」的地方，把参数全文发到列表接口上
+ *     等于让渲染进程自己裁字段 —— 裁错了就是界面上少一行信息而接口没错。
+ *     要参数的人走 `GET /approvals/:id` 那一条（等它有人要的时候再加，
+ *     而不是先给一个「列表里塞全部」的形状）。
+ *  ② `timeout_at` / `timeout_behavior` 【带】。这一对是【规格】§9.2 第二行明写的
+ *     「超时行为」那一栏，卡片上必须显示「还有几小时过期」。
+ *     ⚠ 但**带到期时刻不等于会执行它**：今天全仓没有任何超时执行者
+ *     （口径见 0026 §2 与 hub/src/approvals/cards.ts 的 DEFAULT_TIMEOUT_HOURS 上方）。
+ *     界面因此**不该**画一个倒数到零就变的动画 —— 它到了零什么都不会发生，
+ *     而一个会走到零然后停住的倒计时，读起来像系统坏了。
+ *  ③ `escalation_reason` 是从 `parameters.escalation.reason` 里**提出来**的一格，
+ *     而不是把整个 parameters 发出去：收件箱要按原因分组统计
+ *     （「今天有几件是因为不可逆动作上来的」，【规格】§8.3 那条北极星），
+ *     而让每个消费者各解一遍那段 JSON 就是五处会漂移的解析。
+ */
+export const approvalViewSchema = z
+  .object({
+    id: z.string().min(1),
+    task_id: z.string().nullable(),
+    approval_type: z.string().min(1),
+    summary: z.string().min(1),
+    recommendation: z.string().nullable(),
+    recommendation_source: z.string().nullable(),
+    timeout_behavior: z.string().nullable(),
+    timeout_at: z.number().int().nullable(),
+    status: z.string().min(1),
+    created_at: z.number().int().nullable(),
+    /** 【规格】§8.3 的升级原因；非升级卡为 null。**不是**枚举类型：
+     *  这一格存的是【当时写下的那个字符串】，库里出现一个契约不知道的取值时，
+     *  视图应当把它**原样带出去**让人看见，而不是在解析层整体 500。 */
+    escalation_reason: z.string().nullable(),
+  })
+  .strict();
+export type ApprovalView = z.infer<typeof approvalViewSchema>;
+
+/**
+ * `GET /approvals` 的查询参数（白名单，未登记的键忽略而不是拒 —— 与 SSE 的
+ * query 同一口径：query 是**读**侧的过滤条件，不是命令，多给一个不构成风险）。
+ */
+export const APPROVAL_STATUS_VALUES = [
+  "pending",
+  "approved",
+  "rejected",
+  "deferred",
+] as const;
+export type ApprovalStatusValue = (typeof APPROVAL_STATUS_VALUES)[number];
+
+/**
+ * 「待批」这个取值本身，以及【默认过滤集】。
+ *
+ * 三个地方需要同一个字面量：建卡时的初值（hub/approvals/cards.ts）、
+ * 列表的默认过滤（query.ts 的 countPending）、认领时的 `WHERE status = ?`
+ * （real-deps.ts）。前两个只能共享一个来源，第三个只能是 SQL 里的字面量
+ * （SQL 文本里没法引用 TS 常量），由 query.test.ts 一发断言钉住它等于这里。
+ */
+export const APPROVAL_STATUS_PENDING: ApprovalStatusValue = "pending";
 
 /** GET /events 的一帧。seq 就是 events.id，也是断线重连的游标（§5.8）。 */
 export const feedItemSchema = z

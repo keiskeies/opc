@@ -46,7 +46,7 @@ $ grep -rn "INSERT INTO budgets" --include='*.ts' packages/hub/src
 $ grep -rn "declareLimit(" --include='*.ts' packages/hub/src packages/hub/test test | grep -v "src/budget/tracker.ts"
    ⇒ 命中全在 test/。⇒ declareLimit 在【生产】里一次都没被调过。
 $ grep -rn "consumed_cents" --include='*.ts' packages/hub/src
-   ⇒ 除 tracker 的 `consumed_cents + ?` 之外，只有一处【读】（http/app.ts:400 读来显示）。
+   ⇒ 除 tracker 的 `consumed_cents + ?` 之外，只有一处【读】（http/app.ts:438 读来显示）。
 ```
 
 四条合起来：**`budgets` 表在生产里从来没有被写过**，而岗位书里那两格预算（`daily_usd` / `per_task_usd`）从 YAML 加载进来后**从来没有流向过限流**。
@@ -79,7 +79,7 @@ $ grep -rn "consumed_cents" --include='*.ts' packages/hub/src
 
 于是那个作用域的突破警报**永久关闭**，而关掉它的是一次看起来无害的「把预算从 $10 调到 $5」。屏幕上写着「预算已收紧」，`over` 也确实是 true，而**没有任何东西会为它发声**。
 
-我的处置：`syncCharterBudgets` / `saveCharterVersion` 自己算并报 `alarm_silenced`（进审计 payload），另给一条读侧补救 `silentOverBudgets()`。**没有替它补发 `BudgetPaused`**：那个事件要求 `taskId`（`bus.ts:49`，`tracker.ts:238` 传的是消费方的任务），而一次限额变更不属于任何任务 —— 编一个 taskId 就是伪造一条 CEO 点得进去的卡片（同 0014 §3：少一个事件是可以补的缺口，脏了的审计库删不掉）。
+我的处置：`syncCharterBudgets` / `saveCharterVersion` 自己算并报 `alarm_silenced`（进审计 payload），另给一条读侧补救 `silentOverBudgets()`。**没有替它补发 `BudgetPaused`**：那个事件要求 `taskId`（`bus.ts:58`，`tracker.ts:238` 传的是消费方的任务），而一次限额变更不属于任何任务 —— 编一个 taskId 就是伪造一条 CEO 点得进去的卡片（同 0014 §3：少一个事件是可以补的缺口，脏了的审计库删不掉）。
 
 **「一次超限该发几条 BudgetPaused」是产品问题**（收件箱刷屏 vs 警报永久哑），归 CEO，见 §9 第二项。
 

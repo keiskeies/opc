@@ -206,6 +206,18 @@ export const PATROL_SQL =
  *  因为 approvals 表在生产里【一次 INSERT 都没有】（0013 §10.1 实测），
  *  而 timeout_at 那两列同样没有任何读方 —— 也就是说两条通道都还没接通，
  *  「忘掉的卡片」这件事目前根本发生不了。接线那天要重看这一格。
+ *  ── 「接线那天」到了，这一格当场重看过（0026 §4，原文留着）────────────
+ *  两条里【只有一条变了】：
+ *   · 「timeout_at 没有任何读方」—— 不再成立。GET /approvals 把它读出去展示
+ *     （approvals/query.ts 的 APPROVAL_COLUMNS），前端能算「还剩多久过期」。
+ *   · 「生产里一次 INSERT 都没有」—— 仍然成立，而且这是【刻意维持】的：
+ *     创建路径 approvals/cards.ts 建好了，而 src 里【零调用方】
+ *     （phase3.test.ts 与 auto-approve.test.ts 各有一发断言钉着这两半，
+ *      把它们合成一句「已经接上了」会让这两发红不掉）。
+ *  ⚠ 而【展示】不等于【执行】：到期之后仍然什么都不发生，
+ *    这条缺席被 cards.test.ts ⑤ 钉成了一条【会过期】的性质（跑完巡检、推过 100 小时，
+ *    卡片还是 pending）。所以本模块的免检结论【不变】：
+ *    「有读方」改变的是能不能看见它老了，不是谁去催它。
  */
 export function judgeTask(
   s: TaskSignals,

@@ -158,12 +158,12 @@ function verify(
 }
 
 const SNAP: Record<string, string> = {
-  // 0025（Task 6.1 常驻 Hub）新写的一条。先在目标文件里 `sed -n '373p'` 读原文再抄，
+  // 0025（Task 6.1 常驻 Hub）新写的一条。先在目标文件里 `sed -n '385p'` 读原文再抄，
   // 不凭记忆。写全路径与 0013/0016 那几组保持一致（基名这里其实也能唯一解析）。
   // 这一条是**活坐标**：0025 §0 的论据是「patrol.ts 自己明写了调度不属于它」，
   // 而那句话的价值全在【那一行现在还写着那句话】—— 有人把注释删了或改成「这里应该有调度」，
   // 快照就该红，逼他重读 §0。
-  "0025-resident-hub-and-four-silent-bugs-i-wrote.md>packages/hub/src/heartbeat/patrol.ts:373":
+  "0025-resident-hub-and-four-silent-bugs-i-wrote.md>packages/hub/src/heartbeat/patrol.ts:385":
     "* ⚠ 这里【故意】不 setInterval。调度（什么时候醒）属于常驻进程，",
   // 0016（Task 3.7）本轮新写的六条。同样是先在目标文件里 `sed -n '<n>p'` 读原文再抄。
   // 六条都写**全路径**，但**不是因为歧义** —— 实测这四个基名（role-memory.ts / real-deps.ts /
@@ -173,7 +173,7 @@ const SNAP: Record<string, string> = {
   // 0013 里同一行被引用两次（一次全路径、一次基名），所以那边**两条都要登记**。
   "0016-parallel-branches-role-memory-and-an-assertion-engine-that-saw-nothing.md>packages/hub/src/memory/role-memory.ts:547":
     'has_review_decisions: rows.some((r) => r.action === "review_decision"),',
-  "0016-parallel-branches-role-memory-and-an-assertion-engine-that-saw-nothing.md>packages/hub/src/http/real-deps.ts:225":
+  "0016-parallel-branches-role-memory-and-an-assertion-engine-that-saw-nothing.md>packages/hub/src/http/real-deps.ts:229":
     'action: "approval",',
   "0016-parallel-branches-role-memory-and-an-assertion-engine-that-saw-nothing.md>packages/hub/src/events/recorder.ts:229":
     'const DEFAULT_ACTOR = { actorType: "system", actorId: "hub" } as const;',
@@ -197,11 +197,11 @@ const SNAP: Record<string, string> = {
     "const config = JSON.parse(prev.config) as Record<string, unknown>;",
   "0015-charter-editor-and-two-sources-of-budget.md>0001_init.sql:144":
     "CREATE TABLE role_charters (",
-  "0015-charter-editor-and-two-sources-of-budget.md>http/app.ts:400":
+  "0015-charter-editor-and-two-sources-of-budget.md>http/app.ts:438":
     'consumed_cents: Number(r["consumed_cents"] ?? 0),',
   "0015-charter-editor-and-two-sources-of-budget.md>tracker.ts:233":
     "const breached = before <= limit && after > limit;",
-  "0015-charter-editor-and-two-sources-of-budget.md>bus.ts:49":
+  "0015-charter-editor-and-two-sources-of-budget.md>bus.ts:58":
     '| { kind: "BudgetPaused"; taskId: string; spentUsdCents: number }',
   "0015-charter-editor-and-two-sources-of-budget.md>tracker.ts:238":
     "taskId: input.taskId,",
@@ -285,7 +285,7 @@ const SNAP: Record<string, string> = {
   // 快照当场红，逼人重读那段论证，而不是让文档继续指着一句 `/**` 讲 UNIMPLEMENTED。
   "0012-org-versioned-commit-and-unwritten-graph-version.md>packages/contracts/src/api.ts:29":
     "export const API_ENDPOINTS = [",
-  "0012-org-versioned-commit-and-unwritten-graph-version.md>packages/contracts/src/api.ts:64":
+  "0012-org-versioned-commit-and-unwritten-graph-version.md>packages/contracts/src/api.ts:66":
     "export const UNIMPLEMENTED_ENDPOINTS: readonly ApiEndpoint[] = [];",
   // 0013 §10.1 那次【撤回】的三块砖。这一组与前面几组的性质不同：前面抓的是
   // 「文档引用的那行代码挪了」，这一组抓的是「文档引用的那条**注释**不再成立」。
@@ -301,11 +301,11 @@ const SNAP: Record<string, string> = {
   // 全仓唯一那句「写 approvals」的 SQL：它是 UPDATE 而不是 INSERT，
   // 所以「有写入方」这句话错在这里。行内容改写（比如补一列 auto_approved_by）
   // 会当场让 0013 §10 那张表的第二行变红 —— 而那正是应该重读它的时刻。
-  "0013-replay-timeline-search-and-a-test-with-zero-discriminating-power.md>real-deps.ts:147":
+  "0013-replay-timeline-search-and-a-test-with-zero-discriminating-power.md>real-deps.ts:151":
     '"UPDATE approvals SET status = ?, decided_by = ?, decided_at = ?, decision_note = ? " +',
   // 「条件写匹配 0 行 ⇒ 安静地什么都不发生」这一条实测的出处。
   // 它是 §10.1 末段那条「Task 3.5 必须带存在性断言」的判据来源。
-  "0013-replay-timeline-search-and-a-test-with-zero-discriminating-power.md>real-deps.ts:213":
+  "0013-replay-timeline-search-and-a-test-with-zero-discriminating-power.md>real-deps.ts:217":
     "if (Number(info.changes) === 0) return null; // 没抢到：不写审计",
   // 0002 §4 那条「schema 看着开放」论证的唯一落点：platform 那一列的注释枚举了三个平台。
   // 它必须是活坐标 —— 那篇的排除理由里【最硬的一条】依赖「这套形状从第一天起没给个人微信留位」，

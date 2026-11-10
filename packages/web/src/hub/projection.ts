@@ -41,6 +41,17 @@ export interface TaskSnapshot {
 
 export type Link = "connecting" | "live" | "stale" | "down";
 
+export interface ApprovalSnapshot {
+  /**
+   * `GET /approvals` 的 `pendingTotal` —— 库里**真的**有几张待批。
+   * 不是那一页的长度（被 limit 截断时两者不等，而把页长当总数会得到一个
+   * **看着权威的错数**，比不显示更糟；口径见 hub/approvals/query.ts 的 pendingTotal）。
+   */
+  readonly pendingTotal: number;
+  /** 这个数覆盖到 events.id = ?。由 Hub 的 `asOfMs` 那一路带着，见下面水位线的理由。 */
+  readonly asOfSeq: number;
+}
+
 export interface Projection {
   /** taskId → 任务。整体替换语义见 applySnapshot。 */
   readonly tasks: ReadonlyMap<string, TaskView>;
@@ -59,6 +70,110 @@ export interface Projection {
   readonly attempt: number;
   /** 待拉快照的次数（观测点：一次会话里如果 >1，说明事件流在反复出洞）。 */
   readonly resnapshotCount: number;
+  /**
+   * 收件箱那个角标的状态（§5.8 事件表：`ApprovalRequired` ⇒ 收件箱计数 +1）。
+   * 为什么不是「一个 number」：见下面 InboxState 的字段注释。
+   */
+  readonly inbox: InboxState;
+}
+
+/**
+ * 收件箱角标：一个**由两个来源拼出来**的数字，所以它必须自带「我现在可信吗」。
+ *
+ * ── 两个来源，各自的坏法不同 ──────────────────────────────────────
+ *  · REST 快照 `GET /approvals` 的 `pendingTotal`：库里实际的待批张数，
+ *    但它只描述【它被读出来的那一刻】（asOfSeq 那一刻）。
+ *  · 事件增量：`ApprovalRequired` +1 / `ApprovalDecided` −1
+ *    （hub/events/bus.ts 明写「只带事实，不带计数，计数由消费者自己累计」）。
+ *
+ * ── 拼法：水位线之上才算增量 ──────────────────────────────────────
+ * 直接把两种东西相加会**重复计数**：快照读出来的那一刻，(0, asOfSeq] 里那些
+ * ApprovalRequired 已经反映在 `pendingTotal` 里了，而事件流会把它们【再推一遍】
+ * （SSE 快照帧之后的续订本来就会重投一段，见 sse.ts 文件头那条交错分析）。
+ * 所以增量只在【seq > totalAsOfSeq】时才计 —— 水位线之下那些，总数已经含了。
+ *
+ * ── 为什么要带 trusted 这个旗标，而不是永远显示一个数 ──────────────
+ * 增量法唯一守不住的是【丢事件】，而这件事前端【自己知道】（link=stale / degraded
+ * 就是它）。丢了 ApprovalRequired 而没丢 ApprovalDecided，数会偏小；反过来会偏大。
+ * 偏大只是吵，**偏小是致命的**：角标显示 0 的收件箱，CEO 就不再看了 ——
+ * 而 §19.1 那条「20 秒完成一次审批」的承诺建立在「他会看到有东西在等」上。
+ * 所以知道不完整性之后正确的做法是【说不知道】，而不是【给一个大概的数】，
+ * 更不是夹紧到 0（夹紧等于把「少了事件」伪装成「没有待批」，
+ * 与本仓反复抓的那类「看着对而实际错」同一个形状，0007 §4.1）。
+ */
+export interface InboxState {
+  /** 上次 REST 对账拿到的 pendingTotal。null = 从来没对过账（首屏之前）。 */
+  readonly pendingTotal: number | null;
+  /** 那个总数覆盖到 events.id = ?。水位线：seq ≤ 它的增量一律不计。 */
+  readonly totalAsOfSeq: number;
+  /** 水位线之后累计的 +1 与 −1。分开存是为了能在报错里说清差在哪。 */
+  readonly requiredAfter: number;
+  readonly decidedAfter: number;
+  /**
+   * 这个数现在能不能显示给人看。false 的触发条件只有两个：
+   *  ① 事件流出过洞（markGap）⇒ 增量段不再完整；
+   *  ② 算出来是负数 ⇒ 少了一次 +1 的直接证据（见 pendingInbox）。
+   * 与 link 无关：link=down 时数字只是【停在断线那一刻】，那是「旧」不是「错」，
+   * 界面应当标成旧的（渲染层读 link），而不是标成不可信。
+   */
+  readonly trusted: boolean;
+}
+
+export function emptyInbox(): InboxState {
+  return {
+    pendingTotal: null,
+    totalAsOfSeq: 0,
+    requiredAfter: 0,
+    decidedAfter: 0,
+    trusted: true,
+  };
+}
+
+/**
+ * 角标要显示的那个数。null = **显示「未知」而不是 0**。
+ *
+ * 负数那一支是这个模块里我最想留下的一条判据：它在数学上【不该】发生
+ * （总数 ≥ 0，减掉的不会多于加上的），一旦发生就说明水位线之下有一次
+ * ApprovalRequired 没进总数也没进增量 —— 也就是**确实丢过事件**，
+ * 而且是在我们已经 trusted=true 的前提下丢的。
+ * 那种情况下把它夹紧到 0 会产出一个【最危险的合法值】：一个空的收件箱。
+ */
+export function pendingInbox(p: Projection): number | null {
+  const i = p.inbox;
+  if (i.pendingTotal === null || !i.trusted) return null;
+  const n = i.pendingTotal + i.requiredAfter - i.decidedAfter;
+  return n < 0 ? null : n;
+}
+
+/**
+ * 一次 `GET /approvals` 的对账结果。与任务快照【分开两个函数】是刻意的：
+ * 它们的水位线、失效条件、以及「谁去拉」的节奏都不同
+ * （任务表在 SSE 建连时随快照帧来，收件箱是切到那一页时按需拉的）。
+ * 揉成一个 applySnapshot 会让「只刷新角标」也必须把任务表整表替换掉。
+ */
+export function applyApprovalSnapshot(
+  p: Projection,
+  snap: ApprovalSnapshot,
+): Projection {
+  // 【比当前水位线更旧的那一份直接丢掉】。
+  // 这与 applySnapshot 对任务表的做法【刻意不同】，理由是两者的字段性质不同：
+  // 任务表里一行是自足的（那一行的每个字段都来自同一份快照），旧快照整体替换进去
+  // 顶多是「短暂显示旧值」，下一次快照会盖回来；而角标是一个【跨两次读取算出来的量】
+  // （总数 + 水位线之上的增量）。旧快照的总数配上新水位线之上的增量，
+  // 会算出一个【两边都不是】的数：它既不是旧时刻的待批数，也不是现在的。
+  // 两次 await 交错就能发生这件事（本机也会），而它发生时【没有任何报错】。
+  if (snap.asOfSeq < p.inbox.totalAsOfSeq) return p;
+  return {
+    ...p,
+    inbox: {
+      pendingTotal: snap.pendingTotal,
+      totalAsOfSeq: Math.max(p.inbox.totalAsOfSeq, snap.asOfSeq),
+      // 归零：新总数是新水位线的完整答案，之前的增量已被它包含。
+      requiredAfter: 0,
+      decidedAfter: 0,
+      trusted: true,
+    },
+  };
 }
 
 export function emptyProjection(): Projection {
@@ -69,6 +184,7 @@ export function emptyProjection(): Projection {
     link: "connecting",
     attempt: 0,
     resnapshotCount: 0,
+    inbox: emptyInbox(),
   };
 }
 
@@ -178,7 +294,30 @@ function markGap(p: Projection): Projection {
     // 缺的是【数据】不是【连接】，用重连解决它是南辕北辙。
     attempt: 0,
     resnapshotCount: already ? p.resnapshotCount : p.resnapshotCount + 1,
+    // 角标跟着一起不可信：增量段不再完整（少一条 +1 就是少一条 +1）。
+    // 不重置那些增量 —— 它们是【已知的】部分，扔掉它们会让下一次对账之前的
+    // 整段历史一起丢掉，而 correct 的做法只有「重新拿一份完整的总数」那一条。
+    inbox: { ...p.inbox, trusted: false },
   };
+}
+
+/**
+ * 收件箱增量：ApprovalRequired +1、ApprovalDecided −1（§5.8 事件表 + bus.ts 的口径）。
+ *
+ * 只在【seq 严格大于水位线】时才计。水位线以下是快照的地盘：那一段的 +1/−1
+ * 已经反映在 pendingTotal 里，再算一遍就是把一张卡数两次，
+ * 症状是「批完一张，角标从 3 变 3」—— 而那种角标的下场是没人再信它。
+ */
+function applyInboxDelta(p: Projection, item: FeedItemView): Projection {
+  const i = p.inbox;
+  if (item.seq <= i.totalAsOfSeq) return p;
+  if (item.kind === "ApprovalRequired") {
+    return { ...p, inbox: { ...i, requiredAfter: i.requiredAfter + 1 } };
+  }
+  if (item.kind === "ApprovalDecided") {
+    return { ...p, inbox: { ...i, decidedAfter: i.decidedAfter + 1 } };
+  }
+  return p;
 }
 
 /**
@@ -200,12 +339,17 @@ function applyItem(p: Projection, item: FeedItemView): Projection {
   // 这比一直显示 stale 坏得多，因为 stale 至少会触发重拉快照。
   // 能证明「缺的那段补上了」的只有一件事：一次完整的快照（applySnapshot）。
   // 一条事件能证明的只有「连接活着」，那对应的是 attempt 归零，不是 link 转绿。
-  const next: Projection = {
+  const base: Projection = {
     ...p,
     cursor: item.seq,
     link: p.link === "stale" ? "stale" : "live",
     attempt: 0,
   };
+  // 收件箱增量【在这里】进，而且只有这一处入口。
+  // 放在 switch 的某个 case 里会漏，而漏掉的方向是【静默少一个 +1】：
+  // ApprovalRequired 落在 default 那一支，若增量写在 TaskStateChanged 之后，
+  // 角标会永远停在快照那一刻，且没有任何一条断言会红（它一直是「旧值」，旧值合法）。
+  const next = applyInboxDelta(base, item);
   const body = item as unknown as Record<string, unknown>;
 
   switch (item.kind) {

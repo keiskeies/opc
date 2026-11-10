@@ -57,6 +57,15 @@ export function createExposedApi(ipc: RendererBridge) {
     getTask: (input: { taskId: string }): Promise<unknown> =>
       ipc.invoke("hub:getTask", input),
 
+    /**
+     * 收件箱列表。入参【可整体不传】= 读侧默认那一档（待批）。
+     * 不在这里填默认值：默认口径住在 hub/approvals/query.ts，
+     * 在这里写一个 `status ?? "pending"` 就等于把那条口径抄了第二份，
+     * 以后读侧改了默认值，这里会安静地继续发旧的那一档。
+     */
+    listApprovals: (input?: { status?: string; limit?: number }): Promise<unknown> =>
+      ipc.invoke("hub:listApprovals", input),
+
     decideApproval: (input: {
       approvalId: string;
       resume: "approve" | "reject_with_comment" | "defer_deep_review";

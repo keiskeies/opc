@@ -649,14 +649,31 @@ describe("⑦ countSimilarApprovals：R2 的唯一可计算来源", () => {
 });
 
 describe("⑧ 接线状态（接线那天这条会红，逼着同时更新 0014）", () => {
-  it("src 里没有任何代码创建 approvals 行 ⇒ 卡片认领那一路在真库里走不到", () => {
-    // 0013 §10.1 的实测结论，钉成断言：Task 3.5 的「自动通过一张卡片」今天
-    // 只能对【测试自己插进去的行】生效。全绿不等于接上了。
+  it("⭐ 创建路径【已经有了】而【零生产者】⇒ 认领那一路在真库里仍然走不到", () => {
+    /*
+     * 0013 §10.1 的原始实测是「src 里【零】INSERT INTO approvals」，当时钉成断言。
+     * 本轮（0026）补上了 src/approvals/cards.ts，那一格【过了】。
+     *
+     * ⚠ 差点在这里只把 `[]` 改成 `[cards.ts]` —— 那会把两件事合成一件：
+     *   「创建路径存在」与「有人调用它」。它们必须分开，因为它们的修法完全不同：
+     *   前者是写代码（已做，见上面那 24 发 cards.test.ts），
+     *   后者是接图（graph 的升级节点还没接上 createCard）。
+     *   合并之后，那条断言会在【今天】转绿，而 Task 3.5 的自动通过
+     *   仍然只能对【测试自己插进去的行】生效 —— 全绿继续不等于接上了。
+     *   同一处分裂也写进了 phase3.test.ts 的 blocker 6（两处口径必须一起改）。
+     */
     const files = tsFiles(SRC);
     const writers = files.filter((f) =>
       /["']INSERT INTO approvals[ (]/u.test(readFileSync(f, "utf8")),
     );
-    expect(writers.map((f) => f.replace(SRC + "/", ""))).toEqual([]);
+    expect(writers.map((f) => f.replace(SRC + "/", ""))).toEqual(["approvals/cards.ts"]);
+    // 而它【没有调用方】：createCard 在 src 里零命中（cards.ts 自己不算）。
+    const callers = files.filter(
+      (f) =>
+        !f.endsWith("approvals/cards.ts") &&
+        readFileSync(f, "utf8").includes("createCard("),
+    );
+    expect(callers.map((f) => f.replace(SRC + "/", ""))).toEqual([]);
   });
 
   it("policy 模块的自动批准在生产 src 里【还没有调用方】（已知缺口，不是实现遗漏）", async () => {

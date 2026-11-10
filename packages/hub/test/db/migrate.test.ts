@@ -159,6 +159,7 @@ it("schema_migrations 记录版本与 Unix 毫秒时间戳", async () => {
     "0001_init",
     "0002_phase1_evidence_and_budget",
     "0003_patrol_event_index",
+    "0004_approval_card_identity",
   ]);
   // applied_at 必须是 Unix 毫秒整数：审计要能还原「这张表什么时候建的」
   for (const r of rows) {
