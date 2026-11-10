@@ -39,11 +39,12 @@ import {
   tokenRemainingMs,
   isIrreversibleApproval,
 } from "../../src/http/tokens.js";
+import { fixtureTmp } from "../fixtures/fixture-dir.js";
 import { openDb } from "../../src/db/driver.js";
 import { migrate } from "../../src/db/migrate.js";
 
 const HUB = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
-const TMP = join(HUB, ".tmp", "tokens-" + process.pid);
+const TMP = fixtureTmp("tokens", import.meta.url);
 const TOKENS_SRC = readFileSync(join(HUB, "src", "http", "tokens.ts"), "utf8");
 
 /** 一个不像「现在」的时刻。 */

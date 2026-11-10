@@ -19,8 +19,7 @@
  */
 import { AsyncLocalStorage } from "node:async_hooks";
 import { mkdirSync, rmSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
@@ -32,14 +31,14 @@ import {
   BudgetTracker,
   type ConsumeInput,
 } from "../../src/budget/tracker.js";
+import { fixtureTmp } from "../fixtures/fixture-dir.js";
 import type { StepTx } from "../../src/events/recorder.js";
 import { AuditRecorder } from "../../src/events/recorder.js";
 import { InMemoryEventBus } from "../../src/events/bus.js";
 import type { DomainEvent } from "../../src/events/bus.js";
 import { migrate } from "../../src/db/migrate.js";
 
-const HUB = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
-const TMP = join(HUB, ".tmp", "budget");
+const TMP = fixtureTmp("budget", import.meta.url);
 
 /**
  * 连接的结构类型（同 test/db/schema-0001.test.ts 的做法）。

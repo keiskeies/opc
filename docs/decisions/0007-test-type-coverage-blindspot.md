@@ -319,7 +319,7 @@ hub 内的探针【无报警】。规则方向正确 —— 界外禁止、界�
 > `driver.ts:30` 的签名就是 `openDb(path: string): DatabaseSync`，既没有别名也没有包装层。
 > 实测真因是测试侧自己手写了三份互不相同的 `type Db` 桩 ——
 > `driver-preflight.test.ts:17` 用 `InstanceType<typeof import(...)[DatabaseSync]>`，
-> 而 `migrate.test.ts:17` 与 `schema-0001.test.ts:19` 各写了一份结构体桩，于是传给要
+> 而 `migrate.test.ts:16` 与 `schema-0001.test.ts:18` 各写了一份结构体桩，于是传给要
 > 真 `DatabaseSync` 的函数时报 missing the following properties: aggregate,
 > loadExtension, enableLoadExtension 等。修法是把三份桩收敛成一处（或直接删掉、用真实
 > 类型），与新增工程配置无关。
@@ -473,7 +473,7 @@ D-1 的红必须由断言产生而不是缺 import 报 `ReferenceError` —— �
 第 1 条我原先只数了用例数（251 ≥ 25）。但报告里同时写着 `6 skipped`，我从没查过那 6 条
 跳过的是什么 —— 如果某个 skip 恰好覆盖门禁要求的行为，「251」就是个虚数。
 
-查法与结果：全仓 `git grep` 只有【一处】动态 skip（`saver.contract.test.ts:448`），
+查法与结果：全仓 `git grep` 只有【一处】动态 skip（`saver.contract.test.ts:447`），
 6 条全部来自它，都是 Checkpoint Saver 契约里「仅对 SqliteWALSaver 成立」的那组：
 同事务原子性、外层写锁期间另一条连接被拒、事务内 deleteThread 随外层回滚、事务外调用
 put/putWrites 直接抛错、type 列真被使用、中文与嵌套对象往返。

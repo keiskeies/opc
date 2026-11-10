@@ -52,6 +52,7 @@ import {
   gateCriteriaForRoleAtVersion,
   saveCharterVersion,
 } from "../../src/charter/store.js";
+import { fixtureTmp } from "../fixtures/fixture-dir.js";
 import { WriteQueue } from "../../src/db/write-queue.js";
 import { migrate } from "../../src/db/migrate.js";
 import { evaluateGate } from "../../src/graph/gates/evaluate.js";
@@ -72,7 +73,7 @@ import { searchEvents } from "../../src/replay/search.js";
 const HERE = dirname(fileURLToPath(import.meta.url));
 const HUB = join(HERE, "..", "..");
 const SRC = join(HUB, "src");
-const TMP = join(HUB, ".tmp", "acceptance3");
+const TMP = fixtureTmp("acceptance3", import.meta.url);
 
 /** 固定在 2026-01-02（UTC）。日报的「哪一天」用 UTC 日划界（auto-approve.ts 文件头）。 */
 const NOW = Date.UTC(2026, 0, 2, 5);

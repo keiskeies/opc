@@ -33,11 +33,11 @@
  * 收窄成 TokenRejectReason / TokenIssueReject 联合（收窄才是本轮买到的东西）。
  */
 import { mkdirSync, rmSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { HTTP_CONFLICT } from "@opc/contracts";
+import { fixtureTmp } from "../fixtures/fixture-dir.js";
 import { InMemoryEventBus } from "../../src/events/bus.js";
 import { migrate } from "../../src/db/migrate.js";
 import {
@@ -60,8 +60,7 @@ import {
   TOKEN_AUDIT_ACTOR,
 } from "../../src/http/tokens.js";
 
-const HUB = join(dirname(fileURLToPath(import.meta.url)), "..");
-const TMP = join(HUB, ".tmp", "http-tokens-route");
+const TMP = fixtureTmp("http-tokens-route", import.meta.url);
 
 const UNAUTHORIZED = 401;
 const FORBIDDEN = 403;

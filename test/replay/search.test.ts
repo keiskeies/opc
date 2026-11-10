@@ -27,10 +27,10 @@
  */
 
 import { mkdirSync, rmSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { migrate } from "../../packages/hub/src/db/migrate.js";
+import { fixtureTmp } from "../../packages/hub/test/fixtures/fixture-dir.js";
 import {
   DEFAULT_SEARCH_LIMIT,
   escapeLikePattern,
@@ -48,8 +48,7 @@ import {
   REPLAY_EVENTS_SQL,
 } from "../../packages/hub/src/replay/query.js";
 
-const HUB = join(dirname(fileURLToPath(import.meta.url)), "..", "packages", "hub");
-const TMP = join(HUB, ".tmp", "replay");
+const TMP = fixtureTmp("replay", import.meta.url);
 
 type Row = Record<string, unknown>;
 type Db = {

@@ -42,9 +42,9 @@
  * 这里全是真库真连接，只有计时是真的做不了保证 —— 所以不断言计时。
  */
 import { mkdirSync, rmSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { fixtureTmp } from "../fixtures/fixture-dir.js";
 import { openDb } from "../../src/db/driver.js";
 import { migrate } from "../../src/db/migrate.js";
 import { WriteQueue } from "../../src/db/write-queue.js";
@@ -54,8 +54,7 @@ import { PATROL_SQL, runPatrol } from "../../src/heartbeat/patrol.js";
 import { searchEvents, type SearchHit } from "../../src/replay/search.js";
 import type { AuditRow } from "../../src/events/recorder.js";
 
-const HUB = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
-const TMP = join(HUB, ".tmp", "perf");
+const TMP = fixtureTmp("perf", import.meta.url);
 rmSync(TMP, { recursive: true, force: true });
 mkdirSync(TMP, { recursive: true });
 

@@ -11,9 +11,8 @@
  */
 
 import { mkdirSync, rmSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { fileURLToPath } from "node:url";
 import type {
   BaseCheckpointSaver,
   Checkpoint,
@@ -27,11 +26,11 @@ import {
   SCHEDULED,
 } from "@langchain/langgraph-checkpoint";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { fixtureTmp } from "../fixtures/fixture-dir.js";
 import { SqliteWALSaver } from "../../src/checkpoint/saver.js";
 import { txScope } from "../../src/checkpoint/tx-scope.js";
 
-const HUB = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
-const TMP = join(HUB, ".tmp", "saver-contract");
+const TMP = fixtureTmp("saver-contract", import.meta.url);
 
 /*
  * 每个实现包一层「怎么执行一次调用」：SqliteWALSaver 的 put / putWrites 必须在

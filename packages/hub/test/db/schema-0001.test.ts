@@ -1,7 +1,7 @@
 import { mkdirSync, rmSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { fixtureTmp } from "../fixtures/fixture-dir.js";
 import { migrate } from "../../src/db/migrate.js";
 
 /**
@@ -13,8 +13,7 @@ import { migrate } from "../../src/db/migrate.js";
  * 它证明的是 SQLite 触发器能用，证明不了【我们的】events 表真的免疫 UPDATE。
  */
 
-const HUB = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
-const TMP = join(HUB, ".tmp", "schema-0001");
+const TMP = fixtureTmp("schema-0001", import.meta.url);
 
 type Db = {
   prepare: (sql: string) => {

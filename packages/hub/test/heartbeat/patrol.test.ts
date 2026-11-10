@@ -27,6 +27,7 @@ import { mkdirSync, readFileSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { fixtureTmp } from "../fixtures/fixture-dir.js";
 import { openDb } from "../../src/db/driver.js";
 import { migrate } from "../../src/db/migrate.js";
 import { WriteQueue } from "../../src/db/write-queue.js";
@@ -51,7 +52,7 @@ import {
 } from "../../src/heartbeat/patrol.js";
 
 const HUB = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
-const TMP = join(HUB, ".tmp", "heartbeat");
+const TMP = fixtureTmp("heartbeat", import.meta.url);
 
 const T0 = Date.parse("2026-11-10T00:00:00.000Z");
 const MIN = 60_000;

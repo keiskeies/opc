@@ -23,10 +23,10 @@
  * 比值与机器快慢基本无关（同一台机器上两边同涨同跌），
  * 而「分片大小 = 1」这个最真实的回归会当场红。绝对值只记录，不断言。
  */
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import { mkdirSync, rmSync } from "node:fs";
 import { afterAll, describe, expect, it } from "vitest";
+import { fixtureTmp } from "../fixtures/fixture-dir.js";
 import { BATCH_ROWS, openDb } from "../../src/db/driver.js";
 import { migrate } from "../../src/db/migrate.js";
 import { WriteQueue, type Writer } from "../../src/db/write-queue.js";
@@ -34,8 +34,7 @@ import { WriteQueue, type Writer } from "../../src/db/write-queue.js";
 import { appendAudit, type AuditRow } from "../../src/events/recorder.js";
 import { appendAuditBatch, shard } from "../../src/events/batch.js";
 
-const HUB = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
-const TMP = join(HUB, ".tmp", "batch");
+const TMP = fixtureTmp("batch", import.meta.url);
 // 先清再建：只 rmSync 的话目录不存在，openDb 报的是 "unable to open database file"，
 // 而那条错误读起来像「权限/磁盘问题」，不像「忘了 mkdir」。
 rmSync(TMP, { recursive: true, force: true });

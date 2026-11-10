@@ -43,12 +43,13 @@ import {
   recordAutoApproval,
   readAutoApprovalReport,
 } from "../../src/policy/auto-approve.js";
+import { fixtureTmp } from "../fixtures/fixture-dir.js";
 import { type ActionDraft, matchForbidden, policyDecide } from "../../src/policy/engine.js";
 import { migrate } from "../../src/db/migrate.js";
 import { openDb } from "../../src/db/driver.js";
 
 const HUB = join(dirname(fileURLToPath(import.meta.url)), "..");
-const TMP = join(HUB, ".tmp", "auto-approve");
+const TMP = fixtureTmp("auto-approve", import.meta.url);
 /**
  * 被测包的生产源码树。⑧ 那一节扫的是它，不是 test/ —— 扫错目录会让「零调用方」
  * 变成恒真断言（test/ 里当然没有 INSERT INTO approvals 之外的生产写路径）。

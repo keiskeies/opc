@@ -26,10 +26,10 @@
  * 所以这里给一个能 advance 的 now，并在用例里真的推进它。
  */
 import { mkdirSync, rmSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { HTTP_CONFLICT, HTTP_NOT_FOUND, HTTP_NOT_IMPLEMENTED } from "@opc/contracts";
+import { fixtureTmp } from "../fixtures/fixture-dir.js";
 import { InMemoryEventBus } from "../../src/events/bus.js";
 import { WriteQueue } from "../../src/db/write-queue.js";
 import { migrate } from "../../src/db/migrate.js";
@@ -44,8 +44,7 @@ import {
 import { newLocalToken, signedHeaders } from "../../src/http/auth.js";
 import { LOOPBACK_HOST } from "../../src/http/bind.js";
 
-const HUB = join(dirname(fileURLToPath(import.meta.url)), "..");
-const TMP = join(HUB, ".tmp", "http-bindings-route");
+const TMP = fixtureTmp("http-bindings-route", import.meta.url);
 
 const UNAUTHORIZED = 401;
 const UNPROCESSABLE = 422;

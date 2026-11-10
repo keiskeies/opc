@@ -1,8 +1,8 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { existsSync, mkdirSync, rmSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { fixtureTmp } from "../fixtures/fixture-dir.js";
 
 /**
  * Task 0.3　把 D6 决策记录（docs/decisions/0001-sqlite-driver.md §2.1 / §2.2）的探针结论
@@ -28,8 +28,7 @@ try {
   );
 }
 
-const HUB = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
-const TMP = join(HUB, ".tmp", "driver-preflight");
+const TMP = fixtureTmp("driver-preflight", import.meta.url);
 
 const opened: Db[] = [];
 let seq = 0;

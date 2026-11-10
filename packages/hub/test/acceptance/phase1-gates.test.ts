@@ -20,11 +20,11 @@
  */
 import { AsyncLocalStorage } from "node:async_hooks";
 import { mkdirSync, rmSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import type { EvidenceBundle } from "@opc/contracts";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { fixtureTmp } from "../fixtures/fixture-dir.js";
 import { BudgetTracker } from "../../src/budget/tracker.js";
 import { migrate } from "../../src/db/migrate.js";
 import type { DomainEvent } from "../../src/events/bus.js";
@@ -44,8 +44,7 @@ import {
 } from "../../src/graph/routing/escalation.js";
 import type { TaskState } from "../../src/graph/status.js";
 
-const HUB = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
-const TMP = join(HUB, ".tmp", "acceptance");
+const TMP = fixtureTmp("acceptance", import.meta.url);
 
 type Row = Record<string, unknown>;
 type Db = {

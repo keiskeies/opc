@@ -32,6 +32,7 @@ import { fileURLToPath } from "node:url";
 import type { DatabaseSync } from "node:sqlite";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { decodeSseFrame, type SseFrame } from "@opc/contracts";
+import { fixtureTmp } from "../fixtures/fixture-dir.js";
 import { type DomainEvent, InMemoryEventBus } from "../../src/events/bus.js";
 import { migrate } from "../../src/db/migrate.js";
 import type { HubDeps } from "../../src/http/app.js";
@@ -41,7 +42,7 @@ import { LOOPBACK_HOST, MAX_BODY_BYTES, type HubServer, serveHub } from "../../s
 // 只上一层得到的是 packages/hub/test，于是下面那条源码扫描读的是另一个目录，
 // 报 ENOENT（这一条在本文件第一版里真的红了，红法恰好证明扫描不是恒真的）。
 const HUB = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
-const TMP = join(HUB, ".tmp", "http-server");
+const TMP = fixtureTmp("http-server", import.meta.url);
 
 type Row = Record<string, unknown>;
 type Db = {

@@ -22,6 +22,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { ResumeValue } from "@opc/contracts";
+import { fixtureTmp } from "../fixtures/fixture-dir.js";
 import type { DomainEvent } from "../../src/events/bus.js";
 import { InMemoryEventBus } from "../../src/events/bus.js";
 import { migrate } from "../../src/db/migrate.js";
@@ -43,8 +44,7 @@ import {
 import { newLocalToken } from "../../src/http/auth.js";
 import { issueToken, newApprovalToken } from "../../src/http/tokens.js";
 
-const HUB = join(dirname(fileURLToPath(import.meta.url)), "..");
-const TMP = join(HUB, ".tmp", "real-deps");
+const TMP = fixtureTmp("real-deps", import.meta.url);
 
 type Row = Record<string, unknown>;
 type Db = {

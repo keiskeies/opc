@@ -1,11 +1,11 @@
 import { mkdirSync, rmSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import type {
   Checkpoint,
   CheckpointMetadata,
 } from "@langchain/langgraph-checkpoint";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { fixtureTmp } from "../fixtures/fixture-dir.js";
 import { requireScopeDb } from "../../src/checkpoint/tx-scope.js";
 import { openDb } from "../../src/db/driver.js";
 import { migrate } from "../../src/db/migrate.js";
@@ -39,8 +39,7 @@ import {
  * 3) tail 链上的错误不许污染队列（见「一次失败不会卡死队列」用例）。
  */
 
-const HUB = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
-const TMP = join(HUB, ".tmp", "write-queue");
+const TMP = fixtureTmp("write-queue", import.meta.url);
 
 const queues: WriteQueue[] = [];
 const extraDbs: { close(): void }[] = [];

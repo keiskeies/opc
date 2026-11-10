@@ -30,8 +30,7 @@
  * 「大于现在」，而那条断言对「加错了单位」完全无感（8 小时 vs 8 毫秒都大于现在）。
  */
 import { mkdirSync, rmSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import type { DatabaseSync } from "node:sqlite";
 import {
@@ -47,6 +46,7 @@ import {
   SQLITE_CONSTRAINT_UNIQUE,
   timeoutAtMs,
 } from "../../src/approvals/cards.js";
+import { fixtureTmp } from "../fixtures/fixture-dir.js";
 import { decideEscalation, type EscalationState } from "../../src/graph/routing/escalation.js";
 import { openDb } from "../../src/db/driver.js";
 import { migrate } from "../../src/db/migrate.js";
@@ -58,8 +58,7 @@ import {
 import { CLAIM_APPROVAL_SQL, CEO_ACTOR } from "../../src/http/real-deps.js";
 import { APPROVAL_STATUS_PENDING } from "@opc/contracts";
 
-const HUB = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
-const TMP = join(HUB, ".tmp", "approvals-" + process.pid);
+const TMP = fixtureTmp("approvals", import.meta.url);
 
 /** 一个不像「现在」的时刻：真时钟永远不等于它，所以「用了真时钟」会被抓到。 */
 const T0 = Date.parse("2026-03-04T05:06:07.000Z");

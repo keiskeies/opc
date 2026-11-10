@@ -19,8 +19,7 @@
  * 自造的简化表既没有触发器、也不会因为写错而红 —— 那正是本仓认定自造表不可信的理由。
  */
 import { mkdirSync, rmSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
@@ -31,6 +30,7 @@ import {
   UNIMPLEMENTED_ENDPOINTS,
   type SseFrame,
 } from "@opc/contracts";
+import { fixtureTmp } from "../fixtures/fixture-dir.js";
 import type { DomainEvent } from "../../src/events/bus.js";
 import { InMemoryEventBus } from "../../src/events/bus.js";
 import { migrate } from "../../src/db/migrate.js";
@@ -46,8 +46,7 @@ import { newLocalToken, signedHeaders, verifyRequest, NonceGuard } from "../../s
 import { LOOPBACK_HOST } from "../../src/http/bind.js";
 import { reconnectDelayMs, ResumeStream, shouldGiveUp } from "../../src/http/sse.js";
 
-const HUB = join(dirname(fileURLToPath(import.meta.url)), "..");
-const TMP = join(HUB, ".tmp", "http");
+const TMP = fixtureTmp("http", import.meta.url);
 
 type Row = Record<string, unknown>;
 type Db = {

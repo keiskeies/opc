@@ -29,6 +29,7 @@ import { mkdirSync, rmSync, copyFileSync, openSync, ftruncateSync, fstatSync, cl
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { fixtureTmp } from "../fixtures/fixture-dir.js";
 import { openDb } from "../../src/db/driver.js";
 import { openSnapshotReadonlyDb } from "../../src/db/pragmas.js";
 import { migrate } from "../../src/db/migrate.js";
@@ -47,7 +48,7 @@ import {
 import { isPageOk, reportText } from "../../src/db/page-check.js";
 
 const HUB = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
-const TMP = join(HUB, ".tmp", "integrity");
+const TMP = fixtureTmp("integrity", import.meta.url);
 
 const opened: { close(): void }[] = [];
 let seq = 0;

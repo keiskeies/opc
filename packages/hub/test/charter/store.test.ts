@@ -16,6 +16,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { CharterInput } from "@opc/contracts";
 import { afterAll, describe, expect, it } from "vitest";
+import { fixtureTmp } from "../fixtures/fixture-dir.js";
 import { WriteQueue } from "../../src/db/write-queue.js";
 import {
   assertCharterShape,
@@ -34,7 +35,7 @@ import { evaluateGate, type GateCriterion } from "../../src/graph/gates/evaluate
 import type { EvidenceBundle } from "@opc/contracts";
 
 const HUB = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
-const TMP = join(HUB, ".tmp", "charter");
+const TMP = fixtureTmp("charter", import.meta.url);
 mkdirSync(TMP, { recursive: true });
 
 type AnyDb = {

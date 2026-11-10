@@ -10,8 +10,7 @@
  * 不自造简化表。自造表证明的是「我写的表能用」，证明不了「迁移出来的那张表能用」。
  */
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import {
   type EvidenceBundle,
   evidenceBundleSchema,
@@ -19,6 +18,7 @@ import {
   unresolvableClaimIndexes,
 } from "@opc/contracts";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { fixtureTmp } from "../fixtures/fixture-dir.js";
 import { migrate } from "../../src/db/migrate.js";
 import {
   artifactPath,
@@ -28,8 +28,7 @@ import {
   sha256Text,
 } from "../../src/evidence/store.js";
 
-const HUB = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
-const TMP = join(HUB, ".tmp", "evidence");
+const TMP = fixtureTmp("evidence", import.meta.url);
 
 type Db = {
   prepare: (sql: string) => {

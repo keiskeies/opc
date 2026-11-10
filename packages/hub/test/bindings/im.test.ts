@@ -40,6 +40,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, describe, expect, it } from "vitest";
 import type { DatabaseSync } from "node:sqlite";
+import { fixtureTmp } from "../fixtures/fixture-dir.js";
 import { openDb } from "../../src/db/driver.js";
 import { migrate } from "../../src/db/migrate.js";
 import { WriteQueue } from "../../src/db/write-queue.js";
@@ -85,7 +86,7 @@ function walkSrc(dir: string): string[] {
   return out;
 }
 
-const TMP = join(HUB, ".tmp", "bindings-" + process.pid);
+const TMP = fixtureTmp("bindings", import.meta.url);
 const IM_SRC = join(HUB, "src", "bindings", "im.ts");
 
 /**

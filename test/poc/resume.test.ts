@@ -3,6 +3,7 @@ import { mkdirSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { fixtureTmp } from "../../packages/hub/test/fixtures/fixture-dir.js";
 
 /**
  * Task 0.1：把 Phase-0 可行性验证固化成仓库内测试。
@@ -25,13 +26,9 @@ const POC = fileURLToPath(
 // 实测（本轮）：npx vitest run --root <仓库根> 但 cwd 换成别处时，这棵树真的会建到启动目录去
 // （对照组 test-inventory.test.ts 在同样条件下什么都不留，故不是 vitest 自己的产物）。
 // 与紧邻上一行的 POC 用同一种绝对化方式；解析结果与原来的 <仓库根>/.tmp/poc 逐字相同。
-const TMP = join(
-  dirname(fileURLToPath(import.meta.url)),
-  "..",
-  "..",
-  ".tmp",
-  "poc",
-);
+const TMP = fixtureTmp("poc", import.meta.url, {
+  root: join(dirname(fileURLToPath(import.meta.url)), "..", "..", ".tmp"),
+});
 
 type Phase1 = {
   phase: string;

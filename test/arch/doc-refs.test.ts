@@ -219,7 +219,7 @@ const SNAP: Record<string, string> = {
     "* 验收对象是【命令行退出码】，必须能被真子进程执行来验证。计划 V13 实测过 ——",
   "0006-cli-resume-and-identity.md>cli.ts:479":
     'io.error("错误：" + p.error + "\\n\\n" + USAGE + "\\n");',
-  "0006-cli-resume-and-identity.md>write-queue.test.ts:207":
+  "0006-cli-resume-and-identity.md>write-queue.test.ts:206":
     'it("失败之后立刻 close()：不得重抛旧失败，且必须真的关掉连接", async () => {',
   // §7-39 里为了举证【真正的消费者一掏空就红】而写下的坐标；登记同轮完成，不留红过夜。
   // 漂过一次：原本是第 225 行，本轮在同文件上方新增一条 it（scoped 子包扫描的回归），
@@ -263,9 +263,9 @@ const SNAP: Record<string, string> = {
     "export function openDb(path: string): DatabaseSync {",
   "0007-test-type-coverage-blindspot.md>driver-preflight.test.ts:17":
     'type Db = InstanceType<typeof import("node:sqlite")["DatabaseSync"]>;',
-  "0007-test-type-coverage-blindspot.md>migrate.test.ts:17": "type Db = {",
-  "0007-test-type-coverage-blindspot.md>schema-0001.test.ts:19": "type Db = {",
-  "0007-test-type-coverage-blindspot.md>saver.contract.test.ts:448":
+  "0007-test-type-coverage-blindspot.md>migrate.test.ts:16": "type Db = {",
+  "0007-test-type-coverage-blindspot.md>schema-0001.test.ts:18": "type Db = {",
+  "0007-test-type-coverage-blindspot.md>saver.contract.test.ts:447":
     "it.skip(title, fn);",
   // 0010 里那两条【承重实测】的出处。它们必须是活坐标而不是叙述：
   // 0010 §3 那一条改动的整个论据是「txScope 在 BEGIN 与 COMMIT 之间 await」，
@@ -380,8 +380,18 @@ const SNAP: Record<string, string> = {
     "* ⚠ 脏行【被跳过】而不是 500。这个决定发生在 im.ts 的 listBindings",
   "0031-binding-http-entry-and-a-false-green-i-recorded-as-a-test-result.md>http/bindings.ts:193":
     "// 0030 §8：角色存在性的判据【需要装配方注入 knownRoles】，本模块不猜。",
-  "0031-binding-http-entry-and-a-false-green-i-recorded-as-a-test-result.md>bindings-route.test.ts:471":
+  "0031-binding-http-entry-and-a-false-green-i-recorded-as-a-test-result.md>bindings-route.test.ts:470":
     'it("⭐ 请求体里塞 verified_by ⇒ 422，且库里那一行【不会因为多带一个键就被署名】", async () => {',
+  // 0035 这一条是**活坐标**，而且比上面几条更脆 —— 它指向本篇自己新写的那个文件的文件头
+  // 第 4 行（「为什么需要这一处」那一行）。它脆是对的：那一行整篇的起因（0025 §7 那一格留给
+  // 「独立一篇」的东西）。有人把它删了或改成「这里已按 pid 分目录」，快照就该红，
+  // 逼他重读 0035 §1 那张三行对照表，而不是让文档继续指着一句 `/**` 讲竞态。
+  // ⚠ 快照存的是目标行 **`.trim()` 之后**的内容（`verify` 那边就这么比）。我第一版照抄了
+  // JSDoc 里那个前导空格，于是红在「一个缩进空格」上，而它读起来像「目标行被人改了」——
+  // 一条噪音伪装成一条结论（0033 §0 那一族）。上面 0030 那条 `* 端点 → …` 同样是 trim 过的，
+  // 口径一直如此，错的是我抄的时候没读比对口径（0035 §5.1 那条「先读判据再写『照判据数过』」的第三次）。
+  "0035-fixture-dirs-per-process-and-a-guard-whose-scope-empties-itself.md>fixture-dir.ts:4":
+    "* ── 为什么需要这一处（0025 §7 第 7 条那一格）─────────────────────────",
 };
 
 describe("决策文档里的「文件:行号」引用不漂移", () => {

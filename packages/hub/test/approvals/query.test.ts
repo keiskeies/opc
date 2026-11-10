@@ -41,11 +41,12 @@ import {
   listApprovals,
   MAX_APPROVAL_LIMIT,
 } from "../../src/approvals/query.js";
+import { fixtureTmp } from "../fixtures/fixture-dir.js";
 import { openDb } from "../../src/db/driver.js";
 import { migrate } from "../../src/db/migrate.js";
 
 const HUB = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
-const TMP = join(HUB, ".tmp", "approvals-query-" + process.pid);
+const TMP = fixtureTmp("approvals-query", import.meta.url);
 
 const T0 = Date.parse("2026-05-01T00:00:00.000Z");
 const HOUR = 3_600_000;

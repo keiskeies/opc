@@ -21,8 +21,7 @@
  * 那正好是 §18.4 阶段 3 里 Hub 负责的那一半；LangGraph 读它怎么用，不在此处。
  */
 import { mkdirSync, rmSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   CEO_ROLE_ID,
@@ -32,6 +31,7 @@ import {
 } from "@opc/contracts";
 import { migrate } from "../../packages/hub/src/db/migrate.js";
 import { insertTask } from "../../packages/hub/src/http/real-deps.js";
+import { fixtureTmp } from "../../packages/hub/test/fixtures/fixture-dir.js";
 import {
   applyChangeToGraph,
   commitOrgGraph,
@@ -40,8 +40,7 @@ import {
   RUNNING_TASKS_SQL,
 } from "../../packages/hub/src/org/commit.js";
 
-const HUB = join(dirname(fileURLToPath(import.meta.url)), "..", "packages", "hub");
-const TMP = join(HUB, ".tmp", "org-commit");
+const TMP = fixtureTmp("org-commit", import.meta.url);
 
 type Row = Record<string, unknown>;
 type Db = {

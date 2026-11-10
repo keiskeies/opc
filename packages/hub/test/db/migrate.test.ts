@@ -1,7 +1,7 @@
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import { afterAll, beforeAll, expect, it } from "vitest";
+import { fixtureTmp } from "../fixtures/fixture-dir.js";
 import { MIGRATIONS_DIR, migrate } from "../../src/db/migrate.js";
 
 /**
@@ -11,8 +11,7 @@ import { MIGRATIONS_DIR, migrate } from "../../src/db/migrate.js";
  * 「第二次报 table already exists」等于每次重启都要人工介入。
  */
 
-const HUB = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
-const TMP = join(HUB, ".tmp", "migrate");
+const TMP = fixtureTmp("migrate", import.meta.url);
 
 type Db = {
   prepare: (sql: string) => {

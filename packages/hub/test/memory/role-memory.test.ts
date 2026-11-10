@@ -24,6 +24,7 @@ import { mkdirSync, readFileSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, describe, expect, it } from "vitest";
+import { fixtureTmp } from "../fixtures/fixture-dir.js";
 import { appendAudit } from "../../src/events/recorder.js";
 import { migrate } from "../../src/db/migrate.js";
 import { openDb } from "../../src/db/driver.js";
@@ -44,7 +45,7 @@ import {
 
 const HUB = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const ROLE_MEMORY_SRC = join(HUB, "src", "memory", "role-memory.ts");
-const TMP = join(HUB, ".tmp", "memory");
+const TMP = fixtureTmp("memory", import.meta.url);
 mkdirSync(TMP, { recursive: true });
 
 type Row = Record<string, unknown>;

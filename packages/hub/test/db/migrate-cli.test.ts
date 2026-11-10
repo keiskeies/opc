@@ -4,6 +4,7 @@ import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, expect, it } from "vitest";
+import { fixtureTmp } from "../fixtures/fixture-dir.js";
 import { parseArgs } from "../../src/db/migrate-cli.js";
 
 /**
@@ -16,7 +17,7 @@ import { parseArgs } from "../../src/db/migrate-cli.js";
  */
 
 const HUB = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
-const TMP = join(HUB, ".tmp", "migrate-cli");
+const TMP = fixtureTmp("migrate-cli", import.meta.url);
 const require_ = createRequire(import.meta.url);
 
 function runCliCli(args: string[]): {

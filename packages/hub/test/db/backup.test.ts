@@ -48,6 +48,7 @@ import {
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { fixtureTmp } from "../fixtures/fixture-dir.js";
 import { openDb } from "../../src/db/driver.js";
 import { openReadonlyDb, openSnapshotReadonlyDb } from "../../src/db/pragmas.js";
 import { migrate } from "../../src/db/migrate.js";
@@ -67,7 +68,7 @@ import {
 import { WriteQueue } from "../../src/db/write-queue.js";
 
 const HUB = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
-const TMP = join(HUB, ".tmp", "backup");
+const TMP = fixtureTmp("backup", import.meta.url);
 
 const opened: { close(): void }[] = [];
 /**

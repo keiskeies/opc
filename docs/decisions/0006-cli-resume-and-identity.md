@@ -774,7 +774,7 @@ TEST_FIXTURE。" 0.7 已经踩过同一个坑，当时的解法是写下这段�
     `write-queue.ts` 里 `this.#tail = run.then(SETTLED, SETTLED);`（`SETTLED` 是 `() => {}`）保证 tail 永不 rejected，
     一次失败不会让整条串行链报废 —— 我把实验做成【赋值 + 单 handler】，正好绕开唯一有意义的那个分支。
     决定性判别来自变异 MW（只删第二个 `SETTLED`）：`tsc` 0、biome 0（变异合法；这条规矩的真实出处是 0007 §4.3 的【变异实验必须分层报】，我上一轮写成【第 22 条】是凭记忆，本轮已在下面第 28 条记下这类错），`pnpm verify` 变红且红在断言 ——
-    `write-queue.test.ts:207`「失败之后立刻 `close()`：不得重抛旧失败，且必须真的关掉连接」报 `AssertionError: promise rejected …
+    `write-queue.test.ts:206`「失败之后立刻 `close()`：不得重抛旧失败，且必须真的关掉连接」报 `AssertionError: promise rejected …
     instead`，另有 `Vitest caught 3 unhandled errors`。**⇒ tail 链的 rejection 处理有人守，MW = KILLED。** 本轮产品侧
     扫描最终 0 命中 ⇒ 无新增断言、`src` 一字未动（这是【已解释的零】，不是【没查】）。
 

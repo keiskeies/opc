@@ -12,18 +12,17 @@
 
 import { AsyncLocalStorage } from "node:async_hooks";
 import { mkdirSync, rmSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { fileURLToPath } from "node:url";
 import { Annotation, END, StateGraph } from "@langchain/langgraph";
 import {
   BaseCheckpointSaver,
   MemorySaver,
 } from "@langchain/langgraph-checkpoint";
 import { afterAll, beforeAll, expect, it } from "vitest";
+import { fixtureTmp } from "../fixtures/fixture-dir.js";
 
-const HUB = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
-const TMP = join(HUB, ".tmp", "tx-scope-probe");
+const TMP = fixtureTmp("tx-scope-probe", import.meta.url);
 
 const als = new AsyncLocalStorage();
 const opened = [];

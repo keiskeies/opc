@@ -20,6 +20,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { DatabaseSync } from "node:sqlite";
 import { afterAll, describe, expect, it } from "vitest";
+import { fixtureTmp } from "../fixtures/fixture-dir.js";
 import { WriteQueue } from "../../src/db/write-queue.js";
 import { migrate } from "../../src/db/migrate.js";
 import { openDb } from "../../src/db/driver.js";
@@ -40,7 +41,7 @@ import {
 import { charterSchema, type CharterInput } from "@opc/contracts";
 
 const HUB = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
-const TMP = join(HUB, ".tmp", "budget-sync");
+const TMP = fixtureTmp("budget-sync", import.meta.url);
 mkdirSync(TMP, { recursive: true });
 
 type Row = Record<string, unknown>;
