@@ -345,4 +345,29 @@ describe("验收：渲染进程内不存在任何业务状态机", () => {
     // 把「有待批卡片」写成 status = "ESCALATED_TO_CEO" 就是前端自己造跃迁，
     // 而 Hub 那侧这条边可能根本不存在。显示由渲染层订阅原始事件流去做。
   });
+
+  it("Hub 新加一个不认识的 kind ⇒ 【不炸、不误判为洞】，只推 cursor", () => {
+    // 这一条为 ApprovalDecided 而加（规格 §5.8 那张表里没有，理由见 0010 §4）。
+    // 要的性质的【方向】是【加 kind 不会打挂前端】：contracts 的 feedItemSchema 是
+    // passthrough + kind 只要求非空串，投影层 switch 有 default 分支。
+    // 所以老客户端（浏览器缓存里那份渲染包）收到新事件时是【照常显示】而不是白屏。
+    //
+    // 断言里最要紧的是 action 不是 "gap"：如果 default 分支写成了标 stale，
+    // 那么 Hub 每加一种事件，所有前端就【永久降级 + 反复拉快照】——
+    // 那比不认识这个 kind 严重得多，而它只需要一行错误就能发生。
+    const p = snapshot(1, [task("a", "IN_PROGRESS")]);
+    const r = applyEvent(p, {
+      seq: 2,
+      kind: "ApprovalDecided",
+      taskId: "a",
+      interruptId: "i-1",
+      decision: "approved",
+    });
+    expect(r.action).toBe("applied");
+    expect(r.projection.cursor).toBe(2);
+    expect(r.projection.link).toBe("live");
+    expect(r.projection.resnapshotCount).toBe(0);
+    // 也不改 tasks：批准不是状态跃迁（status 由 Hub 的图写，见 0010 §4）。
+    expect(r.projection.tasks.get("a")?.status).toBe("IN_PROGRESS");
+  });
 });

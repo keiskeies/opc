@@ -93,25 +93,30 @@ const NOW = 1_700_000_000_000;
 const TOKEN = newLocalToken();
 
 /**
- * 一套 handler 依赖，附【recordDecision 被调用了几次】这个计数器。
+ * 一套 handler 依赖，附【三个注入点各被调用了几次】。
  *
- * 这个计数器就是 Test 项 ③ 的全部判据，所以它的取值得站得住：
+ * 前两个计数器就是 Test 项 ③ 的全部判据，所以它们的取值得站得住：
  * 判「有没有产生审计事件」如果去数 events 表的行数，那么在真总线上有其它事件在飞时
  * 是噪声；而 handler 唯一能写审计的路径就是 deps.recordDecision，
  * 数它等于数「这条请求有没有走到写审计那一步」—— 正是那条不变量的可测形态。
+ *
+ * 第三个（resume）是【后来加的】，加它的理由本身就是发现：HubDeps 原本没有
+ * resumeGraph 这个注入点，所以计划 Task 2.6 第一条 Test「批准后 Hub 图恢复执行」
+ * 在整个 Phase 2 里【没有任何代码承载】，也没有任何测试红过 ——
+ * 决策落库之后什么都不发生，而 200 照回。现在这条计数器能红。
  */
 async function harness(taskId = "task-1"): {
   deps: HubDeps;
   db: Db;
   bus: InMemoryEventBus;
-  calls: { decision: number; created: number };
+  calls: { decision: number; created: number; resumed: string[] };
   sign: (method: string, path: string, body?: string) => Record<string, string>;
   req: (o: Partial<HubRequest> & { method: string; path: string }) => HubRequest;
   approvals: (id: string, status?: string) => void;
 } {
   const db = await newDb(taskId);
   const bus = new InMemoryEventBus();
-  const calls = { decision: 0, created: 0 };
+  const calls = { decision: 0, created: 0, resumed: [] as string[] };
   const nonces = new NonceGuard();
   const deps: HubDeps = {
     db: db as unknown as DatabaseSync,
@@ -129,6 +134,9 @@ async function harness(taskId = "task-1"): {
     },
     createTask: async () => {
       calls.created += 1;
+    },
+    resumeGraph: async (id: string) => {
+      calls.resumed.push(id);
     },
   };
   // 形参就叫 target：调用方传进来的【必须】是它准备发出的那一整个请求目标。
@@ -475,6 +483,127 @@ describe("③ POST /approvals/:id", () => {
     );
     expect(res.status).toBe(422);
     expect(h.calls.decision).toBe(0);
+  });
+
+  /* ── 决策之后【图要接着跑】（计划 Task 2.6 第一条 Test 的 Hub 侧一半）──────
+   * 这一组是【后补的】，而它补的是一个真实存在过的空档：HubDeps 原本没有
+   * resumeGraph 这个注入点，所以「批准后 Hub 图恢复执行」这句话在 Phase 2
+   * 全程没有任何代码承载，也没有任何测试红过。下面四条各自钉住一条边界，
+   * 缺任何一条，「恢复」都会在一个不该发生的情况下发生（或不该恢复时恢复了）。
+   */
+
+  it("首次决策 ⇒ 图被恢复，且恢复的是【这条审批所属的】任务", async () => {
+    const h = await harness();
+    h.approvals("r-1");
+    const body = decideBody({ resume: "approve" });
+    const res = await handleRequest(
+      h.deps,
+      h.req({
+        method: "POST",
+        path: "/approvals/r-1",
+        headers: h.sign("POST", "/approvals/r-1", body),
+        body,
+      }),
+    );
+    expect(res.status).toBe(200);
+    // 断的是【参数】不只是「调过一次」：taskId 取自 approvals.task_id（库里那行），
+    // 若这里传的是 approvalId，图会去恢复一条不存在的会话，而本用例照样绿。
+    expect(h.calls.resumed).toEqual(["task-1"]);
+  });
+
+  it("id 不存在 ⇒ 【不恢复】图（404 那条路一步都不走）", async () => {
+    // 反向用例。只有上一条正向断言的话，把 resumeGraph 提到 route() 开头
+    // （任何 POST /approvals 都恢复一次）也能全绿 —— 而那种写法会让
+    // 「对着一个不存在的审批点了一下」触发一次真实图执行，白烧一份模型调用。
+    const h = await harness();
+    const body = decideBody({ resume: "approve" });
+    const res = await handleRequest(
+      h.deps,
+      h.req({
+        method: "POST",
+        path: "/approvals/ghost",
+        headers: h.sign("POST", "/approvals/ghost", body),
+        body,
+      }),
+    );
+    expect(res.status).toBe(404);
+    expect(h.calls.resumed).toEqual([]);
+  });
+
+  it("已决策过的卡片 ⇒ 200 replayed 且【不重复恢复】图", async () => {
+    // 幂等的完整含义在这里比「不写第二条审计」更宽：审计不重复 + 图不重跑。
+    // 图重跑一次的代价不是多一行记录，是【节点里的模型调用再来一遍】（真金白银），
+    // 而 events 那边还因为 append-only 挡不住。
+    const h = await harness();
+    h.approvals("r-2", "approved");
+    const body = decideBody({ resume: "approve" });
+    const res = await handleRequest(
+      h.deps,
+      h.req({
+        method: "POST",
+        path: "/approvals/r-2",
+        headers: h.sign("POST", "/approvals/r-2", body),
+        body,
+      }),
+    );
+    expect(res.body).toEqual({ ok: true, replayed: true });
+    expect(h.calls.resumed).toEqual([]);
+  });
+
+  it("并发抢输（recordDecision 返回 false）⇒ replayed: true 且【不恢复】图", async () => {
+    // 这一条是四条里唯一【不能靠读代码想到要写】的：handler 上面那次 SELECT
+    // 说这张卡片是 pending，而 recordDecision  afterwards 说「没写成」——
+    // 两次读之间另一个窗口点了同一次。此时【事实】是别人抢到并已在恢复，
+    // 我再恢复一次 = 同一条图跑两遍。
+    // 上面那三条用例的替身一律 return true，所以它们【结构上测不到】这一支；
+    // 这里换一个 return false 的替身，把这一支单独接出来。
+    const h = await harness();
+    h.approvals("r-3");
+    (h.deps as { recordDecision: (o: unknown) => Promise<boolean> }).recordDecision =
+      async () => false;
+    const body = decideBody({ resume: "approve" });
+    const res = await handleRequest(
+      h.deps,
+      h.req({
+        method: "POST",
+        path: "/approvals/r-3",
+        headers: h.sign("POST", "/approvals/r-3", body),
+        body,
+      }),
+    );
+    expect(res.status).toBe(200);
+    // 报错口径跟着事实走，而不是跟着我那次过时的 SELECT 走。
+    expect(res.body).toEqual({ ok: true, replayed: true });
+    expect(h.calls.resumed).toEqual([]);
+  });
+
+  it("图恢复失败 ⇒ 500 而【不是】200（卡片已批、任务没动，必须响）", async () => {
+    // 「200 + 什么都不动」是本仓认定最贵的失效形状：CEO 看到卡片消失、看板不动，
+    // 而没有任何一处留下痕迹。所以这里刻意不 catch（见 app.ts decide 的注释）。
+    // 库侧【确实】留着一条已批准的卡片 —— 那是【有意的】，理由与补救路径
+    // 写在 real-deps.ts 的 makeResumeGraph 注释里（不在这里重述一遍，两处会漂移）。
+    const h = await harness();
+    h.approvals("r-4");
+    h.deps.resumeGraph = async () => {
+      throw new Error("图起不来");
+    };
+    const body = decideBody({ resume: "approve" });
+    const res = await handleRequest(
+      h.deps,
+      h.req({
+        method: "POST",
+        path: "/approvals/r-4",
+        headers: h.sign("POST", "/approvals/r-4", body),
+        body,
+      }),
+    );
+    expect(res.status).toBe(500);
+    // 报错原文带出来（本机回环上没有信息泄漏可言，而坐在这台机器上的就是要修它的人）。
+    expect((res.body as { error: string }).error).toMatch(/图起不来/u);
+    // 决策【已经】落库了 —— 这条断言钉的是顺序：先提交决策、后跑图。
+    // 顺序反了的话这里会是 0 行，而「图前进了、审计里没有那次批准」
+    // 在 events 是事实源的口径下比「卡片已批、待恢复」危险得多。
+    expect(h.calls.decision).toBe(1);
   });
 });
 

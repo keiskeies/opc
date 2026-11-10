@@ -109,6 +109,11 @@ async function harness(): Promise<Harness> {
       return true;
     },
     createTask: async () => {},
+    // 传输层不关心图恢复（那是 handler 层的事），但要一个【不抛】的实现：
+    // 缺这个字段在类型上就过不去，而这里刻意让它【什么都不做】——
+    // 本文件测的是 socket、订阅、状态码，不是「图有没有跑」。
+    // 真恢复的接线在 test/http/real-deps.test.ts 与 contract.test.ts 那几例里钉。
+    resumeGraph: async () => {},
   };
   const srv = await serveHub(deps, { port: 0 });
   servers.push(srv);

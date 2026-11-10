@@ -114,6 +114,21 @@ export interface HubDeps {
     readonly parentId?: string;
     readonly nowMs: number;
   }) => Promise<void>;
+  /**
+   * 决策落库【之后】让这一条图接着跑（计划 Task 2.6 第一条 Test：
+   * 「批准后 Hub 图恢复执行」，规格 §5.8 结尾那句「CEO 在手机上批准战略提案时，
+   * Hub 恢复该图的执行并广播 TaskStateChanged」）。
+   *
+   * 第三个注入点是【后来加的】，形状偏离记在 http/real-deps.ts 文件头。
+   * 关键在【顺序】：决策与审计先提交，图后跑。反过来（先跑图再记审计）会留下
+   * 「图前进了、审计里没有那次批准」—— 而 events 是事实源（§5.8），
+   * 那种缺口在回放里表现为「任务动了但没人让它动」。
+   *
+   * 失败【不吞】，让它冒到 500：卡片确实已批准（库已提交），而图没动 ——
+   * 「200 + 什么都不动」是本仓认定最贵的失效形状（同一判据见 sse.ts 的 cursor 那条）。
+   * 代价写在 real-deps.ts 的 makeResumeGraph 注释里，含当前唯一的补救路径。
+   */
+  readonly resumeGraph: (taskId: string) => Promise<void>;
 }
 
 const MAX_TITLE_CHARS = 200;
@@ -421,6 +436,18 @@ async function decide(
     resume: request.resume,
     ...(request.note === undefined ? {} : { note: request.note }),
   });
+  if (applied) {
+    // 只有【本次真的写成了】才去恢复图。并发那一次（applied === false）不恢复：
+    // 抢到的那一次已经在恢复了，这一次再调一次就是同一条图跑两遍，
+    // 而节点里的模型调用不按次数计费的话，重复一次 = 白烧一份预算。
+    //
+    // 这一句在写 real-deps.ts 之前【不存在】，而它上面那段注释（「生产用真 recorder」）
+    // 早就在了 —— 也就是说计划 Task 2.6 第一条 Test「批准后 Hub 图恢复执行」
+    // 在整个 Phase 2 里没有任何代码承载它，也没有任何测试红过。
+    // 这里刻意【不 catch】：恢复失败要让这次请求变成 500 + 原文，
+    // 而不是 200 + 任务一步不动（见 HubDeps.resumeGraph 的注释）。
+    await deps.resumeGraph(outcome.audit.taskId);
+  }
   return json(200, {
     ok: true,
     // 走到这里 outcome.replayed 必为 false（我那次 SELECT 说它是 pending）。

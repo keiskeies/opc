@@ -199,11 +199,23 @@ git diff 才算完成。
 
 \`\`\`text
 git grep --untracked -n "thread_id:" -- packages/hub/src/cli.ts
-  → cli.ts:254  function config(taskId: string): { configurable: { thread_id: string } }
-  → cli.ts:255    return { configurable: { thread_id: taskId } };
-  两条 = config() 是 thread_id 的唯一拼装点，值就是 taskId。搜 "thread_id:"（带冒号，
-  即【作为键出现】）而不是 "thread_id"：后者在 packages/hub/src 下命中 40 多处，绝大多数
-  是 saver 与 checkpoint schema 的列名，对这条结论毫无信息量。
+  → 【0 命中】。写本节时这里是【两行】（config() 的签名与它的 return），拼装点后来搬到了
+    packages/hub/src/graph/thread.ts。搬动的原因不是整洁：http 侧写决策落库也要同一个
+    thread 坐标，而它【不能】import cli.ts —— cli.ts 顶层 import `@langchain/langgraph`
+    与整张图，那样「把一条 CEO 决策写进库」在装不上那几个包时连 import 都做不到
+    （可行性的实测口径见 0009 §2）。搬完之后【唯一拼装点】这条比原来更强：
+    CLI 与 HTTP 两侧调的是同一个函数，而不是两处各写一遍、恰好一样。
+    （这两行【刻意不写成 文件:行号 形式】：那个形式会被 doc-refs 当成活坐标、
+    要求一份指向【现存内容】的快照，而这里指的是一个已经不在这个文件里的历史位置。）
+
+git grep --untracked -n "thread_id:" -- packages/hub/src
+  → graph/thread.ts:24  export function threadConfig(taskId: string): { configurable: { thread_id: string } }
+  → graph/thread.ts:25    return { configurable: { thread_id: taskId } };
+    两条 = 唯一拼装点，值就是 taskId。另有 11 处命中在 saver（列名）、real-deps.ts 的
+    结构类型标注与 poc/ 探针脚本里，都不是拼装点。
+    搜 "thread_id:"（带冒号，即【作为键出现】）而不是 "thread_id"：后者在
+    packages/hub/src 下本轮重测为 49 处命中（写本节时是 40 多处，量级未变），绝大多数
+    是 saver 与 checkpoint schema 的列名，对这条结论毫无信息量。
 
 git grep --untracked -n -c -e "--thread" -- packages/hub/src/cli.ts
   → cli.ts:5     五处命中，读下来分别是文件头纪律 1 处、USAGE 1 处、拒绝分支 2 处、
@@ -316,7 +328,7 @@ TEST_FIXTURE。" 0.7 已经踩过同一个坑，当时的解法是写下这段�
      拒绝在它上游 40 行处先命中 —— 那段变异是死代码，既没被跳过也没被执行，我因此连
      "它真的等价"都不曾验证过。
    然后我第一次补的断言（三条 toContain）**又被 USAGE 段兜住了**：CLI 打印 parse 错误时
-   会连着用法一起打（cli.ts:468），而用法里本来就有"没有 --thread：thread_id 由 --task
+   会连着用法一起打（cli.ts:479），而用法里本来就有"没有 --thread：thread_id 由 --task
    推导（docs/decisions/0006 §4）"这样一行 —— 三条断言全部由这段公共文本满足，M7 于是在
    19 条测试下继续存活。
    **真正的修法**：判据落在【错误本体那一行】（首行；用法是空行之后的第二段），要求它
@@ -1401,7 +1413,9 @@ TEST_FIXTURE。" 0.7 已经踩过同一个坑，当时的解法是写下这段�
     改名移走：`doc-coords`、`doc-refs`、`decision-index` 三条【全部当场红】。静态复核也对得上 —— 它们体内
     分别有 6 处、1 处、2 处规模下界断言。**结论与我的预期相反，这个假绿面不存在。** 顺带修掉一条过时档案：
     磁盘 `test|spec` 文件现在是 26 个（ vitest 收集 26、缺 0），档案里的 25 已过时 —— 以实测为准。
-    **代码侧与反向都测了。** 改一行被快照锚定的源码（`cli.ts:255`）→ `doc-refs` 红，且把快照值与现值同时
+    **代码侧与反向都测了。** 改一行被快照锚定的源码（当时锚定的是 config() 的 return 那一行；
+    该行后来随 §6.3 的搬动离开 cli.ts，故此处【不再写成坐标形式】—— 写成坐标形式就会被守卫
+    当成活坐标要求一份现存内容的快照，而它指的是一次历史实验）→ `doc-refs` 红，且把快照值与现值同时
     打出来，可读性够人自己判断；往文档【合法地新增一句不含编号与坐标的正文】→ 三条守卫全绿，不误伤。
     **探针【确实】抓到一个零覆盖面，而且不是靠感觉认定的。** 我往 0006 注入一条指向不存在编号的引用
     （一个假编号，正文里我【不写出它的字面值】—— 理由见本节末尾），三条文档守卫全部恒绿。查覆盖要用

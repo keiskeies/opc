@@ -158,13 +158,13 @@ function verify(
 }
 
 const SNAP: Record<string, string> = {
-  "0006-cli-resume-and-identity.md>cli.ts:254":
-    "function config(taskId: string): { configurable: { thread_id: string } } {",
-  "0006-cli-resume-and-identity.md>cli.ts:255":
+  "0006-cli-resume-and-identity.md>graph/thread.ts:24":
+    "export function threadConfig(taskId: string): { configurable: { thread_id: string } } {",
+  "0006-cli-resume-and-identity.md>graph/thread.ts:25":
     "return { configurable: { thread_id: taskId } };",
   "0006-cli-resume-and-identity.md>cli.ts:5":
     "* 验收对象是【命令行退出码】，必须能被真子进程执行来验证。计划 V13 实测过 ——",
-  "0006-cli-resume-and-identity.md>cli.ts:468":
+  "0006-cli-resume-and-identity.md>cli.ts:479":
     'io.error("错误：" + p.error + "\\n\\n" + USAGE + "\\n");',
   "0006-cli-resume-and-identity.md>write-queue.test.ts:207":
     'it("失败之后立刻 close()：不得重抛旧失败，且必须真的关掉连接", async () => {',
@@ -178,7 +178,7 @@ const SNAP: Record<string, string> = {
     "expect(isRuntimeFixture(BOUNDARY_PROBE)).toBe(true);",
   // 同一轮里第二次被 doc-refs 抓住：正文写了坐标却没登记快照；连着两次 => 【登记快照】
   // 已是写文档的固定动作，见 0006 §7-40。
-  "0007-test-type-coverage-blindspot.md>cli.ts:478": "try {",
+  "0007-test-type-coverage-blindspot.md>cli.ts:489": "try {",
   "0007-test-type-coverage-blindspot.md>db/driver.ts:64": "try {",
   "0007-test-type-coverage-blindspot.md>db/migrate.ts:120": "try {",
   "0007-test-type-coverage-blindspot.md>checkpoint/saver.ts:378": "try {",
@@ -187,8 +187,11 @@ const SNAP: Record<string, string> = {
   "0007-test-type-coverage-blindspot.md>db/migrate-cli.ts:120": "try {",
   "0007-test-type-coverage-blindspot.md>internal/direct-run.ts:19": "try {",
   "0007-test-type-coverage-blindspot.md>db/write-queue.ts:235": "try {",
-  "0007-test-type-coverage-blindspot.md>events/recorder.ts:369": "try {",
-  "0007-test-type-coverage-blindspot.md>recorder.ts:242":
+  // 369 → 375：本轮给 KIND_TO_ACTION / targetOf 各加了一条 case（新事件 kind
+  // ApprovalDecided），把它下面那一行 try 顶下去 6 行。守卫又一次抓住同一件事：
+  // 【代码没写错、文档也没写错，只是行号动了】。
+  "0007-test-type-coverage-blindspot.md>events/recorder.ts:375": "try {",
+  "0007-test-type-coverage-blindspot.md>recorder.ts:248":
     "// 默认必须【可见】而不是静默：投影失败是可用性事故（前端看不到进度），",
   "0007-test-type-coverage-blindspot.md>driver.ts:30":
     "export function openDb(path: string): DatabaseSync {",
@@ -198,6 +201,14 @@ const SNAP: Record<string, string> = {
   "0007-test-type-coverage-blindspot.md>schema-0001.test.ts:19": "type Db = {",
   "0007-test-type-coverage-blindspot.md>saver.contract.test.ts:448":
     "it.skip(title, fn);",
+  // 0010 里那两条【承重实测】的出处。它们必须是活坐标而不是叙述：
+  // 0010 §3 那一条改动的整个论据是「txScope 在 BEGIN 与 COMMIT 之间 await」，
+  // 另一条给出的是 5000ms 这个具体数字（P5 那次「等了 5444ms 才报错」的出处）。
+  // 任何一处挪动，都意味着 0010 那一段要么写错、要么已经不再成立。
+  "0010-approval-write-path-and-lock.md>checkpoint/tx-scope.ts:82":
+    "const result = await body();",
+  "0010-approval-write-path-and-lock.md>db/pragmas.ts:19":
+    "export const BUSY_TIMEOUT_MS = 5000;",
 };
 
 describe("决策文档里的「文件:行号」引用不漂移", () => {

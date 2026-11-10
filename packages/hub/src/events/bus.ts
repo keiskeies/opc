@@ -23,6 +23,29 @@ export type DomainEvent =
       interruptId: string;
       payload: unknown;
     }
+  /**
+   * CEO 按了一次按钮 ⇒ 那张卡片不再是待批。
+   *
+   * 【这一 kind 是实现时加的，规格 §5.8 那张六行表里没有】，偏离与代价记在
+   * docs/decisions/0010（含「为什么不复用 ApprovalRequired」「为什么不靠后续的
+   * TaskStateChanged 把界面带回来」两条实测）。这里只写形状层面必须写的：
+   *  - decision 的三值与 http/real-deps.ts 的 STATUS_BY_RESUME 值域【同一个词表】。
+   *    两套词表（approved / approve / 已批准）迟早要靠一张映射表对齐，而那张表
+   *    就是「卡片已批但仍被算进待批数」这类错长出来的地方。
+   *  - 只带【事实】，不带【计数】。收件箱那个数字由消费者自己累计
+   *    （ApprovalRequired 加一、ApprovalDecided 减一）。把计数塞进事件，
+   *    等于让 Hub 替每个消费者各维护一份状态，多一处可以与库不一致的地方。
+   *    ⚠ 但【对账的那条 REST 源还不存在】：要核对「事件算出来的数」与「库里
+   *    实际有几张 pending」，需要 GET /approvals，而它没做（理由与代价记在 0010 §5）。
+   *    所以今天这个计数【无从校验】，只能靠两条事件不丢不重 —— 这是已知缺口，
+   *    不是已验证性质。
+   */
+  | {
+      kind: "ApprovalDecided";
+      taskId: string;
+      interruptId: string;
+      decision: "approved" | "rejected" | "deferred";
+    }
   | { kind: "BudgetPaused"; taskId: string; spentUsdCents: number }
   | { kind: "MeetingSummaryReady"; taskId: string; meetingId: string }
   | { kind: "HeartbeatStalled"; taskId: string; node: string };

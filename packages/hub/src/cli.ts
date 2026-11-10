@@ -34,6 +34,7 @@ import { KIND_TO_ACTION } from "./events/recorder.js";
 import { SuperStepAuditor } from "./graph/audit-middleware.js";
 import { buildCompanyGraph, type CompanyNode } from "./graph/company.js";
 import { StubRegistry } from "./graph/stub-model.js";
+import { chooseResumeInput, hasPendingInterrupt, threadConfig } from "./graph/thread.js";
 import { isDirectRun } from "./internal/direct-run.js";
 import { loadPresetRoles } from "./roles/preset.js";
 
@@ -250,10 +251,16 @@ async function withHub<T>(
   }
 }
 
-/** thread_id 与 task_id 同值，所以不给第二个自由字符串的入口（0006 §4）。 */
-function config(taskId: string): { configurable: { thread_id: string } } {
-  return { configurable: { thread_id: taskId } };
-}
+/**
+ * thread_id 与 task_id 同值，所以不给第二个自由字符串的入口（0006 §4）。
+ *
+ * 实现【不在这里】，在 graph/thread.ts。这不是搬家癖：HTTP 侧写决策落库时也要
+ * 同一个坐标，而它【不能】import 本文件 —— 本文件顶层 import 了
+ * `@langchain/langgraph` 与整张图，那会让「把一条 CEO 决策写进库」在缺那几个包时
+ * 连 import 都做不到（实测：本机装不上，见 0009 §2）。
+ * 留这个别名是为了让上面那 6 个调用点一字不改；改的是它只有一处实现这件事。
+ */
+const config = threadConfig;
 
 function findTask(
   db: ReturnType<typeof openDb>,
@@ -398,17 +405,21 @@ async function cmdResume(
     }
 
     const before = await graph.getState(config(taskId));
-    const interrupts = (before as { interrupts?: unknown[] }).interrupts ?? [];
+    const bag = before as { interrupts?: unknown[] };
+    const interrupts = bag.interrupts ?? [];
     const next = (before as { next?: string[] }).next ?? [];
 
     // 先读 checkpoint 再决定输入。实测（0006 §1）：无中断时 Command({resume:null})
     // 抛 "Received empty Command input"；而已完成 thread 上 invoke(null) 只推进一个
     // 空超步 —— events 与节点执行都不增。选错一种的两种后果都不可爱，所以不猜。
-    const input: Command | null =
-      interrupts.length > 0 ? new Command({ resume: null }) : null;
+    // 两个判据本身都在 graph/thread.ts / http/real-deps.ts 可达的那一层：HTTP 侧批准
+    // 卡片之后走的是【同一对函数】，不是抄一份。抄一份的漂移方式是
+    // 「CLI 能恢复、点批准不恢复」，而两边各自都看着有理由。
+    const choice = chooseResumeInput(hasPendingInterrupt(before));
+    const input: Command | null = choice === "command" ? new Command({ resume: null }) : null;
 
     io.write(
-      interrupts.length > 0
+      choice === "command"
         ? "  检测到 " + interrupts.length + " 个中断，用 Command(resume) 恢复\n"
         : "  没有待恢复的中断（next = " +
             (next.length === 0 ? "[]，图已到 END" : next.join(", ")) +

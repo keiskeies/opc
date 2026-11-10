@@ -35,6 +35,7 @@ export const KIND_TO_ACTION: Record<EventKind, AuditAction> = {
   TaskStateChanged: "state_change",
   ReviewDecided: "review_decision",
   ApprovalRequired: "approval",
+  ApprovalDecided: "approval",
   BudgetPaused: "budget_consume",
   MeetingSummaryReady: "meeting",
   HeartbeatStalled: "escalation",
@@ -201,6 +202,11 @@ function targetOf(e: DomainEvent): string | null {
     case "ReviewDecided":
       return e.gate;
     case "ApprovalRequired":
+      return e.interruptId;
+    case "ApprovalDecided":
+      // 与 ApprovalRequired 同一个 target（都是卡片 id）。这是【刻意的】：
+      // 「这张卡片被要求批准」与「这张卡片被批掉了」必须能在 target 上 join 得起来。
+      // 若这里改成 decision，两行事件就再也对不到同一张卡上了。
       return e.interruptId;
     case "MeetingSummaryReady":
       return e.meetingId;

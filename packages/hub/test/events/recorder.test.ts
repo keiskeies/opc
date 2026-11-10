@@ -268,9 +268,13 @@ describe("events 插入语句与参数", () => {
     expect(eventParams(noCreated, () => 42)[7]).toBe(42);
   });
 
-  it("kind 到 action 的映射覆盖全部 6 个 kind，且值都在 §22.1 枚举内", () => {
+  it("kind 到 action 的映射覆盖全部 7 个 kind，且值都在 §22.1 枚举内", () => {
+    // 6 → 7：实现侧加了 ApprovalDecided（CEO 批完一张卡片这件事，规格 §5.8 那张
+    // 六行表里【没有】）。改这个数是【有意偏离规格】的一处，偏离的理由、
+    // 丢掉的东西与「为什么不能靠随后的 TaskStateChanged 代替」记在
+    // docs/decisions/0010；这一行不是把守卫改松，它仍然要求【逐个 kind】有 action。
     const kinds = Object.keys(KIND_TO_ACTION);
-    expect(kinds.length).toBe(6);
+    expect(kinds.length).toBe(7);
     for (const k of kinds) {
       const action = KIND_TO_ACTION[k as keyof typeof KIND_TO_ACTION];
       expect((AUDIT_ACTIONS as readonly string[]).includes(action)).toBe(true);
@@ -278,6 +282,11 @@ describe("events 插入语句与参数", () => {
     expect(KIND_TO_ACTION.TaskStateChanged).toBe("state_change");
     expect(KIND_TO_ACTION.ReviewDecided).toBe("review_decision");
     expect(KIND_TO_ACTION.ApprovalRequired).toBe("approval");
+    // 【两条 approval 类事件共用一个 action】，这是刻意的而不是偷懒：
+    // §22.1 的枚举里只有一个 approval 值，而 events.action 是 append-only 枚举，
+    // 不能为了实现方便加第 11 个值。二者在【库里的区分】靠 actor_type：
+    // ApprovalRequired 是 system/hub（图停下来），ApprovalDecided 是 human/ceo（人点了）。
+    expect(KIND_TO_ACTION.ApprovalDecided).toBe("approval");
     expect(KIND_TO_ACTION.BudgetPaused).toBe("budget_consume");
     expect(KIND_TO_ACTION.MeetingSummaryReady).toBe("meeting");
     expect(KIND_TO_ACTION.HeartbeatStalled).toBe("escalation");
