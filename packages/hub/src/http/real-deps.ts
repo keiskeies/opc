@@ -66,7 +66,10 @@
  * 所以这件事只能写在 import 那一行上。
  */
 
-import type { ResumeValue } from "@opc/contracts";
+import {
+  APPROVAL_STATUS_PENDING,
+  type ResumeValue,
+} from "@opc/contracts";
 import { requireScopeDb } from "../checkpoint/tx-scope.js";
 import type { DomainEvent, EventBus } from "../events/bus.js";
 import { appendAudit } from "../events/recorder.js";
@@ -134,7 +137,7 @@ export const STATUS_BY_RESUME: Readonly<
 /**
  * 首次决策的【条件】UPDATE。
  *
- * `WHERE status = 'pending'` 是幂等承重那一步。为什么不先 SELECT 再 UPDATE：
+ * `WHERE status = ?`（绑 `APPROVAL_STATUS_PENDING`）是幂等承重那一步。为什么不先 SELECT 再 UPDATE：
  * 两次读之间可以有一次并发写入（同一张卡片在两个窗口各点一次），
  * 那时「查出来是 pending」与「写下去」之间不是原子的，
  * 而 events 是 append-only —— 第二条决策事件写下去就删不掉，
@@ -143,13 +146,28 @@ export const STATUS_BY_RESUME: Readonly<
  * 这是 §8.2 第 4 条同一条思路：能绕过的那条路不要留在那里，
  * 而不是写注释提醒别人别绕。
  *
+ * ⚠ 这一格的 `pending` 从前是 SQL 文本里的**字面量**，0026 §9 留的问题就是它该不该改成绑参，
+ * 今天改了。改的动机不是好看：`contracts` 里那句「SQL 文本里没法引用 TS 常量」当时是**事实**，
+ * 而它只对「把常量拼进字符串」那一种做法成立 —— 绑参是另一条路，走通之后
+ * 「建卡初值 / 列表过滤 / 认领条件」三处**在编译期同源**，于是一条靠扫源码维持的断言
+ * 失去了分母，已删（0026 §9 明写「那条扫描在 SQL 改成绑参的那天必须删掉」）。
+ *
+ * ⚠ **但绑参换来一个新的失效方式，必须一起记**：字面量年代 `WHERE id = ? AND status = 'pending'`
+ * 只有**一个**占位符，形状上不可能填错方向；现在有两个，
+ * 把 `approvalId` 与 `PENDING_LITERAL` 的顺序写反 ⇒ SQL 变成 `id = 'pending' AND status = <那个 id>`
+ * ⇒ **匹配 0 行** ⇒ `changes === 0` ⇒ 函数返回「没抢到」，**不抛错、不写审计、HTTP 报 404**。
+ * 也就是说这种错的形态是「这张卡永远批不掉」，而不是「参数错了」。
+ * `assertParamCount` 挡不住它（个数是对的）。真正挡得住的只有**正向那一发**：
+ * `real-deps.test.ts` 那条「第一次 applyDecision 必须返回 true」——
+ * 顺序写反它当场红。**所以那条断言不许被改成只测幂等那一半。**
+ *
  * `decided_by` 存的是【谁】而不是【决定了什么】：status 已经回答了后者
  * （schema 注释：decided_by TEXT）。把 resume 值抄进 decided_by 是把两列当一列用，
  * 以后要支持多审批人就没地方放了。
  */
 export const CLAIM_APPROVAL_SQL =
   "UPDATE approvals SET status = ?, decided_by = ?, decided_at = ?, decision_note = ? " +
-  "WHERE id = ? AND status = 'pending'";
+  "WHERE id = ? AND status = ?";
 
 /**
  * 抢占那张卡片 + 落一条 CEO 决策，返回是否真的写成了。
@@ -208,7 +226,20 @@ export async function applyDecision(
 
   const wrote = await w.node(() => {
     const db = requireScopeDb("applyDecision");
-    const params: unknown[] = [status, CEO_ACTOR.actorId, o.nowMs, note, o.approvalId];
+    // 顺序【必须】与 SQL 里占位符的出现次序一致：SET 的四列 ⇒ WHERE id ⇒ WHERE status。
+    // 最后那一个绑的是 contracts 的 APPROVAL_STATUS_PENDING —— 这一格从前是 SQL 里的
+    // 字面量 'pending'，改绑参之后「建卡初值 / 列表默认过滤 / 认领条件」三处编译期同源。
+    // ⚠ 这里把最后两项写反【不会】被 assertParamCount 抓到（个数是对的），
+    // 症状是「这张卡永远批不掉」而不是「参数错了」；挡住它的是
+    // real-deps.test.ts 那条【第一次决策返回 true】的正向用例，不许删。
+    const params: unknown[] = [
+      status,
+      CEO_ACTOR.actorId,
+      o.nowMs,
+      note,
+      o.approvalId,
+      APPROVAL_STATUS_PENDING,
+    ];
     assertSingleStatement(CLAIM_APPROVAL_SQL);
     assertParamCount(CLAIM_APPROVAL_SQL, params);
     const info = db.prepare(CLAIM_APPROVAL_SQL).run(...(params as never[])) as {

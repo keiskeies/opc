@@ -355,31 +355,68 @@ describe("⑤ 出参形状：列表不是「顺手把整行发出去」", () => 
     ]);
   });
 
-  it("⭐ 「待批」那个字面量四处同源：SQL 里唯一一处【常量伸不进去】的地方由这一发钉住", () => {
+  it("⭐ 「待批」那条判据现在【编译期】同源：SQL 里的字面量扫描已被删除", () => {
     /*
-     * real-deps.ts 的 CLAIM_APPROVAL_SQL 里 `AND status = 'pending'` 是字符串字面量，
-     * TS 常量没法伸进 SQL 文本（改成绑参会牵动那条 UPDATE 的断言参数个数，
-     * 而那正是它幂等的地方 —— 见该文件注释）。所以这一发红 = 有人改了其中一处。
-     * 症状不是报错，是「这张卡明明显示待批，点下去说已经批过了」。
+     * 这一发从前是【源码扫描】：读 real-deps.ts 的字节，断言里面恰好有一处
+     * `status = 'pending'` 且它等于 contracts 的常量。它存在的唯一理由是
+     * 「TS 常量没法伸进 SQL 文本」。那句话只对【把常量拼进字符串】成立 ——
+     * 绑参是另一条路，走通之后那个理由消失，扫描也就【没有分母】了。
      *
-     * ⚠ 若将来那条 SQL 改成 `AND status = ?` 并由调用方喂 contracts 的常量，
-     *   这一发会【扫不到字面量而红】—— 那时该删掉它，不要改成恒真。
+     * 0026 §9 明写：「那条扫描在 SQL 改成绑参的那天必须删掉 ——
+     * 一条失去分母的断言比没有断言更坏」。今天就是那天。
+     *
+     * 但这一发【没有整条删掉】，因为还剩两件事是真需要钉的，而且都不是「值等于什么」：
+     *  ① 两条认领 SQL 里【不许出现 status 的字面量】—— 出现就说明有人把绑参改回拼接，
+     *     那种改法在编译期不响（字符串而已），只有这一发能报；
+     *  ② TS 侧那三处【必须引用 contracts 的常量】而不是各自打一遍 "pending"。
+     * 也就是说判据从「字面量的值对不对」换成了「还有没有人在写字面量」——
+     * 前者已经由类型保证，后者类型管不了。
+     *
+     * ⚠ 换判据的同时要如实记下【绑参换来的新失效方式】：一个字面量的时候
+     * `WHERE id = ? AND status = 'pending'` 只有一个占位符，形状上不可能填错；
+     * 现在有两个，把 approvalId 与 PENDING_LITERAL 顺序写反 ⇒ 匹配 0 行 ⇒
+     * changes===0 ⇒ 报「没抢到」，不抛错。挡住它的是 real-deps.test.ts 那条
+     * 【第一次决策返回 true】的正向用例（那里也写了这条警告）。
      */
-    const literals = codeLines(
-      readFileSync(join(HUB, "src", "http", "real-deps.ts"), "utf8"),
-    )
-      .flatMap((l) => [...l.matchAll(/status\s*=\s*'([^']*)'/gu)])
-      .map((m) => m[1]);
-    expect(literals, "real-deps.ts 里应当恰有一处 status 字面量").toEqual(["pending"]);
+    const claim = readFileSync(join(HUB, "src", "http", "real-deps.ts"), "utf8");
+    const auto = readFileSync(join(HUB, "src", "policy", "auto-approve.ts"), "utf8");
+    for (const [name, src] of [
+      ["real-deps.ts", claim],
+      ["auto-approve.ts", auto],
+    ] as const) {
+      const sqlLine = codeLines(src).filter((l) => /WHERE id = \? AND status/.test(l));
+      expect(sqlLine.length, name + " 应当有一条认领 SQL").toBe(1);
+      // ① 不许回退成字面量拼接。
+      expect(sqlLine[0], name + " 的认领 SQL 回退成了 status 字面量").not.toMatch(
+        /status\s*=\s*'/u,
+      );
+      expect(sqlLine[0]).toMatch(/status = \?/u);
+      // ② 绑的必须是 contracts 那个常量。
+      expect(src, name + " 没有 import APPROVAL_STATUS_PENDING").toMatch(
+        /APPROVAL_STATUS_PENDING/u,
+      );
+      expect(src).not.toMatch(/status\s*=\s*"pending"/u);
+    }
+    // 反向对照：常量本身仍然是 "pending"。若有人改它而忘了上面两处，
+    // 这一行会【先】红，从而指出「扫描已删，但语义还在」—— 而不是让那次改动
+    // 变成一个安静的「库里 status 变了而 SQL 也一起变了」的一致性变更。
     expect(APPROVAL_STATUS_PENDING).toBe("pending");
-
-    // 建卡初值与列表默认过滤必须与它同一来源（不是「碰巧都是 pending」）。
+    // 认领条件与建卡初值必须是【同一个引用】，不是「碰巧都是 pending」。
     const cards = readFileSync(join(HUB, "src", "approvals", "cards.ts"), "utf8");
     const query = readFileSync(join(HUB, "src", "approvals", "query.ts"), "utf8");
     expect(cards).toMatch(/APPROVAL_STATUS_PENDING/u);
     expect(cards).not.toMatch(/=\s*"pending"/u);
     expect(query).toMatch(/PENDING_LITERAL: string = APPROVAL_STATUS_PENDING/u);
     expect(query).not.toMatch(/status\s*=\s*"pending"/u);
+    /*
+     * ⚠ 这里【不】再写「注释里的 status = 'pending' 不会被算进来」那种断言。
+     * 我第一版写了，而且是【错的】：codeLines 剥的是【行首】是注释标记的行，
+     * 一行代码尾随的 `// status = 'pending'` 它剥不掉（实测：断言直接红）。
+     * 本仓的 SQL 常量都是整行字符串拼接，注释也各自独占一行，所以那条判据【今天】
+     * 不会误判 —— 但「今天不误判」不等于「这条判据能挡住误判」，
+     * 把一次巧合写成性质，就是 0013 §10 那一族「零判别力断言」。
+     * 真要收紧，得换成【剥掉行尾注释】的实现，那是另一发改法而不是这条断言。
+     */
   });
 });
 

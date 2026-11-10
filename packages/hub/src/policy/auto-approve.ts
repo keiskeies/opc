@@ -64,6 +64,7 @@
 
 import { createHash } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
+import { APPROVAL_STATUS_PENDING } from "@opc/contracts";
 import { appendAudit } from "../events/recorder.js";
 import { assertParamCount, assertSingleStatement } from "../db/write-queue.js";
 import { type ActionDraft, matchForbidden, policyDecide } from "./engine.js";
@@ -335,16 +336,21 @@ function blocked(
 
 /**
  * 认领那张卡片：形状与 http/real-deps.ts 的 CLAIM_APPROVAL_SQL 一致
- * （同一条 `WHERE ... AND status = 'pending'` 的条件写），但**不 import 那个常量**。
+ * （同一条 `WHERE ... AND status = ?` 的条件写，两处都绑 contracts 的
+ * APPROVAL_STATUS_PENDING），但**不 import 那条 SQL 常量**。
  *
- * 为什么不复用：那条 SQL 的 decided_by 写的是 CEO_ACTOR.actorId（"ceo"）。
+ * 为什么不复用那条 SQL：它的 decided_by 写的是 CEO_ACTOR.actorId（"ceo"）。
  * 自动批准把 "ceo" 写进 decided_by 就是【伪造人的签名】—— 而 decided_by 这一列
  * 在审计里的意思是「谁」，它正是「这条是人批的还是规则批的」的唯一列级出处。
- * 两条 SQL 形状一致这件事由用例保证（都断言 status = 'pending' 这一半），不靠注释。
+ *
+ * ⚠ 「两条 SQL 形状一致」这件事从前靠注释 + 两条各扫一遍字面量的断言维持。
+ * 现在两处都绑同一个 TS 常量，所以**漂移在编译期就不成立**（那个常量改了，
+ * 两边同时改），这里的断言改成钉【形状】而不是钉【字面量】：
+ * WHERE 里必须同时有 id 与 status 两个条件，且**没有** status 的字面量。
  */
 export const CLAIM_APPROVAL_FOR_AUTO_SQL =
   "UPDATE approvals SET status = ?, decided_by = ?, decided_at = ?, decision_note = ? " +
-  "WHERE id = ? AND status = 'pending'";
+  "WHERE id = ? AND status = ?";
 
 export interface RecordAutoApprovalInput {
   readonly taskId: string | null;
@@ -402,11 +408,21 @@ export function recordAutoApproval(
       "基于模式的自动批准（规则 " + out.rule + "，署名 " + AUTO_APPROVED_BY + "）";
     const sql = CLAIM_APPROVAL_FOR_AUTO_SQL;
     const params: unknown[] = [
+      // ⚠ 这一格【故意】还是字面量，与最后一个参数不对称，理由是实的：
+      // contracts 里没有 APPROVAL_STATUS_APPROVED 这个标量，而 "approved" 的
+      // 另一处使用者是 real-deps.ts 的 STATUS_BY_RESUME（一张 TS 判别表，
+      // 它的值域还比 APPROVAL_STATUS_VALUES 窄一档 —— 不含 pending）。
+      // 为一个不对称顺手造一个只有两个使用者的常量，就是 0026 §9 撤掉
+      // isPendingStatus 时记的那个形状：一条「唯一真相」而无人读它。
+      // 真要收口，得连那张表一起改（连同它的窄值域怎么表达一起决定），
+      // 那是一次独立改动而不是顺手。
       "approved",
       AUTO_APPROVED_BY,
       o.nowMs,
       note,
       o.approvalId,
+      // 与 real-deps.ts 的 CLAIM_APPROVAL_SQL 同一个来源（0026 §9 那条绑参）。
+      APPROVAL_STATUS_PENDING,
     ];
     assertSingleStatement(sql);
     assertParamCount(sql, params);

@@ -173,7 +173,7 @@ const SNAP: Record<string, string> = {
   // 0013 里同一行被引用两次（一次全路径、一次基名），所以那边**两条都要登记**。
   "0016-parallel-branches-role-memory-and-an-assertion-engine-that-saw-nothing.md>packages/hub/src/memory/role-memory.ts:583":
     'has_review_decisions: rows.some((r) => r.action === "review_decision"),',
-  "0016-parallel-branches-role-memory-and-an-assertion-engine-that-saw-nothing.md>packages/hub/src/http/real-deps.ts:229":
+  "0016-parallel-branches-role-memory-and-an-assertion-engine-that-saw-nothing.md>packages/hub/src/http/real-deps.ts:260":
     'action: "approval",',
   "0016-parallel-branches-role-memory-and-an-assertion-engine-that-saw-nothing.md>packages/hub/src/events/recorder.ts:229":
     'const DEFAULT_ACTOR = { actorType: "system", actorId: "hub" } as const;',
@@ -301,11 +301,15 @@ const SNAP: Record<string, string> = {
   // 全仓唯一那句「写 approvals」的 SQL：它是 UPDATE 而不是 INSERT，
   // 所以「有写入方」这句话错在这里。行内容改写（比如补一列 auto_approved_by）
   // 会当场让 0013 §10 那张表的第二行变红 —— 而那正是应该重读它的时刻。
-  "0013-replay-timeline-search-and-a-test-with-zero-discriminating-power.md>real-deps.ts:151":
+  // ⚠「全仓唯一」这半句【已经不再成立，原文留着】：0026 加了 approvals/cards.ts 的
+  // INSERT_CARD_SQL，那句 grep 现在是 INSERT 1 处 + UPDATE 3 处（另一条 UPDATE 在
+  // policy/auto-approve.ts）。这一格仍然值得当活坐标，但它的意义变了：
+  // 原本它证的是「只有 UPDATE 没有 INSERT」，现在它证的是「CEO 那条认领 SQL 的形状还在」。
+  "0013-replay-timeline-search-and-a-test-with-zero-discriminating-power.md>real-deps.ts:169":
     '"UPDATE approvals SET status = ?, decided_by = ?, decided_at = ?, decision_note = ? " +',
   // 「条件写匹配 0 行 ⇒ 安静地什么都不发生」这一条实测的出处。
   // 它是 §10.1 末段那条「Task 3.5 必须带存在性断言」的判据来源。
-  "0013-replay-timeline-search-and-a-test-with-zero-discriminating-power.md>real-deps.ts:217":
+  "0013-replay-timeline-search-and-a-test-with-zero-discriminating-power.md>real-deps.ts:248":
     "if (Number(info.changes) === 0) return null; // 没抢到：不写审计",
   // 0002 §4 那条「schema 看着开放」论证的唯一落点：platform 那一列的注释枚举了三个平台。
   // 它必须是活坐标 —— 那篇的排除理由里【最硬的一条】依赖「这套形状从第一天起没给个人微信留位」，

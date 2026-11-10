@@ -223,15 +223,18 @@ export function listApprovals(
  * 待批总数用的字面量。
  *
  * **取自 contracts 而不是在这里打「pending」这两个字**：
- * 「卡片现在待批吗」这条判据在 SQL 侧的另一个使用者是 `real-deps.ts` 的
- * `CLAIM_APPROVAL_SQL`（那条 `WHERE status = 'pending'`）。两处各写一遍字符串，
+ * 「卡片现在待批吗」这条判据在 SQL 侧的另两个使用者是两条认领 SQL
+ * （`real-deps.ts` 的 CLAIM_APPROVAL_SQL、`policy/auto-approve.ts` 的
+ * CLAIM_APPROVAL_FOR_AUTO_SQL）。三处各写一遍字符串，
  * 漂移的症状是「这张卡明明显示待批，点下去说已经批过了」——
  * 而那句话在审计里对应一次**没有发生**的点击。
- * SQL 里只能是字面量（SQLite 的表名/键名不能绑参，虽然这里绑的是值），
- * 所以做法是【从 contracts 的默认过滤集里取那一个值】，让两处共享同一个来源。
- * 它是 contracts 的 `APPROVAL_STATUS_PENDING`，而 query.test.ts 有一发【源码级】
- * 断言：real-deps.ts 那条 `WHERE status = 'pending'` 里的字面量必须等于它
- * （SQL 文本里没法绑常量，所以那一处只能是字面量 —— 只能靠断言把它钉住）。
+ *
+ * ⚠ 这一段从前写的是「SQL 里只能是字面量，所以只能靠一发源码扫描钉住」。
+ * 那句已经不再成立（0026 §9 那条绑参今天落地了）：两条认领 SQL 现在都写
+ * `AND status = ?` 并绑这一个常量，所以**四处全部编译期同源**，
+ * 那发扫描随之被删（一条失去分母的断言比没有断言更坏）。
+ * query.test.ts 里留着的断言换成了它管得到的那一半：
+ * **不许有人把绑参改回字面量拼接**（那种改法编译期不响，只有扫源码能报）。
  */
 const PENDING_LITERAL: string = APPROVAL_STATUS_PENDING;
 

@@ -51,7 +51,12 @@ import { decideEscalation, type EscalationState } from "../../src/graph/routing/
 import { openDb } from "../../src/db/driver.js";
 import { migrate } from "../../src/db/migrate.js";
 import { WriteQueue } from "../../src/db/write-queue.js";
-import { countSimilarApprovals } from "../../src/policy/auto-approve.js";
+import {
+  CLAIM_APPROVAL_FOR_AUTO_SQL,
+  countSimilarApprovals,
+} from "../../src/policy/auto-approve.js";
+import { CLAIM_APPROVAL_SQL, CEO_ACTOR } from "../../src/http/real-deps.js";
+import { APPROVAL_STATUS_PENDING } from "@opc/contracts";
 
 const HUB = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const TMP = join(HUB, ".tmp", "approvals-" + process.pid);
@@ -153,13 +158,36 @@ describe("① 建得出：卡片与审计同事务，字段各归各位", () => 
     ]);
     // 反向对照：建出来的这张卡必须【能被现有的两条认领 SQL 抢到】。
     // 「初值是 NULL」这句话本身不推进任何东西，能配上才是性质。
-    const info = db
-      .prepare(
-        "UPDATE approvals SET status = 'approved', decided_by = 'ceo', decided_at = ?, " +
-          "decision_note = '上线' WHERE id = ? AND status = 'pending'",
-      )
-      .run(T0 + HOUR, r.result.approvalId);
-    expect(Number(info.changes)).toBe(1);
+    //
+    // ⚠ 这里从前写的是一段【手抄的】UPDATE（`... AND status = 'pending'` 自己打上去的）。
+    // 那正是绑参那次改动要消灭的形状：认领 SQL 后来改成 `AND status = ?`，
+    // 而这段测试里的副本【不会跟着改】，它会继续绿着测一条生产已经不再用的 SQL。
+    // 现在直接用真常量 —— 于是这一发同时钉住两件事：
+    // 建卡初值配得上认领条件，以及【这条测试测的是那条真 SQL】。
+    for (const [name, sql, actor] of [
+      ["CEO 那一条", CLAIM_APPROVAL_SQL, CEO_ACTOR.actorId],
+      ["规则那一条", CLAIM_APPROVAL_FOR_AUTO_SQL, "policy:auto"],
+    ] as const) {
+      const info = db
+        .prepare(sql)
+        .run("approved", actor, T0 + HOUR, "上线", r.result.approvalId, APPROVAL_STATUS_PENDING) as {
+        changes: number | bigint;
+      };
+      expect(Number(info.changes), name).toBe(1);
+      // 抢完必须【抢不到第二次】：这一发是幂等那一半在建卡侧的正对照
+      // （初值只要不是绑参那个常量，第一次就会是 0，两发都红）。
+      const again = db
+        .prepare(sql)
+        .run("approved", actor, T0 + 2 * HOUR, null, r.result.approvalId, APPROVAL_STATUS_PENDING) as {
+        changes: number | bigint;
+      };
+      expect(Number(again.changes), name + " 第二次").toBe(0);
+      // 还原成待批，好让第二条也在同一个初值上跑。
+      db.prepare("UPDATE approvals SET status = ? WHERE id = ?").run(
+        APPROVAL_STATUS_PENDING,
+        r.result.approvalId,
+      );
+    }
   });
 
   it("⭐ created_at 落的是【注入的那个时刻】，不是真时钟", async () => {

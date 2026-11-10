@@ -232,6 +232,14 @@ export type ApprovalStatusValue = (typeof APPROVAL_STATUS_VALUES)[number];
  * 列表的默认过滤（query.ts 的 countPending）、认领时的 `WHERE status = ?`
  * （real-deps.ts）。前两个只能共享一个来源，第三个只能是 SQL 里的字面量
  * （SQL 文本里没法引用 TS 常量），由 query.test.ts 一发断言钉住它等于这里。
+ *
+ * ⚠ 上面那两句【已经被推翻，原文留着】：第三条也能绑参 ——
+ * 「SQL 文本里没法引用 TS 常量」只对【把常量拼进字符串】成立，
+ * `AND status = ?` + 把常量放进 params 是另一条路。0026 §9 留的那个问题今天答了：
+ * 绑参，并把那一条靠扫源码维持的断言删掉（它失去了分母）。
+ * 现在这三处【编译期同源】。绑参换来的新失效方式记在 real-deps.ts 的
+ * CLAIM_APPROVAL_SQL 注释里（两个占位符可以填反，而个数是对的 ⇒ 挡不住 assertParamCount，
+ * 症状是「这张卡永远批不掉」，挡住它的是那条【第一次决策返回 true】的正向用例）。
  */
 export const APPROVAL_STATUS_PENDING: ApprovalStatusValue = "pending";
 

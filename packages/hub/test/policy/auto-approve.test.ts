@@ -436,10 +436,28 @@ describe("⑤ 落库那一行：计划 Test 项『含 auto_approved_by』的逐�
     expect(String(a["decided_by"])).not.toBe(AUTO_APPROVED_BY);
   });
 
-  it("认领那条 SQL 的 WHERE 里有 status='pending'（幂等承重那一半，钉在常量上）", () => {
-    expect(CLAIM_APPROVAL_FOR_AUTO_SQL).toContain("AND status = 'pending'");
-    // 反向对照：光有 WHERE id=? 也能「跑通」，但并发第二次会把审计再写一遍。
+  it("认领那条 SQL 的 WHERE 里同时钉着 id 与 status（幂等承重那一半）", () => {
+    /*
+     * 这一发从前断言的是 `toContain("AND status = 'pending'")` —— 钉的是【字面量的值】。
+     * 0026 §9 那条绑参落地之后（`AND status = ?` + 绑 contracts 的常量），
+     * 那个断言失去了分母：值不再出现在 SQL 文本里，它对任何 status 都同样成立。
+     * 判据换成【形状】，因为形状才是类型管不到的那一半：
+     *   ① WHERE 必须两个条件都在。只有 `id = ?` 也能「跑通」，
+     *      而并发第二次点会把那条 append-only 审计再写一遍（本篇文件头第 ① 条）；
+     *   ② 不许回退成 status 字面量拼接 —— 那种改法编译期不响。
+     * 值本身现在由类型保证（两处都 import 同一个 APPROVAL_STATUS_PENDING），
+     * 所以本文件不再重复钉它，改由 query.test.ts 那一发跨文件扫「还有没有人写字面量」。
+     *
+     * ⚠ decided_by 不许署成 ceo 那一半【本文件早就钉了】（上面「署名的那一发」
+     * 断言 `decided_by === AUTO_APPROVED_BY`）。我在这里起草时又写了一发同义的，
+     * 发现之后删掉：一条重复断言不会增加判别力，只会让下一次改判据时【多一处要想起得改】，
+     * 而那正是本仓反复抓的「两处同名判据各改各的」的形状。
+     */
     expect(CLAIM_APPROVAL_FOR_AUTO_SQL).toContain("WHERE id = ?");
+    expect(CLAIM_APPROVAL_FOR_AUTO_SQL).toMatch(/AND status = \?/u);
+    expect(CLAIM_APPROVAL_FOR_AUTO_SQL).not.toMatch(/status\s*=\s*'/u);
+    // 反向对照：六个占位符一个都不能少（少绑在 node:sqlite 上写 NULL 而不报错）。
+    expect(CLAIM_APPROVAL_FOR_AUTO_SQL.match(/\?/gu) ?? []).toHaveLength(6);
   });
 
   it("降级判定传进来 ⇒ 【抛错】，不写任何审计（署错名是伪证）", () => {

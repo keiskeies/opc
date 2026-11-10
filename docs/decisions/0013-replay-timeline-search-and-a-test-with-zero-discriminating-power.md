@@ -282,6 +282,14 @@ M10 一开始报「全绿」时我的第一反应是「这条测试真守不住�
 
 ### 10.1 【撤回 + 重写】上面第二行的依据是假的：`approvals` 在 src 里连一次 INSERT 都没有
 
+⚠ **本节描述的是 0013 当时的事实，那份事实后来变了两次，原文留着**：
+① `packages/hub/src/approvals/cards.ts` 现在有一条 `INSERT_CARD_SQL`（0026），
+所以「src 里没有任何一条 `INSERT INTO approvals`」在今天不成立 ——
+但**它当时成立**，而本节的价值在于那条【撤回】本身（grep 命中数 ≠ 写入方数），
+那个教训不随事实过时而失效。② 下面引号里那句 SQL 的**字面内容**已经改了：
+`WHERE ... AND status = 'pending'` 现在写成 `AND status = ?`（绑 contracts 的常量，0026 §9）。
+形状（条件写 + `changes === 0` ⇒ 不写审计）**没变**，变的只是那个值从字面量变成绑参。
+
 拍板要读的那张表，第二行我写的是「**`approvals` 有写入方**；`auto_approved_by` 无人写」，
 据此判「策略引擎自动通过这一格**能**实现，但等 Task 3.5」。
 
@@ -290,13 +298,13 @@ M10 一开始报「全绿」时我的第一反应是「这条测试真守不住�
 唯一的命中是 `packages/hub/src/http/real-deps.ts:7` 的一句**注释**，
 而那句注释自己写的就是「⇒ 0 命中」和「全仓唯一写 approvals 的代码在两个测试文件的
 **【夹具】**里」（`:8`）。也就是说 **src 里没有任何一条 `INSERT INTO approvals`**，
-唯一的写是 `real-deps.ts:151` 的
+唯一的写是 `real-deps.ts:169` 的
 `CLAIM_APPROVAL_SQL = "UPDATE approvals SET status = ?, decided_by = ?, decided_at = ?, decision_note = ? WHERE id = ? AND status = 'pending'"`。
 UPDATE 不创建行。全仓的 `INSERT INTO approvals` 只出现在三个测试文件的夹具里
 （`http/contract.test.ts`、`http/real-deps.test.ts`、`db/schema-0001.test.ts`）。
 
 **为什么这条错值得单独一节，而不只是改两个字**：UPDATE-with-`status = 'pending'` 是
-**条件写**，库里没有那一行时它匹配 0 行。实测（`real-deps.ts:217` 那一行
+**条件写**，库里没有那一行时它匹配 0 行。实测（`real-deps.ts:248` 那一行
 `if (Number(info.changes) === 0) return null; // 没抢到：不写审计`，由
 `real-deps.test.ts` 覆盖）说明它的行为是
 「安静地什么也没发生」，而**没有任何东西创建那张卡片**：
