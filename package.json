@@ -15,7 +15,8 @@
     "typecheck": "tsc -b",
     "verify": "pnpm lint && pnpm typecheck && pnpm test",
     "migrate": "tsx packages/hub/src/db/migrate-cli.ts",
-    "hub": "tsx packages/hub/src/cli.ts"
+    "hub": "tsx packages/hub/src/cli.ts",
+    "hub:maintenance": "tsx packages/hub/src/heartbeat/maintenance.ts"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.6.5",
