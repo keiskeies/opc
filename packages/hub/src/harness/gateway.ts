@@ -377,9 +377,9 @@ export async function callHarness(
   /** 缓存键。参数序列化失败（循环引用）时退化成工具名 + 一个不可能的后缀 ⇒ 不共享缓存（宁可多问一次）。 */
   function verdictKey(tool: string, args: unknown): string {
     try {
-      return tool + " " + JSON.stringify(args ?? null);
+      return tool + "\u0000" + JSON.stringify(args ?? null);
     } catch {
-      return tool + " <不可序列化#" + (verdictCache.size + 1) + ">";
+      return tool + "\u0000<不可序列化#" + (verdictCache.size + 1) + ">";
     }
   }
 
