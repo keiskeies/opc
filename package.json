@@ -16,6 +16,7 @@
     "verify": "pnpm lint && pnpm typecheck && pnpm test",
     "migrate": "tsx packages/hub/src/db/migrate-cli.ts",
     "hub": "tsx packages/hub/src/cli.ts",
+    "hub:serve": "tsx packages/hub/src/serve/hub-serve.ts",
     "hub:maintenance": "tsx packages/hub/src/heartbeat/maintenance.ts"
   },
   "devDependencies": {

@@ -164,6 +164,51 @@ describe("决策文档里的坐标（节号 / §7 条目号 / 短哈希）指向
     expect(hp[0]?.ref.endsWith("deadbee")).toBe(true);
   });
 
+  it("⭐ 英文单词不被切成短哈希，而真哈希挨着标点仍被扫到", () => {
+    // 这一发是修一个【真实红过】的假阳：INDEX 里写了 `succeeded` flag，旧边界
+    // (?<![0-9a-f]) 只看两侧是不是 hex 字符，于是从第 2 个字母起切出 `cceeded`
+    // —— 七个合法 hex 字符、含字母（连「纯数字放过」那条豁免也挡不住），
+    // 报成「仓库里没有这个提交」。写文档的人据此被要求改【措辞】，而坏的是【判据】。
+    // （docs/INDEX.md 的 0025 条目今天仍原样写着 `succeeded` —— 它就是这个判据的活体
+    //   反向样例，谁把边界改回去，全库那一发就当场红。这里不为此新增断言：
+    //   强迫文档保留某个词，比让这个词自然消失更糟。）
+    const hashes: Set<string> = repoShortHashes();
+    // 夹具前置：下面拿这几个 token 当【必然报坏】的样本，它们哪天成了真提交，
+    // 这一发就会绿在错位上 —— 前提要钉住，不能默认它成立。
+    for (const t of ["deadbee", "beef00d", "cafe123"]) {
+      expect(hashes.has(t)).toBe(false);
+    }
+    //
+    // 三个词各代表一种切法都被旧判据误伤的形状；feedback 尤其要紧：它是 8 个字符，
+    // 只把【左】边界改成非字母数字挡不住它（右侧 `k` 不是 hex，旧判据本来就过得去），
+    // 所以两侧必须一起收紧 —— 少收紧一侧，这一发就还是红的。
+    const words: Problem[] = hashProblems(
+      "0025",
+      ["succeeded flag 与 feedback 与 deadbeat 都不该被当成提交"],
+      hashes,
+    );
+    expect(words).toEqual([]);
+    // 反向对照：把上面那条改成「全都不报」也能绿，所以要钉【真哈希还在被扫】。
+    // 括号、反引号、句号、中文紧邻 —— 这些边界全都【不是】字母数字，一条都不许漏。
+    const real: Problem[] = hashProblems(
+      "0025",
+      ["(deadbee) 与 `beef00d` 与 cafe123. 与 从 cafe123 起"],
+      hashes,
+    );
+    expect(real.map((p) => p.ref.split(" → ")[1])).toEqual([
+      "deadbee",
+      "beef00d",
+      "cafe123",
+      "cafe123",
+    ]);
+    // 计数与判错必须【同一个】正则：判据放宽而计数不放宽，覆盖自检
+    // （tokens >= 15）就与真实扫描范围脱钩，「没数到东西」又能伪装成「全对」。
+    // 注意这一行用的是 deadbeat【那个词】而不是 deadbee —— 后者本身就是合法的
+    // 7 位十六进制 token，写错了会让这一发断言的正是它想否证的东西（当场红过一次）。
+    expect(hashTokenCount(["succeeded feedback deadbeat"])).toBe(0);
+    expect(hashTokenCount(["(deadbee) `beef00d`"])).toBe(2);
+  });
+
   it("全部坐标引用与设计文档、计划、仓库提交对得上", () => {
     const rows: Row[] = decisionRows();
     expect(rows.length).toBeGreaterThanOrEqual(6);

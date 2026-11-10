@@ -632,3 +632,25 @@ export function restoreDrill(o: {
   }
   return { backup, restore, ok: backup.ok && restore.ok };
 }
+
+/**
+ * 文件名 → 那一刻。`backupName` 的反函数。
+ *
+ * 为什么放在本文件而不是调用方：`backupName` 的形状（`: 与 . 全换成 -`、毫秒用 `-123`
+ * 而不是 `.123`、结尾一个 `Z`）是这里定义的【私有】约定。调用方各自手搓一份正则的话，
+ * 改名字格式时【不会有人想起去改正则】—— 而那种改动的症状不是报错，是
+ * 「备份目录里明明有 7 份，而自动备份判据说一份都没有」⇒ 每天重新备一份，
+ * 7 份保留位被同一天挤满，把上周那份真正有用的挤掉。
+ *
+ * 解析失败返回 null 而不是抛。这一条判据的消费方（serve 的「今天备过了吗」）
+ * 在 null 时的行为是【去备份】—— 多备份一份是浪费磁盘，
+ * 而少备份一份是丢掉灾难恢复。方向必须是浪费那一边。
+ */
+export function backupNameToMs(name: string): number | null {
+  if (!isBackupName(name)) return null;
+  const iso = name
+    .slice(BACKUP_PREFIX.length, name.length - BACKUP_SUFFIX.length)
+    .replace(/(\d{4})-(\d{2})-(\d{2})T(\d{2})-(\d{2})-(\d{2})-(\d{3})Z$/u, "$1-$2-$3T$4:$5:$6.$7Z");
+  const t = Date.parse(iso);
+  return Number.isFinite(t) ? t : null;
+}

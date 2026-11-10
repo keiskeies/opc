@@ -1115,6 +1115,31 @@ export function ftsIndexCoherence(
  * 那次实测把它证伪了 —— 归属判定已经堵住了那个洞，多出来的那道判据只会把
  * 一份【正常】的整齐数据报告搅成 not_observable。删之。
  */
+/**
+ * 「这份库的【页面】坏了」的唯一判据。
+ *
+ * 提出来成函数之前，它两行内联在 heartbeat/maintenance.ts 里，只有备份那一处用。
+ * 提出来不是因为复用方便（复用只是表象），是因为**第二个使用者的方向相反**：
+ * 备份那处的用法是「不过 ⇒ 别写备份」，而 `pnpm hub:serve` 启动那处的用法是
+ * 「不过 ⇒ 拒绝启动」。两处各写一份的话，改一处就会得到
+ * 「备份拦住了而 Hub 照样带伤起来」—— 两边各自都自洽、各自都绿。
+ * 与 0022 §3 为 `preventionFor`、0024 §3 为 `isExternalSourceRef` 写的理由同一条。
+ *
+ * 判据只看 page_integrity 那一条，**不看整份报告的 ok**。这不是宽松，是量出来的：
+ * `ok` 会被 `could_not_run` 与 `not_observable` 拉下来（实测：一个没有任何门控决定
+ * 的合法新库，因为「没有 gate_decision 可核」而 ok = false）。
+ * 用 ok 当启动闸会【把一大半真实启动挡在门外】，而拦下的理由与「文件坏了」毫无关系 ——
+ * 「没有东西可核」与「库损坏」是两件事，后者绝不该拦启动，前者绝不该放行损坏。
+ *
+ * `verdict === "not_observable"` / `"could_not_run"` 都【不算】损坏：
+ * 那两格说的是「这条判据没跑成」。据此拒绝启动，等于让一次 worker 起不来
+ * 变成整台机器不可用；而它该做的（响一声、指路）由调用方在别处做。
+ */
+export function pageIntegrityBroken(report: Pick<IntegrityReport, "checks">): boolean {
+  const page = report.checks.find((c) => c.name === "page_integrity");
+  return page !== undefined && page.verdict === "violated";
+}
+
 function trigramOf(payload: string, id: number): string | null {
   const chars = [...payload];
   if (chars.length < 5) return null;

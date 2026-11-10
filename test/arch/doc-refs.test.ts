@@ -158,6 +158,13 @@ function verify(
 }
 
 const SNAP: Record<string, string> = {
+  // 0025（Task 6.1 常驻 Hub）新写的一条。先在目标文件里 `sed -n '373p'` 读原文再抄，
+  // 不凭记忆。写全路径与 0013/0016 那几组保持一致（基名这里其实也能唯一解析）。
+  // 这一条是**活坐标**：0025 §0 的论据是「patrol.ts 自己明写了调度不属于它」，
+  // 而那句话的价值全在【那一行现在还写着那句话】—— 有人把注释删了或改成「这里应该有调度」，
+  // 快照就该红，逼他重读 §0。
+  "0025-resident-hub-and-four-silent-bugs-i-wrote.md>packages/hub/src/heartbeat/patrol.ts:373":
+    "* ⚠ 这里【故意】不 setInterval。调度（什么时候醒）属于常驻进程，",
   // 0016（Task 3.7）本轮新写的六条。同样是先在目标文件里 `sed -n '<n>p'` 读原文再抄。
   // 六条都写**全路径**，但**不是因为歧义** —— 实测这四个基名（role-memory.ts / real-deps.ts /
   // recorder.ts / audit-interrupt.test.ts）在仓库里各只有 1 个命中，写基名也能解析。

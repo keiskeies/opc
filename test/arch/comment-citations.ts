@@ -90,18 +90,41 @@ export function commentLines(
   return out;
 }
 
-/** 同子句内（到下一个 。；！？ 为止）是否把这条引用否定重述了。 */
+/**
+ * 同子句内（到下一个 。；！？ 为止）是否把这条引用否定重述了。
+ *
+ * ⚠ 这里有过一个【判据自身】的假阳，形状与它在找的东西一模一样 ——
+ * 一句话被读成了另一句话的意思。原来的切法是
+ * `Math.max(tail.indexOf("。"), tail.indexOf("；"), …)`，
+ * 而 Math.max 取的是【最后一个】终止符，不是【第一个】——
+ * 与本函数文件头那句「到下一个 。；！？ 为止」**正好相反**。
+ * 后果在【一行一条】的 docs/INDEX.md 上必然出现：那种行有 4000+ 字符，
+ * 于是「子句」= 从引用一路到行尾附近，任何一处无关的否定词都会被算到这条引用头上。
+ * 实测现场：`0025 §3` 之后第 436 个字符有一句「只有 `catch` 没有 `finally`」，
+ * 于是守卫报「0025 §3 这句说不存在，可它现在存在了 —— 描述已过期」，
+ * 而那一句讲的是 `boot` 的 try，与 0025 §3 是否存在毫无关系。
+ *
+ * 改法是回到【第一个】终止符。本仓文档上的影响当场量过：
+ * 命中从 2 条变 0 条，**少的两条都是假阳**（另一条是 INDEX 里 `0021 §9`
+ * 撞上同一段里另一句「不存在的降级路」），**一条真判定都没丢**。
+ *
+ * 收紧会不会漏报？会漏的那种写法是「引用与否定词之间跨了一句句号」，
+ * 而那种句子本身已经不是一个断言（人在两句话里说两件事），
+ * 守卫本来就没有权利把它读成一个「说不存在」的断言 ——
+ * 那正是本函数存在的理由（区分「他说这里没有」与「他说别处没有」）要求的方向。
+ */
 export function negatedRestatement(
   tail: string,
   targetDoc: string,
   num: string,
 ): boolean {
-  const cut = Math.max(
+  const stops = [
     tail.indexOf("。"),
     tail.indexOf("；"),
     tail.indexOf("！"),
     tail.indexOf("？"),
-  );
+  ].filter((i: number) => i >= 0);
+  const cut = stops.length > 0 ? Math.min(...stops) : -1;
   const clause = tail.slice(0, cut < 0 ? tail.length : cut);
   return (
     /(没有|不存在|并无|并非)/.test(clause) &&

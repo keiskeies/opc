@@ -659,6 +659,32 @@ function callersOf(name: string, ...ownFiles: string[]): string[] {
   );
 }
 
+/**
+ * src 里【代码行】命中 re 的文件。
+ *
+ * 为什么要跳过注释行而不是直接 includes：本仓的源码注释里【抄了 grep 命令原文】
+ * （real-deps.ts 文件头那三条实测 grep 就是证据本身，按 0007 §4.1 那种「错话也留着」
+ * 的口径更不能删）。于是「src 里有没有 INSERT INTO approvals」这一判据
+ * 用裸 includes 会命中那条【注释】，把【零生产者】判成【有生产者】——
+ * 一个假的生产者，而它正是这条断言要防的东西。
+ *
+ * 只跳「整行是注释」的行（trimmed 以 // 或 * 或 /* 开头）。刻意不做完整的词法分析：
+ * 残留的漏法是【代码行尾】的注释里写着那个词，那种会算成生产者 ——
+ * 方向是【误报】（多算一个生产者 → 断言红 → 有人来看一眼），
+ * 而漏报（少算 → 把真生产者判成零）才是这条断言不能承受的。
+ */
+function srcFilesMatching(re: RegExp): string[] {
+  return tsFiles(SRC).filter((f) =>
+    readFileSync(f, "utf8")
+      .split("\n")
+      .some((l) => {
+        const t = l.trim();
+        if (t.startsWith("//") || t.startsWith("*") || t.startsWith("/*")) return false;
+        return re.test(l);
+      }),
+  );
+}
+
 describe("④ 两条验收各自【不可测的那一半】（登记，不写成已通过）", () => {
   it("① 的『重跑同类任务』今天仍无路可跑：调用链多了一环，而那一环也没人调", () => {
     /*
@@ -725,7 +751,7 @@ describe("④ 两条验收各自【不可测的那一半】（登记，不写成
     /*
      * 这一发不测代码，测的是**我写这个文件时的口径**。
      * 一条标题写着「Phase 3 出口门禁」的文件如果全绿，读的人（和下一次的我）会把它
-     * 当成「Phase 3 做完了」。实际状态是右边那五条，一条没消。
+     * 当成「Phase 3 做完了」。实际状态是右边那六条，一条没消。
      * 把它写进测试文件而不是只写进决策文档，是因为只有这里它会在有人改动时被看到。
      * 它同时是一个**会过期的断言**：有人消掉一条缺口，callersOf 那两发就会红，
      * 逼他同时改这份清单 —— 而不是让「门禁没通过」这句话悄悄变成一条假的实话。
@@ -736,11 +762,21 @@ describe("④ 两条验收各自【不可测的那一半】（登记，不写成
       "② 的自动批准在生产运行期零生产者（0014 §3；本文件②段那些 recordAutoApproval 全由测试自己调）",
       "pnpm verify 未跑：本机装不上依赖（0009 §2）",
       "③ 段那条 escalate 接缝没人接（本文件③段钉的就是它没接）",
+      // 这一条是 Task 6.1 之后【新增】的，不是消掉的。写它之前先分清两件容易混的事：
+      //   · 批准的【写路径】今天有了 —— real-deps.ts 有一条 UPDATE approvals（认领 + 落决定），
+      //     常驻 Hub 起来之后它是唯一常驻进程里那条路径的唯一调用方（0025 §1）。
+      //   · 卡片的【生产】今天仍然没有 —— src 里 `INSERT INTO approvals` 命中数是 0
+      //     （当场 grep，0013 §10.1 那句话今天仍然成立）。所以「零生产者」这一格
+      //     的准确说法是【从「连写都没有」变成「有写、没有行可写」】，缺口变窄、没关上。
+      // 而升级卡片额外还缺三类 approval_type（insufficient_evidence /
+      // low_confidence / meeting_escalation）—— 那三格即便有人补了 INSERT 也写不出来，
+      // 所以要的是 schema 决定而不是代码（0025 §8.2）。
+      "② 的卡片仍零 INSERT；升级另有三类 approval_type 无处落（0025 §8.2）",
     ] as const;
-    expect(blockers).toHaveLength(5);
-    // 前两条与后三条的**性质不同**：前两条本文件当场判了（可复算、会随改动变红），
-    // 后三条引的是别处的实测与环境事实。这条区分要钉住 ——
-    // 否则这五条看起来像同一类「作者自述」，而其中两条其实是判据。
+    expect(blockers).toHaveLength(6);
+    // 各条的**性质不同**：第 1、2、6 条本文件当场判了（可复算、会随改动变红），
+    // 其余引的是别处的实测与环境事实。这条区分要钉住 ——
+    // 否则这六条看起来像同一类「作者自述」，而其中三条其实是判据。
     //
     // ⚠ 原来这两发是 `toHaveLength(0)`，Task 5.4 让第一发红了一次（verifier.ts 成了
     // evaluateGate 的调用方）。改法是**换成那条链的真实形状**而不是删掉：
@@ -751,5 +787,17 @@ describe("④ 两条验收各自【不可测的那一半】（登记，不写成
     ]);
     expect(callersOf("verifyFix", "harness/verifier.ts")).toHaveLength(0);
     expect(callersOf("readAutoApprovalReport", "policy/auto-approve.ts")).toHaveLength(0);
+    /*
+     * 第 6 条 blocker 原来只是作者自述（「卡片仍零 INSERT」）。自述会过期而**过期时不响**，
+     * 所以这里把它也变成判据 —— 谁补上第一条真 INSERT，这一发红，逼他同时改这份清单。
+     * 反向对照同段已有形状：同一个扫描器必须能捞到【真的那条 UPDATE approvals】
+     * （real-deps.ts 与 auto-approve.ts 各一条），否则「捞不到 INSERT」可能只是
+     * 「扫描器坏了 / 注释过滤把代码也滤掉了」。
+     */
+    expect(srcFilesMatching(/INSERT\s+INTO\s+approvals/iu)).toEqual([]);
+    expect(srcFilesMatching(/UPDATE\s+approvals\b/iu)).toEqual([
+      SRC + "/http/real-deps.ts",
+      SRC + "/policy/auto-approve.ts",
+    ]);
   });
 });

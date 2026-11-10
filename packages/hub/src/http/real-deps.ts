@@ -437,6 +437,13 @@ export interface RealHubDepsOptions {
  * （cli.ts 文件头纪律 1：不给代码编一个「谁也没决定过、但写着」的路径）。
  * 真入口（Electron 主进程 / `hub serve`）到 Task 2.2/2.9 落地时接这一行。
  *
+ * 【上面两句的时效，日期 2026-11-11，原文留着不删】「`serveHub` 没有任何非测试调用点」
+ * 是当时的 grep 结果，今天已经不成立：`serve/assemble.ts` 是 `buildHubDeps` 与 `serveHub`
+ * 的共同调用方（0025 §1）。而「真入口」那句里的两个名字**一个都没落地**，其中一个还写错了：
+ * `hub serve` 这个子命令【不存在】（cli.ts 的 VERBS 只有 run / status / resume，
+ * 敲它是「未知子命令」退出 2）；今天的真入口是 `pnpm hub:serve`，
+ * 它仍然不是 Electron 主进程 —— 0025 §7 第 5 条登记的就是这一格（还没被进程管理器管起来）。
+ *
  * ⚠ 装配之后仍有一件事【没被证明】：图恢复那条链（makeResumeGraph 真的驱动图）
  * 与「批准之后看板上的卡片真的变了」在本机【一次也没跑过】。前者缺 @langchain/*，
  * 后者缺 React。别把本模块的绿读成 Task 2.9 那条 E2E 过了。

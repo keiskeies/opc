@@ -248,11 +248,35 @@ export function verify(refs: Ref[], w: World, retracted: string[]): Problem[] {
   return problems;
 }
 
+/**
+ * ⚠ 【恰好 7 位】的那个正则只有这一份（`HASH_TOKEN`）。
+ *
+ * 原来计数与判错两处各写了一份字面量，于是「改一处忘另一处」是可达的：判据放宽而
+ * 计数不放宽，覆盖自检（tokens >= 15）与真实扫描范围就脱钩，那时【没数到东西】又能
+ * 伪装成【全对】—— 正是本文件反复要消灭的那个形状。所以正则只留一份，两个函数共用。
+ */
+const HASH_TOKEN = /(?<![0-9A-Za-z])[0-9a-f]{7}(?![0-9A-Za-z])/g;
+
+/**
+ * 边界为什么是【字母数字】而不是【十六进制字符】（这一发改过一次，理由是实测的）：
+ * 旧写法 `(?<![0-9a-f]…(?![0-9a-f])` 只看两侧是不是 hex 字符，于是英文单词会被切成
+ * 一个「短哈希」。当场量到的三个受害者：`succeeded` → `cceeded`、`feedback` →
+ * `feedbac`、`deadbeat` → `deadbea` —— 全都是**含字母**的，连下面那条「纯数字放过」
+ * 的豁免也挡不住。第一个就真的红过一次（INDEX 里写 `succeeded` flag）。
+ * 收紧成两侧非字母数字之后：本仓文档少扫到的条目恰好只有那一条假阳，74 条真引用
+ * 一条没丢。反向的漏报也要看清楚 —— 真哈希写在 `(abc1234)` / `` `deadbee` `` /
+ * 句末 `abc1234.` 里都仍在边界外，照样扫得到；唯一扫不到的是 `abc1234def` 这种
+ * 本来就【不是恰好 7 位】的东西，而那正是这条判据一开始就不打算管的东西。
+ */
+function hashTokens(l: string): RegExpMatchArray[] {
+  HASH_TOKEN.lastIndex = 0;
+  return [...l.matchAll(HASH_TOKEN)];
+}
+
 /** 只数【恰好 7 位】的坐标 token，不管好坏：把【扫到了多少】与【其中多少坏】分开计数。 */
 export function hashTokenCount(lines: string[]): number {
   let n: number = 0;
-  for (const l of lines)
-    n += [...l.matchAll(/(?<![0-9a-f])[0-9a-f]{7}(?![0-9a-f])/g)].length;
+  for (const l of lines) n += hashTokens(l).length;
   return n;
 }
 
@@ -263,7 +287,7 @@ export function hashProblems(
 ): Problem[] {
   const problems: Problem[] = [];
   lines.forEach((l: string, i: number) => {
-    for (const m of l.matchAll(/(?<![0-9a-f])[0-9a-f]{7}(?![0-9a-f])/g)) {
+    for (const m of hashTokens(l)) {
       // 不含 a-f 的七位纯数字按【普通数字】放过：实测本仓 55 个提交的 7 位短哈希里没有一个是全数字，
       // 决策文档里现存的 22 处引用也全是含字母的 ⇒ 这条过滤不漏真引用，却能挡住【共 1234567 行】这种假阳。
       if (!/[a-f]/.test(m[0])) continue;
