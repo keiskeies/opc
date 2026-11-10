@@ -102,11 +102,14 @@ describe("决策文档里的坐标（节号 / §7 条目号 / 短哈希）指向
       "上一句提过规格 §9 的事。跨句的裸形仍须报：" + SEC + "6.2 云云",
       // 同一句里的枚举共享限定词（【规格 §9、§6.3】是常规中文写法），必须放行
       "同句共享限定词：规格 §9、" + SEC + "6.2 云云",
+      // 另一路分支：外部只有计划集合有 §6.9（规格集合没有）。文中不写限定词，
+      // 旧 fixture 的计划集合是空集，elsewhere 的第二个分支从未被触及。
+      "赤形只在另一份文档里出现：" + SEC + "6.9 云云",
     ];
     const w: World = {
       byDoc: world(rows, new Set<string>()).byDoc,
       spec: headingSets(["# 9. 设计节", "## 6.2 设计文档里有同名子节"]),
-      plan: headingSets([]),
+      plan: headingSets(["## 6.9 计划里有这个子节"]),
       hashes: new Set<string>(["abc1234"]),
       lines: new Map<string, string[]>([["0007", canaryLines]]),
     };
@@ -114,11 +117,11 @@ describe("决策文档里的坐标（节号 / §7 条目号 / 短哈希）指向
     const retracted: string[] = [];
     const probs: Problem[] = verify(refs, w, retracted);
     const found: string[] = probs.map((p: Problem) => p.why);
-    // 14 = 十二条 §引用 + 两个 §7 条目 token（§7 第 N 条 只由 ITEM_RE 计一次，不双计）。
+    // 15 = 十三条 §引用 + 两个 §7 条目 token（§7 第 N 条 只由 ITEM_RE 计一次，不双计）。
     // 注释里的数字必须跟断言一致 —— 上一版这里注释写【8】而断言是【10】，本身就是
     // 0007 §4.1 要消灭的【注释说了一套、断言做了另一套】。
-    expect(refs.length).toBe(14);
-    expect(found.length).toBe(6);
+    expect(refs.length).toBe(15);
+    expect(found.length).toBe(7);
     // 撤回豁免必须真的咬住一条，否则它是装饰
     expect(retracted.length).toBe(1);
     expect(retracted[0]?.endsWith("0008 " + SEC + "5.2")).toBe(true);
@@ -133,6 +136,12 @@ describe("决策文档里的坐标（节号 / §7 条目号 / 短哈希）指向
     // 还是【设计文档的 6.2】，光看形状挣不出来。守卫旧版靠【设计文档有就算对】兜住了它，
     // 于是【本篇内的错号】会被设计文档的同名节洗白 —— 这就是那条假绿。
     expect(found.some((s: string) => s.includes("形状歧义"))).toBe(true);
+    // 计划那一路单独钉住：去掉 elsewhere 的第二个分支，这条会退成【不存在】。
+    expect(
+      probs.some(
+        (p: Problem) => p.ref.includes("l.13") && p.why.includes("形状歧义"),
+      ),
+    ).toBe(true);
     // 限定词的传递范围两个方向都要钉住（变异 M5：去掉子句截断，远处一个【规格】就能
     // 豁免后面每一句的裸形 —— 那是漏报；反过来把限定词收紧成只许紧邻，又会误伤
     // 【规格 §9、§6.3】这种常规枚举 —— 那是误报）。l.11 必须报，l.12 必须不报。

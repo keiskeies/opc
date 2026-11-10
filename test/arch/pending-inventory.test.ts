@@ -77,6 +77,21 @@ describe("跳过写法扫描", () => {
     }
   });
 
+  it("名单外的名字挂 skip 不算：否则任何 foo.skip 都会被当成跳过", () => {
+    // 变异：去掉 TEST_IDS 判定（只留【必须是标识符】），这里会多报两条。
+    // 注意前面所有正例用的都是名单内名字，反向一直没人测。
+    const text =
+      "expect.skip(" +
+      '"名单外"' +
+      ", () => {});" +
+      NL +
+      "foo.todo(" +
+      '"名单外"' +
+      ");";
+    expect(findSkipForms("pkg/d.test.ts", text).length).toBe(0);
+    expect(reasons([one("pkg/d.test.ts", text)])).toEqual([]);
+  });
+
   it("xit、xdescribe 这种没有点号的裸调用也要认：否则名单是假的", () => {
     const text = "xit(T, () => {});" + NL + "xdescribe(T, () => {});";
     const forms = findSkipForms("pkg/x.test.ts", text).map(
