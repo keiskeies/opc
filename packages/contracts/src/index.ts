@@ -80,3 +80,43 @@ export {
   taskViewSchema,
   UNIMPLEMENTED_ENDPOINTS,
 } from "./api.js";
+
+/**
+ * 组织图数据层与三层校验（Task 3.1）。两个模块【分开导出】而不是揉成一个
+ * `export * from "./org/index.js"`：org/ 下目前只有 graph 与 validate 两个文件，
+ * 加一层 barrel 会让人以为还有第三个入口。分开导出同时让
+ * 「谁只用了原语、没用校验」在 import 那一行上可见（Task 3.2 的前端只用校验）。
+ */
+export {
+  canReach,
+  CEO_ROLE_ID,
+  depthOf,
+  getDescendants,
+  type DelegationEdge,
+  delegationEdgeSchema,
+  nodeOf,
+  ORG_MAX_DEPTH,
+  type OrgGraph,
+  orgActorSchema,
+  type OrgActor,
+  orgChangeSchema,
+  type OrgChange,
+  orgGraphSchema,
+  type OrgNode,
+  orgNodeSchema,
+  pathToRoot,
+  reportsToCycle,
+} from "./org/graph.js";
+
+export {
+  type NeedsConfirmation,
+  rejectMalformed,
+  type RejectCode,
+  type RunningTasksInput,
+  validateNewEdge,
+  validateOrgChange,
+  validateReparenting,
+  type Verdict,
+  violatesNoSelfReview,
+  wouldExceedMaxDepth,
+} from "./org/validate.js";
