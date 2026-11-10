@@ -18,3 +18,32 @@ export {
   MODEL_TIERS,
   type ModelTier,
 } from "./charter.js";
+
+export {
+  type BundleType,
+  BUNDLE_TYPES,
+  type EvidenceArtifact,
+  type EvidenceBundle,
+  type EvidenceClaim,
+  evidenceBundleSchema,
+  HANDOFF_BUNDLE_TYPES,
+  requiredBundleType,
+  SHA256_RE,
+  unresolvableClaimIndexes,
+  UUID_RE,
+} from "./evidence.js";
+
+export {
+  type ApprovalButton,
+  APPROVAL_BUTTONS,
+  type ApprovalCardDraft,
+  approvalCardDraftSchema,
+  type EscalationReason,
+  ESCALATION_REASONS,
+  type GateDecision,
+  GATE_DECISIONS,
+  type RiskTier,
+  RISK_TIERS,
+  type TimeoutBehavior,
+  TIMEOUT_BEHAVIORS,
+} from "./gates.js";
