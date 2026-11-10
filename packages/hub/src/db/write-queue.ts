@@ -189,6 +189,29 @@ export function assertParamCount(
 
 const SETTLED = () => {};
 
+/**
+ * 写入方 = 【单写者队列】，不是一条连接。形状取 Pick 而不是直接收 WriteQueue：
+ * 用到的只有 node() 这一个方法，而测试要能塞一份不碰磁盘的替身
+ * （真 WriteQueue 的构造函数吃的是【路径】并当场 openDb，测试里为每条断言开一个库
+ * 会让失败信息变成「哪个临时文件」而不是「哪个断言」）。
+ *
+ * Pick 的代价说清楚：它挡不住「自己实现一个 node()，里面不排队」——
+ * 那种替身能让并发缺陷在全测试绿的下面隐身。挡的方式不是类型，
+ * 是 real-deps.test.ts 里那条【两次并发决策都成功、各自一行审计】的断言。
+ *
+ * ── 这个类型【原来】定义在 http/real-deps.ts，搬到这里是因为依赖方向 ────
+ * 第二个使用方是 org/commit.ts（组织变更的版本化提交）。它 import 一个 http 模块
+ * 才能拿到「怎么排队写库」这个类型，等于说成「组织功能属于 HTTP 层」；
+ * 而桌面端走 IPC 同样要提交组织变更，那时它该 import 的是 org/，
+ * 不该被迫拖进一个 http 模块。类型描述的是【队列】，所以它和队列住一起。
+ * real-deps.ts 那边留一条 re-export：已有调用方一字不改，
+ * 而定义只有一处（不留两份 Pick，否则一处收紧一处没跟上）。
+ */
+export type Writer = Pick<WriteQueue, "node">;
+
+/** 装配入口用的写入方：比 Writer 多一个只读连接（理由见 real-deps.ts 的 HubDeps 装配）。 */
+export type HubWriter = Pick<WriteQueue, "node" | "readConnection">;
+
 export class WriteQueue {
   #write: DatabaseSync;
   #read: DatabaseSync;

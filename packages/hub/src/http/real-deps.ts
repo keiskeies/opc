@@ -69,30 +69,33 @@ import { appendAudit } from "../events/recorder.js";
 import {
   assertParamCount,
   assertSingleStatement,
+  type HubWriter,
   type WriteQueue,
+  type Writer,
 } from "../db/write-queue.js";
 import {
   chooseResumeInput,
   hasPendingInterrupt,
   threadConfig,
 } from "../graph/thread.js";
+// 只在 insertTask 里取一版「当前组织图版本」。方向是 http/ → org/：
+// HTTP 是组织功能的一个入口，不是组织功能的归属地（同一个理由见 org/commit.ts
+// 文件头那条「ORG_ACTOR 不从 http/real-deps.ts 拿」）。
+// 这条 import 不顶层带 @langchain/*：org/commit.ts 的 import 闭包只有
+// contracts + db + checkpoint + events，所以文件头那条「可验证性由 import 图决定」
+// 仍然成立，本文件照旧可以离线测。
+import { currentGraphVersion } from "../org/commit.js";
 import type { HubDeps } from "./app.js";
 
 /** CEO 这一侧的动作在审计里的身份。 */
 export const CEO_ACTOR = { actorType: "human", actorId: "ceo" } as const;
 
 /**
- * 写入方 = 【单写者队列】，不是一条连接。形状取 Pick 而不是直接收 WriteQueue：
- * 本模块用到的只有 node() 这一个方法，而测试要能塞一份不碰磁盘的替身
- * （真 WriteQueue 的构造函数吃的是【路径】并当场 openDb，测试里为每条断言开一个库
- * 会让失败信息变成「哪个临时文件」而不是「哪个断言」）。
- *
- * Pick 的代价说清楚：它挡不住「自己实现一个 node()，里面不排队」——
- * 那种替身能让 P1 那类并发缺陷在本文件的全测试下隐身。挡的方式不是类型，
- * 是 real-deps.test.ts 里那条【两次并发决策都成功、各自一行审计】的断言：
- * 它直接测 P1 的现场，替身不排队就红。
+ * 定义已搬到 db/write-queue.ts（理由写在那边：第二个使用方 org/commit.ts 不该
+ * 为了拿这个类型而 import 一个 http 模块）。这里【只 re-export】，
+ * 于是已有调用方一字不改，而定义仍只有一处。
  */
-export type Writer = Pick<WriteQueue, "node">;
+export type { Writer };
 
 /**
  * resume 值 → approvals.status。
@@ -349,10 +352,26 @@ export function makeResumeGraph(
  * 加一个 action 值 = 改规格 §22.1 的枚举，不是实现层能顺手定的事。
  * 这条缺口现在【有测试把它写成断言】（见 real-deps.test.ts 那条「全文查不到」），
  * 免得下一个人以为全文存在某个角落。
+ *
+ * ── graph_version：这一列【必须】在这里写，而不是事后再 UPDATE ──────────
+ * 0001_init.sql:49 那列是 `INTEGER NOT NULL DEFAULT 1`，而本轮之前
+ * `grep -rn "graph_version" packages/hub/src` 除注释外【0 命中】——
+ * 建库以来没有任何代码写过它，每条任务都躺在默认值 1 上，
+ * 而 delegation_graphs 里 1 号版本【一行都不存在】。
+ * 于是规格 §18.4 阶段 3 那句「旧任务从 Checkpoint 恢复时加载创建时版本的图定义」
+ * 不是没做完，是【前提不成立】：所有任务的「创建时版本」都是同一个假的 1。
+ *
+ * 为什么写成 INSERT 的一列 + 同事务里取数，而不是插入后再发一条 UPDATE：
+ * 拆两条语句会留一段「任务行已存在而版本还是 1」的窗口（崩在中间就永久留下），
+ * 更要紧的是「取最新版本」与「写这一行」必须同刻 —— WriteQueue 排的是
+ * 【事务之间】的顺序，两次 node() 就是两个事务，中间允许别人提交一版，
+ * 于是会建出一行「在 v7 生效之后建、却盖着 v6」的任务，而且一句报错都没有。
+ * 那正是 §18.4 建版本化想防的事，所以取数走 org/commit.ts 的 currentGraphVersion，
+ * 与 INSERT 共用 node() 回调里这条连接、这个事务。
  */
 export const INSERT_TASK_SQL =
   "INSERT INTO tasks (id, parent_id, title, status, assigned_role, current_node, " +
-  "created_at, updated_at) VALUES (?, ?, ?, 'CHARTER_PENDING', ?, 'intake', ?, ?)";
+  "created_at, updated_at, graph_version) VALUES (?, ?, ?, 'CHARTER_PENDING', ?, 'intake', ?, ?, ?)";
 
 export async function insertTask(
   w: Writer,
@@ -364,16 +383,6 @@ export async function insertTask(
     readonly nowMs: number;
   },
 ): Promise<void> {
-  const params: unknown[] = [
-    o.id,
-    o.parentId ?? null,
-    o.title,
-    o.assignedRole,
-    o.nowMs,
-    o.nowMs,
-  ];
-  assertSingleStatement(INSERT_TASK_SQL);
-  assertParamCount(INSERT_TASK_SQL, params);
   // 同样排队，但理由与 applyDecision 那条【不一样】，所以单独写：
   // 那里排队是为了「两次点击不打架」，这里是【装配上的一致性】——
   // 同一个写入方一半走队列一半不走，走的那半就要去猜没走的那半什么时候提交。
@@ -381,21 +390,27 @@ export async function insertTask(
   // 不需要谁去记得先建父再建子。
   // 回调保持【全同步】是排队有效的前提 —— node() 里一 await，
   // 事务就横跨微任务，P1 那句报错就会在这里复现。
+  // 取版本那一发也在回调【里面】：params 若在回调外算好，「读版本」就发生在
+  // 事务之外，上面那段「读到 v6 → 别人提交 v7 → 落成 v6」原样复现。
   await w.node(() => {
-    requireScopeDb("insertTask").prepare(INSERT_TASK_SQL).run(...(params as never[]));
+    const db = requireScopeDb("insertTask");
+    const params: unknown[] = [
+      o.id,
+      o.parentId ?? null,
+      o.title,
+      o.assignedRole,
+      o.nowMs,
+      o.nowMs,
+      currentGraphVersion(db),
+    ];
+    assertSingleStatement(INSERT_TASK_SQL);
+    assertParamCount(INSERT_TASK_SQL, params);
+    db.prepare(INSERT_TASK_SQL).run(...(params as never[]));
   });
 }
 
-/**
- * 装配 HubDeps 需要的写入方形状。
- *
- * 比 Writer 多一个 readConnection()，为的是把 P1 那一条【推广】掉：
- * 「喂一条 DatabaseSync 进来」这个形状本身就是缺陷源头 —— 拿着它既能写也能读，
- * 而写就走不到队列。装配入口若还收一个裸 handle，我就只是在 applyDecision 那一处
- * 堵了洞，入口那里原样留着。收队列之后，【只读连接】是队列给的，
- * 「用错连接」这件事在参数上写不出来。
- */
-export type HubWriter = Pick<WriteQueue, "node" | "readConnection">;
+/** 同 Writer：定义在 db/write-queue.ts，这里只 re-export。 */
+export type { HubWriter };
 
 export interface RealHubDepsOptions {
   /** 单写者队列。写入走 node()，对外读取走 readConnection()。 */

@@ -186,7 +186,16 @@ const SNAP: Record<string, string> = {
   "0007-test-type-coverage-blindspot.md>graph/audit-middleware.ts:167": "try {",
   "0007-test-type-coverage-blindspot.md>db/migrate-cli.ts:120": "try {",
   "0007-test-type-coverage-blindspot.md>internal/direct-run.ts:19": "try {",
-  "0007-test-type-coverage-blindspot.md>db/write-queue.ts:235": "try {",
+  // 235 → 258：Task 3.3 把 Writer / HubWriter 两个类型从 http/real-deps.ts 搬进
+  // write-queue.ts（org/commit.ts 要排队写库，而 org/ 不该为了学「怎么排队」去 import
+  // 一个 http 模块）。新增那 23 行落在 assertParamCount 之后、tx() 之前，
+  // 于是 tx() 与 node() 里那两处 #rejected 各往下挪 23 行 —— 行内容一字未变。
+  // 这是本守卫第【四】次抓到同一件事，而且这一次被挪的文件本身没被改坏：
+  // 漂移是【搬类型】这种看起来最无害的改动带出来的。
+  // 同一行里那个 `:284` 是简写形态（不带文件名），守卫不提取它 —— 所以那句
+  // 【只登记一个坐标】是不够的：第二个站点靠人核对。本轮核对过：两处都是
+  // `try {` + 紧接的 #rejected，判据不变。
+  "0007-test-type-coverage-blindspot.md>db/write-queue.ts:258": "try {",
   // 369 → 375：本轮给 KIND_TO_ACTION / targetOf 各加了一条 case（新事件 kind
   // ApprovalDecided），把它下面那一行 try 顶下去 6 行。守卫又一次抓住同一件事：
   // 【代码没写错、文档也没写错，只是行号动了】。
@@ -209,6 +218,22 @@ const SNAP: Record<string, string> = {
     "const result = await body();",
   "0010-approval-write-path-and-lock.md>db/pragmas.ts:19":
     "export const BUSY_TIMEOUT_MS = 5000;",
+  // 0012 的三条活坐标。第一条是本篇整篇的**前提**：那个 `DEFAULT 1` 就是
+  // 「每条任务的 graph_version 都是假的 1」这个论断的出处。它一旦被人改成
+  // DEFAULT 0、或补上一个真的 v1 种子行，0012 §1 那段论证当场失效 ——
+  // 所以它必须是活坐标，不能写成「初始化迁移里那个默认值」这种 grep 不出的叙述。
+  "0012-org-versioned-commit-and-unwritten-graph-version.md>0001_init.sql:49":
+    "graph_version INTEGER NOT NULL DEFAULT 1   -- 创建时组织图版本（§18.4）",
+  // 后两条是 §7 那次【撤回】的替身：我原先拿「规格不列端点」当「端点名是冻结值」的依据，
+  // 实测规格零命中，真正的契约面是下面这张表。登记的用处不只是举证，
+  // 而是**下一次加端点时必须有人动这张表**：那张表一动，这段论证就要被重读一遍。
+  // 注：`api.ts` 这个基名【有歧义】（另有 packages/desktop/src/preload/api.ts），
+  // 所以两条都得写全路径 —— 只写 `api.ts:56` 会被 resolveTarget 判成歧义并报错。
+  // 这是本守卫抓的第三类问题：前两类是行号漂移与目标行改写，这一类是【同名文件没指定目录】。
+  "0012-org-versioned-commit-and-unwritten-graph-version.md>packages/contracts/src/api.ts:29":
+    "export const API_ENDPOINTS = [",
+  "0012-org-versioned-commit-and-unwritten-graph-version.md>packages/contracts/src/api.ts:56":
+    "export const UNIMPLEMENTED_ENDPOINTS: readonly ApiEndpoint[] = [",
 };
 
 describe("决策文档里的「文件:行号」引用不漂移", () => {
