@@ -17,6 +17,7 @@ export {
   JUDGMENT_MODES,
   MODEL_TIERS,
   type ModelTier,
+  SEARCH_MANDATORY_SOURCES_CONDITION,
 } from "./charter.js";
 
 export {

@@ -41,6 +41,17 @@ export const JUDGMENT_MODES = [
 ] as const;
 
 /**
+ * 岗位书里点第 1 层那把钥匙的那条验收标准的**那一个字符串**。
+ *
+ * ⭐ 这个常量住在这里而不是 `hub/src/search/policy.ts`，是为了让「写入方」与「判定方」
+ * 共用一份定义：判据在 hub 那一侧（`makeSearchCriteriaEvaluator` 精确匹配它），
+ * 而写入方是**这份 schema 守着的 YAML**。两处各写一份的后果是漂，而漂的后果不是崩，
+ * 是「岗位书写了一条而判定方不认」—— 一条永远不生效的标准，全绿。
+ * hub 那边 `MANDATORY_SOURCES_CONDITION` 现在指向这一个值（不是复制）。
+ */
+export const SEARCH_MANDATORY_SOURCES_CONDITION = "search:mandatory_sources";
+
+/**
  * 【规格】附录 B.3 给技术总监那一份里写的 `search_policy`（§13.3）。
  *
  * ⚠ **只认 `tier_1_mandatory` 这一个键**，而这不是漏写。B.3 原文还有
@@ -159,7 +170,64 @@ const charterInput = z
       .record(z.string(), z.record(z.string(), z.unknown()))
       .optional(),
   })
-  .strict();
+  .strict()
+  /**
+   * ⭐ 第 1 层的**两半必须成对**：声明了非空的 `tier_1_mandatory` 而验收标准里没有
+   * 那条 `search:mandatory_sources` ⇒ **拒加载**。
+   *
+   * ── 为什么这条判据存在（它不是润色）──────────────────────────────
+   * 0033 把判定侧接上了，而判定侧只在**门控标准里有那一条**时才被叫到
+   * （`makeSearchCriteriaEvaluator` 精确匹配那个 condition，其余原样交回 fallback）。
+   * 于是「CEO 在 YAML 里写了三个领域」这件事本身**不产生任何行为**：
+   * 实测（0034 §0）加载通过、`charterMandatoryDomains` 交出那三个名字、
+   * 而按 `criteriaFromCharter` 的口径展开出的门控标准里**没有一条**会走到搜索判据。
+   * ⇒ 一个看起来配好了第 1 层的岗位书，实际上一条也不判，**而且全绿**。
+   * 这正是本篇 §7 里我写下的那句「落错会响」的反面 —— 那句话在写下它是错的。
+   *
+   * ── 为什么在 schema 里判，而不是在门控那一层判 ────────────────────
+   * 因为这一对**必须在同一份文档里**才成立。门控那一层拿到的 `criteria` 是调用方传的
+   * （生产口径是 `criteriaFromCharter(charter)`，但没有任何东西强制它来自同一份岗位书），
+   * 而 `verifierCharter` 是**审阅方**那份 —— 拿 A 的主体去配 B 的标准，
+   * 是 0033 §3 那一发（「观测必须出自作者」）的**同形复发**：那条判据会拒掉正确接线，
+   * 而且不会以红的方式说话。在 schema 里判 ⇒ 两半天然同主体（同一份 YAML），
+   * 判据不需要回答「这是谁的」这个它答不了的问题。
+   *
+   * ── 方向：拒掉，**不代填** ──────────────────────────────────────
+   * 另一个写法是「发现领域非空就自动追加那条标准」，它省事而**不能做**：
+   * acceptance_criteria 是 CEO 签的字（本仓有一条明文规矩：不替他写验收标准、
+   * 不写 signed_by: ceo）。自动追加会让一条他从未写过的 reject 出现在他的岗位书里，
+   * 而 reject 是打回产出的那一档。所以这里只说「你配了一半」，补哪一半归他。
+   *
+   * 空数组不触发（`[]` = 声明过而没有领域 ⇒ 本来就没有东西要判）。
+   * 反方向（有那条标准而没声明领域）**不**拒：那是「不适用」，
+   * 判定侧已经按 satisfied 处理了（0033 §4 那张四格表），拒会把一个合法写法变成加载失败。
+   */
+  .superRefine((c, ctx) => {
+    const declared = c.search_policy?.tier_1_mandatory ?? [];
+    if (declared.length === 0) return;
+    const hasCriterion = c.acceptance_criteria.some(
+      (a) => a.condition.trim() === SEARCH_MANDATORY_SOURCES_CONDITION,
+    );
+    if (hasCriterion) return;
+    ctx.addIssue({
+      code: "custom",
+      message:
+        "search_policy.tier_1_mandatory 声明了 " +
+        declared.length +
+        " 个领域 [" +
+        declared.join(", ") +
+        "]，而 acceptance_criteria 里**没有** condition 为 '" +
+        SEARCH_MANDATORY_SOURCES_CONDITION +
+        "' 的那一条。第 1 层只在门控标准里有那一条时才被叫到 ⇒ " +
+        "现在这份岗位书配了一半：领域有人读，没人判。" +
+        "补法（二选一，都由写岗位书的人定）：① 在 acceptance_criteria 里加上那条 " +
+        "condition（action 用 reject 才是【规格】§13.3 说的「直接打回」）；" +
+        "② 把 tier_1_mandatory 清空或删掉那一格。",
+      // 路径指向 acceptance_criteria：那里是**缺东西**的那一侧，也是修法落点。
+      // 只指 search_policy 会让人先去改那一格（把领域删掉）而问题其实是标准没写。
+      path: ["acceptance_criteria"],
+    });
+  });
 
 /** 校验后的岗位书：snake_case → camelCase 的映射【写在 transform 里】，所以字段只有一处定义。 */
 export const charterSchema = charterInput.transform((c) => ({

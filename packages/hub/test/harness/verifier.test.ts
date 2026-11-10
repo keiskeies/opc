@@ -32,7 +32,12 @@ import type {
   HarnessEvent,
   HarnessRequest,
 } from "@opc/contracts";
-import { charterSchema, SHA256_RE, evidenceBundleSchema } from "@opc/contracts";
+import {
+  charterSchema,
+  SEARCH_MANDATORY_SOURCES_CONDITION,
+  SHA256_RE,
+  evidenceBundleSchema,
+} from "@opc/contracts";
 import { describe, expect, it } from "vitest";
 import type { AuditRow } from "../../src/events/recorder.js";
 import type { GateCriterion } from "../../src/graph/gates/evaluate.js";
@@ -133,13 +138,37 @@ const COVERAGE_CRITERION: GateCriterion = {
 };
 
 /**
+ * 一条点了第 1 层那把钥匙的标准（action=reject，与【规格】B.2 那条同形）。
+ *
+ * 提到文件顶层是因为它现在有**两个**读者：下面那组门控用例，以及 `charterWith`
+ * （夹具要在岗位书里写上同一条，否则那份夹具会被 0034 §1 的成对判据拒掉）。
+ * condition 取 `SEARCH_MANDATORY_SOURCES_CONDITION` 而不是手抄那串 ——
+ * 夹具与常量一旦漂开，得到的形状正是「岗位书写了一条而判定方不认」，
+ * 而它会以「测试全绿 + 生产不判」的样子出现，不会红。
+ */
+const SEARCH_CRITERION: GateCriterion = {
+  condition: SEARCH_MANDATORY_SOURCES_CONDITION,
+  action: "reject",
+  message: "强制搜索领域必须附带可追溯来源",
+};
+
+/**
  * 一份过 schema 的岗位书，只为了给出 `searchPolicy` 那一格。
  *
  * 走 `charterSchema.parse` 而不是 `as Charter` 断言：断言会让「夹具与真实形状不符」
  * 这件事在测试里**永久隐形**（本仓记过一次夹具说谎，第五次）。
  * 而且这一格是新增字段，夹具正是它唯一的离线读者 —— 夹具不真，字段就等于没测。
+ *
+ * ⚠ 声明领域时，夹具**同时**往 acceptance_criteria 里加上那条 `search:mandatory_sources`。
+ * 不是为了让 parse 过关才顺手加的（虽然它确实不过：0034 §1 那条成对判据会拒），
+ * 而是**夹具必须长成一份真能生效的岗位书** —— 否则这个文件里所有「有岗位书」那几发
+ * 测的都是一个加载期就会被拒的形状，绿了也不代表那条通路存在。
+ * 而 `criteria:` 那一格（传给 verifyFix 的门控标准）与岗位书里的这一条**是两处**：
+ * 生产口径是 `criteriaFromCharter(charter)`，本文件为了别的用例能单独控标准而显式传，
+ * 所以两处都得写。这个「两处」本身是 0034 §1 那条判据为什么落在 schema 而不是门控的现场。
  */
 function charterWith(searchPolicy?: { tier_1_mandatory?: string[] }): Charter {
+  const declared = (searchPolicy?.tier_1_mandatory?.length ?? 0) > 0;
   return charterSchema.parse({
     role_id: "test",
     display_name: "测试",
@@ -147,6 +176,15 @@ function charterWith(searchPolicy?: { tier_1_mandatory?: string[] }): Charter {
     honesty_boundaries: ["不声称未跑过的测试已通过"],
     acceptance_criteria: [
       { condition: "metric:coverage < 90", action: "reject", message: "覆盖率不足" },
+      ...(declared
+        ? [
+            {
+              condition: SEARCH_CRITERION.condition,
+              action: "reject" as const,
+              message: SEARCH_CRITERION.message,
+            },
+          ]
+        : []),
     ],
     forbidden_actions: [],
     tool_permissions: ["Read", "Bash", "web_search"],
@@ -731,12 +769,6 @@ describe("请求装配", () => {
 /* ═════════════════ 第 1 层接进门控（0033）═════════════════ */
 
 describe("§搜索 第 1 层经由 criteriaEvaluator 接进这一层的门控", () => {
-  /** 一条点了第 1 层那把钥匙的标准（action=reject，与【规格】B.2 那条同形）。 */
-  const SEARCH_CRITERION: GateCriterion = {
-    condition: "search:mandatory_sources",
-    action: "reject",
-    message: "强制搜索领域必须附带可追溯来源",
-  };
   const urlClaim = () => ({
     artifacts: [{ path: "cov.json", sha256: SHA_A, bytes: 10 }],
     claims: [{ text: "该框架 3.2 已废弃这个 API", evidence_refs: ["https://example.com/a"] }],

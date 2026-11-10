@@ -26,7 +26,12 @@
  *   - 「搜过没有」有两个强度：包里有没有 URL（【规格】字面要求，**可被编造**）
  *     与审计里有没有真的发生过搜索（**编不出来**）。两个都做，差别写在函数注释里。
  */
-import { isExternalSourceRef, type Charter, type EvidenceBundle } from "@opc/contracts";
+import {
+  isExternalSourceRef,
+  SEARCH_MANDATORY_SOURCES_CONDITION,
+  type Charter,
+  type EvidenceBundle,
+} from "@opc/contracts";
 // `metricCriteriaEvaluator` 作为**默认 fallback** 用在下面那条测试里，
 // 而类型 `CriteriaEvaluator` 是这一节的接口本体 —— 都来自门控那一层，不另写一份。
 import type { CriteriaEvaluator } from "../graph/gates/evaluate.js";
@@ -532,8 +537,14 @@ export function charterMandatoryDomains(
  * **只有这一串精确匹配**才判 —— 不做前缀/模糊匹配，理由与 matchDomains 同一句：
  * 一条宽匹配会给出「配了个别的名字而它其实没在判」的假防线，
  * 而那比没配更难查（岗位书看起来写了东西）。
+ *
+ * ⚠ 这个串**不在这里定义**，它是 `@opc/contracts` 那个常量的一份别名。
+ * 理由与上面那句是同一条：定义漂了的话，「岗位书写了一条而判定方不认」正好是
+ * 那条宽匹配想防的东西，而漂的方式（各改一份）比写错名字更安静。
+ * 那一侧的 schema 还用它判「声明了领域而没写这条标准」（0034 §1），
+ * 所以这份定义现在有**两个**读者，复制一份等于让两个读者各读一本书。
  */
-export const MANDATORY_SOURCES_CONDITION = "search:mandatory_sources";
+export const MANDATORY_SOURCES_CONDITION = SEARCH_MANDATORY_SOURCES_CONDITION;
 
 export function makeSearchCriteriaEvaluator(o: {
   /**

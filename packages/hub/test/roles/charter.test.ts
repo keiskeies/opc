@@ -11,7 +11,10 @@
  */
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { CHARTER_PLACEHOLDER_ACCEPTANCE } from "@opc/contracts";
+import {
+  CHARTER_PLACEHOLDER_ACCEPTANCE,
+  SEARCH_MANDATORY_SOURCES_CONDITION,
+} from "@opc/contracts";
 import { describe, expect, it } from "vitest";
 import { stringify } from "yaml";
 import {
@@ -78,6 +81,28 @@ function yamlWith(overrides: Record<string, unknown>): string {
     else merged[k] = v;
   }
   return stringify(merged);
+}
+
+/**
+ * 在夹具那一条之外，**再加**一条点了第 1 层的验收标准。
+ *
+ * condition 取 `SEARCH_MANDATORY_SOURCES_CONDITION` 而不是手抄那串字面量：
+ * 本文件钉的那条判据读的就是那个常量，夹具若与它漂开，得到的形状是
+ * 「岗位书写了一条而判定方不认」，而那个形状**不会红**（全绿 + 生产不判）。
+ * 提到顶层是因为两个 describe 都用它（成对判据拒掉的就是「只写领域」那份夹具）。
+ */
+function withSearchCriterion(
+  extra: { condition: string; action: "reject"; message: string }[] = [],
+): Record<string, unknown>[] {
+  return [
+    ...(BASE.acceptance_criteria as Record<string, unknown>[]),
+    {
+      condition: SEARCH_MANDATORY_SOURCES_CONDITION,
+      action: "reject" as const,
+      message: "强制搜索领域必须附带可追溯来源",
+    },
+    ...extra,
+  ];
 }
 
 /** 抓异常：断言异常里的字段路径比 toThrow(/字符串/) 更精确 */
@@ -247,7 +272,10 @@ describe("§13.3 搜索策略那一格（0033 新加的可选字段）", () => {
 
   it("写了 tier_1_mandatory ⇒ 派生成 camelCase 的 mandatoryDomains", () => {
     const c = loadCharterText(
-      yamlWith({ search_policy: { tier_1_mandatory: ["security_advisories"] } }),
+      yamlWith({
+        search_policy: { tier_1_mandatory: ["security_advisories"] },
+        acceptance_criteria: withSearchCriterion(),
+      }),
       "x.yaml",
     );
     expect(c.searchPolicy?.mandatoryDomains).toEqual(["security_advisories"]);
@@ -278,11 +306,95 @@ describe("§13.3 搜索策略那一格（0033 新加的可选字段）", () => {
   it("领域名拼错在【加载期】放行 —— 报错的活是门控的，不是这里的", () => {
     // 这不是「不校验」的懒，是校验该落在谁身上：加载 YAML 的是装配代码，
     // 知道领域写错了的是写岗位书的人。在这里拒会把两者分开。
+    // ⚠ 这一发刻意**没有**改成合法名字：它钉的就是「加载期不比对取值」，
+    // 而成对判据（下面那一组）只看那条 criteria 在不在、不看领域名对不对 ——
+    // 两判据互不掩盖，所以这一发的夹具必须同时过得了成对那一关（补上那条标准）。
     const c = loadCharterText(
-      yamlWith({ search_policy: { tier_1_mandatory: ["framework_version_compat"] } }),
+      yamlWith({
+        search_policy: { tier_1_mandatory: ["framework_version_compat"] },
+        acceptance_criteria: withSearchCriterion(),
+      }),
       "x.yaml",
     );
     expect(c.searchPolicy?.mandatoryDomains).toEqual(["framework_version_compat"]);
+  });
+});
+
+describe("⭐ 第 1 层那两半必须成对（0034 §1 新加的判据）", () => {
+  it("⭐ 声明了领域而验收标准里没那条 ⇒ 拒加载，并报 acceptance_criteria", () => {
+    // 这一发钉的是 0034 的起因：上一轮把判定侧接上之后，「写了领域」这件事
+    // **本身不产生任何行为**（判定侧只在门控标准里有那一条时才被叫到）。
+    // 实测当时：加载通过、领域读得到、展开出的标准里没有一条走搜索判据 ⇒ 全绿而不判。
+    const e = grab(() =>
+      loadCharterText(
+        yamlWith({ search_policy: { tier_1_mandatory: ["security_advisories"] } }),
+        "x.yaml",
+      ),
+    );
+    expect(charterFieldPaths(e)).toContain("acceptance_criteria");
+    // 报错要点名那串 condition：写岗位书的人要去**加那一条**，
+    // 而只说「配了一半」他会去删领域那一格（那是把配错改成没配，代价反的）。
+    expect(String(e)).toContain(SEARCH_MANDATORY_SOURCES_CONDITION);
+  });
+
+  it("⭐ 反向对照：同一份领域 + 那条标准 ⇒ 加载通过", () => {
+    // 没有这一发，上面那条红可能是「任何写了领域的岗位书都被拒」（恒真判据）。
+    const c = loadCharterText(
+      yamlWith({
+        search_policy: { tier_1_mandatory: ["security_advisories"] },
+        acceptance_criteria: withSearchCriterion(),
+      }),
+      "x.yaml",
+    );
+    expect(c.searchPolicy?.mandatoryDomains).toEqual(["security_advisories"]);
+  });
+
+  it("空数组不触发成对判据（声明过而没有领域 ⇒ 本来就没东西要判）", () => {
+    expect(() =>
+      loadCharterText(yamlWith({ search_policy: { tier_1_mandatory: [] } }), "x.yaml"),
+    ).not.toThrow();
+  });
+
+  it("⭐ 反向不要求：有那条标准而没声明领域 ⇒ 合法（那是「不适用」，不是配错）", () => {
+    // 判据若双向，会把一个合法写法变成加载失败：判定侧对「有标准而无领域」
+    // 已经按 satisfied 处理（0033 §4 那张四格表）。拒它等于用加载期去表达
+    // 「这条标准这次不成立」—— 而那一格的答案本来就该由判定侧给。
+    const c = loadCharterText(
+      yamlWith({ acceptance_criteria: withSearchCriterion() }),
+      "x.yaml",
+    );
+    expect(c.searchPolicy).toBeUndefined();
+  });
+
+  it("condition 空白围拢后仍算配上（判定侧也是 trim 后精确匹配）", () => {
+    const c = loadCharterText(
+      yamlWith({
+        search_policy: { tier_1_mandatory: ["framework_versions"] },
+        acceptance_criteria: withSearchCriterion().map((a, i) =>
+          i === 1 ? { ...a, condition: "  " + SEARCH_MANDATORY_SOURCES_CONDITION + " " } : a,
+        ),
+      }),
+      "x.yaml",
+    );
+    expect(c.searchPolicy?.mandatoryDomains).toEqual(["framework_versions"]);
+  });
+
+  it("⭐ 判据【不代填】那条标准：领域声明了而标准里没有，就一条也不多出", () => {
+    // 另一条实现路径是「发现领域非空就自动追加那条 reject」，它省事而不能做：
+    // acceptance_criteria 是 CEO 签的字，自动追加会让一条他从未写过的 reject
+    // 出现在他岗位书里，而 reject 是打回产出的那一档。这一发钉住「没代填」。
+    const c = loadCharterText(
+      yamlWith({
+        search_policy: { tier_1_mandatory: ["security_advisories"] },
+        acceptance_criteria: withSearchCriterion(),
+      }),
+      "x.yaml",
+    );
+    const hits = c.acceptanceCriteria.filter(
+      (a) => a.condition.trim() === SEARCH_MANDATORY_SOURCES_CONDITION,
+    );
+    expect(hits).toHaveLength(1);
+    expect(c.acceptanceCriteria).toHaveLength(2); // 夹具那条 metric + 人写的那条，没有第三条
   });
 });
 
