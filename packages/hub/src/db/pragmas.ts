@@ -65,3 +65,38 @@ export function openReadonlyDb(path: string): DatabaseSync {
   }
   return db;
 }
+
+/**
+ * 以只读模式打开一个【快照文件】—— VACUUM INTO 的产物、或刚从备份恢复出来的那份。
+ *
+ * 为什么不复用 openReadonlyDb（这件事值得一个函数而不是一个 if）：
+ * 实测 VACUUM INTO 产物的 journal_mode 是 **delete**（不是 wal —— 快照是单文件，
+ * 没有 -wal 可挂）。而 journal_mode 是【持久】设置：在只读连接上把它改成 WAL
+ * 需要写库文件头，当场抛 "attempt to write a readonly database"（实测）。
+ * 也就是说 openReadonlyDb 拿一份合法备份去打开会【直接失败】，
+ * 失败信息还指向「只读连接不能改模式」这个看起来像调用方用错了 API 的方向。
+ *
+ * 这里跳过 journal_mode，另外三条照旧施加，理由与上面同源：
+ * synchronous / foreign_keys / busy_timeout 是连接级的，跳过它们就是让这条连接
+ * 与全仓其他连接行为不一致；而 journal_mode 恰恰是唯一一条【不该由校验者改】的 ——
+ * 校验一份快照的时候改动它，等于校验动作本身修改了被校验对象。
+ *
+ * 快照被 hub 接管跑生产时，走的是 driver.openDb()，那条路会把 journal_mode 设回 WAL。
+ * 所以「恢复出来的库先是 delete 模式」不是缺陷，是「还没人按生产方式打开它」。
+ */
+export function openSnapshotReadonlyDb(path: string): DatabaseSync {
+  const db = new DatabaseSync(path, {
+    readOnly: true,
+    enableForeignKeyConstraints: true,
+    timeout: BUSY_TIMEOUT_MS,
+  });
+  try {
+    db.exec("PRAGMA synchronous = NORMAL;");
+    db.exec("PRAGMA foreign_keys = ON;");
+    db.exec("PRAGMA busy_timeout = " + BUSY_TIMEOUT_MS + ";");
+  } catch (e) {
+    db.close();
+    throw e;
+  }
+  return db;
+}
