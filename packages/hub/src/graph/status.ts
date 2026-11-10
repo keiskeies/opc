@@ -63,7 +63,22 @@ const EDGES: Record<TaskState, readonly TaskState[]> = {
   ESCALATED_TO_CEO: [
     "FINAL_REVIEW", // 【补边】§7.2 步骤 8→9：CEO 批准上线后进入交付
   ],
-  BUDGET_PAUSED: [], // 规格未给出路（§7.4 预算硬停落地时必须补）
+  /**
+   * 【补边】§8.3 第二条把「触及预算硬停」列为升级触发条件，§7.4 又写明预算暂停的
+   * 三个按钮（追加预算 / 维持暂停 / 终止任务）出现在 CEO 的审批收件箱里 ——
+   * 两处合起来就是「暂停态必须能升到 CEO」。不补这条边，本仓会出现一个自相矛盾的组合：
+   * routing/escalation.ts 会为预算突破起草出一张卡片（budget_threshold 是它的触发条件之一），
+   * 而 canEscalateFrom("BUDGET_PAUSED") 判 false ⇒ 那张卡片【起草了却永远无法合法送达】。
+   * 起草成功、投递非法，比根本不起草更难发现：单测里卡片是好的。
+   *
+   * 仍缺的是【恢复边】。§7.4 只说「决策后 agent 从 Checkpoint 恢复」，没点名恢复到
+   * 哪个状态 —— 回 IN_REVIEW（接着被打断的审阅往下走）还是 IN_PROGRESS（当作重做一轮）
+   * 是两种不同语义，规格没给依据，这里不替它编（理由见文件头：编出来的恢复边会让
+   * 「非法跃迁」检查松掉）。CEO 点「追加预算」之后该怎么落状态，是一条待拍板项。
+   * 「维持暂停」不需要边：CEO 什么也不放行就是不跃迁，不该为此写一条重复状态的事件
+   * （自环一律非法，见 status-machine.test.ts 同名用例）。
+   */
+  BUDGET_PAUSED: ["ESCALATED_TO_CEO"],
   BLOCKED: [], // 规格未给出路（§7.3 心跳恢复落地时必须补）
   FINAL_REVIEW: ["DELIVERED"], // §7.1 778→779
   DELIVERED: ["ARCHIVED"], // §7.1 779→780

@@ -173,8 +173,20 @@ describe("非法跃迁（校验的存在意义全在这一段）", () => {
     // 这三条断言【不是】设计意图，是「规格没写恢复边」这一事实的快照。
     // 辩论会子图 / 预算硬停 / 心跳恢复各自落地时必须来改这张表，届时这里变红。
     expect([...legalTransitionsFrom("MEETING_REQUIRED")]).toEqual([]);
-    expect([...legalTransitionsFrom("BUDGET_PAUSED")]).toEqual([]);
     expect([...legalTransitionsFrom("BLOCKED")]).toEqual([]);
+  });
+
+  it("预算暂停态：升级边已补（Task 1.6 落地触发的对账），恢复边【仍未补】", () => {
+    // 本用例是上面那条「已知缺口快照」被自己装的那条绊线弄红的结果 ——
+    // 原话是「预算硬停落地时必须改这张表，届时本文件相应断言会红，逼人来对账」。
+    // Task 1.6 让 §7.4 硬停真的能触发了，于是红了一次，对账结论记在 status.ts 的边上：
+    // §8.3 第二条 + §7.4 的收件箱按钮 ⇒ 升级边有原文依据，补。
+    expect(isTaskTransitionLegal("BUDGET_PAUSED", "ESCALATED_TO_CEO")).toBe(true);
+    // §7.4「决策后 agent 从 Checkpoint 恢复」没点名恢复到哪个状态，所以恢复边仍缺席。
+    // 这一半缺口继续显式钉住：CEO 点「追加预算」之后落哪个状态，是一条待拍板项。
+    expect([...legalTransitionsFrom("BUDGET_PAUSED")]).toEqual([
+      "ESCALATED_TO_CEO",
+    ]);
   });
 
   it("未知状态名直接抛错，不与「非法跃迁」混为一谈", () => {
