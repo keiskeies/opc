@@ -173,6 +173,130 @@ export interface TickerOptions {
 
 export const DEFAULT_MAX_CONSECUTIVE_FAILURES = 3;
 
+/**
+ * 「有一件事在飞」这个状态本身（0036 §3）。
+ *
+ * ── 为什么这是一个独立的、显式的对象而不是一个 Promise 变量 ──────────
+ * 本仓为此付过一次代价（0025 §3 第 ③ 条）：`backupInFlight` 被一个局部同名声明遮蔽，
+ * 于是「关机时等一份在飞的备份」读到的永远是 null，**测试全绿**。
+ * 那一版的形状是「一个可能为 null 的 Promise 变量」，它的失效是【读不到】，
+ * 而读不到与「确实没有在飞的东西」在断言里长得一模一样。
+ *
+ * 所以这里把它做成一个有名字的对象，两个字段各自对应一条独立的性质：
+ *  · `inFlight`   ⇒ 「同一轮里会不会开出第二份」。挡住并发。
+ *  · `cancelling` ⇒ 「关机已开始后不再【开始】新的」。挡住关机之后的新一轮。
+ * 两者【不能合成一个】：一个说「有东西在跑，要等」，一个说「别再派新活」。
+ * 合成一个之后，「等到落地」与「不再派新活」两种处置在类型上分不开
+ * （与 0036 里 `run` / `failure` 那个分形、0031 §0 那个判决形状同一族）。
+ *
+ * 之所以住在 timer.ts 而不是 assemble.ts：它管的这件事（什么时候开始、要不要等）
+ * 与本模块管的「什么时候醒」是同一类【进程问题】，而文件头那段划的界线正是
+ * 「判定留业务模块，调度与生命周期归这里」。
+ */
+export type InFlightWatch<T> = {
+  /** 当前有没有在飞的任务。给「不许开出第二份」那一格用。 */
+  readonly inFlight: boolean;
+  /** 已进入关机。给「不再开始新的」那一格用。 */
+  readonly cancelling: boolean;
+  /**
+   * 进入关机。**必须在任何 await 之前调用**，否则「决定要派活」与「开始派活」之间
+   * 就还开着缝（0025 §3 第 ④ 条那一族）。
+   * @returns 是否真的进入了关机（false = 早就是了，调用方可据此知道自己是第二次叫）。
+   */
+  beginCancel(): boolean;
+  /**
+   * 等在飞的任务落地。**永不 reject**：这里等的是「别在它跑着的时候关资源」，
+   * 而不是「它得成功」。让一个失败从 settle 里冒出来，调用方就会面对
+   * 「要不要处理这个失败」这个它并不需要的决定（失败本来就有自己的出口）。
+   *
+   * ⚠ 「不 reject」不等于「没人说这句话」，它等于【说话的地方搬走了】：
+   * 派发动作必须自己接住失败并说出去（assemble.ts 的 reportBackupOutcome 就是这么干的）。
+   * 只读这一栏而不去看派发处，会得出「失败被吞了」这个结论 —— 而我写第一版时
+   * 就是这么以为的，并且差一点据此给 settle 加一个 onRejected 参数。
+   */
+  settle(): Promise<void>;
+  /**
+   * 派一件活。派不派得出去，以及【派不出去是因为哪一道门】。
+   *
+   * 两道门都在这个函数【里面】，而不是让调用方自己查：调两个地方就会有两个忘一处的那天
+   * （0036 §5 的 P-A / P-B 各拆一道门，都必须红）。
+   *
+   * ⚠ 为什么返回的是【原因】而不是 boolean：这里曾经同时存在【第三道门】
+   * （调用方自己写的一句 `if (watch.cancelling) return`），而我把那句删掉了 ——
+   * 不是因为嫌重复，是因为**它让 P-B 变成一发打不红的变异**：
+   * 删掉调用方那一句，start() 里面那道同样的门照样把它挡住，行为一字不差。
+   * 一个「补回来的守卫」如果拆掉不红，它就只是源码里的一句话（0025 §3 第 ③ 条同族）。
+   * 换成带原因的返回值之后：门只有一处，而【测试可以直接断言被拒的原因】，
+   * 于是「cancelling 真的在挡东西」这件事有一条打得红的用例。
+   *
+   * 返回值【必须被读】：拿到 started:false 而什么都不说，就是「备份没做成而日志一片干净」。
+   *
+   * ⚠ `task` 【不会在 start 这一行被调用】（理由见实现里那条微任务）。
+   * 所以闭包里读的外部变量取值于【微任务那一刻】而不是叫 start 那一刻 ——
+   * 这一条对调用方可见，所以写在类型上而不是只写在实现里。
+   */
+  start(task: () => Promise<T>): StartOutcome;
+};
+
+/** start 的结论。两个拒因必须【分开】，理由见 start 那一栏。 */
+export type StartOutcome =
+  | { readonly started: true }
+  | { readonly started: false; readonly reason: "cancelling" | "in_flight" };
+
+export function createInFlightWatch<T = unknown>(): InFlightWatch<T> {
+  let current: Promise<T> | null = null;
+  let cancelling = false;
+
+  const watch: InFlightWatch<T> = {
+    get inFlight() {
+      return current !== null;
+    },
+    get cancelling() {
+      return cancelling;
+    },
+    beginCancel() {
+      if (cancelling) return false;
+      cancelling = true;
+      return true;
+    },
+    start(task) {
+      // 两道门都在这里，而不是让调用方自己查：调两个地方就会有两个忘一处的那天，
+      // 而 P-A / P-B 那两发变异（0036 §5）分别拆掉一道门时都必须红。
+      // 顺序上 cancelling 在前：关机【同时】也让在飞的东西存在，那时正确的原因是
+      // 「别再派新活」而不是「有个活的在跑」—— 报反了会让人以为关机被一份备份卡住。
+      if (cancelling) return { started: false, reason: "cancelling" };
+      if (current !== null) return { started: false, reason: "in_flight" };
+      /**
+       * ⚠ 与上面 createTicker 那条【同一个坑】，形状也不同但病同源：
+       * `task()` 若是【同步抛】（或返回一个已 settle 的 promise），
+       * `.then/.catch` 链上的清理会在 `current = p` 之前跑完，
+       * 于是把一个【已经落地】的 promise 永久留在 current 上 ⇒
+       * 从此「不许开出第二份」那道门永远关着，备份/任务再也不跑，
+       * 而日志上看起来像「上一份还没完」。
+       * 修法照 ticker：让 task 的调用【推迟到微任务】，current 一定先落地。
+       */
+      const p = Promise.resolve()
+        .then(task)
+        .catch((): undefined => undefined)
+        .then(
+          (v): T => {
+            current = null;
+            return v as T;
+          },
+        );
+      current = p;
+      return { started: true };
+    },
+    settle() {
+      // current 可能为 null（没有在飞的东西）—— 那时这就是「不用等」，不是「等一个不存在的东西」。
+      // 与 0025 §3 第 ③ 条那条「await 一个永远为 null 的变量」的区别是：
+      // 这里 null 是【真的没有】而不是【读错了地方】，因为读的是闭包里的 current。
+      return current === null ? Promise.resolve() : current.then((): void => undefined);
+    },
+  };
+  return watch;
+}
+
 export function createTicker(o: TickerOptions): Ticker {
   if (!Number.isFinite(o.intervalMs) || o.intervalMs <= 0) {
     throw new Error("心跳间隔必须是正数毫秒，收到 " + String(o.intervalMs));

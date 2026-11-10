@@ -46,7 +46,17 @@ import { existsSync, writeFileSync } from "node:fs";
 import { basename } from "node:path";
 import type { HubDeps } from "../http/app.js";
 import type { HubServer } from "../http/server.js";
-import { backupNameToMs, createBackup, listBackups, type BackupResult } from "../db/backup.js";
+// createBackup（同步版）在这里【不再被 import】：心跳那一段改走 worker（0036）。
+// 同步版仍然活着并且有真消费方 —— maintenance.ts 那条 CLI 路径（那里没有别的东西
+// 会被它冻住，见 0036 §6 第 1 条）。这一行少一个 import 就是那次改动的形状本身。
+import {
+  backupNameToMs,
+  BackupWorkerThrewError,
+  createBackupOffLoop,
+  listBackups,
+  type BackupOffLoopOutcome,
+  type BackupOffLoopRequest,
+} from "../db/backup.js";
 import type { WriteQueue } from "../db/write-queue.js";
 import { newLocalToken } from "../http/auth.js";
 // bind.ts 是【纯字符串逻辑】：不 import http、不开 socket、不读库（import 方向定死为
@@ -79,7 +89,14 @@ import {
   releaseLock,
   type LockAcquire,
 } from "./lock.js";
-import { createTicker, REAL_SCHEDULER, type Scheduler, type Ticker } from "./timer.js";
+import {
+  createInFlightWatch,
+  createTicker,
+  REAL_SCHEDULER,
+  type Scheduler,
+  type StartOutcome,
+  type Ticker,
+} from "./timer.js";
 
 /**
  * 端口文件里就一个数字加一个换行。有别的格式就该改这里而不是让读侧猜。
@@ -126,6 +143,22 @@ export interface BootOverrides {
    * 本来也不该被用来断言绑定 —— 新加的那条用例自带一个记录第三参的替身）。
    */
   readonly serve?: (deps: HubDeps, port: number, bind: BindDecision) => Promise<HubServer>;
+  /**
+   * 备份的执行点（0036）。默认 `createBackupOffLoop` —— 生产走的就是默认值，
+   * 这一格【不是】给生产留的第二条路，是给测试留的可控窗口。
+   *
+   * 为什么必须可注入而不是让测试直接用真 worker：要钉的三条性质
+   * （「在飞的备份不许开出第二份」「关机时真的等到了落地」「cancelling 之后不再派新活」）
+   * 全都需要一个【停在半路】的备份，而真 worker 只给一个约 100ms 的窗口 ——
+   * 靠 sleep 撞窗口就是本仓反复拒绝的那种 flaky（timer.ts 文件头同一取舍）。
+   * 与 openQueue / serve 两格是同一个理由：注入的是【时机】，不是【结论】。
+   *
+   * ⚠ 注入的代价要如实说：走注入的用例【不证明】真 worker 能跑通 ——
+   * 那一条由 backup.test.ts 里那些走真 worker 的用例负责（含上面那条「主循环仍在推进」）。
+   */
+  readonly backupVia?: (req: BackupOffLoopRequest) => Promise<BackupOffLoopOutcome>;
+  /** 备份 worker 的超时上限覆盖。不传用 BACKUP_WORKER_TIMEOUT_MS。 */
+  readonly backupTimeoutMs?: number;
   readonly token?: string;
   /**
    * 心跳彻底停掉时的处置。生产传一个「结束进程」的动作（见 runServeCli）；
@@ -327,24 +360,49 @@ export async function boot(
   let server: HubServer | null = null;
   let heartbeat: Ticker | null = null;
   let succeeded = false;
-  let cleaned = false;
+  /**
+   * 在飞的备份（0036 §3）。两个字段各自是一条性质：
+   * `inFlight` ⇒ 不许开出第二份；`cancelling` ⇒ 关机已开始后不再【开始】新的。
+   *
+   * ⚠ 原来这里还有一个 `let cleaned = false`，本篇【把它删掉了】而不是再叠一道门。
+   * 理由不是嫌它多余：job 里那句 `if (cleaned) return` 与 `backupWatch.cancelling`
+   * 挡的是【同一件事】，而两道门挡同一件事的代价是**每一道单独拆掉都不红** ——
+   * 「补回来的守卫」会变成没人验过的守卫（0036 §5 开头那个「写成装饰」的形状）。
+   * 备份那一条路径上的状态因此只有 backupWatch 一个来源。
+   * 「清理是否已经跑过」这一格改由下面那条 `cleaning` promise 表示（它同时管
+   * 「只跑一次」和「第二个调用方也要等到清完」）。
+   */
+  const backupWatch = createInFlightWatch<void>();
 
   /**
    * 唯一的清理出口。成功时的 shutdown 与失败时的 finally 走【同一段代码】——
    * 分开的两份清理一定会漂移（漂移的形式是「失败路径少了某一步」）。
    *
-   * 这里【不再】有「等备份落地」那一步，而那是有意拿掉的，不是漏掉的：
-   * 备份现在在心跳那一轮里【同步】跑完（见下面 job 上面那整段），所以
-   * 「关机时有一份备份在进行」这个状态在本进程里【不存在】，
-   * 需要等的东西也就没有了。真正在跑的那一轮由 ticker 的 inFlight 表示，
-   * 而它由 ticker.stop() 与 shutdown 的顺序负责（先 stop 再关队列）。
-   * 如果将来备份挪进 worker（0025 §7），这一发必须【加回来】并且要能
-   * 覆盖「已经派发给 worker、还没回消息」那个窗口 —— 那才是缝真正存在的地方。
+   * ⭐ 备份挪进 worker 之后，「关机时有一份备份在飞」又成了【真实状态】（0036 §3），
+   * 所以「等它落地」这一步【跟着回来了】，而它带回来的是三样东西而不是一个 await：
+   *  ① 位置必须在 `queue.close()` 与还锁【之前】。写反的后果不是丢一份备份那么轻 ——
+   *    是「备份在一个已经没有锁的库上跑完」，那期间另一个 Hub 可以起开并写同一个库。
+   *  ② `beginCancel()` 必须在【任何 await 之前】。它是「不再派新备份」那道门，
+   *    而它一旦被推迟到 await 之后，「清理流程自己又派了一件要等的活」就重新成立了
+   *    —— 这一发是 0025 §3 第 ④ 条那一族的正主，所以下面三行的顺序整体是判据。
+   *  ③ `heartbeat?.stop()` 在 settle 之前：ticker 还在跑的话，等备份的那段时间里
+   *    照样能叫起新一轮巡检。
+   *
+   * ⚠ 为什么这里要【记住那条 promise】而不是只留一个 boolean：
+   * 加了 await 之后，`if (cleaned) return` 的语义从「清过了」变成【正在清、你别管】——
+   * 第二个调用方会在资源还没还完时就拿到 resolve。改之前 giveUp 里也有 await（server.close），
+   * 所以那一格【本来就漏】，只是那时 await 的东西都很短，看不出来。
+   * 现在 await 的是一份可能几秒的备份，所以把它补上：同一个清理只跑一次，
+   * 而叫它的人【都等到它跑完】。
    */
-  const giveUp = async (): Promise<void> => {
-    if (cleaned) return;
-    cleaned = true;
+  let cleaning: Promise<void> | null = null;
+  const giveUpInner = async (): Promise<void> => {
+    backupWatch.beginCancel();
     heartbeat?.stop();
+    // 等一份在飞的备份。settle() 永不 reject（rejection 在 watch.start 里面被吞掉，
+    // 而那句「备份没得出结论」由派发处自己 catch 之后说 —— 见 job 那里），
+    // 所以清理路径不会被一份备份的失败打断。
+    await backupWatch.settle();
     if (server !== null) {
       try {
         await server.close();
@@ -373,6 +431,13 @@ export async function boot(
         /* 清不掉不改变「本进程已经停了」这个事实 */
       }
     }
+  };
+  const giveUp = async (): Promise<void> => {
+    // 同步地占住这条 promise：`cleaning = giveUpInner()` 里的 giveUpInner
+    // 在【第一个 await 之前】是同步跑完的（timer.ts 那条同族的坑），
+    // 而这里靠的是「赋值发生在任何人第二次读之前」—— 同步路径上这一句一定先落地。
+    if (cleaning === null) cleaning = giveUpInner();
+    await cleaning;
   };
 
   try {
@@ -604,6 +669,16 @@ export async function boot(
       );
     }
 
+    /**
+     * 备份的执行点。默认 createBackupOffLoop（生产走这条），可注入的理由见 BootOverrides
+     * 那一栏。取到手【在 job 外面】：与 0025 §3 第 ② 条同一条纪律 ——
+     * job 里面不许出现【为了拿到一个函数而跨 await】的写法。
+     */
+    const backupVia =
+      o.backupVia ??
+      ((req: BackupOffLoopRequest): Promise<BackupOffLoopOutcome> =>
+        createBackupOffLoop(req));
+
     const backupDir = args.backupDir;
     if (backupDir === undefined && args.noBackup !== true) {
       // 这一句必须说。规格 §6.5 把每日备份当默认要求，而这里没配目录 ⇒
@@ -615,29 +690,25 @@ export async function boot(
       );
     }
 
-    // ⚠ 这一带【已经没有】backupInFlight 这个变量了 —— 它连同「关机时等一份在飞的备份」
-    // 一起被下面的同步改动作废（同步的东西没有缝，也就没什么可等的）。
-    // 我第一版在这里有一份【局部同名声明】遮蔽了外层那一个，于是 giveUp 里的
-    // 「等备份落地」读到的永远是 null —— 那是 §3 第 ③ 条，一条【测试全绿】的失效。
-    // 留这段话而不是删掉，是因为挪进 worker 之后这一格要【带着用例一起回来】（0025 §7 第 2 条）；
-    // 如果我直接删干净，下一个人只会看到一段同步代码，想不到它曾经缺过什么。
-    //
-    // ⚠⭐ 整段备份在【同步路径】上跑完，中间一个 await 都不许有。
-    // 我第一版写的是 async IIFE，里面先来一句 `await import("../db/backup.js")`。
-    // 那一版有两个缺陷，都不是「风格」问题：
-    //   ① 动态 import 在【模块已加载】时仍然会让出一个微任务。于是
-    //      `backupInFlight = (async () => …)()` 这一行的赋值发生在【备份真的开始之前】，
-    //      而 giveUp 读 backupInFlight 是【同步】读的 —— 那个缝里它读到 null，
-    //      于是不等、直接关队列，备份在队列已关之后才开始。
-    //      「等备份落地」这条保护就变成了一个【有时生效】的保护，而有时生效的保护
-    //      比没有保护更糟：它让写的人以为已经防住了。
-    //   ② 上面那个 `await lastBackupAtMs(...)` 是同一族的问题（它读目录 + 解析文件名，
-    //      被我写成 async 只是因为函数签名）。判定与执行之间跨了一个 await，
-    //      就意味着「判该备」与「开始备」之间可以插进一次关机。
-    // 修法是让这一段【整体同步】：createBackup / lastBackupAtMs 都在装配时就取到手，
-    // 这里不再 await。真要把备份挪出事件循环（一份大库是秒级），
-    // 唯一稳的形状是挪进 worker/子进程 —— 那时缝依然存在，只是变成「谁都能撞上」，
-    // 所以那时候要配的是一个显式的 cancelling 状态而不是这条同步路径。已登记 0025 §7。
+    /**
+     * ⭐ 备份那一段的形状（0036 §3，替掉了原来那段「整段同步、一个 await 都不许有」）。
+     *
+     * 原来那段的前提是「`createBackup` 是同步的 ⇒ 同步的东西没有缝」。
+     * 那句话当时是对的，而它换来的代价是一个实测数字：11.5MB 的库把主循环停 91ms
+     * （0036 §0）。本篇把备份挪进 worker，于是【前提没了】，而挂在它下面的两样东西
+     * —— 「不需要守卫」「不需要 cancelling 状态」—— 不会因前提变了而变红。
+     * 所以两样都补回来了，各自配一发能红的用例（0036 §5 的 P-A / P-B / P-C）。
+     *
+     * 不变的那一条是【范围收窄了】：原来要求「判定 → 落地」整段不跨 await，
+     * 现在只能要求【判定 → 派发】那一段不跨 await（派发之后本来就得跨，
+     * 因为备份的意义就是不在这儿等它）。「备完之后报一声」跨 await 是安全的
+     * （备份已经落地，没有东西可被插进来），这区别写在 0036 §7，
+     * 是为了别让下一个人把它当成同一格删掉。
+     *
+     * ⚠ 判定与派发之间仍然【一个 await 都不许有】：跨一个上去，
+     * 「判该备」与「开始备」之间就能插进一次关机（0025 §3 第 ④ 条本体）。
+     * 这一条由 assemble.test.ts 那条结构性守卫钉着（它跟着改了区间，不是被删掉）。
+     */
     const job = async (): Promise<void> => {
       const q = queue;
       if (q === null) throw new Error("心跳在队列关闭之后仍在跑（不该发生）");
@@ -650,33 +721,71 @@ export async function boot(
         io.warn("巡检：本轮新增停滞 " + r.stalled + " 个任务");
       }
       if (backupDir === undefined) return;
-      // 关机已经开始 ⇒ 不再【开始】一份新备份。
-      // 不挡住的后果很具体：giveUp 在 runPatrol 那个 await 期间跑完（关了队列、还了锁），
-      // 而这一轮回来之后照样去 VACUUM INTO —— 那是在一个【已经没有锁】的库上做备份，
-      // 另一个 Hub 可能正在写它。备出来的那份不算坏（WAL 给一致快照），
-      // 但「我已经停了」这件事从此不再为真，所以要挡在这里。
-      if (cleaned) return;
+      /**
+       * ⭐ 这里【原来】还有一句 `if (cleaned) return`（旧写法），本篇把它删了，
+       * 而删的理由本身就是本篇的一条结论：
+       * 我先是照旧写了一句「关机中就不派新活」，然后去做 P-B 那发变异
+       * （删掉这道门，期望「关机之后不再开始备份」那发红）—— 它【没红】。
+       * 因为 backupWatch.start() 里面还有【同一道门】，行为一字不差。
+       * 也就是说我「补回来的守卫」是一句【拆掉不红】的话，而那正是 0025 §3 第 ③ 条
+       * 给「测试全绿的失效」下的定义。
+       * ⇒ 门只留一处（在 start 里面，它同时是状态的唯一来源），
+       *   而调用方【读被拒的原因】并把该说的那句话说出来。
+       *   「cancelling 真的在挡东西」于是变成一条能红的用例（断言的是原因，不是文件数）。
+       */
+      // ⚠ lastBackupAtMs / shouldBackUp 都是【同步】函数，这里保持同步
+      // （0025 §3 第 ② 条：把它写成 async 只是因为签名，就在判定与执行之间开了缝）。
       if (!shouldBackUp(lastBackupAtMs(backupDir), scheduler.now())) return;
-      // 「上一份没写完就不再开一份」这一格今天【不存在】，而且是【不需要】：
-      // createBackup 是同步的 ⇒ job 走到这一行时上一份必然已经落地，
-      // 一个「永远为假」的判空只是让人以为有人管过这件事。
-      // ⚠ 我第一版在这里写过 `if (backupInFlight !== null) return`，而那份声明被
-      // 局部同名声明遮蔽（§3 第 ③ 条），所以那一版【既没有效、也没有测试能发现】。
-      // 挪进 worker/子进程的那天这一格【必须补回来】并且配一条真判「等待发生了」的用例
-      // —— 补回来的理由不是「回到旧写法」，而是那时真的会有一份在飞的备份（0025 §7 第 2 条）。
-      //
-      // ⚠ 这里【不假装】备份是并发的。`createBackup` 是同步函数（VACUUM INTO
-      // 在 SQLite 那一层就是同步的，maintenance.ts 也是直接调它），所以【这段时间
-      // HTTP 请求会停一拍】，一份大库是秒级。不粉饰成「不阻塞关键路径」。
-      // 它同时也就顺手满足了上面那条「关机时不可能有备份在进行」—— 同步的东西
-      // 没有缝。挪进 worker 是下一篇的事（0025 §7）。
-      const b = createBackup({
-        dbPath,
-        backupDir,
-        onWarning: (m: string): void => io.warn("备份告警：" + m),
-        ...(o.now === undefined ? {} : { now: o.now }),
+      /**
+       * ⭐ 传给 worker 的是【时刻】而不是【时钟】，而这一行是本篇最容易写错的一格。
+       *
+       * 相位判据上面用的是 `scheduler.now()`（测试里是假时钟），而备份文件名里的时刻
+       * 必须与它【同源】。不同源会怎样（本篇改完之后 assemble.test.ts 真红过一次）：
+       * 注入 2026-03-10 而 worker 用自己的墙钟 2026-11-10 命名 ⇒
+       * `shouldBackUp(2026-11-10, 2026-03-10)` 天天判「该备」⇒
+       * **每轮心跳重备一份**，把 7 份保留位被同一天挤满，把上周那份真备份挤掉。
+       * 所以这里取的是与相位判据同一个时钟源：注入的 now（有则优先）／scheduler.now。
+       *
+       * 为什么不是 `Date.now()`：生产上这两者与 scheduler.now 是同一个系统时钟，
+       * 取值一样；差别只在【注入存在的时候】—— 而那正是测试与回放的那一侧。
+       */
+      const atMs = (o.now ?? scheduler.now)();
+      const dispatched: StartOutcome = backupWatch.start(async (): Promise<void> => {
+        try {
+          const out = await backupVia({
+            dbPath,
+            backupDir,
+            nowMs: atMs,
+            ...(o.backupTimeoutMs === undefined ? {} : { timeoutMs: o.backupTimeoutMs }),
+          });
+          reportBackupOutcome(out, io);
+        } catch (e) {
+          // ⚠ 这一发 catch【必须在这里】而不是交给 watch：
+          // watch.start() 为了让 settle() 永不 reject 会【吞掉 rejection】（那是它的职责），
+          // 于是如果这里不接，「worker 里抛了」这件事就真的静默了 ——
+          // 而静默的备份失败正是 Task 6.3 明令禁止的那一条。
+          // 包成 { rejected } 而不是就地写一句 warn，是为了让【四种 + reject】这五种
+          // 结论的文案住在同一个函数里（reportBackupOutcome），不分散在两个 catch 里各写一半。
+          reportBackupOutcome({ rejected: e }, io);
+        }
       });
-      reportBackup(b, io);
+      if (!dispatched.started) {
+        // 两个拒因【分开处置】，而且这个分开本身是判据（把两支合成一句 warn，
+        // 「关机中被拒」与「上一份还在飞」就分不开了 —— 后者要人看，前者不用）。
+        if (dispatched.reason === "in_flight") {
+          // 【说出来】而不是静默跳过：静默跳过正是 0025 反复定义的最贵那类失效
+          // —— 备份没做成、日志一片干净、下一次出事才知道。
+          io.warn(
+            "本轮跳过备份：上一份还在飞。同一天里不该出现（每日一份），出现了说明" +
+              "备份比心跳间隔还慢 —— 那是库大到该担心的信号。",
+          );
+        }
+        // cancelling ⇒ 保持安静。理由不是「反正没人看」：
+        // 关机这件事在 shutdown 那条路径上已经说过话了，而 ticker 已 stop，
+        // 这一支最多数码上会发生一次（唯一那发【已经挂在半路】的轮次走到这里）。
+        // 在那儿加一句「因为关机所以没备」只会让人以为出了新事，
+        // 而真正该问的问题在【下一次启动】：那天到底备过没有（lastBackupAtMs 答）。
+      }
     };
 
     heartbeat = createTicker({
@@ -744,12 +853,82 @@ export async function boot(
   }
 }
 
-function reportBackup(b: BackupResult, io: ServeIo): void {
+/**
+ * 备份结论的【唯一】出口。
+ *
+ * ⚠ 四种形状一条都不许漏（0036 §7）：ran:true 里还分 ok / 不 ok，ran:false 里分
+ * 三类 worker 失效，外加一条【reject】。为什么 reject 要单独算一种：
+ * `createBackupOffLoop` 对「createBackup 自己抛了（keep 非法那一种）」是 reject，
+ * 而 `backupWatch.start()` 为了让 settle() 永不 reject 会把 rejection 吞掉
+ * （吞掉是【对的】—— 清理路径不该被一份备份的失败打断），
+ * 于是【这一层必须接住它】，否则它就真的静默了。
+ * 「watch 吞掉 rejection」这件事不是缺陷，但它把「谁负责说这句话」搬到了这里；
+ * 读 start() 的实现而没读到这里的人会以为没人说。
+ *
+ * ⚠ 三档语气各不相同，而且【不该统一】：
+ *  · ok ⇒ log（每天一条，是正常事件）
+ *  · createBackup 判失败 ⇒ warn（环境没坏，是备份这一步坏了）
+ *  · worker 没给出结论 ⇒ warn，但文案必须说清「【没拿到结论】不等于【备份失败】」
+ *    —— 那三种失效里有一份备份可能【已经落盘了】（worker 备完之后死在回话之前），
+ *    把它报成「备份失败」会让人去手动补一份，而真正该做的是看一眼目录。
+ */
+function reportBackupOutcome(
+  out: BackupOffLoopOutcome | { readonly rejected: unknown },
+  io: ServeIo,
+): void {
+  if ("rejected" in out) {
+    const e = out.rejected;
+    const warnings = e instanceof BackupWorkerThrewError ? e.warnings : [];
+    io.warn(
+      "备份【没有得出结论】：worker 里抛错 —— " +
+        (e instanceof Error ? e.message : String(e)) +
+        "\n→ 这不是「备份失败」，是「不知道有没有成」。先看 " +
+        "备份目录里最新那份的时刻，再决定要不要重备。" +
+        warnSuffix(warnings),
+    );
+    return;
+  }
+  if (!out.ran) {
+    io.warn(
+      "备份【没有得出结论】（" +
+        out.failure +
+        "）：" +
+        out.message +
+        "\n→ 与「备份失败」不同：这里连结论都没拿到，" +
+        "目录里可能已经有一份落地的备份。今天这一格按【没备过】算 ⇒ 下一轮心跳会再试一次。" +
+        warnSuffix(out.warnings),
+    );
+    return;
+  }
+  for (const w of out.warnings) io.warn("备份告警：" + w);
+  const b = out.result;
   if (b.ok) {
-    io.log("备份完成：" + b.path + "（" + b.bytes + " 字节，events " + b.eventsInBackup + " 行）");
+    io.log(
+      "备份完成：" +
+        b.path +
+        "（" +
+        b.bytes +
+        " 字节，events " +
+        b.eventsInBackup +
+        " 行，worker " +
+        out.workerMs +
+        "ms / 含冷启动 " +
+        out.totalMs +
+        "ms）",
+    );
   } else {
     io.warn("备份失败（" + b.reason + "）：" + b.message);
   }
+}
+
+/** worker 里攒下的告警。一条都不许丢：Task 6.3 那条「备份静默失败等于没有备份」的验收。 */
+function warnSuffix(warnings: readonly string[]): string {
+  return warnings.length === 0
+    ? ""
+    : "\n→ worker 里还告过 " +
+        warnings.length +
+        " 条：" +
+        warnings.map((w) => w.slice(0, 200)).join(" / ");
 }
 
 /**

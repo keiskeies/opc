@@ -40,24 +40,20 @@ import { requireScopeDb } from "../checkpoint/tx-scope.js";
 import { AUDIT_ACTIONS, type AuditAction } from "../events/recorder.js";
 import type { Writer } from "./write-queue.js";
 import { isPageOk, reportText } from "./page-check.js";
+import { selfWorkerUrl } from "./worker-entry.js";
 
 /**
  * worker 入口地址：把【我自己】的后缀换成 .worker<同后缀>。
  *
- * 三条实测决定的写法（0018 §1 第 4、5 条）：
- *  - `new URL("./integrity.worker.js", import.meta.url)` 在源码态【加载失败】
- *    （"Cannot find module …integrity.worker.js"）。worker 是【入口】，
- *    入口解析没有 parentURL，仓库那条 .js→.ts 解析钩子接不上。
- *  - `.ts` 那个名字在源码态可用（type-stripping 直接吃 .ts 入口），
- *    但编译产物里没有那个文件。
- *  - 所以正确形状是【由自己的 URL 推】：integrity.ts → integrity.worker.ts，
- *    integrity.js → integrity.worker.js。一个表达式同时覆盖两态，
- *    而不是写两个候选再 catch —— 两个候选的那发 catch 会把「入口真丢了」也咽下去。
- * 全仓只允许这一处由自己的扩展名推导 worker 入口，由 integrity.test.ts ⑦ 钉住。
+ * 三条实测决定的写法（0018 §1 第 4、5 条）写全在 ./worker-entry.ts 里，这里不重述。
+ * ⚠ **本节原本是内联那串 `import.meta.url.replace(...)`，并注明「全仓只允许这一处」。**
+ * 0036 §2 量的事实是：那条断言只看 `src/db/integrity.ts` 一个文件，
+ * 所以「全仓只有一处」当时【没有任何东西守着】。现在推导式收进 worker-entry.ts
+ * 由两个 worker（本文件 + backup.ts 那个备份 worker）共用，
+ * 「只有一处」改由 test/db/integrity.test.ts ⑦ 扫全部 src 下的 ts 文件守着 ——
+ * 含推导式的文件恰好一个，就是 worker-entry.ts。
  */
-const WORKER_URL: URL = new URL(
-  import.meta.url.replace(/\.(ts|js|mts|mjs)$/u, ".worker.$1"),
-);
+const WORKER_URL: URL = selfWorkerUrl(import.meta.url);
 
 /** 一次 worker 扫描的等待上限。超时按【失败】处理，不按【没查出问题】处理。 */
 export const INTEGRITY_WORKER_TIMEOUT_MS = 120_000;

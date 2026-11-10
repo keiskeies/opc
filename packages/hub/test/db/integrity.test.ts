@@ -25,8 +25,8 @@
  * 与 backup.test.ts 同一条理由：这里要验的东西（触发器、FTS、外键）
  * 全是【真 schema 的行为】，手搓表会让检查项对着一个不存在的世界给出漂亮结论。
  */
-import { mkdirSync, rmSync, copyFileSync, openSync, ftruncateSync, fstatSync, closeSync, existsSync, readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { mkdirSync, rmSync, copyFileSync, openSync, ftruncateSync, fstatSync, closeSync, existsSync, readFileSync, readdirSync } from "node:fs";
+import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { fixtureTmp } from "../fixtures/fixture-dir.js";
@@ -848,18 +848,94 @@ describe("⑦ 结论集合本身", () => {
     expect(CHECK_VERDICTS).toHaveLength(4);
   });
 
-  it("worker 入口的推导式在源码里只出现一次", () => {
+  it("worker 入口的推导式全仓只出现在一处", () => {
     // worker 入口靠剥掉自己扩展名再拼 .worker<同扩展名> 得到，
     // 这样源码态（.ts）与构建产物（.js）都能解析。
     // 这个技巧【只能有一处】：第二处出现就意味着有人在别处猜扩展名。
-    const text = readFileSync(join(HUB, "src", "db", "integrity.ts"), "utf8");
-    const hits = text.match(/import\.meta\.url\.replace/gu) ?? [];
-    expect(hits).toHaveLength(1);
+    //
+    // ⚠ **这一发原来只读 src/db/integrity.ts 一个文件**，而它旁边的注释写的是
+    // 「全仓只允许这一处」—— 一条声称管全仓的不变量，配一条只看一个文件的断言，
+    // 第二处出现在任何别的文件里它都看不见。0036 §2 加第二个 worker 入口（备份）时
+    // 量的就是这件事；修法不是「再补一发只看 backup.ts 的断言」（那只是把同一个洞
+    // 复制两份，而两份都会漏第三个文件），是把射程换成【真的全仓】。
+    //
+    // ⚠⚠ 换成全仓之后【第一次跑就红，而红的是注释】：原来的判据是
+    // `/import\.meta\.url\.replace/`，而我在 integrity.ts 里留了一段话记录
+    // 「本节原本是内联那串 import.meta.url.replace(...)」—— 那段话本身就含这几个字。
+    // 更难看的是同一发**在另一个方向上本来就不成立**：推导式搬进 worker-entry.ts 之后，
+    // 那里那一行写的是 `callerUrl.replace(CALLER_EXT, ".worker.$1")`，
+    // **不含 import.meta.url**，所以那个正则【匹配不到真正的代码】。
+    // 一个既看不见目标、又看得见散文的判据，只要有人把那段注释删掉，
+    // 就会「绿」成【全仓零处推导式】的样子 —— 而那正是它最想抓的情形。
+    // ⇒ 判据不能拿【当年那行代码的字面】当特征，要拿【这件事的形状】当特征：
+    //   同一行里既有一次 .replace( 调用、又有一个 .worker. 那个替换目标。
+    // 这是「判据写在名字里、射程写在实现里」（0036 §2）之外同一发上的第二个坑：
+    // **把判据搬进新射程时，特征是照着旧代码写的，而旧代码正是被搬走的那个东西。**
+    const deriveLine = (line: string): boolean =>
+      line.includes(".replace(") && line.includes(".worker.");
+
+    // 判据自己的正向自检。缺了它，上面那个谓词写成恒 false 也能靠「hits 恰好为空」
+    // 在这一发里蒙过一次（`toEqual([])` 会红，但下一次有人把 expect 也顺手放宽就绿了）；
+    // 更直接的理由是：这一发要守的是【有没有第二处】，而它自己必须先证明
+    // 「第二处如果存在，我认得出来」。
+    expect(
+      deriveLine('  const W = new URL(import.meta.url.replace(/x/u, ".worker.$1"));'),
+      "判据必须认得出「有人把推导式重新内联回来」那一行",
+    ).toBe(true);
+    // 反向对照：一句提到这件事的散文不许命中（本篇撞的就是它）。
+    expect(
+      deriveLine(" * 本节原本是内联那串 import.meta.url.replace(...)，注明全仓只允许一处"),
+      "判据不许把历史叙述当成第二处推导式",
+    ).toBe(false);
+    const srcDir = join(HUB, "src");
+    const files: string[] = [];
+    const walk = (dir: string): void => {
+      for (const e of readdirSync(dir, { withFileTypes: true })) {
+        // 与 doc-refs.ts 同一份跳过口径：dist 是产物（里面【必然】有 .js 版的推导式，
+        // 那是同一次编译的复制品而不是「第二处有人猜扩展名」，数它会恒红）。
+        if (e.name === "node_modules" || e.name === "dist" || e.name === ".tmp") continue;
+        const p = join(dir, e.name);
+        if (e.isDirectory()) walk(p);
+        else if (e.name.endsWith(".ts")) files.push(p);
+      }
+    };
+    walk(srcDir);
+    // 装配自检（0006 §7 第 21、22 条）：扫不到文件就等于「零处推导式」，
+    // 而那是【判据坏了】伪装成【不变量成立】。src 下今天有几十个 ts 文件，20 是下限。
+    expect(files.length).toBeGreaterThanOrEqual(20);
+
+    const hits = files
+      .map((f) => ({
+        rel: relative(HUB, f).replace(/\\/gu, "/"),
+        n: readFileSync(f, "utf8")
+          .split("\n")
+          .filter((line) => deriveLine(line)).length,
+      }))
+      .filter((r) => r.n > 0);
+    // 【恰好一个文件】含它，而那个文件必须是 worker-entry.ts ——
+    // 只断言「总数 1」是不够的：有人把推导式从 worker-entry.ts 抄进 backup.ts 之后
+    // 删掉原来那份，总数还是 1，而「只有一处」已经从【结构上】退化成【今天碰巧】。
+    expect(hits.map((h) => h.rel)).toEqual(["src/db/worker-entry.ts"]);
+    expect(hits[0]?.n).toBe(1);
+
+    // 两个消费者各【调用一次】那个共用函数。为什么这条要单独钉：
+    // 上面那条只保证「推导式在一处」，它【不保证任何人真的在用】——
+    // 有人把 backup.ts 那行调用删掉、改回内联，上面那条会红（因为内联就是第二处），
+    // 而有人改成写死路径时上面那条【不红】（写死路径里没有 .replace）。
+    // 这一发堵的就是那一支：调用次数从 1 变 0，或变成 2（自己又推一次），都红。
+    for (const consumer of ["src/db/integrity.ts", "src/db/backup.ts"]) {
+      const text = readFileSync(join(HUB, consumer), "utf8");
+      const calls = (text.match(/selfWorkerUrl\(/gu) ?? []).length;
+      expect(calls, consumer).toBe(1);
+    }
+
     // 拼回去的时候要【补回那个点】。第一版写成 ".worker$1"，
     // 于是解析出 integrity.workerts —— 而 worker 起不来是【有兜底分支】的
     // （报 worker_unavailable / worker_error），所以这个洞不会让任何东西变红：
     // 全部「走 worker」的用例其实都走的是失败分支，而它们照样绿。
-    // 这一发就是那个洞的锁。
-    expect(text).toContain('".worker.$1"');
+    // 这一发就是那个洞的锁。断言的对象跟着推导式一起搬到 worker-entry.ts。
+    expect(readFileSync(join(HUB, "src", "db", "worker-entry.ts"), "utf8")).toContain(
+      '".worker.$1"',
+    );
   });
 });

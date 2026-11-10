@@ -53,11 +53,15 @@ import { openDb } from "../../src/db/driver.js";
 import { openReadonlyDb, openSnapshotReadonlyDb } from "../../src/db/pragmas.js";
 import { migrate } from "../../src/db/migrate.js";
 import {
+  BACKUP_FAILURE_REASONS,
   BACKUP_PREFIX,
   BACKUP_SUFFIX,
+  BACKUP_WORKER_FAILURES,
   KEEP_BACKUPS,
+  BackupWorkerThrewError,
   backupName,
   createBackup,
+  createBackupOffLoop,
   isBackupName,
   isSamePath,
   listBackups,
@@ -897,5 +901,335 @@ describe("⑥ 恢复演练：备份成功 ≠ 恢复可用", () => {
     // 因为 macOS 的大小写不敏感只发生在真 open 的时候，而这里是纯字符串归一化。
     // 宁可多拦一次：这里错的方向是「拒绝跑演练」，不是「跑错文件」。
     expect(isSamePath("/a/B.db", "/a/b.db")).toBe(false);
+  });
+});
+
+/**
+ * ⑦ 备份挪出事件循环（0036，`createBackupOffLoop`）。
+ *
+ * ── 这一节与上面六节的【分工】──────────────────────────────────────
+ * 上面六节测的是「一次备份对不对」，这一节测的是「一次备份【在主线程之外】跑完之后
+ * 那些性质还在不在」，加上一条【新的】：主线程一毫秒都不许停。
+ * 所以这一节里有几条是上面那几条的【异步版复制品】（比如「产物要能打开」）。
+ * 那不是重复：同步版绿不蕴含异步版绿 —— 两条路走的是【不同的拼装代码】
+ * （一条直接调 createBackup，一条要过 postMessage 的边界）。
+ * 而边界的两侧各有一份拼装：主线程拼 workerData，worker 拼 BackupRequest。
+ * **任何一处漏一个字段，症状都是「注入被静默丢掉」而不是报错**，
+ * 这正是这一节存在的理由（本篇撞过一次：nowMs 在主线程带了、worker 拼装时没往下传）。
+ *
+ * ── 三条【这一节证不了】的事，先说在前面 ──────────────────────────
+ *  · 证不了 worker 起不来时的行为（入口由 import.meta.url 推导，本机造不出「入口丢了」；
+ *    integrity.test.ts ① 那一节撞过同一格，那里退成了「库路径不存在」的可达一半）。
+ *  · 证不了「真卡住的备份会在 N ms 被打断」—— 超时那发是 timeoutMs: 0 造的，
+ *    它证的是【超时会被判失败而不是判通过】。
+ *  · 证不了 worker 被 terminate 而【不退进程】这件事（第四条通道 exit）——
+ *    今天没有任何路径走到那里，见 backup.ts 那一支上面的注释。
+ */
+describe("⑦ 备份在 worker 里跑（0036）", () => {
+  /** 一个够大的库：够到「同步跑会明显停一拍」的量级，否则下面那发恒绿。 */
+  function bigDb(rows: number): string {
+    const path = migratedDb(rows);
+    // 用自家 schema 翻倍（不能 UPDATE，append-only 触发器会拒；integrity.test.ts 撞过）。
+    for (let k = 0; k < 3; k++) {
+      const db = openDb(path);
+      opened.push(db);
+      db.exec(
+        "INSERT INTO events (task_id, actor_type, actor_id, action, payload, state_snapshot, created_at) " +
+          "SELECT task_id, actor_type, actor_id, action, " +
+          "json_set(payload, '$.pad', '一撑大页面规模的中文串' || id), '{}', created_at + id FROM events",
+      );
+      db.exec("PRAGMA wal_checkpoint(TRUNCATE)");
+      db.close();
+    }
+    return path;
+  }
+
+  it("⭐ 备份期间【主线程仍在推进】；而同步版会把主线程停住（反向对照）", async () => {
+    /*
+     * 这一发是 0036 的【全部理由】，所以它必须是一条【行为】判据而不是源码形状：
+     * 「是不是 new Worker」这种断言在实现换成 worker 线程池 / 子进程的那天就会误红，
+     * 而真正要的性质是「这段时间主循环没停」。与 integrity.test.ts ① 同一立场。
+     *
+     * ⚠ 判据的形式值得说一句：我第一版写成「ticks > 0」，那太松 ——
+     * 一个只停 3ms 的实现照样过。所以这里比的是【同一份库上同步版与异步版的差距】：
+     * 同步那一次【必须】停得住（ticks 少），异步那一次【必须】停不住（ticks 多几倍）。
+     * 这样「库不够大」会让第一发红（而不是让整发白绿）。
+     */
+    const path = bigDb(4_000); // 4000 × 8 = 32000 行，实测约 37MB / 同步备份 500ms 级
+    const dir = join(TMP, "offloop-" + ++seq);
+
+    const probe = async (
+      run: () => Promise<unknown>,
+    ): Promise<{ ticks: number; maxGap: number }> => {
+      let ticks = 0;
+      let last = Date.now();
+      let maxGap = 0;
+      const timer = setInterval(() => {
+        const now = Date.now();
+        maxGap = Math.max(maxGap, now - last);
+        last = now;
+        ticks++;
+      }, 5);
+      await run();
+      clearInterval(timer);
+      return { ticks, maxGap };
+    };
+
+    const offLoop = await probe(async () => {
+      const r = await createBackupOffLoop({ dbPath: path, backupDir: join(dir, "w") });
+      expect(r.ran).toBe(true);
+      if (r.ran) expect(r.result.ok).toBe(true);
+    });
+    const sync = await probe(async () => {
+      const r = createBackup({
+        dbPath: path,
+        backupDir: join(dir, "s"),
+        onWarning: () => {},
+      });
+      expect(r.ok).toBe(true);
+    });
+
+    /**
+     * ⚠ 【没有】断言「offLoop.maxGap < sync.maxGap」，而那不是疏忽。
+     * 我第一版就是这么写的，它【红】：同步那一次在主线程上跑，探针根本没法在它内部采样，
+     * 于是 sync.maxGap 恰好等于整次备份时长（500ms 级），而 offLoop 的 gap 只有几十 ms ——
+     * 断言方向是对的，但【ticks 那一维】才是稳的：同步期间一次都不 tick。
+     * 改成「同步期间几乎不 tick、异步期间明显更多」之后，它测的还是同一件事，
+     * 而不再依赖两个数值的相对大小（那两个数都随机器负载漂）。
+     */
+    expect(
+      offLoop.ticks,
+      "worker 版备份期间主线程定时器一次都没推进 ⇒ 判据多半还在主线程上（offLoop " +
+        offLoop.ticks +
+        " / sync " +
+        sync.ticks +
+        "，offLoop maxGap " +
+        offLoop.maxGap +
+        "ms）",
+    ).toBeGreaterThan(0);
+    expect(
+      offLoop.ticks,
+      "异步版的 ticks 不比同步版多 ⇒ 库不够大，同步那一次根本没停住主线程 ⇒ 这一发白绿"
+      ).toBeGreaterThan(sync.ticks);
+  });
+
+  it("worker 备出来的那份【不是二等备份】：另一条连接打得开、integrity_check 过、行数一致", async () => {
+    const path = migratedDb(37);
+    const dir = join(TMP, "offloop-valid-" + ++seq);
+    const r = await createBackupOffLoop({ dbPath: path, backupDir: dir });
+    expect(r.ran).toBe(true);
+    if (!r.ran) return;
+    expect(r.result.ok).toBe(true);
+    if (!r.result.ok) return;
+    expect(existsSync(r.result.path)).toBe(true);
+    // 与同步版【同一条】判据：开一条只读连接跑 integrity_check。
+    const probe = openSnapshotReadonlyDb(r.result.path);
+    try {
+      const rows = probe.prepare("PRAGMA integrity_check").all() as {
+        integrity_check: string;
+      }[];
+      expect(rows).toHaveLength(1);
+      expect(rows[0]?.integrity_check).toBe("ok");
+    } finally {
+      probe.close();
+    }
+    // 而且它能【真的被恢复】—— 走的是上面 ⑤ 那一节同一条路径，不是另搓一份。
+    const target = join(dir, "restored.db");
+    const back = restoreBackup({ backupPath: r.result.path, targetPath: target });
+    expect(back.ok).toBe(true);
+  });
+
+  it("⭐ 注入的时刻【必须】跟着进 worker：文件名用的是它，不是墙钟", async () => {
+    /*
+     * 这一发守的是本篇最容易「悄悄丢掉」的一格，而且它【本来不存在】——
+     * 我起初把「注入的时钟跨不过 worker 边界」当成一条限制登记下来（0036 §4 原话），
+     * 而那句话只对一半：过不了的是【函数】，now 的【返回值】是个 number。
+     *
+     * 丢掉它的症状不是报错，是【相位判据与文件名不同源】：
+     * serve 那边用假时钟判「今天备过了吗」，而文件名用的是真墙钟 ⇒
+     * 每个心跳都判「该备」⇒ 每天挤满保留位、把上周那份真备份挤掉。
+     * 所以这里断的是【文件名本身】，不是返回值里那个字段
+     * （返回值里的 createdAtMs 与文件名是同一处算出来的，断文件名才断到落盘结果）。
+     */
+    const path = migratedDb(5);
+    const dir = join(TMP, "offloop-now-" + ++seq);
+    const injectedMs = Date.UTC(2026, 2, 10, 1, 2, 3, 4);
+    const r = await createBackupOffLoop({ dbPath: path, backupDir: dir, nowMs: injectedMs });
+    expect(r.ran).toBe(true);
+    if (!r.ran) return;
+    expect(r.result.ok).toBe(true);
+    if (!r.result.ok) return;
+    expect(r.result.path.endsWith(backupName(injectedMs))).toBe(true);
+    // 反向对照：不注入时【不该】是这个时刻（否则上面那发可能只是恒成立）。
+    const plain = await createBackupOffLoop({ dbPath: path, backupDir: join(dir, "plain") });
+    expect(plain.ran).toBe(true);
+    if (!plain.ran) return;
+    if (plain.result.ok) {
+      expect(plain.result.path.endsWith(backupName(injectedMs))).toBe(false);
+    }
+  });
+
+  it("nowMs 不合法 ⇒ 抛，而不是【当作没传】用墙钟", async () => {
+    // 「当作没传」是这一格里唯一会静默的方向：调用方以为注入生效了。
+    // 与 §4 那条「传了函数被悄悄丢掉」同族，只是入口换成了「传了个坏值」。
+    for (const bad of [1.5, -1, Number.NaN, "1700000000000"]) {
+      await expect(
+        createBackupOffLoop({ dbPath: "/nope.db", backupDir: TMP, nowMs: bad as never }),
+      ).rejects.toThrow(TypeError);
+    }
+  });
+
+  it("⭐ 传了 now / onWarning ⇒ 当场抛并指路，而不是带进 worker 后失效", async () => {
+    // 类型上这两个字段已经不存在了（Omit），所以只有 JS / as any 能走到这里。
+    // 而这一发【必须】有：类型挡得住编译器，挡不住「传了却完全不生效」那一种静默。
+    const path = migratedDb(3);
+    const dir = join(TMP, "offloop-fn-" + ++seq);
+    for (const extra of [{ now: () => 1 }, { onWarning: () => {} }]) {
+      await expect(
+        createBackupOffLoop({ dbPath: path, backupDir: dir, ...(extra as never) }),
+      ).rejects.toThrow(/函数不能过 worker 边界/u);
+    }
+    // 两个都传 ⇒ 两个都要在报错里点名（只报第一个会让人改完一个再撞第二个）。
+    await expect(
+      createBackupOffLoop({
+        dbPath: path,
+        backupDir: dir,
+        now: () => 1,
+        onWarning: () => {},
+      } as never),
+    ).rejects.toThrow(/now.*onWarning|onWarning.*now/u);
+  });
+
+  it("超时按【失败】处理，不按「没跑完 = 大概成了」处理", async () => {
+    const path = migratedDb(50);
+    const r = await createBackupOffLoop({
+      dbPath: path,
+      backupDir: join(TMP, "offloop-timeout-" + ++seq),
+      timeoutMs: 0,
+    });
+    expect(r.ran).toBe(false);
+    if (r.ran) return;
+    expect(r.failure).toBe("worker_timeout");
+    // 超时那一支【拿不到】worker 攒的告警（它没来得及回话）。空数组不等于「没有告警」，
+    // 这一点在实现里写了注释，这里钉成断言：别让下一个人把它当成「worker 里没出事」。
+    expect(r.warnings).toEqual([]);
+    // 反向对照：worker_timeout 必须【不在】createBackup 自己的失败枚举里 ——
+    // 两个维度混用会让人以为同步版也可能返回它（它结构上不可能）。
+    expect(BACKUP_FAILURE_REASONS as readonly string[]).not.toContain("worker_timeout");
+    expect(BACKUP_WORKER_FAILURES as readonly string[]).toContain("worker_timeout");
+  });
+
+  it("keep 非法 ⇒ reject 且【保留原文】，不压成一条 reason", async () => {
+    /*
+     * 这一发钉的是本篇一个【写错过的地方】：我第一版把 worker 里的抛错压成
+     * `reason: "verify_failed"`，理由是「总得给调用方一个 reason」。
+     * 那句错的代价是【不对症】：verify_failed 的既有语义是「产物落盘了而 integrity_check 不过」，
+     * 读它会去查一份并不存在的产物，而真正要改的是调用参数（0032 §0 同一条）。
+     * ⇒ 「抛」这一支不带 reason，只带原文，并且走 reject（与同步版只差一个通道）。
+     */
+    const path = migratedDb(3);
+    const e = await createBackupOffLoop({
+      dbPath: path,
+      backupDir: join(TMP, "offloop-keep-" + ++seq),
+      keep: 0,
+    }).then(
+      () => null,
+      (x: unknown) => x,
+    );
+    expect(e).toBeInstanceOf(BackupWorkerThrewError);
+    // 原文里必须还留着 keep 那句（它教人怎么改）。被压成枚举的话这里就没有了。
+    expect(String((e as Error).message)).toContain("keep 必须是 >= 1 的整数");
+  });
+
+  it("⭐ 备份【成功】而清理失败时，告警原样带回而结论仍是 ok:true", async () => {
+    /*
+     * 这一发是本篇【最贵的一条】，因为它防的是我自己写过的那个错。
+     *
+     * 第一版 backup.worker.ts 里 `onWarning` 直接 throw，配的论证是
+     * 「createBackup 每条告警之后都紧跟一条 ok:false，所以消息不会丢」——
+     * 那句【是假的】：pruneBackups 失败那一条告警之后返回的是 ok:true
+     * （「备份成功但清理旧备份失败」，那份备份确实可用）。
+     * 于是那一版把一份【已经成功】的备份报成失败 ⇒ 调用方再备一次 ⇒ 目录越堆越厚，
+     * 而那正是保留策略要防的事。
+     *
+     * 造法不需要 chflags / chmod：一个【目录】占用备份名就够了 ——
+     * pruneBackups 只删名字匹配 BACKUP_NAME 的条目，而 rmSync(目录) 抛 EISDIR。
+     * （比改权限好：那条在 root / CI 容器里会静默不生效，变成一条白绿的用例。）
+     */
+    const path = migratedDb(9);
+    const dir = join(TMP, "offloop-prune-" + ++seq);
+    mkdirSync(dir, { recursive: true });
+    const squatter = join(dir, backupName(Date.UTC(2026, 0, 1)));
+    mkdirSync(squatter); // 一个占着备份名的目录 = prune 删不掉它
+    const r = await createBackupOffLoop({ dbPath: path, backupDir: dir, keep: 1 });
+    expect(r.ran).toBe(true);
+    if (!r.ran) return;
+    // ⭐ 结论必须是【成功】。把它报成失败就是本篇第一版那个缺陷本体。
+    expect(r.result.ok).toBe(true);
+    // 而告警一条都不能少 —— 静默掉那一条，就没人知道目录在超出保留位。
+    expect(r.warnings).toHaveLength(1);
+    expect(r.warnings[0] ?? "").toContain("清理旧备份失败");
+  });
+
+  it("worker 线程装配错（workerData 少字段）⇒ worker_error 且带原文", async () => {
+    // 这一支测的是【环境/装配】层的失效，与 worker_unavailable 同一类（结论没拿到），
+    // 所以它是 resolve 成 ran:false 而不是 reject —— 与上面 keep 那一发【刻意不同】：
+    // 那里是「业务上不许继续」，这里是「这一轮没跑成，下一轮再试」。
+    // 两批发酵成不同的形状，是因为调用方的处置动作不同（改代码 vs 等下一次）。
+    const dir = join(TMP, "offloop-werr-" + ++seq);
+    const r = await createBackupOffLoop({ dbPath: 42 as never, backupDir: dir });
+    expect(r.ran).toBe(false);
+    if (r.ran) return;
+    expect(r.failure).toBe("worker_error");
+    expect(r.message).toContain("backup.worker 没收到 dbPath");
+    expect(BACKUP_WORKER_FAILURES as readonly string[]).toContain("worker_error");
+  });
+
+  it("⚠ worker 入口【被主线程 import】时必须抛（不得静默什么都不做）", async () => {
+    // 抄 integrity.worker 那三条约束里的第 1 条：被主线程 import 时静默返回
+    // = 一次备份从未发生而没人报错。这里是 P-E 那一发变异的落点。
+    // 只能【动态 import】：静态 import 会直接让本文件炸掉。
+    await expect(import("../../src/db/backup.worker.js")).rejects.toThrow(
+      /被主线程 import 了/u,
+    );
+  });
+
+  it("⭐ backup.ts 的模块图【不含框架】—— worker 入口能不能加载起来的前提", () => {
+    /*
+     * worker 拿到的是主线程的 execArgv 而【不是】它的模块图。
+     * backup.worker.ts 只 import ./backup.js，所以 backup.ts 一旦顺手 import 了
+     * 一个认识 @langchain 的东西，这个入口就会在缺那几个包时【连加载都做不到】
+     * （本机就缺，0009 §2），于是「每日备份」这块的可验证性由 import 图决定。
+     *
+     * 为什么按【import 语句】数而不是按 import 图递归解析：
+     * 递归解析要把整张图算出来（得依赖打包器或 tsc 的 API），而这里要防的只是
+     * 「有人在本文件顶部加了一行 import」。0033 §3 那条「只有 import 形态能表达的约束
+     * 要用 import 表达」在这里的可执行版本就是：数行首的 import。
+     */
+    const text = readFileSync(join(HUB, "src", "db", "backup.ts"), "utf8");
+    const imports = text
+      .split("\n")
+      .map((l) => l.trim())
+      .filter((l) => l.startsWith("import "))
+      .join("\n");
+    for (const bad of ["@langchain", "graph/", "http/app", "roles/"]) {
+      expect(imports, "backup.ts import 了 " + bad + " ⇒ worker 入口会变重到加载不了").not.toContain(
+        bad,
+      );
+    }
+    // 反向对照：这条扫描必须真的【看得见】import 行，否则「不含 X」可能只是
+    // 「我把过滤条件写错了，一条都没捞到」。node:sqlite 是 backup.ts 一定有的依赖。
+    expect(imports).toContain("node:sqlite");
+    // worker 入口自己的运行时 import 也钉住：它【只】能要 worker_threads 与 backup.js。
+    // 那两个之外的每一个（哪怕看起来无害）都让入口在缺包时加载不了。
+    const wtext = readFileSync(join(HUB, "src", "db", "backup.worker.ts"), "utf8");
+    const runtimeImports = wtext
+      .split("\n")
+      .map((l) => l.trim())
+      .filter((l) => l.startsWith("import ") && !l.startsWith("import type "))
+      .join("\n");
+    expect(runtimeImports).toContain("node:worker_threads");
+    expect(runtimeImports).toContain("./backup.js");
+    expect(runtimeImports.split("import ").length - 1).toBe(2);
   });
 });

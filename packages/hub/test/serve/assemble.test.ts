@@ -52,7 +52,7 @@ import type { DatabaseSync } from "node:sqlite";
 import type { HubDeps } from "../../src/http/app.js";
 import type { HubServer } from "../../src/http/server.js";
 import type { WriteQueue } from "../../src/db/write-queue.js";
-import { backupName } from "../../src/db/backup.js";
+import { BackupWorkerThrewError, backupName } from "../../src/db/backup.js";
 import { acquireLock, lockPathFor, type LockAcquire } from "../../src/serve/lock.js";
 import { bindFailureIsFatal, LOOPBACK_HOST, type BindDecision } from "../../src/http/bind.js";
 import {
@@ -653,11 +653,28 @@ describe("备份：没配目录必须说出来；配了就必须真的备一次"
         now: () => s.now(),
       }),
     );
-    expect(await happens(() => names(dir).length === 1)).toBe(true);
+    /**
+     * ⭐ 等的是【日志】而不是【文件】，而这一改是 0036 逼出来的、不是风格。
+     *
+     * 同步版里「文件已落」与「备份这件事结束」是【同一个时刻】（createBackup 返回即结束，
+     * 而 io.log 就在它下面一行），所以原来那句 `happens(() => names(dir).length === 1)`
+     * 顺手也保证了「备份已经不在飞」。挪进 worker 之后两者【分开了】：
+     * 文件由 worker 那一侧写，主线程要等一条消息才知道它结束。
+     * 于是「先等到文件、再 advance」会撞上【上一份还在飞】那道门 ⇒
+     * 第二次派发被拒 ⇒ 这一发间歇性红（本篇红过一次，红在 659 行，
+     * 而我第一反应是「异步太慢，把超时调大」—— 那是错的方向：慢不是原因，
+     * 【没等完】才是。把 happens 的 ms 调大只会把红变成偶尔红）。
+     *
+     * ⇒ 「备份好了」的等价信号在异步版【只有一个】：主线程说的那句日志。
+     *   文件可见只证明【数据落盘了】，不证明【这一轮结束了】。已登记 0036 §7。
+     *   反过来「有日志 ⇒ 有文件」仍然成立，方向只有一个。
+     */
+    expect(await happens(() => log.join(" ").includes("备份完成"))).toBe(true);
+    expect(names(dir)).toHaveLength(1);
     // 推到次日【同一时刻】：跨了日历日 ⇒ 必须再备一份。
     s.advance(24 * 3_600_000 + 60_000);
     expect(await happens(() => names(dir).length === 2)).toBe(true);
-    expect(log.join(" ")).toContain("events");
+    expect(await happens(() => log.join(" ").includes("events"))).toBe(true);
     await r.shutdown();
   });
 
@@ -715,64 +732,311 @@ describe("备份：没配目录必须说出来；配了就必须真的备一次"
   });
 
   /**
-   * ⭐⭐ 结构性守卫：备份那一段【不许有任何 await】。
+   * ⭐⭐ 结构性守卫：【判定 → 派发】那一段不许有 await。
    *
-   * 这一发是补一个真实存在过的漏洞：0025 §3 第 ④ 条说「修法是把这一段改成整体同步」，
-   * 而我做完之后【没有任何东西守着这件事】—— 我拿变异实验验过：
-   * 在 `shouldBackUp(...)` 与 `createBackup(...)` 之间插一句 `await Promise.resolve()`，
-   * 本文件**35 条全绿**。也就是说「同步」当时只是**源码里的一段注释 + 我的一句话**，
-   * 而这两样都会在重构里活下来，代码不会。
+   * ⚠⭐ 这一发【被改过射程】，而改的过程本身就是 0036 §3 那条结论的现场：
+   * 它原来钉的是「备份那一段【整体同步】，一个 await 都不许有」，
+   * 而那句的前提是「createBackup 是同步的 ⇒ 同步的东西没有缝」。
+   * 0036 把备份挪进 worker ⇒ 前提没了，于是这一发【当场红】（区间终点找不到）。
+   * 红的时候有两条路：删掉它（理由是「备份本来就该是异步的了」，听起来完全正当），
+   * 或者【问一句它当初防的那件事，在新形状下还剩多少】。剩下的是这条：
+   *   「判定与【开始执行】之间不许跨 await」—— 跨上去就能插进一次关机。
+   * 它【不再覆盖】的那半也要说清：落地本身现在【必须】跨 await（那就是异步化的目的），
+   * 所以这一发【不再】能防「备份在队列关闭之后才落地」——
+   * 那件事改由 backupWatch（inFlight / cancelling / settle）与两条并发用例负责。
+   * ⇒ **一条守卫的射程应当跟着它的【理由】走，而不是跟着它的【写法】走；
+   *    理由变了之后要重新问一遍「还剩什么可防」—— 既不能整条删掉，也不能原样留着。**
    *
-   * 为什么必须用【文本守卫】而不是行为用例来守：那一族缺陷的失效方式正是
-   * 「要恰好在判定与执行之间关机才看得见」，而关机时刻在本进程的测试里造不出来
-   * （要真信号 + 真并发）。同 patrol.ts 那条「不得含 setInterval」是同一个选择：
-   * **判不了的性质就退到源码形状上钉住，并写清它证不了什么**。
-   *
-   * ⚠ 这一发【证不了】同步性本身（那是 node:sqlite 与 VACUUM INTO 的语义）；
-   *   它证的是「这段区间里没有 await」，也就是那道保护【还在】。
-   * ⚠ 它同时【会误伤】：如果哪天把备份挪进 worker（0025 §7 第 2 条），
-   *   这一发会红，而那时**正确**的改法是连「等一份在飞的备份」+ cancelling 状态
-   *   一起补回来 —— 不是把这一发删掉。红的时候请去读 0025 §3 与 §7 再动手。
+   * 为什么仍然用【文本守卫】而不是行为用例：「要恰好在判定与派发之间关机才看得见」
+   * 那种时刻在本进程的测试里造不出来（要真信号 + 真并发）。同 patrol.ts 那条
+   * 「不得含 setInterval」是同一个选择：**判不了的性质退到源码形状上钉住，并写清它证不了什么**。
    */
-  it("⭐⭐ 备份那一段【零 await】（源码形状守卫；变异实验验过它确实会红）", () => {
-    const src = readFileSync(
+  it("⭐⭐ 【判定 → 派发】之间零 await（源码形状守卫；射程随 0036 收窄过一次）", () => {
+    const raw = readFileSync(
       join(dirname(fileURLToPath(import.meta.url)), "..", "..", "src", "serve", "assemble.ts"),
       "utf8",
     );
-    // 区间的两端用的是【代码里的原文】而不是行号：行号会在无关改动后指向别处，
-    // 而那会让这一发静默地扫一段错的东西（扫不到 await ⇒ 绿）。
-    // 所以先断言两端都**找得到**，再断言区间内容。
-    const START = "if (backupDir === undefined) return;";
-    const END = "reportBackup(b, io);";
-    const a = src.indexOf(START);
-    const b = src.indexOf(END);
-    expect(a, "区间起点找不到：备份那一段被改写过了，这一发要跟着改").toBeGreaterThan(-1);
-    expect(b, "区间终点找不到：同上").toBeGreaterThan(a);
-    const region = src
-      .slice(a, b + END.length)
+    /**
+     * ⚠ 先【滤掉注释】再找区间，而不是先切区间再滤注释 —— 顺序反过来会出一种
+     * 很难看懂的红：本篇在区间【上方】写了一段解释这件事的注释，里面就含有
+     * `backupWatch.start(` 这几个字，于是终点匹配到注释里那一处，区间被切成
+     * 只剩两行 ⇒ 「区间里没有 await」白过，而「区间里必须有 lastBackupAtMs」红。
+     * 也就是：**给源码形状写守卫时，注释是判据的输入之一，而它是【会被匹配到】的**。
+     * 0036 §2 那条「正则匹配到散文」是同一个坑的两个方向（那边是误报有，这边是误报无）。
+     */
+    const src = raw
       .split("\n")
       .filter((l) => {
         const t = l.trim();
         return !(t.startsWith("//") || t.startsWith("*") || t.startsWith("/*"));
       })
       .join("\n");
+    // 区间两端用的是【代码里的原文】而不是行号：行号会在无关改动后指向别处，
+    // 而那会让这一发静默地扫一段错的东西（扫不到 await ⇒ 绿）。
+    // 所以先断言两端都**找得到**，再断言区间内容。
+    const START = "if (backupDir === undefined) return;";
+    // 终点是【派发那一句】而不是「备份落地」：异步化之后落地在区间之外，
+    // 区间【必须】止于派发，否则它会去扫一段本来就该有 await 的代码（那就是恒红的判据）。
+    const END = "backupWatch.start(";
+    const a = src.indexOf(START);
+    const b = src.indexOf(END);
+    expect(a, "区间起点找不到：备份那一段被改写过了，这一发要跟着改").toBeGreaterThan(-1);
+    expect(b, "区间终点找不到：派发那一句不在了 —— 那意味着备份【又开始同步跑】了").toBeGreaterThan(a);
+    // 两端都【只能找到一处】。多处意味着有人在别处也写了这句话，
+    // 而 indexOf 会悄悄选中前面那一处，扫的就不是被测的那一段（本仓 0006 §7 那一族：
+    // 装配自检要能区分「扫不到」与「扫错了地方」）。
+    expect(src.split(START).length - 1, "区间起点这句话在源码里不止一处").toBe(1);
+    const region = src.slice(a, b + END.length);
     // await / async / .then / await import 四种写法一起挡：
-    // 只挡 `await` 关键字的话，`void something.then(...)` 或 `queue node` 的
-    // 异步包装照样能开出一条缝，而症状与第 ④ 条一模一样。
+    // 只挡 `await` 关键字的话，`void something.then(...)` 照样能开出一条缝，症状一模一样。
     for (const bad of [/\bawait\b/, /\basync\b/, /\.then\s*\(/, /\bimport\s*\(/]) {
       const hit = region.match(bad);
       expect(
         hit === null,
-        "备份区间里出现了 " + String(bad) + "（命中 " + String(hit?.[0]) + "）：" +
-          "0025 §3 第 ④ 条那一族 —— 判定与执行之间跨一个 await，" +
-          "『关机时不等备份』就变成有时生效的保护",
+        "判定与派发之间出现了 " + String(bad) + "（命中 " + String(hit?.[0]) + "）：" +
+          "0025 §3 第 ④ 条那一族 —— 中间跨一个 await，『关机时不等备份』就变成有时生效的保护",
       ).toBe(true);
     }
     // 反向对照：同一条扫描必须能【捞到】别处的 await，否则「区间里没有」
     // 可能只是「我把整段切错了 / 过滤条件把代码也滤掉了」。
-    // runPatrol 那一发就在区间上方几行，是最近的真 await，切错一寸就捞不到。
     expect(/\bawait\b/.test(src.slice(src.indexOf("const r = await runPatrol"), a))).toBe(true);
-    expect(region).toContain("createBackup({");
+    /**
+     * ⭐ 下面这一组是【新加的】，而且它比上面四个正则更接近这一发的本体：
+     * 四个正则全过只证明「区间里没有 await」—— 有人把整段备份逻辑删掉时它们
+     * 【照样全过】（区间里只剩两行 return，一个 await 都没有）。
+     * 所以必须钉住「判定之后【真的派了活】」：比较、取名、派发，一步都不能被抽走。
+     * ⇒ 「不许有 X」型的判据【永远】要配一条「必须有 Y」，否则把被保护区间清空就是最优解。
+     */
+    for (const must of ["lastBackupAtMs(", "shouldBackUp(", "backupWatch.start("]) {
+      expect(region, "区间里少了 " + must + "：判定与派发之间被抽走了一步").toContain(must);
+    }
+    // 时刻与相位判据【必须同源】（0036 §4）。分两截断言，因为它们【不在同一截源码里】：
+    // ① 区间里必须出现「atMs 取自注入的 now，退回 scheduler.now」—— 与上面
+    //    shouldBackUp 用的那个 now 同一个来源；
+    const sameClock = /const atMs = \(o\.now \?\? scheduler\.now\)\(\);/u;
+    expect(
+      sameClock.test(region),
+      "区间里没有「atMs 与相位判据同源」那一行：换成 Date.now() 就会不同源",
+    ).toBe(true);
+    // ② 派发出去的那个对象里必须真的带上它。这一条【在区间之外】（在派发的闭包里），
+    //    所以它不能塞进 region —— 把区间放大去包住它，就会把 await 一起包进来，
+    //    而那个 await 是【异步化之后必须有的】，于是判据变成恒红。
+    //    ⇒ 同一条不变量的两半各自钉在【它实际所在的位置】，不为「看起来完整」而合并射程。
+    const dispatchSite = src.slice(b, b + 700);
+    expect(
+      dispatchSite.includes("nowMs: atMs"),
+      "派发时没带上 atMs ⇒ worker 用自己的墙钟命名 ⇒ 注入假时钟下每轮都判「该备」⇒ 挤满保留位",
+    ).toBe(true);
+  });
+
+  /**
+   * ⭐⭐ 关机时【先等在飞的备份落地，才关队列】。
+   *
+   * 这一发是 0036 §5 的 P-C（把 giveUp 里那句 `await backupWatch.settle()` 删掉 ⇒ 这一发红）。
+   * 它守的不是「备份会不会丢」，而是【顺序】：备份跑在一个已经没有锁的库上，
+   * 期间另一个 Hub 可以起开并写同一个库 —— 那才是 0025 §7 第 2 条当初要求
+   * 「等一份在飞的备份」的理由（不是怕丢文件）。
+   *
+   * ⚠ 判据落在【close 的时刻 vs 备份落地的时刻】的先后上，而不是「close 被叫了几次」。
+   *   删掉 settle 那一行时 close 仍然只被叫【一次】，只是早了 —— 数次数会白绿。
+   * ⚠ 走的是 backupVia 注入（不是真 worker）：要的是【测试决定备份什么时候结束】，
+   *   真 worker 只给一个约 100ms 的窗口，靠 sleep 撞窗口就是本仓拒绝的那种 flaky。
+   *   代价如实说：这一发【不证明】真 worker 能跑通，那由 backup.test.ts ⑦ 负责。
+   */
+  it("⭐⭐ 关队列之前先等在飞的备份落地（P-C 的落点）", async () => {
+    const path = db();
+    const dir = join(tmp(), "bk-await");
+    const s = createFakeScheduler(Date.parse("2026-03-10T08:00:00Z"));
+    const { io } = ioOf();
+    const order: string[] = [];
+
+    let releaseBackup = (): void => {};
+    const g = gatedQueue(path);
+    const origClose = g.q.close.bind(g.q);
+    (g.q as unknown as { close(): Promise<void> }).close = async (): Promise<void> => {
+      order.push("queue.close");
+      await origClose();
+    };
+
+    const r = needOk(
+      await boot(args({ dbPath: path, port: 8787, backupDir: dir, heartbeatMs: 60_000 }), io, {
+        serve: fakeServer().serve,
+        scheduler: s,
+        openQueue: () => g.q,
+        now: () => s.now(),
+        backupVia: async (req) => {
+          order.push("backup.start");
+          await new Promise<void>((res) => {
+            releaseBackup = res;
+          });
+          order.push("backup.done");
+          // 手工写一个文件，让「备份落地」在磁盘上也可观察（这里注入的是执行点，
+          // 落盘本身不是这一发要测的东西，但留个文件能让失败现场更好读）。
+          writeFileSync(join(req.backupDir, backupName(req.nowMs ?? s.now())), "演练留下的一份");
+          return {
+            ran: true,
+            result: {
+              ok: true,
+              path: join(req.backupDir, "x.db"),
+              bytes: 1,
+              sha256: "0",
+              eventsInBackup: 0,
+              eventsInSourceNow: 0,
+              pruned: [],
+              createdAtMs: req.nowMs ?? 0,
+            },
+            warnings: [],
+            workerMs: 1,
+            totalMs: 1,
+          };
+        },
+      }),
+    );
+    expect(await happens(() => order.includes("backup.start"))).toBe(true);
+    // 备份【还挂着】。此刻关机。
+    const down = r.shutdown();
+    await drainMicrotasks();
+    // ① 关机确实开始了，而队列【还没关】—— 这就是那一次等待。
+    expect(order).toContain("backup.start");
+    expect(order).not.toContain("queue.close");
+    // ② 放行备份，清理才往下走。
+    releaseBackup();
+    await down;
+    expect(order).toEqual(["backup.start", "backup.done", "queue.close"]);
+    // ③ 锁真的还了（顺序对了还不够，得确认真的清完）。
+    expect(existsSync(lockPathFor(path))).toBe(false);
+  });
+
+  /**
+   * ⭐ 一份在飞的备份【不许开出第二份】，而且要说出来。
+   *
+   * 0036 §5 的 P-A（删掉 `if (current !== null) return {reason:"in_flight"}` ⇒ 这一发红）。
+   * 并发两份备份的后果不是浪费 IO，是【同名相撞】之外的另一种：两份 prune 同时删，
+   * 以及 giveUp 只等【最后那一份】（watch 上只有一个 current 槽位）。
+   *
+   * ⚠ 断的是【被拒的原因】而不是「目录里只有一份」。后者会红于「两份都写了文件」，
+   *   但如果实现改成「第二份排队等第一份」，目录里就还是两份而那是【另一种】错
+   *   （心跳那一轮会被拖成两倍长）—— 断原因才能把「拒而排队」与「拒而不做」分开。
+   */
+  it("⭐ 上一份还在飞时【不派第二份】，并警告一句（P-A 的落点）", async () => {
+    const path = db();
+    const dir = join(tmp(), "bk-inflight");
+    const s = createFakeScheduler(Date.parse("2026-03-10T08:00:00Z"));
+    const { io, warn, log } = ioOf();
+    let releaseFirst = (): void => {};
+    let calls = 0;
+    const r = needOk(
+      await boot(args({ dbPath: path, port: 8787, backupDir: dir, heartbeatMs: 60_000 }), io, {
+        serve: fakeServer().serve,
+        scheduler: s,
+        now: () => s.now(),
+        backupVia: async (req) => {
+          calls++;
+          if (calls === 1) {
+            await new Promise<void>((res) => {
+              releaseFirst = res;
+            });
+          }
+          return {
+            ran: true,
+            result: {
+              ok: true,
+              path: "x",
+              bytes: 1,
+              sha256: "0",
+              eventsInBackup: 0,
+              eventsInSourceNow: 0,
+              pruned: [],
+              createdAtMs: req.nowMs ?? 0,
+            },
+            warnings: [],
+            workerMs: 1,
+            totalMs: 1,
+          };
+        },
+      }),
+    );
+    expect(await happens(() => calls === 1)).toBe(true);
+    // 跨日 ⇒ shouldBackUp 变真 ⇒ 第二轮【本该】去备，但上一份还挂着。
+    s.advance(24 * 3_600_000 + 60_000);
+    await drainMicrotasks();
+    await happens(() => warn.join(" ").includes("跳过备份"), 200);
+    expect(calls, "上一份还在飞的时候派出了第二份").toBe(1);
+    // 而且【出声】了：静默跳过 = 备份没做成而日志一片干净。
+    expect(warn.join(" ")).toContain("跳过备份");
+    expect(warn.join(" ")).toContain("还在飞");
+    expect(log.join(" ")).not.toContain("跳过备份"); // 这是告警，不是正常事件
+    releaseFirst();
+    await r.shutdown();
+  });
+
+  /**
+   * ⭐ 备份 worker 抛错 ⇒ 主线程【一定有一句告警】，而且清理不中断。
+   *
+   * 这一发钉的是一个【我一开始没看见】的组合缺陷：
+   * `backupWatch.start()` 为了让 settle() 永不 reject，会【吞掉 rejection】——
+   * 吞掉本身是对的（清理路径不该被一份备份的失败打断），
+   * 但它把「谁负责说这句话」搬到了派发处。如果派发处不 catch，
+   * 「worker 里抛了」就真的静默了，而 Task 6.3 明令禁止的正是备份静默失败。
+   * 我写 watch 的时候先看到的是「settle 不 reject」这条好性质，
+   * 差点据此认为「失败有人管」—— 是读了自己的 start() 实现才发现没人管。
+   */
+  it("⭐ 备份抛错 ⇒ 告警照说，且关机不被它打断", async () => {
+    const path = db();
+    const dir = join(tmp(), "bk-throw");
+    const s = createFakeScheduler(Date.parse("2026-03-10T08:00:00Z"));
+    const { io, warn } = ioOf();
+    const r = needOk(
+      await boot(args({ dbPath: path, port: 8787, backupDir: dir, heartbeatMs: 60_000 }), io, {
+        serve: fakeServer().serve,
+        scheduler: s,
+        now: () => s.now(),
+        backupVia: async () => {
+          throw new BackupWorkerThrewError("worker 内部抛错：keep 必须是 >= 1 的整数", [
+            "已经攒着的一条告警",
+          ]);
+        },
+      }),
+    );
+    expect(await happens(() => warn.join(" ").includes("没有得出结论"))).toBe(true);
+    // 抛错之前攒的告警也要带出来（backup.worker 里那一栏存在的理由）。
+    expect(warn.join(" ")).toContain("已经攒着的一条告警");
+    // 清理不被它打断：锁必须还掉。
+    await r.shutdown();
+    expect(existsSync(lockPathFor(path))).toBe(false);
+  });
+
+  /**
+   * ⭐ worker【没给出结论】时，文案不许说「备份失败」。
+   *
+   * 三种 worker 失效（起不来 / 超时 / 线程坏了）里，有一份备份可能【已经落盘了】
+   * —— worker 备完之后死在回话之前。报成「备份失败」会让人手动再补一份，
+   * 而正确动作是先看一眼目录。这一发钉的是【措辞承载的判据】：
+   * 「没拿到结论」与「失败」是两件事（0036 §7），把它们写成一个词就丢了这个区分。
+   */
+  it("worker 没给出结论 ⇒ 说「没得出结论」而不是「备份失败」", async () => {
+    const path = db();
+    const dir = join(tmp(), "bk-noresult");
+    const s = createFakeScheduler(Date.parse("2026-03-10T08:00:00Z"));
+    const { io, warn } = ioOf();
+    const r = needOk(
+      await boot(args({ dbPath: path, port: 8787, backupDir: dir, heartbeatMs: 60_000 }), io, {
+        serve: fakeServer().serve,
+        scheduler: s,
+        now: () => s.now(),
+        backupVia: async () => ({
+          ran: false,
+          failure: "worker_unavailable",
+          message: "worker 起不来：模拟",
+          warnings: [],
+        }),
+      }),
+    );
+    expect(await happens(() => warn.join(" ").includes("worker_unavailable"))).toBe(true);
+    expect(warn.join(" ")).toContain("没有得出结论");
+    // ⭐ 反向对照：不许出现「备份失败（worker_unavailable）」这种把两个维度混起来的说法。
+    expect(warn.join(" ")).not.toContain("备份失败（");
+    await r.shutdown();
   });
 
   /**

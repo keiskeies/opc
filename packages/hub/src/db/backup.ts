@@ -54,7 +54,19 @@ import {
 } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { basename, dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import { Worker } from "node:worker_threads";
 import { openSnapshotReadonlyDb } from "./pragmas.js";
+import { selfWorkerUrl } from "./worker-entry.js";
+
+/**
+ * worker 回程消息的形状。**只能是类型导入，不能有运行时 import**：
+ * `backup.worker.ts` import 了本文件，运行时反向 import 就是一个环，
+ * 而环在 type-stripping 下的表现是「其中一方拿到半成品」—— 那种失效不在任何测试里。
+ * 抄 `integrity.ts` 同一个写法（`type WorkerOk = import("./integrity.worker.js")...`）。
+ */
+type BackupWorkerMessage = import("./backup.worker.js").BackupWorkerMessage;
+type BackupWorkerData = import("./backup.worker.js").BackupWorkerRequest;
 
 /** 规格 §6.5：保留最近 7 份。改动它属于改运维口径，不在这里单方面调。 */
 export const KEEP_BACKUPS = 7;
@@ -756,4 +768,289 @@ export function backupNameToMs(name: string): number | null {
     .replace(/(\d{4})-(\d{2})-(\d{2})T(\d{2})-(\d{2})-(\d{2})-(\d{3})Z$/u, "$1-$2-$3T$4:$5:$6.$7Z");
   const t = Date.parse(iso);
   return Number.isFinite(t) ? t : null;
+}
+
+/* ------------------------------------------------------------------ *
+ * 异步入口（0036）。同步的 createBackup 上面那一段，一字未改。
+ * ------------------------------------------------------------------ */
+
+/**
+ * worker 里那一发的超时上限。取值抄 `INTEGRITY_WORKER_TIMEOUT_MS`（同为「整库级同步
+ * SQLite 操作」，量级一致），但**不复用那个常量名**：那两个数各自被各自的用例钉住
+ * （超时那发靠 `timeoutMs: 0` 造），共用一个常量会让「改完整性扫描的超时」顺手动到备份。
+ */
+export const BACKUP_WORKER_TIMEOUT_MS = 120_000;
+
+/**
+ * 本文件的 worker 入口。推导式**只在 `./worker-entry.ts` 那一处**（0036 §2：
+ * 「全仓只允许一处由自己的扩展名推 worker 入口」这条不变量，从前只有一条
+ * 只看单文件的断言守着，现在由 `integrity.test.ts` ⑦ 扫 src 全部 ts 文件守着）。
+ *
+ * 模块级而不是函数体内：这个值只由【本文件自己的 URL】决定，运行期不会变，
+ * 放进函数体里等于每次备份重算一次同一个数，而更要紧的是它会在
+ * 「调用点写错了」和「环境不支持」之间多一层可混淆的位置。
+ * 加载时就抛（URL 形状不对）也比到第一次备份才抛好 —— 那一次通常是生产上那次。
+ */
+const WORKER_URL: URL = selfWorkerUrl(import.meta.url);
+
+/**
+ * 【这一层包装】的失效方式，与 `BACKUP_FAILURE_REASONS` 是两个维度，刻意不合并。
+ *
+ * `BACKUP_FAILURE_REASONS` 说的是「createBackup 试过了，失败在这四步之一」；
+ * 这三个说的是「createBackup 的结论【一条都没拿到】」。合并成一个枚举的话，
+ * 读 `reason` 的人会以为同步版 `createBackup` 也可能返回 worker_timeout
+ * （它结构上不可能），而更要紧的是：告警面板上「备份失败」这一维会被
+ * 三类**根本不同**的东西混在一起 —— 「备份这一步没跑起来」和「备份产物坏了」
+ * 的处置动作完全不一样（前者改环境，后者要去查那份库）。
+ */
+export const BACKUP_WORKER_FAILURES = [
+  "worker_unavailable",
+  "worker_timeout",
+  "worker_error",
+] as const;
+export type BackupWorkerFailure = (typeof BACKUP_WORKER_FAILURES)[number];
+
+/**
+ * 异步版的入参 = 同步版**减去那两个函数字段**，外加一个 `nowMs`。
+ *
+ * `now` 与 `onWarning` 不能过 `workerData`（结构化克隆当场抛 TypeError，
+ * 而那一句抛错的原文指向 node 内部，不指向调用点）。所以这一格约束**在类型层消失**，
+ * 而不是在运行时被静默丢掉（0036 §4）。运行时那一层仍然有（下面 `rejectsFunctionFields`）：
+ * 类型挡的是 TS 这一侧，JS 调用方 / `as any` 挡不住 —— 而**「传了却完全不生效」是这一格里
+ * 唯一会静默的失效方向**（注入了假时钟而测试仍然绿）。
+ *
+ * ⭐ `nowMs` 是【本篇一度以为自己做不到】的那一格，值得留着：
+ * 我写下「注入的时钟跨不过去 ⇒ 异步版的时间戳只能取 worker 自己的墙钟」，
+ * 并且把它登记成一条限制。那句话**只对了一半** —— 跨不过去的是【函数】，
+ * 而 `now` 这个函数的**返回值**是一个 number，number 过结构化克隆毫无问题。
+ * 于是这里收的是【时刻】而不是【时钟】：主线程算好一个数带过去，
+ * worker 里 `now: () => nowMs`。
+ *
+ * 差别不只是能否注入，而是一条真会踩的坑：serve 那边的「今天备过了吗」
+ * 拿的是【注入的时钟】（config.ts 的相位判据 + 测试里的假时钟），
+ * 备份文件名里的时刻必须与它同源。不同源的话，注入假时钟 2026-03-10 而
+ * 真实墙钟是 2026-11-10 ⇒ `shouldBackUp(2026-11-10, 2026-03-10)` 判「该备」
+ * ⇒ **同一个时钟下每轮心跳都重备一份**，而它看起来像「保留策略生效了」。
+ * 这条不是设想的：它是本篇把 job 改完之后 assemble.test.ts 会变红的【那一条】。
+ *
+ * ⚠ 收 number 而不是 `() => number` 也带来一条真的收窄：
+ * 一次备份只有一个时刻（开始那一刻），拿不到「备份中途的 now」。
+ * createBackup 本来就只在取名时调一次 `now()`，所以这里没有丢掉任何现有语义。
+ */
+export type BackupOffLoopRequest = Omit<BackupRequest, "now" | "onWarning"> & {
+  /** 备份文件名用的时刻（毫秒）。不传 ⇒ worker 自己的 Date.now()。理由见类型上面那段。 */
+  readonly nowMs?: number;
+  /** worker 超时。默认 BACKUP_WORKER_TIMEOUT_MS。传 0 可以**立刻**判超时（测试用）。 */
+  readonly timeoutMs?: number;
+};
+
+export type BackupOffLoopOutcome =
+  | {
+      /** true ⇒ **拿到了 createBackup 的结论**（成或败都算，看 result.ok）。 */
+      readonly ran: true;
+      readonly result: BackupResult;
+      /** worker 那边攒下的告警，原样带回。由调用方那一处出口说出去。 */
+      readonly warnings: readonly string[];
+      /** worker 内部耗时。与 totalMs 的差 ≈ 冷启动（0036 §0 量到约 95ms）。 */
+      readonly workerMs: number;
+      /** 主线程看到的总时长，含冷启动。 */
+      readonly totalMs: number;
+    }
+  | {
+      readonly ran: false;
+      readonly failure: BackupWorkerFailure;
+      readonly message: string;
+      readonly warnings: readonly string[];
+    };
+
+/**
+ * 异步版里 createBackup **自己抛了**（keep 非法那一种）。
+ *
+ * 为什么不压成一条 `ran: false`：那种失败是**接错线**，与同步版抛 TypeError 同源，
+ * 唯一正确的处置是改调用代码；把它做成一个可读的失败态，调用方就能「记一笔然后继续」，
+ * 而这里不许继续（同一个理由见 restoreDrill 那个同路径守卫）。
+ *
+ * `warnings` 挂在错误对象上而不是丢进 message 字符串：worker 里可能已经告过一条
+ * （prune 失败之后才抛），那一条是「备份静默失败」这条验收唯一能抓住的东西。
+ */
+export class BackupWorkerThrewError extends Error {
+  readonly warnings: readonly string[];
+  constructor(message: string, warnings: readonly string[]) {
+    super(message);
+    this.name = "BackupWorkerThrewError";
+    this.warnings = warnings;
+  }
+}
+
+/** 只在【主线程这一侧】拒绝：两个函数字段带进 worker 会当场失效（见 BackupOffLoopRequest）。 */
+function rejectsFunctionFields(o: BackupOffLoopRequest): void {
+  const passed = ["now", "onWarning"].filter(
+    (k) => (o as unknown as Record<string, unknown>)[k] !== undefined,
+  );
+  if (passed.length > 0) {
+    throw new TypeError(
+      "createBackupOffLoop 不接受 " +
+        passed.join(" / ") +
+        "（函数不能过 worker 边界：workerData 用的是结构化克隆，" +
+        "带函数会在 node 内部抛，报错不指向你的调用点）。" +
+        "要注入时钟或自己接管告警，请调同步的 createBackup；" +
+        "异步版的告警从返回值的 warnings 拿，时间戳取 worker 自己的墙钟。",
+    );
+  }
+}
+
+/**
+ * 一次**不在主线程上跑**的备份（0036）。
+ *
+ * 存在理由是一个实测数字（0036 §0）：11.5MB 的库，主线程同步跑 91ms，
+ * 期间那个 5ms 心跳探针的**最大间隔恰好 91ms** —— 写队列、心跳、HTTP 一起停拍；
+ * 挪进 worker 之后同一发探针最大间隔 7ms。代价是备份自己从 91ms 变 212ms（含 ~95ms 冷启动）。
+ *
+ * **worker 起不来时不退回主线程**（立场抄 `runIntegrityScan`）：
+ * 自动兜底等于在「最像出事的时候（环境坏了）」悄悄违反本篇唯一的验收，
+ * 所以如实报 `worker_unavailable`。要同步备，调用方自己调 `createBackup`。
+ *
+ * ⚠ 三条别当成做到了（0036 §7）：
+ *  · worker 用的是它自己那条只读连接，**不与 WriteQueue 共享**；WAL 只保证它读到
+ *    一致快照，不保证「包含最新一次写入」——`eventsInBackup` 小于 `eventsInSourceNow`
+ *    是常态，同步版也一样，本篇没改这件事。
+ *  · 超时那一支**收不回 worker 已攒的告警**（它没来得及回话），warnings 只能是空数组。
+ *  · `timeoutMs: 0` 造出来的是「超时会被判失败而不是判通过」，
+ *    **不是**「真卡住的备份会在 N ms 被打断」（后者本机造不出来）。
+ */
+export async function createBackupOffLoop(
+  o: BackupOffLoopRequest,
+): Promise<BackupOffLoopOutcome> {
+  rejectsFunctionFields(o);
+  const timeoutMs = o.timeoutMs ?? BACKUP_WORKER_TIMEOUT_MS;
+  if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 0) {
+    throw new TypeError("timeoutMs 必须是 >= 0 的整数（得到 " + String(timeoutMs) + "）。");
+  }
+  if (o.nowMs !== undefined && (!Number.isSafeInteger(o.nowMs) || o.nowMs < 0)) {
+    // 这里【抛】而不是「当作没传」。当作没传的后果是文件名用墙钟，
+    // 而调用方以为注入生效了 —— 那正是 §4 那条「静默失效」的形状，
+    // 只是这次的入口是「传了一个不合法的值」而不是「传了个函数」。
+    throw new TypeError("nowMs 必须是 >= 0 的安全整数毫秒（得到 " + String(o.nowMs) + "）。");
+  }
+  const started = Date.now();
+  const workerData: BackupWorkerData = {
+    dbPath: o.dbPath,
+    backupDir: o.backupDir,
+    ...(o.keep === undefined ? {} : { keep: o.keep }),
+    ...(o.nowMs === undefined ? {} : { nowMs: o.nowMs }),
+  };
+
+  return new Promise<BackupOffLoopOutcome>((resolve, reject) => {
+    let worker: Worker;
+    try {
+      worker = new Worker(WORKER_URL, { workerData });
+    } catch (e) {
+      resolve({
+        ran: false,
+        failure: "worker_unavailable",
+        message:
+          "备份 worker 起不来：" +
+          String(e) +
+          "。试过的位置 " +
+          fileURLToPath(WORKER_URL) +
+          "。本篇【不】自动退回主线程跑（那等于在最像出事的时候悄悄违反验收）；" +
+          "要同步备份请显式调 createBackup。",
+        warnings: [],
+      });
+      return;
+    }
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      void worker.terminate();
+      resolve({
+        ran: false,
+        failure: "worker_timeout",
+        message:
+          "备份 worker 在 " +
+          timeoutMs +
+          "ms 内没有回话（已 terminate）。按失败处理而不是按成功：" +
+          "一次【没跑完】的备份不能记成「今天备过了」。",
+        // 这里只能是空数组，而**空数组不等于「worker 里没有告警」** ——
+        // 那句区别写在这里，是为了别让下一个人把它当 `ran: true` 那个 warnings 读。
+        warnings: [],
+      });
+    }, timeoutMs);
+    const stop = (): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      void worker.terminate();
+    };
+    worker.once("message", (m: unknown) => {
+      stop();
+      const msg = m as Partial<BackupWorkerMessage> | undefined;
+      if (msg?.kind === "threw") {
+        reject(
+          new BackupWorkerThrewError(
+            msg.message ?? "worker 报了一句没有内容的 threw",
+            msg.warnings ?? [],
+          ),
+        );
+        return;
+      }
+      if (msg?.kind !== "result" || msg.via !== "worker" || msg.result === undefined) {
+        // 消息形状不对 ⇒ 判失败，**不猜**。这一支的存在理由是：worker 入口换了回程形状
+        // 而忘了改这里时，「没有 result」最省事的写法是当成 ok:true，
+        // 于是每天报一次「备份成功」而目录里一份新文件都没有。
+        reject(
+          new BackupWorkerThrewError(
+            "备份 worker 回了一句认不出的消息：" + JSON.stringify(msg ?? null).slice(0, 400),
+            [],
+          ),
+        );
+        return;
+      }
+      resolve({
+        ran: true,
+        result: msg.result,
+        warnings: msg.warnings ?? [],
+        workerMs: msg.ms ?? 0,
+        totalMs: Date.now() - started,
+      });
+    });
+    // worker 顶层抛（含「被主线程 import」那一道门、参数自检）走这一支。
+    // 它是【环境/装配】层的失效 ⇒ 归 worker_error，resolve 成 ran:false 而不是 reject：
+    // 它与 worker_unavailable 是同一类「结论没拿到」，调用方按同一处置（告警 + 下次再试）。
+    worker.once("error", (e) => {
+      stop();
+      resolve({
+        ran: false,
+        failure: "worker_error",
+        message: "备份 worker 这个线程本身出错：" + String(e),
+        warnings: [],
+      });
+    });
+    /**
+     * 第四条通道：线程【自己退了】而既没发消息也没报错（它调了 process.exit、
+     * 或者被别人 terminate）。
+     *
+     * ⚠ 这一发【没有用例覆盖】，而我把话说明而不是留白：今天 backup.worker.ts 里
+     * 没有任何一条路径会走到这里（要么 postMessage，要么抛 ⇒ 上面那条 error 接到，
+     * 未捕获异常在 worker 上是「先 error 再 exit」，被 settled 挡掉第二次）。
+     * 那为什么还要写：因为 createBackupOffLoop 的**契约**是「一定给答复」，
+     * 而上面那三条【message / error / timeout】漏一条就是让调用方
+     * 【永远等】—— 正是 backup.worker.ts 文件头第 3 条列为不可接受的那一种。
+     * 「以后有人给 worker 加一条 exit 路径」这件事不需要改这里，
+     * 而这一支今天唯一的代价是一行不会跑的代码。
+     * ⚠ 别把它当成「已经测过 worker 会死」的性质读。
+     */
+    worker.once("exit", () => {
+      stop();
+      resolve({
+        ran: false,
+        failure: "worker_error",
+        message:
+          "备份 worker 退出了而【一条消息都没发】。这不代表备份成功 —— " +
+          "一次没拿到结论的备份只能按失败处理。",
+        warnings: [],
+      });
+    });
+  });
 }

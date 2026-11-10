@@ -19,6 +19,7 @@
 import { describe, expect, it } from "vitest";
 import {
   createFakeScheduler,
+  createInFlightWatch,
   createTicker,
   DEFAULT_MAX_CONSECUTIVE_FAILURES,
   type Ticker,
@@ -403,5 +404,138 @@ describe("④ stop 与参数校验", () => {
         createTicker({ intervalMs: bad, job: () => {}, scheduler: createFakeScheduler(0) }),
       ).toThrow();
     }
+  });
+});
+
+/**
+ * ⑤ 「一件事在飞」这个状态本身（0036 §3）。
+ *
+ * ── 这一组为什么必须存在，而不是只在 assemble.test.ts 里测行为 ──────
+ * 0025 §3 第 ③ 条那次失效（`backupInFlight` 被局部同名声明遮蔽 ⇒ 一次【测试全绿】的
+ * 「等备份落地」）的根因是【状态放在一个可被遮蔽的变量里】。本篇把它挪进闭包 +
+ * 一个有名字的谓词，而**「挪进闭包」这件事本身需要一条用例才成立**：
+ * 否则下一次重构把它挪回一个模块级 let，没有任何一条 assemble 的用例会红
+ * （它们看得到行为，看不到状态住哪儿）。
+ *
+ * ── 四条判据各自挡一种坏法 ────────────────────────────────────────
+ *   ① 同刻派第二件 ⇒ 拒，且【原因是 in_flight】（不是布尔 false）
+ *   ② beginCancel 之后 ⇒ 拒，且【原因是 cancelling】—— 与 ① 分得开，
+ *      这一条是 P-B 那一发变异的落点（原因混成一个 false 就分不出是哪道门挡的）
+ *   ③ settle 等到落地，且【不 reject】（清理路径不该被任务的失败打断）
+ *   ④ 同步抛的任务【不会】把一个已落地的 promise 永久留在 inFlight 上
+ *      —— 这是 createTicker 那个真缺陷的同族（上面 runOnce 那段注释记的同一个坑），
+ *      在这里是「从此再也派不出第二件，而日志看起来像上一份还没完」
+ */
+describe("⑤ 在飞状态：inFlight / cancelling 两个字段各自是一条性质", () => {
+  it("派一件 → 同刻第二件被拒，且原因是 in_flight", async () => {
+    const w = createInFlightWatch<void>();
+    let releaseFirst: (() => void) | null = null;
+    const first = w.start(
+      () =>
+        new Promise<void>((r) => {
+          releaseFirst = r;
+        }),
+    );
+    expect(first).toEqual({ started: true });
+    expect(w.inFlight).toBe(true);
+    // 第二件必须【没跑】。断 started 计数而不是断「第二件的副作用」，
+    // 因为后者要等一个不存在的调度时机。
+    let secondCalled = 0;
+    expect(w.start(async () => void secondCalled++)).toEqual({
+      started: false,
+      reason: "in_flight",
+    });
+    await drain();
+    expect(secondCalled).toBe(0);
+    releaseFirst?.();
+    await w.settle();
+    expect(w.inFlight).toBe(false);
+  });
+
+  it("beginCancel 之后派不出去，且原因【与 in_flight 分得开】", () => {
+    const w = createInFlightWatch<void>();
+    expect(w.beginCancel()).toBe(true);
+    // 这一发是 P-B 的落点。reason 必须是 cancelling 而不是 in_flight：
+    // 关机时【也】可能有东西在飞，那时报 in_flight 会让人以为「关机被一份备份卡住了」，
+    // 而真正的语义是「别再派新活」。两个原因合成一个 false，这条就退化成
+    // 「有一道门在挡」而看不出是哪一道 —— 那正是 0036 §5 说的「写成装饰」。
+    expect(w.start(async () => {})).toEqual({ started: false, reason: "cancelling" });
+    expect(w.cancelling).toBe(true);
+    // beginCancel 幂等：第二次要说「早就是了」，不然调用方以为自己触发了关机。
+    expect(w.beginCancel()).toBe(false);
+  });
+
+  it("先 cancel 再派：原因仍是 cancelling（两道门的【顺序】是判据）", () => {
+    // 这一发看起来与上面重复，其实不是：它测的是【两个条件同时成立时先报哪个】。
+    // 把实现里那两行 if 换个顺序，上面那发【不红】（那时还没有在飞的任务），
+    // 只有这里「先派一件、再 cancel」的情形能分辨 —— 那时 inFlight 与 cancelling
+    // 同时为真，而正确答案是 cancelling（别派新活）而不是 in_flight（有个活的在跑）。
+    const w = createInFlightWatch<void>();
+    let release: (() => void) | null = null;
+    w.start(
+      () =>
+        new Promise<void>((r) => {
+          release = r;
+        }),
+    );
+    w.beginCancel();
+    expect(w.start(async () => {})).toEqual({ started: false, reason: "cancelling" });
+    release?.();
+  });
+
+  it("settle 等到落地；任务【抛】也照样 settle 而不 reject", async () => {
+    // 「不 reject」不等于「没人说这句话」—— 它等于说话的地方搬到了派发动作那边
+    // （assemble.ts 那个 catch）。这一发钉的是【搬得过去】：清理路径不会跟着炸。
+    const w = createInFlightWatch<void>();
+    w.start(async () => {
+      throw new Error("备份炸了");
+    });
+    expect(w.inFlight).toBe(true);
+    // 不 reject ⇒ 这一行【不该】抛。如果实现改成把 rejection 透出来，这一发红。
+    await w.settle();
+    expect(w.inFlight).toBe(false);
+    // 落地之后可以再派（否则一次失败会把这道门永久关上 = 备份再也不跑）。
+    expect(w.start(async () => {})).toEqual({ started: true });
+    await w.settle();
+  });
+
+  it("⭐ 任务【同步抛】不会把一个已落地的 promise 永久留在 inFlight 上", async () => {
+    // 这是 createTicker 里那个真缺陷的同族（见它 runOnce 上面那段注释）：
+    // 同步抛的任务会在清理里把状态清掉，【那时】赋值才执行 ⇒ 状态永久停在「在飞」。
+    // 在这里的后果不是「每轮跳过」而是「再也派不出第二件」，同样是一个
+    // 自己把自己锁死的形状，而症状看起来像「上一份还没完」。
+    const w = createInFlightWatch<void>();
+    expect(
+      w.start(() => {
+        throw new Error("装配错了");
+      }),
+    ).toEqual({ started: true });
+    await drain();
+    expect(w.inFlight).toBe(false);
+    // 第二件必须派得出去。这一行是这一发的本体：上一发断的是「不卡在 inFlight」。
+    expect(w.start(async () => {})).toEqual({ started: true });
+    await w.settle();
+  });
+
+  it("settle 在没有在飞任务时是【不用等】，不是「等一个不存在的东西」", async () => {
+    // 与 0025 §3 第 ③ 条那条「await 一个永远为 null 的变量」的区别写在实现里：
+    // 那里 null 是【读错了地方】（遮蔽），这里是【真的没有】。
+    // 所以这一发不是废话 —— 它钉的是「空的时候不挂住」，挂住就是关机永不完成。
+    const w = createInFlightWatch<void>();
+    await w.settle();
+    expect(w.inFlight).toBe(false);
+  });
+
+  it("start 里【不在这一行调用】任务（闭包读的是微任务那一刻的外部变量）", async () => {
+    // 类型上写了这条（start 那一栏），所以它得有用例 —— 「写在注释里的契约」
+    // 没有用例就是没有契约（test/arch/run-fixtures.ts 文件头那句「注释不是机制」）。
+    const w = createInFlightWatch<void>();
+    let when = "before";
+    w.start(async () => {
+      when = "inside";
+    });
+    expect(when).toBe("before");
+    await w.settle();
+    expect(when).toBe("inside");
   });
 });
