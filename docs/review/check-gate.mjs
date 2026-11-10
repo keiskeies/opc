@@ -96,8 +96,47 @@ const wordsOf = (s) =>
     .filter((w) => w !== "");
 const hasWord = (list, w) => list.includes(w);
 const MARK_FORMS = [W_MARK, W_MARK + W_ED, W_MARK + W_ING, W_PASSED];
+
+// 中文没有词边界，上面那套【分词 + 合取】在中文主题上完全失效：中文里搜不到
+// gate/mark/passed 这些英文词。而本仓主题绝大多数是中文 —— 只认英文形状的那一臂，
+// 对本仓等于恒不命中。故补一条中文臂，但形状必须收得很紧：只做【紧邻短语】整体匹配，
+// 不做【门禁】+【通过】这种合取。后者在本仓一条真实主题上误报（那条写的是
+// 【…被当成通过标记】，词序正好相反），而一条长期误报的门禁会被当噪音关掉。
+// 实测：下面 8 条紧邻短语在现有全部主题上命中 0 条。
+const ZH_GATE_PHRASES = [
+  String.fromCharCode(0x95e8, 0x7981, 0x6807, 0x8bb0, 0x901a, 0x8fc7),
+  String.fromCharCode(0x95e8, 0x7981, 0x6807, 0x8bb0, 0x4e3a, 0x901a, 0x8fc7),
+  String.fromCharCode(0x95e8, 0x7981, 0x5df2, 0x6807, 0x8bb0, 0x901a, 0x8fc7),
+  String.fromCharCode(0x95e8, 0x7981, 0x5224, 0x5b9a, 0x901a, 0x8fc7),
+  String.fromCharCode(0x95e8, 0x7981, 0x89c6, 0x4e3a, 0x901a, 0x8fc7),
+  String.fromCharCode(0x95e8, 0x7981, 0x786e, 0x8ba4, 0x901a, 0x8fc7),
+  String.fromCharCode(0x95e8, 0x7981, 0x5df2, 0x901a, 0x8fc7),
+  String.fromCharCode(0x95e8, 0x7981, 0x901a, 0x8fc7),
+];
+const claimsGatePassedZh = (s) => {
+  const t = String(s);
+  return ZH_GATE_PHRASES.some((p) => t.includes(p));
+};
+// 码位表若写错字，整条中文臂会静默失效（永远匹配不上＝恒不命中）。
+// 这里用字面量复算最要紧的那一条，作为两路互证。
+const ZH_EXPECT = String.fromCharCode(
+  0x95e8,
+  0x7981,
+  0x6807,
+  0x8bb0,
+  0x901a,
+  0x8fc7,
+);
+ok(
+  ZH_GATE_PHRASES[0] === ZH_EXPECT && ZH_EXPECT === "门禁标记通过",
+  "阳性对照：中文臂词表码位与字面量互证",
+  ZH_GATE_PHRASES[0] === ZH_EXPECT ? "一致" : "★码位表写错了",
+);
 const claimsGatePassed = (s) => {
   const ws = wordsOf(s);
+  if (claimsGatePassedZh(s)) {
+    return true;
+  }
   return hasWord(ws, W_GATE) && MARK_FORMS.some((w) => hasWord(ws, w));
 };
 
@@ -132,6 +171,13 @@ const POS_SUBJECTS = [
   EXPECT_GATE + ": " + W_MARK + W_ED + " phase 0 exit " + W_GATE + ".",
   "chore: " + W_MARK + W_ING + " the exit " + W_GATE + ".",
   "chore: " + W_MARK + "-up exit " + W_GATE + " now",
+  // 中文写法：只认英文形状的那一臂对这些全部无效，补上。
+  "chore(阶段0): 门禁标记通过",
+  "docs: 已把门禁标记为通过",
+  "chore: 现在判定门禁通过",
+  "docs: 将门禁视为通过并推进下一阶段",
+  "chore: 门禁确认通过",
+  "chore: 门禁已通过",
 ];
 const NEG_SUBJECTS = [
   "feat(arch): " +
@@ -155,6 +201,15 @@ const NEG_SUBJECTS = [
   "feat: " +
     String.fromCharCode(109, 97, 114, 107) +
     "ing notes for the sprint",
+  // 中文阴性对照。第一条是本仓真实主题，【通过】与【标记】词序相反，
+  // 它守的是【紧邻】这道槽：改成【门禁】∧【通过】的合取就会把它判成违规
+  // —— 刀下实测过。后面几条是形状接近但并非宣称已通过的合法写法。
+  "fix(review): 门禁词臂改成合取，正当提交不再被当成通过标记",
+  "test(gate): 门禁测试通过了",
+  "docs(review): 已通过的判据清单与门禁无关",
+  "chore: 阶段门禁这一关已经通过",
+  "docs: 门禁还没通过",
+  "test: 没有任何东西把门禁判定为通过",
 ];
 ok(
   POS_SUBJECTS.length > 0 && POS_SUBJECTS.every((s) => claimsGatePassed(s)),
