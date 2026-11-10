@@ -58,6 +58,7 @@ import {
   type ApprovalVerdict,
   forbiddenFlagBlock,
   needsApproval,
+  preventionFor,
   redactArgs,
   type SafetyBlockCode,
   type SafetyVerdict,
@@ -823,10 +824,9 @@ export async function callHarness(
       approvals,
       model_family: outcome?.modelFamily ?? "unknown",
       status,
-      prevention:
-        adapter.capabilities.toolApproval && req.approvalPolicy === "on-request"
-          ? "enforced"
-          : "observed_only",
+      // 与路由用的是同一份判据（见 safety.ts preventionFor 那段：两处各写一份 ternary
+      // 会得出「审计写 enforced 而路由当初按 observed_only 判」，那种不一致最难查）。
+      prevention: preventionFor(adapter.capabilities, req.approvalPolicy),
     };
     write({
       taskId: req.taskId,

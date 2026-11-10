@@ -265,16 +265,42 @@ describe("第 3 层：要不要停下来问人", () => {
     expect(needsApproval({ tool: "Bash", args: { command: "pnpm test" } })).toBe(false);
   });
 
-  it("⭐ 认不出的工具参数形状 ⇒ 默认不可逆 ⇒ 一律要审批", () => {
-    // 这条不是 bug 的自白，是【复用 §9.1 那张表的结果被钉住】：
-    // classifyAction 的口径是「未知动作默认 irreversible」，而 harness 传进来的是
-    // 机器形状（`{"path":"/repo/x.ts"}`），那张表里全是人类语言子串，所以多半不命中 ⇒ 默认档。
-    // 方向是对的（宁可多问），但它意味着**一期上线前审批队列会一条工具调用一张卡**。
-    // 降噪的正确改法是把 harness 的工具名映射进 §9.1 那张表共用的 KIND_TIERS
-    // （Read→read_file、Write→edit_file…），而【不是】在 safety 里再写一张表 ——
-    // 两张表的必然结果是「同一次调用两处判成不同档」（0020 里记过同一类错）。
-    expect(needsApproval({ tool: "Read", args: { path: "/repo/x.ts" } })).toBe(true);
-    expect(needsApproval({ tool: "Write", args: { path: "/repo/x.ts" } })).toBe(true);
+  it("⭐ harness 的工具名已经进那张表（0021 §10 第 2 条那条已知坏味道的修法）", () => {
+    // 这一条**被改写过一次**，改写的理由要留在这儿：
+    // Task 5.2 那一版钉的是「Read/Write 传机器形状参数 ⇒ 判成默认不可逆 ⇒ 一律要审批」，
+    // 并把「修它需要一份 harness 工具名表，而那份表该由路由（Task 5.3）与岗位书一起定」
+    // 写在注释里。Task 5.3 就是那一次，所以断言翻过来了 ——
+    // 这不是「测试碍事所以改掉」，而是**被钉住的那个前提已经不再成立**（0021 §9 第 12 条
+    // 讲的是同一件事：先确认新行为更对，再改断言，并把理由留在测试里）。
+    //
+    // 翻过来的代价说清楚：光看名字的降噪放掉了一批审批，兜住它的只剩
+    // 「参数文本过那三张模式表」+「白名单」+「工作区越界」。所以这里同时钉住
+    // **仍然是 true 的那三例** —— 它们是这次降噪的边界。
+    expect(needsApproval({ tool: "Read", args: { path: "/repo/x.ts" } })).toBe(false);
+    expect(needsApproval({ tool: "Write", args: { path: "/repo/x.ts" } })).toBe(false);
+    // 边界 1：名字降噪**盖不住参数里的不可逆描述**（这条是那次加表的风险兜底）。
+    expect(
+      needsApproval({ tool: "Write", args: { path: "/repo/x.ts", new_string: "改完直接发布上线" } }),
+    ).toBe(true);
+    // 边界 2：**没被列进来的**工具名照旧默认不可逆（表不是白名单，漏名字只会多问）。
+    expect(needsApproval({ tool: "Bash", args: { command: "do Something Weird" } })).toBe(true);
+    expect(needsApproval({ tool: "SomeVendorTool", args: { x: 1 } })).toBe(true);
+  });
+
+  it("⭐ 那张表**只有这一份**（safety 与 policy 两处必须同判）", () => {
+    // 加表的这一轮最容易犯的错是「在 safety 里加一份 harness 表」，
+    // 于是同一次调用两处判成不同档（0020 记过同一类错）。这条用例是那个错误的机器防线：
+    // 它不测任何新逻辑，只要求两侧对**同一批工具名**给出同一个答案。
+    const names = ["Read", "Write", "Edit", "Grep", "Glob", "WebSearch", "WebFetch", "MultiEdit"];
+    for (const tool of names) {
+      const args = { path: "/repo/x.ts" };
+      expect(
+        needsApproval({ tool, args }),
+        "工具 [" +
+          tool +
+          "] 在 safety 与 policy 两处判得不一样 ⇒ 表已经分叉（safety 里长出了第二份表）",
+      ).toBe(classifyAction({ kind: tool, detail: JSON.stringify(args) }) === "irreversible");
+    }
   });
 
   it("⭐ 同一次调用在 §9.1 与 §12.7 两处判成同一档（两张表同源）", () => {

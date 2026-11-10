@@ -120,7 +120,32 @@ export const READ_ONLY_PATTERNS: readonly string[] = [
   "log",
 ];
 
-/** kind 的直接映射：调用方有时能给出确切类别（来自 harness 的结构化输出）。 */
+/** kind 的直接映射：调用方有时能给出确切类别（来自 harness 的结构化输出）。
+ *
+ * ⚠ 下面那 9 个 harness 工具名（read / edit / write / multiedit / notebookedit /
+ * grep / glob / websearch / webfetch）**与上面那些语义 kind 不是同一类东西**，
+ * 它们的来路是「白名单里会出现的字符串」，而把它们放进来是一个**有意的降噪**：
+ *
+ * 0021 §10 第 2 条记着一条已知的坏味道 —— harness 传进来的参数是机器形状
+ * （`{"path":"/repo/x.ts"}`），而三张模式表全是人类语言子串，于是**每一次** harness
+ * 工具调用都落到「默认不可逆」，接上线那天审批队列会变成**一条工具调用一张卡片**。
+ * 当时我没有在 safety.ts 里另写一张表（那会得到「同一次调用两处判成不同档」），
+ * 而是把它留给这一张表 —— 现在就是那一次。
+ *
+ * 加一条名字的**风险是有界的**，这点值得写清：命中 kind 之后，不可逆文本表
+ * **仍然先判**（见 classifyAction 里那段「自报盖不住危险描述」），所以
+ * `Write` 的 new_string 里写着「顺便发布一下」照样是 irreversible。也就是说
+ * 这张表能改变的只有「**光看名字**时该按哪一档」，改不了「这次参数里写着什么」。
+ * 于是每个取值断言的是一件与「这个名字到底存在于哪家 harness」无关的事：
+ * **若**有这么个工具，它光看名字的效果是只读/可改工作区。
+ * 名字写错（那家其实没有 Grep）没有代价；档位写错（把写工具写成 read_only）才有，
+ * 而那正是下面每条都带一句效果依据的原因。
+ *
+ * 反过来，**没被列进来的名字仍然默认不可逆** —— 那是这张表的兜底，
+ * 也是为什么 `Bash` 故意**不在**这里：它的光看名字什么都判不出来
+ * （`git status` 与 `git push --force` 是同一个工具名），
+ * 只能由参数文本决定，而参数文本走的就是那三张模式表。
+ */
 export const KIND_TIERS: Readonly<Record<string, RiskTier>> = {
   read_repo: "read_only",
   read_file: "read_only",
@@ -135,6 +160,18 @@ export const KIND_TIERS: Readonly<Record<string, RiskTier>> = {
   external_send: "irreversible",
   production_deploy: "irreversible",
   merge_to_main: "irreversible",
+  // ↓ harness 工具名（classifyAction 会把 kind 转小写，所以这里必须小写）。
+  // 白名单里出现过的形状见【规格】§4.1.3 的 ["Read","Edit","Bash(git:*)"] 与
+  // 【规格】§12.5 / §12.6 的 --allowedTools "Read,Edit,Bash"。
+  read: "read_only", // 读文件内容，无副作用
+  grep: "read_only", // 检索，无副作用
+  glob: "read_only", // 列文件，无副作用
+  websearch: "read_only", // 与既有 search_web 同档；【规格】§13.3 的搜索策略是另一层，不在这里判
+  webfetch: "read_only", // 取回一个页面；发出去的是请求，收回来的才是效果，两者都不改状态
+  edit: "reversible", // 改工作区文件；越界由 safety 的 workspaceContainmentBlock 判，不是这里
+  write: "reversible", // 同上（整文件覆盖，仍在工作区内 ⇒ 可回滚）
+  multiedit: "reversible",
+  notebookedit: "reversible",
 };
 
 function hit(haystack: string, needles: readonly string[]): boolean {

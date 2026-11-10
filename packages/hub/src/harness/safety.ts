@@ -27,6 +27,8 @@
  */
 import {
   type ApprovalHandler,
+  type ApprovalPolicy,
+  type RiskTier,
   type SandboxTier,
   SANDBOX_TIERS,
   type ToolApprovalRequest,
@@ -416,6 +418,29 @@ export function needsApproval(o: {
   /** 工作区外的目标 ⇒ 一律高风险（外部 API / 生产环境，§12.7 第三层点名的升级条件）。 */
   external?: boolean;
 }): boolean {
+  return toolRiskTier(o) === "irreversible";
+}
+
+/**
+ * 一次工具调用的**风险档**（§9.1 三级）。`needsApproval` 就是它等于 irreversible 那一档，
+ * 而这个函数另外有一个消费者：路由（routing.ts）的**只读段闸门** ——
+ * 【规格】§12.5 第 2 段要求「分析段不修改文件」，判据是
+ * 「这一段里出现任何非只读动作即失败」，而那个「非只读」必须与审批用的是**同一个**判据。
+ *
+ * 为什么要有这一层而不是让路由自己调 classifyAction：那会得到**两条通向同一张表的路**，
+ * 于是将来任何一方想加一层预处理（比如把 harness 工具名做别名归一）就会只加在一边，
+ * 得到「同一次调用，审批说可逆、闸门说只读」。这一层是那个漂移的收口点。
+ *
+ * 方向仍然是【宁可报高不报低】：认不出的工具名落 irreversible ⇒ 在只读段里就是违规。
+ * 一个 read-only 段被一次认不出的调用打断，看到的是「这一段被中止」，
+ * 而反过来（报低了）是「分析段偷偷改了文件而没人知道」—— 后者正是【规格】§12.5
+ * 那段流程第 2 步「不修改文件」这句话存在的全部理由。
+ */
+export function toolRiskTier(o: {
+  tool: string;
+  args: unknown;
+  external?: boolean;
+}): RiskTier {
   // `external` 只在**给了的时候**才进 draft：ActionDraft 那一侧是
   // `external?: boolean`（不是 `boolean | undefined`，本仓开了
   // exactOptionalPropertyTypes），直接 `external: o.external` 会把 undefined
@@ -424,7 +449,7 @@ export function needsApproval(o: {
     o.external === undefined
       ? { kind: o.tool, detail: argText(o.args) }
       : { kind: o.tool, detail: argText(o.args), external: o.external };
-  return classifyAction(draft) === "irreversible";
+  return classifyAction(draft);
 }
 
 /**
@@ -488,6 +513,31 @@ export async function approvalBlock(
     ),
     decidedBy: d.decidedBy ?? null,
   };
+}
+
+/* ═════════════════ 否决权到底有没有（enforced / observed_only） ═════════════════ */
+
+/**
+ * 这一次调用我们**有没有否决权**。
+ *
+ * 口径与 gateway 记审计时那一格**必须是同一份实现**，所以它在这里只有一份：
+ *  - `enforced` —— 这台适配器具备审批回调，且策略要求它问（`approval_policy=on-request`）；
+ *  - `observed_only` —— 其余全部。这不是「一定没拦住」，而是
+ *    【我们无从知道自己有没有拦住】，而审计里「不知道」必须有它自己的值。
+ *
+ * 它有两个消费者，而这正是它必须同源的理由：
+ *  1. **gateway 写审计**（那一行 harness_call 的 prevention 格）；
+ *  2. **路由判该不该把任务派给它**（routing.ts；【规格】§12.7 会碰不可逆工具的岗位书
+ *     不该被派给 observed_only 那一家）。
+ * 两处各写一份 ternary 的话，加一项条件（比如以后按 harness 版本区分）就会只加在一边，
+ * 得到「审计里写着 enforced 而路由当初是按 observed_only 判的」——
+ * 那比两边都写错更难查，因为审计看起来是自证干净的。
+ */
+export function preventionFor(
+  caps: { readonly toolApproval: boolean },
+  policy: ApprovalPolicy,
+): "enforced" | "observed_only" {
+  return caps.toolApproval && policy === "on-request" ? "enforced" : "observed_only";
 }
 
 /* ═════════════════ 脱敏（§12.7 第四层「脱敏参数」） ═════════════════ */
