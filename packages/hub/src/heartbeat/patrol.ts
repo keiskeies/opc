@@ -111,13 +111,55 @@ export type PatrolOptions = {
 };
 
 /**
+ * 「这一行的 kind」的【唯一】SQL 写法。四处引用都从这里取，不在各处手抄。
+ *
+ * 为什么不是直接的 json_extract(a.payload, '$.kind')：
+ * json_extract 对畸形 payload 是【抛错】而不是返回 NULL —— 这条本仓量过两次
+ * （0014 §2；policy/auto-approve.ts 的 MALFORMED_PAYLOAD_PROBE_SQL 注释）。
+ * 实测形状：库里有一行 payload = '坏掉的不是JSON'，PATROL_SQL 直接抛
+ * "malformed JSON" ⇒ 【整轮巡检一行结果都没有】。
+ *
+ * 而那种行今天【写得进去】：events.payload 只有 NOT NULL，没有 json_valid 检查，
+ * 直写 appendAudit 之外任何一条旁路 INSERT（人工修数据、迁移脚本、
+ * 未来的导入工具）都能留下它。于是原写法的效果是：
+ * 一行毫不相干的脏数据，让【所有】任务的停滞检测永久失效 ——
+ * 而这正是本模块存在的全部理由（消灭静默）的反面。
+ * 报错里既没有那行的 id 也没有 task_id，症状指向「巡检坏了」而不是「有一行脏数据」，
+ * 与 auto-approve.ts 那条「把数据事故伪装成功能故障」同族。
+ *
+ * 守卫取值是 CASE WHEN json_valid(...) THEN ... END ⇒ 坏行得 NULL，
+ * 而 NULL 在这一支里的语义【正是】下面 PATROL_SQL 那段说的「脏行不算真实事件」。
+ * 所以这不是新增语义，是让既有语义在遇到坏行时不再以抛错的形式实现。
+ * 反向对照在 patrol.test.ts ⑤：删掉守卫，那条用例必红。
+ *
+ * 导出是为了让测试能把【这一段】与 0003 那份 DDL 里的表达式逐字比一遍 ——
+ * 表达式索引匹配的是字面写法，两侧漂移的后果是索引静默失效（不报错、不变红）。
+ * 不导出的话那条用例只能重写一份表达式，而重写的那份就是第二份抄本（0006 §7 那族问题）。
+ */
+export function kindOf(alias: string): string {
+  return (
+    "(CASE WHEN json_valid(" +
+    alias +
+    ".payload) THEN json_extract(" +
+    alias +
+    ".payload, '$.kind') END)"
+  );
+}
+
+/**
  * 一次扫描取回全部判定所需信号。
  *
- * 三个子查询都在 events 上，而 idx_events_task (task_id, created_at) 正好覆盖 ——
+ * 三个子查询都在 events 上，而 0003 那条 idx_events_task_kind_created 正好覆盖 ——
  * 巡检是【每 15 分钟对全表 tasks 跑一次】的东西，写成 N+1 就是
  * 「任务数 × 3 次查询」，规格 §6.5 的量级是十万任务。这一条必须一条 SQL 出。
  *
- * ⚠ 载荷里没有 kind 的脏行（旁路写入、半截 JSON）json_extract 出 NULL，
+ * ⚠ 但「一条 SQL」只解决了往返次数，没解决【每行一次 json 解析】。
+ * kind 在 payload 这个 TEXT 列里，0001 那两条索引都覆盖不到它，于是这条 SQL
+ * 在 10 万事件的库上实测要 413 ms —— 而它跑在 Hub 主线程上，node:sqlite 是同步 API，
+ * 那期间【写队列、HTTP、SSE 全停】。补的索引在 0003_patrol_event_index.sql；
+ * 那条索引要求 SQL 里的 kind 表达式与 DDL 【逐字一致】，这就是 kindOf 存在的理由。
+ *
+ * ⚠ 载荷里【没有 kind】的脏行：json_extract 出 NULL，
  * 而 SQL 里 `NULL <> 'x'` 是 NULL 而不是 true ⇒ 那种行【不】算真实事件。
  * 「显式写 IS NOT NULL」与「靠 <> 的三值逻辑」在这一支上【结果相同】（实测），
  * 加它不是为了改行为，是为了让「脏行被剔除」这件事在 SQL 里【看得见】——
@@ -125,21 +167,24 @@ export type PatrolOptions = {
  * 换成 COALESCE(json_extract(...),'') 会把脏行算成【活动】，于是这类任务【永远不被报】。
  * 本模块存在的全部理由就是消灭「静默」，所以宁可多一张可撤销的卡片，
  * 也不要一个永远一声不吭的巡检。改之前先去看 patrol.test.ts ② 那条同名用例。
+ *
+ * 另一类脏行——payload 【不是合法 JSON】——由上面的 kindOf 兜住，走的是同一套语义
+ * （得 NULL ⇒ 不算真实事件），但如果没有那层守卫，它实现的方式是【整轮巡检抛错】。
  */
 export const PATROL_SQL =
   "SELECT t.id AS id, t.status AS status, t.current_node AS current_node, " +
   "  t.created_at AS created_at, " +
   "  (SELECT max(e.created_at) FROM events e WHERE e.task_id = t.id " +
-  "     AND json_extract(e.payload, '$.kind') IS NOT NULL " +
-  "     AND json_extract(e.payload, '$.kind') <> 'HeartbeatStalled') AS last_real_event_at, " +
+  "     AND " + kindOf("e") + " IS NOT NULL " +
+  "     AND " + kindOf("e") + " <> 'HeartbeatStalled') AS last_real_event_at, " +
   "  (SELECT max(e.created_at) FROM events e WHERE e.task_id = t.id " +
-  "     AND json_extract(e.payload, '$.kind') = 'HeartbeatStalled') AS last_stall_at, " +
+  "     AND " + kindOf("e") + " = 'HeartbeatStalled') AS last_stall_at, " +
   "  EXISTS (" +
   "    SELECT 1 FROM events r WHERE r.task_id = t.id " +
-  "      AND json_extract(r.payload, '$.kind') = 'ApprovalRequired' " +
+  "      AND " + kindOf("r") + " = 'ApprovalRequired' " +
   "      AND NOT EXISTS (SELECT 1 FROM events d WHERE d.task_id = r.task_id " +
   "        AND d.target = r.target " +
-  "        AND json_extract(d.payload, '$.kind') = 'ApprovalDecided')" +
+  "        AND " + kindOf("d") + " = 'ApprovalDecided')" +
   "  ) AS awaiting_approval " +
   "FROM tasks t ORDER BY t.created_at";
 

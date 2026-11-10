@@ -37,10 +37,12 @@ import {
   DEFAULT_STALL_THRESHOLD_MS,
   HEARTBEAT_INTERVAL_MS,
   HUMAN_HOLD_STATES,
+  PATROL_SQL,
   PATROL_VERDICTS,
   TERMINAL_STATES,
   WATCHED_STATES,
   judgeTask,
+  kindOf,
   patrolTasks,
   recordStalls,
   runPatrol,
@@ -483,6 +485,303 @@ describe("④ 分层：巡检不该把图运行时拖进来", () => {
     expect(src.includes("setTimeout")).toBe(false);
     // 反向对照：注释里【有】这个词（那句「故意不 setInterval」），所以不剥注释的写法必红。
     expect(readSrc().includes("setInterval")).toBe(true);
+  });
+});
+
+describe("⑤ 一趟巡检的开销必须是【索引区间扫】（Task 6.4「心跳不得阻塞写队列」）", () => {
+  /**
+   * 这一节【不断言毫秒数】。断言「< 100 ms」的基准测试在 CI 上会因一次并发编译而红，
+   * 而被红逼出来的一次阈值放宽，正好把要防的那件事永久放掉。
+   *
+   * 断言的是【形状】：SQL 计划里必须有SEARCH 走 idx_events_task_kind_created，
+   * 且不能出现「SCAN e」（全表扫 events）。形状与机器快慢无关，
+   * 而它 precisely 抓住回归：有人改 PATROL_SQL 让 kind 谓词不再能被索引覆盖时，
+   * 计划当场变 SCAN，而【10 万行以下的耗时看不出来】—— 那正是这类退化
+   * 能活到生产的唯一原因。
+   *
+   * 为什么这条性质值得单独一节：patrol 跑在 Hub 主线程上，而 node:sqlite 是同步 API。
+   * 加索引前实测一趟 413 ms（10 万事件 / 50 个活跃任务，9 趟中位；同一份库摘掉索引对照），
+   * 期间【写队列、HTTP、SSE 全停】；加了之后 0.28 ms。
+   * 索引在 0003_patrol_event_index.sql。它自己的写侧代价【不写在这里】：
+   * 那个百分比在复算里被发现【方差比样本数大】（三次运行 +20%/+35%/+43%，梯度里 +6%~+93%），
+   * 稳的只有「不为零、几十个百分点」，写法与理由在那份 DDL 文件头。
+   */
+  const INDEX = "idx_events_task_kind_created";
+
+  it("迁移之后这条索引【在】（少了它下面两条断言无从谈起）", () => {
+    const { db } = fresh();
+    const names = (
+      db
+        .prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'events'")
+        .all() as { name: string }[]
+    ).map((r) => r.name);
+    expect(names).toContain(INDEX);
+    // 反向对照：既有那两条 0001 的索引必须还在。
+    // 「加了一条新索引顺手把旧的删了」也能让上面那条绿，而巡检的第一个子查询
+    // 靠的是 idx_events_task —— 删掉它，plan 会变 SCAN 而索引名断言照绿。
+    expect(names).toContain("idx_events_task");
+    expect(names).toContain("idx_events_action");
+  });
+
+  it("计划里 SEARCH 走了那条覆盖索引，且没有 SCAN events", () => {
+    const { db } = fresh();
+    const plan = (db.prepare("EXPLAIN QUERY PLAN " + PATROL_SQL).all() as { detail: string }[]).map(
+      (r) => String(r.detail),
+    );
+    const text = plan.join("\n");
+    expect(text).toContain(INDEX);
+    // COVERING 这一词也要核：非覆盖索引会退化成「索引定位 + 逐行回表取 payload」，
+    // 那种计划里索引名照样出现，而耗时是覆盖索引的两个数量级。
+    expect(text).toContain("COVERING INDEX " + INDEX);
+    expect(text.includes("SCAN e")).toBe(false);
+    // 反向对照：EXPLAIN 真的会写出这两种词，所以上面两条不是恒真/恒假的空断言。
+    // 拿一条【故意不带 kind 谓词】的 SQL 去 EXPLAIN，就该看到 SCAN e。
+    const bad = db
+      .prepare(
+        "EXPLAIN QUERY PLAN SELECT t.id, (SELECT max(e.created_at) FROM events e " +
+          "WHERE e.task_id = t.id) x FROM tasks t",
+      )
+      .all() as { detail: string }[];
+    expect(bad.map((r) => String(r.detail)).join("\n")).toContain("USING COVERING INDEX idx_events_task");
+  });
+
+  it("四个探测里【恰好三个】走那条索引，而第四个走 idx_events_task 不是漏配", () => {
+    /**
+     * 这条断言的存在理由：0003 文件头原本写着「非部分那份 4 个探测【全部】走它」，
+     * 而那次对照一次差了【两个】变量（索引类型 + 列清单里有没有 created_at），
+     * 等列清单之下两者覆盖面【相同】。已撤回，见 0019 §1 第 14 条与 §5 第 20 条。
+     * 现在这一格不再由任何人【声称】，包括我 —— 它是断言。
+     *
+     * 不断言毫秒数（理由见本节文件头那段），断的是【逐条 SEARCH 走哪条索引】——
+     * 那个数与机器无关，而它正是「索引有没有被用上」这件事的可观察形态。
+     */
+    const { db } = fresh();
+    const probes = (sql: string) =>
+      (db.prepare("EXPLAIN QUERY PLAN " + sql).all() as { detail: string }[])
+        .map((r) => String(r.detail))
+        .filter((d) => /\bSEARCH (e|r|d) USING\b/u.test(d));
+    const plan = probes(PATROL_SQL);
+    // 前提检查：计划里得有【四个】events 探测。少一个的话下面那个 3/4 比的是
+    // 别的东西（比如「SQL 被人改短了」），而那条断言照样可能绿。
+    expect(plan).toHaveLength(4);
+    expect(plan.filter((d) => d.includes(INDEX))).toHaveLength(3);
+    const stray = plan.filter((d) => !d.includes(INDEX));
+    expect(stray).toHaveLength(1);
+    // 那唯一没配上的是 last_real_event_at 那一发，它退到 idx_events_task。
+    expect(stray[0]).toContain("idx_events_task ");
+
+    // 覆盖面不是选型的理由：等列清单之下，部分索引配上【同样三个】。
+    // 这一发是那条撤回的直接产物 —— 少了它，「非部分覆盖面更宽」这句话
+    // 还可以被重新写出来，而它已经在同一份库上被证伪过一次。
+    db.exec("DROP INDEX " + INDEX);
+    db.exec(
+      "CREATE INDEX " + INDEX + " ON events(task_id, " +
+      "CASE WHEN json_valid(payload) THEN json_extract(payload, '$.kind') END, created_at) " +
+      "WHERE CASE WHEN json_valid(payload) THEN json_extract(payload, '$.kind') END IS NOT NULL",
+    );
+    expect(probes(PATROL_SQL)).toEqual(plan);
+  });
+
+  it("第四个探测靠 max(created_at) 的索引序【提前收尾】—— 尾部是心跳事件时才退化", () => {
+    /**
+     * 上面那条只说「它走 idx_events_task」，没说【为什么这不算退化】。
+     * 这句解释的分量在这里：它不是「看着应该挺快」，是一组【差一个变量】的对照。
+     *
+     * 两侧行数、created_at 分布、索引集合、SQL 全部相同，只差【尾部那批的 kind】：
+     *   T_real  尾部是真实事件   → 从最新往旧走，第一条就停
+     *   T_stall 尾部是心跳事件   → 把尾部那批全扫完才找到真实事件
+     * 机制：idx_events_task 是 (task_id, created_at)，max(created_at) 因此天然有序。
+     *
+     * 为什么这一格值得单独测：它回答了「巡检自己写的事件会不会拖慢巡检」——
+     * 会，每轮多扫一轮心跳事件。而去重语义保证那种行最多一个间隔一条
+     *（§2 那张双向表），所以它是有界的。以后若有人「顺手」把这一发掰到
+     * 0003 那条索引上（等值定位，看起来总是更快），得先来回答这一发。
+     */
+    const { db } = fresh();
+    const N = 500;
+    for (const id of ["T_real", "T_stall"]) {
+      addTask(db, id, "IN_PROGRESS", T0 - HOUR);
+      for (let i = 0; i < N; i++) ev(db, id, "TaskStateChanged", T0 - HOUR + i);
+      // 唯一的那个变量：尾部 N 条的 kind。
+      const tail = id === "T_stall" ? "HeartbeatStalled" : "TaskStateChanged";
+      for (let i = 0; i < N; i++) ev(db, id, tail, T0 + i);
+    }
+    // 就是 PATROL_SQL 里那一发（第一个子查询），单独拿出来才能归因到它自己身上。
+    const stmt = db.prepare(
+      "SELECT max(e.created_at) FROM events e WHERE e.task_id = ? AND " +
+        kindOf("e") + " IS NOT NULL AND " + kindOf("e") + " <> 'HeartbeatStalled'",
+    );
+    const median = (xs: number[]): number =>
+      [...xs].sort((a, b) => a - b)[Math.floor(xs.length / 2)] ?? Number.NaN;
+    const timed = (id: string): number =>
+      median(
+        Array.from({ length: 7 }, () => {
+          const s = performance.now();
+          stmt.all(id);
+          return performance.now() - s;
+        }),
+      );
+    // 交替测：两侧库里数据不变，交替只是去掉「先测的那侧承担热身」这件事。
+    const real: number[] = [];
+    const stall: number[] = [];
+    for (let k = 0; k < 3; k++) {
+      real.push(timed("T_real"));
+      stall.push(timed("T_stall"));
+    }
+    const realMs = Math.min(...real);
+    const stallMs = Math.min(...stall);
+    process.stdout.write(
+      "\n[0003] 第四个探测：尾部是真实事件 " + realMs.toFixed(3) + "ms / 尾部是心跳事件 " +
+        stallMs.toFixed(3) + "ms\n",
+    );
+    // 判据取 3×（本机 500 行那一档实测 20× 量级）：这一发要抓的是【那条索引被删或改名】
+    // 之后这一发退化成全任务扫 —— 那时两侧【同量级变慢】而比值塌到 1 附近。
+    // 不断言 stallMs 的绝对值：绝对毫秒随库漂（0019 §1 第 10 条那条撤回的教训）。
+    expect(stallMs).toBeGreaterThan(realMs * 3);
+    // 前提：快的那侧【确实走了索引序】。删掉 idx_events_task 之后它必须变慢到
+    // 与慢的那侧同量级 —— 否则上面的比值可能只是「两侧都很快」凑出来的。
+    db.exec("DROP INDEX idx_events_task");
+    expect(timed("T_real")).toBeGreaterThan(realMs * 3);
+  });
+
+  it("kind 为 NULL 的脏行【不算】真实事件（索引下推没把边界吃掉）", () => {
+    // 这一发守的是「加了索引之后结果还是对的」。索引带来的最常见错误不是慢，
+    // 是【少行】：谓词被下推进索引之后，边界值（kind 为 NULL 的脏行）容易被一起吃掉。
+    const { db } = fresh();
+    addTask(db, "T-a", "IN_PROGRESS", T0 - HOUR);
+    ev(db, "T-a", "TaskStateChanged", T0 - HOUR);
+    // 没有 kind 的脏行：它【不该】被当成真实事件（patrol.ts 的 SQL 显式判 IS NOT NULL）
+    db.prepare(
+      "INSERT INTO events (task_id, actor_type, actor_id, action, payload, state_snapshot, created_at) " +
+        "VALUES ('T-a', 'system', 'hub', 'state_change', '{}', '{}', ?)",
+    ).run(T0 - 1000);
+    const rows = db.prepare(PATROL_SQL).all() as { id: string; last_real_event_at: number | null }[];
+    expect(rows.map((r) => r.id)).toEqual(["T-a"]);
+    expect(Number(rows[0]?.last_real_event_at)).toBe(T0 - HOUR);
+  });
+  it("payload 不是合法 JSON 的行【不让整轮巡检抛错】（kindOf 那层守卫）", () => {
+    /**
+     * 这一发守的失效形状是「一行毫不相干的脏数据 ⇒ 所有任务的停滞检测永久失效」。
+     * json_extract 对畸形 payload 是【抛错】而不是返回 NULL（本仓量过两次：0014 §2、
+     * policy/auto-approve.ts 的 MALFORMED_PAYLOAD_PROBE_SQL 注释）。
+     * 而那种行【写得进】events —— payload 只有 NOT NULL，没有 json_valid 检查，
+     * 所以旁路 INSERT（人工修数据、迁移脚本、导入工具）就能留下它。
+     * 没有守卫时实测就是 db.prepare(PATROL_SQL).all() 抛 "malformed JSON"，
+     * 一行结果都没有，而报错里既没有那行的 id 也没有 task_id。
+     */
+    const { db } = fresh();
+    addTask(db, "T-clean", "IN_PROGRESS", T0 - HOUR);
+    ev(db, "T-clean", "TaskStateChanged", T0 - HOUR);
+    addTask(db, "T-dirty", "IN_PROGRESS", T0 - HOUR);
+    db.prepare(
+      "INSERT INTO events (task_id, actor_type, actor_id, action, payload, state_snapshot, created_at) " +
+        "VALUES ('T-dirty', 'system', 'hub', 'state_change', ?, '{}', ?)",
+    ).run("坏掉的不是JSON", T0 - 60_000);
+
+    const rows = db.prepare(PATROL_SQL).all() as Array<{
+      id: string;
+      last_real_event_at: number | null;
+    }>;
+    // 健康任务【照常】出结果：脏行不能把它一起拖倒
+    const clean = rows.find((r) => r.id === "T-clean");
+    expect(Number(clean?.last_real_event_at)).toBe(T0 - HOUR);
+    // 脏行按 kindOf 的语义得 NULL ⇒ 「没有真实事件」，于是它落在 never_started/recent
+    // 那一格而不是被当成一次活动。这里断言的是【不是 T-clean 那种时间戳】，
+    // 因为「守卫把坏行变成 NULL」与「守卫把坏行变成 0」是两种不同的错。
+    const dirty = rows.find((r) => r.id === "T-dirty");
+    expect(dirty?.last_real_event_at).toBeNull();
+
+    // 反向对照（DDL 与 kindOf 注释都承诺了这一发）：把守卫拿掉，同样的数据必须抛。
+    // 不写这一发的话，上面那些断言在一个【从来没有坏行】的世界里也能过 ——
+    // 而这条用例的全部意义就是坏行存在时的情形。
+    const unguarded = PATROL_SQL.replace(
+      /\(CASE WHEN json_valid\(([a-z])\.payload\) THEN json_extract\(\1\.payload, '\$\.kind'\) END\)/gu,
+      "json_extract($1.payload, '$.kind')",
+    );
+    expect(unguarded).not.toContain("json_valid");
+    expect(() => db.prepare(unguarded).all()).toThrow(/malformed JSON/u);
+  });
+
+  it("有畸形 payload 行时，那条表达式索引【仍然建得起来】（升级不能因脏行失败）", () => {
+    /**
+     * 0003 那份 DDL 用 CASE WHEN json_valid(...) 而不直接用 json_extract 的【第一条】理由：
+     * 索引要物化整个表达式，老库里有一行坏 payload 时，
+     * CREATE INDEX ... json_extract(payload,'$.kind') 会报 "malformed JSON"
+     * ⇒ 整个 0003 迁移失败 ⇒ 【升级做不完】。
+     * 这一格只能这样测：先在【没有这条索引】的库上写下坏行，再执行 DDL 里那句表达式。
+     * 顺序反过来（先有索引）根本写不进坏行，测试就会变成恒真。
+     */
+    const { db } = fresh();
+    db.exec("DROP INDEX idx_events_task_kind_created");
+    db.prepare(
+      "INSERT INTO events (task_id, actor_type, actor_id, action, payload, state_snapshot, created_at) " +
+        "VALUES (NULL, 'system', 'hub', 'state_change', '坏掉的', '{}', 1)",
+    ).run();
+    // 未守卫版：同一个库上必然失败 —— 这一发证明上面那句 INSERT 真的写下了一行坏数据
+    expect(() =>
+      db.exec(
+        "CREATE INDEX ix_unguarded ON events(task_id, json_extract(payload, '$.kind'), created_at)",
+      ),
+    ).toThrow(/malformed JSON/u);
+    // 守卫版：与 0003 里的表达式逐字一致
+    expect(() =>
+      db.exec(
+        "CREATE INDEX ix_guarded ON events(task_id, CASE WHEN json_valid(payload) " +
+          "THEN json_extract(payload, '$.kind') END, created_at)",
+      ),
+    ).not.toThrow();
+    // 而且写语义没变：有索引之后坏 payload 仍然【写得进去】。
+    // 这条守的是「一条读侧优化不许悄悄改写路径的契约」（append-only 审计库）。
+    expect(() =>
+      db
+        .prepare(
+          "INSERT INTO events (task_id, actor_type, actor_id, action, payload, state_snapshot, created_at) " +
+            "VALUES (NULL, 'system', 'hub', 'state_change', '又是坏的', '{}', 2)",
+        )
+        .run(),
+    ).not.toThrow();
+  });
+
+  it("DDL 里的索引表达式与 patrol.ts 的 kindOf【逐字同源】（漂移会让索引静默失效）", () => {
+    /**
+     * 表达式索引匹配的是【字面表达式】。两侧一旦漂移（比如 patrol 侧改成
+     * json_valid(payload)=1，或去掉 CASE 换成 IIF），SQLite 只是【不再选这条索引】——
+     * 不报错、不变红，生产静默退回 413 ms。上面那条 EXPLAIN 用例能抓到它，
+     * 但它抓不到「DDL 被人改写而测试里那条手写 DDL 也跟着改」这种情形，
+     * 所以这里直接把 DDL 文本拿来比。
+     */
+    const ddl = readFileSync(
+      join(HUB, "resources", "migrations", "0003_patrol_event_index.sql"),
+      "utf8",
+    );
+    // 与 patrol.ts 里那个【同一个函数】的产物比对，不在测试里重写一遍表达式。
+    // 去掉外层那对括号：patrol.ts 拼进 SQL 时需要它们（表达式要和 <> / = 抢优先级），
+    // 而 DDL 的索引列列表本身就是括号分界的，写第二对是噪声。
+    // 括号之外必须【逐字相同】—— 索引匹配的是字面表达式，差一个空格都可能不被选中。
+    const expr = kindOf("e")
+      .replace(/e\.payload/gu, "payload")
+      .replace(/^\(/u, "")
+      .replace(/\)$/u, "");
+    expect(expr).toContain("json_valid(payload)");
+    const ddlCode = ddl
+      .split("\n")
+      .filter((l) => !l.trimStart().startsWith("--"))
+      .join(" ")
+      .replace(/\s+/gu, "");
+    expect(ddlCode).toContain(expr.replace(/\s+/gu, ""));
+    // 反向对照：DDL 的【可执行部分】里，json_extract(payload 只能出现一次，
+    // 且永远是紧跟在 CASE WHEN json_valid(payload) THEN 后面的那一处。
+    // 少这一发的话，「有人在 CREATE INDEX 里另加了一条未守卫的表达式」看不出来，
+    // 而那条索引在脏行库上会让迁移失败（上面那条用例测的正是这个失效）。
+    const bare = [...ddlCode.matchAll(/json_extract\(payload/gu)];
+    expect(bare).toHaveLength(1);
+    expect(ddlCode).toContain("json_valid(payload)THENjson_extract(payload,'$.kind')END");
+    // 而注释里【确实】多处写着未守卫的那个写法（那几段在解释为什么不能用它）——
+    // 整份文件里的出现次数必须【严格多于】可执行部分那 1 次，否则说明「按行滤注释」
+    // 这一步没滤掉任何东西，上面那条「恰好 1 次」是它自己造出来的假象。
+    // （0018 §6 第 4 条记过同一族坑：门禁扫到注释 ⇒ 代码是干净而测试是红的。）
+    const raw = [...ddl.matchAll(/json_extract\(payload/gu)];
+    expect(raw.length).toBeGreaterThan(bare.length);
   });
 });
 

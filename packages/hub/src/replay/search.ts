@@ -123,12 +123,34 @@ export function quoteFtsPhrase(keyword: string): string {
  * 限定单个任务。回放页必须带它：CEO 在任务 A 的回放里搜一个词，
  * 得到任务 B 的事件是**答非所问**（§22.2 的回放对象是「任意一个任务」）。
  *
- * FTS 侧用 `rowid IN (SELECT id FROM events WHERE task_id = ?)` 而不是直接
- * `events_fts` 上加列：这张表是 external content 表（content='events'），
- * 它手上只有被索引的 payload 列，task_id 不在索引里。实测两种限定都返回预期行
- * （探针见 0013 §2），这一条按可读性选。
+ * 写法从 `rowid IN (SELECT id FROM events WHERE task_id = ?)` 改成了
+ * `EXISTS (… e.id = f.rowid …)`，两者【结果相同】，而代价差两个到三个数量级 ——
+ * 这不是微优化，是【一条会冻住整个 Hub 的查询】（node:sqlite 同步 API，
+ * 它占住主线程的那段时间里写队列、HTTP、SSE 全停）。
+ *
+ * 正确性那条【不是我说说过就算】：scripts/bench-recompute.mjs 每次跑之前
+ * 会把两种写法在「限定/全库 × 时间序/最近序 × 三种命中数」上逐格比一遍，
+ * 时间序比【顺序】、最近序只比【集合】（rank 并列时两种计划的次序不保证一致，
+ * 拿它当断言会造出一个每几周红一次而代码没错的用例）。
+ *
+ * 耗时这里【不写绝对毫秒数】。理由是我自己上过当：同一句旧 SQL 在三份
+ * 10 万行的库上我量出过 0.6 s / 18 s / 135 s 三种值，差异不在索引
+ * （把 0003 那条建上再拆掉，同一份库上没动）—— 我没法解释它随什么漂，
+ * 因此【没有资格引用任何一个单独的「旧写法是 X ms」】。
+ * 0019 §1 第 10 条记着这件事，包括我第一版在这里写下的那两个来自【不同库】
+ * 拼成的数。稳的是这两样，也正好是测试断的那两样：
+ *   比值：新写法在【同库同词同任务同 LIMIT】下快两个到三个数量级
+ *   计划：旧写法 EXPLAIN 出 `LIST SUBQUERY` + `CREATE BLOOM FILTER`
+ *         （先把该任务【全部】 id 物化再建过滤器），
+ *         新写法是 `SEARCH e EXISTS USING INTEGER PRIMARY KEY (rowid=?)` ——
+ *         拿 FTS 给的 rowid 逐个主键定位，LIMIT 一满就停。
+ * 门禁在 test/acceptance/perf-thresholds.test.ts ③，它断的就是上面那个 BLOOM 词，
+ * 并且带一条「把旧写法搬回来，那个词就该出现」的反向对照。
+ *
+ * external content 表（content='events'）与 events 共用 rowid，
+ * 所以 e.id = f.rowid 这个 join 条件是**语义**上的同一行，不只是能跑。
  */
-const FTS_SCOPE = " AND rowid IN (SELECT id FROM events WHERE task_id = ?)";
+const FTS_SCOPE = " AND EXISTS (SELECT 1 FROM events e WHERE e.id = f.rowid AND e.task_id = ?)";
 const LIKE_SCOPE = " AND task_id = ?";
 
 /**
@@ -166,7 +188,9 @@ export type SqlShape = {
  */
 export function ftsSearchSql(s: SqlShape): string {
   return (
-    "SELECT rowid AS id FROM events_fts WHERE events_fts MATCH ?" +
+    // 别名 f 是给 FTS_SCOPE 那个 EXISTS 子查询用的（e.id = f.rowid）。
+    // 不在这里写死成两条完整 SQL：片段只有一份的纪律见上面那段。
+    "SELECT f.rowid AS id FROM events_fts f WHERE events_fts MATCH ?" +
     (s.scope ? FTS_SCOPE : "") +
     (s.order === "timeline" ? FTS_ORDER_TIMELINE : FTS_ORDER_RECENT) +
     " LIMIT ? OFFSET ?"
