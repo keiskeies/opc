@@ -282,6 +282,49 @@ function auditOf(o: {
     : { ...base, note: o.request.note };
 }
 
+/* ────────────────────────── 断线重连策略 ────────────────────────── */
+
+/**
+ * 重连退避。住在 contracts 而不是 hub，因为【服务端永不重连】：
+ * 这段代码的唯一消费者是客户端（桌面端与 Web）。放 hub 侧的话，
+ * web 要么 import hub（§5.6.1 的边界立刻被破，且前端会欠下 node:sqlite），
+ * 要么自己抄一份 —— 而两份退避策略的漂移表现是「桌面端 15 秒放弃、Web 无限重试」，
+ * 同一个 Hub 挂掉时两个客户端给出两种说法。
+ */
+export const RECONNECT_BASE_MS = 500;
+export const RECONNECT_MAX_MS = 15_000;
+
+/**
+ * 第 attempt 次重连前应等待多久（attempt 从 0 起）。
+ *
+ * 纯函数、无状态：调用方自己记第几次。
+ * 上限是这条函数存在的意义 —— 没有上限的指数退避会让 Hub 挂了一小时后
+ * 重连间隔变成几十分钟，恢复后 CEO 点开看板却还要等那一坨；
+ * 没有下限（每次都固定 1s）则 Hub 起不来时前端每 1s 撞一次，日志被刷满。
+ */
+export function reconnectDelayMs(attempt: number): number {
+  if (!Number.isInteger(attempt) || attempt < 0) {
+    throw new Error("attempt 是非负整数（第 0 次重连传 0），实到 " + String(attempt));
+  }
+  // 2**attempt 在 attempt 很大时会溢出成 Infinity，与上限取 min 之前先夹一次指数，
+  // 免得「上限」这件事要靠 Infinity 参与运算才成立（能算对，但读不出意图）。
+  const exp = Math.min(attempt, 16);
+  return Math.min(RECONNECT_BASE_MS * 2 ** exp, RECONNECT_MAX_MS);
+}
+
+/**
+ * 什么时候该放弃重连、把界面切成「去拉快照」。
+ *
+ * 为什么要有这一条而不是无限重连：§5.8 的纪律是「事件只做增量，全量状态由 REST 补齐」。
+ * 无限重连的前端会在 Hub 崩溃期间一直显示【崩溃前】的状态，而且显示得像实时。
+ * 那比一个明确的「连接断开」更坏 —— CEO 会基于一个过期看板做审批决定。
+ */
+export const GIVE_UP_AFTER_ATTEMPTS = 8;
+
+export function shouldGiveUp(attempt: number): boolean {
+  return attempt >= GIVE_UP_AFTER_ATTEMPTS;
+}
+
 /* ────────────────────────── SSE 帧格式 ────────────────────────── */
 
 /**
