@@ -158,6 +158,27 @@ function verify(
 }
 
 const SNAP: Record<string, string> = {
+  // 0015（Task 3.6）本轮新写的引用。逐条在被引用文件里 sed -n '<n>p' 读过原文再抄，
+  // 不是从 0015 正文里复制措辞 —— 那等于让快照抄文档，守卫当场失效。
+  // 其中 `org/commit.ts:107` 在同一篇里出现两次（表格 ①、§3 末），快照按 key 去重，一条即可。
+  "0015-charter-editor-and-two-sources-of-budget.md>org/commit.ts:107":
+    '"INSERT INTO role_charters (id, role_id, version, config, effective_from, created_by) " +',
+  // 0015 §8 第三条引的是「bump 逐字复制上一版 config」那一句。正文写的是 295-301 这个区间，
+  // 而提取器只认区间起点（取舍一），所以快照按 295 登记。
+  "0015-charter-editor-and-two-sources-of-budget.md>org/commit.ts:295":
+    "const config = JSON.parse(prev.config) as Record<string, unknown>;",
+  "0015-charter-editor-and-two-sources-of-budget.md>0001_init.sql:144":
+    "CREATE TABLE role_charters (",
+  "0015-charter-editor-and-two-sources-of-budget.md>http/app.ts:400":
+    'consumed_cents: Number(r["consumed_cents"] ?? 0),',
+  "0015-charter-editor-and-two-sources-of-budget.md>tracker.ts:233":
+    "const breached = before <= limit && after > limit;",
+  "0015-charter-editor-and-two-sources-of-budget.md>bus.ts:49":
+    '| { kind: "BudgetPaused"; taskId: string; spentUsdCents: number }',
+  "0015-charter-editor-and-two-sources-of-budget.md>tracker.ts:238":
+    "taskId: input.taskId,",
+  "0015-charter-editor-and-two-sources-of-budget.md>contracts/evidence.ts:165":
+    '"dev_to_test": "code_diff",',
   "0006-cli-resume-and-identity.md>graph/thread.ts:24":
     "export function threadConfig(taskId: string): { configurable: { thread_id: string } } {",
   "0006-cli-resume-and-identity.md>graph/thread.ts:25":
