@@ -58,6 +58,7 @@ export type IpcChannel =
   | "hub:getTask"
   | "hub:listApprovals"
   | "hub:decideApproval"
+  | "hub:listBindings"
   | "hub:subscribeEvents";
 
 export interface ChannelSpec {
@@ -102,6 +103,36 @@ export const CHANNEL_SPECS: readonly ChannelSpec[] = [
     endpoint: "POST /approvals/:interruptId",
     kind: "invoke",
     args: "decision",
+  },
+  /**
+   * IM 身份绑定那张列表（0031）。
+   *
+   * 为什么【只有读】这一条通道，而 `POST /bindings` / `/verify` / `/rebind`
+   * 三条落地了却没有通道 —— 这与文件头那条「已实现而未暴露」的一般口径不同，
+   * 所以理由必须单独写，不能读成「以后补」：
+   *  ① 那三条的【语义前提是「操作者知道自己在校验一个人」】，而渲染进程里
+   *    没有任何东西能证明这一点。桌面壳的渲染进程是一个浏览器上下文
+   *    （nodeIntegration 关着、能加载远程内容的历史见 §5.6.1），
+   *    给它一条「把这个账号校验成 CEO」的通道，等于让【任何能在渲染进程里
+   *    执行脚本的东西】都拿到那一次写 —— 一次 XSS 就从「读看板」升级成
+   *    「自封身份」。审批那条通道没有这个问题：§11.4 让远程/IM 侧只能批可逆项，
+   *    而校验绑定【没有对应的更弱一档】，它本身就是那条最高的门。
+   *  ② 那三条今天真正的调用方是【人 + CLI】而不是界面：校验一个身份要先在
+   *    另一个渠道上跟本人核对（0028 §2 说得很明白，签名验的是消息不是人），
+   *    那次核对不发生在渲染进程里，所以把它做成一个按钮会【伪造出「点一下就行」】
+   *    这个假象 —— 那比少一个按钮更糟，0030 §3 末尾记的就是同一种错误。
+   *  ③ 因此这三条今天的合法入口是 curl / 将来的 CLI，而那条路上站着的是
+   *    【同机的一个终端】，不是【一个能跑远程脚本的上下文】。
+   *
+   * ⚠ 所以这一格是【判断】而不是【未完成】。判断可能错，错的形状是：
+   * 真要做管理界面时有人在这里加一条通道 —— 那一刻请连 ① 一起回答
+   * （渲染进程里那次「我知道他是谁」凭什么成立），而不是只加一行。
+   */
+  {
+    channel: "hub:listBindings",
+    endpoint: "GET /bindings",
+    kind: "invoke",
+    args: "none",
   },
   { channel: "hub:subscribeEvents", endpoint: "GET /events", kind: "push", args: "none" },
 ];

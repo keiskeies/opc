@@ -42,6 +42,17 @@ import type { DatabaseSync } from "node:sqlite";
 import type { EventBus } from "../events/bus.js";
 import { legalTransitionsFrom, type TaskState } from "../graph/status.js";
 import { listApprovals as listApprovalsFrom } from "../approvals/query.js";
+// IM 绑定的四条路由**不写在下面那个 switch 附近**，单独住 http/bindings.ts。
+// 那不是为了分文件整洁：test/bindings/im.test.ts 有一条守卫扫 src，
+// 断言 `im_bindings` 这四个字只出现在 bindings/im.ts 一个文件里。
+// 若把这四个 handler 写在 app.ts，要么我在那里手搓 SQL（绕过那一整列被测试穷尽的预检），
+// 要么天天跟那条守卫打架。分开之后，「HTTP 层不碰那张表」是一句机器守着的话。
+import {
+  listBindingsRoute,
+  rebindBindingRoute,
+  requestBindingRoute,
+  verifyBindingRoute,
+} from "./bindings.js";
 import { ResumeStream, type SnapshotSource } from "./sse.js";
 import { buildReplayView } from "../replay/query.js";
 import { verifyRequest, type VerifyInput } from "./auth.js";
@@ -51,6 +62,13 @@ import { isLoopbackAddress } from "./bind.js";
 // （那边带 node:crypto 与 db/write-queue）。contract.test.ts 手搓 deps 时能构造出
 // 一个假 reason 而不是被迫把整个 token 存储拖进测试。
 import type { TokenIssueReject, TokenRejectReason } from "./tokens.js";
+// 【又一个 type-only import】，动机与上面 tokens.ts 那一条【不一样】，值得分开说：
+// 那边是「实现在本文件，所以只要类型」；这边是「实现真在 db/write-queue.js，
+// 但 app.ts 只把它当【注入点的形状】，一次运行期调用都不发」——
+// 真正的 node() 调用全在 http/bindings.ts 里。
+// 所以这条 import 在产物里是 0 字节，而 contract.test.ts 手搓 deps 时
+// 仍然不必把整个写队列拖进测试（不传 bindingWriter ⇒ 三条写路由 501，那正是测的分支）。
+import type { Writer } from "../db/write-queue.js";
 
 export interface HubRequest {
   readonly method: string;
@@ -167,6 +185,12 @@ export interface HubDeps {
    * P1/P2 那族故障（同连接重入 ⇒ cannot start a transaction within a transaction，
    * 或者更糟：与超步事务互踩）。所以写必须走 Writer，而 Writer 在 app.ts 这一层不可见。
    *
+   * ⚠ 最后那半句在 0031 之后【只对了运行时】：下面 bindingWriter 那一条让
+   * app.ts 以【type-only】的方式看见 Writer（编译期有类型，运行期不 import
+   * db/write-queue.js，与文件头 tokens.ts 那一条同一个手法与同一个理由）。
+   * 原文留着，因为那句论证的【P1/P2 那一半】照旧成立，而且正是它决定了
+   * bindingWriter 收队列而不是连接。
+   *
    * 【可选】而不是必填，是因为它今天【还没有生产者】：签票的地方（图里升级那一刻）
    * 与建卡一样没有接线（0026 §1 那格同一件事）。必填会逼装配方传一个假实现，
    * 那比缺一个真实现更糟 —— 见 0026 §9 撤掉 isPendingStatus 时记的那个形状。
@@ -205,6 +229,36 @@ export interface HubDeps {
     | { readonly ok: true; readonly token: string; readonly expiresAt: number }
     | { readonly ok: false; readonly reason: TokenIssueReject }
   >;
+  /**
+   * IM 身份绑定的**写路径**（0031，http/bindings.ts）。
+   *
+   * 收的是 WriteQueue 的 `node` 那一格而不是连接：绑定是【写】，
+   * 而 deps.db 是只读连接（real-deps.ts 的装配注释）。在 handler 里
+   * 直接拿 db 写会绕开单写者队列 —— 0010 §2 那发 P1 实测过的形状。
+   *
+   * 可选，缺省时三条写路由回 501。这个「可选」与 issueApprovalToken 同源：
+   * 契约先行，装配后补，而 501 让「没接」是一句【说得清修法】的话
+   * （接上 buildHubDeps 就行），不是一句「路由不存在」。
+   */
+  readonly bindingWriter?: Writer;
+  /**
+   * 「谁有权校验一个 IM 身份」在**这台 Hub 上**的名字（0031）。
+   *
+   * ⚠ 它是【署名来源】，不是【鉴权】。这一点必须写准，因为两处都叫得出
+   * 「校验人」这三个字而含义不同：
+   *  · 鉴权（这发请求能不能进来）由 HMAC + 回环门决定，与这个值无关；
+   *  · 这个值只决定【写进 verified_by 那一格的是谁】—— 出了事库里问得到人。
+   * 0030 §9 登记的那格「谁有权校验」到现在仍然没有答案，本字段是它的
+   * 【一半】：它让那次校验有主语，而主语是启动命令里一个看得见的参数，
+   * 不是「谁签得出动就谁说了算」。真正的授权模型（多管理员？轮换？）
+   * 仍然在那一格。
+   *
+   * 为什么【不给默认值】：默认一个名字（'ceo' 是最顺手的那个）会让
+   * verified_by 变成一句永远填得上而与事实无关的话，
+   * 而 0030 §4 那条 DDL 判据存在的全部理由就是「那次校验要有真署名」。
+   * 缺它 ⇒ verify 路由 501，症状指向唯一正确的修法（启动时带 --ceo）。
+   */
+  readonly bindingVerifier?: string;
 }
 
 const MAX_TITLE_CHARS = 200;
@@ -353,6 +407,14 @@ async function dispatch(
       return events(deps, req);
     case "replay":
       return replay(deps, routeHit.id, req.query);
+    case "list_bindings":
+      return listBindingsRoute(deps, req);
+    case "request_binding":
+      return requestBindingRoute(deps, req);
+    case "verify_binding":
+      return verifyBindingRoute(deps, req);
+    case "rebind_binding":
+      return rebindBindingRoute(deps, req);
     default: {
       // 走到这里意味着【有人加了一种 Route 却没在这里加分支】。
       //
@@ -401,7 +463,21 @@ export type Route =
       id: string;
     }
   | { kind: "events"; endpoint: "GET /events"; id?: undefined }
-  | { kind: "replay"; endpoint: "GET /replay/:taskId"; id: string };
+  | { kind: "replay"; endpoint: "GET /replay/:taskId"; id: string }
+  /**
+   * IM 身份绑定那四条（0031）。**四条都没有 id 段** —— 这个形状是刻意的，
+   * 而它挡的是一发看着最自然的改动：把 verify 做成 `POST /bindings/:id/verify`。
+   * 那需要 id 先进 URL，而 id 是【我们内部】的主键；im.ts 那三个写入口
+   * 收的身份是 (platform, external_user_id) —— 也就是【平台侧那个人】。
+   * 用 id 定行意味着调用方要先知道我们这边的主键，
+   * 而那一步没有来源（GET /bindings 给得出，于是 list → id → verify 变成一条
+   * 「先扫全表再点一行」的流程；用身份定行则天然是一步，
+   * 且与那条 UNIQUE 索引同一组键）。这是选形状的理由，不是「以后不能改」。
+   */
+  | { kind: "list_bindings"; endpoint: "GET /bindings"; id?: undefined }
+  | { kind: "request_binding"; endpoint: "POST /bindings"; id?: undefined }
+  | { kind: "verify_binding"; endpoint: "POST /bindings/verify"; id?: undefined }
+  | { kind: "rebind_binding"; endpoint: "POST /bindings/rebind"; id?: undefined };
 
 /**
  * 手写匹配而不是引一个路由器：五条形，而引库又要装依赖（见文件头）。
@@ -466,6 +542,27 @@ export function matchRoute(method: string, path: string): Route | null {
     const r = id(segs[1]);
     if (r === null) return null;
     return { kind: "replay", endpoint: "GET /replay/:taskId", id: r };
+  }
+  /*
+   * 绑定那四条（0031）。三条动作共用【同一段前缀】，所以这里必须点名第二段的
+   * 字面值（verify / rebind），而不是「bindings 后面的那一段当 id」。
+   *
+   * 差别在【没有 id 这一段】的时候才显出来：写成 `{ kind: "verify_binding", id: segs[1] }`
+   * 的话，`POST /bindings/anything` 会匹配成功并把 anything 当 id 带下去，
+   * 而 handler 那边根本不读它 ⇒ 拼错一个字母（`/bindings/verfy`）得到的是 404 之外的
+   * 某个体面答复，指向错误方向。现在它是 null ⇒ 404「no such route」，那正是事实。
+   * 同 approvals/:id/token 那条【靠字面段而不是靠位置】的写法。
+   */
+  if (method === "GET" && segs.length === 1 && segs[0] === "bindings") {
+    return { kind: "list_bindings", endpoint: "GET /bindings" };
+  }
+  if (method === "POST" && segs.length === 1 && segs[0] === "bindings") {
+    return { kind: "request_binding", endpoint: "POST /bindings" };
+  }
+  if (method === "POST" && segs.length === 2 && segs[0] === "bindings") {
+    if (segs[1] === "verify") return { kind: "verify_binding", endpoint: "POST /bindings/verify" };
+    if (segs[1] === "rebind") return { kind: "rebind_binding", endpoint: "POST /bindings/rebind" };
+    return null;
   }
   return null;
 }

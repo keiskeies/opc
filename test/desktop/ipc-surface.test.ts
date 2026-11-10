@@ -134,6 +134,30 @@ describe("通道与端点对齐", () => {
     expect(channelFor("GET /replay/:taskId")).toBeNull();
   });
 
+  it("⭐ 绑定那三条【写】路由【刻意】没有 IPC 通道 —— 这一格是判断，不是漏做", () => {
+    // 三条都已落地（在 IMPLEMENTED_ENDPOINTS 里）而 channelFor 交回 null。
+    // 如果只留一句注释，下一个加通道的人看到的是「四缺一，补上就一致了」；
+    // 钉成断言之后，加通道会【当场红】，而红的那条要求他去读理由
+    // （ipc-surface.ts 里 hub:listBindings 那条注释的 ①②③）。
+    // 同一条立场在 POST /approvals/:interruptId/token 上已经有了先例 ——
+    // 那条也是「落地而不暴露」，理由在那边是「回环专用」。
+    for (const e of ["POST /bindings", "POST /bindings/verify", "POST /bindings/rebind"] as const) {
+      expect(IMPLEMENTED_ENDPOINTS, e).toContain(e);
+      expect(channelFor(e), e).toBeNull();
+    }
+    // 反向：读那一条【有】通道。少了这一发，上面那个循环在
+    // 「四条全都没通道」的世界里也全绿 —— 那正是本文件反复防的恒绿形状。
+    expect(channelFor("GET /bindings")).toBe("hub:listBindings");
+    // 而主进程那边也不许有对应的 URL 拼装分支（两条判据各自成立：
+    // 有人在 toHttpRequest 加了分支而没加通道 ⇒ dispatch 到不了它；
+    // 有人加了通道而没加分支 ⇒ 拿到一次带原文的抛，指向唯一成因）。
+    const mainSrc = readFileSync(MAIN_SRC, "utf8");
+    expect(mainSrc).not.toMatch(/"\/bindings\/(verify|rebind)"/u);
+    // 而且渲染侧【不能】有名字里带 verify/rebind/bind 的方法形状泄漏进 preload。
+    const api = createExposedApi(fakeIpc().bridge) as Record<string, unknown>;
+    expect(Object.keys(api).filter((k) => /verify|rebind/iu.test(k))).toEqual([]);
+  });
+
   it("通道名不重复，且【恰好一个】推送通道", () => {
     const channels = CHANNEL_SPECS.map((s) => s.channel);
     expect(new Set(channels).size).toBe(channels.length);
@@ -355,6 +379,7 @@ const INVOKE_METHODS: Record<string, string> = {
   "hub:getTask": "getTask",
   "hub:listApprovals": "listApprovals",
   "hub:decideApproval": "decideApproval",
+  "hub:listBindings": "listBindings",
 };
 
 /* ───────────────── 主进程侧分发（Task 2.2 的 src/main 半边） ───────────────── */

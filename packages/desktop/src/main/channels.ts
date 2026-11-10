@@ -163,6 +163,11 @@ export function toHttpRequest(
         init: { method: "GET" },
       };
     }
+    case "hub:listBindings":
+      // 无 query。三条写路由【没有】通道，理由整段写在 ipc-surface.ts 那条注释里
+      // （不是「以后补」），所以这里也没有对应分支 —— 有人加通道时会先在
+      // toHttpRequest 这里撞上一次「忘了加分支」的抛，那是刻意的次序。
+      return { path: "/bindings", init: { method: "GET" } };
     case "hub:decideApproval": {
       const o = (args ?? {}) as { approvalId?: string; resume?: string; note?: string };
       const body: Record<string, unknown> = { resume: o.resume };

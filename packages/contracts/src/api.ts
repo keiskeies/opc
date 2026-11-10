@@ -25,6 +25,16 @@ import { z } from "zod";
  * 同一条：让「多一个端点」成为一次可 review 的显式改动，而不是某个人在 app.ts
  * 里顺手 app.get(...) 加的一行。preload 的 IPC 白名单（Task 2.2）与这份清单
  * 必须能对上，对不上就是「渲染进程能调到一个前端契约里没有的端点」。
+ *
+ * ⚠ 下面四条 `/bindings*` 是 0031 加的。加进这张表**只**意味着「app.ts 有对应分支」
+ * （就是上一段那句话），而它们另外还各有这张表**装不下**的性质，别在这里读丢：
+ *  · 四条全部【只开回环】—— 比 HMAC 更严（判据与理由在 http/bindings.ts 的
+ *    assertLoopbackBindingRoute，那里也写了为什么【读】那一条也只开回环）；
+ *  · `POST /bindings/verify` 除回环之外还要一个【署名来源】（启动参数 `--ceo`），
+ *    没配 ⇒ 那条路由 501。校验一个身份而不交出「谁验的」，
+ *    正是 0030 §4 那条 DDL 判据拦了一整轮的东西，不能在 HTTP 层放回来。
+ * 这两条都不在端点清单这一层表达，所以清单本身**读不出**这一族的安全形状 ——
+ * 那句话写在这里，是因为读端点清单的人不会去读 handler。
  */
 export const API_ENDPOINTS = [
   "POST /tasks",
@@ -35,6 +45,10 @@ export const API_ENDPOINTS = [
   "POST /approvals/:interruptId/token",
   "GET /events",
   "GET /replay/:taskId",
+  "GET /bindings",
+  "POST /bindings",
+  "POST /bindings/verify",
+  "POST /bindings/rebind",
 ] as const;
 export type ApiEndpoint = (typeof API_ENDPOINTS)[number];
 
@@ -61,6 +75,10 @@ export const IMPLEMENTED_ENDPOINTS: readonly ApiEndpoint[] = [
   "POST /approvals/:interruptId/token",
   "GET /events",
   "GET /replay/:taskId",
+  "GET /bindings",
+  "POST /bindings",
+  "POST /bindings/verify",
+  "POST /bindings/rebind",
 ];
 
 /**
@@ -250,6 +268,88 @@ export type ApprovalStatusValue = (typeof APPROVAL_STATUS_VALUES)[number];
  * 症状是「这张卡永远批不掉」，挡住它的是那条【第一次决策返回 true】的正向用例）。
  */
 export const APPROVAL_STATUS_PENDING: ApprovalStatusValue = "pending";
+
+/**
+ * `GET /bindings` 的一行（0031）。**不是 `im_bindings` 那行的整行直译** ——
+ * 口径与 taskViewSchema / approvalViewSchema 同一条：对外形状由这里定义，
+ * 库加一列不会自动变成契约（具名列在 hub/src/bindings/im.ts 的 BINDING_COLUMNS）。
+ *
+ * 三个决定值得写在契约这一层而不是 handler 那一层：
+ *  ① `platform` 是**闭合枚举**而不是 string。这一列在库里由两个触发器拦着
+ *    （白名单，0030 §2），所以读侧出现第四个取值只可能是【有人直接改库】。
+ *    让它在解析层就响，而不是原样发给前端去 switch ——
+ *    前端认不出一个平台名时的默认行为是【那一行不画】，
+ *    于是「库里多了一个平台的绑定」会表现成「列表少了一行」，
+ *    而那恰好是本仓反复抓的形状（记录在、看起来正常、信息没了）。
+ *  ② `verified` 是 boolean 而不是 0/1。DDL 那一层它是 INTEGER（0001 的列型，
+ *    本仓不 ALTER 已有列），但对外只有「验过了 / 没验过」两种真话，
+ *    把 INTEGER 发出去等于让每个消费者自己决定 `2` 算不算数 ——
+ *    而 0030 §6 专门加了一条触发器就是为了不让那一格有解释空间。
+ *    转换只发生在 hub 侧一处（`=== 1`），口径在那边。
+ *  ③ `verifiedBy` 可空。未校验的行【必须】是 null 而不是 ""：
+ *    「没署名」与「署了一个空名字」在一张 append-only 的表里是两件事，
+ *    而 DDL 第 7 条（0030 §7）拦的正是「未验证的行挂着署名」这个形状 ——
+ *    空串是那个形状的漏网之鱼（它 IS NOT NULL），这里判 null 而不是 ""
+ *    就是不在契约层把那个缝留回来。
+ */
+export const IM_BINDING_PLATFORM_VALUES = ["feishu", "wecom", "qq"] as const;
+export type ImBindingPlatformValue = (typeof IM_BINDING_PLATFORM_VALUES)[number];
+
+export const imBindingViewSchema = z
+  .object({
+    id: z.string().min(1),
+    platform: z.enum(IM_BINDING_PLATFORM_VALUES),
+    external_user_id: z.string().min(1),
+    role: z.string().min(1),
+    verified: z.boolean(),
+    created_at: z.number().int(),
+    verified_at: z.number().int().nullable(),
+    verified_by: z.string().nullable(),
+  })
+  .strict();
+export type ImBindingView = z.infer<typeof imBindingViewSchema>;
+
+/**
+ * `POST /bindings` 与 `POST /bindings/rebind` 的请求体。
+ *
+ * `role` 是【必填】的，而且这条必填在契约层就成立 —— 理由不是整洁：
+ * 库里那一列带着 `DEFAULT 'ceo'`（0028 §2 那个陷阱的全部来源），
+ * 而 HTTP 是一张真表最外面的那个入口。少一个字段就默认把人绑成 CEO，
+ * 这件事在 TypeScript 里由「类型逼你写」挡着（im.ts 的 requestBinding），
+ * 在 JSON 那一侧只能由 schema 的 `.min(1)` 挡着。两道各管一侧，缺一侧就漏一侧。
+ *
+ * ⚠ 这里【没有】`verified` 这个键，而且是 `.strict()` 挡着而不是「不看它」：
+ * 「申请」与「校验」是两次写（0030 §3），把它们做成一个带可选 flag 的端点
+ * 就是把两条判据焊回一条，而焊点两侧长得一模一样。校验走 verify 那一条。
+ */
+export const bindingRequestSchema = z
+  .object({
+    platform: z.string().min(1),
+    external_user_id: z.string().min(1),
+    role: z.string().min(1),
+  })
+  .strict();
+export type BindingRequest = z.infer<typeof bindingRequestSchema>;
+
+/**
+ * `POST /bindings/verify` 的请求体。**只有身份，没有 `verified_by`**。
+ *
+ * 那是这一族里最容易被顺手做错的一格：把署名做成请求字段看起来完全合理
+ * （「调用方告诉我是谁验的」），而它的结果是【任何人 POST 一个
+ * {verified_by: "ceo"} 就得到一行「ceo 校验过」】——
+ * 0030 §4 那条 DDL 判据（置 1 必须交出署名与时刻）当场形同虚设，
+ * 因为它验的是「这一格有没有值」，验不了「这句话是不是真的」。
+ * 所以署名只从服务端自己的装配来源取（HubDeps.bindingVerifier，见那边），
+ * 而请求体里连这个键都不该出现 —— `.strict()` 让「客户端多传一个 verified_by」
+ * 变成一个看得见的 422，而不是一次静默的采纳。
+ */
+export const bindingVerifyRequestSchema = z
+  .object({
+    platform: z.string().min(1),
+    external_user_id: z.string().min(1),
+  })
+  .strict();
+export type BindingVerifyRequest = z.infer<typeof bindingVerifyRequestSchema>;
 
 /** GET /events 的一帧。seq 就是 events.id，也是断线重连的游标（§5.8）。 */
 export const feedItemSchema = z

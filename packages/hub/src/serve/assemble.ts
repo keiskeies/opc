@@ -452,7 +452,25 @@ export async function boot(
       token,
       graphFor,
       ...(o.now === undefined ? {} : { now: o.now }),
+      // 校验 IM 身份绑定的署名来源（0031）。从 --ceo 来，不传 ⇒ 那条路由 501。
+      // 这里【再判一次空白】而不只靠 config.ts：boot 是公开 API（下面那条
+      // heartbeatMs 同款理由），而一个空白串传给 markVerified 会被
+      // invalidText 拒成 422 —— 症状指向「你请求写错了」，
+      // 而真相是启动参数是个空值。宁可是那句 501（它说的是「这台 Hub 没配署名」）。
+      ...(args.ceo === undefined || args.ceo.trim() === ""
+        ? {}
+        : { bindingVerifier: args.ceo.trim() }),
     });
+    // 没给 --ceo 就把「verify 那条路由是死的」当场说出来，理由与上面那句
+    // 「本入口未接图运行时」完全同一条：一个只在人点了按钮才发现的 501，
+    // 排查的人会先去查自己有没有权限，而真相是启动命令少了一个参数。
+    if (args.ceo === undefined || args.ceo.trim() === "") {
+      io.warn(
+        "未指定 --ceo <名字> ⇒ POST /bindings/verify 会回 501。\n" +
+          "IM 身份绑定的读侧（GET /bindings）与申请（POST /bindings）不受影响。\n" +
+          "校验一个身份必须交出「谁验的」，而这个名字只能由启动命令给出（不给默认值）。",
+      );
+    }
     // 启动时就把「图恢复这一步要人喊一声」说出来，而不是等到有人点批准才发现。
     // 判据是【装配上用的是哪个工厂】而不是【@langchain 装没装上】：
     // 后者在这里判不了（本文件顶层不 import 它，这正是本篇的可验证性来源），

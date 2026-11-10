@@ -580,6 +580,12 @@ export interface RealHubDepsOptions {
   readonly nonces?: HubDeps["nonces"];
   /** Command 构造点，透传给 makeResumeGraph。测试用它让 resume 分支本机可跑。 */
   readonly makeCommand?: ResumeDeps["makeCommand"];
+  /**
+   * 「谁校验 IM 身份绑定」写进 verified_by 的那个名字（0031）。
+   * 不给 ⇒ POST /bindings/verify 回 501。为什么这里【不设默认值】，
+   * 整段论证在 HubDeps.bindingVerifier 旁边，那份是唯一一处，不重抄。
+   */
+  readonly bindingVerifier?: string;
 }
 
 /**
@@ -644,6 +650,10 @@ export function buildHubDeps(o: RealHubDepsOptions): HubDeps {
     redeemApprovalToken: async ({ token, approvalId }) =>
       redeemApprovalTokenVia(o.queue, { token, approvalId, nowMs: now() }, publish),
     issueApprovalToken: async ({ approvalId, nowMs }) => mintApprovalTokenVia(o.queue, { approvalId, nowMs }),
+    // 绑定那三条写路由走【同一个队列】（0031）。给它而不是给 deps.db 那条只读连接：
+    // 上面每条写路径写明的同一条理由（P1 同连接重入），没有第二条更弱的写通道。
+    bindingWriter: o.queue,
+    ...(o.bindingVerifier === undefined ? {} : { bindingVerifier: o.bindingVerifier }),
     resumeGraph,
   };
 }

@@ -201,7 +201,7 @@ const SNAP: Record<string, string> = {
     "const config = JSON.parse(prev.config) as Record<string, unknown>;",
   "0015-charter-editor-and-two-sources-of-budget.md>0001_init.sql:144":
     "CREATE TABLE role_charters (",
-  "0015-charter-editor-and-two-sources-of-budget.md>http/app.ts:869":
+  "0015-charter-editor-and-two-sources-of-budget.md>http/app.ts:966":
     'consumed_cents: Number(r["consumed_cents"] ?? 0),',
   "0015-charter-editor-and-two-sources-of-budget.md>tracker.ts:233":
     "const breached = before <= limit && after > limit;",
@@ -291,9 +291,9 @@ const SNAP: Record<string, string> = {
   // 第二条的**行号在本篇写完后动过一次**（56 → 64）：Task 3.4 把 replay 搬进
   // IMPLEMENTED 之后，那张表头上多注释了一段。这正是活坐标该有的反应 ——
   // 快照当场红，逼人重读那段论证，而不是让文档继续指着一句 `/**` 讲 UNIMPLEMENTED。
-  "0012-org-versioned-commit-and-unwritten-graph-version.md>packages/contracts/src/api.ts:29":
+  "0012-org-versioned-commit-and-unwritten-graph-version.md>packages/contracts/src/api.ts:39":
     "export const API_ENDPOINTS = [",
-  "0012-org-versioned-commit-and-unwritten-graph-version.md>packages/contracts/src/api.ts:74":
+  "0012-org-versioned-commit-and-unwritten-graph-version.md>packages/contracts/src/api.ts:92":
     "export const UNIMPLEMENTED_ENDPOINTS: readonly ApiEndpoint[] = [];",
   // 0013 §10.1 那次【撤回】的三块砖。这一组与前面几组的性质不同：前面抓的是
   // 「文档引用的那行代码挪了」，这一组抓的是「文档引用的那条**注释**不再成立」。
@@ -353,18 +353,35 @@ const SNAP: Record<string, string> = {
   // 把那个 `never` 赋值删掉、或改掉 `ipc-surface.test.ts:129` 那条包含断言，
   // 0030 §9 那句「真正无人断言的只剩『已实现而未接桌面』这一个方向」就不再成立，
   // 而它是 CEO 拍不拍那一项的**唯一**依据。快照在这里红了就是逼重读 §9。
-  "0030-im-binding-identity-and-three-holes-i-did-not-design.md>contracts/src/api.ts:29":
+  "0030-im-binding-identity-and-three-holes-i-did-not-design.md>contracts/src/api.ts:39":
     "export const API_ENDPOINTS = [",
-  "0030-im-binding-identity-and-three-holes-i-did-not-design.md>contracts/src/api.ts:55":
+  "0030-im-binding-identity-and-three-holes-i-did-not-design.md>contracts/src/api.ts:69":
     "export const IMPLEMENTED_ENDPOINTS: readonly ApiEndpoint[] = [",
-  "0030-im-binding-identity-and-three-holes-i-did-not-design.md>ipc-surface.ts:119":
+  "0030-im-binding-identity-and-three-holes-i-did-not-design.md>ipc-surface.ts:150":
     "export const EXPOSED_ENDPOINTS: readonly ApiEndpoint[] = IMPLEMENTED_ENDPOINTS;",
-  "0030-im-binding-identity-and-three-holes-i-did-not-design.md>app.ts:379":
+  "0030-im-binding-identity-and-three-holes-i-did-not-design.md>app.ts:441":
     "const impossible: never = routeHit;",
   "0030-im-binding-identity-and-three-holes-i-did-not-design.md>ipc-surface.test.ts:129":
     "expect(API_ENDPOINTS).toContain(s.endpoint);",
-  "0030-im-binding-identity-and-three-holes-i-did-not-design.md>ipc-surface.ts:127":
+  "0030-im-binding-identity-and-three-holes-i-did-not-design.md>ipc-surface.ts:158":
     "* 端点 → 一个 IPC 通道名。【未实现的端点返回 null】，理由见 EXPOSED_ENDPOINTS。",
+  // 0031（绑定那四条 HTTP 入口）这一组四条。同样是先 `sed -n '<n>p'` 读原文再抄。
+  // 三条是**活坐标**，各守一段会被「顺手改掉」的判据：
+  //  · `ipc-surface.ts:110` 守的是【三条写路由刻意没有 IPC 通道】这个判断本身 ——
+  //    有人补上通道时，那一行必然被改写，而 0031 §3 整节就是那句判断的理由；
+  //  · `bindings.ts:132` 守的是【脏行跳过住在 im.ts 不在 HTTP 层重做】的分工方向；
+  //  · `bindings.ts:193` 守的是【knownRoles 未注入 ⇒ unknown_role 结构上不可达】，
+  //    也就是 0031 §0 末尾那句「角色存在性今天仍然空转」的唯一落点。
+  // 第四条（测试文件那一发）守的是 §4 那一次假绿的**现场**：那发断言一旦被人删掉或放宽，
+  // 「服务端来源优先」这个判据就没有行为测试了，而那正是本篇最贵的一格。
+  "0031-binding-http-entry-and-a-false-green-i-recorded-as-a-test-result.md>ipc-surface.ts:110":
+    "* 为什么【只有读】这一条通道，而 `POST /bindings` / `/verify` / `/rebind`",
+  "0031-binding-http-entry-and-a-false-green-i-recorded-as-a-test-result.md>http/bindings.ts:132":
+    "* ⚠ 脏行【被跳过】而不是 500。这个决定发生在 im.ts 的 listBindings",
+  "0031-binding-http-entry-and-a-false-green-i-recorded-as-a-test-result.md>http/bindings.ts:193":
+    "// 0030 §8：角色存在性的判据【需要装配方注入 knownRoles】，本模块不猜。",
+  "0031-binding-http-entry-and-a-false-green-i-recorded-as-a-test-result.md>bindings-route.test.ts:471":
+    'it("⭐ 请求体里塞 verified_by ⇒ 422，且库里那一行【不会因为多带一个键就被署名】", async () => {',
 };
 
 describe("决策文档里的「文件:行号」引用不漂移", () => {

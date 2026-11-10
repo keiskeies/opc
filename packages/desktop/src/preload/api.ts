@@ -73,6 +73,17 @@ export function createExposedApi(ipc: RendererBridge) {
     }): Promise<unknown> => ipc.invoke("hub:decideApproval", input),
 
     /**
+     * IM 身份绑定那张列表（0031）。【无参】—— 与 hub:listTasks 同一条形状。
+     *
+     * 为什么没有对应的「校验 / 改绑」两个方法，而 Hub 那边三条写路由都活着：
+     * 理由整段在 desktop/ipc-surface.ts 的 hub:listBindings 那条注释里，
+     * 一句话版是「渲染进程里没有任何东西能证明操作者知道自己在校验谁」。
+     * 这里刻意【不留一个 TODO 或注释掉的按钮函数】—— 留了就会有人照着解开注释，
+     * 而那一次解开不需要回答上面那一句。
+     */
+    listBindings: (): Promise<unknown> => ipc.invoke("hub:listBindings"),
+
+    /**
      * 订阅 Hub 事件。返回一个【退订函数】。
      *
      * 返回值不是 Promise：这不是一个请求，是一个监听。

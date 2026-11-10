@@ -76,6 +76,19 @@ export interface ServeArgs {
    * 本层只保证「拿到的是一个非空的值」，那是参数解析的职责。
    */
   readonly bind?: string;
+  /**
+   * 「谁校验 IM 身份绑定」写进 `im_bindings.verified_by` 的那个名字（0031，`--ceo`）。
+   * 不给 ⇒ `POST /bindings/verify` 回 501，读侧与申请照旧。
+   *
+   * ⚠ 它是【署名来源】，不是鉴权：它不判「这个人能不能校验」，只决定
+   * 库里那一格写着谁。完整论证在 HubDeps.bindingVerifier 旁边那份（唯一一处）。
+   *
+   * 与 `--bind` 同一条立场：**刻意没有 OPC_CEO 这个 env 缺省源**。
+   * 「这个人的名字是校验人」是一次要看得见的决定 —— 一个从 shell profile
+   * 或 compose 文件里继承来的名字，等于让某次校验带着一个没人决定过的署名落库，
+   * 而那一格存在的唯一价值就是「有人认领了这件事」。
+   */
+  readonly ceo?: string;
   readonly help?: boolean;
   readonly error?: string;
 }
@@ -130,6 +143,7 @@ export function parseServeArgs(
   let heartbeatMs: number | undefined;
   let noBackup = false;
   let bind: string | undefined;
+  let ceo: string | undefined;
 
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -189,6 +203,17 @@ export function parseServeArgs(
         if (typeof v === "object") return v;
         i++;
         bind = v;
+        break;
+      }
+      case "--ceo": {
+        const v = takeValue(argv, i + 1, "--ceo");
+        if (typeof v === "object") return v;
+        i++;
+        // 只做「非空」这一件判据，与 --bind 同一层职责（见 ServeArgs.bind 那段）。
+        // 「这是不是一个真实存在的人」不属这一层，也没有任何一层能回答它 ——
+        // 那正是 0030 §9 还挂着的那格「谁有权校验」。
+        if (v.trim() === "") return { error: "--ceo 后面要跟一个非空的名字" };
+        ceo = v.trim();
         break;
       }
       default:
@@ -284,6 +309,7 @@ export function parseServeArgs(
     ...(backupDir === undefined ? {} : { backupDir }),
     ...(heartbeatMs === undefined ? {} : { heartbeatMs }),
     ...(bind === undefined ? {} : { bind }),
+    ...(ceo === undefined ? {} : { ceo }),
     ...(noBackup ? { noBackup: true } : {}),
   };
 }
