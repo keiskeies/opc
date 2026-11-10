@@ -70,13 +70,19 @@ import {
   IGNORED_DIRS,
   looksLikeTest,
   parseFilesOnly,
+  survivesStat,
 } from "./test-inventory.js";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "../..");
 /** 忽略目录不在此处手抄：与判定侧共用 test-inventory.ts 导出的同一份名单。 */
 
 /** 宽枚举：仓库里所有「名字长得像测试」的文件，规则见 looksLikeTest（比 include 宽）。 */
-function enumerate(relDir: string): string[] {
+// statOf 可注入：默认真调 statSync；「扫描途中消失」这一态用一个
+// 直接抛 ENOENT 的假 stat 复现，不真造文件再当场删除去撞竞态。
+function enumerate(
+  relDir: string,
+  statOf: (abs: string) => boolean = (abs) => statSync(abs).isFile(),
+): string[] {
   const out: string[] = [];
   for (const e of readdirSync(join(ROOT, relDir), { withFileTypes: true })) {
     if (IGNORED_DIRS.has(e.name)) {
@@ -84,8 +90,11 @@ function enumerate(relDir: string): string[] {
     }
     const rel = relDir === "" ? e.name : relDir + "/" + e.name;
     if (e.isDirectory()) {
-      out.push(...enumerate(rel));
-    } else if (statSync(join(ROOT, rel)).isFile() && looksLikeTest(rel)) {
+      out.push(...enumerate(rel, statOf));
+    } else if (
+      survivesStat(() => statOf(join(ROOT, rel))) &&
+      looksLikeTest(rel)
+    ) {
       out.push(rel);
     }
   }
@@ -195,6 +204,52 @@ describe("测试文件的执行清单覆盖", () => {
     expect(checkConfigMatch(["a.test.ts"], ["a.test.ts"])).toEqual([]);
   });
 
+  // 竞态回归：扫描期间文件被并行的另一条守卫删掉，盘点不许随它一块儿崩。
+  // 不靠真造真删去撞时间 —— 那种测试本身就是流动的。改把 stat 注入成
+  // 直接抛 ENOENT 的假函数，与「刚刚被删」在语义上无可区分，但完全确定。
+  it("扫描途中消失的文件跳过即可，不把整轮盘点带崩", () => {
+    const gone = Object.assign(new Error("vanished"), { code: "ENOENT" });
+    const found = enumerate("test/arch", () => {
+      throw gone;
+    });
+    expect(found).toBeInstanceOf(Array);
+    expect(found).toEqual([]);
+  });
+
+  describe("survivesStat（扫描容错）", () => {
+    it("stat 成功时原样返回", () => {
+      expect(survivesStat(() => true)).toBe(true);
+      expect(survivesStat(() => false)).toBe(false);
+    });
+
+    it("消失了就当不存在，不抛", () => {
+      for (const code of ["ENOENT", "ENOTDIR"]) {
+        const err = Object.assign(new Error("gone"), { code });
+        expect(
+          survivesStat(() => {
+            throw err;
+          }),
+          code + " 必须被吞掉",
+        ).toBe(false);
+      }
+    });
+
+    it("其他错误照抛：权限类失败若也吞，等于静默抹掉真测试", () => {
+      for (const code of ["EACCES", "EPERM"]) {
+        const err = Object.assign(new Error("denied"), { code });
+        expect(() =>
+          survivesStat(() => {
+            throw err;
+          }),
+        ).toThrow();
+      }
+      expect(() =>
+        survivesStat(() => {
+          throw new Error("no code");
+        }),
+      ).toThrow();
+    });
+  });
   it("磁盘上每个测试样文件都在 include 覆盖范围内", () => {
     const expected = enumerate("").sort();
     // 独立来源：vitest 自己给出的清单，不从 expected 派生，phantom 才可能非空。

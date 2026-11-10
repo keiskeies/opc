@@ -24,6 +24,30 @@ export const IGNORED_DIRS = new Set<string>([
 export type Inventory = { expected: string[]; collected: string[] };
 export type InventoryDiff = { uncollected: string[]; phantom: string[] };
 
+/**
+ * 盘点扫描期间，并行的另一条守卫会现场创建又删除探针文件（越界探针就
+ * 是这种短命文件，见 dependency-boundary.test.ts）。它删除的那一瞬间恰好被
+ * stat 撞上，ENOENT 就会把整轮清单扫描带崩。流动的红比没守卫更糟（0007 §4.1）。
+ *
+ * 只宽容「消失了」这一类（ENOENT / ENOTDIR）：清单的前提本来就是磁盘上
+ * 有这个文件，没了就不该进清单。其他错误照旧抛出 —— 权限类错误若也被吞掉，
+ * 等于把一个真存在的测试文件静默从名单里抹掉，那是真的假绿。
+ *
+ * 抽成注入式纯函数（本模块一向不 import 东西），是为了三种态都能用普通单测
+ * 钉住，不必真造一个文件再当场删除去撞竞态。
+ */
+export function survivesStat(statIsFile: () => boolean): boolean {
+  try {
+    return statIsFile();
+  } catch (e) {
+    const code = (e as { code?: string }).code;
+    if (code === "ENOENT" || code === "ENOTDIR") {
+      return false;
+    }
+    throw e;
+  }
+}
+
 /** 比 vitest include 更宽：.test.* 与 .spec.*，扩展名含 mjs/js，位置不限。 */
 export function looksLikeTest(rel: string): boolean {
   const segs = rel.split("/");
