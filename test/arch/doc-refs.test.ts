@@ -158,6 +158,27 @@ function verify(
 }
 
 const SNAP: Record<string, string> = {
+  // 0016（Task 3.7）本轮新写的六条。同样是先在目标文件里 `sed -n '<n>p'` 读原文再抄。
+  // 六条都写**全路径**，但**不是因为歧义** —— 实测这四个基名（role-memory.ts / real-deps.ts /
+  // recorder.ts / audit-interrupt.test.ts）在仓库里各只有 1 个命中，写基名也能解析。
+  // 我一开始在这里写的理由是「recorder.ts 有歧义」，那是没查就写的（0016 §6 那一族的当场复发）。
+  // 真实理由只是【与 0013 那组的全路径写法保持一致】，而基名形态本身是合法的：
+  // 0013 里同一行被引用两次（一次全路径、一次基名），所以那边**两条都要登记**。
+  "0016-parallel-branches-role-memory-and-an-assertion-engine-that-saw-nothing.md>packages/hub/src/memory/role-memory.ts:547":
+    'has_review_decisions: rows.some((r) => r.action === "review_decision"),',
+  "0016-parallel-branches-role-memory-and-an-assertion-engine-that-saw-nothing.md>packages/hub/src/http/real-deps.ts:225":
+    'action: "approval",',
+  "0016-parallel-branches-role-memory-and-an-assertion-engine-that-saw-nothing.md>packages/hub/src/events/recorder.ts:229":
+    'const DEFAULT_ACTOR = { actorType: "system", actorId: "hub" } as const;',
+  "0016-parallel-branches-role-memory-and-an-assertion-engine-that-saw-nothing.md>packages/hub/test/graph/audit-interrupt.test.ts:200":
+    'expect(r[0]?.actor_type).toBe("system");',
+  // 下面两条是 §4 那两个漏洞的**修法现场**。它们必须是活坐标：0016 §4 整段的论据是
+  // 「判据写在哪一层粒度上决定了漏不漏」，而判据一旦被人从行级挪回桶级，
+  // 那两行的内容必然变 —— 快照红的时候，正是该重读 §4 的时刻。
+  "0016-parallel-branches-role-memory-and-an-assertion-engine-that-saw-nothing.md>packages/hub/src/memory/role-memory.ts:365":
+    "const strategic =",
+  "0016-parallel-branches-role-memory-and-an-assertion-engine-that-saw-nothing.md>packages/hub/src/memory/role-memory.ts:478":
+    "const ceoReadingOwn =",
   // 0015（Task 3.6）本轮新写的引用。逐条在被引用文件里 sed -n '<n>p' 读过原文再抄，
   // 不是从 0015 正文里复制措辞 —— 那等于让快照抄文档，守卫当场失效。
   // 其中 `org/commit.ts:107` 在同一篇里出现两次（表格 ①、§3 末），快照按 key 去重，一条即可。
