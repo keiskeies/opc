@@ -74,6 +74,36 @@ export const CEO_MEMORY_OWNER = "ceo";
  */
 export const APPROVAL_TYPE_UNKNOWN = "unknown";
 
+/**
+ * **明确不算战略**的那几个卡片类型。战略判据用的是这张【排除表】而不是
+ * 「只有 'strategic' 算战略」那张【白名单】，方向选这一边与上面 fail-closed 同一条理由。
+ *
+ * ⚠ 这张表是 0026 那一次改动**逼出来的**，而它记的是我自己开的一个洞：
+ * 0026 §2 给 `approval_type` 加了通用 `escalation` 值之前，一类升级决定在库里的形状是
+ * 「**卡片行不存在**」⇒ `approval_type = APPROVAL_TYPE_UNKNOWN` ⇒ 按战略处理（挡住）。
+ * 加了那个值之后，同一类决定**有了卡片行**，类型是 `escalation`，
+ * 于是它掉进「别的类型 ⇒ 常规审批」那一支 —— **我给自己新写的取值打开了一条
+ * 「CEO 的战略理由进 dev 的 work 桶」的通路，而且方向是放行**。
+ * 症状不是报错，是 dev 的 few-shot 里出现 CEO 的战略理由，而审计里查不到这件事发生过。
+ *
+ * ⇒ 所以判据不能写成「我认识的几个值不算战略」，得写成「**我明确知道不算战略的**才不算」。
+ * 新增加任何一个 approval_type 值，默认落进战略档（多挡），
+ * 而想让它不算战略必须**来这张表里登记一次** —— 那是一次可被 review 的放行。
+ *
+ * 表里为什么只有这两项：
+ *  - `charter` —— 岗位书编辑，是配置变更不是方向决策（0015 §1 那条链）。
+ *  - `budget_override` —— 花钱额度，role-memory.test.ts 那条反向对照钉着它，
+ *    它存在的意义就是「判据不是凡 CEO 的都战略」。
+ * `irreversible_action` **不在表上**（= 算战略）：CEO 点头「允许做这件收不回来的事」
+ * 本身就是战略表态，把它放进 dev 可读的桶不是我要的默认。
+ * `escalation` **不在表上**（= 算战略）：那是本篇开头那个洞的正主。代价是 dev 的提示词
+ * 少一段参考 —— 与漏放的代价不对称，见文件头那段。
+ */
+export const NON_STRATEGIC_APPROVAL_TYPES: readonly string[] = [
+  "charter",
+  "budget_override",
+];
+
 /** 一条记忆。字段全为**渲染层可直接用**的形状，不塞原始 payload。 */
 export interface MemoryEntry {
   /** events.id：唯一能回到事实源的指针。 */
@@ -354,17 +384,23 @@ export function classifyMemoryRow(
      * 而 work 档对 self 读取全放行 ⇒ **dev 读自己的记忆就能看到 CEO 的战略理由，
      * 计划点名的那条 Test 当场是反的**。隔离判据若挂在「桶」上而不是「行」上，
      * 就会被桶的归属规则绕过。
-     * 三种情形：
+     * 三种情形（第三种是**排除表**，不是白名单，理由见 NON_STRATEGIC_APPROVAL_TYPES）：
      *  - 卡片类型是 'strategic' ⇒ 战略。契约里明写的那一档。
      *  - 卡片类型**对不上**（APPROVAL_TYPE_UNKNOWN）⇒ **也当战略**。对不上的最常见
      *    原因是那张卡片行根本不存在（0013 §10.1：生产里 approvals 从来没有 INSERT，
      *    只有 UPDATE ... WHERE status='pending'），而不是「它是一张普通卡片」。宁可多挡。
-     *  - 卡片类型是别的（charter / budget_override / …）⇒ 常规审批，不是战略。
+     *  - 卡片类型在 NON_STRATEGIC_APPROVAL_TYPES 里（charter / budget_override）⇒ 常规审批。
+     *    ⚠ 其余一切取值 —— 包括 'escalation'、'irreversible_action'、'meeting_escalation'，
+     *    以及将来任何新加的值 —— 都**当战略**。这是从「别的类型都算常规」翻过来的，
+     *    翻的动机是我自己在 0026 §2 开的那个洞：加了 escalation 这个取值之后，
+     *    一类升级决定从「无卡片行 ⇒ 挡住」变成「有卡片行且类型不认识 ⇒ 放行」。
+     *    翻过来的代价如实记在这里：CEO 批准的不可逆动作、会议升级这些决定的理由
+     *    现在也不进 dev 可读的桶了，dev 的 few-shot 少一段参考。
      * 署名不是 CEO 的（policy-engine 自动批的那些）永远不进战略档：规则没做战略决定。
      */
     const strategic =
       actorId === CEO_MEMORY_OWNER &&
-      (approvalType === "strategic" || approvalType === APPROVAL_TYPE_UNKNOWN);
+      !NON_STRATEGIC_APPROVAL_TYPES.includes(approvalType);
 
     return {
       entry: {

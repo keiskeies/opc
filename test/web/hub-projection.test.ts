@@ -522,13 +522,44 @@ describe("收件箱角标（§5.8 事件表：ApprovalRequired ⇒ 计数 +1）"
       pendingTotal: 1,
       asOfSeq: 1,
     });
-    for (const kind of ["BudgetPaused", "ReviewDecided", "HeartbeatStalled"]) {
+    /**
+     * 每种事件都要给【形状合法】的载荷。这一发曾经只用 `{ seq, kind, taskId }`，
+     * 收进 TaskStateChanged 之后它【红在错误的理由上】：applyItem 里
+     * `typeof to !== "string"` 会走 markGap ⇒ trusted 变 false ⇒ 角标变 null，
+     * 于是这条断言测的是「缺字段的处理方式」而不是「这一类事件不许动角标」。
+     * 判据与失败原因必须一一对应，否则红了也不知道该改什么（本篇 §7.1 撞过同形）。
+     */
+    const evt = (seq: number, kind: string): unknown =>
+      kind === "TaskStateChanged"
+        ? { seq, kind, taskId: "a", from: "IN_PROGRESS", to: "IN_PROGRESS" }
+        : { seq, kind, taskId: "a" };
+    // 每个 kind 用【递增的 seq】。原来这一圈写的是固定 seq=2，而循环体末尾把
+    // 结果赋回 p ⇒ 从第二轮起每条都撞上 `seq <= cursor` 被判 duplicate、
+    // 直接原样返回 —— **那个 for 循环实际只测了第一个 kind**，后三种一次都没被应用过。
+    // 又是一处「绿而没执行」（本篇 §7.1 同一个形状第三次），抓法也一样是变异实验。
+    let seq = 2;
+    for (const kind of [
+      "BudgetPaused",
+      "ReviewDecided",
+      "HeartbeatStalled",
+      // ⚠ TaskStateChanged 必须在这张名单里。我第一版没写它，于是
+      // 「把计数判据写成 kind !== ApprovalDecided」这种改法【全绿】——
+      // 它会让每一条任务状态跃迁都给角标 +1（一张卡都没多，角标一路涨），
+      // 而当时唯一那条「别的事件不许动角标」的用例恰好跳过了【最常来】的这一类。
+      // 名单漏一个取值的代价在这里是具体的：TaskStateChanged 是流量最大的事件。
+      "TaskStateChanged",
+    ]) {
       const before = inbox(p);
-      const r = applyEvent(p, { seq: 2, kind, taskId: "a" });
+      const r = applyEvent(p, evt(seq, kind));
+      expect(r.action, kind).toBe("applied"); // 反向对照：必须【真的被应用】，不能是 duplicate
       expect(inbox(r.projection), kind).toBe(before);
+      expect(r.projection.link, kind).toBe("live"); // 不得因为这条而标 stale
+      expect(r.projection.cursor, kind).toBe(seq);
       expect(r.projection.tasks.get("a")?.status).toBe("IN_PROGRESS");
-      p = applyEvent(p, { seq: 2, kind, taskId: "a" }).projection;
+      p = r.projection;
+      seq++;
     }
+    expect(seq).toBe(6); // 四发【全都】被应用过（少一发就是回到固定 seq 那个 bug）
     // 未知 kind 同样不动角标（老客户端收到新事件是【照常显示】，不是角标乱跳）。
     const unknown = applyEvent(p, { seq: 3, kind: "SomethingNew", taskId: "a" });
     expect(inbox(unknown.projection)).toBe(inbox(p));

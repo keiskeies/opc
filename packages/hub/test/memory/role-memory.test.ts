@@ -20,7 +20,7 @@
  * 并在 coverage 那一节把「生产没有」钉成断言。
  */
 
-import { mkdirSync, rmSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, describe, expect, it } from "vitest";
@@ -35,6 +35,7 @@ import {
   memoryCoverage,
   MEMORY_ROWS_SQL,
   MEMORY_SCAN_WINDOW,
+  NON_STRATEGIC_APPROVAL_TYPES,
   readRoleMemory,
   renderMemoryBlock,
   type CrossRoleScope,
@@ -42,6 +43,7 @@ import {
 } from "../../src/memory/role-memory.js";
 
 const HUB = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
+const ROLE_MEMORY_SRC = join(HUB, "src", "memory", "role-memory.ts");
 const TMP = join(HUB, ".tmp", "memory");
 mkdirSync(TMP, { recursive: true });
 
@@ -237,6 +239,95 @@ describe("① 计划点名的那条 Test：开发角色读不到 CEO 战略记�
     expect(asDev.entries[0]?.scope).toBe("work");
     expect(asDev.entries[0]?.reason).toBe("这个季度可以给到 $50");
     db.close();
+  });
+
+  it("⭐ 卡片类型是 escalation 时【算】战略：0026 我自己开的那条放行通路的回归", () => {
+    /*
+     * 这一发在本篇之前是不存在的，而它对应的缺陷是我自己引入的（0026 §2 加了
+     * `escalation` 这个 approval_type 取值）。加那个值【之前】，一类升级决定在库里的
+     * 形状是「卡片行不存在」⇒ approval_type = unknown ⇒ 按战略处理 ⇒ dev 读不到。
+     * 加那个值【之后】，同一类决定有了卡片行、类型是 escalation，
+     * 而当时的判据是「charter / budget_override 之外都算常规」⇒ 落 work 档 ⇒ **dev 读得到**。
+     * 也就是：**我加了一个枚举值，顺手把一条隔离判据从挡住翻成了放行**，
+     * 而这件事在 diff 里完全看不见（改动在 approvals 那边，判据在 memory 这边）。
+     *
+     * 判据现在改成排除表（NON_STRATEGIC_APPROVAL_TYPES），所以这里断言的是【挡住】。
+     * 与上一条 budget_override 用例配成对：那一发钉「不是凡 CEO 的都战略」，
+     * 这一发钉「不是凡不在表上的都放行」。**两发都必须在**，
+     * 少任何一发，另一发都能被一条偷懒的规则（恒严 / 恒松）通过。
+     */
+    const db = newDb();
+    addTask(db, "T-1", "dev");
+    addCard(db, { id: "A-1", taskId: "T-1", type: "escalation" });
+    ceoDecides(db, {
+      approvalId: "A-1",
+      taskId: "T-1",
+      resume: "approve",
+      note: "这件事方向上不该做，原因是现金流",
+    });
+
+    const asDev = readRoleMemory(db as never, {
+      owner: "dev",
+      requester: "dev",
+      // 刻意【传了】crossScopes：证明不是「因为没授权才被挡」。
+      crossScopes: ["gate", "work"],
+      isTaskOwner: ownerOf(db),
+    });
+    expect(asDev.entries).toEqual([]);
+    expect(asDev.withheld_by_scope.strategic).toBe(1);
+
+    // 反向对照：CEO 自己读得到（挡住的对象是别的角色，不是本人；
+    // 若这里也是空，上面那条断言可能只是因为整条链没取到行）。
+    const asCeo = readRoleMemory(db as never, {
+      owner: CEO_MEMORY_OWNER,
+      requester: CEO_MEMORY_OWNER,
+      isTaskOwner: ownerOf(db),
+    });
+    expect(asCeo.entries).toHaveLength(1);
+    expect(asCeo.entries[0]?.scope).toBe("strategic");
+    expect(asCeo.entries[0]?.reason).toBe("这件事方向上不该做，原因是现金流");
+    db.close();
+  });
+
+  it("⭐ 战略判据是【排除表】而不是白名单：新加的 approval_type 默认挡住", () => {
+    /*
+     * 上一发只覆盖 escalation 一个值。而真正的性质是【对所有将来新增的值成立】，
+     * 那没法靠枚举取值来测（未来的值今天不存在），所以这里从两个方向钉：
+     *  ① 判据的【形状】—— 源码里必须是 `!表.includes(类型)`，不能是
+     *    `类型 === "strategic" || 类型 === unknown`（后者是白名单，正是我写错的那版）；
+     *  ② 一个【契约里不存在】的类型 —— 用一个谁都没登记过的字符串，
+     *    它代表「下个月有人往 APPROVAL_TYPES 加了一项」。
+     * ② 是本文件里我唯一能给「将来的取值」写的用例，而它之所以有效，
+     * 全是因为判据不看具体取值而只看是否在排除表上。
+     */
+    for (const future of ["some_type_invented_next_month", "meeting_escalation", "irreversible_action"]) {
+      const db = newDb();
+      addTask(db, "T-1", "dev");
+      addCard(db, { id: "A-1", taskId: "T-1", type: future });
+      ceoDecides(db, { approvalId: "A-1", taskId: "T-1", resume: "approve", note: "理由" });
+      const asDev = readRoleMemory(db as never, {
+        owner: "dev",
+        requester: "dev",
+        crossScopes: ["gate", "work"],
+        isTaskOwner: ownerOf(db),
+      });
+      expect(asDev.entries, "类型 " + future).toEqual([]);
+      expect(asDev.withheld_by_scope.strategic, "类型 " + future).toBe(1);
+      db.close();
+    }
+
+    const src = readFileSync(ROLE_MEMORY_SRC, "utf8");
+    const code = src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, "");
+    expect(code).toMatch(
+      /!NON_STRATEGIC_APPROVAL_TYPES\.includes\(approvalType\)/u,
+    );
+    // 反向：白名单写法一旦回来，这一发红。
+    expect(code).not.toMatch(
+      /approvalType === "strategic"\s*\|\|/,
+      "判据退回了白名单写法（新增值会被默认放行）",
+    );
+    // 排除表必须【短】。它变长意味着有人在往里加放行项，而每一次加都该过一次 review。
+    expect(NON_STRATEGIC_APPROVAL_TYPES.length).toBeLessThanOrEqual(3);
   });
 
   it("跨角色显式授权 gate + work 也拿不到 strategic（运行期那道）", () => {
