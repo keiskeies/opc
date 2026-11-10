@@ -364,6 +364,28 @@ export function classifyMemoryRow(
     if (payload?.["kind"] === "ApprovalRequired") {
       return { skip: "这一行是【要求批准】而不是【做了决定】，不是记忆" };
     }
+    /*
+     * Task 4.1 加的第二道。`ApprovalTokenRedeemed` 烧的那一行同样落在 action='approval'
+     * 底下（§22.1 那个十值枚举是 append-only 的，不能为它开第 11 个值），
+     * 而它【连「有人被要求批准」都不算】—— 它只说明【一张凭据被消费掉了】，
+     * 决定可能随后发生、也可能永远不发生（票烧了而 decide() 随后失败）。
+     *
+     * 为什么它会一路走进来：它的 actor_id 是 "approval-token"，不是任何角色，
+     * 所以下面那个 isSelf 判不到它；但【taskId 归属】那一半会命中 ——
+     * 远程批准走的正是某个角色负责的任务，于是这一行会进那个角色的候选行，
+     * 再往下 decision 解不出 resume/decision ⇒ null，
+     * 得到一条【没有结论的伪决定】。后果不是崩，是那个角色的 few-shot 里
+     * 长期多一条「这件事有人批过」而事实上没有任何决定 ——
+     * 与本文件上面那两句同一个方向，只是这次是【新 kinds 把它推进来】的。
+     *
+     * ⚠ 这一格刻意【不看 actorId】而看 payload.kind：actor 那一列是给人/系统署名的，
+     * 而「这一行是不是一个决定」是关于【事件种类】的事实。
+     * 靠 actorId === "approval-token" 判也能过今天的测试，
+     * 而它会在哪天有人给这条审计换个署名时【静默失效】（换署名比换 kind 省事得多）。
+     */
+    if (payload?.["kind"] === "ApprovalTokenRedeemed") {
+      return { skip: "这一行是【一次性凭据被消费】，既不是要求也不是决定，不是记忆" };
+    }
     const isSelf = actorId === owner;
     if (!isSelf && !(taskId !== null && isTaskOwner(taskId, owner))) {
       return { skip: "既不是本人决策，也不在该角色负责的任务上" };

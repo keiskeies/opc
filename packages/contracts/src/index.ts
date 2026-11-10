@@ -67,6 +67,8 @@ export {
   encodeSseFrame,
   type FeedItemView,
   feedItemSchema,
+  HTTP_CONFLICT,
+  HTTP_FORBIDDEN,
   HTTP_NOT_FOUND,
   HTTP_NOT_IMPLEMENTED,
   HTTP_UNAUTHORIZED,

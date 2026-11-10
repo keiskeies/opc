@@ -480,10 +480,33 @@ describe("监听地址", () => {
   it("源码层面【没有】host 参数可以改监听地址", () => {
     const src = readFileSync(join(HUB, "src/http/server.ts"), "utf8");
     // 「默认值是 127.0.0.1」和「没有别的取值路径」是两件不同的事，后者才守得住。
-    expect(src).toMatch(/listen\(\s*port,\s*LOOPBACK_HOST/u);
-    expect(src).not.toMatch(/listen\(\s*port\s*\)/u); // 漏 host ⇒ Node 绑所有网卡
-    expect(src).not.toMatch(/opts\.host|\bhost\?\s*:/u);
-    // 读到了内容（空串对上述三条全部成立 —— 本类守卫最典型的假绿）。
+    //
+    // ⚠ 这一发在 Task 4.1 改过判据，原文是 `expect(src).toMatch(/listen\(\s*port,\s*LOOPBACK_HOST/u)`。
+    // 那次改动把 listen 的第二参从常量换成了 bind.host，于是这条【红了】。
+    // 红了之后有两条路：把它改成匹配新形状（保住意图），或者把它删掉（保住绿）。
+    // 意图是「调用方拿不到一个能改监听地址的入口」，而不是「那里写着一个常量」——
+    // 所以换判据而不删，且新判据【更严】：不光要没有 host 参数，
+    // 还必须有那道运行期身份核验（少了它，`as BindDecision` 就是那条更弱的通道）。
+    // ⚠ 判据换成扫【代码行】，不扫整份源码 —— 这一条是我自己撞出来的，不是预防性的。
+    // 上面那几条 not.toMatch 原本是拿整份文件比的，而我在新写的文件头注释里
+    // 举了一个反例（「最省事的兑现是给 serveHub 加一个 host?: string」），
+    // 于是 `host\?\s*:` 命中了【那句散文】，这条守卫当场红 —— 而代码里根本没有 host 参数。
+    // 这正是 0013 §10.1 记的那族错的第三次变体：【grep 把注释算成代码】。
+    // 修法有两个：改注释绕开正则（❌ 那是让正文迁就守卫，本仓明确反对），
+    // 或者让守卫只看它本来要看的东西（✅）。下面那个剥注释的函数很粗，
+    // 但它只需要粗到【能把这两种注释形态剥掉】，而漏剥的后果是守卫偏严（多报），
+    // 不是偏松（漏报）—— 方向是安全的。
+    const code = src.replace(/\/\*[\s\S]*?\*\//gu, "").replace(/^\s*\/\/.*$/gmu, "");
+    expect(code).toMatch(/listen\(\s*port,\s*bind\.host/u);
+    expect(code).not.toMatch(/listen\(\s*port\s*\)/u); // 漏 host ⇒ Node 绑所有网卡
+    expect(code).not.toMatch(/opts\.host|\bhost\?\s*:/u);
+    // 新增的两条，各挡 Task 4.1 引入的一种退化：
+    expect(code).toMatch(/instanceof BindDecision/u); // 只有类型没有运行期核验 ⇒ 可被 as 绕过
+    expect(code).not.toMatch(/bind\?\s*:\s*string/u); // bind 从 BindDecision 退化成 string ⇒ 整个形状白做
+    // 反向对照：剥注释【确实剥到了东西】。否则「剥完再比」可能只是「拿原文比」的别名，
+    // 上面那四条负向断言的判据范围就没人核对过（同 0013 §8 那条元断言）。
+    expect(code.length).toBeLessThan(src.length - 500);
+    // 读到了内容（空串对上述各条全部成立 —— 本类守卫最典型的假绿）。
     expect(src.length).toBeGreaterThan(1000);
   });
 });

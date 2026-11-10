@@ -176,6 +176,66 @@ describe("用法与解析的其它格", () => {
   });
 });
 
+describe("--bind：解析层只管形状，安全判据在 http/bind.ts", () => {
+  it("--bind 是一个【可选】项：不传时结果里根本没有这个键", () => {
+    const r = parseServeArgs(BASE, CLEAN);
+    expect(r.error).toBeUndefined();
+    // 断言「键不存在」而不是「值是 undefined」：后者两种写法都能过，
+    // 而下游 assemble.ts 用的是 `args.bind === undefined ? {} : {requested: args.bind}`，
+    // 那个三元判的是【有没有填】。空串在这里必须已经变成错误（下面那一发），
+    // 所以到 assemble 手上的只可能是「没有」或「一个非空串」。
+    expect(Object.prototype.hasOwnProperty.call(r, "bind")).toBe(false);
+  });
+
+  it("⭐ OPC_BIND 不存在：把 --bind 换成一个 env 缺省源会被这一发抓到", () => {
+    // 这一发测的是【没有】一个功能，而「没有」很难断言 —— 直接扫用法文本与解析结果：
+    //  · 用法文本里出现 OPC_BIND ⇒ 有人在文档里加了它，那解析层多半也加了；
+    //  · 设了 OPC_BIND 而解析结果里冒出 bind ⇒ 解析层真的读了它。
+    // 这一格存在的理由不是洁癖：serve/config.ts 里【其他每一项】都有 env 缺省源，
+    // 「为了一致性补一个 OPC_BIND」读起来像修 bug，而它的实际效果是让
+    // 【一次安全暴露】可以躺在 shell profile 里，每次启动都生效而命令行上看不见
+    // （bind.ts 文件头列的三种「默认值被改掉」的路径之一）。
+    expect(DEFAULT_SERVE_USAGE).not.toContain("OPC_BIND");
+    const r = parseServeArgs(BASE, { OPC_BIND: "0.0.0.0" });
+    expect(r.error).toBeUndefined();
+    expect((r as { bind?: string }).bind).toBeUndefined();
+    // 反向对照：同一份参数走命令行时【确实】能被读到 —— 证明上面那个 undefined
+    // 不是「整个 --bind 没接上」造成的。
+    expect(parseServeArgs([...BASE, "--bind", "0.0.0.0"], CLEAN).bind).toBe("0.0.0.0");
+  });
+
+  it("IP 字面量原样透传：这一层【不】判它安不安全", () => {
+    // 0.0.0.0 在这里通过是【对的】，不是漏判。判「非回环要有远程审批通道」需要
+    // 知道装配结果，而这一层只有 argv。把两层的判据混在一起会得到
+    // 「解析层拒了一个装配层打算放行的值」，那种分歧的报错最误导人。
+    const r = parseServeArgs([...BASE, "--bind", "0.0.0.0"], CLEAN);
+    expect(r.error).toBeUndefined();
+    expect(r.bind).toBe("0.0.0.0");
+    // 主机名同样原样交下去（bind.ts 会拒它，并给出那句「不接受 localhost」的解释）。
+    expect(parseServeArgs([...BASE, "--bind", "localhost"], CLEAN).bind).toBe("localhost");
+  });
+
+  it("⭐ --bind 后面是空串 ⇒ 拒，且不当成「没填」", () => {
+    // --bind "" --port 8787 多半是引号打漏。当成「没填」的后果是：一个人以为
+    // 自己在测局域网路径，而进程悄悄绑回了回环 —— 他接下来排查的是手机与防火墙。
+    const r = parseServeArgs([...BASE, "--bind", ""], CLEAN);
+    expect(r.error).toContain("--bind");
+    expect((r as { bind?: string }).bind).toBeUndefined();
+    // 纯空白同理（与上面 OPC_DB 那一条同一条判据）。
+    expect(parseServeArgs([...BASE, "--bind", "   "], CLEAN).error).toContain("--bind");
+  });
+
+  it("--bind 吃掉后一个 token ⇒ 报『后面要跟』，而不是把 --port 当值", () => {
+    // 与 --db/--port 同一条缺陷：吃掉下一个开关会让报错指向完全无关的方向。
+    expect(parseServeArgs([...BASE, "--bind"], CLEAN).error).toContain("后面要跟");
+    expect(parseServeArgs([...BASE, "--bind", "--no-backup"], CLEAN).error).toContain("后面要跟");
+  });
+
+  it("用法文本里看得到 --bind（安全相关的可选项在 --help 里不可见 = 没人知道有）", () => {
+    expect(DEFAULT_SERVE_USAGE).toContain("--bind");
+  });
+});
+
 describe("备份相位：日历日，不是 24 小时计时器", () => {
   const DAY = 86_400_000;
 

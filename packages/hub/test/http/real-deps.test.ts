@@ -17,7 +17,7 @@
  * 「走到了这一支」，而不是验「LangGraph 收到 resume 之后做了什么」。
  * 后者【未在本机执行过】，这句在 real-deps.ts 文件头也写着，两处同一口径。
  */
-import { mkdirSync, rmSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -32,6 +32,8 @@ import {
   CEO_ACTOR,
   insertTask,
   makeResumeGraph,
+  mintApprovalTokenVia,
+  redeemApprovalTokenVia,
   STATUS_BY_RESUME,
   type HubWriter,
   type ResumableGraph,
@@ -39,6 +41,7 @@ import {
   type Writer,
 } from "../../src/http/real-deps.js";
 import { newLocalToken } from "../../src/http/auth.js";
+import { issueToken, newApprovalToken } from "../../src/http/tokens.js";
 
 const HUB = join(dirname(fileURLToPath(import.meta.url)), "..");
 const TMP = join(HUB, ".tmp", "real-deps");
@@ -720,6 +723,215 @@ describe("makeResumeGraph 的接线", () => {
 });
 
 /* ───────────── ④ 装配：HubDeps 的生产来源 ───────────── */
+
+describe("一次性审批 token 的装配层（mint / redeem）", () => {
+  it("⭐ mint 交回的 expiresAt【不是自己重算的】：源码里没有第二个 TTL 来源", async () => {
+    // 这一发盯的是 mintApprovalTokenVia 里最容易「顺手写一下」的位置：
+    //   return { ok: true, token: raw, expiresAt: o.nowMs + DEFAULT_TOKEN_TTL_MS }
+    // 式子只有一项、今天【完全对】，而它把「TTL 默认值」变成两处各自持有的事实：
+    // 改 DEFAULT_TOKEN_TTL_MS 只改一处时，响应里那个数与库里那一行不符，
+    // 症状是「手机上显示还剩 9 分钟而服务端已经拒了」。
+    //
+    // ⚠ 我第一版只写了「r.expiresAt === 库里那一行」，并在注释里声称
+    // 「这里刻意改一次默认 TTL 再来对账」—— 那句是【空头支票】，代码里没做，
+    // 而那个断言本身【证不到这件事】：两个式子都算 NOW + 同一个常量时它恒成立。
+    // 真要区分只有一条路（改 tokens.ts 里那个常量再看两处是否一起动），
+    // 而那是一次一次性人工探针，不是一条能留下的用例。
+    // 所以这里换成【结构判据】：整份 real-deps.ts 不许出现 DEFAULT_TOKEN_TTL_MS ——
+    // 「第二个 TTL 来源」写不出来，比「写了会被发现」便宜且更硬。
+    // ⚠ 这条取舍是【量过的】，不是推的：我做了两次变异，同一份改动
+    //   （把 issueToken 的返回值丢掉，改回 o.nowMs + DEFAULT_TOKEN_TTL_MS）——
+    //     摘掉结构判据、只留下面那句行为对账 ⇒ 【32 全绿】（变异溜过去了，如推理所说）
+    //     两条都在 ⇒ 1 红，红的正是这一发
+    //   所以「行为断言证不到这件事」不是我的判断，是一次实测。
+    // ⚠ 这里【不用】HUB 那个名字：每个 http 测试文件都在自己文件头第三十行附近
+    // 定义一个叫 HUB 的文件级常量，而它们的【值不一样】—— 有的指包根、有的指 test/。
+    // 我照另一个文件抄了一行 join(HUB, "src", …)，拿到一个 ENOENT，
+    // 而那行代码【看起来】完全合理，这才是它的难处：错的是「哪个文件的 HUB」，
+    // 不是这一行本身。所以这里从 import.meta.url 一路走到底，不借那个名字。
+    // （这一族我本轮踩了【两次】：另一次是同一份文件里用 bash 注入一段中文注释，
+    //   读写按 latin1 往返把那几行压成了不可解码字节 —— 教训是
+    //   【带中文的改动一律走 Edit，不走 shell】。）
+    const SELF = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "src", "http", "real-deps.ts");
+    const code = readFileSync(SELF, "utf8")
+      .replace(/\/\*[\s\S]*?\*\//gu, "")
+      .replace(/^\s*\/\/.*$/gmu, "");
+    expect(code).not.toMatch(/DEFAULT_TOKEN_TTL_MS/u);
+    // 反向对照（两条，都必要）：
+    //  ① 剥注释【确实剥到了东西】。否则「剥完再比」可能只是「拿原文比」的别名，
+    //     而本仓的注释里恰恰写着「不在这里重算 nowMs + TTL」这种含该常量的句子 ——
+    //     不剥注释的话这一发【会假红】，剥不干净的话它会【假绿】。
+    expect(code.length).toBeLessThan(
+      readFileSync(SELF, "utf8").length - 500,
+    );
+    //  ② 判据【不是恒真】：issueToken 确实被 import 且被调用，
+    //     所以这份源码不是「根本没碰 token 那套东西」。
+    expect(code).toMatch(/issueToken\(/u);
+
+    // 行为侧仍然对一次账（它证不了上面那条，但能抓住「响应里的数与库里不符」）：
+    const { db, w } = await newDb();
+    approval(db, "m-1");
+    const r = await mintApprovalTokenVia(w, { approvalId: "m-1", nowMs: NOW });
+    expect(r.ok).toBe(true);
+    if (r.ok !== true) throw new Error("前置失败");
+    const stored = Number(
+      (db.prepare("SELECT expires_at FROM im_tokens WHERE approval_id = ?").get("m-1") as Row)[
+        "expires_at"
+      ],
+    );
+    expect(r.expiresAt).toBe(stored);
+    // 原文【只在这一次返回】：库里那一行按原文查不到（备份里不含可用凭据）。
+    expect(
+      db.prepare("SELECT COUNT(*) AS c FROM im_tokens WHERE token = ?").get(r.token),
+    ).toEqual({ c: 0 });
+    // taskId 顺带钉一次：交回的 taskId 来自 precheck 那一行，不是自己再查的。
+    expect(r.taskId).toBe("task-1");
+  });
+
+  it("mint 拒的三种情形【不写 im_tokens】，且【不抛】（预检在事务里、issue 之前）", async () => {
+    // 关键不在「返回 reason」，在【库里干干净净】。
+    // 预检与 INSERT 若分两次 await，就会出现「预检说行、卡片刚被批掉、票签出来了」，
+    // 产物是一张指向已决策卡片的票 —— 它的症状不在签发时刻，
+    // 而在手机上一次「点了没反应」，排查的人会去查网络而根因在几十秒前。
+    const { db, w } = await newDb();
+    for (const [id, o] of [
+      ["m-missing", undefined],
+      ["m-decided", { status: "approved" }],
+      ["m-irrev", { type: "irreversible_action" }],
+    ] as const) {
+      if (o !== undefined) {
+        db.prepare(
+          "INSERT INTO approvals (id, task_id, approval_type, summary, parameters, status) " +
+            "VALUES (?, ?, ?, '摘要', '{}', ?)",
+        ).run(id, "task-1", o.type ?? "strategic", o.status ?? "pending");
+      }
+      const r = await mintApprovalTokenVia(w, { approvalId: id, nowMs: NOW });
+      expect(r.ok, id).toBe(false);
+    }
+    expect(db.prepare("SELECT COUNT(*) AS c FROM im_tokens").get()).toEqual({ c: 0 });
+    // 反向对照：同一次调用里加一张干净的卡，就该签得出来 ——
+    // 否则上面三个 false 只是「mint 恒失败」的三种写法。
+    approval(db, "m-ok");
+    expect((await mintApprovalTokenVia(w, { approvalId: "m-ok", nowMs: NOW })).ok).toBe(true);
+    expect(db.prepare("SELECT COUNT(*) AS c FROM im_tokens").get()).toEqual({ c: 1 });
+  });
+
+  it("⭐ redeem 在【提交之后】广播烧票那行，seq = 那条审计的 events.id", async () => {
+    // 这一发存在的理由是 events.id 就是 SSE 的 seq（bus.ts 文件头）。
+    // 写了那一行 events 而【不 publish】 ⇒ 活着的订阅撞见一个 seq 空洞 ⇒
+    // 投影层把 link 标 stale 去重拉快照 ⇒ 【每一次远程批准都把连接标脏一次】。
+    // 所以 publish 在这里同样是【必填】参数，而这里用真总线：
+    // 总线自己校验 seq 必须严格递增且为正整数，自记数组会把那道校验换掉。
+    const { db, w } = await newDb();
+    approval(db, "t-1");
+    const raw = newApprovalToken();
+    await w.node(() =>
+      issueToken(db as never, { rawToken: raw, approvalId: "t-1", nowMs: NOW }),
+    );
+    const bus = new InMemoryEventBus();
+    const r = await redeemApprovalTokenVia(
+      w,
+      { token: raw, approvalId: "t-1", nowMs: NOW },
+      (e, seq) => bus.publishPersisted(e, seq),
+    );
+    expect(r).toEqual({ ok: true, taskId: "task-1" });
+
+    const sub = bus.subscribe(0);
+    const first = (await nextBounded(sub)) as { kind: string; seq: number; interruptId: string };
+    expect(first.kind).toBe("ApprovalTokenRedeemed");
+    // target 就是这条事件的 interruptId（recorder 的 targetOf），回放靠它 join 决策。
+    expect(first.interruptId).toBe("t-1");
+    const auditId = (
+      db.prepare("SELECT id FROM events WHERE target = ? ORDER BY id").all("t-1") as Row[]
+    )[0]?.["id"];
+    expect(first.seq).toBe(Number(auditId));
+    sub.close();
+  });
+
+  it("⭐ 烧票的广播【不能在事务里】：广播那一刻只读连接已能读到 used=1", async () => {
+    // 与 applyDecision 那条同名的判据，形状一样而内容不同：
+    // 这里被「提前看见」的不是卡片状态而是【票已消耗】。在事务里 publish 的后果不是
+    // 界面弹回旧状态，而是【事务回滚而事件已广播】—— 前端收到一条库里不存在的事件，
+    // 且它【永不自我纠正】（它不会知道那条烧票从未发生）。
+    const { db, w } = await newDb();
+    approval(db, "t-2");
+    const raw = newApprovalToken();
+    await w.node(() =>
+      issueToken(db as never, { rawToken: raw, approvalId: "t-2", nowMs: NOW }),
+    );
+    const seen: number[] = [];
+    await redeemApprovalTokenVia(w, { token: raw, approvalId: "t-2", nowMs: NOW }, () => {
+      // 只读连接。拿写连接读会【恒过】：同连接看得见自己未提交的行，
+      // 那就退化成「我读我刚写的」，看着像断言而什么都没证明。
+      const r = w
+        .readConnection()
+        .prepare("SELECT used FROM im_tokens WHERE approval_id = ?")
+        .get("t-2") as unknown as Row;
+      seen.push(Number(r["used"]));
+    });
+    expect(seen).toEqual([1]);
+  });
+
+  it("redeem 被拒 ⇒ 【一次广播都没有】（拒不是状态变更，不该留痕）", async () => {
+    const { db, w } = await newDb();
+    approval(db, "t-3");
+    const spy = publishSpy();
+    const r = await redeemApprovalTokenVia(
+      w,
+      { token: "never-issued", approvalId: "t-3", nowMs: NOW },
+      spy.fn,
+    );
+    expect(r).toEqual({ ok: false, reason: "unknown_token" });
+    expect(spy.calls).toEqual([]);
+    // 库里也不该有那行审计。状态码与审计两件事各自都可能是「拒了但留痕」的漏点。
+    expect(auditRows(db).length).toBe(0);
+  });
+
+  it("并发 redeem 同一张票 ⇒ 【恰好一次】ok:true，而广播【不是两次】", async () => {
+    // 与 applyDecision 那条并发同理但后果不同：这里抢的是【一张凭据】。
+    // 两次都返回 ok:true 的后果不是重复写入（写入在那边有条件 UPDATE 挡着），
+    // 是「一张票被用了两次而两次都算成功」—— 审计里最难解释的一种形状。
+    // 两条 SQL 判据（JS 查 used + changes===0）各挡一次，这里测的是【装配层
+    // 有没有把第二次那次广播也挡掉】：判据对了而广播两次，前端会看到两条烧票记录。
+    const { db, w } = await newDb();
+    approval(db, "t-race");
+    const raw = newApprovalToken();
+    await w.node(() =>
+      issueToken(db as never, { rawToken: raw, approvalId: "t-race", nowMs: NOW }),
+    );
+    const spy = publishSpy();
+    const both = await Promise.all([
+      redeemApprovalTokenVia(w, { token: raw, approvalId: "t-race", nowMs: NOW }, spy.fn),
+      redeemApprovalTokenVia(w, { token: raw, approvalId: "t-race", nowMs: NOW }, spy.fn),
+    ]);
+    expect(both.filter((x) => x.ok === true)).toHaveLength(1);
+    expect(both.filter((x) => x.ok === false)).toHaveLength(1);
+    expect(spy.calls).toHaveLength(1);
+  });
+
+  it("⭐ buildHubDeps 把两个注入点【都装上】了 —— bind.ts 的 LAN 放行读的就是这一维", async () => {
+    // 这一发是 assemble.ts 那个 bindForAssembly 的分母的【上游】：
+    // remoteApprovalsWired 读的是装配出来的 deps 上这两个注入点在不在，
+    // 而「在」这件事由 buildHubDeps 决定。少接一个，LAN 绑定就会被 bind.ts 拒掉 ——
+    // 那是【该能跑的跑不了】（吵），比反向（不该能跑的跑了）便宜，
+    // 但它仍然是一次「装配漏了一行而测试全绿」，所以在这里钉成断言。
+    const { w } = await newDb();
+    const deps = buildHubDeps({
+      queue: w,
+      bus: new InMemoryEventBus(),
+      token: newLocalToken(),
+      graphFor: () => ({ graph: fakeGraph({}).graph, invoke: async (fn) => await fn() }),
+      now: () => NOW,
+    });
+    expect(typeof deps.redeemApprovalToken).toBe("function");
+    expect(typeof deps.issueApprovalToken).toBe("function");
+    // bindForAssembly 的判据是【两个都在】。这一发把那条 AND 与装配对上：
+    // 只断言两个 typeof 而不对上 AND 的话，改了 bindForAssembly 的判式这里不会红。
+    expect(
+      deps.redeemApprovalToken !== undefined && deps.issueApprovalToken !== undefined,
+    ).toBe(true);
+  });
+});
 
 describe("buildHubDeps", () => {
   it("装配出来的三个注入点【真的写库】（不是替身）", async () => {

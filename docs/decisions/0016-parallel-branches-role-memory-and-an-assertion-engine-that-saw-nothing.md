@@ -29,15 +29,15 @@ Task 3.7。计划那行给的 Files 是 `src/graph/branches.ts`、`src/memory/ro
    「策略引擎有调用方」是它其实没有，是同一件事：**规格的宾语不存在**。
    处置沿用 0014 §3：不硬造生产者（脏了的审计库删不掉），改成**读取口 + 把「空」报成数据**，
    并把这条空**钉成断言**（`role-memory.test.ts` ③ 节：跑完全部迁移的库里
-   `has_review_decisions === false`，见 `packages/hub/src/memory/role-memory.ts:583`）。
+   `has_review_decisions === false`，见 `packages/hub/src/memory/role-memory.ts:605`）。
    哪天有人接上写入方，那一发会红。
 2. **唯一有生产写入方的「角色决定」是 CEO 那一条。**
-   `packages/hub/src/http/real-deps.ts:260` 写 `action: "approval"`，
+   `packages/hub/src/http/real-deps.ts:268` 写 `action: "approval"`，
    `payload = {approvalId, resume}`（决定本身）、`state_snapshot = {note}`（理由）。
    ⇒ 『历史决定与理由』这个形状**只有 CEO 那一格今天真有数据**。
 3. **图里节点执行写的事件，actor 是 `system` / `hub`，不是执行它的那个角色。**
    `packages/hub/src/graph/audit-middleware.ts` 不传 actor，于是
-   `packages/hub/src/events/recorder.ts:229` 那个 `DEFAULT_ACTOR` 顶上；
+   `packages/hub/src/events/recorder.ts:239` 那个 `DEFAULT_ACTOR` 顶上；
    现成的断言在 `packages/hub/test/graph/audit-interrupt.test.ts:200`
    （`expect(r[0]?.actor_type).toBe("system")`）。
    而节点体当场**知道**角色 id（`company.ts` 的 `askModel` 里 `charter.roleId` 就在手边）。
@@ -195,7 +195,7 @@ expect(new Set(viaAppend)).toEqual(new Set(["p,o,t"]));
 一条 **CEO 在 dev 的任务上做的战略决定**，会带着 `scope = "work"` 进 dev 的自读结果。
 因为那一行的 `actor_id` 是 `ceo`，而桶的 owner 是 `dev`。
 
-修法：判据下沉到**行级** —— 见 `packages/hub/src/memory/role-memory.ts:401`：
+修法：判据下沉到**行级** —— 见 `packages/hub/src/memory/role-memory.ts:423`：
 
 ```ts
 const strategic =
@@ -214,7 +214,7 @@ const strategic =
 **自读根本不经过它**，所以 dev 自读照样把 strategic 行放过去。
 也就是说 4a 那个修法只修了「别人来读」那一路，而漏洞真正在「自己读自己」那一路。
 
-修法：**两道互相独立的闸门**（`packages/hub/src/memory/role-memory.ts:514`）：
+修法：**两道互相独立的闸门**（`packages/hub/src/memory/role-memory.ts:536`）：
 
 ```ts
 const ceoReadingOwn =

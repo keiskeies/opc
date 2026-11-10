@@ -268,13 +268,24 @@ describe("events 插入语句与参数", () => {
     expect(eventParams(noCreated, () => 42)[7]).toBe(42);
   });
 
-  it("kind 到 action 的映射覆盖全部 7 个 kind，且值都在 §22.1 枚举内", () => {
+  it("kind 到 action 的映射覆盖全部 8 个 kind，且值都在 §22.1 枚举内", () => {
     // 6 → 7：实现侧加了 ApprovalDecided（CEO 批完一张卡片这件事，规格 §5.8 那张
     // 六行表里【没有】）。改这个数是【有意偏离规格】的一处，偏离的理由、
     // 丢掉的东西与「为什么不能靠随后的 TaskStateChanged 代替」记在
     // docs/decisions/0010；这一行不是把守卫改松，它仍然要求【逐个 kind】有 action。
+    //
+    // 7 → 8：Task 4.1 加 ApprovalTokenRedeemed。⚠ 这一次改数的【理由不是「要加个 kind」】，
+    // 值得单独记一句，因为「把常量 +1」这个动作本身是零成本的：
+    // redeemToken 必须留一行 events（im_tokens 没有 used_at 那一列），
+    // 而 events.id 就是 SSE 的 seq —— 写了不 publish 就是【消费了一个 seq 而没送出去】，
+    // 活着的订阅会撞见空洞并把 link 标成 stale（0010 §4）。
+    // 也就是说【每一次远程批准都会把连接标脏一次】。
+    // 所以「加这个 kind」不是想让界面看到什么，是【那一行 events 逼出来的】：
+    // 要么广播它，要么不写它，而「不写」会让凭据消费查无此刻。
+    // 记这一条是因为将来有人问「这个 kind 有谁在渲染吗？没有就删了吧」——
+    // 答案是【没有消费者，而它仍然不能删】。
     const kinds = Object.keys(KIND_TO_ACTION);
-    expect(kinds.length).toBe(7);
+    expect(kinds.length).toBe(8);
     for (const k of kinds) {
       const action = KIND_TO_ACTION[k as keyof typeof KIND_TO_ACTION];
       expect((AUDIT_ACTIONS as readonly string[]).includes(action)).toBe(true);
@@ -287,6 +298,12 @@ describe("events 插入语句与参数", () => {
     // 不能为了实现方便加第 11 个值。二者在【库里的区分】靠 actor_type：
     // ApprovalRequired 是 system/hub（图停下来），ApprovalDecided 是 human/ceo（人点了）。
     expect(KIND_TO_ACTION.ApprovalDecided).toBe("approval");
+    // 第三条共用 'approval' 的。三条共用一个 action 而库里的区分靠 payload.kind，
+    // 于是【role-memory 那道「只把决定当记忆」的过滤必须逐条认领 kinds】——
+    // 它漏认一条的后果不是崩，是那条事件被当成一次伪决定进 few-shot，静默且长期。
+    // 这条耦合在 tokens.ts / role-memory.ts 两边各写了注释，而注释挡不住漏；
+    // 真正挡着的是 memory/role-memory.test.ts 里那条专门喂 ApprovalTokenRedeemed 的用例。
+    expect(KIND_TO_ACTION.ApprovalTokenRedeemed).toBe("approval");
     expect(KIND_TO_ACTION.BudgetPaused).toBe("budget_consume");
     expect(KIND_TO_ACTION.MeetingSummaryReady).toBe("meeting");
     expect(KIND_TO_ACTION.HeartbeatStalled).toBe("escalation");

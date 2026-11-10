@@ -17,23 +17,45 @@
  * 反过来说：如果哪天有人把路由/鉴权/状态码判定【搬进】 hono 的 handler 里，
  * 这些测试就失效了，那种搬动要连带把这些用例搬过去，别丢。
  *
- * ── 只绑 127.0.0.1，而且把这条写进测试 ───────────────────────────────
+ * ── 只绑 127.0.0.1，而这一条现在由【一个类型】而不是一行常量守着 ──────────
  * 这个服务【没有任何远程鉴权】：它的全部凭据是一个本机 HMAC 密钥（见 auth.ts），
  * 而那个密钥就躺在同一个进程的内存里。绑到 0.0.0.0 等于把
  * 「任何人可以以 CEO 身份批准付款」开放给同一局域网 ——
  * 而签名机制给的保护在这里几乎为零（它防的是【链路窃听】，不防【同机进程读到密钥】，
  * 更不防【根本不在链路上的邻居】）。
- * 所以这里【没有】host 选项：写死回环。要暴露到远程是 Task 4.1 的事，
- * 而那一层必须先有真正的远程鉴权（一次性配对 + 长期 token 轮换），
- * 届时删掉这个写死是一次【显式的、会被 review 的】改动。
+ *
+ * 下面那段注释（原文留着，它是 0025 之前那一版的事实）写的是：
+ *   「这里【没有】host 选项：写死回环。要暴露到远程是 Task 4.1 的事，
+ *    而那一层必须先有真正的远程鉴权（一次性配对 + 长期 token 轮换），
+ *    届时删掉这个写死是一次【显式的、会被 review 的】改动。」
+ *
+ * Task 4.1 到了，而【那个条件句怎么兑现】是本文件这次改动唯一要紧的事。
+ * 最省事的兑现是给 serveHub 加一个 `host?: string` —— 那【恰好是原注释警告的那种做法】：
+ * 它把「绑哪」变成一个调用方随手能填的字符串，于是安全性质由【默认值】维持，
+ * 而默认值会被改（一次「本地起不来，先绑 0.0.0.0 试试」的排查就破了它，且零报错）。
+ * 所以这次加的不是 host，是 `bind?: BindDecision`：
+ *   · 不传 ⇒ 回环，与改动前【逐字相同的取值】（默认路径零变化，老调用方一个字不用改）；
+ *   · 要非回环 ⇒ 必须【拿一个 BindDecision 进来】，而那个类只能由 BindDecision.resolve()
+ *     产出，resolve 又要 remoteApprovalsWired=true —— 也就是先接上 http/tokens.ts；
+ *   · 传进来的东西还有一道【运行期】instanceof（见下面 listen 前那几行）。
+ *     ⚠ 为什么要有这道运行期检查而不是只靠类型：TS 的 `as BindDecision` 造得出一个
+ *       形状一样的对象，而【我一开始以为类型那道就够了】—— bind.test.ts 里那条
+ *       「伪造一个 decision」的用例实测推翻了我写在注释里的这个论断
+ *       （private constructor 编译后被擦掉，`as any` 直接 new 成功）。
+ *       所以这里的 instanceof 不是防御性冗余，是【那次误判的补丁】。
  */
 
 import { encodeSseFrame } from "@opc/contracts";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import { BindDecision, defaultBindDecision, LOOPBACK_HOST } from "./bind.js";
 import { type HubRequest, type HubResponse, handleRequest, type HubDeps } from "./app.js";
 
-/** 唯一的监听地址。没有第二个值，也没有 host 参数（见文件头）。 */
-export const LOOPBACK_HOST = "127.0.0.1";
+/**
+ * 唯一的默认监听地址。定义已搬到 http/bind.ts（理由写在那边：绑定策略要能在
+ * 不加载 HTTP 服务的情况下被判定与测试，而 import 方向必须是 bind ← server）。
+ * 这里【只 re-export】，于是既有调用方（含 test/http/server.test.ts）一字不改。
+ */
+export { LOOPBACK_HOST };
 
 /** 单个请求体的上限。与 contracts 的 MAX_IDEA_CHARS 同量级，留足 JSON 包裹与将来字段。 */
 export const MAX_BODY_BYTES = 64 * 1024;
@@ -92,8 +114,26 @@ export function toHubRequest(req: IncomingMessage, body: string): HubRequest {
     query,
     headers,
     body,
+    // 对端在哪 —— 这条决定走 HMAC 还是走一次性 token（见 app.ts 的 HubRequest.peer）。
+    //
+    // ⚠ 取不到地址时填的是【非回环】那个哨兵，而不是 LOOPBACK_HOST。
+    // 方向要说清楚：`req.socket.remoteAddress` 在正常 TCP 连接上恒有值，
+    // 但 Node 在两种边角情况下会给 undefined（socket 已被销毁、Unix domain socket
+    // 且未设 address 参数）。那种时候【判成本机】= 免掉一次性 token 与 §11.4 的
+    // 不可逆限制，也就是【凭据缺失 ⇒ 权限更高】；
+    // 判成远程 = 最多多要一张票，最差是 401。
+    // 一个安全判据在【信息缺失】时的取值必须是那个【更贵但更窄】的方向，
+    // 与本仓给隔离定的「判不出 ⇒ 多挡」（0008 门控、0026 §2.1 战略档）同一条。
+    peer: req.socket.remoteAddress ?? UNKNOWN_PEER,
   };
 }
+
+/**
+ * 拿不到对端地址时的占位值。**刻意长得不像一个 IP**：
+ * 填 "0.0.0.0" 会让人以为「这是一台远程机器」，而真相是「我不知道」。
+ * 一个谁看了都知道是哨兵的串，下一个读这段的人在改 isLoopbackAddress 时会想起它。
+ */
+export const UNKNOWN_PEER = "unknown-peer";
 
 /**
  * 一次「对端没了」的哨兵异常。仅用于把 race 里的关闭那一支和真正的写失败区分开。
@@ -183,9 +223,10 @@ export interface HubServer {
   close(): Promise<void>;
 }
 
+
 export async function serveHub(
   deps: HubDeps,
-  opts: { port?: number } = {},
+  opts: { readonly port?: number; readonly bind?: BindDecision } = {},
 ): Promise<HubServer> {
   const server: Server = createServer((req, res) => {
     // 【每个请求一个 try/catch】，且覆盖到 readBody：
@@ -219,12 +260,26 @@ export async function serveHub(
   });
 
   const port = opts.port ?? 0;
+  // 监听地址：不传就是回环，与加这个参数之前【逐字相同】。
+  // 传了就必须是一个真的 BindDecision —— 见文件头那条「为什么不止靠类型」。
+  // 默认那一路走的还是 resolve()，而不是 new 一个「看起来是默认值」的对象：
+  // 少这一致的话，「不传 bind」与「传一个 resolve 出来的回环」会是两种运行时形状，
+  // 而下面那道 instanceof 只验得后一种 —— 于是默认路径变成一条【没被同一道检查管到】的路。
+  const bind: BindDecision = opts.bind ?? defaultBindDecision();
+  if (!(bind instanceof BindDecision)) {
+    throw new Error(
+      "serveHub 的 bind 必须是 BindDecision.resolve() 的产出，收到的是一个形状像的对象（" +
+        JSON.stringify(bind) +
+        "）。运行期这一发不是冗余：as BindDecision 能凭空造出一个 LAN 决定，" +
+        "而「非回环要求一次性 token 通道」这条判据不能由一次类型断言绕过。",
+    );
+  }
   await new Promise<void>((ok, bad) => {
     server.once("error", bad);
-    // 主机参数【不接受外部传入】：见文件头。写死 127.0.0.1，
-    // 于是「绑到 0.0.0.0」这件事在这里【没有对应的代码路径】，
+    // 主机参数【只能来自 bind.host】：见文件头。这里没有 `opts.host`，
+    // 于是「绑到 0.0.0.0」这件事在这里【没有一条对应的代码路径】，
     // 而不是「有路径但默认值是对的」。
-    server.listen(port, LOOPBACK_HOST, () => ok());
+    server.listen(port, bind.host, () => ok());
   });
   const actual = (server.address() as { port: number }).port;
 

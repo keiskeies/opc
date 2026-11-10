@@ -49,6 +49,16 @@ import type { HubServer } from "../http/server.js";
 import { backupNameToMs, createBackup, listBackups, type BackupResult } from "../db/backup.js";
 import type { WriteQueue } from "../db/write-queue.js";
 import { newLocalToken } from "../http/auth.js";
+// bind.ts 是【纯字符串逻辑】：不 import http、不开 socket、不读库（import 方向定死为
+// bind ← server，理由写在它文件头）。所以装配层可以在【顶层】用它，
+// 而不必像 http/server.js 那样等到真要监听时才动态 import ——
+// 那一次动态 import 是为了不把 node:http 拖进离线测试，这里没有那个约束。
+import {
+  BindDecision,
+  bindFailureIsFatal,
+  defaultBindDecision,
+  type BindOutcome,
+} from "../http/bind.js";
 import { EXIT_OK, EXIT_PROBLEM, EXIT_USAGE } from "../heartbeat/maintenance.js";
 import {
   DEFAULT_STALL_THRESHOLD_MS,
@@ -104,8 +114,18 @@ export interface BootOverrides {
   readonly now?: () => number;
   /** WriteQueue 构造点。测试注入假的，好钉「失败路径也一定 close 队列」这种形状。 */
   readonly openQueue?: (dbPath: string) => WriteQueue;
-  /** serveHub 构造点。测试注入假 server，好钉「启动半途失败时前面的清理真的跑了」。 */
-  readonly serve?: (deps: HubDeps, port: number) => Promise<HubServer>;
+  /**
+   * serveHub 构造点。测试注入假 server，好钉「启动半途失败时前面的清理真的跑了」。
+   *
+   * 第三参 bind 是 Task 4.1 加的。它【刻意放在这里而不是某个 override】：
+   * 「监听哪个地址」这件事在装配里只该有一个出口，而那个出口就是 serve ——
+   * 若 bind 走 o.bindOverride 之类的旁路，就会出现「假 server 收到了端口而没收到地址」，
+   * 于是【绑定策略在测试里根本不可见】，而它是本篇唯一在承重的一条判据。
+   * 兼容：TS 允许两个形参的函数赋给三个形参的函数类型，所以既有的假 server
+   * 一字不改仍然编译过（它们只是【看不到】bind，而看不到 bind 的假 server
+   * 本来也不该被用来断言绑定 —— 新加的那条用例自带一个记录第三参的替身）。
+   */
+  readonly serve?: (deps: HubDeps, port: number, bind: BindDecision) => Promise<HubServer>;
   readonly token?: string;
   /**
    * 心跳彻底停掉时的处置。生产传一个「结束进程」的动作（见 runServeCli）；
@@ -121,6 +141,15 @@ export type BootResult =
       readonly port: number;
       readonly token: string;
       readonly portFile?: string | undefined;
+      /**
+       * 实际监听的地址（Task 4.1）。CLI 那句「Hub 已在 X:port 上服务」用它而不是
+       * 写死的 127.0.0.1 —— 写死的那一句在 --bind 之后会变成【一句假话】：
+       * 服务其实对所有网卡开放，而日志说只绑了回环。
+       * 那种日志比没有日志更坏，因为它是运维唯一会读的一行。
+       */
+      readonly bindHost: string;
+      /** loopback / lan。给 CLI 决定那句「只绑回环」该不该说。 */
+      readonly exposure: "loopback" | "lan";
       readonly lockPath: string;
       readonly heartbeat: Ticker;
       shutdown(): Promise<void>;
@@ -131,6 +160,66 @@ export type BootResult =
       readonly message: string;
       readonly hint?: string | undefined;
     };
+
+/**
+ * 装配结果上「远程审批通道在不在」这一维的最小视图。
+ *
+ * 为什么写成 Pick 而不是直接收 HubDeps：这一发【只】需要那两个注入点的存在性，
+ * 收整个 HubDeps 会让它读起来像「它还会看别的」，而下一个加判据的人就会往那里加
+ * （加进去的那一维在测试里【不需要真库】就能构造，见 tokens-route 那组）。
+ * 窄到只能读这两格，是「判据只有这一维」这句话的类型表达。
+ */
+export type ApprovalChannelDeps = Pick<
+  HubDeps,
+  "redeemApprovalToken" | "issueApprovalToken"
+>;
+
+/**
+ * 监听决策 = 「人要求什么」×「这次装配能不能支撑远程审批」。
+ *
+ * ── 为什么从 boot 里抽出来（这件事本身值得记）─────────────────────────
+ * 抽之前它内联在 boot 里，于是【致命那一支没有活的分母】：
+ * buildHubDeps 现在【总是】装那两个注入点 ⇒ remoteApprovalsWired 恒真 ⇒
+ * `--bind 0.0.0.0` 在 boot 里【永远放行】，而「通道没接时不许绑非回环」这条
+ * 安全主张在 boot 这一层【一次也没被测过】。
+ * 那与本仓反复处理的两件事都不同：不是「分支该删」（它不该删），
+ * 也不是「判据写错」（它是对的），是【判据的输入被装配焊成了常量，于是判据恒真】。
+ * 抽出来之后，「通道没接 + 要暴露 ⇒ 拒」这一发可以用一份【没接通道的 deps】直接构造，
+ * 不需要改装配、也不需要假装。
+ *
+ * ── 为什么 remoteApprovalsWired 是【读 deps】而不是字面量 true ──────────
+ * 写 `remoteApprovalsWired: true` 在今天【恰好为真】，而它会一直为真到有人把
+ * buildHubDeps 里那两行改成条件装配为止 —— 那一天字面量仍然编译过、仍然「对」，
+ * 而它宣布的事实已经不成立，后果是【一个没有任何远程鉴权的地址被绑上】。
+ * 传 deps 而不是一个 boolean，买到的是【判式只在这一处】：调用方交出的是那份它真要
+ * 拿去 serve 的 deps（Pick 之后仍然造得出只有那两格的假 deps —— 挡的是
+ * 「把一个 true 挪一行」，不挡「伪造一次装配」，准确说法与 bind.ts 的 CONSTRUCTION_KEY 同一条），
+ * 而「两个注入点【都】在才算接通」这条 AND 由这里算，不由调用方算。
+ * ⚠ 这一条 AND 是【偏严的方向】，而偏严是有意的、也值得质疑一次：
+ * 远程鉴权真正依赖的只有 redeem（mint 只认回环，它是【发票】那一侧）。
+ * 只接 redeem 不接 mint 时（先做读收件箱、后做签票，是很自然的两次提交），
+ * 这一版会说「没接通」而拒掉 LAN 绑定 —— 后果是【该能跑的跑不了】（吵），
+ * 而不是【不该能跑的跑了】（吞）。取向按 0026 §5「合并比重复贵」同一条：宁可吵。
+ * 如果哪天有人把它改成只判 redeem，请连这一段一起推翻，别只改那一行。
+ *
+ * ⚠ 反过来别把它读成「boot 里那条致命分支从此被端到端测过了」：
+ * boot 那一支今天仍然走不到（原因如上），本函数测的是【判据】，
+ * boot 测的是【拿到一个致命拒之后退什么码、说什么话】—— 两件事各有各的分母。
+ */
+export function bindForAssembly(o: {
+  readonly requested: string | undefined;
+  readonly deps: ApprovalChannelDeps;
+}): { readonly outcome: BindOutcome; readonly remoteApprovalsWired: boolean } {
+  const remoteApprovalsWired =
+    o.deps.redeemApprovalToken !== undefined && o.deps.issueApprovalToken !== undefined;
+  return {
+    remoteApprovalsWired,
+    outcome: BindDecision.resolve({
+      ...(o.requested === undefined ? {} : { requested: o.requested }),
+      remoteApprovalsWired,
+    }),
+  };
+}
 
 /**
  * 起一个常驻 Hub。【不抛】—— 所有失败都翻成 { ok: false, code }。
@@ -378,16 +467,70 @@ export async function boot(
       );
     }
 
+    /*
+     * ── 监听地址（Task 4.1）──────────────────────────────────────────
+     * 判据全在 http/bind.ts，「装配上通道在不在」这一维在 bindForAssembly（上面），
+     * 这里只剩三件装配的事：拒了分致命与否、非致命要响一声、告警每次启动都打。
+     *
+     * ⚠ 致命那一支【此刻在 boot 里没有活的分母】：buildHubDeps 总是装那两个注入点，
+     * 所以从这里走到 bindOutcome 时 remoteApprovalsWired 恒真。分支保留而不是删掉，
+     * 理由与 app.ts 里 501 那一支同源（契约先行 + 判据本身另有分母），
+     * 而它的判据分母在 bindForAssembly 那一组用例里 —— 不在这里。
+     */
+    const { remoteApprovalsWired, outcome: bindOutcome } = bindForAssembly({
+      requested: args.bind,
+      deps,
+    });
+    if (bindOutcome.ok !== true) {
+      if (bindFailureIsFatal(bindOutcome)) {
+        return {
+          ok: false,
+          // EXIT_USAGE（2）而不是 EXIT_PROBLEM（1）：这不是「环境坏了」，
+          // 是【这一次命令的要求此刻满足不了】，修法在命令行上而不在机器上。
+          // 退 1 会让人去查端口、查防火墙、查日志，而真相是他得先把通道接上
+          // 或者去掉一个参数 —— 退出码是这条报错里唯一一定被读到的部分。
+          code: EXIT_USAGE,
+          message: bindOutcome.message,
+          hint:
+            remoteApprovalsWired
+              ? "装配上【有】token 通道而仍被拒：这是 bind.ts 的判据本身出了问题，不是配置问题。"
+              : "装配上没有 token 通道。今天 buildHubDeps 会装它，所以真走到这一格" +
+                "说明装配被改过 —— 先确认那次改动是否有意。",
+        };
+      }
+      // 非致命（打错成主机名 / 垃圾串）⇒ 退回默认回环，但【必须响一声】。
+      // 这里不退成「安静用默认」：那个人以为自己指定过监听地址，
+      // 而两句话的差别是他今晚会不会以为远程已经能连（不能）。
+      io.warn(
+        "忽略 --bind（" +
+          bindOutcome.reason +
+          "）：\n" +
+          bindOutcome.message,
+      );
+    }
+    // 上面那一支不 return，所以这里要自己再取一次默认。
+    // 不用「在上面那支里塞一个 decision 变量再往下带」：那会让默认值出现在两个地方，
+    // 而这两个地方将来会漂（一处给回环、一处给 ::1 这种事故不值得冒）。
+    const bind: BindDecision = bindOutcome.ok
+      ? bindOutcome.decision
+      : defaultBindDecision();
+    // bind.warning 是【只有非默认取值才非 null】的那一句（::1 的栈提示 / LAN 的暴露告警）。
+    // 回环默认时它是 null，于是【正常启动不会多打一行】—— 这不是省字：
+    // 每次都打的告警会被读的人训练成噪音，而这条告警要防的正是
+    // 「没人再看它的那一天」。真正每次都要说的只有一句，在 runServeCli 那行
+    // 「Hub 已在 <host>:<port> 上服务」，而它现在打的是 bind.host 而不是写死的 127.0.0.1。
+    if (bind.warning !== null) io.warn(bind.warning);
+
     const serve =
       o.serve ??
-      (async (d: HubDeps, p: number): Promise<HubServer> => {
+      (async (d: HubDeps, p: number, b: BindDecision): Promise<HubServer> => {
         const { serveHub } = await import("../http/server.js");
-        return await serveHub(d, { port: p });
+        return await serveHub(d, { port: p, bind: b });
       });
     // args.port 为 undefined 时传 0 ⇒ 系统分配。这正是 --port-file 那条路。
     const requested = args.port ?? 0;
     try {
-      server = await serve(deps, requested);
+      server = await serve(deps, requested, bind);
     } catch (e) {
       return {
         ok: false,
@@ -558,6 +701,8 @@ export async function boot(
       ok: true,
       port: server.port,
       token,
+      bindHost: bind.host,
+      exposure: bind.exposure,
       lockPath: lock.path,
       heartbeat,
       ...(args.portFile === undefined ? {} : { portFile: args.portFile }),
@@ -751,7 +896,11 @@ export async function runServeCli(
     return { code: r.code };
   }
 
-  io.log("Hub 已在 127.0.0.1:" + r.port + " 上服务（只绑回环，见 http/server.ts）");
+  /*
+   * 这一行的判据与它的来历在 serveBannerOf（下面）—— 抽出去之前它是内联在这里的，
+   * 而内联的那一版是写死的 "Hub 已在 127.0.0.1:" + port。
+   */
+  io.log(serveBannerOf({ bindHost: r.bindHost, port: r.port, exposure: r.exposure }));
   io.log(
     "本机 token【只打印这一次】，不落库也不落盘（理由见 http/auth.ts 文件头）：\n  " +
       r.token,
@@ -766,6 +915,44 @@ export async function runServeCli(
     if (fatalBeforeStop) stop();
   });
   return { code };
+}
+
+/**
+ * 启动横幅那一行「Hub 已在 X:port 上服务（…）」。
+ *
+ * ── 为什么抽出来 ────────────────────────────────────────────────────
+ * 它原本内联在 runServeCli 里，而成功那一支要【先打印、再挂进 waitForShutdown
+ * 等一个真信号】才返回。测试里要走到那一行，只能给自己发一发 SIGINT ——
+ * 那一发会同时被同进程里【其他用例留下的】信号监听收到
+ * （waitForShutdown 注册了不注销），所以那不是「一次可控的注入」而是一次全局动作。
+ * 结论不变：这一行在本机【一次也没被执行过】，「只绑回环」那五个字没人见过。
+ * 抽成纯函数之后两个分支都有分母，不需要真起进程、不需要发信号。
+ * ⚠ 别把这条理由读成「信号那条路测不了」：waitForShutdown 自己的清理语义
+ *   仍然只由 boot/shutdown 那几发间接覆盖，那一格的本机覆盖度没有因为本次抽取而变好。
+ *
+ * ── 这一行曾经是【一句仍然会打印的假话】────────────────────────────
+ * Task 4.1 之前它是 `"Hub 已在 127.0.0.1:" + r.port`，写死的。加 --bind 之后
+ * 它【照常打印】，而服务其实对所有网卡开放。比崩溃贵得多的正是这种
+ * 「功能坏了而输出照常」的形状 —— 尤其当它是唯一被读的那一行时。
+ * 现在取值一律来自入参（= 真传给 listen 的那个 host 与那个 exposure），
+ * 于是「只绑回环」这四个字【只在真的只绑回环时】才会出现。
+ * 下面那条用例的反向对照钉的就是这一句。
+ */
+export function serveBannerOf(r: {
+  readonly bindHost: string;
+  readonly port: number;
+  readonly exposure: "loopback" | "lan";
+}): string {
+  return (
+    "Hub 已在 " +
+    r.bindHost +
+    ":" +
+    r.port +
+    " 上服务" +
+    (r.exposure === "loopback"
+      ? "（只绑回环，见 http/bind.ts）"
+      : "（⚠ exposure=lan：同一网络内任何设备可达，凭据是一次性 token）")
+  );
 }
 
 /**

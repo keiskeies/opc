@@ -32,6 +32,7 @@ export const API_ENDPOINTS = [
   "GET /tasks/:id",
   "GET /approvals",
   "POST /approvals/:interruptId",
+  "POST /approvals/:interruptId/token",
   "GET /events",
   "GET /replay/:taskId",
 ] as const;
@@ -44,6 +45,12 @@ export type ApiEndpoint = (typeof API_ENDPOINTS)[number];
  * 未落地的那份被 hasEndpoint 判 false，app.ts 对它的处理是 501 而不是 404 ——
  * 404 会让前端以为「这个任务不存在」，而真相是「服务端还没实现」。
  * 这两种「没有」对调用方的修法完全不同：一个是改参数，一个是等服务端。
+ *
+ * ⚠ 「在这里登记」的含义是【app.ts 里有对应的 handler 分支】，仅此而已。
+ * 它【不】意味着「渲染进程能调到它」—— 那是 desktop/ipc-surface.ts 的 EXPOSED_ENDPOINTS
+ * 那一格管的事，两份清单的分工见那边。今天这一条上有一个实例：
+ * POST /approvals/:interruptId/token 落在地而【没有】IPC 通道，
+ * 因为它是【回环专用】的（远程端是它的对立面，不是它的调用方）。
  */
 export const IMPLEMENTED_ENDPOINTS: readonly ApiEndpoint[] = [
   "POST /tasks",
@@ -51,6 +58,7 @@ export const IMPLEMENTED_ENDPOINTS: readonly ApiEndpoint[] = [
   "GET /tasks/:id",
   "GET /approvals",
   "POST /approvals/:interruptId",
+  "POST /approvals/:interruptId/token",
   "GET /events",
   "GET /replay/:taskId",
 ];
@@ -261,9 +269,31 @@ export type FeedItemView = z.infer<typeof feedItemSchema>;
  *  401 没带凭据（改调用方）  404 资源不存在（改参数）  501 服务端没实现（等实现）
  * 把它们混成一个 404 是本类契约最容易犯也最难查的错：前端看到 404 会去检查自己的
  * 参数，而真相可能是路由没注册。
+ *
+ * ⚠ 下面那个 HTTP_FORBIDDEN 是 Task 4.1 加的，它【不是第四种「没有」】——
+ * 它是【有，但不许】：卡片存在、凭据有效、服务端也实现了，而策略不允许在这条通道上做。
+ * 之所以仍要在这一族里登记：它与 401 的区别【必须】保住。
+ * 401 的修法是「把凭据弄对」，403 的修法是「换个地方点」。
+ * 把【规格】§11.4 那条「不可逆不许在远程批」翻成 401，
+ * 得到的症状是 CEO 在手机上反复重签 token 而永远批不掉 ——
+ * 一个把人支去检查自己凭据的报错（同上面那句 404 的病，只是换了个码）。
  */
 export const HTTP_UNAUTHORIZED = 401;
+export const HTTP_FORBIDDEN = 403;
 export const HTTP_NOT_FOUND = 404;
+/**
+ * 「这件事已经有人做完了」。
+ *
+ * 它【不属于】上面那三种「没有」，也不属于 403「有但不许」—— 它是第四种：
+ * 【你的请求本身没毛病，但它的前提刚刚不成立了】。
+ * 今天唯一的用法是给「对一张已经决策过的卡片签远程票」回话。
+ * 为什么不用 404（那也讲得通：这张卡对你而言已经不存在了）：
+ * 404 的修法是「检查你的参数」，而这里参数完全正确 ——
+ * 卡片在，id 对，只是状态变了。把「你点晚了」报成 404，
+ * 界面会显示「卡片不存在」，而 CEO 看到的是一件他从没见过的东西消失了；
+ * 409 至少让界面有机会说对人话：「这张卡已经被批过了」。
+ */
+export const HTTP_CONFLICT = 409;
 export const HTTP_NOT_IMPLEMENTED = 501;
 export const HTTP_UNPROCESSABLE = 422;
 

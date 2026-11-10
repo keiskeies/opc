@@ -42,14 +42,18 @@ export const DEFAULT_SERVE_USAGE: string = [
   // 「未知子命令」退出 2（VERBS 只有 run / status / resume）。用法文本的读者是人照着敲的，
   // 一条不存在的命令比少写一行更糟（同 assemble.ts 的 resumeCommand 那段理由）。
   "用法：pnpm hub:serve --db <path> [--port <n> | --port-file <path>] [--backup-dir <dir>] [--heartbeat <ms>]",
-  "      [--no-backup] [--help]",
+  "      [--no-backup] [--bind <IP>] [--help]",
   "      环境变量 OPC_DB / OPC_BACKUP_DIR / OPC_PORT / OPC_HEARTBEAT_MS 只做【缺省来源】，不覆盖显式参数。",
+  // --bind 那一行【没有】对应的 OPC_BIND，而这不是漏写。写清楚，否则下一个补 env
+  // 的人是在「修一个不一致」，而他读不到任何一句告诉他这不是不一致（理由见下文的注释）。
+  "      ⚠ --bind 【没有】env 缺省源：打开对外暴露必须是这一次命令里一个看得见的参数。",
   "",
   "做四件事，按这个顺序：",
   "  1) 抢库文件旁边的写者锁（<db>.lock）。别的进程持着 ⇒ 【拒绝启动】，",
   "     否则两个「唯一写者」会交错写同一个库而不报错（规格 §5.1）",
   "  2) 打开 + 迁移 + 启动时的页面完整性检查（不过 ⇒ 拒绝启动并指路 scripts/restore.md）",
-  "  3) 起 HTTP/SSE（只绑 127.0.0.1，见 http/server.ts）",
+  "  3) 起 HTTP/SSE（默认只绑 127.0.0.1；--bind 换地址要看 http/bind.ts 的判据，",
+  "     非回环要求一次性 token 的远程审批通道已接上，否则拒绝启动）",
   "  4) 起心跳：启动后立即一趟巡检，之后每 --heartbeat 一趟；每趟顺便问一次「今天备过没有」",
   "",
   "退出码：0 正常退出 / 1 起不来或运行期出事 / 2 参数不对。",
@@ -62,6 +66,16 @@ export interface ServeArgs {
   readonly backupDir?: string;
   readonly heartbeatMs?: number;
   readonly noBackup?: boolean;
+  /**
+   * 【要求】绑定的地址，原样透传（不校验、不规整、不猜默认）。
+   *
+   * 为什么这里【不做校验】而 --port 那边做：校验「这是不是一个合法的非回环 IP」
+   * 属安全判据，它住在 http/bind.ts，而那一层还要问一个本层【回答不了】的问题 ——
+   * 「远程审批通道接上了吗」。在这一层提前判一次，就会有两份「这算不算 LAN」的判据，
+   * 而两份判据之间必然漂移（0026 §9 撤掉 isPendingStatus 时记的就是那一族）。
+   * 本层只保证「拿到的是一个非空的值」，那是参数解析的职责。
+   */
+  readonly bind?: string;
   readonly help?: boolean;
   readonly error?: string;
 }
@@ -115,6 +129,7 @@ export function parseServeArgs(
   let backupDir: string | undefined;
   let heartbeatMs: number | undefined;
   let noBackup = false;
+  let bind: string | undefined;
 
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -169,6 +184,13 @@ export function parseServeArgs(
       case "--no-backup":
         noBackup = true;
         break;
+      case "--bind": {
+        const v = takeValue(argv, i + 1, "--bind");
+        if (typeof v === "object") return v;
+        i++;
+        bind = v;
+        break;
+      }
       default:
         return { error: "未知参数 " + String(a) };
     }
@@ -177,6 +199,13 @@ export function parseServeArgs(
   // env 只做缺省来源，不覆盖显式参数（同 maintenance.ts 的口径：
   // 显式给的是一个意思，环境里躺着的是另一个 ⇒ 报错指向环境而真相在命令行）。
   if (dbPath === undefined) dbPath = fromEnv(env, "OPC_DB");
+  // --bind 【刻意没有 OPC_BIND】。这一层其他每一项都有 env 缺省源，只有它没有，
+  // 而这个【不一致】就是内容本身：http/bind.ts 文件头列的那三种「默认值被改掉」的
+  // 途径里，第二条正是「一次 env 里躺着的 OPC_BIND」。
+  // 一个安全边界只能由【这一次启动命令里一个看得见的参数】打开；
+  // 从环境继承来的暴露不算任何人做过决定（compose 文件、shell profile、CI 变量
+  // 都能带着它活过很多次「我没动过那块」的排查）。
+  // 所以将来觉得「为了一致性该补个 OPC_BIND」的人：请连 bind.ts 那一段一起推翻。
   if (port === undefined) {
     const raw = fromEnv(env, "OPC_PORT");
     if (raw !== undefined) {
@@ -230,6 +259,15 @@ export function parseServeArgs(
         "而那正是【不得阻塞写队列】这条验收要防的事。",
     };
   }
+  if (bind !== undefined && bind.trim() === "") {
+    return {
+      error:
+        "--bind 后面是一个空值。要么给一个 IP 字面量（" +
+        "本机回环写 127.0.0.1），要么【整个参数不要给】（默认就是回环）。\n" +
+        "空串在这里不当成「没填」：那会让一次引号打漏（--bind \"\" --port 8787）" +
+        "变成一个【静默用默认值】的启动，而这个人以为自己显式指定过监听地址。",
+    };
+  }
   if (noBackup && backupDir !== undefined) {
     return {
       error:
@@ -245,6 +283,7 @@ export function parseServeArgs(
     ...(portFile === undefined ? {} : { portFile }),
     ...(backupDir === undefined ? {} : { backupDir }),
     ...(heartbeatMs === undefined ? {} : { heartbeatMs }),
+    ...(bind === undefined ? {} : { bind }),
     ...(noBackup ? { noBackup: true } : {}),
   };
 }

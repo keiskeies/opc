@@ -684,6 +684,102 @@ describe("③ coverage：把「这一档是空的」报成数据", () => {
     expect(again.entries).toHaveLength(1);
     db.close();
   });
+
+  it("⭐ ApprovalTokenRedeemed（Task 4.1 烧票那行）不进任何角色的记忆", () => {
+    /*
+     * 这一发不是「顺手多盖一格」，它挡的是一条【会静默成立】的漏。
+     * 链条：KIND_TO_ACTION 把 ApprovalTokenRedeemed 映到 'approval'
+     *（§22.1 那个十值枚举是 append-only 的，不能为它开第 11 个值），
+     * 于是它落进本文件这一族读法取的同一批行里。
+     * 它的 actor_id 是 "approval-token"（不是任何角色）⇒ 那个 isSelf 判不到它；
+     * 但取回候选行用的是【署名 OR 任务归属】那个 OR（0026 §5 量过的就是它），
+     * 而远程批准走的正是某个角色负责的任务 ⇒ 这一行【会】进那个角色的候选。
+     * 再往下 decision 解不出 resume/decision ⇒ null，
+     * 于是那个角色的 few-shot 里多出一条【没有结论的伪决定】：
+     * 「这件事有人批过」，而事实上一个决定都没发生（票烧了、决定可能在别处、也可能没有）。
+     *
+     * 为什么【不看 actor_id】而看 payload.kind（源码里那条判据的形状）：
+     * 「这一行是不是一个决定」是关于【事件种类】的事实，而 actor 那一列是给人/系统署名的。
+     * 按 actorId === "approval-token" 判也能过今天这一发，而它会在哪天有人
+     * 给这条审计换个署名时【静默失效】—— 换署名比换 kind 省事得多。
+     * 所以这一发连那条形状一起钉：换一个【没人用的署名】而 kind 仍是这个 ⇒ 仍然被挡。
+     */
+    const db = newDb();
+    addTask(db, "T-1", "dev");
+    // 一张【非战略档】的卡。少了它，上面那条对照决定会因为没有卡片行而被判成
+    // APPROVAL_TYPE_UNKNOWN ⇒ 战略档 ⇒ 对 dev 隐藏，于是 before.entries 是空的，
+    // 整发测试从第一步就失去分母（这个坑是我第一次写这一发时踩的：
+    // 断言写成 expect(before.entries).toHaveLength(1) 而实到 []，
+    // 红得很像「过滤器生效了」，其实是【对照行自己没进候选】）。
+    addCard(db, { id: "A-1", taskId: "T-1", type: "budget_override" });
+    // 一个真决定作对照（它【该】进 dev 的记忆：任务归属命中那个 OR）。
+    appendAudit(
+      db as never,
+      {
+        taskId: "T-1",
+        actorType: "human",
+        actorId: CEO_MEMORY_OWNER,
+        action: "approval",
+        target: "A-1",
+        payload: { kind: "ApprovalDecided", interruptId: "A-1", resume: "approve" },
+        createdAt: NOW,
+      },
+      () => NOW,
+    );
+    const before = readRoleMemory(db as never, {
+      owner: "dev",
+      requester: "dev",
+      isTaskOwner: ownerOf(db),
+    });
+    expect(before.entries).toHaveLength(1);
+
+    appendAudit(
+      db as never,
+      {
+        taskId: "T-1",
+        actorType: "system",
+        actorId: "approval-token",
+        action: "approval",
+        target: "A-1",
+        payload: { kind: "ApprovalTokenRedeemed", taskId: "T-1", interruptId: "A-1" },
+        createdAt: NOW + 1,
+      },
+      () => NOW + 1,
+    );
+    const after = readRoleMemory(db as never, {
+      owner: "dev",
+      requester: "dev",
+      isTaskOwner: ownerOf(db),
+    });
+    // 【仍然只有那一条】。加了烧票那一行而条数变了，就是伪决定进了记忆。
+    expect(after.entries).toHaveLength(1);
+    expect(after.entries[0]?.decision).toBe("approve");
+
+    // 反向对照（这条才是钉【判据形状】的那发）：署名换一个【没人用过的】值，
+    // 而 payload.kind 不变 ⇒ 【照样被挡】。
+    // 少了这一发，实现写成 `actorId === "approval-token"` 也能全绿，
+    // 而那条实现会在换署名那天静默放开这一格。
+    appendAudit(
+      db as never,
+      {
+        taskId: "T-1",
+        actorType: "system",
+        actorId: "someone-else-entirely",
+        action: "approval",
+        target: "A-2",
+        payload: { kind: "ApprovalTokenRedeemed", taskId: "T-1", interruptId: "A-2" },
+        createdAt: NOW + 2,
+      },
+      () => NOW + 2,
+    );
+    const third = readRoleMemory(db as never, {
+      owner: "dev",
+      requester: "dev",
+      isTaskOwner: ownerOf(db),
+    });
+    expect(third.entries).toHaveLength(1);
+    db.close();
+  });
 });
 
 describe("④ 分页与窗口：不能给出翻不完的空白页", () => {

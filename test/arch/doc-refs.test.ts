@@ -171,20 +171,24 @@ const SNAP: Record<string, string> = {
   // 我一开始在这里写的理由是「recorder.ts 有歧义」，那是没查就写的（0016 §6 那一族的当场复发）。
   // 真实理由只是【与 0013 那组的全路径写法保持一致】，而基名形态本身是合法的：
   // 0013 里同一行被引用两次（一次全路径、一次基名），所以那边**两条都要登记**。
-  "0016-parallel-branches-role-memory-and-an-assertion-engine-that-saw-nothing.md>packages/hub/src/memory/role-memory.ts:583":
+  // 0016 那一组的行号在 Task 4.1 这一轮整体下移（role-memory +22、real-deps +123、
+  // recorder +10 行）。逐条 sed -n '<n>p' 重读现场确认【引用的还是同一行、内容一字未变】
+  // 之后才改的坐标 —— 不是按 diff 行数推算的（推算出来的那个数一旦中间还有别的改动就错，
+  // 而本轮 real-deps.ts 恰好就不止一处改动）。这是本守卫第【五】次抓同一件事。
+  "0016-parallel-branches-role-memory-and-an-assertion-engine-that-saw-nothing.md>packages/hub/src/memory/role-memory.ts:605":
     'has_review_decisions: rows.some((r) => r.action === "review_decision"),',
-  "0016-parallel-branches-role-memory-and-an-assertion-engine-that-saw-nothing.md>packages/hub/src/http/real-deps.ts:260":
+  "0016-parallel-branches-role-memory-and-an-assertion-engine-that-saw-nothing.md>packages/hub/src/http/real-deps.ts:268":
     'action: "approval",',
-  "0016-parallel-branches-role-memory-and-an-assertion-engine-that-saw-nothing.md>packages/hub/src/events/recorder.ts:229":
+  "0016-parallel-branches-role-memory-and-an-assertion-engine-that-saw-nothing.md>packages/hub/src/events/recorder.ts:239":
     'const DEFAULT_ACTOR = { actorType: "system", actorId: "hub" } as const;',
   "0016-parallel-branches-role-memory-and-an-assertion-engine-that-saw-nothing.md>packages/hub/test/graph/audit-interrupt.test.ts:200":
     'expect(r[0]?.actor_type).toBe("system");',
   // 下面两条是 §4 那两个漏洞的**修法现场**。它们必须是活坐标：0016 §4 整段的论据是
   // 「判据写在哪一层粒度上决定了漏不漏」，而判据一旦被人从行级挪回桶级，
   // 那两行的内容必然变 —— 快照红的时候，正是该重读 §4 的时刻。
-  "0016-parallel-branches-role-memory-and-an-assertion-engine-that-saw-nothing.md>packages/hub/src/memory/role-memory.ts:401":
+  "0016-parallel-branches-role-memory-and-an-assertion-engine-that-saw-nothing.md>packages/hub/src/memory/role-memory.ts:423":
     "const strategic =",
-  "0016-parallel-branches-role-memory-and-an-assertion-engine-that-saw-nothing.md>packages/hub/src/memory/role-memory.ts:514":
+  "0016-parallel-branches-role-memory-and-an-assertion-engine-that-saw-nothing.md>packages/hub/src/memory/role-memory.ts:536":
     "const ceoReadingOwn =",
   // 0015（Task 3.6）本轮新写的引用。逐条在被引用文件里 sed -n '<n>p' 读过原文再抄，
   // 不是从 0015 正文里复制措辞 —— 那等于让快照抄文档，守卫当场失效。
@@ -197,7 +201,7 @@ const SNAP: Record<string, string> = {
     "const config = JSON.parse(prev.config) as Record<string, unknown>;",
   "0015-charter-editor-and-two-sources-of-budget.md>0001_init.sql:144":
     "CREATE TABLE role_charters (",
-  "0015-charter-editor-and-two-sources-of-budget.md>http/app.ts:438":
+  "0015-charter-editor-and-two-sources-of-budget.md>http/app.ts:869":
     'consumed_cents: Number(r["consumed_cents"] ?? 0),',
   "0015-charter-editor-and-two-sources-of-budget.md>tracker.ts:233":
     "const breached = before <= limit && after > limit;",
@@ -248,8 +252,12 @@ const SNAP: Record<string, string> = {
   // 369 → 375：本轮给 KIND_TO_ACTION / targetOf 各加了一条 case（新事件 kind
   // ApprovalDecided），把它下面那一行 try 顶下去 6 行。守卫又一次抓住同一件事：
   // 【代码没写错、文档也没写错，只是行号动了】。
-  "0007-test-type-coverage-blindspot.md>events/recorder.ts:375": "try {",
-  "0007-test-type-coverage-blindspot.md>recorder.ts:248":
+  // 375 → 385：同一文件、同一原因，第二次。Task 4.1 加第 8 个事件 kind
+  // ApprovalTokenRedeemed 时又往 KIND_TO_ACTION / targetOf 各加了一条 case（+10 行）。
+  // 同一个坐标被顶两次、理由一模一样，说明【在表尾加 case】是这段代码的日常操作，
+  // 而不是偶发事故 —— 这一格以后每次动那张表都要预期它漂。
+  "0007-test-type-coverage-blindspot.md>events/recorder.ts:385": "try {",
+  "0007-test-type-coverage-blindspot.md>recorder.ts:258":
     "// 默认必须【可见】而不是静默：投影失败是可用性事故（前端看不到进度），",
   "0007-test-type-coverage-blindspot.md>driver.ts:30":
     "export function openDb(path: string): DatabaseSync {",
@@ -285,7 +293,7 @@ const SNAP: Record<string, string> = {
   // 快照当场红，逼人重读那段论证，而不是让文档继续指着一句 `/**` 讲 UNIMPLEMENTED。
   "0012-org-versioned-commit-and-unwritten-graph-version.md>packages/contracts/src/api.ts:29":
     "export const API_ENDPOINTS = [",
-  "0012-org-versioned-commit-and-unwritten-graph-version.md>packages/contracts/src/api.ts:66":
+  "0012-org-versioned-commit-and-unwritten-graph-version.md>packages/contracts/src/api.ts:74":
     "export const UNIMPLEMENTED_ENDPOINTS: readonly ApiEndpoint[] = [];",
   // 0013 §10.1 那次【撤回】的三块砖。这一组与前面几组的性质不同：前面抓的是
   // 「文档引用的那行代码挪了」，这一组抓的是「文档引用的那条**注释**不再成立」。
@@ -305,11 +313,11 @@ const SNAP: Record<string, string> = {
   // INSERT_CARD_SQL，那句 grep 现在是 INSERT 1 处 + UPDATE 3 处（另一条 UPDATE 在
   // policy/auto-approve.ts）。这一格仍然值得当活坐标，但它的意义变了：
   // 原本它证的是「只有 UPDATE 没有 INSERT」，现在它证的是「CEO 那条认领 SQL 的形状还在」。
-  "0013-replay-timeline-search-and-a-test-with-zero-discriminating-power.md>real-deps.ts:169":
+  "0013-replay-timeline-search-and-a-test-with-zero-discriminating-power.md>real-deps.ts:177":
     '"UPDATE approvals SET status = ?, decided_by = ?, decided_at = ?, decision_note = ? " +',
   // 「条件写匹配 0 行 ⇒ 安静地什么都不发生」这一条实测的出处。
   // 它是 §10.1 末段那条「Task 3.5 必须带存在性断言」的判据来源。
-  "0013-replay-timeline-search-and-a-test-with-zero-discriminating-power.md>real-deps.ts:248":
+  "0013-replay-timeline-search-and-a-test-with-zero-discriminating-power.md>real-deps.ts:256":
     "if (Number(info.changes) === 0) return null; // 没抢到：不写审计",
   // 0002 §4 那条「schema 看着开放」论证的唯一落点：platform 那一列的注释枚举了三个平台。
   // 它必须是活坐标 —— 那篇的排除理由里【最硬的一条】依赖「这套形状从第一天起没给个人微信留位」，

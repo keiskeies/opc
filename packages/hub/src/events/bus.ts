@@ -57,7 +57,31 @@ export type DomainEvent =
     }
   | { kind: "BudgetPaused"; taskId: string; spentUsdCents: number }
   | { kind: "MeetingSummaryReady"; taskId: string; meetingId: string }
-  | { kind: "HeartbeatStalled"; taskId: string; node: string };
+  | { kind: "HeartbeatStalled"; taskId: string; node: string }
+  /**
+   * 一张一次性审批 token 被烧掉（Task 4.1，http/tokens.ts）。
+   *
+   * 【这一 kind 是被 seq 空洞逼出来的，不是「想让界面看到」】。顺序是这样的：
+   * redeemToken 要留痕（im_tokens 只有 used=0/1，没有时间列），所以它写一行 events；
+   * 而 events.id 就是 seq（本文件头）。写了那一行而不 publishPersisted，
+   * 就等于【消费了一个 seq 而没送出去】—— 那正是 0010 §4 量过的失效形状：
+   * 活着的 SSE 订阅撞见一个空洞，投影层把 link 标成 stale 去重拉快照，
+   * 于是【每一次远程批准都把连接标脏一次】。所以「留痕」与「广播」是同一件事的两半，
+   * 少一半比两半都没有更糟（两半都没有时 seq 至少是连续的）。
+   *
+   * 为什么不复用 ApprovalDecided：那条的 decision 三值是【有人做了决定】，
+   * 而烧票发生在决定之前、且可能永远等不到那个决定（票烧了、图没跑、或者随后 decide() 失败）。
+   * 复用会让「有一次远程批准」与「有一次远程批准落了库」在事件里分不开，
+   * 而后者正是排查时要问的那一句。
+   *
+   * ⚠ 它在 events 里的 action 仍是 'approval'（§22.1 那个十值枚举是 append-only 的，
+   *   不能为了实现方便加第 11 个值，同 recorder.test.ts 记的那条），
+   *   所以【role-memory 必须按 payload.kind 显式跳过它】—— 那条过滤的理由是
+   *   「记忆要的是决定，不是一句没结论的『有人问过』」，而烧票比 ApprovalRequired
+   *   更不是决定。少那一行过滤的后果不是崩，是【角色的 few-shot 里多一条伪决定】，
+   *   静默且长期。见 memory/role-memory.ts 里那段过滤。
+   */
+  | { kind: "ApprovalTokenRedeemed"; taskId: string; interruptId: string };
 
 export type EventKind = DomainEvent["kind"];
 

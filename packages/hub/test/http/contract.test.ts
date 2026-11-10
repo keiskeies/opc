@@ -43,6 +43,7 @@ import {
   type HubRequest,
 } from "../../src/http/app.js";
 import { newLocalToken, signedHeaders, verifyRequest, NonceGuard } from "../../src/http/auth.js";
+import { LOOPBACK_HOST } from "../../src/http/bind.js";
 import { reconnectDelayMs, ResumeStream, shouldGiveUp } from "../../src/http/sse.js";
 
 const HUB = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -185,6 +186,14 @@ async function harness(taskId = "task-1"): {
         body: "",
         ...o,
         target,
+        // peer 在这里【有默认值】，而生产那一侧（toHubRequest）没有 —— 这个不对称是有意的，
+        // 别把它读成「peer 其实可以省」。区别在身份：
+        //   · toHubRequest 代表【真 socket】，它拿不到地址时必须落到非回环哨兵（fail-closed）；
+        //   · 这个 fixture 代表【一个本机的桌面端调用方】，它的全部职责是让人不用每次
+        //     手写 48 遍同一个值。要测远程那条路，用例【显式】传 peer（见下面 token 那几发）。
+        // 也就是说默认值在这里省的是【打字】，不是【判据】—— 生产侧那发才是判据，
+        // 而它由 server.test.ts 里真 socket 那组覆盖。
+        peer: o.peer ?? LOOPBACK_HOST,
         headers: o.headers ?? sign(o.method, target, body),
       };
     },

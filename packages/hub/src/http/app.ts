@@ -25,8 +25,10 @@ import {
   approvalDecisionRequestSchema,
   approvalOutcome,
   createTaskRequestSchema,
+  HTTP_CONFLICT,
   HTTP_NOT_FOUND,
   HTTP_NOT_IMPLEMENTED,
+  HTTP_FORBIDDEN,
   HTTP_UNAUTHORIZED,
   HTTP_UNPROCESSABLE,
   isImplemented,
@@ -43,6 +45,12 @@ import { listApprovals as listApprovalsFrom } from "../approvals/query.js";
 import { ResumeStream, type SnapshotSource } from "./sse.js";
 import { buildReplayView } from "../replay/query.js";
 import { verifyRequest, type VerifyInput } from "./auth.js";
+import { isLoopbackAddress } from "./bind.js";
+// 【type-only import】。这一条边界值得说：tokenHttpStatus 的实现【不在】tokens.ts 而在下面，
+// 于是 app.ts 只从那边拿一个类型，运行期仍然不 import tokens.ts
+// （那边带 node:crypto 与 db/write-queue）。contract.test.ts 手搓 deps 时能构造出
+// 一个假 reason 而不是被迫把整个 token 存储拖进测试。
+import type { TokenIssueReject, TokenRejectReason } from "./tokens.js";
 
 export interface HubRequest {
   readonly method: string;
@@ -69,6 +77,23 @@ export interface HubRequest {
   readonly query: Readonly<Record<string, string | undefined>>;
   readonly headers: Readonly<Record<string, string | undefined>>;
   readonly body: string;
+  /**
+   * 对端地址（`req.socket.remoteAddress`）。**必填**，而且刻意不给默认值。
+   *
+   * 为什么要有这一维：桌面端那套 HMAC 凭据是【本机密钥】，它出不了这台机器。
+   * 一旦 Hub 绑了非回环地址，同一网段里任何人都能【拿到那个签名的形状】——
+   * 不，他们连密钥都拿不到，所以签不出来；但反过来的问题更要紧：
+   * **鉴权层必须能区分「这台机器上的进程」与「别的机器」**，
+   * 因为一次性审批 token（Task 4.1，http/tokens.ts）只对后者生效，
+   * 而它带来的限制（【规格】§11.4 不可逆一律拒批）不该落到桌面端头上。
+   *
+   * 为什么【必填】而不是 `peer?` + 「缺省当回环」：那正是我在 bind.ts 文件头批评过的形状
+   * —— 把安全性质交给默认值维持。`peer?` 的失效方式是：下一个写调用方的人忘了传，
+   * TS 不响，而症状是【远程请求被当成本机请求】，也就是那套限制静默消失。
+   * 必填让「这条请求来自哪」成为每个构造点都必须回答的问题。
+   * 传输层之外唯一合理的填法是回环常量（测试夹具就是这么填的）。
+   */
+  readonly peer: string;
 }
 
 export interface HubResponse {
@@ -132,6 +157,54 @@ export interface HubDeps {
    * 代价写在 real-deps.ts 的 makeResumeGraph 注释里，含当前唯一的补救路径。
    */
   readonly resumeGraph: (taskId: string) => Promise<void>;
+  /**
+   * 一次性审批 token 的兑换点（Task 4.1，实现见 http/tokens.ts + real-deps.ts 那个包装）。
+   *
+   * 【为什么又是一个注入点而不是在这里直接查库】—— 与 recordDecision 同一条理由，
+   * 而且这里还多一条更硬的理由：兑换要【写】（UPDATE im_tokens + 一条审计），
+   * 而 deps.db 是【只读连接】（real-deps.ts 的 buildHubDeps 给的是 queue.readConnection()）。
+   * 在这里直接 db.prepare(...).run() 会【绕开单写者队列】—— 那正是 0010 §2 实测过的
+   * P1/P2 那族故障（同连接重入 ⇒ cannot start a transaction within a transaction，
+   * 或者更糟：与超步事务互踩）。所以写必须走 Writer，而 Writer 在 app.ts 这一层不可见。
+   *
+   * 【可选】而不是必填，是因为它今天【还没有生产者】：签票的地方（图里升级那一刻）
+   * 与建卡一样没有接线（0026 §1 那格同一件事）。必填会逼装配方传一个假实现，
+   * 那比缺一个真实现更糟 —— 见 0026 §9 撤掉 isPendingStatus 时记的那个形状。
+   * 缺它时的行为写在 remoteDecision() 里：明确拒绝，而不是退回 HMAC。
+   *
+   * ⚠ reason 的类型是【TokenRejectReason 而不是 string】，这一格比看着像的更要紧。
+   * 原来是 string，那时下面 remoteTokenAuth 里的 401/403 判定只能写成一次字符串比较，
+   * 而【新加一条 reason 的人不会被告知要去登记状态码】—— 那正是 tokenHttpStatus
+   * 文件头写的那个错。收窄成联合之后，reason 从 tokens.ts 到 real-deps 的包装到这里
+   * 全程同源，编译器能说出「这里收到的只可能是这六种」。
+   * 代价：装配方（含测试里手搓的假 dep）必须用那个联合，不能再随手回一个自造字符串 ——
+   * 而那个「随手回一个自造字符串」恰恰是这一格想拦的动作。
+   */
+  readonly redeemApprovalToken?: (o: {
+    readonly token: string;
+    readonly approvalId: string;
+  }) => Promise<
+    { readonly ok: true; readonly taskId: string } | { readonly ok: false; readonly reason: TokenRejectReason }
+  >;
+  /**
+   * 签一张一次性审批 token（Task 4.1 的另一半：兑换的【对面】）。
+   *
+   * 与 redeem 同为可选、同走 Writer（签发也写库），理由不再重抄。
+   * 真正的区别只有一条，而它决定了这条注入点存在与否：
+   * 【签发只允许回环对端调用】。见 app.ts 的 mintToken handler 里那道 gate ——
+   * 那边写清了为什么「远程端自己签自己的票」会把一次性 token 这套东西整体作废。
+   *
+   * 缺它时 mintToken 回 501 而【不是】404 也不是 500：
+   * 501 说的是「服务端还没接」，那正是事实（见下面那段「501 此刻没有活的分母」——
+   * 这一格是那句话【不再成立】的第一例，原文按口径留着）。
+   */
+  readonly issueApprovalToken?: (o: {
+    readonly approvalId: string;
+    readonly nowMs: number;
+  }) => Promise<
+    | { readonly ok: true; readonly token: string; readonly expiresAt: number }
+    | { readonly ok: false; readonly reason: TokenIssueReject }
+  >;
 }
 
 const MAX_TITLE_CHARS = 200;
@@ -183,25 +256,69 @@ async function route(
   //    UNIMPLEMENTED_ENDPOINTS 念给他听（本机的端点清单本来就在 contracts 里公开，
   //    所以危害有限，但没必要主动多说一遍）。
   // 现在未授权者无论问什么，看到的都只有一种形状。
-  const auth = verifyRequest({
-    token: deps.token,
-    method,
-    // 【target 不是 path】：鉴权签原始请求目标，路由才用剥过 query 的 path。
-    // 见 HubRequest.target 的注释 —— 换成 req.path 编译器不会响，
-    // 响的是「所有带 query 的请求 401」。
-    target: req.target,
-    body: req.body,
-    headers: req.headers,
-    now: deps.now(),
-    ...(deps.nonces === undefined ? {} : { nonces: deps.nonces }),
-  });
-  if (auth.ok !== true) {
-    // 报错【不区分】是缺头、时间戳过期还是签名不对，只回一句 "unauthorized"。
-    // 区分它们等于给攻击者一台免费的「你差哪一步」预言机；
-    // 而真用户在本地拿不到签名材料 ⇒ 一次就错，不需要看细节。
-    return json(HTTP_UNAUTHORIZED, { error: "unauthorized" });
+  //
+  // ⚠ 但【Task 4.1 之后这一句要重读】：形状仍然只有一种（401 unauthorized，
+  // 连 reason 都不带），而**判据分成了两条**。分岔点在 peer 上：
+  //   · 回环对端 ⇒ 还是那一发 HMAC（桌面端拿得到密钥，它是【本机进程】）。
+  //   · 非回环对端 ⇒ HMAC【结构上不可能通过】（密钥不落盘、只在内存里，
+  //     auth.ts 文件头），所以走【一次性 token】。而它【只覆盖一条路由】：
+  //     POST /approvals/:id。别的端点在远程一律 401 —— 不是「没做」，是
+  //     【规格】§20.3 只授权了「审批」这一件事出本机，读回放/看板没有那条授权。
+  // 这条分岔的**方向**要说清楚：它是【收紧】不是放宽 —— 改动之前非回环对端
+  // 根本连不上（只绑回环），所以不存在「原来能用现在不能用」。
+  // 两条凭据按【对端在哪】分派，不按先后试。
+  // ⚠ 「先 token 后 HMAC」这个顺序是刻意的，反过来（HMAC 失败再试 token）读起来
+  //   更像「多重尝试」，而它的失效方向是错的 —— 一旦 HMAC 因为时钟偏移
+  //   （MAX_CLOCK_SKEW_MS）偶然通过，一个远程请求就拿到了【本机】那套
+  //   【不受 §11.4 不可逆限制】的权限。凭据不是候选列表，是两条互斥的路。
+  const gate = isLoopbackAddress(req.peer)
+    ? null
+    : await remoteTokenAuth(deps, method, req.path, req);
+  // 三种取值各走各的：
+  //  · HubResponse ⇒ token 拒了，原样回那个响应（401 或 403）。
+  //  · TOKEN_PASS  ⇒ token 有效，【跳过 HMAC】直接进路由。
+  //                  不能再跑 HMAC：远程签不出名（密钥不落盘），跑了必然 401，
+  //                  而此刻票已经烧掉了 —— 症状会是「票没了、决策也没做」。
+  //  · null        ⇒ 这条请求不由 token 管辖（回环对端，或远程但没带票），走 HMAC。
+  if (gate !== null && gate !== TOKEN_PASS) return gate;
+  if (gate === null) {
+    const auth = verifyRequest({
+      token: deps.token,
+      method,
+      // 【target 不是 path】：鉴权签原始请求目标，路由才用剥过 query 的 path。
+      // 见 HubRequest.target 的注释 —— 换成 req.path 编译器不会响，
+      // 响的是「所有带 query 的请求 401」。
+      target: req.target,
+      body: req.body,
+      headers: req.headers,
+      now: deps.now(),
+      ...(deps.nonces === undefined ? {} : { nonces: deps.nonces }),
+    });
+    if (auth.ok !== true) {
+      // 报错【不区分】是缺头、时间戳过期还是签名不对，只回一句 "unauthorized"。
+      // 区分它们等于给攻击者一台免费的「你差哪一步」预言机；
+      // 而真用户在本地拿不到签名材料 ⇒ 一次就错，不需要看细节。
+      return json(HTTP_UNAUTHORIZED, { error: "unauthorized" });
+    }
   }
+  return dispatch(deps, method, req);
+}
 
+/**
+ * 鉴权【之后】的分发。桌面端与远程端在各自通过自己的凭据之后都走进这里，
+ * 走的是同一个函数、同一组 handler —— 这条「一条写路径」的性质就是
+ * 计划 Task 4.1 那条「不得有第二条更弱的通道」的落地形态。
+ *
+ * 把它从 route() 里拆出来【不是】为了整洁：如果远程那一支自己复制一份 switch，
+ * 下次给某个 handler 加一条判据（比如 decide 里那个 approvalOutcome 判别式）时，
+ * 只有桌面端那一半会被改到，而两份 switch 的 diff 看起来【都还是合法的】。
+ * 拆成"只有一个 dispatch"之后，那种漂移在结构上写不出来。
+ */
+async function dispatch(
+  deps: HubDeps,
+  method: string,
+  req: HubRequest,
+): Promise<HubResponse> {
   const routeHit = matchRoute(method, req.path);
   if (routeHit === null) return json(HTTP_NOT_FOUND, { error: "no such route" });
   // 501 这一支【此刻没有活的分母】：UNIMPLEMENTED_ENDPOINTS 在 Task 3.4 之后是空的
@@ -230,6 +347,8 @@ async function route(
       return listApprovals(deps, req);
     case "decide":
       return decide(deps, routeHit.id, req.body);
+    case "mint_token":
+      return mintToken(deps, routeHit.id, req);
     case "events":
       return events(deps, req);
     case "replay":
@@ -276,6 +395,11 @@ export type Route =
   | { kind: "get_task"; endpoint: "GET /tasks/:id"; id: string }
   | { kind: "list_approvals"; endpoint: "GET /approvals"; id?: undefined }
   | { kind: "decide"; endpoint: "POST /approvals/:interruptId"; id: string }
+  | {
+      kind: "mint_token";
+      endpoint: "POST /approvals/:interruptId/token";
+      id: string;
+    }
   | { kind: "events"; endpoint: "GET /events"; id?: undefined }
   | { kind: "replay"; endpoint: "GET /replay/:taskId"; id: string };
 
@@ -322,6 +446,19 @@ export function matchRoute(method: string, path: string): Route | null {
     if (a === null) return null;
     return { kind: "decide", endpoint: "POST /approvals/:interruptId", id: a };
   }
+  // 【三段】那条：签票。放在两段那条【之后】，但顺序在这里【不承重】——
+  // 两条靠 segs.length 就已经互斥（2 与 3），谁先谁后都得同一个答案。
+  // 写在这句旁边只是为了让下一个读的人不必自己去数段数。
+  if (
+    method === "POST" &&
+    segs.length === 3 &&
+    segs[0] === "approvals" &&
+    segs[2] === "token"
+  ) {
+    const a = id(segs[1]);
+    if (a === null) return null;
+    return { kind: "mint_token", endpoint: "POST /approvals/:interruptId/token", id: a };
+  }
   if (method === "GET" && segs.length === 1 && segs[0] === "events") {
     return { kind: "events", endpoint: "GET /events" };
   }
@@ -332,6 +469,300 @@ export function matchRoute(method: string, path: string): Route | null {
   }
   return null;
 }
+
+/**
+ * 远程对端（非回环）能不能靠【一次性 token】通过鉴权。
+ *
+ * ── 返回值只有三种，而且【不返回「放行整条请求」】 ──────────────────────
+ * 这一发只回答「这次鉴权过没过」，它**不做决策、不写库**。
+ * 为什么：计划给 Task 4.1 的 Test 里那条硬约束是
+ *   「移动端的批准请求与桌面端走【同一套鉴权与审计路径】（不得有第二条更弱的通道）」
+ * 如果这一发顺手把决策也做了（自己 UPDATE 一下 approvals 再 return 200），
+ * approvals 的写路径就从两条变三条，而每条都是靠【条件 UPDATE + 同事务审计】维持幂等的 ——
+ * 多一条就多一处「改了那条忘了这条」，而那类漂移的症状是回放里同一张卡批过两次。
+ * 所以这里通过后，请求仍然走下面那个 switch 里的 decide()，与桌面端【同一个函数】。
+ *
+ * 三种返回：
+ *  · null            —— 「这条请求不该由 token 管」：回环对端，或远程但没带 token 头。
+ *                       调用方接着走 HMAC（远程没带 token 时它会 401，那是正确答案）。
+ *  · {proceed:true}  —— token 有效，跳过 HMAC，继续正常路由。
+ *  · {response:...}  —— 拒。已经把状态码定好了。
+ *
+ * ── 状态码为什么分成 401 与 403 两档 ──────────────────────────────────
+ * 本文件的鉴权口径是「不区分失败原因，一律一句 unauthorized」，理由是别给攻击者
+ * 一台「你差哪一步」的预言机。这条口径对【凭据错】完全成立，对【凭据对而事情不许做】
+ * 不成立：irreversible_denied 不是一条关于凭据的信息，它是【产品决定】，
+ * 而那个决定的正确报错是「这张卡请在桌面端点」（403 + 一句人话）。
+ * 把两者混进 401 的后果是：CEO 在手机上点了半天「链接失效」，而真相是
+ * 「这张卡按设计就不能在这儿批」—— 一个把人支去检查自己凭据的报错。
+ * 所以：凭据那一族（unknown / expired / used / mismatch / not_pending）一律 401 不带原因；
+ * 只有【策略拒绝】那一族带原因。
+ *
+ * ── 一张票只值 URL 上那一张卡 ─────────────────────────────────────────
+ * expectedApprovalId 传的是路由解出来的那个 id。不传的话，
+ * 「拿 A 的票去批 B」是可行的，而票的全部意义就是「一次、一张、一个决定」。
+ */
+const TOKEN_PASS = "token-pass" as const;
+
+async function remoteTokenAuth(
+  deps: HubDeps,
+  method: string,
+  path: string,
+  req: HubRequest,
+): Promise<HubResponse | typeof TOKEN_PASS | null> {
+  // 只有 POST /approvals/:id 允许靠 token 通过。别的端点【没有远程授权】：
+  // 【规格】§20.3 授权走出本机的只有「审批」这一件事，读看板/读回放不在其中，
+  // 那些数据要从远程看是另一回事（§20 网络边界那一节没有给它们凭据模型）。
+  //
+  // 判据【复用 matchRoute】而不是在这里再写一遍路径拆分 —— 这一条不是洁癖：
+  // 自己拆一遍就会出现「路由认为匹配而鉴权认为不匹配」的双份判据，
+  // 那种分歧的方向永远是【鉴权漏放】或【鉴权误杀】之一，两者都是静默的。
+  const hit = matchRoute(method, path);
+  if (hit === null || hit.kind !== "decide") {
+    const raw = headerValue(req.headers, HEADER_APPROVAL_TOKEN);
+    if (raw === null) return null; // 没带票 ⇒ 交给 HMAC（远程必然 401，正确）
+    // 带了票却打在别的端点上 ⇒ 拒。这一发【不能返回 null】——
+    // 返回 null 的意思是「交给 HMAC」，而带票的远程请求必然签不出名，
+    // 结论同样是 401，可那是一次【靠另一条路失败】的正确：
+    // 哪天 HMAC 的判据放宽一格（比如加个「开发环境跳过签名」），
+    // 这一支就会从「挡住」变成「放行」，而改 HMAC 的人不会想到这里有依赖。
+    // ⚠ 「同样都是 401，所以怎么写都行」这句话是【错的】，而错的方式值得写下来：
+    //   带【真签名】+ 票的远程请求，在「返回 null」的实现下会【200 放行】读到看板数据。
+    //   现实里远程签不出名，所以那条歧路今天不可达 —— 但它是「今天不可达」，
+    //   不是「结构上写不出来」，而本仓对这两者的区分是明确的（bind.ts 文件头同一条）。
+    //   这一发被 tokens-route.test.ts 里那发「带真签名的票头打在 GET /tasks」钉住，
+    //   那一发同时配了反向对照（去掉票头 ⇒ 200），所以它不是一条只会绿的装饰。
+    return json(HTTP_UNAUTHORIZED, { error: "unauthorized" });
+  }
+  const token = headerValue(req.headers, HEADER_APPROVAL_TOKEN);
+  if (token === null) return null; // 同上：没带票就走 HMAC
+  if (deps.redeemApprovalToken === undefined) {
+    // 装配方没接 token 存储 ⇒ 【拒绝】而不是退回 HMAC。
+    // 退回 HMAC 是本函数最容易被「顺手加一下」的写法，而它等于宣布
+    // 「远程请求可以用本机凭据」—— 那一发一旦存在，一次性 token 这一整套
+    // 就只是多的一条可选路径，而不是【远程唯一的】路径。
+    return json(HTTP_UNAUTHORIZED, { error: "unauthorized" });
+  }
+  const r = await deps.redeemApprovalToken({ token, approvalId: hit.id });
+  if (r.ok === true) return TOKEN_PASS;
+  return json(tokenHttpStatus(r.reason), tokenRejectBody(r.reason));
+}
+
+/**
+ * `POST /approvals/:id/token` —— 给一张待批卡片签一张远程票。
+ *
+ * ── 这一发为什么【只认回环】，以及那道门为什么在【这里】而不在上面的 route() ──
+ * 一个远程请求可以靠一张有效的兑换票通过 route() 的 token 门（TOKEN_PASS），
+ * 然后走进 dispatch() 的 switch —— 那时它打到的【可以】是这一条路由。
+ * 如果这里不再看一次 peer，结论就是【远程持票人能给自己再签一张票】。
+ * 而那正是「一次性」这三个字的全部内容：一张票能换来一张票，
+ * 就能换来无限张，TTL 也失去意义（每次快过期时自己续一张）。
+ *
+ * ⚠ 为什么这道门【不能】只写在 remoteTokenAuth 里（那里已经有一条
+ *   「只有 kind === 'decide' 允许靠 token 通过」）：那一条今天【确实】挡住了这条路
+ *   —— 一个远程请求带着票打到 mint_token 会拿到 401。所以我可以在这里只写注释。
+ *   但那正是本仓反复在防的形状：一条安全判据的生效【依赖另一处代码今天长什么样】，
+ *   而改那一处的人不会知道这里有依赖。具体说，哪天有人把 remoteTokenAuth 那条
+ *   白名单从「只有 decide」放宽到「审批类路由」（读收件箱要做的时候这动作很自然），
+ *   这一条路由就【静默地】对远程开放了签票，而改动者的测试大概还是绿的。
+ *   两道门各自独立成立，才是「不依赖对方今天长什么样」。
+ *
+ * 501（没接签发实现）而【不是】404：404 说「这张卡不存在」，
+ * 而这张卡在，只是服务端没接。这条口径与文件里那句 501 的口径同源，
+ * 也确实是那句「此刻没有活的分母」被打破的第一例。
+ *
+ * ⚠ 【export 的唯一理由是测试，而这个理由值得写下来】：
+ * 上面那段论证的是「这道门必须【独立于】remoteTokenAuth 那道门成立」。
+ * 而只要走 handleRequest，一个远程持票请求就在【第一道】门被弹掉，
+ * 于是「第二道门挡住了」这个结论【在端到端层面不可证】——
+ * 端到端那一发会绿，而它测的是第一道门（tokens-route.test.ts 里那发没有假装测第二道）。
+ * 要证明第二道门自己有肌肉，只能直接调这一发。导出一个内部 handler
+ * 不是把边界打开（它不 import 任何写路径，也不改变任何鉴权判据），
+ * 换来的是那条安全判据从「注释 + grep」升级成「一条真请求」。
+ *
+ * ⚠ 反过来那一维也量过了，结论与直觉相反：把上面那条白名单【放宽】成
+ *   「decide 或 mint_token」，全仓【一条测试都不红】（实测记在 tokens-route.test.ts 文件头）。
+ *   那不是测试没写够 —— 门二单独就够，行为完全正确；而「改门一必须有红」
+ *   等于把两道门焊回一条判据，恰恰是本段论证反对的事。
+ *   所以如果你正是那个放宽白名单的人：这里不会拦你，而【这一发会替你挡着后果】。
+ */
+export async function mintToken(
+  deps: HubDeps,
+  approvalId: string,
+  req: HubRequest,
+): Promise<HubResponse> {
+  if (!isLoopbackAddress(req.peer)) {
+    return json(HTTP_UNAUTHORIZED, { error: "unauthorized" });
+  }
+  if (deps.issueApprovalToken === undefined) {
+    return json(HTTP_NOT_IMPLEMENTED, {
+      error:
+        "本装配未接一次性审批 token 的签发实现（http/tokens.ts 的 issueToken）。" +
+        "501 而不是 404：卡片在，缺的是服务端。",
+    });
+  }
+  const r = await deps.issueApprovalToken({ approvalId, nowMs: deps.now() });
+  if (r.ok !== true) return json(tokenIssueStatus(r.reason), tokenIssueBody(r.reason));
+  return json(201, { token: r.token, expires_at: r.expiresAt });
+}
+
+/**
+ * 签票的拒绝理由 → 状态码。与 tokenHttpStatus【两张表】而不是一张，
+ * 理由逐字写在 tokens.ts 的 TokenIssueReject 上面（分歧点是「报错给谁看」：
+ * 这一侧的调用方是本机一个已鉴权的人，他【有】approvalId，也有那张卡）。
+ * 同样是 switch + never 的正向穷尽守卫：加一格就必须来这里登记一次。
+ */
+export function tokenIssueStatus(reason: TokenIssueReject): number {
+  switch (reason) {
+    case "approval_missing":
+      // 404：这里【可以】用 404，而 redeem 那一侧刻意不用 ——
+      // 这里的调用方手上有真实的 id，「id 写错了」是他能执行的修法。
+      return HTTP_NOT_FOUND;
+    case "approval_not_pending":
+      // 409：见 contracts 那个常量的注释。「你点晚了」不是「你参数错了」。
+      return HTTP_CONFLICT;
+    case "irreversible_denied":
+      // 403：与 redeem 那一侧同一个理由，也【同样带一句人话】——
+      // 这一条不是关于凭据的信息，§11.4 是公开的产品规则。
+      return HTTP_FORBIDDEN;
+    default: {
+      const impossible: never = reason;
+      throw new Error(
+        "tokenIssueStatus 收到一个没有登记状态码的 reason：" +
+          JSON.stringify(impossible) +
+          "。加 TokenIssueReject 的成员时必须来这里登记一格。",
+      );
+    }
+  }
+}
+
+function tokenIssueBody(reason: TokenIssueReject): Record<string, unknown> {
+  if (reason === "irreversible_denied") {
+    return {
+      error:
+        "这张卡片是不可逆操作，按【规格】§11.4 不允许签发远程票；请在桌面端批准。",
+      reason,
+    };
+  }
+  if (reason === "approval_not_pending") {
+    return {
+      error: "这张卡片已经不是待批状态（已被批准或已超时），签票没有对象。",
+      reason,
+    };
+  }
+  return { error: "approval not found", reason };
+}
+
+/**
+ * 一次性 token 的拒绝理由 → HTTP 状态码。
+ *
+ * ── 为什么是一张 switch 而不是一句 `reason === "irreversible_denied" ? 403 : 401` ──
+ * 三元短得多，而它挡不住【新加一条 reason 的人】：那种人读到的是 tokens.ts 里
+ * 一个多出来的联合成员，编译器不响，于是新那一格默认落进 401。
+ * 401 对新加的【凭据类】理由是碰巧对的，对新加的【策略类】理由（rate_limited、
+ * 某个新加的门控）是【错得最有说服力的那种】—— 它让用户去检查自己的凭据。
+ * 下面那个 `const impossible: never` 让漏登记变成编译错误，
+ * 手法与本文件 Route 那个 switch 完全相同（那里的教训记在 default 分支上：
+ * 守卫必须写成【正向】的，写成 `x.kind` 读法会得到一个只在漏分支时不报错的反向守卫）。
+ *
+ * ── 为什么这个函数在 app.ts 而不在 tokens.ts ────────────────────────
+ * 判据（一次/一张/过期/不可逆）在 tokens.ts，而【状态码是 HTTP 层的事】：
+ * 挪过去会让 tokens.ts 依赖 contracts 的那几个状态码常量，
+ * 而它今天只依赖 APPROVAL_STATUS_PENDING 一条；更要紧的是 app.ts 会因此
+ * 在【运行期】import tokens.ts（带 node:crypto 与写队列），
+ * 而 contract 层那些手搓 deps 的测试就拖不动了。所以这里只 import 一个 type。
+ *
+ * ── 401 与 403 的分界，与本文件那口径的关系 ─────────────────────────
+ * 本文件的鉴权口径是「不区分失败原因，一律一句 unauthorized」，
+ * 理由是别给攻击者一台「你差哪一步」的预言机。那条口径对【凭据错】成立，
+ * 对【凭据对而这件事不许做】不成立：irreversible_denied 不是关于凭据的信息，
+ * 它是【产品决定】，而那个决定的正确报错是「这张卡请在桌面端点」。
+ * 所以凭据那一族（unknown / expired / used / mismatch / not_pending）
+ * 一律 401 且【不带 reason】；只有策略那一族带。
+ * 分错方向的代价不对称，说清楚：把策略报成 401 是【把人使错方向】，
+ * 而把凭据报成 403 + 原文是【多告诉攻击者一格信息】。
+ * 下面每一支都逐条写明方向，不给「默认」。
+ */
+export function tokenHttpStatus(reason: TokenRejectReason): number {
+  switch (reason) {
+    case "irreversible_denied":
+      // 403：凭据没问题，是【规格】§11.4 不许在这条通道上做这件事。
+      return HTTP_FORBIDDEN;
+    case "unknown_token":
+    case "expired":
+    case "already_used":
+    case "approval_mismatch":
+    case "approval_not_pending":
+      // 401：五者都是【凭据这一侧】的状态。
+      // approval_not_pending 值得单独说一句：它讲的是【卡片】而不是票，
+      // 看上去像 404 或者 409。留在这里的理由是【报错给谁看】：
+      // 远程端此刻只知道「我手上这张票没换成一次批准」，
+      // 而 404「卡片不存在」会把人支去检查卡片 id（他没有那个信息，也没有那张卡），
+      // 409 要求他理解「pending」这个服务端状态。401 + 一句「链接失效」是唯一
+      // 每条通道都能正确执行的修法：重签一张，或者回桌面端。
+      return HTTP_UNAUTHORIZED;
+    default: {
+      // 正向穷尽守卫（见上面那段：反向写法只在漏分支时不报错）。
+      const impossible: never = reason;
+      throw new Error(
+        "tokenHttpStatus 收到一个没有登记状态码的 reason：" +
+          JSON.stringify(impossible) +
+          "。加 TokenRejectReason 的成员时必须来这里登记一格，" +
+          "并写明它属于【凭据】(401) 还是【策略】(403) —— 默认落 401 会把策略类拒绝" +
+          "伪装成凭据问题，让 CEO 去重签一张本来有效的票。",
+      );
+    }
+  }
+}
+
+/**
+ * 拒绝时回什么。**逐条决定说不说人话**，而不是一律一句 unauthorized。
+ *
+ * 分界是【这句话会不会多告诉攻击者一格信息】：
+ *  - 凭据族：一句 "unauthorized"，连 reason 都不带。知道「过期」与「用过」的差别
+ *    对攻击者有用（他能据此判断自己猜中的票被哪一挡弹掉）。
+ *  - 策略族：带一句人话 + reason。这条信息【本来就不是秘密】—— §11.4 是产品规则，
+ *    写在卡片类型里，攻击者不需要这张报错也能知道哪些卡不许远程批。
+ *    而它对一个真用户的价值极大：省掉一次「在手机上反复点一张设计上不能点的卡」。
+ */
+function tokenRejectBody(reason: TokenRejectReason): Record<string, unknown> {
+  if (reason === "irreversible_denied") {
+    return {
+      error:
+        "这张卡片标记为不可逆操作，按【规格】§11.4 不能在远程批准，请在桌面端处理。",
+      reason,
+    };
+  }
+  return { error: "unauthorized" };
+}
+
+/**
+ * 取一个头。与 auth.ts 里那个同名的小函数【刻意各有一份】而不是抽公共：
+ * auth.ts 那份的签名吃的是 VerifyInput（它还带着 token/method/target 那些材料），
+ * 这里只要一个 Record。为了省五行 while 把鉴权材料的类型拖进这一层，
+ * 会得到一个「谁都能构造」的公共参数对象 —— 那才是这条路上真正的漂移点。
+ */
+function headerValue(
+  headers: Readonly<Record<string, string | undefined>>,
+  name: string,
+): string | null {
+  const lower = name.toLowerCase();
+  for (const [k, v] of Object.entries(headers)) {
+    if (k.toLowerCase() !== lower) continue;
+    if (v === undefined || v.trim() === "") return null;
+    return v;
+  }
+  return null;
+}
+
+/**
+ * 一次性审批 token 的请求头名。
+ *
+ * 走【头】而不是 query 是刻意的，理由与 auth.ts 的 target 那一格同族但更强：
+ * URL 会进访问日志、进代理日志、进浏览器历史，而这张票的价值是
+ * 「它能批准一次花钱的动作」。头不进任何标准日志。
+ */
+export const HEADER_APPROVAL_TOKEN = "x-opc-approval-token";
 
 async function createTask(
   deps: HubDeps,

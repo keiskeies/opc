@@ -39,6 +39,12 @@ export const KIND_TO_ACTION: Record<EventKind, AuditAction> = {
   BudgetPaused: "budget_consume",
   MeetingSummaryReady: "meeting",
   HeartbeatStalled: "escalation",
+  // 第 8 个 kind（Task 4.1）。action 仍是 'approval' 而【不开第 11 个 action 值】：
+  // §22.1 那个十值枚举与 events 表一样是 append-only 的口径，
+  // 加一个值会让所有按 action 统计的报表当场少一批（同 auto-approve.ts 给自动批
+  // 选 'approval' 时记的那条理由）。它在库里的身份靠 payload.kind，
+  // 而 role-memory 那边已经有一道显式过滤认领这件事（它不是决定，不该进记忆）。
+  ApprovalTokenRedeemed: "approval",
 };
 
 /** 单条 events 插入：8 列 8 个匿名问号，单语句无分号。 */
@@ -207,6 +213,10 @@ function targetOf(e: DomainEvent): string | null {
       // 与 ApprovalRequired 同一个 target（都是卡片 id）。这是【刻意的】：
       // 「这张卡片被要求批准」与「这张卡片被批掉了」必须能在 target 上 join 得起来。
       // 若这里改成 decision，两行事件就再也对不到同一张卡上了。
+      return e.interruptId;
+    case "ApprovalTokenRedeemed":
+      // 同样落在卡片 id 上：于是「要求批准 → 烧票 → 做了决定」三行能在 target 上
+      // 串成一条线，而这正是排查「远程点了没反应」时唯一能用的那条线。
       return e.interruptId;
     case "MeetingSummaryReady":
       return e.meetingId;

@@ -54,12 +54,15 @@ import type { HubServer } from "../../src/http/server.js";
 import type { WriteQueue } from "../../src/db/write-queue.js";
 import { backupName } from "../../src/db/backup.js";
 import { acquireLock, lockPathFor, type LockAcquire } from "../../src/serve/lock.js";
+import { bindFailureIsFatal, LOOPBACK_HOST, type BindDecision } from "../../src/http/bind.js";
 import {
+  bindForAssembly,
   boot,
   graphNotWiredMessage,
   GRAPH_NOT_WIRED,
   lastBackupAtMs,
   runServeCli,
+  serveBannerOf,
   unavailableGraphFor,
   type BootResult,
   type ServeIo,
@@ -1160,6 +1163,187 @@ describe("图运行时没接这件事必须响亮（本入口唯一被【声明�
     // 「决策已落库」这一句防止人以为批准丢了而重重点批准 ——
     // 第二次批准是无效转移（审批终态唯一性会拒），症状变成「按钮坏了」。
     expect(m).toContain("决策已经落库");
+  });
+});
+
+/**
+ * 一个【记下第二、三参】的假 server。
+ *
+ * 为什么单独一个而不给 fakeServer 加两个 getter：既有的二十来处假 server
+ * 故意【看不到】bind（TS 允许两形参函数赋给三形参类型），
+ * 而「看不到 bind 的假 server」不该被用来断言绑定 —— 那样会得到
+ * 「断言读到了一个实现根本没传的值」这种恒绿的形状。
+ * 要断言绑定，就得用一个【明说自己收三个参】的替身。
+ */
+function bindRecordingServer(port = 8787): {
+  serve: (d: HubDeps, p: number, b: BindDecision) => Promise<HubServer>;
+  seen(): { port: number; host: string; exposure: string } | null;
+} {
+  let seen: { port: number; host: string; exposure: string } | null = null;
+  return {
+    serve: (_d: HubDeps, p: number, b: BindDecision): Promise<HubServer> => {
+      seen = { port: p, host: b.host, exposure: b.exposure };
+      return Promise.resolve({ port, close: () => Promise.resolve() });
+    },
+    seen: () => seen,
+  };
+}
+
+describe("监听地址（Task 4.1）：绑定策略跟随【实际装配结果】", () => {
+  it("⭐ 没接远程审批通道 + 要求 0.0.0.0 ⇒ 判成【致命拒】，且报错写着怎么才许开", () => {
+    // 这一发是 bindForAssembly 的【存在理由】。同一条判据内联在 boot 里时，
+    // 它的输入被 buildHubDeps 焊成了恒真 ⇒ 这一格在 boot 层面【没有活的分母】，
+    // 「通道没接不许绑非回环」这条安全主张一次也没被测过。
+    // 现在它有了分母：一份没接通道的 deps。
+    const r = bindForAssembly({ requested: "0.0.0.0", deps: {} });
+    expect(r.remoteApprovalsWired).toBe(false);
+    expect(r.outcome.ok).toBe(false);
+    if (r.outcome.ok === true) throw new Error("前置失败");
+    expect(bindFailureIsFatal(r.outcome)).toBe(true);
+    // 报错里必须写着【怎么才许开】。「拒绝而不给出口」是这一族报错最常见的形态，
+    // 而它的后果是那人去翻防火墙或者干脆把判据注释掉。
+    expect(r.outcome.message).toContain("一次性 token");
+    expect(r.outcome.message).toContain("--bind " + LOOPBACK_HOST);
+    // ⚠ 标题原来写的是「退 2 而不是退 1」，而这一发【没有】断退出码 ——
+    // 写那个标题时我以为 boot 那支可达，其实不可达（原因见上）。
+    // 「致命 ⇒ EXIT_USAGE」那一格在本机【仍然没有分母】：boot 只能拿到
+    // buildHubDeps 装配好的 deps，而那两份注入点总是齐的。
+    // 我没有为了能测它而加一个「注入一份残缺 deps」的 override ——
+    // 那等于在装配上开一条【专门给测试用的旁路】，而装配层唯一该有的出口是 serve
+    // （理由就在上面 serve 那个 override 的注释里）。要接那一格，正确的时机是
+    // buildHubDeps 真的把两个注入点改成条件装配的那一天。
+  });
+
+  it("⭐ 只接了一半（有 redeem 没 mint）⇒ 仍算【没接通】，这是偏严那一侧", () => {
+    // 远程鉴权真正依赖的只有 redeem，所以「只判 redeem」是【更松】的另一种写法，
+    // 而且它读起来更精确 —— 精确到足以让下一个人顺手改对。
+    // 这里选偏严（两个都在才算接通），理由与取向写在 bindForAssembly 文件头。
+    // 这一发的作用是：那次「顺手改精确」必须红，而不是安静地放宽一条安全边界。
+    const onlyRedeem = { redeemApprovalToken: async () => ({ ok: false, reason: "expired" as const }) };
+    expect(bindForAssembly({ requested: "0.0.0.0", deps: onlyRedeem }).remoteApprovalsWired).toBe(
+      false,
+    );
+    const onlyMint = { issueApprovalToken: async () => ({ ok: false, reason: "approval_missing" as const }) };
+    expect(bindForAssembly({ requested: "0.0.0.0", deps: onlyMint }).remoteApprovalsWired).toBe(
+      false,
+    );
+    // 反向对照：两个都在才算通 —— 证明上面那两个 false 不是「恒 false」。
+    expect(
+      bindForAssembly({ requested: "0.0.0.0", deps: { ...onlyRedeem, ...onlyMint } })
+        .remoteApprovalsWired,
+    ).toBe(true);
+  });
+
+  it("回环【永远】放行，与通道在不在无关（Phase 4 的能力不该是 Phase 2 的启动依赖）", () => {
+    for (const deps of [{}, { redeemApprovalToken: async () => ({ ok: true, taskId: "t" }) }]) {
+      const r = bindForAssembly({ requested: LOOPBACK_HOST, deps: deps as never });
+      expect(r.outcome.ok).toBe(true);
+      if (r.outcome.ok !== true) throw new Error("前置失败");
+      expect(r.outcome.decision.exposure).toBe("loopback");
+    }
+    // 没填 requested 也一样。这一发挡的是「有人把默认那一支也去查 remoteApprovalsWired」——
+    // 那一改动让桌面端在通道没接时【起不来】，而它看起来只是多加了一条一致的检查。
+    expect(bindForAssembly({ requested: undefined, deps: {} }).outcome.ok).toBe(true);
+  });
+
+  it("boot 把 decision 真的交到了 serve 手上，而 BootResult 报的是【那个】地址", async () => {
+    const path = db();
+    const { io } = ioOf();
+    const srv = bindRecordingServer();
+    const r = needOk(
+      await boot(
+        args({ dbPath: path, port: 8787, heartbeatMs: 60_000, noBackup: true }),
+        io,
+        { serve: srv.serve, scheduler: createFakeScheduler(0) },
+      ),
+    );
+    // 这三行必须【互相对得上】：假 server 收到的、BootResult 报的、实际默认值。
+    // 只断言 BootResult 的话，「装配算出一个地址、传给 serve 另一个、往上报第三个」
+    // 这种三处不一致能全绿 —— 而 CLI 那行「Hub 已在 X:port」读的正是 BootResult。
+    expect(srv.seen()).toEqual({ port: 8787, host: LOOPBACK_HOST, exposure: "loopback" });
+    expect(r.bindHost).toBe(LOOPBACK_HOST);
+    expect(r.exposure).toBe("loopback");
+    await r.shutdown();
+  });
+
+  it("打错成主机名 ⇒ 【照常起来】但响一声，而绑的还是回环", async () => {
+    const path = db();
+    const { io, warn } = ioOf();
+    const srv = bindRecordingServer();
+    const r = needOk(
+      await boot(
+        args({ dbPath: path, port: 8787, bind: "localhost", heartbeatMs: 60_000, noBackup: true }),
+        io,
+        { serve: srv.serve, scheduler: createFakeScheduler(0) },
+      ),
+    );
+    expect(srv.seen()?.host).toBe(LOOPBACK_HOST);
+    expect(r.bindHost).toBe(LOOPBACK_HOST);
+    // 「响一声」的判据是【内容】不是条数：装配自己会打「未接图运行时」那一句，
+    // 断 warn.length 会绿在错的那一句上。
+    expect(warn.some((w) => w.includes("忽略 --bind") && w.includes("not_an_ip_literal"))).toBe(
+      true,
+    );
+    await r.shutdown();
+  });
+
+  it("绑 ::1 ⇒ 起得来，并提示「这只覆盖 IPv6 回环」", async () => {
+    const path = db();
+    const { io, warn } = ioOf();
+    const srv = bindRecordingServer();
+    const r = needOk(
+      await boot(
+        args({ dbPath: path, port: 8787, bind: "::1", heartbeatMs: 60_000, noBackup: true }),
+        io,
+        { serve: srv.serve, scheduler: createFakeScheduler(0) },
+      ),
+    );
+    expect(srv.seen()?.host).toBe("::1");
+    expect(warn.some((w) => w.includes("127.0.0.1"))).toBe(true);
+    await r.shutdown();
+  });
+
+  it("⭐ 正常回环启动【不多打一行】：告警不能靠刷屏维持效力", async () => {
+    // 这一发测的是【没有】输出，而「没有」只能靠精确的分母来测：
+    // 上面那两条各自断言了 warn 里【有】某一句，这一条断言默认路径里
+    // 【没有】任何一句提到 bind/监听/暴露。绑定的告警每次都打，
+    // 会被读的人训练成噪音 —— 而这条告警防的正是「没人再看它的那一天」。
+    const path = db();
+    const { io, warn } = ioOf();
+    const r = needOk(
+      await boot(args({ dbPath: path, port: 8787, heartbeatMs: 60_000, noBackup: true }), io, {
+        serve: bindRecordingServer().serve,
+        scheduler: createFakeScheduler(0),
+      }),
+    );
+    expect(warn.some((w) => /--bind|监听|暴露|exposure/iu.test(w))).toBe(false);
+    await r.shutdown();
+  });
+
+  it("⭐ 横幅那一行说的是【真监听的那个地址】，「只绑回环」只在真回环时出现", () => {
+    // Task 4.1 之前这一行是写死的 "Hub 已在 127.0.0.1:" + port。加 --bind 之后它
+    // 【照常打印】而服务其实对所有网卡开放 —— 一句仍然会打印的假话，
+    // 且落在运维唯一一定会读的那一行上。
+    // 抽成 serveBannerOf 的理由写在它自己的注释里：内联那一版要先打印、再挂进
+    // waitForShutdown 等一个真信号才返回，而给自己发 SIGINT 会被同进程其他用例
+    // 留下的信号监听一起收到（它注册了不注销），所以那一行【在本机一次也没被执行过】。
+    // 「只绑回环」这四个字今天没有任何测试见过。
+    const loopback = serveBannerOf({ bindHost: LOOPBACK_HOST, port: 8787, exposure: "loopback" });
+    expect(loopback).toContain("127.0.0.1:8787");
+    expect(loopback).toContain("只绑回环");
+
+    const lan = serveBannerOf({ bindHost: "10.1.2.3", port: 9000, exposure: "lan" });
+    expect(lan).toContain("10.1.2.3:9000");
+    // ⚠ 承重的是【这一句不含「只绑回环】，而不是「含 exposure=lan」。
+    // 只断后者的话，实现写成「只绑回环（⚠ exposure=lan）」照样全绿 ——
+    // 而那正是那次缺陷的原样：一句仍然会打印的假话旁边挂一句真话。
+    expect(lan).not.toContain("只绑回环");
+    // 反向对照（地址维）：写死 127.0.0.1 的实现会让上面那句 lan 断言红。
+    // 这里再钉一次【端口也是取的入参】：只写对 host 而把 port 写死，
+    // 是这类「修了一半」最常见的形状。
+    expect(serveBannerOf({ bindHost: "127.0.0.1", port: 1234, exposure: "loopback" })).toContain(
+      ":1234",
+    );
   });
 });
 

@@ -92,6 +92,14 @@ import {
 // contracts + db + checkpoint + events，所以文件头那条「可验证性由 import 图决定」
 // 仍然成立，本文件照旧可以离线测。
 import { currentGraphVersion } from "../org/commit.js";
+import {
+  issueToken,
+  newApprovalToken,
+  precheckIssue,
+  redeemToken,
+  type TokenIssueReject,
+  type TokenRejectReason,
+} from "./tokens.js";
 import type { HubDeps } from "./app.js";
 
 /** CEO 这一侧的动作在审计里的身份。 */
@@ -444,6 +452,118 @@ export async function insertTask(
   });
 }
 
+/**
+ * 签一张一次性审批 token 的【装配包装】（Task 4.1）。
+ *
+ * 与 redeem 那一层对称，但【只有一件事】是这里新增的：签发也要写库（INSERT im_tokens），
+ * 所以它同样必须走单写者队列，理由与 redeemApprovalTokenVia 第一条完全相同。
+ *
+ * ── 这张票签给谁：调用方 ──────────────────────────────────────────
+ * 只有 HTTP 层会调它（POST /approvals/:id/token），而那条路由【只认回环对端 + HMAC】
+ * —— 也就是「坐在这台机器前的 CEO 要一张能发给手机的票」。
+ * 将来图里升级那一刻直接建卡+签票时，应当直接调 tokens.ts 的 issueToken
+ * 放进那一个事务里（与 insertCard 同事务，理由写在 cards.ts createCard 第 ① 条），
+ * 而【不要】调这一层 —— 这层自己开节点，嵌套进一个已开着的事务里会撞上
+ * write-queue 那条「不得嵌套」的守卫（0010 §2）。
+ *
+ * ── 为什么票与卡【不在同一个事务】里签 ────────────────────────────
+ * 走 HTTP 这条路时卡片早就存在了（不然预检就拒了），所以这里没有「半个卡片」的窗口。
+ * 反过来，签票失败（比如卡片不存在）不会伤到卡片本身。
+ * 这条分离在图那条链接上之后要重新审一次：那时同事务才是对的。
+ * ⚠ 但【预检 + INSERT】这两步【确实】在同一个 node() 里（见函数体旁边那段）。
+ *   「卡片与票不必同事务」讲的是【创建时机】，不是「整个函数不用原子性」——
+ *   这两句混着读会得出一个错的结论，所以写在一处。
+ *
+ * ── 返回原文【一次】，且只经这一条路 ─────────────────────────────
+ * 库里只有哈希（tokens.ts 文件头），所以这一刻是【唯一】能拿到原文的时候。
+ * 它不进事件、不进日志、不进任何持久列 —— 只进这一次 HTTP 响应体。
+ * 「忘了这张票」的修法是【再签一张】，不是找回旧的（issueToken 可重复调用）。
+ */
+export async function mintApprovalTokenVia(
+  w: Writer,
+  o: { readonly approvalId: string; readonly nowMs: number },
+): Promise<
+  | { readonly ok: true; readonly token: string; readonly expiresAt: number; readonly taskId: string }
+  | { readonly ok: false; readonly reason: TokenIssueReject }
+> {
+  // 预检与 INSERT 在【同一个 node()】里 —— 不是两次 await。
+  // 分成两次会得到一个真窗口：预检时卡片还是 pending，两次之间被桌面端批掉，
+  // 于是签出一张【指向已决策卡片】的票。它的症状不在签发时刻，
+  // 而在手机上一次「点了没反应」（redeem 走 approval_not_pending），
+  // 排查的人会去查手机与网络，而根因在几十秒前那次签发。
+  return await w.node(() => {
+    const db = requireScopeDb("mintApprovalToken");
+    const pre = precheckIssue(db, o.approvalId);
+    if (pre.ok !== true) return pre;
+    const raw = newApprovalToken();
+    // expiresAt 直接取 issueToken 的返回值，不在这里重算一遍 nowMs + TTL。
+    // 重算是能写的（式子就一项），而它会把「TTL 默认值」变成两处各自持有的事实：
+    // 哪天改 DEFAULT_TOKEN_TTL_MS 只改一处，响应里那个数就与库里那一行不符，
+    // 症状是「手机上显示还剩 9 分钟而服务端已经拒了」。
+    // 让 issueToken 说话，这条不符就【写不出来】—— 比写一条测试挡着它更便宜。
+    // ⚠ 「比测试便宜」这句是【准确的】，而我一开始在下面写的是一条【证不到这件事】的
+    //   断言（对账 r.expiresAt 与库里那一行）—— 两个式子都算 NOW + 同一个常量时它恒成立。
+    //   真正的守卫是一条结构判据：本文件【不许出现】 DEFAULT_TOKEN_TTL_MS
+    //   （real-deps.test.ts 里那条，含两条反向对照）。别把那条读成「行为已被验证」。
+    const { expiresAt } = issueToken(db, {
+      rawToken: raw,
+      approvalId: o.approvalId,
+      nowMs: o.nowMs,
+    });
+    return { ok: true, token: raw, expiresAt, taskId: pre.taskId };
+  });
+}
+
+/**
+ * 一次性审批 token 的【装配包装】（Task 4.1）。
+ *
+ * ── 为什么这里只是一层包装 ──────────────────────────────────────────
+ * 判据全部在 http/tokens.ts（一次/一张/过期/不可逆）。这一层只干两件装配的事：
+ *  ① 【走单写者队列】。redeem 是【写】（UPDATE im_tokens + 一行 events），
+ *     而 app.ts 手上那个 deps.db 是【只读连接】（下面 buildHubDeps 给的是
+ *     queue.readConnection()）。在 app.ts 里直接 db.prepare(...).run() 会绕开队列 ——
+ *     那正是 0010 §2 实测过的 P1/P2 那一族（同连接重入 / 与超步事务互踩）。
+ *  ② 【广播烧票那一行】。这一件比第一件更容易被省掉，而省掉的代价是本仓量过的：
+ *     redeemToken 写了一行 events，而 events.id 就是 seq。写了不 publish
+ *     ⇒ 活着的 SSE 订阅撞见一个 seq 空洞 ⇒ 投影层把 link 标成 stale 去重拉快照
+ *     ⇒ 【每一次远程批准都把连接标脏一次】（0010 §4，与上面 applyDecision
+ *     那个 publish 必填参数同一条理由）。所以 publish 在这里同样是【必填】，
+ *     不给默认值：「选择不广播」与「忘了广播」在代码上必须长得不一样。
+ *
+ * ── 为什么 redeem 与 decide 是两个事务，而不是合成一个 ────────────────
+ * tokens.ts 文件头那格写的是【顺序】的选择（先烧票、后决策），这里补上它在这一层的形状：
+ * 合成一个事务要给它开一个通用 hook，而一个通用 hook 能做的事比它换来的原子性多得多。
+ * 今天崩在中间的后果是「票烧了而卡片还是 pending」，
+ * CEO 看到的是手机上那句「链接失效，请在桌面端重新点一次」—— 吵，而不是吞。
+ *
+ * ⚠ 【approvalId 由谁定】这件事在这一层是【不做二次判断】的：
+ * redeemToken 已经把票上那张卡与 URL 上那张卡比过了（不传 expectedApprovalId 时
+ * 用票上那张）。这里返回的 taskId 直接来自那一行 JOIN，不再自己查一次 approvals ——
+ * 再查一次就是【第二份「这张卡存不存在」的判据】，而两份判据之间的时间差
+ * 会让「票有效而卡刚被批掉」在两条路上得到不同答案（一个 401、一个 404，
+ * 都是对的，而同时存在就是分歧）。
+ */
+export async function redeemApprovalTokenVia(
+  w: Writer,
+  o: { readonly token: string; readonly approvalId: string; readonly nowMs: number },
+  publish: (e: DomainEvent, seq: number) => void,
+): Promise<
+  { readonly ok: true; readonly taskId: string } | { readonly ok: false; readonly reason: TokenRejectReason }
+> {
+  const r = await w.node(() =>
+    redeemToken(requireScopeDb("redeemApprovalToken"), {
+      rawToken: o.token,
+      nowMs: o.nowMs,
+      expectedApprovalId: o.approvalId,
+    }),
+  );
+  if (r.ok !== true) return { ok: false, reason: r.reason };
+  // 提交之后才 publish（与 applyDecision、recorder.#flush 同一个时机）：
+  // 事务回滚而事件已广播 = 前端收到一条库里【不存在】的事件，且永不自我纠正。
+  publish(r.event, r.seq);
+  return { ok: true, taskId: r.taskId };
+}
+
 /** 同 Writer：定义在 db/write-queue.ts，这里只 re-export。 */
 export type { HubWriter };
 
@@ -521,6 +641,9 @@ export function buildHubDeps(o: RealHubDepsOptions): HubDeps {
         assignedRole: intakeRole,
         nowMs,
       }),
+    redeemApprovalToken: async ({ token, approvalId }) =>
+      redeemApprovalTokenVia(o.queue, { token, approvalId, nowMs: now() }, publish),
+    issueApprovalToken: async ({ approvalId, nowMs }) => mintApprovalTokenVia(o.queue, { approvalId, nowMs }),
     resumeGraph,
   };
 }

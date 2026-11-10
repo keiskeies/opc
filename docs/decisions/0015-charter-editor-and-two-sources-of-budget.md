@@ -46,8 +46,16 @@ $ grep -rn "INSERT INTO budgets" --include='*.ts' packages/hub/src
 $ grep -rn "declareLimit(" --include='*.ts' packages/hub/src packages/hub/test test | grep -v "src/budget/tracker.ts"
    ⇒ 命中全在 test/。⇒ declareLimit 在【生产】里一次都没被调过。
 $ grep -rn "consumed_cents" --include='*.ts' packages/hub/src
-   ⇒ 除 tracker 的 `consumed_cents + ?` 之外，只有一处【读】（http/app.ts:438 读来显示）。
+   ⇒ 除 tracker 的 `consumed_cents + ?` 之外，只有一处【读】（http/app.ts:869 读来显示）。
 ```
+
+> **行号与后效（Task 4.1 重测时补）**：上面那条 grep 报的 438 是当时的行号，现在那条读
+> 在 `http/app.ts:869`（同一行内容，被这之后几次往 app.ts 加端点顶下去 431 行）。
+> 另外上面那四条测的是**本轮动手之前**的仓库，本轮自己就否掉了其中两条：
+> `INSERT INTO budgets` 现在除了 tracker 那一处还有 `charter/budget-sync.ts` 的一处，
+> `consumed_cents` 的【读】也不止一处（都在 budget-sync 里）。
+> 原样留着不删 —— 「当时确实只有一处」是本篇结论成立的前提，改掉它就把
+> 「测出来再动手」的痕迹抹成了「事后总结」。
 
 四条合起来：**`budgets` 表在生产里从来没有被写过**，而岗位书里那两格预算（`daily_usd` / `per_task_usd`）从 YAML 加载进来后**从来没有流向过限流**。
 
