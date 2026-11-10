@@ -60,6 +60,37 @@ export type ReplayEntry = {
   /** 降级时保留的库内原文，让界面还能把「那一行到底是什么」摊开给人看。 */
   readonly raw_payload?: string;
   readonly raw_state_snapshot?: string;
+  /**
+   * §22.3 第二条：策略引擎自动通过的决策 ⇒ 标『基于模式的自动批准』。
+   *
+   * 判据取 payload.auto_approved_by（写入方 policy/auto-approve.ts 就是它），
+   * 【不取 actor_id】：actor_id 是「谁」，而「谁」可以是将来任何一种自动批准的署名，
+   * 那个字段今天还承担别的系统事件（recorder 默认 actorId 就是 hub）。
+   * 拿一个共享维度当判据，将来加一种系统署名就会连带标错一批回放条目。
+   *
+   * 规格 §22.3 那一行写的是『策略引擎自动通过的决策 → 标注「基于模式的自动批准」』，
+   * 把三档里的两档（自动放行 / 模式自动通过）【合并成了同一句措辞】。
+   * 我照规格给 annotation（对外可见的那句归规格管），同时把 rule 原样带出去，
+   * 让界面想分开显示「只读自动放行」与「基于模式的自动批准」时【有数据可分】。
+   * 规格的这处合并已在 0014 登记。
+   */
+  readonly auto_approved?: AutoApprovedAnnotation;
+};
+
+/**
+ * payload.auto_approved_by 那一格的形状。
+ *
+ * 单独命名而不是就地写字面量，是为了下面那个 helper 的返回类型能指到它：
+ * 早先返回类型写成 `{ auto_approved: ReplayEntry["auto_approved"] } | undefined`，
+ * 而索引访问一个**可选**属性会把 `| undefined` 一起带出来，配上本仓开的
+ * `exactOptionalPropertyTypes: true`，展开进对象字面量当场 TS2375
+ * （「undefined 不能赋给那个非 undefined 的类型」）。这里不是靠 `!` 或 `as` 糊过去，
+ * 是把「可选」这件事只留在字段上、类型本身不带 undefined。
+ */
+export type AutoApprovedAnnotation = {
+  readonly by: string;
+  readonly rule: string;
+  readonly annotation: string;
 };
 
 /** Checkpoint 行。decoded=false 时通道值拿不到，见文件头那段。 */
@@ -293,6 +324,9 @@ export function buildReplayView(
       created_at: num(r["created_at"], "created_at"),
       payload: payload.value,
       state_snapshot: snapshot.value,
+      // §22.3 第二条。解不开的 payload 不标（那一行已经有 degraded + 原文在提示，
+      // 再标一个「基于模式的自动批准」就是给一条读不出来的行【下一个肯定的结论】）。
+      ...(autoApprovedSection(payload) ?? {}),
     };
     const reason =
       payload.degraded === true
@@ -346,6 +380,31 @@ export function buildReplayView(
       ? {}
       : { checkpoints_unavailable: ckpt.unavailableReason }),
     complete,
+  };
+}
+
+/**
+ * §22.3 第二条那一格的取数。写成函数而不是内联在循环里：
+ * 它要在【降级那一支】和【正常那一支】之间共用同一个判断，内联就得抄两遍，
+ * 而抄的那份只会在一支里被改（0006 §7 那族「两份抄本」）。
+ */
+function autoApprovedSection(
+  payload: ParsedColumn,
+): { auto_approved: AutoApprovedAnnotation } | undefined {
+  if (payload.degraded === true) return undefined;
+  const p: unknown = payload.value;
+  if (p === null || typeof p !== "object" || Array.isArray(p)) return undefined;
+  const by = (p as Record<string, unknown>)["auto_approved_by"];
+  if (typeof by !== "string" || by.trim() === "") return undefined;
+  const rule = (p as Record<string, unknown>)["rule"];
+  return {
+    auto_approved: {
+      by,
+      rule: typeof rule === "string" ? rule : "",
+      // 措辞逐字取自规格 §22.3 那一行（『标注「基于模式的自动批准」』）。
+      // 不在这里改写措辞：界面显示的那句归规格管，改它要过一次文档。
+      annotation: "基于模式的自动批准",
+    },
   };
 }
 
