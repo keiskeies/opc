@@ -336,6 +336,35 @@ const SNAP: Record<string, string> = {
   // 「反复去 grep 同一张表」才被抓出来的，让读者在两处都能点回原文是目的的一部分。
   "0028-channel-abstraction-and-a-table-i-said-did-not-exist.md>0001_init.sql:249":
     "CREATE TABLE im_bindings (",
+  // 0030（IM 身份绑定）这一组八条。同样是先在目标文件里 `sed -n '<n>p'` 读原文再抄，
+  // 不凭记忆 —— 而这一轮**真的靠记忆错过一次**：正文先写的是 `app.ts:380`，
+  // 而 `const impossible: never = routeHit` 在 379，380 是下面那句 `throw new Error(`。
+  // 两行都在同一段错误处理里，读起来「差不多对」，而守卫只认逐字 ——
+  // 这就是【抄之前先读】这条动作存在的全部理由（0006 §7-40 同一族）。
+  // 另：`contracts/src/api.ts` 那两条**必须带目录** —— 仓库里有【两个】 api.ts
+  // （contracts 那份与 desktop/preload 那份），只写基名会被 resolveTarget 判成歧义。
+  // 这一发也是当场撞出来的：第一版写裸基名，守卫报的是「找不到该文件，或同名歧义」。
+  "0030-im-binding-identity-and-three-holes-i-did-not-design.md>0001_init.sql:249":
+    "CREATE TABLE im_bindings (",
+  "0030-im-binding-identity-and-three-holes-i-did-not-design.md>channels/abstraction.ts:584":
+    "readonly actorFor?: (actor: ChannelActor) => ChannelActor | null;",
+  // §9 那六条是**活坐标**：那一段的整段论据是「哪些接线代价真无人守、哪些有人守」。
+  // 下面每一条都在守【那一句判据还在】—— 有人把 `EXPOSED_ENDPOINTS` 从别名改成手抄、
+  // 把那个 `never` 赋值删掉、或改掉 `ipc-surface.test.ts:129` 那条包含断言，
+  // 0030 §9 那句「真正无人断言的只剩『已实现而未接桌面』这一个方向」就不再成立，
+  // 而它是 CEO 拍不拍那一项的**唯一**依据。快照在这里红了就是逼重读 §9。
+  "0030-im-binding-identity-and-three-holes-i-did-not-design.md>contracts/src/api.ts:29":
+    "export const API_ENDPOINTS = [",
+  "0030-im-binding-identity-and-three-holes-i-did-not-design.md>contracts/src/api.ts:55":
+    "export const IMPLEMENTED_ENDPOINTS: readonly ApiEndpoint[] = [",
+  "0030-im-binding-identity-and-three-holes-i-did-not-design.md>ipc-surface.ts:119":
+    "export const EXPOSED_ENDPOINTS: readonly ApiEndpoint[] = IMPLEMENTED_ENDPOINTS;",
+  "0030-im-binding-identity-and-three-holes-i-did-not-design.md>app.ts:379":
+    "const impossible: never = routeHit;",
+  "0030-im-binding-identity-and-three-holes-i-did-not-design.md>ipc-surface.test.ts:129":
+    "expect(API_ENDPOINTS).toContain(s.endpoint);",
+  "0030-im-binding-identity-and-three-holes-i-did-not-design.md>ipc-surface.ts:127":
+    "* 端点 → 一个 IPC 通道名。【未实现的端点返回 null】，理由见 EXPOSED_ENDPOINTS。",
 };
 
 describe("决策文档里的「文件:行号」引用不漂移", () => {
