@@ -120,3 +120,41 @@ export {
   violatesNoSelfReview,
   wouldExceedMaxDepth,
 } from "./org/validate.js";
+
+/**
+ * Harness Gateway 契约（Task 5.1，规格 §12）。单独一节而不是并进上面：
+ * 这一层的读者只有 hub（适配器与门控），前端今天不读它 —— 但类型仍必须放 contracts，
+ * 因为 `harness_call` 审计事件的载荷要能被回放页读到（§12.7 第四层）。
+ */
+export {
+  type ApprovalHandler,
+  type ApprovalPolicy,
+  APPROVAL_POLICIES,
+  type CostReport,
+  costReportSchema,
+  type ExecutionResult,
+  executionResultSchema,
+  type ExperimentalHarnessId,
+  EXPERIMENTAL_HARNESS_IDS,
+  type HarnessAdapter,
+  type HarnessCapabilities,
+  harnessCapabilitiesSchema,
+  type HarnessDefaultEntry,
+  harnessDefaultEntrySchema,
+  HARNESS_ID_ALIASES,
+  type HarnessEvent,
+  type HarnessEventKind,
+  HARNESS_EVENT_KINDS,
+  type HarnessId,
+  HARNESS_IDS,
+  harnessDefaultsFor,
+  type HarnessOutcome,
+  harnessOutcomeSchema,
+  type HarnessRequest,
+  type HarnessRequestInput,
+  harnessRequestSchema,
+  type SandboxTier,
+  SANDBOX_TIERS,
+  type ToolApprovalDecision,
+  type ToolApprovalRequest,
+} from "./harness.js";
