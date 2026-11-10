@@ -179,7 +179,7 @@ describe("测试装置不变量判据", () => {
   it("真配置必须仍开着 requireAssertions，否则【断言被整条掏空】没有报警者", () => {
     const cfg = readFileSync(join(ROOT, "vitest.config.ts"), "utf8");
     expect(readVitestRequireAssertions(cfg)).toBe(true);
-    expect(reasons({ ...OK, requireAssertions: true })).toEqual([]);
+    expect(reasons({ ...OK, requireAssertions: true }).join(" | ")).toEqual("");
     // 整行被删：读到 false，且必须报，不许当成零发现
     const removed = cfg.replace(/^ {4}expect: \{[^\n]*\},\n/mu, "");
     expect(removed).not.toContain("requireAssertions:");

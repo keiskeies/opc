@@ -36,6 +36,7 @@ export function listedIds(indexText: string): string[] {
       continue;
     }
     const id = line.slice(LIST_PREFIX.length, LIST_PREFIX.length + ID_LEN);
+    // 【闭合】要求行至少 10 个字符，所以长度判断不可能单独为假 —— 等价变异，
     const digits =
       id.length === ID_LEN && [...id].every((c) => c >= "0" && c <= "9");
     const closed =
@@ -43,6 +44,7 @@ export function listedIds(indexText: string): string[] {
         LIST_PREFIX.length + ID_LEN,
         LIST_PREFIX.length + ID_LEN + 2,
       ) === "**";
+    // 不是未测连词；把它当漏洞会浪费下一轮。详见 0006 §7 第 65 条。
     if (digits && closed) {
       out.push(id);
     }

@@ -209,8 +209,10 @@ describe("源码注释里的跨篇引用指向真实存在的东西", () => {
     expect(all.length).toBeGreaterThanOrEqual(40);
     expect(all.filter((c) => c.negated).length).toBeGreaterThanOrEqual(1);
     expect(
-      checkCitations(all, world(decisionRows(), repoShortHashes())),
-    ).toEqual([]);
+      checkCitations(all, world(decisionRows(), repoShortHashes()))
+        .map((p) => p.why)
+        .join(" | "),
+    ).toEqual("");
   });
 });
 
@@ -325,7 +327,12 @@ describe("决策目录之外的 markdown 里的跨篇引用", () => {
     const cites = citationsFromMarkdown(rows, retracted);
     expect(cites.length).toBeGreaterThanOrEqual(20);
     const w = world(decisionRows(), repoShortHashes());
-    expect(checkCitations(cites, w)).toEqual([]);
+    // 红了要能认出是哪条引用：数组只报 Array(1)，拼串才点名。
+    expect(
+      checkCitations(cites, w)
+        .map((p) => p.why)
+        .join(" | "),
+    ).toEqual("");
     let bad = 0;
     for (const r of rows) bad += hashProblems(r.doc, r.lines, w.hashes).length;
     expect(bad).toBe(0);

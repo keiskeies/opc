@@ -33,19 +33,18 @@ describe("决策索引与 decisions/ 目录一致", () => {
     });
     expect(diffIds([], [])).toEqual({ missing: [], extra: [] });
 
-    // 列表解析只认行首的 - **NNNN**：正文提到的号、引文里的加粗号、位数不足的号都不算
+    // 列表解析只认行首的 - **NNNN**：正文提到的号、引文里的加粗号、位数不对的号、
+    // 没闭合的号都不算 —— 后两类上一版注释没提，因为它自己的样例就没含这两种。
     const lines = [
       "- **0001** 甲",
       "提到 0002 但没有条目",
       "> **0003** 是引文不是列表项",
       "- **001** 位数不足",
       "- **000a** 不是纯数字",
-      "- **0000** 后面没闭合",
+      "- **0000* 少一个闭合星号：字段没闭合就不算列出",
+      "- **00123** 字段过长：闭合星号落在别处，也不算",
     ];
-    expect(listedIds(lines.join(String.fromCharCode(10)))).toEqual([
-      "0001",
-      "0000",
-    ]);
+    expect(listedIds(lines.join(String.fromCharCode(10)))).toEqual(["0001"]);
   });
 
   it("decisions/ 的每个编号都在 INDEX 列出，且 INDEX 不列不存在的号", () => {

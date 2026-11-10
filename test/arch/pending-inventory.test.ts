@@ -237,7 +237,7 @@ describe("真仓库", () => {
     const files = collect();
     /* 通路坏了也表现为【零问题】，所以先钉住它真的读了文件（§7 第 38 条） */
     expect(files.length).toBeGreaterThanOrEqual(21);
-    expect(reasons(files)).toEqual([]);
+    expect(reasons(files).join(" | ")).toEqual("");
   });
 
   it("真仓库里唯一带跳过的文件，正是名单里那一个", () => {

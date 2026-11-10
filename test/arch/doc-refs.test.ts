@@ -173,8 +173,6 @@ const SNAP: Record<string, string> = {
     "expect(isRuntimeFixture(BOUNDARY_PROBE)).toBe(true);",
   // 同一轮里第二次被 doc-refs 抓住：正文写了坐标却没登记快照；连着两次 => 【登记快照】
   // 已是写文档的固定动作，见 0006 §7-40。
-  "0006-cli-resume-and-identity.md>doc-ids.test.ts:92":
-    "expect(findMissing(docs, existing, reserved)).toEqual([]);",
   "0007-test-type-coverage-blindspot.md>cli.ts:478": "try {",
   "0007-test-type-coverage-blindspot.md>db/driver.ts:64": "try {",
   "0007-test-type-coverage-blindspot.md>db/migrate.ts:120": "try {",
@@ -245,7 +243,11 @@ describe("决策文档里的「文件:行号」引用不漂移", () => {
         return undefined;
       }
     };
-    expect(verify(docs, names, read, SNAP)).toEqual([]);
+    expect(
+      verify(docs, names, read, SNAP)
+        .map((p) => p.key + " " + p.why)
+        .join(" | "),
+    ).toEqual("");
     // 引用条数下界：解析被误写成恒真时，提取会变 0，这条会先红。
     expect(Object.keys(SNAP).length).toBeGreaterThanOrEqual(15);
   });

@@ -144,6 +144,25 @@ describe("扫描器与解析器", () => {
     expect(got).toEqual(["0006 §8", "0007 §5"]);
   });
 
+  it("小节标题必须是二级：三级标题或正文里的同名句子都不算登记表起点", () => {
+    /* 实测过的刀：把 parseRegistry 里的【行首是 ## 】拆掉，只剩【这行包含小节名】，
+       下面这个输入就会从正文那句【等待 CEO 决策】开始吃条目，把别的区里的号当成登记。
+       原用例只有【越过小节边界】那一半，从没钉过【起点必须是二级标题】。 */
+    const md = [
+      "## 其它",
+      "这里只是提到一下等待 CEO 决策，不是标题",
+      "- **0008 §9** 在别的区，不该被算进来",
+      "### 等待 CEO 决策",
+      "- **0009 §9** 三级标题也不算",
+      "",
+      "## " + REGISTRY_SECTION + "（改实现前先看这里）",
+      "- **0006 §8** 这才是登记表",
+    ].join(String.fromCharCode(10));
+    expect(parseRegistry(md, REGISTRY_SECTION).map((e) => e.docId)).toEqual([
+      "0006",
+    ]);
+  });
+
   it("登记表小节不存在时返回空数组，由 checkPending 报漏报", () => {
     expect(
       parseRegistry(
@@ -185,7 +204,11 @@ describe("真仓库：入口与决策文档必须对得上", () => {
       }
     }
     const listed = parseRegistry(readFileSync(INDEX, "utf8"), REGISTRY_SECTION);
-    expect(checkPending(found, listed)).toEqual([]);
+    expect(
+      checkPending(found, listed)
+        .map((p) => p.why)
+        .join(" | "),
+    ).toEqual("");
   });
 
   it("真仓库扫到的待决小节不得低于下限（防扫描通路坏掉，也防批量删标题字样消音）", () => {

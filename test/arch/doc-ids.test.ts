@@ -38,6 +38,15 @@ function findMissing(
   return out.sort();
 }
 
+/** 失败时把违规编号原样打出来：toEqual([]) 只会显示 Array(1)，不点名。 */
+function joined(
+  docs: Map<string, string>,
+  existing: ReadonlySet<string>,
+  reserved: ReadonlySet<string>,
+): string {
+  return findMissing(docs, existing, reserved).join(" ");
+}
+
 /** 被扫描的文档：决策文档全体 + 索引本身（索引里也写编号，一并盯住）。 */
 function repoDocs(): Map<string, string> {
   const m: Map<string, string> = new Map();
@@ -66,16 +75,12 @@ describe("文档正文提到的决策编号不指空号", () => {
     ]);
     // 反向：全部允许时必须为空。它防【判据恒返回非空】让上面那条退化成永真。
     expect(
-      findMissing(new Map([["c.md", "提到 0001"]]), existing, reserved),
-    ).toEqual([]);
+      joined(new Map([["c.md", "提到 0001"]]), existing, reserved),
+    ).toEqual("");
     // 预约号必须放行，否则文档里每一句【0002 被预约】的合法叙述都会假红。
     expect(
-      findMissing(
-        new Map([["d.md", "0002 已预约给 Task 4.6"]]),
-        existing,
-        reserved,
-      ),
-    ).toEqual([]);
+      joined(new Map([["d.md", "0002 已预约给 Task 4.6"]]), existing, reserved),
+    ).toEqual("");
   });
 
   it("真实文档：正文提到的每个编号要么存在、要么被 INDEX 预约", () => {
@@ -89,6 +94,6 @@ describe("文档正文提到的决策编号不指空号", () => {
     // 正对照：豁免通路必须是活的。它坏了读不到 0002，下面会红 —— 不许静默放行。
     expect(reserved.has("0002")).toBe(true);
     expect(existing.has("0007")).toBe(true);
-    expect(findMissing(docs, existing, reserved)).toEqual([]);
+    expect(joined(docs, existing, reserved)).toEqual("");
   });
 });

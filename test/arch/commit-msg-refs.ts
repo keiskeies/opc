@@ -76,6 +76,7 @@ export function loadEntries(rootDir: string): Entry[] {
         files: tail
           .split(NL)
           .map((l) => l.trim())
+          // 非空那一半推得出：下游只做 startsWith，空串本来就不匹配（0006 §7 第 65 条）。
           .filter((l) => l.length > 0 && !l.includes(String.fromCharCode(1))),
       };
     });

@@ -117,6 +117,11 @@ describe("提交消息里的决策文档编号", () => {
     /* 前提断言：预约集合非空。INDEX 措辞一改它就空掉，届时老提交会假红，必须先知道 */
     expect(reserved.size).toBeGreaterThanOrEqual(1);
     expect(reserved.has("0002")).toBe(true);
-    expect(check(entries, existing, reserved, EXEMPT)).toEqual([]);
+    // 提交号 + 原因拼串：断数组时红了只看到 Array(1)，不知道是哪条提交。
+    expect(
+      check(entries, existing, reserved, EXEMPT)
+        .map((p) => p.hash.slice(0, 7) + " " + p.why)
+        .join(" | "),
+    ).toEqual("");
   });
 });
