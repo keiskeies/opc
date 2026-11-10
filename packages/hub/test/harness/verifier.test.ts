@@ -427,13 +427,19 @@ describe("派生目录必须落在作者写范围之外", () => {
     if (!v.ok) expect(v.code).toBe("same_role");
   });
 
-  it("派生目录带 taskId：任务之间不串残留，同一任务**能**被找回", () => {
+  it("派生目录带 taskId 且**无随机后缀**：任务之间不串残留，同一任务能被找回", () => {
     expect(independentWorkspace("t1")).toBe("/tmp/opc-verify/t1");
-    expect(independentWorkspace("t1", "/srv/v/")).toBe("/srv/v/t1");
+    expect(independentWorkspace("t1", "/srv/v/")).toBe("/srv/v/t1"); // 尾斜杠不产生空段
     expect(independentWorkspace("t1")).not.toBe(independentWorkspace("t2"));
-    // 确定性（不是随机后缀）是这一维能被回放的前提：
-    // 随机目录事后找不回，「独立工作区跑过」这句话就在审计里指不回任何东西。
-    expect(independentWorkspace("t1")).toBe(independentWorkspace("t1"));
+    // ⚠ 这里原来还有一条 `expect(f("t1")).toBe(f("t1"))`，注释写着「确定性是回放的前提」——
+    // 同一个调用写两遍，对任何实现都真，是本文件第 ⑥ 条那种恒绿装饰的又一种形状，
+    // 而它坏在**带着一条看起来在解释为什么需要它的注释**。
+    // 而它坏在**带着一条看起来在解释为什么需要它的注释**。
+    // 「无随机后缀」这个性质主要由上面第一条【具体形状】的断言守住：
+    // 实现一旦改成 `root + "/" + taskId + "-" + randomUUID()`，那条立刻红。
+    // 下面这条 UUID 正则只是把同一件事说得更显眼（**单独看它偏弱**，
+    // 因为它只认标准 UUID 形状，短的随机后缀它看不见 —— 别把它当主判据）。
+    expect(independentWorkspace("t1")).not.toMatch(/[0-9a-f]{8}-[0-9a-f]{4}/u);
   });
 
   it("根必须是绝对路径、taskId 不得为空，缺了**抛错**而不退回相对/随机", () => {

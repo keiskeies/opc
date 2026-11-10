@@ -27,6 +27,7 @@ export {
   type EvidenceClaim,
   evidenceBundleSchema,
   HANDOFF_BUNDLE_TYPES,
+  isExternalSourceRef,
   requiredBundleType,
   SHA256_RE,
   unresolvableClaimIndexes,

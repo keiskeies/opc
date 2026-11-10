@@ -149,7 +149,7 @@ export function unresolvableClaimIndexes(
   const out: number[] = [];
   bundle.claims.forEach((c, i) => {
     const hit = c.evidence_refs.some((r) => {
-      if (/^https?:\/\//i.test(r)) return true;
+      if (isExternalSourceRef(r)) return true;
       const head = r.split("#")[0] as string;
       return paths.has(head);
     });
@@ -186,4 +186,17 @@ export function requiredBundleType(gate: string): BundleType {
     );
   }
   return t;
+}
+
+/**
+ * 一条 ref 是不是【外部来源链接】（http/https 绝对 URL）。
+ *
+ * 提出来成函数之前，这个正则只活在 `unresolvableClaimIndexes` 里面。
+ * 提出来的理由不是复用方便，是**口径必须唯一**：Task 5.7 的第一层
+ * 「快速变化领域的证据包必须带来源引用」读的正是同一件事（什么算一条外部来源），
+ * 两处各写一份正则的话，改一处就会得到「包内引用核对认为算来源、
+ * 而门控认为不算」这种两边各自自洽的组合 —— 本仓在 preventionFor 上记过同一形状。
+ */
+export function isExternalSourceRef(ref: string): boolean {
+  return /^https?:\/\//i.test(ref);
 }
