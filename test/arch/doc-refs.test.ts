@@ -421,6 +421,10 @@ const SNAP: Record<string, string> = {
   // 一行指向「被 0038 改过的那一行」的引用，正是活坐标该被钉住的形状。
   "0038-page-integrity-vocabulary-and-a-machine-to-boot-on.md>maintenance.ts:290":
     '// （`page.verdict === "violated"`）。而 `pageIntegrityBroken` 的注释一直写着',
+  // 0039：本篇引用了 harness-invariants.ts:156 —— 那条「requireAssertions 必须为 true」
+  // 的守卫。0039 改了 vitest.config.ts 的注释但没动开关，这句引用钉住「那条守卫还在这行」。
+  "0039-vitest-installs-and-coverage-attribution-still-does-not.md>harness-invariants.ts:156":
+    "if (input.requireAssertions !== REQUIRED_REQUIRE_ASSERTIONS) {",
 };
 
 describe("决策文档里的「文件:行号」引用不漂移", () => {

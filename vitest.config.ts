@@ -33,16 +33,22 @@ export default defineConfig({
      *    整个 Hub 的源码，而计划要求 95% 的对象是【门控判定分支】。把 95 填在全局上，
      *    红了之后读不出是门控覆盖不够还是别的模块覆盖不够，而那正是这条阈值唯一
      *    该回答的问题。
-     *  ② 我现在【无从测量】。本机没有 vitest（pnpm verify 跑不起来，见 0008 与本仓
-     *    门禁的口径），所以我没法知道真实数字是多少。在这种情况下填一个 95，
-     *    我报出去的就是一次【没有测过的通过】—— 那比不设限更坏：不设限是已知的洞，
-     *    填 95 是一个假装合不上的洞。
+     *  ② 阈值【还没填】的原因（0039 复核，非「本机没有 vitest」）：离线能装 vitest
+     *    **4.1.5** 且真跑通（0037 §7 已记；0039 复核 gate 套件在 4.1.5 下 59/59 通过），
+     *    但 pin 的 **4.1.12**、以及 coverage 归因所需的 **vite@8.3.6 / esbuild@0.28.2**
+     *    tarball 都不在 store（`find` 物理文件 = 0，空壳）。两款 coverage provider 都归因
+     *    不了：v8 走 Node strip-types 直跑 `.ts`、没有 esbuild transform 的 sourcemap，
+     *    报告出 0/130（文件列出来全是 0 行）；istanbul 的 metadata 不在 store、离线解析即
+     *    `ERR_PNPM_NO_OFFLINE_META`。⇒ 真实数字拿不到，是**基础设施 blocked**，不是我没量。
+     *    旧注释写「本机没有 vitest」是**假的**（4.1.5 装得上）；真实前提是「**pin 那几套
+     *    装不上 / coverage 归因 offline 不可达**」（0039 §0–§2）。
      *
      * 正确做法（Task 1.8 的前置，别绕过）：能跑 vitest 的环境里先量一次
      * `pnpm vitest run --coverage`，再把门控那几个文件（src/graph/gates/**）单独
      * 圈一个作用域去设阈值 —— vitest 的 thresholds 没有「按 glob 给不同阈值」的
      * 形状，所以要么用 projects 拆成两份配置，要么把 95 加在只含门控的第二份
      * coverage 配置上。谁做这件事，请把量到的数字一并写回这里，别让下一个人数。
+     * （gate 套件在 vitest 4.1.5 下实测 59/59 全绿，见 0039 §3。）
      */
     coverage: {
       provider: "v8",
