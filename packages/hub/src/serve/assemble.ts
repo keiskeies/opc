@@ -120,8 +120,19 @@ export interface BootOverrides {
   /** 抢锁。测试注入一个恒成功的，好把「锁之后的一切」单独测。 */
   readonly acquire?: (dbPath: string) => LockAcquire;
   /**
-   * 按任务给图。不传就用 unavailableGraphFor() —— 一个「用到就响亮报错并教你跑
-   * `hub resume`」的工厂，不是空实现。要接真图就传这一项（Electron 主进程那条路）。
+   * 按任务给图。**不传 = 引擎路线**（CEO 点批准走 engine/approve.ts，一个事务里
+   * 认领卡片 + 写状态边 + 两条审计，任务真的往前一格 —— 0043）。
+   * 要接真图（Electron 主进程那条路）就传这一项，决策写路径整条换回
+   * applyDecision + makeResumeGraph，理由与两种形状的取舍写在
+   * real-deps.ts 的 RealHubDepsOptions.graphFor 那一段，不重抄。
+   *
+   * ⚠ 这一格的原话是「不传就用 unavailableGraphFor() —— 一个用到就响亮报错的工厂」。
+   * 那句在 0043 之前是【事实】，而那个事实的内容是"默认装的是一个被 CEO
+   * 第一次点批准就会撞上的抛"（撞上的时候卡片已经落库了）。函数本身仍然导出，
+   * 但⚠ 它今天【只有测试在调】（grep 实测：src 里零调用方，调用点全在
+   * test/serve/assemble.test.ts 与本包的图路线用例里）—— 也就是说"保留它"目前是
+   * 保留一条【接法】，不是保留一条【在跑的路】。这与 0016 §4 那种"零生产调用方"
+   * 是同一件事，区别只在于这一次是【明说的】。它不再是默认值。
    */
   readonly graphFor?: (taskId: string) => TaskGraph;
   /** 时间源 + 定时器。默认 REAL_SCHEDULER。 */
@@ -560,12 +571,20 @@ export async function boot(
     // 界面永远显示旧状态，而审计里全都对，HTTP 照旧 200 —— 又一个静默。
     // 我第一版正是 import 了两次 events/bus.js 各 new 一个，所以这一格有专门一条用例。
     const bus = new InMemoryEventBus();
-    const graphFor = o.graphFor ?? unavailableGraphFor(dbPath);
+    // ⚠ 这一行在 0043 改了默认值，原文留着：
+    //   const graphFor = o.graphFor ?? unavailableGraphFor(dbPath);
+    // 那一句把【一个被叫到就抛的工厂】当成了默认值，而它被叫到的时机是
+    // 【CEO 点完批准之后】—— 那一刻卡片已经落库成决策了（实测见 0043 §1：
+    // 500 + 卡片 approved + 任务 CHARTER_PENDING + 再点一次回 replayed:true）。
+    // 也就是说"默认值"这个词在这里的含义是：
+    // **装完就跑不通的那一条，是这台机器上唯一会被用到的那一条。**
+    // 现在不传图就是不装图（buildHubDeps 缺图 ⇒ 引擎写路径，任务真的往前一格），
+    // unavailableGraphFor 仍然导出、仍然给"显式要一条图路线的调用方"用（见它的注释）。
     const deps = buildHubDeps({
       queue,
       bus,
       token,
-      graphFor,
+      ...(o.graphFor === undefined ? {} : { graphFor: o.graphFor }),
       ...(o.now === undefined ? {} : { now: o.now }),
       // 校验 IM 身份绑定的署名来源（0031）。从 --ceo 来，不传 ⇒ 那条路由 501。
       // 这里【再判一次空白】而不只靠 config.ts：boot 是公开 API（下面那条
@@ -599,16 +618,40 @@ export async function boot(
           "校验一个身份必须交出「谁验的」，而这个名字只能由启动命令给出（不给默认值）。",
       );
     }
-    // 启动时就把「图恢复这一步要人喊一声」说出来，而不是等到有人点批准才发现。
-    // 判据是【装配上用的是哪个工厂】而不是【@langchain 装没装上】：
-    // 后者在这里判不了（本文件顶层不 import 它，这正是本篇的可验证性来源），
-    // 而前者就是事实本身 —— 用注入的真图起进程时这一句【不该】出现。
+    // 启动时就把「这一台 Hub 的决策写路径是哪一条」说出来，而不是等到有人点批准才发现。
+    // 判据是【装配上给没给图工厂】—— 那正是 buildHubDeps 的选路输入本身（0043），
+    // 所以这一句不可能与事实漂移：它读的就是分岔的那个值。
     if (o.graphFor === undefined) {
+      // ⚠ 这一支的【原文】是「本入口未接图运行时：批准会落库而图不会自动往下跑，
+      // 每条批准之后需要跑一次 hub resume」。那两句话在 0043 之前【字面上都对】，
+      // 而它们合起来盖住了一个具体的坏：hub resume 在 cli.ts 那一侧，
+      // cli.ts 顶层 import @langchain/langgraph（本机装不上），
+      // 而那一次批准失败的时候【卡片已经落库成决策了】——
+      // 报错教的那一步在这台机器上跑不起来，而第二次点会返回 replayed:true。
+      // 所以这一支现在说的是【这台机器上真的会发生什么】，不是【哪个模块没装上】。
       io.warn(
-        "本入口【未接图运行时】：批准会落库（卡片状态真的变），而图不会自动往下跑。\n" +
-          "每条批准之后需要跑一次 `" +
+        "决策写路径 = 【引擎那一条】：CEO 点批准 ⇒ 认领卡片 + 状态边 + 审计，一个事务，\n" +
+          "任务真的往前一格（例如 CHARTER_PENDING → CHARTER_APPROVED）。不需要图运行时。\n" +
+          "本入口【不跑角色也不起草章程卡】：CHARTER_APPROVED 之后的每一步都要有人跑\n" +
+          "  pnpm hub:engine work --db " +
+          dbPath +
+          " --task <id> \\\n" +
+          "      --max-budget-usd <每轮美元硬顶> --task-limit-cents <任务上限美分>\n" +
+          "那【两个参数是必填的】（0041 §8：花钱的上限不给默认值），所以这一行不能整行照抄 —— " +
+          "少抄一个拿到的是「缺参数」，而它会让人以为是命令写错了。\n" +
+          "⚠ 那条命令要 tsx，本机装不上（0039 量的那半）：装不上就是跑不了，" +
+          "这一句提示替你解决不了，它只保证【不说一句照抄会挂的补救命令】。",
+      );
+    } else {
+      // 图路线：调用方【显式】交了图工厂，所以这是选上去的，不是默认撞上的。
+      // 警告留着，因为形状没变：applyDecision 只认领卡片，任务靠图恢复。
+      io.warn(
+        "决策写路径 = 【图那一条】（装配交了图工厂）：批准只认领卡片，" +
+          "任务靠图恢复。\n" +
+          "图恢复失败的那一次【卡片已经落库成决策】，而第二次点会返回 replayed:true ——\n" +
+          "所以这一条路线要求图真的能跑。补救命令：" +
           resumeCommand("<id>", dbPath) +
-          "`。原因与修法见 " +
+          "。原因见 " +
           GRAPH_NOT_WIRED + " 那条报错原文。",
       );
     }

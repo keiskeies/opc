@@ -1416,8 +1416,8 @@ describe("心跳：首轮立刻跑；坏到底要出声并交出退出权", () =
   });
 });
 
-describe("图运行时没接这件事必须响亮（本入口唯一被【声明】为不可用的能力）", () => {
-  it("⭐ 默认装配下启动就警告一次，并教你跑 hub resume", async () => {
+describe("决策写路径是哪一条，启动时就要说出来（两条路线各一句，0043）", () => {
+  it("⭐ 默认装配 = 引擎那一条：说出任务真的会动，且【不教一条本机跑不通的补救】", async () => {
     const path = db();
     const { io, warn } = ioOf();
     const r = needOk(
@@ -1426,30 +1426,83 @@ describe("图运行时没接这件事必须响亮（本入口唯一被【声明�
         scheduler: createFakeScheduler(0),
       }),
     );
-    expect(warn.join(" ")).toContain("未接图运行时");
-    // 命令必须带 --db，而且带的是【这个 Hub 自己那个库】。理由见 resumeCommand 那段：
-    // 不带 --db 的写法只在设了 OPC_DB 的机器上成立，而这句话存在的全部理由是人会照抄。
-    expect(warn.join(" ")).toContain("hub resume --db " + path + " --task <id>");
-    // 反向对照：显式注入图工厂时这一句【不该】出现 ——
-    // 否则 Electron 主进程接上图之后还会被告知「没接」，那是一句假告警。
-    // ⚠ 用的是【另一份库】：同一份库上第二个 Hub 会被写者锁拒掉，
-    // 而我第一版正是复用同一个 path、被锁挡下才看见的。那一发不是这条用例要测的东西
-    // （锁的行为在 lock.test.ts 与上面那组），把两件事混在一发里，
-    // 红的时候分不清是「假告警没消」还是「锁生效了」。
+    const w = warn.join(" ");
+    // 正向：这一支要说的是【这台机器上真的会发生什么】。
+    expect(w).toContain("引擎那一条");
+    expect(w).toContain("CHARTER_PENDING → CHARTER_APPROVED");
+    // 下一格的命令带真实库路径（人会照抄），而且【当场写明那两个参数是必填的】——
+    // 印一条照抄必挂的命令，是 resumeCommand 那段论证点名过的坏形状。
+    expect(w).toContain("pnpm hub:engine work --db " + path);
+    expect(w).toContain("--max-budget-usd");
+    expect(w).toContain("--task-limit-cents");
+    // ⭐ 反向那一发才是这一条用例的存在理由：hub resume 在 cli.ts 那一侧，
+    // 而 cli.ts 顶层 import @langchain/langgraph（本机装不上，实测 ERR_MODULE_NOT_FOUND）。
+    // 旧的那句横幅教的正是这条补救，而它教的那一刻【卡片已经落库成决策了】
+    // —— 教一步跑不通的动作，比不教更坏（0043 §1）。
+    expect(w).not.toContain("hub resume");
+    await r.shutdown();
+  });
+
+  it("⭐ 显式交图工厂 = 图那一条：这一支【该】教 hub resume，且不许说自己动了任务", async () => {
+    // 反向对照同时钉两件事：① 选路判据真的是【给没给图工厂】（不是 @langchain 在不在）；
+    // ② 两句横幅【各自】只描述自己那条路线 —— 合成一句"通用提示"就会两边都骗人。
+    // ⚠ 用【另一份库】：同一份库上第二个 Hub 会被写者锁拒掉（lock.test.ts 的行为），
+    // 混进来红的时候分不清是「假告警没消」还是「锁生效了」。
     const { io: io2, warn: warn2 } = ioOf();
     const r2 = needOk(
       await boot(args({ dbPath: db(), port: 8787, noBackup: true }), io2, {
         serve: fakeServer().serve,
         scheduler: createFakeScheduler(0),
-        graphFor: unavailableGraphFor(), // 同一个工厂；判据是【走没走默认】
+        // 这里传的还是那个"用到就抛"的工厂 —— 判据是【走没走默认】，
+        // 不是它抛不抛（真图装上那天传的是另一个工厂，这一发照样成立）。
+        graphFor: unavailableGraphFor(),
       }),
     );
-    expect(warn2.join(" ")).not.toContain("未接图运行时");
-    await r.shutdown();
+    const w2 = warn2.join(" ");
+    expect(w2).toContain("图那一条");
+    // 这一条路线的补救【确实】是 hub resume（图跑得起来的机器上它是能跑的），
+    // 所以命令带库路径 + 那句「卡片已经落库」的警告两条都要在。
+    expect(w2).toContain("hub resume --db");
+    expect(w2).toContain("卡片已经落库成决策");
+    expect(w2).not.toContain("引擎那一条");
     await r2.shutdown();
   });
 
-  it("⭐ 默认图工厂：装配时【不抛】，用到时【必抛】", async () => {
+  it("⭐ 默认装配装出来的 resumeGraph【不抛】（旧的默认值抛，而抛的时机是批准之后）", async () => {
+    // 这一发守【装配那一行】而不是文案。unavailableGraphFor 曾经在 boot 的默认路径上
+    // （`o.graphFor ?? unavailableGraphFor(dbPath)`），那一行的实际含义是
+    // 「装完就跑不通的那一条恰好是唯一的默认」。横幅改了不算修好，
+    // 那一行改了才算（0043 §2）—— 所以这里判的是 boot 真正装出来的那份 deps。
+    //
+    // 判据取的是【缝的行为】而不是"装的是哪个函数"：名字可以随便改，
+    // 而这道题真正要问的是「CEO 点完批准之后这一步会不会炸」。
+    const path = db();
+    const { io } = ioOf();
+    let installed: HubDeps | null = null;
+    const r = needOk(
+      await boot(args({ dbPath: path, port: 8787, noBackup: true }), io, {
+        // 借 fakeServer 那一格把装配产物接出来 —— serve 的形参就是 HubDeps，
+        // 所以这是【现成的】观测点，不用为了测试给 BootResult 加一个 deps 字段
+        // （那叫测试形状改产品）。
+        serve: async (d: HubDeps): Promise<HubServer> => {
+          installed = d;
+          return fakeServer().serve(d, 8787);
+        },
+        scheduler: createFakeScheduler(0),
+      }),
+    );
+    expect(installed).not.toBeNull();
+    const deps = installed as HubDeps;
+    // resumeGraph 仍然是【必填】的：引擎路线不需要它，但"不需要"要装成一条
+    // 有名字的静默，而不是少装一格（real-deps 的 engineRouteNothingToResume）。
+    expect(typeof deps.resumeGraph).toBe("function");
+    await expect(deps.resumeGraph("task-anything")).resolves.toBeUndefined();
+    await r.shutdown();
+  });
+
+  it("⭐ 图工厂仍然可用：装配时【不抛】，用到时【必抛】", async () => {
+    // 标题原先写的是「默认图工厂」—— 它不再是默认值了（0043），函数本身留用：
+    // 显式要一条"用到就响"的图路线的调用方与下面那几发都用它。
     const graphFor = unavailableGraphFor();
     const g = graphFor("task-42"); // 装配时抛的话，看板也打不开，而真相只是「恢复要人喊一声」
     expect(typeof g.invoke).toBe("function");
@@ -1605,7 +1658,7 @@ describe("监听地址（Task 4.1）：绑定策略跟随【实际装配结果�
     );
     expect(srv.seen()?.host).toBe(LOOPBACK_HOST);
     expect(r.bindHost).toBe(LOOPBACK_HOST);
-    // 「响一声」的判据是【内容】不是条数：装配自己会打「未接图运行时」那一句，
+    // 「响一声」的判据是【内容】不是条数：装配自己会打「决策写路径 = ...」那一句，
     // 断 warn.length 会绿在错的那一句上。
     expect(warn.some((w) => w.includes("忽略 --bind") && w.includes("not_an_ip_literal"))).toBe(
       true,

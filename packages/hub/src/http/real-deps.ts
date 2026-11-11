@@ -87,6 +87,13 @@ import {
   hasPendingInterrupt,
   threadConfig,
 } from "../graph/thread.js";
+// 决策写路径的引擎那一条（0043）。方向是 http/ → engine/：本文件是【装配层】，
+// 它已经在组装 db/ / events/ / org/ / graph/thread / checkpoint/ 五个模块，
+// engine/ 是第六个而不是特例。⚠ 这一条 import【顶层】不能扩到 engine/work.ts
+// 或 hub-work.ts —— 那两个是 CLI 入口（自带 stdio 与退出码），
+// 而本文件要被 assemble.ts import、assemble.ts 要被测试 import。
+// 只取 approveCard 这一个函数，正是为了让"决策落库"这件事离线可测。
+import { approveCard } from "../engine/approve.js";
 // 只在 insertTask 里取一版「当前组织图版本」。方向是 http/ → org/：
 // HTTP 是组织功能的一个入口，不是组织功能的归属地（同一个理由见 org/commit.ts
 // 文件头那条「ORG_ACTOR 不从 http/real-deps.ts 拿」）。
@@ -315,6 +322,91 @@ export async function applyDecision(
     wrote.seq,
   );
   return true;
+}
+
+/**
+ * 引擎路线的决策写路径：把 HubDeps.recordDecision 那道缝接到
+ * engine/approve.ts 的 approveCard 上（认领卡片 + 状态边 + 两条审计，【一个】事务）。
+ *
+ * ── 为什么换了这条 ──────────────────────────────────────────────────
+ * 装配原本的默认值是 applyDecision + unavailableGraphFor，装机实测（0043 §1 的探针：
+ * 真的 buildHubDeps + 真的装配默认值 + 真的 insertCard 建出来的卡）：
+ *
+ *   第一次点批准 : 500 「这个 Hub 入口【没有】接上图运行时（graph_not_wired）」
+ *     任务状态   : CHARTER_PENDING        ← 一步没动
+ *     卡片状态   : approved               ← 已经批了，而且删不掉
+ *   再点一次     : 200 {"ok":true,"replayed":true}
+ *     任务状态   : CHARTER_PENDING        ← 永远停在这里
+ *
+ * 坏在两处，第二处更坏：卡片被【不可撤销地】记成决策（events 是 append-only，
+ * 0014 §3）而任务原地不动；而第二次点返回 replayed:true，渲染层按规格 §7.2 把它
+ * 读成「已经生效了」⇒ 屏幕先说 500、再说成功，而任务从未动过。
+ * 那句报错教的补救（`hub resume --db … --task …`）在 cli.ts 那一侧，
+ * cli.ts 顶层 import @langchain/langgraph（本机实测 ERR_MODULE_NOT_FOUND）
+ * ⇒ **它教的补救动作在这台机器上不存在**。
+ *
+ * ── 为什么复用 approveCard 的【整体】，而不是给 applyDecision 补一步 ────
+ * engine/approve.ts 文件头写的正是这一格：「dispatch 停在三个人坐的格子……
+ * 全仓没有一个人调 humanEdge()」。复用它的整体换来两件事：
+ *  ① 卡片与状态边【同事务】⇒「已批准而未推进」那个窗口在 CEO 这条路上【不可表达】
+ *     （applyDecision + 事后再推一格的写法会永远留着那个窗口，我那第一版就是它）；
+ *  ② 没有第二份「认领 + 审计」的文本要漂（approve.ts:47 那条 CLAIM_CARD_SQL
+ *     已经是第二份文本了，不该有第三份）。
+ *
+ * @returns 与 HubDeps.recordDecision 同契约：true = 首次决策已落库。
+ *
+ * ⚠ approveCard 有六条 outcome，这个 boolean 只映射得到两条。剩下四条
+ * （卡片不存在 / 卡片属于另一条任务 / 任务不存在 / 打回没带理由）【不能】咽进
+ * false —— app.ts 那句 `replayed: !applied` 会把它们全都说成"已经有人决定过了"，
+ * 而事实是【一行都没写】。所以这里抛：app.ts 的 catch 翻成 500 + 原文，
+ * "看到报错"与"什么都没发生"重新对上。
+ * （applyDecision 那一条【没有】这些分支，所以旧实现不会遇到 ——
+ * 换写路径换来的是【更严的失败面】，不是新的静默。）
+ */
+export async function decideWithEngineEdge(
+  w: HubWriter,
+  o: {
+    readonly approvalId: string;
+    readonly taskId: string;
+    readonly resume: ResumeValue;
+    readonly note?: string;
+    readonly nowMs: number;
+  },
+  /** 与 applyDecision 同一条必填纪律：写完不广播 = 在活连接上挖 seq 空洞（0010 §4）。 */
+  publish: (e: DomainEvent, seq: number) => void,
+): Promise<boolean> {
+  const r = await approveCard(
+    w,
+    {
+      taskId: o.taskId,
+      approvalId: o.approvalId,
+      // ResumeValue 与 CardButton 是同一个三值联合（contracts 的 RESUME_VALUES /
+      // APPROVAL_BUTTONS），而 approve.test.ts 那条 STATUS_BY_BUTTONtoEqual(STATUS_BY_RESUME)
+      // 已经把两张表钉成同值 —— 所以这里直接传，不另写一份映射表。
+      button: o.resume,
+      nowMs: o.nowMs,
+      ...(o.note === undefined ? {} : { note: o.note }),
+    },
+    publish,
+  );
+  if (r.outcome === "decided") return true;
+  if (r.outcome === "already_decided") return false;
+  throw new Error(r.note);
+}
+
+/**
+ * 引擎路线上【没有东西要恢复】时填 HubDeps.resumeGraph 那道缝的实现。
+ *
+ * 它必须是【一条说得出名字的空】，而不是"少装一个注入点"：
+ * resumeGraph 是必填项，而"装配忘了传"与"这条路线不需要它"在类型上长得很像。
+ * 本仓在 publish / applyDecision 那两处都为"不给默认值"写过纪律，同一个理由
+ * 在这里的方向反过来用 —— 缺席会被读成疏忽，所以让它成为一个【有名字的】决定。
+ */
+export function engineRouteNothingToResume(): (taskId: string) => Promise<void> {
+  return async (): Promise<void> =>
+    // 什么都不做，而且【不该】做任何事：decideWithEngineEdge 已经在同一个事务里
+    // 把状态边写掉了，这里再动一次任务就是推两格。
+    Promise.resolve();
 }
 
 /** 装配 makeResumeGraph 需要的最小图接口（结构类型，测试好塞替身）。 */
@@ -595,8 +687,28 @@ export interface RealHubDepsOptions {
   readonly queue: HubWriter;
   readonly bus: EventBus;
   readonly token: string;
-  /** 按任务给一张图。理由见 TaskGraph —— 一张共享图会写错任务而不报错。 */
-  readonly graphFor: (taskId: string) => TaskGraph;
+  /**
+   * 按任务给一张图。理由见 TaskGraph —— 一张共享图会写错任务而不报错。
+   *
+   * ⚠【这一格从必填改成了可选，日期见 0043 —— 原话「理由见 TaskGraph」留着，
+   * 因为它讲的是"给了就该给对的"，那一半没变。变的是"必须给"那一半】
+   *
+   * 缺省 = 【引擎路线】：CEO 点一次批准走 engine/approve.ts 的 approveCard，
+   * 认领卡片 + 状态边 + 两条审计在【一个】事务里，任务真的往前一格。
+   * 给了 = 【图路线】：applyDecision 认领 + makeResumeGraph 让图续跑（原样保留）。
+   *
+   * 为什么把"给不给这张图"做成选路开关，而不是新加一个 `engineDecide?: boolean`：
+   * 这两条路线【本来就按这张图分岔】—— 图路线的存在理由就是"决策之后有人接着
+   * 跑那张图"，没有图就没有东西要 resume。再加一个开关会得到两个可以互相矛盾的
+   * 输入（给了图又开了引擎 ⇒ 谁的？），而那是一个【装配上写得出来而语义上讲不通】
+   * 的组合，本仓在 bindForAssembly 那条上为同一件事付过一次账
+   * （判据的输入被装配焊成常量 ⇒ 判据恒真）。
+   *
+   * ⚠ 缺省这一支【不是】"少装一个注入点"那种缺席：HubDeps.resumeGraph 仍然
+   * 必填，缺图时装的是一个【有名字的】空实现（见下面装配处），
+   * 于是"这条路线不需要它"与"装配忘了传"在代码上仍然长得不一样。
+   */
+  readonly graphFor?: (taskId: string) => TaskGraph;
   /** 新任务的受理角色。默认节点名，与图里 intake 的 roleId 同一个取值口径。 */
   readonly intakeRole?: string;
   readonly now?: () => number;
@@ -653,10 +765,24 @@ export interface RealHubDepsOptions {
  */
 export function buildHubDeps(o: RealHubDepsOptions): HubDeps {
   const now = o.now ?? Date.now;
-  const resumeGraph = makeResumeGraph({
-    graphFor: o.graphFor,
-    ...(o.makeCommand === undefined ? {} : { makeCommand: o.makeCommand }),
-  });
+  // ── 决策写路径在这里分岔（0043）────────────────────────────────────
+  // 图路线：applyDecision（只认领卡片）+ resumeGraph（让图续跑）。
+  // 引擎路线（缺图 ⇒ 生产默认）：approveCard（认领 + 状态边 + 两条审计，一个事务）
+  //   + 一个【有名字的】空 resume —— 没有图，就没有东西要恢复。
+  //
+  // 为什么图路线【保留】而不是删掉：它不是"一个坏掉的实现"，它是 0010 §3 那笔
+  // 账（超步事务持锁范围）挂着 CEO 的那一侧，图修好了要能装回去。
+  // 而它今天在这台机器上跑不起来（@langchain 装不上），所以它不能是默认值 ——
+  // 一个默认值应该是【装完就能用】的那一条，不是【等另一个人修】的那一条。
+  const engineRoute = o.graphFor === undefined;
+  const resumeGraph = engineRoute
+    ? // 名字就是理由：引擎路线上 approveCard 已经把状态边写掉了，
+      // 这里再动一次任务就是推两格。见 assemble.ts 那句换了内容的启动横幅。
+      engineRouteNothingToResume()
+    : makeResumeGraph({
+        graphFor: o.graphFor,
+        ...(o.makeCommand === undefined ? {} : { makeCommand: o.makeCommand }),
+      });
   const intakeRole = o.intakeRole ?? "intake";
   const publish = (e: DomainEvent, seq: number): void =>
     o.bus.publishPersisted(e, seq);
@@ -669,18 +795,31 @@ export function buildHubDeps(o: RealHubDepsOptions): HubDeps {
     token: o.token,
     now,
     ...(o.nonces === undefined ? {} : { nonces: o.nonces }),
+    // 决策的写路径。两条路线的选路在上面的 engineRoute，理由在那段，不重抄。
     recordDecision: async ({ approvalId, taskId, resume, note }) =>
-      applyDecision(
-        o.queue,
-        {
-          approvalId,
-          taskId,
-          resume,
-          ...(note === undefined ? {} : { note }),
-          nowMs: now(),
-        },
-        publish,
-      ),
+      engineRoute
+        ? decideWithEngineEdge(
+            o.queue,
+            {
+              approvalId,
+              taskId,
+              resume,
+              ...(note === undefined ? {} : { note }),
+              nowMs: now(),
+            },
+            publish,
+          )
+        : applyDecision(
+            o.queue,
+            {
+              approvalId,
+              taskId,
+              resume,
+              ...(note === undefined ? {} : { note }),
+              nowMs: now(),
+            },
+            publish,
+          ),
     createTask: async ({ id, title, parentId, nowMs }) =>
       insertTask(o.queue, {
         id,

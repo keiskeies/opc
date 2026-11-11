@@ -32,8 +32,14 @@ Task 3.7。计划那行给的 Files 是 `src/graph/branches.ts`、`src/memory/ro
    `has_review_decisions === false`，见 `packages/hub/src/memory/role-memory.ts:605`）。
    哪天有人接上写入方，那一发会红。
 2. **唯一有生产写入方的「角色决定」是 CEO 那一条。**
-   `packages/hub/src/http/real-deps.ts:291` 写 `action: "approval"`，
+   `packages/hub/src/http/real-deps.ts:298` 写 `action: "approval"`，
    `payload = {approvalId, resume}`（决定本身）、`state_snapshot = {note}`（理由）。
+   ⚠ **0043 之后这一格的落点分成了两处，而本篇那一处不再是默认那一条**：
+   默认装配（没交图工厂）走 `packages/hub/src/engine/approve.ts:293`，写的**是同一个 `action` 值**
+   （从 `KIND_TO_ACTION.ApprovalDecided` 取，`packages/hub/src/events/recorder.ts:38` ⇒ `"approval"`），
+   `real-deps.ts` 那条 `applyDecision` 只在**显式交了图工厂**时才被走到。
+   所以「只有 CEO 那一格今天真有数据」这句话**照旧成立**，但今天再读它要读两处，
+   而**两处都得读**：只查 real-deps 会得出「默认路线上没有写入方」这个错结论。
    ⇒ 『历史决定与理由』这个形状**只有 CEO 那一格今天真有数据**。
 3. **图里节点执行写的事件，actor 是 `system` / `hub`，不是执行它的那个角色。**
    `packages/hub/src/graph/audit-middleware.ts` 不传 actor，于是

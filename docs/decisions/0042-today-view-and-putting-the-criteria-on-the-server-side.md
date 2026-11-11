@@ -260,7 +260,7 @@ channelFor(GET /today)    : null      ← 真的没通道
 **一处已埋的假红**（记下来，因为它迟早会响而没人知道为什么）：`callersOf` 是裸 `includes`，
 **不滤注释**（`srcFilesMatching` 滤）。实测往 `real-deps.ts` 追加一行**纯注释**的
 `// insertCard( …` ⇒ 新判据红，报的正是「实到三项」。方向是误报（可接受），
-但 `http/real-deps.ts:488` 那句注释写着「与 insertCard 同事务」，**只差没跟一对括号**才没命中。
+但 `http/real-deps.ts:580` 那句注释写着「与 insertCard 同事务」，**只差没跟一对括号**才没命中。
 
 ## 8. 前端那份签名抄件：边界逼出来的手抄，配了一发逐字节对账
 
