@@ -123,9 +123,12 @@ handler 里，也不在 commitOrgGraph 里 —— 于是「忘了备份」不可
 2. **`makeCommitOrgChange` 的 running tasks 查询在只读连接上、事务外**。它决定的是
    `needsConfirmation`（有运行中任务时那句「要 CEO 再确认」），差一条正在 superstep 中间的
    任务，最坏是多/少一次确认提示，不是权限或审计错。
-3. **没有把「改组织广播回看板」接上**。0012 记过组织变更不广播、消费掉的 seq 留空洞那件事；
-   本篇补的是入口 + **配套读侧**（`GET /org` 让活客户端「检出 stale → 重拉快照」这一格能拿到内容），
-   广播那半（回放/日报读到经度）是另一篇的事，不在射程内。
+3. **「改组织广播回看板」这一格已经按 0012 §9 的正确形态关闭，不是欠着**。0012 §9 记过
+   组织变更不广播、消费掉的 seq 留空洞那件事，并【明确判定】：空洞已被检出（`action="gap"`/
+   `link="stale"`）、处置本来就是重拉快照，所以正确做法是**补读端点**而不是给 commitOrgGraph
+   接 publish（接 publish 会把「空转」换成「看得见拿不到」，只多一次无效重拉）。本篇补的就是
+   读端点：`GET /org` 让「stale → 重拉快照」这一格【终于有内容】。广播本身依旧不接 —— 那是
+   0012 §9 判定【不该做】的方向。
 4. **桌面 IPC 侧没接**（`desktop/ipc-surface.ts` 的 `EXPOSED_ENDPOINTS = IMPLEMENTED_ENDPOINTS`
    是恒等式，所以 `POST /org` / `GET /org` 自动落进渲染进程可达面，但今天 `channelFor("commit_org")`
    仍返回 null —— 同 0027 §8 / 0031 那格的形状，桌面那条通道是跳过的判据不是漏做的）。
