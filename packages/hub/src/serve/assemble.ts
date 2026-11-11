@@ -575,6 +575,19 @@ export async function boot(
       ...(args.ceo === undefined || args.ceo.trim() === ""
         ? {}
         : { bindingVerifier: args.ceo.trim() }),
+      // 组织提交（0040）：只有配了 --backup-dir 才接 commitOrgChange ——
+      // §6.5 要求「改组织之前留一份能回到起点的快照」，没备份目录就不给改。
+      // 备份的执行点复用同一个 backupVia（BootOverrides 可注入），于是测试对
+      // 心跳备份与组织备份注入同一套假备份，两者的编排方向一致。
+      ...(args.backupDir === undefined
+        ? {}
+        : {
+            orgDbPath: dbPath,
+            orgBackupDir: args.backupDir,
+            ...(o.backupVia === undefined
+              ? {}
+              : { backupBeforeCommit: o.backupVia }),
+          }),
     });
     // 没给 --ceo 就把「verify 那条路由是死的」当场说出来，理由与上面那句
     // 「本入口未接图运行时」完全同一条：一个只在人点了按钮才发现的 501，

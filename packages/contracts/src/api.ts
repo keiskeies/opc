@@ -19,6 +19,7 @@
  * 与本机的桌面 token 是两码事，见 http/auth.ts）。
  */
 import { z } from "zod";
+import { orgChangeSchema, orgGraphSchema } from "./org/graph.js";
 
 /**
  * 端点清单。写成常量而不是散落在路由注册里，理由与 gates.ts 里 APPROVAL_BUTTONS
@@ -49,6 +50,7 @@ export const API_ENDPOINTS = [
   "POST /bindings",
   "POST /bindings/verify",
   "POST /bindings/rebind",
+  "POST /org",
 ] as const;
 export type ApiEndpoint = (typeof API_ENDPOINTS)[number];
 
@@ -79,6 +81,7 @@ export const IMPLEMENTED_ENDPOINTS: readonly ApiEndpoint[] = [
   "POST /bindings",
   "POST /bindings/verify",
   "POST /bindings/rebind",
+  "POST /org",
 ];
 
 /**
@@ -361,6 +364,37 @@ export const feedItemSchema = z
   })
   .passthrough();
 export type FeedItemView = z.infer<typeof feedItemSchema>;
+
+/**
+ * `POST /org` 的请求体 —— 一次组织变更的提交（Task 3.3 的「保存按钮」那一格，
+ * 0012 §7 登记的生产入口）。
+ *
+ * 三个键各守一条不变量：
+ *  - `before_graph`：提交【之前】的那张组织图，是 `graph` 字段。名字不叫
+ *    `org` 或 `graph`（那会读成「提交【之后】想长成的那张图」）：commitOrgGraph
+ *    收的是 before，`applyChangeToGraph` 在里面算出 after，审计里的 before/after
+ *    快照都用同一个值 —— 调用方【不要】自己算 after，否则审计说 A 而库里是 B。
+ *  - `change`：一次 `reparent` 或 `add_edge`。判别式（orgChangeSchema）在契约层
+ *    就保证「既没有 child 也没有 edge」的变更写不出来。
+ *  - `change_summary`：写进 `delegation_graphs.change_summary` 的那句人话。
+ *    必填、非空：版本历史里每一版都该答得出「这一版改了什么」，欠这个答案的
+ *    版本号在回放里读不出意图。
+ *
+ * ⚠【没有 actor 字段】，而且是 `.strict()` 挡着。这条与 bindingVerifyRequestSchema
+ * 里【刻意没有 `verified_by`】同一个形状同一段理由：组织变更是 self-escalating 的
+ * CEO 权限写（规格 §4.2.3 把组织权集中给 CEO），让 actor 进请求体 = 任何人 POST
+ * `{actor: {type:"human", id:"ceo"}}` 就是一次 CEO 动作。actor 只由服务端装配
+ * （real-deps 的 ORG_ACTOR）取，从不在 HTTP 这一层读。多传一个 actor 键会
+ * 得到一个看得见的 422，而不是一次静默的采纳。
+ */
+export const commitOrgChangeRequestSchema = z
+  .object({
+    graph: orgGraphSchema,
+    change: orgChangeSchema,
+    change_summary: z.string().trim().min(1).max(2000),
+  })
+  .strict();
+export type CommitOrgChangeRequest = z.infer<typeof commitOrgChangeRequestSchema>;
 
 /* ────────────────────────── 状态码口径 ────────────────────────── */
 

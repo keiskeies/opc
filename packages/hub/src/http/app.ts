@@ -34,6 +34,8 @@ import {
   isImplemented,
   type ApiEndpoint,
   type ApprovalDecisionRequest,
+  type OrgChange,
+  type OrgGraph,
   type ResumeValue,
   type TaskView,
   taskViewSchema,
@@ -53,6 +55,8 @@ import {
   requestBindingRoute,
   verifyBindingRoute,
 } from "./bindings.js";
+import { commitOrgRoute } from "./org.js";
+import type { CommitResult } from "../org/commit.js";
 import { ResumeStream, type SnapshotSource } from "./sse.js";
 import { buildReplayView } from "../replay/query.js";
 import { verifyRequest, type VerifyInput } from "./auth.js";
@@ -259,6 +263,26 @@ export interface HubDeps {
    * 缺它 ⇒ verify 路由 501，症状指向唯一正确的修法（启动时带 --ceo）。
    */
   readonly bindingVerifier?: string;
+  /**
+   * 组织变更的**写路径**（Task 3.3 生产入口，0040，http/org.ts）。
+   *
+   * 收返回值类型是 commitOrgGraph 的 CommitResult（type-only，同上 bindingWriter 那
+   * 条 type-only 理由：这里一次 node() 调用都不发）。它【不是】裸的 Writer ——
+   * 与 bindingWriter 的区别是这条写路径在【写之前】还要跑一次 §6.5 的「变更前备份」，
+   * 而备份的传达（对生产是 worker，对测试是注入点）属于装配那一侧，
+   * 不该由 app.ts 决定。所以注入的是一个「已经连好备份 + 提交」的完整动作：
+   * 调用方（http/org.ts）只负责【解析请求体 + 判回环 + 决定备份失败怎么办】，
+   * 备份发生在上游，发生在 commitOrgGraph 的事务之前 —— 那是 §6.5 要的
+   * 「改组织之前留下一份能回到起点的快照」。
+   *
+   * 可选：装配方没接时 POST /org 回 501（同 bindings 值 null 时的 501，
+   * 「还没装配」说得清修法，不是「路由不存在」）。
+   */
+  readonly commitOrgChange?: (o: {
+    readonly graph: OrgGraph;
+    readonly change: OrgChange;
+    readonly changeSummary: string;
+  }) => Promise<CommitResult>;
 }
 
 const MAX_TITLE_CHARS = 200;
@@ -415,6 +439,8 @@ async function dispatch(
       return verifyBindingRoute(deps, req);
     case "rebind_binding":
       return rebindBindingRoute(deps, req);
+    case "commit_org":
+      return commitOrgRoute(deps, req);
     default: {
       // 走到这里意味着【有人加了一种 Route 却没在这里加分支】。
       //
@@ -477,7 +503,14 @@ export type Route =
   | { kind: "list_bindings"; endpoint: "GET /bindings"; id?: undefined }
   | { kind: "request_binding"; endpoint: "POST /bindings"; id?: undefined }
   | { kind: "verify_binding"; endpoint: "POST /bindings/verify"; id?: undefined }
-  | { kind: "rebind_binding"; endpoint: "POST /bindings/rebind"; id?: undefined };
+  | { kind: "rebind_binding"; endpoint: "POST /bindings/rebind"; id?: undefined }
+  /**
+   * 组织变更的提交（0040）。**没有 id 段**，同 bindings 那四条的形状：
+   * 请求体自己带着要提交的 before 图 + change（POST /org 不像
+   * GET /tasks/:id 那样指一个现存资源再改它，它提交的是调用方给的一段图）。
+   * 单段字面匹配，POST /org/anything 得到 404 而不是把 anything 当张图 id。
+   */
+  | { kind: "commit_org"; endpoint: "POST /org"; id?: undefined };
 
 /**
  * 手写匹配而不是引一个路由器：五条形，而引库又要装依赖（见文件头）。
@@ -563,6 +596,9 @@ export function matchRoute(method: string, path: string): Route | null {
     if (segs[1] === "verify") return { kind: "verify_binding", endpoint: "POST /bindings/verify" };
     if (segs[1] === "rebind") return { kind: "rebind_binding", endpoint: "POST /bindings/rebind" };
     return null;
+  }
+  if (method === "POST" && segs.length === 1 && segs[0] === "org") {
+    return { kind: "commit_org", endpoint: "POST /org" };
   }
   return null;
 }

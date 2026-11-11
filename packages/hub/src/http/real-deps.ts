@@ -68,6 +68,8 @@
 
 import {
   APPROVAL_STATUS_PENDING,
+  CEO_ROLE_ID,
+  type OrgActor,
   type ResumeValue,
 } from "@opc/contracts";
 import { requireScopeDb } from "../checkpoint/tx-scope.js";
@@ -91,7 +93,11 @@ import {
 // 这条 import 不顶层带 @langchain/*：org/commit.ts 的 import 闭包只有
 // contracts + db + checkpoint + events，所以文件头那条「可验证性由 import 图决定」
 // 仍然成立，本文件照旧可以离线测。
-import { currentGraphVersion } from "../org/commit.js";
+import {
+  commitOrgGraph,
+  currentGraphVersion,
+  RUNNING_TASKS_SQL,
+} from "../org/commit.js";
 import {
   issueToken,
   newApprovalToken,
@@ -101,9 +107,25 @@ import {
   type TokenRejectReason,
 } from "./tokens.js";
 import type { HubDeps } from "./app.js";
+import {
+  createBackupOffLoop,
+  type BackupOffLoopOutcome,
+  type BackupOffLoopRequest,
+} from "../db/backup.js";
 
 /** CEO 这一侧的动作在审计里的身份。 */
 export const CEO_ACTOR = { actorType: "human", actorId: "ceo" } as const;
+
+/**
+ * 组织提交的 actor（0040）。commitOrgGraph 收的 `actor` 是 contracts 的 OrgActor
+ * （{type, id}），与上面 CEO_ACTOR（审计行里那个 {actorType, actorId}）【不是同一个型】。
+ * 组织变更只认 CEO 提交（[spec] §4.2.3 组织权集中给 CEO，validateOrgChange 已把
+ * 「actor 不是 human/ceo」判过）—— 这里写死 compile-time，因为 POST /org 的
+ * 请求体里【没有】actor 键，能到此地的只可能是本机回环（`--backup-dir` 那条装配
+ * 决定它接没接），而本机持有者是这台机器的运营者。别把它做成可注入/可请求覆盖的：
+ * 那等于把「谁改了组织」交给调用方自报。
+ */
+export const ORG_COMMIT_ACTOR: OrgActor = { type: "human", id: CEO_ROLE_ID };
 
 /**
  * 定义已搬到 db/write-queue.ts（理由写在那边：第二个使用方 org/commit.ts 不该
@@ -586,6 +608,25 @@ export interface RealHubDepsOptions {
    * 整段论证在 HubDeps.bindingVerifier 旁边，那份是唯一一处，不重抄。
    */
   readonly bindingVerifier?: string;
+  /**
+   * 组织提交的装配（0040）。缺这一组 ⇒ buildHubDeps 不装 commitOrgChange ⇒
+   * POST /org 回 501。
+   *
+   * dbPath + backupDir 是【备份的传达】：§6.5 要求「改组织之前留下一份能回到
+   * 起点的快照」，而备份的实体（VACUUM INTO 到哪、保留几份）由这两格决定。
+   * 只有 dbPath/backupDir 都给齐了，装配才认为这台 Hub 为改组织准备好了恢复。
+   * ⚠ 与 assemble 的 boot `--backup-dir` 相隔一个装配参数：今天这两处都由
+   * serve/assemble.ts 传同一个值，见那边 —— 它们各自独立成立，别改一处忘另一处。
+   *
+   * backupBeforeCommit 是备份的执行点，默认真 createBackupOffLoop（异步 worker）。
+   * 可注入同 BootOverrides.backupVia —— 测试想钉「备份在提交前真的发生了、且失败
+   * 就拒绝提交」时，给它一个记录调用的替身。生产走默认。
+   */
+  readonly orgBackupDir?: string;
+  readonly orgDbPath?: string;
+  readonly backupBeforeCommit?: (
+    req: BackupOffLoopRequest,
+  ) => Promise<BackupOffLoopOutcome>;
 }
 
 /**
@@ -654,7 +695,84 @@ export function buildHubDeps(o: RealHubDepsOptions): HubDeps {
     // 上面每条写路径写明的同一条理由（P1 同连接重入），没有第二条更弱的写通道。
     bindingWriter: o.queue,
     ...(o.bindingVerifier === undefined ? {} : { bindingVerifier: o.bindingVerifier }),
+    // 组织提交（0040）。只有当装配给了 dbPath + backupDir 才装 —— 那就是
+    // 「这台 Hub 为改组织准备了恢复」（文件头 + HubDeps.commitOrgChange 那两段）。
+    ...(o.orgBackupDir === undefined || o.orgDbPath === undefined
+      ? {}
+      : {
+          commitOrgChange: makeCommitOrgChange({
+            queue: o.queue,
+            dbPath: o.orgDbPath,
+            backupDir: o.orgBackupDir,
+            backup: o.backupBeforeCommit ?? createBackupOffLoop,
+            nowMs: () => now(),
+          }),
+        }),
     resumeGraph,
+  };
+}
+
+/**
+ * 组织提交的装配（0040）。
+ *
+ * 顺序（顺序就是 §6.5 的判据）：
+ *   ① 变更【之前】先备份（VACUUM INTO 快照）—— 提交成功则这次改图有恢复点；
+ *   ② 备份失败 ⇒ 拒绝提交，不给新版本号（reason 「backup_failed」+ 原文）。
+ *   ③ 备份成功 ⇒ commitOrgGraph（内部自己读写 transactions + 审计）。
+ *
+ * running tasks 在【事务外】查 —— commitOrgGraph 收 runningTasks 是纯函数原则
+ * （validateOrgChange 要用它判「有运行中任务时该不该要确认」），它要求调用方
+ * 先查好传进去。查的动作不能放进 w.node() 的事务里（那是读，且会影响「拒绝也
+ * 不写东西」的语义 —— commitOrgGraph 的校验在开事务前）。所以这里在
+ * commitOrgGraph 之前的只读连接上查。⚠ 读连接可能不包含「最后一次写入」？
+ * —— running tasks 只要「大致当前」：它是决定「要不要 needsConfirmation」用的，
+ * 差一条正在 superstep 中间的任务，最坏是多一次或少一次确认提示，不是权限/审计错。
+ * 而备份跑在【改图之前】，天然领先提交 —— 它看到的 running tasks 与提交时之差，
+ * 只会是「刚好要 DELIVERED」这种收敛方向。
+ */
+export function makeCommitOrgChange(o: {
+  readonly queue: HubWriter;
+  readonly dbPath: string;
+  readonly backupDir: string;
+  readonly backup: (req: BackupOffLoopRequest) => Promise<BackupOffLoopOutcome>;
+  readonly nowMs: () => number;
+}): NonNullable<HubDeps["commitOrgChange"]> {
+  return async ({ graph, change, changeSummary }) => {
+    // ① 变更前备份。失败 ⇒ 拒绝提交（§6.5：改组织前必须能回到起点）。
+    const bk = await o.backup({ dbPath: o.dbPath, backupDir: o.backupDir });
+    if (!bk.ran) {
+      // worker 整体没跑（接错线），理由在 ran:false 那一支的 message。
+      return {
+        ok: false,
+        reason:
+          "改组织前的备份没做成，拒绝提交（§6.5：改组织之前要留一份能回到起点的快照）。" +
+          "原因：" + bk.message,
+        code: "backup_failed",
+      };
+    }
+    if (!bk.result.ok) {
+      // 备份跑了但 createBackup 判它失败，理由在 result（BackupFailed）的 message。
+      return {
+        ok: false,
+        reason:
+          "改组织前的备份没做成，拒绝提交（§6.5：改组织之前要留一份能回到起点的快照）。" +
+          "原因：" + bk.result.message,
+        code: "backup_failed",
+      };
+    }
+    // 备份成功，继续。③ 查 running tasks（事务外，见函数上方那段）。
+    assertSingleStatement(RUNNING_TASKS_SQL);
+    const rows = o.queue.readConnection().prepare(RUNNING_TASKS_SQL).all();
+    const runningTasks = rows.map((r) => String(r.id));
+    // ② 提交。
+    return commitOrgGraph(o.queue, {
+      graph,
+      change,
+      actor: ORG_COMMIT_ACTOR,
+      runningTasks,
+      nowMs: o.nowMs(),
+      changeSummary,
+    });
   };
 }
 

@@ -263,14 +263,14 @@ import 一个 http 模块），往下挪了 23 行。行内容一字未变。
   > `AUDIT_ACTIONS` 枚举同性质（0010 §4 判过：实现层不擅自扩契约面）」，那句的**结论对、依据错**，
   > 标【撤回】后重写。错在「契约面」那三个字的出处：我当时是从规格找的，而
   > `grep -nE "GET /|POST /|PUT /" docs/OPC-OS-设计文档.md` **零命中** —— 规格根本不列端点。
-  > 真正的契约面住在 `packages/contracts/src/api.ts:39` 那张 `API_ENDPOINTS`（写时六个端点，0031 之后十二个），
+  > 真正的契约面住在 `packages/contracts/src/api.ts:40` 那张 `API_ENDPOINTS`（写时六个端点，0031 之后十二个），
   > 它自己的注释就是这件事的判据原文：『让「多一个端点」成为一次可 review 的显式改动，
   > 而不是某个人在 app.ts 里顺手 app.get(...) 加的一行』。
   > 所以准确的读法不是「规格把这个值冻住了、我不能动」，而是
   > 「**契约自己要求加端点这件事走一次 review**」—— 这条改的是**该找谁**（走契约变更），
   > 不是**能不能做**。
   > 顺带量到一件影响**动手顺序**的事：那张表里已经有 `GET /replay/:taskId`
-  > （`packages/contracts/src/api.ts:92` 的 `UNIMPLEMENTED_ENDPOINTS`，
+  > （`packages/contracts/src/api.ts:95` 的 `UNIMPLEMENTED_ENDPOINTS`，
   > 当时注释写明「Phase 3（Task 3.4 回放时间线）填充，本期返回 501」，
   > **那句话到 Task 3.4 落地时已经不成立** —— 端点进了 IMPLEMENTED，那张表变成空的，
   > 见 0013 §6（以及它 §11 那条「本轮没做到」里的 UI 缺口），

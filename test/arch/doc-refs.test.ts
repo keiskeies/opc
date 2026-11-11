@@ -177,7 +177,7 @@ const SNAP: Record<string, string> = {
   // 而本轮 real-deps.ts 恰好就不止一处改动）。这是本守卫第【五】次抓同一件事。
   "0016-parallel-branches-role-memory-and-an-assertion-engine-that-saw-nothing.md>packages/hub/src/memory/role-memory.ts:605":
     'has_review_decisions: rows.some((r) => r.action === "review_decision"),',
-  "0016-parallel-branches-role-memory-and-an-assertion-engine-that-saw-nothing.md>packages/hub/src/http/real-deps.ts:268":
+  "0016-parallel-branches-role-memory-and-an-assertion-engine-that-saw-nothing.md>packages/hub/src/http/real-deps.ts:290":
     'action: "approval",',
   "0016-parallel-branches-role-memory-and-an-assertion-engine-that-saw-nothing.md>packages/hub/src/events/recorder.ts:239":
     'const DEFAULT_ACTOR = { actorType: "system", actorId: "hub" } as const;',
@@ -201,7 +201,7 @@ const SNAP: Record<string, string> = {
     "const config = JSON.parse(prev.config) as Record<string, unknown>;",
   "0015-charter-editor-and-two-sources-of-budget.md>0001_init.sql:144":
     "CREATE TABLE role_charters (",
-  "0015-charter-editor-and-two-sources-of-budget.md>http/app.ts:966":
+  "0015-charter-editor-and-two-sources-of-budget.md>http/app.ts:1002":
     'consumed_cents: Number(r["consumed_cents"] ?? 0),',
   "0015-charter-editor-and-two-sources-of-budget.md>tracker.ts:233":
     "const breached = before <= limit && after > limit;",
@@ -291,9 +291,9 @@ const SNAP: Record<string, string> = {
   // 第二条的**行号在本篇写完后动过一次**（56 → 64）：Task 3.4 把 replay 搬进
   // IMPLEMENTED 之后，那张表头上多注释了一段。这正是活坐标该有的反应 ——
   // 快照当场红，逼人重读那段论证，而不是让文档继续指着一句 `/**` 讲 UNIMPLEMENTED。
-  "0012-org-versioned-commit-and-unwritten-graph-version.md>packages/contracts/src/api.ts:39":
+  "0012-org-versioned-commit-and-unwritten-graph-version.md>packages/contracts/src/api.ts:40":
     "export const API_ENDPOINTS = [",
-  "0012-org-versioned-commit-and-unwritten-graph-version.md>packages/contracts/src/api.ts:92":
+  "0012-org-versioned-commit-and-unwritten-graph-version.md>packages/contracts/src/api.ts:95":
     "export const UNIMPLEMENTED_ENDPOINTS: readonly ApiEndpoint[] = [];",
   // 0013 §10.1 那次【撤回】的三块砖。这一组与前面几组的性质不同：前面抓的是
   // 「文档引用的那行代码挪了」，这一组抓的是「文档引用的那条**注释**不再成立」。
@@ -313,11 +313,11 @@ const SNAP: Record<string, string> = {
   // INSERT_CARD_SQL，那句 grep 现在是 INSERT 1 处 + UPDATE 3 处（另一条 UPDATE 在
   // policy/auto-approve.ts）。这一格仍然值得当活坐标，但它的意义变了：
   // 原本它证的是「只有 UPDATE 没有 INSERT」，现在它证的是「CEO 那条认领 SQL 的形状还在」。
-  "0013-replay-timeline-search-and-a-test-with-zero-discriminating-power.md>real-deps.ts:177":
+  "0013-replay-timeline-search-and-a-test-with-zero-discriminating-power.md>real-deps.ts:199":
     '"UPDATE approvals SET status = ?, decided_by = ?, decided_at = ?, decision_note = ? " +',
   // 「条件写匹配 0 行 ⇒ 安静地什么都不发生」这一条实测的出处。
   // 它是 §10.1 末段那条「Task 3.5 必须带存在性断言」的判据来源。
-  "0013-replay-timeline-search-and-a-test-with-zero-discriminating-power.md>real-deps.ts:256":
+  "0013-replay-timeline-search-and-a-test-with-zero-discriminating-power.md>real-deps.ts:278":
     "if (Number(info.changes) === 0) return null; // 没抢到：不写审计",
   // 0002 §4 那条「schema 看着开放」论证的唯一落点：platform 那一列的注释枚举了三个平台。
   // 它必须是活坐标 —— 那篇的排除理由里【最硬的一条】依赖「这套形状从第一天起没给个人微信留位」，
@@ -353,13 +353,13 @@ const SNAP: Record<string, string> = {
   // 把那个 `never` 赋值删掉、或改掉 `ipc-surface.test.ts:129` 那条包含断言，
   // 0030 §9 那句「真正无人断言的只剩『已实现而未接桌面』这一个方向」就不再成立，
   // 而它是 CEO 拍不拍那一项的**唯一**依据。快照在这里红了就是逼重读 §9。
-  "0030-im-binding-identity-and-three-holes-i-did-not-design.md>contracts/src/api.ts:39":
+  "0030-im-binding-identity-and-three-holes-i-did-not-design.md>contracts/src/api.ts:40":
     "export const API_ENDPOINTS = [",
-  "0030-im-binding-identity-and-three-holes-i-did-not-design.md>contracts/src/api.ts:69":
+  "0030-im-binding-identity-and-three-holes-i-did-not-design.md>contracts/src/api.ts:71":
     "export const IMPLEMENTED_ENDPOINTS: readonly ApiEndpoint[] = [",
   "0030-im-binding-identity-and-three-holes-i-did-not-design.md>ipc-surface.ts:150":
     "export const EXPOSED_ENDPOINTS: readonly ApiEndpoint[] = IMPLEMENTED_ENDPOINTS;",
-  "0030-im-binding-identity-and-three-holes-i-did-not-design.md>app.ts:441":
+  "0030-im-binding-identity-and-three-holes-i-did-not-design.md>app.ts:467":
     "const impossible: never = routeHit;",
   "0030-im-binding-identity-and-three-holes-i-did-not-design.md>ipc-surface.test.ts:129":
     "expect(API_ENDPOINTS).toContain(s.endpoint);",

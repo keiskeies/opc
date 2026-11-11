@@ -66,6 +66,8 @@ export {
   type BindingRequest,
   bindingVerifyRequestSchema,
   type BindingVerifyRequest,
+  type CommitOrgChangeRequest,
+  commitOrgChangeRequestSchema,
   createTaskRequestSchema,
   type CreateTaskRequest,
   decodeSseFrame,

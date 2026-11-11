@@ -298,13 +298,13 @@ M10 一开始报「全绿」时我的第一反应是「这条测试真守不住�
 唯一的命中是 `packages/hub/src/http/real-deps.ts:7` 的一句**注释**，
 而那句注释自己写的就是「⇒ 0 命中」和「全仓唯一写 approvals 的代码在两个测试文件的
 **【夹具】**里」（`:8`）。也就是说 **src 里没有任何一条 `INSERT INTO approvals`**，
-唯一的写是 `real-deps.ts:177` 的
+唯一的写是 `real-deps.ts:199` 的
 `CLAIM_APPROVAL_SQL = "UPDATE approvals SET status = ?, decided_by = ?, decided_at = ?, decision_note = ? WHERE id = ? AND status = 'pending'"`。
 UPDATE 不创建行。全仓的 `INSERT INTO approvals` 只出现在三个测试文件的夹具里
 （`http/contract.test.ts`、`http/real-deps.test.ts`、`db/schema-0001.test.ts`）。
 
 **为什么这条错值得单独一节，而不只是改两个字**：UPDATE-with-`status = 'pending'` 是
-**条件写**，库里没有那一行时它匹配 0 行。实测（`real-deps.ts:256` 那一行
+**条件写**，库里没有那一行时它匹配 0 行。实测（`real-deps.ts:278` 那一行
 `if (Number(info.changes) === 0) return null; // 没抢到：不写审计`，由
 `real-deps.test.ts` 覆盖）说明它的行为是
 「安静地什么也没发生」，而**没有任何东西创建那张卡片**：
