@@ -96,6 +96,7 @@ import {
 import {
   commitOrgGraph,
   currentGraphVersion,
+  readLatestGraph,
   RUNNING_TASKS_SQL,
 } from "../org/commit.js";
 import {
@@ -708,6 +709,29 @@ export function buildHubDeps(o: RealHubDepsOptions): HubDeps {
             nowMs: () => now(),
           }),
         }),
+    // 组织图的读路径（GET /org，0040 的配套读侧）。读不改表、不需要备份，
+    // 所以【无条件装】（同 deps.db 那只看读连接：读路径不该被写装配卡住）。
+    // 走 o.queue.readConnection() —— 与 deps.db 同源，但贴合「组织的读不归 bindings
+    // 那条集群读」的归属（org/commit.ts 文件头「HTTP 是组织功能的一个入口」）。
+    readOrgGraph: (() => {
+      const db = o.queue.readConnection();
+      return () => {
+        const latest = readLatestGraph(db);
+        if (latest === null) return { versions: 0 };
+        return {
+          versions: latest.version, // 最新版本号即「提交过的层数」（版本从 1 起连续）。
+          version: latest.version,
+          graph: latest.graph,
+          graphId: latest.graphId,
+          effectiveFromMs: latest.effectiveFromMs,
+          // exactOptionalPropertyTypes：changeSummary 可能为 null，不能给 undefined，
+          // 用条件展开把「没有 summary」表达成缺键（和 graphId/effectiveFromMs 同族）。
+          ...(latest.changeSummary === null
+            ? {}
+            : { changeSummary: latest.changeSummary }),
+        };
+      };
+    })(),
     resumeGraph,
   };
 }

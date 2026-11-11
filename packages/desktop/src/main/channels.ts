@@ -168,6 +168,12 @@ export function toHttpRequest(
       // （不是「以后补」），所以这里也没有对应分支 —— 有人加通道时会先在
       // toHttpRequest 这里撞上一次「忘了加分支」的抛，那是刻意的次序。
       return { path: "/bindings", init: { method: "GET" } };
+    case "hub:getOrg":
+      // 组织图读侧（0040）。无 query（「当前生效那一份」= 服务端默认口径）。
+      // 提交那条 POST /org【没有】通道：self-escaping CEO 写，理由整段在
+      // ipc-surface.ts 的 hub:getOrg 注释（与 hub:listBindings 的 ①②③ 同判断），
+      // 所以这里也只有读分支 —— 有人加写通道时会先在 toHttpRequest 撞抛。
+      return { path: "/org", init: { method: "GET" } };
     case "hub:decideApproval": {
       const o = (args ?? {}) as { approvalId?: string; resume?: string; note?: string };
       const body: Record<string, unknown> = { resume: o.resume };

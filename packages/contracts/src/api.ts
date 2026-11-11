@@ -51,6 +51,7 @@ export const API_ENDPOINTS = [
   "POST /bindings/verify",
   "POST /bindings/rebind",
   "POST /org",
+  "GET /org",
 ] as const;
 export type ApiEndpoint = (typeof API_ENDPOINTS)[number];
 
@@ -82,6 +83,7 @@ export const IMPLEMENTED_ENDPOINTS: readonly ApiEndpoint[] = [
   "POST /bindings/verify",
   "POST /bindings/rebind",
   "POST /org",
+  "GET /org",
 ];
 
 /**

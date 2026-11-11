@@ -165,6 +165,15 @@ export function currentGraphVersion(db: DbLike): number {
 export const SELECT_GRAPH_BY_VERSION_SQL =
   "SELECT graph_json FROM delegation_graphs WHERE version = ?";
 
+/** 读出一张图 + 它的元数据（GET /org 用；graph_json 之外还要 id/effective_from/change_summary）。 */
+export const SELECT_GRAPH_WITH_META_BY_VERSION_SQL =
+  "SELECT id, version, graph_json, effective_from, change_summary FROM delegation_graphs WHERE version = ?";
+
+/** 读 MAX(version) 那一行：图 + 元数据 + 当前版本号，一次查询拿全。 */
+export const SELECT_LATEST_GRAPH_SQL =
+  "SELECT id, version, graph_json, effective_from, change_summary FROM delegation_graphs ORDER BY version DESC LIMIT 1";
+
+
 /**
  * 提交前必须过的三关。返回第一条不通过的理由。
  *
@@ -374,4 +383,39 @@ export function readGraphByVersion(db: DbLike, version: number): OrgGraph {
     );
   }
   return JSON.parse(row.graph_json) as OrgGraph;
+}
+
+/**
+ * 读【当前生效】那一张图 + 元数据（GET /org 的装配原料）。
+ *
+ * 返回 `null` 表示 delegation_graphs 从没写过任何版本（versions === 0）。
+ * 注意与 readGraphByVersion 的差异：那一只是「按版本读、版本缺失【抛错】」
+ * （§18.4 阶段 3 的判据：旧任务的 graph_version 绝不退回最新版）；而这里是
+ * 「读当前最新」，无图不是错而是「还没有这个资源」—— 由这本函数用空返回表达。
+ */
+export function readLatestGraph(db: DbLike): {
+  graph: OrgGraph;
+  graphId: string;
+  version: number;
+  effectiveFromMs: number;
+  changeSummary: string | null;
+} | null {
+  assertSingleStatement(SELECT_LATEST_GRAPH_SQL);
+  const row = db.prepare(SELECT_LATEST_GRAPH_SQL).get() as
+    | {
+        id: string;
+        version: number;
+        graph_json: string;
+        effective_from: number;
+        change_summary: string | null;
+      }
+    | undefined;
+  if (row === undefined) return null;
+  return {
+    graph: JSON.parse(row.graph_json) as OrgGraph,
+    graphId: row.id,
+    version: Number(row.version),
+    effectiveFromMs: Number(row.effective_from),
+    changeSummary: row.change_summary,
+  };
 }

@@ -46,11 +46,11 @@ $ grep -rn "INSERT INTO budgets" --include='*.ts' packages/hub/src
 $ grep -rn "declareLimit(" --include='*.ts' packages/hub/src packages/hub/test test | grep -v "src/budget/tracker.ts"
    ⇒ 命中全在 test/。⇒ declareLimit 在【生产】里一次都没被调过。
 $ grep -rn "consumed_cents" --include='*.ts' packages/hub/src
-   ⇒ 除 tracker 的 `consumed_cents + ?` 之外，只有一处【读】（http/app.ts:1002 读来显示）。
+   ⇒ 除 tracker 的 `consumed_cents + ?` 之外，只有一处【读】（http/app.ts:1034 读来显示）。
 ```
 
 > **行号与后效（Task 4.1 重测时补）**：上面那条 grep 报的 438 是当时的行号，现在那条读
-> 在 `http/app.ts:1002`（同一行内容：Task 4.1 那轮顶下去 431 行，0031 那轮又顶下去 97 行。
+> 在 `http/app.ts:1034`（同一行内容：Task 4.1 那轮顶下去 431 行，0031 那轮又顶下去 97 行。
 > 同一行内容被顶过两次而无人重读坐标 —— 这正是快照守卫存在的全部理由）。
 > 另外上面那四条测的是**本轮动手之前**的仓库，本轮自己就否掉了其中两条：
 > `INSERT INTO budgets` 现在除了 tracker 那一处还有 `charter/budget-sync.ts` 的一处，
@@ -124,7 +124,7 @@ $ grep -rn "consumed_cents" --include='*.ts' packages/hub/src
 - **没有编辑器界面**。计划写的是 `feat(web)`，本轮交付的是它下面那一层。原因还是 0009 §2 那三条通路（装不上 `@xyflow/react` 那一组）。表单页本身不需要 React Flow，但需要 React + 路由 + IPC 那一套，而 `test/desktop/ipc-surface.test.ts` 用 `toEqual` 钉住 IPC 面、本机没有 Electron 可验（0009 §7 已经报过这本账）。
 - **没有 HTTP 端点**。加一个端点要同时动 `contracts/api.ts` / `http/app.ts` / `desktop/main/channels.ts` / `preload/api.ts` 四处并被那条 IPC 守卫钉住。所以 `saveCharterVersion` / `syncCharterBudgets` / `readBudgetTiers` 今天的运行时消费者是 **0**（同族缺陷**第六次**：0011 §8 / 0012 §7 / 0013 §7 / 0013 §10.1 / 0014 §3 / 本轮）。发现方式仍然是**写文档时顺数据源往下摸**，不是「想到去查调用方」—— 第六次了，说明那个习惯还是没建立。
   这一族我在 0014 学到的处置沿用了：把缺口本身**钉成断言**（两个测试文件各有一节扫 `src` 目录，断言 `charter/` 之外零调用方），接线那天它会红。
-- **`org/commit.ts` 那条 bump 路径不落预算**，也不经过 `saveCharterVersion`（§3）。准确的状态是：它**逐字复制** `prev.config` 再改一个 `reportsTo`（`org/commit.ts:295-301`），所以它写出的形状**取决于上一版存的是什么**，本身不会丢字段；而且**它今天根本不触发** —— 表是 0 行（事实 ①），`if (prev === undefined) continue` 每次都跳过。【撤回】我在此处原写「它写的还是旧 config 形状（缺 `modelTier`）」：那是我没实测就写下的具体断言，实测 org/commit 并不硬编码任何形状，缺 `modelTier` 的是 `test/org/versioning.test.ts` 的**测试夹具**（那是 assertCharterShape 用例举的例子，不是生产会写出的东西）。这条**不在本轮范围内修**，因为改它要同时决定「组织变更要不要改限流」（那是 §9 第三项）。
+- **`org/commit.ts` 那条 bump 路径不落预算**，也不经过 `saveCharterVersion`（§3）。准确的状态是：它**逐字复制** `prev.config` 再改一个 `reportsTo`（`org/commit.ts:304-310`），所以它写出的形状**取决于上一版存的是什么**，本身不会丢字段；而且**它今天根本不触发** —— 表是 0 行（事实 ①），`if (prev === undefined) continue` 每次都跳过。【撤回】我在此处原写「它写的还是旧 config 形状（缺 `modelTier`）」：那是我没实测就写下的具体断言，实测 org/commit 并不硬编码任何形状，缺 `modelTier` 的是 `test/org/versioning.test.ts` 的**测试夹具**（那是 assertCharterShape 用例举的例子，不是生产会写出的东西）。这条**不在本轮范围内修**，因为改它要同时决定「组织变更要不要改限流」（那是 §9 第三项）。
 - **预算的「已消费」永远单调不减**：`daily` 这个 period 名字暗示每天归零，而 src 里**没有归零路径**（实测）。所以「今天的日预算」实际是「自首条消费以来的总额」。这是 `BudgetTracker` 的既有行为、Task 1.6 的验收范围之外，但**它让 §21.3 那句「日消耗 vs 预算」的条形从一开始就是错的**。登记在此，不在本轮改（改归零时机是新的运行期行为）。
 - 未跑 `pnpm verify`（本机装不上依赖，沿 0009 §2）。本轮跑的是：
   - 全量 **786 例 / 741 pass / 37 fail**（上一轮基线 743/698/37：用例数 +43，失败数不变）。

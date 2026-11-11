@@ -388,12 +388,12 @@ verified = 0   ceo_role = 'ceo'   verified_by = 'ceo'
 1. **「三张手抄的端点表」不存在。** `contracts/src/api.ts` 的 `:35` 实测是 `API_ENDPOINTS`
    **数组中间的一个条目**、`:52` 在**一段注释里**、`:61` 又是 `IMPLEMENTED_ENDPOINTS`
    的一个条目 —— 我把「grep 命中 `POST /approvals/…` 的三行」当成了「三张表」。
-   真实的清单是 `contracts/src/api.ts:40` 与 `contracts/src/api.ts:71` **两张**，
+   真实的清单是 `contracts/src/api.ts:40` 与 `contracts/src/api.ts:72` **两张**，
    而 `UNIMPLEMENTED_ENDPOINTS`（同文件 `:96`）**是空数组**；
-   桌面侧 `ipc-surface.ts:150` 的 `EXPOSED_ENDPOINTS` 是 `= IMPLEMENTED_ENDPOINTS` 的**别名**，
+   桌面侧 `ipc-surface.ts:171` 的 `EXPOSED_ENDPOINTS` 是 `= IMPLEMENTED_ENDPOINTS` 的**别名**，
    不是第三份手抄 —— 别名不会漂，**手抄才会**，而我把别名数成了手抄，于是「七处」里有一处是凭影子加的。
 2. **「没有一处会替你报错」是错的，而且错在**最**该有守卫的那两处**：
-   - `app.ts:467` 是 `const impossible: never = routeHit` ——
+   - `app.ts:489` 是 `const impossible: never = routeHit` ——
      `Route` 加了一种 kind 而 `handleRequest` 没跟上 ⇒ **编译期就不过**（那段注释自己写着
      「漏分支 ⇒ 这一行编译不过」）；
    - `ipc-surface.test.ts:129-130` 断言每个 `CHANNEL_SPECS` 条目的端点**必须同时在**
@@ -405,7 +405,7 @@ verified = 0   ceo_role = 'ceo'   verified_by = 'ceo'
    反方向 —— 「端点已实现（`matchRoute` 有它、`handleRequest` 有分支、
    两张清单里有它）而**桌面侧没接线**」—— **没有任何断言**：
    `channelFor()` 对没接线的端点**返回 null 是设计行为**
-   （`ipc-surface.ts:158` 那段注释写着「未实现的端点不进白名单」，
+   （`ipc-surface.ts:179` 那段注释写着「未实现的端点不进白名单」，
    而 `:134` 那条测试 `channelFor("GET /replay/:taskId")` 断言的正是 null）。
    ⇒ 后果说得准一点：**HTTP 那一条能通、curl 得到 200、测试全绿，而桌面应用里点不到它**
    —— 不是「哪儿都不报错」，是**恰好在这一条边上不报错**，而这条边正好是
@@ -413,7 +413,7 @@ verified = 0   ceo_role = 'ceo'   verified_by = 'ceo'
 
 所以真实的接线代价是（**按声明处数**，不是按 grep 命中数）：
 `Route` 联合 + `handleRequest` 分支（这两处**编译期**逼你成对改）、
-`contracts/src/api.ts:40` 与 `contracts/src/api.ts:71` 两张清单、`ipc-surface.ts` 的 `CHANNEL_SPECS` 条目
+`contracts/src/api.ts:40` 与 `contracts/src/api.ts:72` 两张清单、`ipc-surface.ts` 的 `CHANNEL_SPECS` 条目
 + `INVOKE_METHODS` 映射 + 渲染侧那个方法（这三处**有断言**，漏了会红）、
 以及 `preload/api.ts` 那层转发。
 **「漏了不报错」的那一格只有「已实现而未接桌面」这一个方向**，

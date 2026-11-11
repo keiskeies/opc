@@ -148,7 +148,20 @@ describe("通道与端点对齐", () => {
     // 反向：读那一条【有】通道。少了这一发，上面那个循环在
     // 「四条全都没通道」的世界里也全绿 —— 那正是本文件反复防的恒绿形状。
     expect(channelFor("GET /bindings")).toBe("hub:listBindings");
-    // 而主进程那边也不许有对应的 URL 拼装分支（两条判据各自成立：
+    // 组织那条（0040）同一条线：读【有】通道（看板拉图），self-escalating 的写【没有】。
+    // 分开断言，各自钉住 —— 若只断言「getOrg 有通道」，一个「连写也给了通道」的
+    // 改动会让它全绿；反过来只断言「POST /org 没通道」，一个没有实现读侧的世界也全绿。
+    expect(channelFor("GET /org")).toBe("hub:getOrg");
+    expect(IMPLEMENTED_ENDPOINTS).toContain("POST /org");
+    expect(channelFor("POST /org")).toBeNull();
+    // 主进程那边也不许有组织【写】的 URL 拼装分支（同 bindings 那组：加通道而没加分支
+    // ⇒ 拿到一次带原文的抛；加分支而 CHANNEL_SPECS 没登记 ⇒ dispatch 到不了它）。
+    const mainSrc2 = readFileSync(MAIN_SRC, "utf8");
+    expect(mainSrc2).not.toMatch(/"\/org"\s*,\s*\{\s*init:\s*\{\s*method:\s*"POST"/u);
+    // 渲染侧【不能】有名字里带 commitOrg 的方法形状泄漏进 preload。
+    const api2 = createExposedApi(fakeIpc().bridge) as Record<string, unknown>;
+    expect(Object.keys(api2).filter((k) => /commitOrg|commit_org/iu.test(k))).toEqual([]);
+    // 主进程那边也不许有对应的 URL 拼装分支（两条判据各自成立：
     // 有人在 toHttpRequest 加了分支而没加通道 ⇒ dispatch 到不了它；
     // 有人加了通道而没加分支 ⇒ 拿到一次带原文的抛，指向唯一成因）。
     const mainSrc = readFileSync(MAIN_SRC, "utf8");
@@ -178,12 +191,16 @@ describe("通道与端点对齐", () => {
     await api.getTask({ taskId: "t-1" });
     await api.listApprovals();
     await api.decideApproval({ approvalId: "a-1", resume: "approve" });
+    await api.listBindings();
+    await api.getOrg();
     expect(f.calls.map((c) => c.channel)).toEqual([
       "hub:createTask",
       "hub:listTasks",
       "hub:getTask",
       "hub:listApprovals",
       "hub:decideApproval",
+      "hub:listBindings",
+      "hub:getOrg",
     ]);
   });
 
@@ -380,6 +397,7 @@ const INVOKE_METHODS: Record<string, string> = {
   "hub:listApprovals": "listApprovals",
   "hub:decideApproval": "decideApproval",
   "hub:listBindings": "listBindings",
+  "hub:getOrg": "getOrg",
 };
 
 /* ───────────────── 主进程侧分发（Task 2.2 的 src/main 半边） ───────────────── */
@@ -399,7 +417,7 @@ describe("主进程分发", () => {
     };
   };
 
-  it("五个 invoke 通道映射到【正确的端点与方法】", async () => {
+  it("六个 invoke 通道映射到【正确的端点与方法】", async () => {
     const f = fetchReturning(200, { id: "t-1" });
     const deps: MainDeps = { signedFetch: f.signedFetch };
     await dispatch(deps, "hub:createTask", { idea: "x" });
@@ -407,12 +425,16 @@ describe("主进程分发", () => {
     await dispatch(deps, "hub:getTask", { taskId: "t-9" });
     await dispatch(deps, "hub:listApprovals", undefined);
     await dispatch(deps, "hub:decideApproval", { approvalId: "a-9", resume: "approve" });
+    await dispatch(deps, "hub:listBindings", undefined);
+    await dispatch(deps, "hub:getOrg", undefined);
     expect(f.calls.map((c) => c.method + " " + c.path)).toEqual([
       "POST /tasks",
       "GET /tasks",
       "GET /tasks/t-9",
       "GET /approvals",
       "POST /approvals/a-9",
+      "GET /bindings",
+      "GET /org",
     ]);
   });
 

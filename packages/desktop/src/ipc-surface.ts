@@ -59,6 +59,7 @@ export type IpcChannel =
   | "hub:listApprovals"
   | "hub:decideApproval"
   | "hub:listBindings"
+  | "hub:getOrg"
   | "hub:subscribeEvents";
 
 export interface ChannelSpec {
@@ -131,6 +132,26 @@ export const CHANNEL_SPECS: readonly ChannelSpec[] = [
   {
     channel: "hub:listBindings",
     endpoint: "GET /bindings",
+    kind: "invoke",
+    args: "none",
+  },
+  /**
+   * 组织图那张看板（0040）。读侧 —— 让看板把「保存」的成果显示出来：
+   * POST /org 写了新图后，活客户端判定「我落后了」时拉 `/org`，拿到的那份
+   * graph_json 里【终于有内容】可显示（0012 §9 那句「对与错都不会显示」就此闭合）。
+   * 无参：与服务端「当前生效那一份」的口径一致（`?version=` 回放读不在射程）。
+   *
+   * 为什么要这条通道而【不】给 `POST /org`，与上面 hub:listBindings 的 ①②③
+   * 是【同一个判断】：提交组织变更是 self-escalating 的 CEO 写（[spec] §4.2.3
+   * 组织权集中给 CEO），把它做成渲染进程里的一个按钮 = 让任何能在渲染进程里
+   * 执行脚本的东西都拿到那一次写（一次 XSS 就从「读看板」升级成「改组织本身」，
+   * 比 bindings 那三条还重一档）。所以对组织的写，合法入口是【人 + CLI】走
+   * curl（回环 + 装配上的 --backup-dir），与 bindings 的 verify/rebind 同一条线。
+   * 渲染进程能拿到的只有「拉那张图」，那已经够「保存成果显示出来」这一格了。
+   */
+  {
+    channel: "hub:getOrg",
+    endpoint: "GET /org",
     kind: "invoke",
     args: "none",
   },

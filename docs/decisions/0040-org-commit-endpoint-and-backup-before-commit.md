@@ -4,9 +4,9 @@
   **组织变更的生产入口长什么样、为什么只开回环、备份摆在哪**。三处都属「产品设计的出发角度 /
   设计逻辑 / 用户体验」这一档，不是 CEO 专属的不可逆账目决定。
 - **产出**：`packages/contracts` `POST /org` 端点 + `commitOrgChangeRequestSchema` +
-  `http/org.ts`（回环门 + handler）+ `http/real-deps.ts` 的 `makeCommitOrgChange`
-  （备份在前、失败即拒）+ `serve/assemble.ts` 用 `--backup-dir` 装这条链 +
-  `http/org-route.test.ts` 新测试。
+  `http/org.ts`（回环门 + handler + **`GET /org` 配套读侧**）+ `http/real-deps.ts` 的
+  `makeCommitOrgChange`（备份在前、失败即拒）+ `makeReadOrgGraph`（读当前生效图）+
+  `serve/assemble.ts` 用 `--backup-dir` 装这条链 + `http/org-route.test.ts` 新测试。
 - **一句话结论**：⭐ **`commitOrgGraph` 在生产里整整关了二十篇的零调用方，本篇把那个洞补上**
   —— 而补的方式是由**三条能互相打红**的判据钉住的：`POST /org` 只开回环（self-escalating
   CEO 写）· actor 只从装配来 · **备份在提交之前、失败就拒绝提交**（【规格】§6.5 那两件事的落地形态）。
@@ -124,22 +124,37 @@ handler 里，也不在 commitOrgGraph 里 —— 于是「忘了备份」不可
    `needsConfirmation`（有运行中任务时那句「要 CEO 再确认」），差一条正在 superstep 中间的
    任务，最坏是多/少一次确认提示，不是权限或审计错。
 3. **没有把「改组织广播回看板」接上**。0012 记过组织变更不广播、消费掉的 seq 留空洞那件事；
-   本篇补的是**入口**，广播那半（回放/日报读到经度）是另一篇的事，不在射程内。
+   本篇补的是入口 + **配套读侧**（`GET /org` 让活客户端「检出 stale → 重拉快照」这一格能拿到内容），
+   广播那半（回放/日报读到经度）是另一篇的事，不在射程内。
 4. **桌面 IPC 侧没接**（`desktop/ipc-surface.ts` 的 `EXPOSED_ENDPOINTS = IMPLEMENTED_ENDPOINTS`
-   是恒等式，所以 `POST /org` 自动落进渲染进程可达面，但今天 `channelFor("commit_org")` 返回
-   null —— 同 0027 §8 / 0031 那格的形状，桌面那条通道是跳过的判据不是漏做的）。
+   是恒等式，所以 `POST /org` / `GET /org` 自动落进渲染进程可达面，但今天 `channelFor("commit_org")`
+   仍返回 null —— 同 0027 §8 / 0031 那格的形状，桌面那条通道是跳过的判据不是漏做的）。
+
+## 6.5 本篇还补的读侧：GET /org（0040 的配套读）
+
+0012 §9 记着「检出之后拿不回组织图 —— 没有任何读端点」。POST /org 立了写约，本函数补上配套的读：
+
+- `GET /org` 返回**当前生效**那份图（delegation_graphs 的 MAX(version)）+ 版本元数据 —— 把
+  「保存按钮的成果显示出来」这一格补上：客户端判定「我落后了」时，重拉到的快照里终于有图。
+- 【不是】回环专用：读不回写、不是 self-escalating 的 CEO 写，走与 GET /tasks / GET /approvals /
+  GET /bindings 相同的统鉴权（回环 HMAC；远程 401 —— §20.3 只授权「审批」出本机）。分岔落在
+  route() 那道门，handler 里不重复判回环（读不变更任何东西）。
+- 空存（从没提交过）⇒ `{ graph: {nodes:{}, edges:[]}, graph_version: 0 }`：是「还没有这个资源」
+  不是 404/500（同 GET /tasks 空列表回 [] 的口径）。
+- 只做「当前生效」这一份；`?version=` 回放读推迟（readGraphByVersion 在版本缺失时抛错，§18.4 那行
+  注释），那些属另一族消费方，不在本篇射程。
 
 ## 8. 别当成做到了
 
-⚠ **这一篇只证明「保存按钮的入口能跑」**，不证明「组织图真的被桌面端/CLI 用起来」：
-`commitOrgGraph` 有了一个能打的 HTTP 入口，而调用它的那条 UI/CLI 通道（拖拽落下的那一刻真的
-POST /org）**今天仍没有**。α 档结论是「生产路径已备好」+「已接线（有一处）」两条并排钉
-（同 0026 §7 那两处守卫），本篇只钉了后者，前者照旧欠着 —— 桶身那个「保存」按钮在哪。
-`pnpm verify` 仍跑不起来；下面那些绿是 harness 绿，不是门禁绿。
+⚠ **这一篇证明「保存按钮的入口能跑」+「保存之后读侧能拿回那张图」**，不证明「组织图真的被桌面端/CLI
+用起来」：`commitOrgGraph` 有了能打的 HTTP 入口，`GET /org` 有了配套读侧，而调用它们的**那条 UI/CLI 通道**
+（拖拽落下的那一刻真的 POST /org、看板真的去 GET /org 显示）**今天仍没有**。α 档结论是「生产路径已备好」
++「已接线（有一处）」两条并排钉（同 0026 §7 那两处守卫），本篇钉了后者，前者照旧欠着 —— 桶身那个「保存」
+按钮在哪。`pnpm verify` 仍跑不起来；下面那些绿是 harness 绿，不是门禁绿。
 
 ## 9. 实跑
 
-- `http/org-route.test.ts` 新增 **9 发**（describe 分 ① 路由形状 2 · ② 回环门 1 · ③ 请求体严格 2 · ④ 装配与备份编排 4）。
+- `http/org-route.test.ts` 新增 **13 发**（describe 分 ① 路由形状 2 · ② 回环门 1 · ③ 请求体严格 2 · ④ 装配与备份编排 4 · ⑤ GET /org 读侧 4）。
 - `tsc -b --force` 回到 **34 = 基线**：本篇新增那三条（real-deps.ts 的 exactOptionalPropertyTypes 返回型、`BackupResult` union 的 `message` 收窄、`readConnection().prepare().all()` 的非法 cast）都消掉了，剩下的 34 都是 pre-existing 的 @langchain/yaml 离线 module-not-found 集合——提交里那一格不再是「34 = 基线」而是「进 3 出 3，回到 34」。
 - `check-gate.mjs`「判不了或不符的项：**0 无**」。0040 入口里轮次相对指称 0 处。
 
@@ -153,3 +168,12 @@ POST /org）**今天仍没有**。α 档结论是「生产路径已备好」+「
 证据这 6 行是 load-flake 不是回归：`perf-thresholds.test.ts` **单独跑 8/8 全绿**（前台、无并发负载），且**没有任何一条红指向本篇代码**（`org-route` 不在红名单里；doc/arch 那 63 发守卫全绿）。⇒ 本篇**零新增真红**，红名单的抖动全部来自「跑全量时机器同时在忙」这个测试环境侧，不是行为回归。基线那 60 行红的内容（checkpoint / CLI 桩 / SQLite 依赖边界等）一字未动，逐字节核对过 `comm`：本轮 60 去重行去掉那 6 行 load-flake，其余 54 行与基线 `comm -12` 为空（即没有既有的红变成不红也没有新的红混进来）。
 
 `pnpm verify` 仍跑不起来 ⇒ 上面那些绿是 node:test + 自制 harness 给的，**不是门禁绿**。
+
+> **0040 之后的同篇迭代（GET /org 读侧 + 桌面 IPC 读通道）**：`org-route.test.ts` 从 9 发扩到 **13 发**
+> （新增 ⑤ 读侧 4 发）；`desktop/ipc-surface.test.ts` 从 28 扩到 **31 发** + 一条把「组织写无通道、读有通道」
+> 分开钉住的新断言。终跑 **1767 / 1721 / 38**；红名单对比只在去处重后出现一个「新」红 ——
+> `graph/fixtures/e2e-crash-child.ts`（child-process fixture 自身 import saver.ts），隔离跑证实是
+> `@langchain/langgraph-checkpoint` 离线缺失，与基线的 e2e-linear/step-tx/interrupt-resume 同一族，
+> **不是本篇代码**；另外 6 行基线红（A/B/C/D + hub status + 参数契约）本轮转绿，是已知 CLI 时序 flake。
+> tsc 仍 **34 = 基线**。desktop 侧：`channelFor("GET /org")` = `hub:getOrg`（读有通道），
+> `channelFor("POST /org")` = null（self-escaping CEO 写刻意不进渲染进程，同 bindings 那组理由）。

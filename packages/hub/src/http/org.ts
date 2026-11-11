@@ -138,3 +138,65 @@ export async function commitOrgRoute(
   }
   return res(HTTP_UNPROCESSABLE, { error: r.reason, code: r.code });
 }
+
+/**
+ * `GET /org` —— 取当前生效的组织图（◤0012 §9 那条「检出之后拿不回组织图」
+ * 的读侧；0012 §7 记过「先立约再补实现」的顺序，POST /org（0040）立了写约，
+ * 本函数补上配套的读）。
+ *
+ * ⚠ 为什么这条【不是】回环专用（对比 commitOrgRoute 那道环只开回环）：
+ * 读不回写、不是 self-escalating 的 CEO 权限写。POST /org 那道环防的是
+ * 「远程可提交 = 直接改组织本身」；读取组织图不改变任何东西，
+ * 所以它走和 GET /tasks / GET /approvals / GET /bindings 一样的那道鉴权
+ * （回环 HMAC；远程 401 —— §20.3 只授权「审批」出本机，读组织图没有那条授权）。
+ * 分岔由 route() 那道门统一处理，这里不再判一道回环。
+ *
+ * 返回值就是 commitOrgGraph 写进 graph_json 的那张 OrgGraph + 版本元数据，
+ * 于是「客户端检出 stale → 重拉快照」这条链在组织图这一格上终于【能拿到内容】：
+ * 一次组织变更之后，活客户端判定「我落后了」时，拉到的快照里终于有图可显示，
+ * 不再是一句「对与错都不会显示」（0012 §9 的原文）。
+ *
+ * 要不要支持 ?version=：组织图是【版本序列不是单资源】（0055 通用语），
+ * 读当前生效的那份（MAX(version)）覆盖「看板展示」这一格；
+ * 指定历史版本属回放那一族的消费方，且 readGraphByVersion 在版本缺失时是
+ * 【抛错】（§18.4 那行注释：不能退回最新版），那条 500 语义做进 query 要再想。
+ * 本篇只做「当前生效」这份 —— 它是把「保存按钮的成果显示出来」最少的一格。
+ */
+export function orgGraphRoute(
+  deps: HubDeps,
+  req: HubRequest,
+): HubResponse {
+  if (deps.readOrgGraph === undefined) {
+    // 与 POST /org 同一形状：路由在、契约里有，是这个装配没接读侧。
+    // 501 说得清修法（接上 buildHubDeps），不是 404「路由不存在」。
+    return res(HTTP_NOT_IMPLEMENTED, {
+      error:
+        "本装配未接组织图读取（HubDeps.readOrgGraph）。501 而不是 404：路由在，" +
+        "契约里有，是这个装配没把『读最新图』连起来。",
+    });
+  }
+  const r = deps.readOrgGraph();
+  if (r.versions === 0) {
+    // 从没提交过组织图。这不是 404（不是「这个资源不存在」而是「还没有这个资源」），
+    // 也不是 500（不是错）。空存：返回空图 + 版本 0，客户端据此显示「尚未建立组织」。
+    // 这一格与 tasks 的空列表同族：GET /tasks 在没有任务时回 [] 而不是 404。
+    return res(200, {
+      graph: {
+        nodes: {},
+        edges: [],
+      },
+      graph_version: 0,
+      effective_from: null,
+      as_of_ms: deps.now(),
+    });
+  }
+  return res(200, {
+    graph: r.graph,
+    graph_version: r.version,
+    graph_id: r.graphId ?? null,
+    effective_from: r.effectiveFromMs ?? null,
+    change_summary: r.changeSummary ?? null,
+    as_of_ms: deps.now(),
+  });
+}
+

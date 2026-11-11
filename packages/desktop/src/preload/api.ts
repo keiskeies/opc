@@ -84,6 +84,18 @@ export function createExposedApi(ipc: RendererBridge) {
     listBindings: (): Promise<unknown> => ipc.invoke("hub:listBindings"),
 
     /**
+     * 组织图看板（0040 读侧）。【无参】—— 与服务端「当前生效那一份」对齐，
+     * 不在这里发明一个 ?version= 的入参（那是回放读，不在看板这一格）。
+     *
+     * 为什么没有对应「提交组织变更」的方法，而 Hub 那条 POST /org 路由活着：
+     * 理由整段在 desktop/ipc-surface.ts 的 hub:getOrg 注释里（同 hub:listBindings
+     * 那一条的 ①②③）—— 一句话版是「渲染进程里没有任何东西能让一次组织变更
+     * 安全地等同于人 + CLI」。这里刻意【不】留一个注释掉的 commitOrg —— 留了
+     * 就会有人照着解开注释，而那一次解开不需要回答上面那一句。
+     */
+    getOrg: (): Promise<unknown> => ipc.invoke("hub:getOrg"),
+
+    /**
      * 订阅 Hub 事件。返回一个【退订函数】。
      *
      * 返回值不是 Promise：这不是一个请求，是一个监听。

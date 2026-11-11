@@ -55,7 +55,7 @@ import {
   requestBindingRoute,
   verifyBindingRoute,
 } from "./bindings.js";
-import { commitOrgRoute } from "./org.js";
+import { commitOrgRoute, orgGraphRoute } from "./org.js";
 import type { CommitResult } from "../org/commit.js";
 import { ResumeStream, type SnapshotSource } from "./sse.js";
 import { buildReplayView } from "../replay/query.js";
@@ -283,6 +283,26 @@ export interface HubDeps {
     readonly change: OrgChange;
     readonly changeSummary: string;
   }) => Promise<CommitResult>;
+  /**
+   * 组织图的**读路径**（GET /org，0040）。
+   *
+   * 取【当前生效】的那一份（delegation_graphs 的 MAX(version)），外加版本元数据。
+   * 返回 `{ versions: 0 }` 表示从没提交过组织图 —— 那与 404 / 500 都不同：
+   * 不是「资源不存在」也不是「出错」，而是「还没有这个资源」（同 GET /tasks
+   * 空列表回 [] 而不是 404 的口径）。设计决定见 http/org.ts 的 orgGraphRoute。
+   *
+   * 可选：装配方没接时 GET /org 回 501（同 POST /org 那条）
+   * 与 bindingWriter 同一条 type-only 理由：这里一次 node() 调用都不发，
+   * 读走的是只读连接（buildHubDeps 给 queue.readConnection()）。
+   */
+  readonly readOrgGraph?: () => {
+    readonly versions: number;
+    readonly version?: number;
+    readonly graph?: OrgGraph;
+    readonly graphId?: string;
+    readonly effectiveFromMs?: number;
+    readonly changeSummary?: string;
+  };
 }
 
 const MAX_TITLE_CHARS = 200;
@@ -441,6 +461,8 @@ async function dispatch(
       return rebindBindingRoute(deps, req);
     case "commit_org":
       return commitOrgRoute(deps, req);
+    case "get_org":
+      return orgGraphRoute(deps, req);
     default: {
       // 走到这里意味着【有人加了一种 Route 却没在这里加分支】。
       //
@@ -510,10 +532,17 @@ export type Route =
    * GET /tasks/:id 那样指一个现存资源再改它，它提交的是调用方给的一段图）。
    * 单段字面匹配，POST /org/anything 得到 404 而不是把 anything 当张图 id。
    */
-  | { kind: "commit_org"; endpoint: "POST /org"; id?: undefined };
+  | { kind: "commit_org"; endpoint: "POST /org"; id?: undefined }
+  /**
+   * 组织图的读端点（0040 的配套读侧）：取当前生效那份图（MAX(version)）。
+   * 这一条不是回环专用 —— 读不改组织、不是 self-escalating 的 CEO 写，
+   * 走和 GET /tasks / GET /approvals / GET /bindings 一样的统鉴权
+   * （orgGraphRoute 的文件头注解释了分岔落在 route() 那道门）。
+   */
+  | { kind: "get_org"; endpoint: "GET /org"; id?: undefined };
 
 /**
- * 手写匹配而不是引一个路由器：五条形，而引库又要装依赖（见文件头）。
+ * 手写匹配而不是引一个路由器：六条形，而引库又要装依赖（见文件头）。
  *
  * 三处细节，每处对应一种真实故障：
  *  - 【只剥掉前导斜杠产生的那一段，不剥中间的】。上一版在这里写了
@@ -599,6 +628,9 @@ export function matchRoute(method: string, path: string): Route | null {
   }
   if (method === "POST" && segs.length === 1 && segs[0] === "org") {
     return { kind: "commit_org", endpoint: "POST /org" };
+  }
+  if (method === "GET" && segs.length === 1 && segs[0] === "org") {
+    return { kind: "get_org", endpoint: "GET /org" };
   }
   return null;
 }
