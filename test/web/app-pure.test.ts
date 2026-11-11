@@ -1,0 +1,300 @@
+/**
+ * 渲块那批纯函数的**执行**证据（补 renderer-criteria.test.ts 照不到的那一半）。
+ *
+ * 分工（两份文件别混）：
+ *   renderer-criteria.test.ts —— 扫源码，守「判据没落在渲块里」「琥珀落点合法」。
+ *   本文件 —— 真把函数跑起来，守「这些函数算得对」。
+ * 只有一份的话，前者的错误口径（0042 §11 我原先写过「渲块不产判定」那种半假话）
+ * 不会被任何执行证据顶出来；后者则看不见配色与抄件。
+ *
+ * ⚠ 装载方式与它的边界写在 app-loader.ts，那里有三条坑（顶层会抛 /
+ * setTimeout 必须空操作 / const 不挂 globalThis）。这一文件只测**纯函数**：
+ * 输入 → 字符串 / 数 / 数组。renderToday 那种碰 fetch 与真 DOM 的入口不在射程内，
+ * 所以**这一发仍然不等于"app.js 在浏览器里跑过"**（0042 §11 第一条不改）。
+ */
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import { beforeAll, describe, expect, it } from "vitest";
+import { loadAppJs, type AppExports } from "./app-loader.js";
+
+const HERE = dirname(fileURLToPath(import.meta.url));
+const APP_JS = resolve(HERE, "..", "..", "packages/web/public/app.js");
+
+let fns: AppExports;
+beforeAll(() => {
+  const loaded = loadAppJs(APP_JS);
+  fns = loaded.fns;
+  // 顶层抛不抛【不判】—— 装载器文件头那条。这里只把它说出来，让人看见跑到哪。
+  // 把它判成失败会导致下一个人去把 app.js 的入口改成懒执行，那是测试形状改产品。
+  if (loaded.topError !== null) {
+    console.log("（app.js 顶层停在：" + loaded.topError.message.slice(0, 80) + "）");
+  }
+});
+
+const b = (over: Record<string, unknown> = {}) => ({
+  consumed_in_window_cents: 0,
+  consumed_total_cents: 0,
+  declared_task_limits_cents: 0,
+  declared_scopes: 0,
+  silent_over_scopes: 0,
+  ...over,
+});
+
+describe("meterPct —— 那根条形的宽度（口径唯一，且没有分母时不许有长度）", () => {
+  const f = (x: Record<string, unknown>) => (fns.meterPct as (y: unknown) => string)(b(x));
+
+  it("常规情形：分子累计已花、分母已声明上限合计", () => {
+    expect(f({ consumed_total_cents: 5000, declared_task_limits_cents: 20000, declared_scopes: 1 })).toBe("25%");
+  });
+
+  it("⭐ 一行预算都没设过 ⇒ 0%，而不是半根条", () => {
+    // 这是这一发存在的理由：分母为 0 时如果按除法会得到 NaN/Infinity，
+    // 而 NaN 走到 style="width:NaN%" 是【浏览器静默忽略】——
+    // 屏幕上会出现一根【满长】的条（CSS 默认宽度），读起来是"预算花光了"。
+    expect(f({ consumed_total_cents: 9999, declared_task_limits_cents: 0, declared_scopes: 0 })).toBe("0%");
+    expect(f({ consumed_total_cents: 0, declared_scopes: 0 })).toBe("0%");
+  });
+
+  it("⭐ 超限钳到 100%（条画不出去，「超了」由文字与红色说）", () => {
+    const got = f({ consumed_total_cents: 30000, declared_task_limits_cents: 10000, declared_scopes: 2 });
+    expect(got).toBe("100%");
+    expect(got).not.toContain("300");
+  });
+
+  it("反向对照：分母有值而消费为 0 ⇒ 真的是 0%，不是 undefined%", () => {
+    expect(f({ consumed_total_cents: 0, declared_task_limits_cents: 10000, declared_scopes: 1 })).toBe("0%");
+  });
+
+  it("输出永远形如 <整数>% —— 没有 NaN / Infinity / 小数能漏进 style", () => {
+    const cases = [
+      {},
+      { declared_scopes: 1, declared_task_limits_cents: 3, consumed_total_cents: 1 },
+      { declared_scopes: 1, declared_task_limits_cents: -5, consumed_total_cents: 100 },
+      { declared_scopes: -1, declared_task_limits_cents: 100, consumed_total_cents: 100 },
+      { declared_scopes: 1, declared_task_limits_cents: 7, consumed_total_cents: 999999 },
+    ];
+    for (const c of cases) {
+      const got = f(c);
+      expect(/^\d+%$/u.test(got), JSON.stringify(c) + " ⇒ " + got).toBe(true);
+      expect(got).not.toContain("NaN");
+    }
+  });
+});
+
+describe("overBudget —— 触及预算是【算术】，不是状态判定", () => {
+  const f = (x: Record<string, unknown>) => (fns.overBudget as (y: unknown) => boolean)({ budget_cents: null, consumed_cents: 0, ...x });
+
+  it("相等算触及（>=，不是 >）", () => {
+    expect(f({ budget_cents: 100, consumed_cents: 100 })).toBe(true);
+    expect(f({ budget_cents: 100, consumed_cents: 101 })).toBe(true);
+    expect(f({ budget_cents: 100, consumed_cents: 99 })).toBe(false);
+  });
+
+  it("⭐ 没设上限【不算】超预算（null / undefined / 缺字段三形）", () => {
+    // 反向说：把 null 当 0 的话，每一个"没设预算"的任务都会被判成超支，
+    // 「需要我注意」那一列于是永远满 —— 而它的症状跟"真的都超了"一模一样。
+    expect(f({ budget_cents: null, consumed_cents: 500 })).toBe(false);
+    expect(f({ budget_cents: undefined, consumed_cents: 500 })).toBe(false);
+    expect(f({ consumed_cents: 500 })).toBe(false);
+  });
+
+  it("0 上限是真判据（不是「没设」）：花了一分就算触及", () => {
+    expect(f({ budget_cents: 0, consumed_cents: 1 })).toBe(true);
+    expect(f({ budget_cents: 0, consumed_cents: 0 })).toBe(true);
+  });
+});
+
+describe("blockedTitle —— 判据字段真的被消费（不是发出来没人读）", () => {
+  it("有清单时把【哪几个状态】写进 title", () => {
+    const got = (fns.blockedTitle as (x: unknown) => string)({ blocked_statuses: ["BUDGET_PAUSED", "BLOCKED"] });
+    expect(got).toContain("BUDGET_PAUSED");
+    expect(got).toContain("BLOCKED");
+  });
+
+  it("⭐ 清单缺失时不显示空括号（老服务端 / 字段没发）", () => {
+    for (const t of [{}, { blocked_statuses: [] }, { blocked_statuses: null }]) {
+      const got = (fns.blockedTitle as (x: unknown) => string)(t);
+      expect(got).not.toContain("{ }");
+      expect(got).not.toContain("{}");
+      expect(got.length).toBeGreaterThan(0);
+    }
+  });
+});
+
+describe("taskCard —— 琥珀只给决策态，列成员只给灰", () => {
+  const tk = {
+    id: "task-12345678-9",
+    title: "做登录模块",
+    status: "BUDGET_PAUSED",
+    assigned_role: "dev",
+    updated_at: 1,
+    consumed_cents: 100,
+    budget_cents: 100,
+  };
+  const card = (isAttention: boolean, isDecision: boolean) =>
+    (fns.taskCard as (a: unknown, b: boolean, c: boolean) => string)(tk, isAttention, isDecision);
+
+  it("⭐ 阻塞（列成员）不琥珀：规格四处明写预算暂停非琥珀", () => {
+    const got = card(true, false);
+    expect(got).toContain("tk flag");
+    expect(got).not.toContain("decision");
+  });
+
+  it("升级 CEO ⇒ 琥珀", () => {
+    const got = card(true, true);
+    expect(got).toContain("decision");
+    // 同时是成员时不许两个类都上（两个左边框会互相覆盖，屏幕上看不出来）。
+    expect(got).not.toContain("flag");
+  });
+
+  it("普通进行中任务：两个类都不许有", () => {
+    const got = card(false, false);
+    expect(got).not.toContain("decision");
+    expect(got).not.toContain("flag");
+  });
+
+  it("标题里的 HTML 被转义（任务标题是用户输入）", () => {
+    const evil = { ...tk, title: "<img src=x onerror=alert(1)>" };
+    const got = (fns.taskCard as (a: unknown, b: boolean, c: boolean) => string)(evil, false, false);
+    expect(got).not.toContain("<img");
+    expect(got).toContain("&lt;img");
+  });
+});
+
+describe("approvalCard —— 待批 ≠ 琥珀（本轮真实违反过的那一条）", () => {
+  const a = (over: Record<string, unknown> = {}) => ({
+    id: "a1",
+    status: "pending",
+    approval_type: "escalation",
+    summary: "是否接受 P2 缺陷上线",
+    task_id: "t1",
+    created_at: 1,
+    ...over,
+  });
+  const card = (x: Record<string, unknown>, isDecision = true) =>
+    (fns.approvalCard as (a: unknown, n: number, c: boolean, d: boolean) => string)(x, 2, true, isDecision);
+
+  it("待批 + 决策类型 ⇒ 琥珀", () => {
+    const got = card(a(), true);
+    expect(got).toContain("need");
+    expect(got).toContain("s-amber");
+  });
+
+  it("⭐ 待批 + 运营类型 ⇒ 灰，且【不带】琥珀", () => {
+    const got = card(a({ approval_type: "budget_override" }), false);
+    expect(got).toContain("flag");
+    expect(got).not.toContain("need");
+    expect(got).not.toContain("s-amber");
+    // 而且要把"这是运营事件"说出来（否则灰卡读起来像「坏了/不重要」）。
+    expect(got).toContain("运营事件");
+  });
+
+  it("已决定的卡：两类都不上（决定做完了，没东西在等）", () => {
+    const got = card(a({ status: "approved" }), true);
+    expect(got).not.toContain("need");
+    expect(got).not.toContain("flag");
+    expect(got).not.toContain("s-amber");
+  });
+
+  it("⭐ 待批卡必须带三个按钮，运营卡也带 —— 颜色降级不等于按钮消失", () => {
+    // 规格 §7.4 给预算暂停那三个按钮（追加预算 / 维持暂停 / 终止任务）本来就是 CEO 按的。
+    // 把它涂灰很容易顺手写成"所以不给按钮"，那样这一格就变成只能看。
+    expect(card(a(), true)).toContain("data-act");
+    expect(card(a({ approval_type: "budget_override" }), false)).toContain("data-act");
+  });
+});
+
+describe("budgetHtml —— 那根条与那句近似声明", () => {
+  const html = (over: Record<string, unknown>) =>
+    (fns.budgetHtml as (x: unknown) => string)({ budget: b(over), window_ms: 86_400_000, as_of_ms: 1 });
+
+  it("⭐ 超限时条变红，并且【同屏】写明它不是规格 §7.4 那根「日」条", () => {
+    const got = html({ consumed_total_cents: 30000, declared_task_limits_cents: 10000, declared_scopes: 1 });
+    expect(got).toContain("budgetover");
+    expect(got).toContain("meter over");
+    expect(got).toContain("累计");
+  });
+
+  it("没超限 ⇒ 不加过红类（否则红恒在，等于没有红）", () => {
+    const got = html({ consumed_total_cents: 100, declared_task_limits_cents: 10000, declared_scopes: 1 });
+    expect(got).not.toContain("budgetover");
+  });
+
+  it("⭐ 警报已哑那一格用灰、不用琥珀也不用红", () => {
+    const got = html({ silent_over_scopes: 2, declared_scopes: 1, declared_task_limits_cents: 100 });
+    expect(got).toContain("警报已哑");
+    expect(got).toContain("s-gray");
+    expect(got).not.toContain("s-amber");
+  });
+
+  it("一行都没设过预算时【说出来】，而不是显示 $0.00 / $0.00 让人以为花光了", () => {
+    const got = html({});
+    expect(got).toContain("一行都没设过");
+  });
+});
+
+describe("statusClass —— 呈现映射的边界（它拿不到琥珀的决定权）", () => {
+  const f = (s: string) => (fns.statusClass as (x: string) => string)(s);
+
+  it("四档色调各自命中", () => {
+    expect(f("DELIVERED")).toBe("s-green");
+    expect(f("ARCHIVED")).toBe("s-gray");
+    expect(f("REJECTED_DOWNWARD")).toBe("s-red");
+    expect(f("IN_REVIEW")).toBe("s-blue");
+  });
+
+  it("⭐ 任何输入都不许产出琥珀 —— 连 BUDGET_PAUSED / ESCALATED_TO_CEO 也不行", () => {
+    // 这一发守的是"配色函数不许变成判据"那条线：
+    // 哪天有人觉得"升级态顺手涂个琥珀挺自然"，这里红。
+    for (const s of ["ESCALATED_TO_CEO", "BUDGET_PAUSED", "BLOCKED", "MEETING_REQUIRED", "", "deliver"]) {
+      expect(f(s), s).not.toContain("amber");
+    }
+  });
+});
+
+describe("hierarchyColumns / groupByDepth —— 列由 reports_to 派生（不许有任务凭空消失）", () => {
+  type Nodes = Record<string, { reports_to?: string | null }>;
+  const cols = (n: Nodes) => (fns.hierarchyColumns as (x: unknown) => unknown[])(n);
+  const group = (tasks: unknown[], c: unknown) => (fns.groupByDepth as (t: unknown[], x: unknown) => Array<{ items: unknown[] }>)(tasks, c);
+
+  const nodes: Nodes = {
+    ceo: { reports_to: null },
+    product: { reports_to: "ceo" },
+    dev: { reports_to: "product" },
+  };
+
+  it("深度派生正确，列名不套那六个层级名（§16.4 那一行没有数据来源）", () => {
+    const got = cols(nodes) as Array<{ label: string }>;
+    expect(got.length).toBe(3);
+    expect(got[0]?.label).toContain("深度 0");
+    for (const c of got) {
+      for (const name of ["助理", "执行", "运营"]) expect(String(c.label)).not.toContain(name);
+    }
+  });
+
+  it("⭐ 环不许把进程卡死，也不许让卡片凭空消失", () => {
+    const cyc: Nodes = { a: { reports_to: "b" }, b: { reports_to: "a" } };
+    const got = cols(cyc);
+    expect(got.length).toBeGreaterThan(0);
+    const t = [{ assigned_role: "a", updated_at: 1 }, { assigned_role: "b", updated_at: 1 }];
+    const g = group(t, got);
+    expect(g.reduce((n, x) => n + x.items.length, 0)).toBe(2);
+  });
+
+  it("⭐ 角色不在组织图里的任务进「未挂组织」，各列之和恒等于总数", () => {
+    const got = cols(nodes);
+    const t = [
+      { assigned_role: "dev", updated_at: 3 },
+      { assigned_role: "ghost", updated_at: 2 }, // 图里没这个角色
+      { assigned_role: "product", updated_at: 1 },
+    ];
+    const g = group(t, got);
+    expect(g.reduce((n, x) => n + x.items.length, 0)).toBe(3);
+    expect(g.some((x) => String(x.label).includes("未挂组织"))).toBe(true);
+  });
+
+  it("空组织图退化成单列而不是崩（列由数据派生，不是写死六列）", () => {
+    const got = cols({}) as Array<{ label: string }>;
+    expect(got.length).toBe(1);
+  });
+});

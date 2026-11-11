@@ -511,7 +511,7 @@ describe("④ 接线状态", () => {
     expect(payload["alarm_silenced"]).toEqual(["role|dev|daily"]);
   });
 
-  it("这条通道【不经过】任何 HTTP / 组织图路径（今天它是孤岛，接上那天这条会红）", async () => {
+  it("写通道【不经过】任何 HTTP / 组织图路径（今天它是孤岛，接上那天这条会红）", async () => {
     // 见 0015 §3。与 ④ 第一条同族：钉住【今天成立】，而不是假装已接上。
     const { readdirSync, readFileSync, statSync } = await import("node:fs");
     const walk = (d: string): string[] => {
@@ -523,10 +523,47 @@ describe("④ 接线状态", () => {
       }
       return out;
     };
-    const callers = walk(join(HUB, "src"))
-      .filter((f) => !f.includes("/charter/"))
-      .filter((f) => /applyBudgetRowsInTx\(|from ".*charter\/budget-sync/u.test(readFileSync(f, "utf8")));
-    expect(callers.map((f) => f.replace(join(HUB, "src") + "/", ""))).toEqual([]);
+    const outsideCharter = walk(join(HUB, "src")).filter((f) => !f.includes("/charter/"));
+    const SRC_PREFIX = join(HUB, "src") + "/";
+    /**
+     * ⚠ 这一发【原来】不止测写通道，它同时测了「charter/ 外面连这个模块都没人 import」。
+     * 那个更宽的形状在 `GET /today` 那轮【自己红了】：`overview/today.ts` 为了报
+     * 「已超限而警报已哑」那一格（0015 §4 的读侧补救）import 了 silentOverBudgets。
+     * 两条判断当时挤在同一个正则里（`applyBudgetRowsInTx\(|from ".*charter\/budget-sync`），
+     * 所以一条被打破就把另一条一起判红 —— 而它们【不是同一件事】：
+     * 「岗位书里的预算还没流向限流」是个【缺口】（0015 §3 那条结论的全部内容），
+     * 「今日视图读了一个只读的预算查询函数」是个【正常依赖】。
+     * 混在一起的代价很具体：接今日视图的人会被要求去把【写通道那条缺口】改成已接线，
+     * 而那是把一句假话写进断言。所以拆成两条，各自有各自的【分母】。
+     *
+     * 这里保留的是【写】那一半：三个会写 budgets / 会追加审计的入口，
+     * 在 charter/ 之外【一个调用方都不许有】。
+     */
+    const writers = outsideCharter
+      .filter((f) => /applyBudgetRowsInTx\(|upsertLimit\(|syncCharterBudgets\(/u.test(readFileSync(f, "utf8")));
+    expect(writers.map((f) => f.replace(SRC_PREFIX, ""))).toEqual([]);
+
+    /**
+     * 另一半：只读的那几个预算查询函数【允许】被 charter/ 外面用，
+     * 但【只允许】这一组名字 —— 于是这一条不是"放宽成不管"，而是换个更准的形状管：
+     * 谁哪天在同一行 import 里夹一个 writer 进来，这条会红，而上面那条也会红（双保险）。
+     * 反过来把 writer 从这条的名单里删掉是不行的：那等于承认它可以被外部调用。
+     */
+    const READ_ONLY = new Set(["silentOverBudgets", "readBudgetTiers", "budgetTierSummary"]);
+    const imports = outsideCharter
+      .map((f) => {
+        const m = /import\s*\{([^}]*)\}\s*from\s*"[^"]*charter\/budget-sync/u.exec(readFileSync(f, "utf8"));
+        return m ? { f, names: m[1].split(",").map((s) => s.trim().split(" ")[0]).filter(Boolean) } : null;
+      })
+      .filter((x): x is { f: string; names: string[] } => x !== null);
+    // 反向对照：今天【确实】有一个外部只读消费者。少了这一发，上面那条在
+    // 「谁都不 import」的世界里也全绿 —— 而那时它对 READ_ONLY 的判别力是零。
+    expect(imports.map((x) => x.f.replace(SRC_PREFIX, ""))).toEqual(["overview/today.ts"]);
+    for (const x of imports) {
+      for (const n of x.names) {
+        expect(READ_ONLY.has(n), x.f + " import 了非只读的 " + n).toBe(true);
+      }
+    }
   });
   it("读回不做二次校验这件事：库里那份与 validateCharterDraft 放行的那份逐字节相同", async () => {
     const { q, db } = await newQ();

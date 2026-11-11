@@ -214,7 +214,7 @@ const SNAP: Record<string, string> = {
     "const config = JSON.parse(prev.config) as Record<string, unknown>;",
   "0015-charter-editor-and-two-sources-of-budget.md>0001_init.sql:144":
     "CREATE TABLE role_charters (",
-  "0015-charter-editor-and-two-sources-of-budget.md>http/app.ts:1034":
+  "0015-charter-editor-and-two-sources-of-budget.md>http/app.ts:1046":
     'consumed_cents: Number(r["consumed_cents"] ?? 0),',
   "0015-charter-editor-and-two-sources-of-budget.md>tracker.ts:233":
     "const breached = before <= limit && after > limit;",
@@ -319,7 +319,7 @@ const SNAP: Record<string, string> = {
   // 快照当场红，逼人重读那段论证，而不是让文档继续指着一句 `/**` 讲 UNIMPLEMENTED。
   "0012-org-versioned-commit-and-unwritten-graph-version.md>packages/contracts/src/api.ts:40":
     "export const API_ENDPOINTS = [",
-  "0012-org-versioned-commit-and-unwritten-graph-version.md>packages/contracts/src/api.ts:97":
+  "0012-org-versioned-commit-and-unwritten-graph-version.md>packages/contracts/src/api.ts:99":
     "export const UNIMPLEMENTED_ENDPOINTS: readonly ApiEndpoint[] = [];",
   // 0013 §10.1 那次【撤回】的三块砖。这一组与前面几组的性质不同：前面抓的是
   // 「文档引用的那行代码挪了」，这一组抓的是「文档引用的那条**注释**不再成立」。
@@ -381,11 +381,11 @@ const SNAP: Record<string, string> = {
   // 而它是 CEO 拍不拍那一项的**唯一**依据。快照在这里红了就是逼重读 §9。
   "0030-im-binding-identity-and-three-holes-i-did-not-design.md>contracts/src/api.ts:40":
     "export const API_ENDPOINTS = [",
-  "0030-im-binding-identity-and-three-holes-i-did-not-design.md>contracts/src/api.ts:72":
+  "0030-im-binding-identity-and-three-holes-i-did-not-design.md>contracts/src/api.ts:73":
     "export const IMPLEMENTED_ENDPOINTS: readonly ApiEndpoint[] = [",
   "0030-im-binding-identity-and-three-holes-i-did-not-design.md>ipc-surface.ts:171":
     "export const EXPOSED_ENDPOINTS: readonly ApiEndpoint[] = IMPLEMENTED_ENDPOINTS;",
-  "0030-im-binding-identity-and-three-holes-i-did-not-design.md>app.ts:489":
+  "0030-im-binding-identity-and-three-holes-i-did-not-design.md>app.ts:494":
     "const impossible: never = routeHit;",
   "0030-im-binding-identity-and-three-holes-i-did-not-design.md>ipc-surface.test.ts:129":
     "expect(API_ENDPOINTS).toContain(s.endpoint);",
@@ -451,6 +451,34 @@ const SNAP: Record<string, string> = {
   // 的守卫。0039 改了 vitest.config.ts 的注释但没动开关，这句引用钉住「那条守卫还在这行」。
   "0039-vitest-installs-and-coverage-attribution-still-does-not.md>harness-invariants.ts:156":
     "if (input.requireAssertions !== REQUIRED_REQUIRE_ASSERTIONS) {",
+  // 0042（今日视图 + §16 控制室）这一组八条。同样是先在目标文件里 `sed -n '<n>p'` 读原文再抄。
+  // 其中【两条是活坐标，各守一句会被顺手改掉的判断】，其余是「本篇论点挂在那一行上」的锚点：
+  //  · `org/graph.ts:65` 守的是 §10 那条「加 tier 是一次契约变更」的前提 —— 那个 `.strict()`
+  //    一旦被人摘掉（或 schema 长出 tier），0042 §10 那句「需要契约变更」就不再成立，
+  //    而它是 CEO 拍不拍那一格的唯一依据；
+  //  · `ipc-surface.ts:171` 守的是 §5 那句「EXPOSED 是别名，名为暴露实为已实现」——
+  //    有人把它改成手抄白名单，0042 §5 整节（连同那条把不一致本身钉住的断言）就该重读。
+  // 最后一条【带了一层目录】（`http/real-deps.ts`）而不是裸基名：0030 §9 撞过一次同名歧义
+  // （contracts 与 desktop/preload 各有一个 api.ts，裸基名会被 resolveTarget 判成歧义），
+  // real-deps.ts 今天全仓唯一，但「今天唯一」在 import 图上看不见 —— 补一层目录是零成本的防线。
+  // 它指向的正是 0042 §7 末尾说的那颗【已埋的假红】（那句注释只差没跟一对括号）：
+  // 将来 `callersOf("insertCard")` 因为一句补了括号的注释而误报时，这条快照会先红并指回这一组注释。
+  "0042-today-view-and-putting-the-criteria-on-the-server-side.md>packages/web/public/app.js:445":
+    "attention === null ? false : attention.includes(tk.status) || overBudget(tk);",
+  "0042-today-view-and-putting-the-criteria-on-the-server-side.md>packages/hub/src/engine/runtime.ts:111":
+    '"INSERT INTO budget_events (source_event, scope_type, scope_id, period, amount_cents, task_id, created_at) " +',
+  "0042-today-view-and-putting-the-criteria-on-the-server-side.md>packages/hub/src/budget/tracker.ts:70":
+    '"INSERT INTO budget_events (source_event, scope_type, scope_id, period, amount_cents, task_id, created_at) " +',
+  "0042-today-view-and-putting-the-criteria-on-the-server-side.md>packages/contracts/src/org/graph.ts:65":
+    "export const orgNodeSchema = z",
+  "0042-today-view-and-putting-the-criteria-on-the-server-side.md>packages/hub/src/overview/today.ts:104":
+    'export const ATTENTION_STATUSES: readonly string[] = ["ESCALATED_TO_CEO", ...BLOCKED_STATUSES];',
+  "0042-today-view-and-putting-the-criteria-on-the-server-side.md>packages/hub/src/charter/budget-sync.ts:438":
+    "export function silentOverBudgets(db: DatabaseSync): BudgetTierRow[] {",
+  "0042-today-view-and-putting-the-criteria-on-the-server-side.md>packages/desktop/src/ipc-surface.ts:171":
+    "export const EXPOSED_ENDPOINTS: readonly ApiEndpoint[] = IMPLEMENTED_ENDPOINTS;",
+  "0042-today-view-and-putting-the-criteria-on-the-server-side.md>http/real-deps.ts:488":
+    "* 放进那一个事务里（与 insertCard 同事务，理由写在 cards.ts createCard 第 ① 条），",
 };
 
 describe("决策文档里的「文件:行号」引用不漂移", () => {

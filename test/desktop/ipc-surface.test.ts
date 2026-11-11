@@ -154,6 +154,29 @@ describe("通道与端点对齐", () => {
     expect(channelFor("GET /org")).toBe("hub:getOrg");
     expect(IMPLEMENTED_ENDPOINTS).toContain("POST /org");
     expect(channelFor("POST /org")).toBeNull();
+    /**
+     * 今日视图那条（0042）：读侧【有端点、没通道】，而这一次的理由与上面两条都不同，
+     * 值得单独写 —— 上面两条是【不该给】（self-escalating 的写、回环专用），
+     * 这一条是【今天没有消费者】：§16 那个控制室今天跑在 dev-server 上
+     * （packages/web/src/dev-server.ts 那条签名代理），桌面壳本机装不上（Electron 装不上，
+     * 0039 量的那半），于是给它加通道 = 加一个【渲染侧没有调用方】的方法，
+     * 正是本文件上面那段「暴露一个只会返回 501 的方法」那条注释拦的形状。
+     * 真接桌面那天该红的是【这条】，而红了要做的事是"补 hub:getToday + preload 方法 +
+     * 渲染侧调用点"三件一起，不是删掉这条断言。
+     *
+     * ⚠ 而这一格【顺手】暴露了 EXPOSED_ENDPOINTS 这个命名在说谎：它是
+     * `= IMPLEMENTED_ENDPOINTS` 的别名（ipc-surface.ts:171），所以
+     * GET /today 一落地就【已经】在 EXPOSED 里了，而它【没有】通道 ——
+     * 「暴露给渲染进程」与「已实现」今天是两个集合，名字只提了前者。
+     * 下面那一发把这个【不一致本身】钉住，而不是假装一致：它比"channelFor 是 null"
+     * 更值得留着，因为别名方向是【加一个已实现端点就自动算暴露】，
+     * 而真正决定渲染侧能不能碰到一个端点的是 CHANNEL_SPECS。
+     * 这一族 0030 §9 已经点过名（「已实现而未接桌面」是当时唯一无人断言的方向），
+     * 本篇是那个方向上的第二个实例。
+     */
+    expect(IMPLEMENTED_ENDPOINTS).toContain("GET /today");
+    expect(channelFor("GET /today")).toBeNull();
+    expect(EXPOSED_ENDPOINTS).toContain("GET /today"); // 别名 ⇒ 名为"暴露"，实为"已实现"
     // 主进程那边也不许有组织【写】的 URL 拼装分支（同 bindings 那组：加通道而没加分支
     // ⇒ 拿到一次带原文的抛；加分支而 CHANNEL_SPECS 没登记 ⇒ dispatch 到不了它）。
     const mainSrc2 = readFileSync(MAIN_SRC, "utf8");

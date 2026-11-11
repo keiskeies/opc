@@ -131,6 +131,28 @@ export const APPROVAL_TYPES = [
 export type ApprovalType = (typeof APPROVAL_TYPES)[number];
 
 /**
+ * 「运营事件」那一档审批类型 —— 目前只有 `budget_override`。
+ *
+ * 出处是规格 §7.4 的原话：审批收件箱出现**非琥珀色**的「预算暂停」卡片
+ * （**这是运营事件，不是战略决策**）。同一句话在 §6 事件表、§21.3、附录 D
+ * 又各重复了一次，所以这不是一处措辞，是一条被写了四遍的口径。
+ *
+ * ⚠ 这条轴**不是** `role-memory.ts` 那个 `NON_STRATEGIC_APPROVAL_TYPES`，
+ * 两者恰好都叫"非战略"而轴完全不同，混用会错得很安静：
+ *  - role-memory 那条轴问「这条决策能不能进 dev 的角色记忆桶」（可见性）；
+ *  - 这一条问「这张卡现在要不要惊动 CEO」（琥珀色，§19.2）。
+ * 反例就在手边：`charter` 在 role-memory 那张表里（章程是常规审批），
+ * 而 §7.2 步骤 1 明确 CEO 要展开章程卡片点「批准章程」⇒ 它**必须**是琥珀色。
+ * 所以这里只有 budget_override 一格，而那边有两格 —— 数字对不上不是疏漏。
+ *
+ * 为什么不干脆复用那个常量：复用的话，哪天有人往 role-memory 那张表里加一格
+ * （比如把 `escalation` 挪进去让 dev 少一段提示词），收件箱的琥珀色就跟着变，
+ * 而那次改动的人根本不会想到颜色。两条轴各留各的名单，配下面那条用例钉住
+ * 「charter 在这条轴上是琥珀的」。
+ */
+export const OPERATIONAL_APPROVAL_TYPES: readonly string[] = ["budget_override"];
+
+/**
  * 卡片初始状态取自 contracts 的 `APPROVAL_STATUS_PENDING`（这里再导出一次，
  * 让建卡这条路与列表/认领那两条读的是**同一个**字面量）。
  * `pending` 是 CLAIM_APPROVAL_SQL 那条 `WHERE status = 'pending'` 的分母，不是风格选择。

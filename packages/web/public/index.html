@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>OPC · 控制室</title>
+<!-- type=module：app.js import 真正的 packages/web/src/hub/projection.ts。
+     在裸 JS 里重写那套 seq/stale 纪律 = 两份必然漂移（0006 §7），所以这里是模块。 -->
+<script src="/app.js" type="module"></script>
+<style>
+  /* ── §19.2 配色，逐字抄自【规格】那张表 ─────────────────────────────
+   * 琥珀 #E8A33D 那条规则是这一页最硬的一条：「全局仅用于『需要 CEO 决策』
+   * 这一种状态」。它不是装饰色 —— 规格要的是「眼睛在任何页面一扫，
+   * 琥珀色出现处就是需要你动手的地方」。所以本文件里 --amber 只出现在
+   * 待批卡片与「需要你决策」那一片；进行中的任务、选中的导航、按钮
+   * 一律不许用它（用一次，那条扫视规则就废一次）。
+   * 原来那套浅色主题（--bg:#f7fafc）整块换掉：§19.1 要的是控制室、
+   * 长时间扫视，而浅色底 + 琥珀 = 琥珀在浅底上比在深底上更不显眼，
+   * 恰好把上面那条规则反着做。
+   */
+  :root {
+    --bg: #0F1117;         /* 背景 */
+    --card: #1A1D27;       /* 卡片 */
+    --amber: #E8A33D;      /* ⚠ 仅「需要 CEO 决策」 */
+    --blue: #4a7ba6;       /* 进行中（低饱和） */
+    --green: #3f7a5f;      /* 已完成（低饱和） */
+    --gray: #5a6478;       /* 已归档 / 低对比度 */
+    --ink: #dfe4ee;
+    --muted: #8b94a7;
+    --line: #262b38;
+    --chip: #232838;
+    --err: #c76a6a;
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; font:14px/1.5 -apple-system,"PingFang SC","Microsoft YaHei",system-ui,sans-serif; background:var(--bg); color:var(--ink); }
+  /* §19.3：任务 ID / 金额 / 时间戳用等宽，正文用无衬线。混排会让「扫一屏数字」变成读散文。 */
+  .mono { font-family: ui-monospace,"SF Mono",Menlo,Consolas,monospace; font-variant-numeric: tabular-nums; }
+  header { background:var(--card); border-bottom:1px solid var(--line); padding:0 20px; height:52px; display:flex; align-items:center; gap:18px; position:sticky; top:0; z-index:10; }
+  header h1 { font-size:15px; margin:0; white-space:nowrap; }
+  nav { display:flex; gap:4px; }
+  nav a { padding:6px 12px; border-radius:6px; color:var(--muted); text-decoration:none; font-size:13px; }
+  nav a.act { color:var(--ink); background:var(--chip); font-weight:600; }
+  /* 导航上的待批角标用琥珀：它说的正是「这一页里有需要你动手的东西」。 */
+  nav a .badge { background:var(--amber); color:#14161d; border-radius:999px; padding:0 6px; font-size:11px; font-weight:700; margin-left:6px; }
+  .conn { margin-left:auto; font-size:12px; color:var(--muted); display:flex; align-items:center; gap:6px; }
+  .dot { width:8px; height:8px; border-radius:50%; background:var(--green); display:inline-block; }
+  .dot.off { background:var(--err); }
+  main { max-width:1180px; margin:0 auto; padding:22px 20px 80px; }
+  .toolbar { display:flex; gap:10px; align-items:center; margin-bottom:16px; flex-wrap:wrap; }
+  .btn { border:1px solid var(--line); border-radius:6px; padding:7px 14px; font-size:13px; cursor:pointer; background:var(--chip); color:var(--ink); }
+  .btn:hover { border-color:var(--blue); }
+  /* 琥珀【不】给通用按钮：主按钮的"主"是操作强度，不是"这要你决策"。 */
+  .btn.primary { background:var(--blue); border-color:var(--blue); color:#fff; }
+  .btn:disabled { opacity:.5; cursor:not-allowed; }
+  input[type=text], select, textarea { border:1px solid var(--line); border-radius:6px; padding:7px 10px; font-size:13px; font-family:inherit; background:#141822; color:var(--ink); }
+  input[type=text]:focus, textarea:focus { outline:none; border-color:var(--blue); }
+  .err { color:var(--err); font-size:13px; }
+  .ok { color:var(--green); font-size:13px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:14px 16px; margin-bottom:12px; }
+  /* 待批但是【运营事件】那张：灰左边框。§7.4 明写「非琥珀色的『预算暂停』卡片」。 */
+  .card.flag { border-left:3px solid var(--gray); }
+  .card h3 { margin:0 0 4px; font-size:14px; }
+  .meta { color:var(--muted); font-size:12px; }
+  .row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+  .grow { flex:1; min-width:200px; }
+  .tag { display:inline-block; background:var(--chip); color:var(--muted); border-radius:999px; padding:1px 9px; font-size:11px; margin:2px 4px 2px 0; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(160px,1fr)); gap:12px; }
+  .node { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:10px 12px; }
+  .node .role { font-weight:600; }
+  .node .rpto { font-size:12px; color:var(--muted); }
+  .edge { background:var(--chip); padding:2px 8px; border-radius:6px; font-size:12px; margin:0 6px 6px 0; display:inline-block; }
+  .banner { padding:10px 16px; border-radius:8px; margin-bottom:14px; font-size:13px; background:var(--card); border:1px solid var(--line); }
+  /* ⚠ 降级/取不到数据的横幅**不用琥珀**：§19.2 那条规则是「全局仅用于需要 CEO 决策」，
+   * 而「判据取不到」「组织图为空」不是等 CEO 决策的事 —— 用蓝（本表里的"进行中"那一档，
+   * 语义就是"信息"）。硬失败仍旧红（.banner.err）。少这一改，琥珀在同一屏上出现两次，
+   * 「琥珀出现处就是需要你动手的地方」这条扫视承诺当场作废。 */
+  .banner.warn { border-color:var(--blue); color:#8fb6d9; }
+  .banner.err { border-color:var(--err); color:var(--err); }
+  .hidden { display:none; }
+  details { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:10px 14px; }
+  summary { cursor:pointer; color:var(--blue); font-size:13px; }
+  pre { background:#12141b; color:#b8c0d0; padding:12px; border-radius:8px; font-size:11px; overflow:auto; max-height:260px; }
+  .pill { display:inline-block; border-radius:999px; padding:1px 10px; font-size:11px; font-weight:600; background:var(--chip); color:var(--muted); }
+  .pill.s-blue { color:#8fb6d9; }
+  .pill.s-green { color:#7fc9a5; }
+  .pill.s-gray { color:#7d8698; }
+  .pill.s-red { color:#e08b8b; }
+  /* ⚠ .pill.s-amber 唯一合法用途 = 「这一件现在等你动手」。
+   * 「阻塞 / 预算警报已哑」这类**运营事件**不许用它：§7.4 明写预算暂停是
+   * 「运营事件，不是战略决策」且**非琥珀色**，而 §19.2 那句「琥珀色出现处就是
+   * 需要你动手的地方」是一扫即得的承诺 —— 每多用一次，扫视就废一次。
+   * 运营异常的红色是规格自己给的：§7.4「日消耗条变红」。 */
+  .pill.s-amber { color:var(--amber); }
+  .s { font-weight:600; }
+
+  /* ── 今日视图（§16.3：左 2/3、右 1/3）────────────────────────────── */
+  .cols { display:grid; grid-template-columns:2fr 1fr; gap:18px; align-items:start; }
+  @media (max-width:900px) { .cols { grid-template-columns:1fr; } }
+  .sect { font-size:12px; letter-spacing:.08em; text-transform:uppercase; color:var(--muted); margin:0 0 8px; }
+  /* 琥珀【左边框】是 §16.3 逐字要求的形态：待决策卡片靠左一道色条，
+   * 不用整圈描边 —— 一圈琥珀会把整张卡染成"警示"，而这里要说的是"这一件等你"。 */
+  .need { border-left:3px solid var(--amber); }
+  .need .sect { color:var(--amber); }
+  .lowcontrast { opacity:.62; }
+  .lowcontrast:hover { opacity:1; }
+  .num { font-size:30px; font-weight:700; line-height:1.1; }
+  .stat { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:12px 14px; }
+  .stat .lbl { font-size:11px; color:var(--muted); }
+  .statbad .num { color:var(--amber); }
+  /* 全规格唯一明写的红：§7.4「日消耗条变红」。所以 --err 今天只用在这一根条上。
+   * 「被阻塞」那一格今天回到默认墨色 —— 它既不是"等 CEO 动手"（琥珀不合法），
+   * 规格也没给它别的颜色（那张色表只有六档，没有"异常色"）。理由写在 app.js 的 stat() 旁边。 */
+  .budgetover .meter.over { background:#3a2226; }
+  .budgetover .meter.over i { background:var(--err); }
+  .meter { height:6px; border-radius:3px; background:var(--chip); margin-top:8px; overflow:hidden; }
+  .meter i { display:block; height:100%; background:var(--blue); }
+  .stats { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+  .idea { position:sticky; bottom:16px; }
+
+  /* ── 任务看板（§16.4：水平滚动多列）─────────────────────────────── */
+  .board { display:flex; gap:12px; overflow-x:auto; padding-bottom:12px; align-items:flex-start; }
+  .col { min-width:242px; width:242px; flex:0 0 auto; }
+  .colhead { display:flex; justify-content:space-between; font-size:12px; color:var(--muted); padding:0 2px 6px; border-bottom:1px solid var(--line); margin-bottom:8px; }
+  .tk { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:9px 11px; margin-bottom:8px; cursor:pointer; }
+  .tk:hover { border-color:var(--blue); }
+  /* 「需要我注意」那一列的成员（§16.4）—— 灰左边框，不是琥珀。
+   * 成员身份本来就靠"过滤器按下去只剩它们"来表达，位置已经是信息；
+   * 若整列涂琥珀，琥珀就从「这一件等你动手」退化成「这一列的东西」，
+   * §19.2 那条扫视承诺就废了（而预算暂停这类**运营事件**规格明写非琥珀）。 */
+  .tk.flag { border-left:3px solid var(--gray); }
+  .tk.decision { border-left:3px solid var(--amber); }
+  /* 详情抽屉：§16.4 明写「不离开看板上下文」，所以是覆盖在右侧的抽屉而不是跳页。 */
+  .drawer { position:fixed; top:0; right:0; bottom:0; width:min(560px,92vw); background:var(--card);
+            border-left:1px solid var(--line); z-index:40; overflow:auto; padding:20px; box-shadow:-14px 0 40px #0009; }
+  .scrim { position:fixed; inset:0; background:#0008; z-index:39; }
+
+  /* ── 回放（§16.7：垂直事件流）──────────────────────────────────── */
+  .tl { border-left:1px solid var(--line); padding-left:16px; margin-left:6px; }
+  .ev { position:relative; margin-bottom:10px; }
+  .ev::before { content:""; position:absolute; left:-21px; top:7px; width:8px; height:8px; border-radius:50%; background:var(--gray); }
+  .ev.auto::before { background:var(--blue); }
+  /* ⚠ 这里以前是琥珀，改掉了：回放里的"人工决定"是【已经拍过板】的记录，
+   * 而 §19.2 的琥珀是「需要你动手的地方」—— 回放视图里没有任何东西在等谁。
+   * 规格 §16.7 那三条特殊标注（蒸馏 skill / 自动批准 / harness 版本）是**文字标注**，
+   * 不是颜色授权，所以这里用色必须落回那张色表的语义：
+   * 绿 = 已定（这条决定已经做了），蓝 = 机器自动（信息性），灰 = 其余。 */
+  .ev.decide::before { background:var(--green); }
+</style>
+</head>
+<body>
+<header>
+  <h1>OPC</h1>
+  <nav id="nav"></nav>
+  <div class="conn"><span class="dot" id="dot"></span><span id="connText">连接中…</span></div>
+</header>
+<main id="view"></main>
+</body>
+</html>

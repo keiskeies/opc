@@ -44,6 +44,9 @@ import type { DatabaseSync } from "node:sqlite";
 import type { EventBus } from "../events/bus.js";
 import { legalTransitionsFrom, type TaskState } from "../graph/status.js";
 import { listApprovals as listApprovalsFrom } from "../approvals/query.js";
+// 今日视图那几个聚合数的【判据】住在这里（不在 handler 里，也不在界面里算）。
+// 分法与 approvals/query.ts、replay/query.ts 同一条：判定住在模块，HTTP 只是一个入口。
+import { readToday } from "../overview/today.js";
 // IM 绑定的四条路由**不写在下面那个 switch 附近**，单独住 http/bindings.ts。
 // 那不是为了分文件整洁：test/bindings/im.test.ts 有一条守卫扫 src，
 // 断言 `im_bindings` 这四个字只出现在 bindings/im.ts 一个文件里。
@@ -441,6 +444,8 @@ async function dispatch(
       return listTasks(deps);
     case "get_task":
       return getTask(deps, routeHit.id);
+    case "today":
+      return today(deps, req.query);
     case "list_approvals":
       return listApprovals(deps, req);
     case "decide":
@@ -503,6 +508,7 @@ export type Route =
   | { kind: "create_task"; endpoint: "POST /tasks"; id?: undefined }
   | { kind: "list_tasks"; endpoint: "GET /tasks"; id?: undefined }
   | { kind: "get_task"; endpoint: "GET /tasks/:id"; id: string }
+  | { kind: "today"; endpoint: "GET /today"; id?: undefined }
   | { kind: "list_approvals"; endpoint: "GET /approvals"; id?: undefined }
   | { kind: "decide"; endpoint: "POST /approvals/:interruptId"; id: string }
   | {
@@ -575,6 +581,12 @@ export function matchRoute(method: string, path: string): Route | null {
     const t = id(segs[1]);
     if (t === null) return null;
     return { kind: "get_task", endpoint: "GET /tasks/:id", id: t };
+  }
+  // 「今日」那一页的聚合数（【规格】§16.3 右栏 + §16.5 摘要条）。
+  // 放在 tasks 那组【之后】而 approvals 那组之前，只是让读的人按页面顺序找到它；
+  // 承重的是 segs[0] 的字面值，不是顺序（同 bindings 那组旁边写的那句）。
+  if (method === "GET" && segs.length === 1 && segs[0] === "today") {
+    return { kind: "today", endpoint: "GET /today" };
   }
   if (method === "GET" && segs.length === 1 && segs[0] === "approvals") {
     return { kind: "list_approvals", endpoint: "GET /approvals" };
@@ -1038,6 +1050,34 @@ function readTasks(
     );
   }
   return out;
+}
+
+/**
+ * `GET /today` —— 今日视图那几个聚合数（【规格】§16.3 右栏 + §16.5 摘要条）。
+ *
+ * 判据全在 `overview/today.ts`，这里只做三件 HTTP 的事：query 解析、把服务端时刻带进去、
+ * 以及【不藏 notes】。第三件是这个端点唯一容易被「顺手优化」掉的地方：
+ * 那个数组看着像日志噪音，而它是【口径本体】——「自动通过 0 项」不带那句话
+ * 读起来是「策略引擎很闲」，带上才读得到它本来的意思（那条链路今天没接）。
+ *
+ * 只读，所以走 deps.db（readConnection）：与 replay 同一条理由 ——
+ * 一次超过 busy_timeout 的模型调用期间，CEO 打开首页照旧能看（0010 §7 那格锁问题
+ * 不该外溢到只读路径）。
+ */
+function today(deps: HubDeps, query: HubRequest["query"]): HubResponse {
+  const raw = query["window_ms"];
+  if (raw !== undefined && !/^\d+$/u.test(raw)) {
+    return json(HTTP_UNPROCESSABLE, {
+      error: "window_ms 必须是非负整数毫秒，实到 " + raw,
+    });
+  }
+  return json(
+    200,
+    readToday(deps.db, {
+      nowMs: deps.now(),
+      ...(raw === undefined ? {} : { windowMs: Number(raw) }),
+    }),
+  );
 }
 
 async function decide(

@@ -763,23 +763,33 @@ describe("④ 两条验收各自【不可测的那一半】（登记，不写成
       "② 的自动批准在生产运行期零生产者（0014 §3；本文件②段那些 recordAutoApproval 全由测试自己调）",
       "pnpm verify 未跑：本机装不上依赖（0009 §2）",
       "③ 段那条 escalate 接缝没人接（本文件③段钉的就是它没接）",
-      // 这一条在 Task 6.1 之后是「卡片零 INSERT」，0026 把它**改写**了而不是删掉。
-      // 先分清三件容易混的事（第一版在这里只分清了两件，见下）：
-      //   · 批准的【写路径】：real-deps.ts 一条 UPDATE（认领 + 落决定）。早就有。
-      //   · 卡片的【创建】：0026 补了 src/approvals/cards.ts + 迁移 0004。今天有了。
-      //   · 卡片的【生产者】：**还是没有** —— cards.ts 的 createCard 在 src 里
-      //     【零调用方】（当场 grep，本文件下面那条当场判）。也就是说缺口从
-      //     「没有创建路径」上移成了「有创建路径、没人叫它」，与 ① 那条
-      //     「verifier 开始调 evaluateGate，而 verifyFix 零调用方」是**同一个形状**。
-      // 我第一版把这条写成「卡片创建路径有了 ⇒ 缺口消掉」，那是错的，而且错在
-      // 最像对的地方：grep INSERT 确实从 0 变 1 了。真正卡住 Task 2.6 验收
-      // （「收件箱计数与实际待审批数一致」）的从来不是 INSERT 语句在不在，
-      // 而是**有没有人在真运行期建出一张卡**。所以这条留着，只是换了说法。
+      // 这一条被改写过【三次】，三次都改的是同一个词：「生产者」。留痕如下（每次改写
+      // 都是被一次真实改动顶出来的，不是作者改口径 —— 这正是它写成断言而不是文档的原因）。
+      //
+      // 【第一版｜Task 6.1】「卡片零 INSERT」。
+      // 【第二版｜0026】补了 src/approvals/cards.ts + 迁移 0004 ⇒ INSERT 有了。
+      //   当时分清三件事（第一版只分清了两件）：
+      //     · 批准的【写路径】：real-deps.ts 一条 UPDATE（认领 + 落决定）。早就有。
+      //     · 卡片的【创建路径】：有了。
+      //     · 卡片的【生产者】：还是没有 ⇒ 缺口从「没有创建路径」上移成
+      //       「有创建路径、没人叫它」，与 ① 那条「verifier 开始调 evaluateGate
+      //       而 verifyFix 零调用方」是**同一个形状**。
+      //   我第二版一度写成「创建路径有了 ⇒ 缺口消掉」，那是错的，而且错在最像对的地方：
+      //   grep INSERT 确实从 0 变 1 了。真正卡住 Task 2.6 验收（「收件箱计数与实际
+      //   待审批数一致」）的从来不是 INSERT 语句在不在，而是**有没有人真建出一张卡**。
+      // 【第三版｜0041（提交 42c8eea，`hub:engine` 那条链落地那次）】生产者【有了】
+      //   —— 而这件事是【绿着发生的】：
+      //   engine/charter.ts 与 engine/dispatch.ts 经【下层】insertCard 真建卡，
+      //   绕过了带 queue + 入参校验的 createCard ⇒ `callersOf("createCard")`
+      //   【仍然数到零】。判据没坏，它指的事实换了，而换的方向恰好让绿的那边继续绿。
+      //   所以这一版的改动不只是改文案：判据本身换成了 `callersOf("insertCard")`
+      //   （下面那条，有分母），旧的 createCard 那一发【留着但明写它不再判第 6 条】。
+      //   现在的缺口是【生产者只在错的那一侧】—— 见下面那条字符串。
       //
       // 另外那半（0025 §8.2 的 approval_type 缺格）今天**消掉了**：0026 按 CEO
       // 授权选了「加一个通用 escalation 值 + reason 放 payload」，
       // 六类升级原因现在都写得进一张卡（cards.test.ts ③ 那发逐类验过）。
-      "② 的卡片有创建路径而【零生产者】：src/approvals/cards.ts 在 src 里无人调用（上一条当场判的）",
+      "② 的卡片生产者【有了，但只在跑不到 CEO 的那一侧】：src/engine 两条路径经 insertCard 真建卡（上一条当场判的，那条有分母），而 http/ 与 serve/ 里【一行都不建】⇒ CEO 在看板上看到的那张待批卡，今天只有先跑过 `pnpm hub:engine` 才会存在。后半句【本机验不了】：那条命令要 tsx + @langchain/langgraph，两样都装不上（0039 量的那半）—— 于是「建了卡而 CEO 看不见」这件事今天只能靠读代码发现，不能靠测试。",
     ] as const;
     expect(blockers).toHaveLength(6);
     // 各条的**性质不同**：第 1、2、6 条本文件当场判了（可复算、会随改动变红），
@@ -811,8 +821,79 @@ describe("④ 两条验收各自【不可测的那一半】（登记，不写成
     expect(srcFilesMatching(/INSERT\s+INTO\s+approvals/iu)).toEqual([
       SRC + "/approvals/cards.ts",
     ]);
+    /*
+     * ⚠ 下面这一发【今天仍然绿，而它已经不再判第 6 条了】—— 这一句必须写在断言旁边，
+     * 因为「绿的」与「还在判某件事」是两件事，而本文件存在的全部理由就是不混淆它们。
+     *
+     * 0041（提交 42c8eea，`hub:engine` 那条链）落地后，真建卡的两条路径是
+     * `engine/charter.ts` 与 `engine/dispatch.ts`，而它们调的是【下层】的 `insertCard`，
+     * 不是上层那层包装 `createCard`。于是 `callersOf("createCard")` 数到的【还是零】，
+     * 而第 6 条说的「零生产者】【已经不是真的了】。这就是 0016 §1 那族的形状：
+     * 判据没坏，是它指的事实换了 —— 而且换的方向恰好让绿的一边继续绿，
+     * 所以没有任何东西会响。
+     *
+     * 为什么这里【绕的是包装、不是校验】（我一开始把这条写成「绕过了入参校验」，
+     * 那是错的，而且错的方向和上面那条一模一样：听着像对、没人会去查）：
+     *   · 入参校验【在下层】—— zod 的 draft parse 与 APPROVAL_TYPES 那一关
+     *     都在 insertCard 里面（cards.ts 内可见），两条 engine 路径【照过】；
+     *   · 上层多出来的是【事务装配】：`w.node(...)` 拿写锁 + requireScopeDb +
+     *     组 ApprovalRequired 事件 + appendAudit。而超步内部事务已经开着，
+     *     再调 w.node 就是嵌套取锁 —— cards.ts 那段注释本来就写着
+     *     「超步内部的调用方不要用它，应当直接 insertCard + appendAudit」。
+     * 所以那是一条【按设计】的分层，不是绕过。留着这一发只因为它还判另一件事：
+     * 「上层那层包装今天在 src 里零调用方」—— 那是【另一条】待查的账
+     * （serve / 巡检 / CLI 都该用它而今天没人用），它【不许】被读成「卡片零生产者」。
+     * 有分母的那一发在下面。
+     */
     expect(callersOf("createCard", "approvals/cards.ts")).toEqual([]);
+    /**
+     * 第 6 条【现在】的真判据：谁在 src 里真建卡 = 谁调 insertCard（cards.ts 自己除外）。
+     *
+     * ⚠ 它【不是】一条「红过所以可信」的判据 —— 这条断言是 0041 之后【补的】，
+     * 落地那天它并不存在，所以从没被那次改动顶红过。今天真红过一次的是【下面那条
+     * UPDATE 名单】（`hub work / hub decide` 加了 approve.ts 这个第三个写方），
+     * 而那发红的正是它设计要做的事：逼改动的人回来重写上面那份清单
+     * —— 只是那次改动【没有】回来重写，这份账挂到本轮才还。
+     * 这一发的可信度来自另一处：它的分母是【当场数出来的】两个文件（不是空名单），
+     * 所以「扫描器坏了 / 路径拼错 / 注释滤掉代码」那一族瞎法在这条上会当场显形，
+     * 而在上一条（零调用方）那条上不会 —— 两条摆在一起才有分辨力。
+     *
+     * ⚠ 但它【不滤注释】：callersOf 是裸 includes，而上面那条 INSERT 名单用的
+     * srcFilesMatching【滤】整行注释。差别不是疏忽，是【方向】——
+     * 这条只会【多算】（误报 → 红 → 有人来看一眼），
+     * 那条【少算】才是不能承受的（把真生产者判成零）。实测过这一格：往 real-deps.ts
+     * 追加一行【纯注释】的 `// insertCard( …` ⇒ 这一发红，报的正是实到三项。
+     * 代价如实说是【假红】，而它【已经埋了一颗】：real-deps.ts:488 那句注释
+     * 写着「与 insertCard 同事务」，只差【没跟一对括号】才没命中；
+     * 谁哪天在那句里补上括号，就会在这里撞一次不需要撞的红。
+     */
+    expect(callersOf("insertCard", "approvals/cards.ts")).toEqual([
+      SRC + "/engine/charter.ts",
+      SRC + "/engine/dispatch.ts",
+    ]);
+    /**
+     * 而这两条【一条都不】通到 CEO 真会打开的那个界面：serve/ 与 http/ 里
+     * 【一行都不建卡】（当场判：上面那份 INSERT 名单是 toEqual 全等，里面没有它们；
+     * 另 `grep -rn "engine/" packages/hub/src/http/ packages/hub/src/serve/` 零命中，
+     * 所以连「http 调 engine、engine 再建卡」这条间接路也不通）。
+     * 所以「卡片有生产者了」这句话的【真】内容是：生产者在一台跑过
+     * `pnpm hub:engine` 的机器上，而那条命令本机跑不起来（tsx + langgraph 都缺）。
+     * 这一格【不钉成断言】—— 它讲的是两条命令的存在性与可运行性，不是 src 里的形状，
+     * 用 grep 去钉它会得到一条恒绿的装饰。「http/serve 不建卡」这件事【已经】被
+     * 上面那份 INSERT 全等名单钉住了：多一个 http 文件进去它就红。
+     *
+     * 下面这份 UPDATE 名单从【两条】变成【三条】就是 0041 那次改动顶红的东西本身
+     * （第三条 = engine/approve.ts 的 CLAIM_CARD_SQL，`hub decide` 认领卡片那条）。
+     * 三条各自的可达性【不一样】，这一格别读成"三个等价的批准写入口"：
+     *   · http/real-deps.ts —— CEO 真用的那一条（serve 起的路由）；
+     *   · policy/auto-approve.ts —— 自动批准，今天【零生产调用方】（本文件第 3 条）；
+     *   · engine/approve.ts —— 只有 `pnpm hub:engine` 到得了，本机跑不起来。
+     * 所以「批准的写路径有三条」这句听起来比实际宽：真正常在跑的【只有一条】。
+     * 那份 SQL 文本【两份并存】（这边与 real-deps 的 CLAIM_APPROVAL_SQL）是刻意的，
+     * 漂移代价写在 engine/approve.ts 文件头，由 approve.test.ts 那条逐字比对守着。
+     */
     expect(srcFilesMatching(/UPDATE\s+approvals\b/iu)).toEqual([
+      SRC + "/engine/approve.ts",
       SRC + "/http/real-deps.ts",
       SRC + "/policy/auto-approve.ts",
     ]);

@@ -46,12 +46,13 @@ $ grep -rn "INSERT INTO budgets" --include='*.ts' packages/hub/src
 $ grep -rn "declareLimit(" --include='*.ts' packages/hub/src packages/hub/test test | grep -v "src/budget/tracker.ts"
    ⇒ 命中全在 test/。⇒ declareLimit 在【生产】里一次都没被调过。
 $ grep -rn "consumed_cents" --include='*.ts' packages/hub/src
-   ⇒ 除 tracker 的 `consumed_cents + ?` 之外，只有一处【读】（http/app.ts:1034 读来显示）。
+   ⇒ 除 tracker 的 `consumed_cents + ?` 之外，只有一处【读】（读来显示；坐标见下面那段「行号与后效」）。
 ```
 
-> **行号与后效（Task 4.1 重测时补）**：上面那条 grep 报的 438 是当时的行号，现在那条读
-> 在 `http/app.ts:1034`（同一行内容：Task 4.1 那轮顶下去 431 行，0031 那轮又顶下去 97 行。
-> 同一行内容被顶过两次而无人重读坐标 —— 这正是快照守卫存在的全部理由）。
+> **行号与后效（Task 4.1 重测时补；GET /today 那轮又补过一次）**：上面那条 grep 报的 438
+> 是当时的行号，现在那条读在 `http/app.ts:1046`（同一行内容：Task 4.1 那轮顶下去 431 行，
+> 0031 那轮又顶下去 97 行，`GET /today` 那轮在本函数上方加了 12 行 ⇒ 顶到 1046。
+> 同一行内容被顶过【三】次而每次都要靠快照守卫才没人把坐标读成事实 —— 这正是它存在的全部理由）。
 > 另外上面那四条测的是**本轮动手之前**的仓库，本轮自己就否掉了其中两条：
 > `INSERT INTO budgets` 现在除了 tracker 那一处还有 `charter/budget-sync.ts` 的一处，
 > `consumed_cents` 的【读】也不止一处（都在 budget-sync 里）。
