@@ -585,6 +585,68 @@ describe("库打不开 / 页面损坏：两种「带伤运行」都被挡住", (
     expect(srv.portUsed()).toBe(8787);
     await r.shutdown();
   });
+
+  /**
+   * ⭐ 0038：检查【没跑成】时，Hub 照常起 + 【必须响一声】+ 【不许指路 restore.md】。
+   *
+   * 这一发是本篇在启动那一侧的落点，三个断言各挡一种错法：
+   *  1. 起来（needOk）—— 挡「把 unavailable 也判成拒绝启动」。
+   *     0038 之前这里是【拒绝启动】，那才是本篇要修的：一台库完全健康的机器
+   *     会因为 worker 起不来 / 超时被引导去照 restore.md 覆盖自己的库。
+   *  2. warn 里出现「没有跑成」与那个失败名 —— 挡「一声不吭地照常启动」。
+   *     那是把闸门拆掉之后【新】的失效方向（0037 §1.2：分工注释写着「响一声由调用方做」，
+   *     而 src 下读 report.unavailable 的非注释代码 0 处 = 没人做）。
+   *  3. warn 里出现「不要……恢复」而【不】指向 restore.md 作为动作 ——
+   *     挡「指错路」。这一条最容易写成恒真：文案里出现「restore.md」这四个字
+   *     既可以是指路也可以是劝阻。所以断的是【劝阻那半句的形状】（不要 + 恢复），
+   *     并另外单独断「不能出现『按 scripts/restore.md 恢复』那个祈使句形状」。
+   *
+   * ⚠ 造法：`integrityTimeoutMs: 0` ⇒ 真的走 runIntegrityScan、真的起 worker、
+   *   真的拿到 worker_timeout。【不是】塞一份假报告进去 —— 那样只会测到
+   *   「boot 读了那个字段」这一行，测不到 pageCheckCell 那条映射（本篇缺陷的本体）。
+   *   代价：这一发会真的起一次线程，慢一点（几十 ms），可接受。
+   */
+  it("⭐ 检查没跑成 ⇒ 照常启动 + 响一声 + 不指路恢复（0038）", async () => {
+    const good = db();
+    fillEvents(good, 500);
+    const { io, warn } = ioOf();
+    const srv = fakeServer();
+    const r = needOk(
+      await boot(args({ dbPath: good, port: 8787, noBackup: true }), io, {
+        serve: srv.serve,
+        scheduler: createFakeScheduler(0),
+        integrityTimeoutMs: 0,
+      }),
+    );
+    expect(warn.join(" ")).toContain("没有跑成");
+    expect(warn.join(" ")).toContain("worker_timeout");
+    // 起来了：HTTP 真的在听（不是「起了又退」那种半启动）。
+    expect(srv.portUsed()).toBe(8787);
+    // ⭐ 指路方向必须是【修环境】而不是【恢复数据】。
+    expect(warn.join(" ")).toContain("不要");
+    expect(warn.join(" ")).not.toContain("按 scripts/restore.md 恢复");
+    await r.shutdown();
+  });
+
+  it("⭐ 反向对照：同一份库【检查跑成了】时不许出现那句警告（否则上一条恒绿）", async () => {
+    /*
+     * 没有这一发，「warn 里出现『没有跑成』」可以靠【无条件 warn】蒙绿 ——
+     * 而一条每次启动都喊的警告，等于没有警告（patrol.ts / maintenance.ts
+     * 为告警疲劳写的是同一条）。这一发与上面那发的【唯一】差别是
+     * integrityTimeoutMs 不传，所以它是一次干净的对照。
+     */
+    const good = db();
+    fillEvents(good, 500);
+    const { io, warn } = ioOf();
+    const r = needOk(
+      await boot(args({ dbPath: good, port: 8787, noBackup: true }), io, {
+        serve: fakeServer().serve,
+        scheduler: createFakeScheduler(0),
+      }),
+    );
+    expect(warn.join(" ")).not.toContain("没有跑成");
+    await r.shutdown();
+  });
 });
 
 describe("备份：没配目录必须说出来；配了就必须真的备一次", () => {

@@ -40,6 +40,7 @@ import {
   type DrillResult,
 } from "../db/backup.js";
 import {
+  pageIntegrityBroken,
   runIntegrityScan,
   type IntegrityReport,
 } from "../db/integrity.js";
@@ -168,6 +169,17 @@ export type MaintenanceInput = {
   readonly backupDir?: string | undefined;
   readonly skipBackup?: boolean;
   readonly skipPatrol?: boolean;
+  /**
+   * 完整性检查的超时上限覆盖。不传用 INTEGRITY_WORKER_TIMEOUT_MS。
+   *
+   * 与 assemble.ts 的 `integrityTimeoutMs` 同一条理由：注入的是【时机】不是【结论】。
+   * 0038 那一格（检查没跑成 ⇒ 照备份 + 响一声 + 报告里【不】喊恢复）需要一个真的
+   * `unavailable` 从 runIntegrityScan 出来；换成「测试塞一份假报告进来」就只剩
+   * 「本函数读了那个字段」这一行被覆盖，而本篇的缺陷在【映射】那一步。
+   * 没有同时开 CLI 旗：`--no-backup` / `--no-patrol` 是给运维的判断，
+   * 而「把检查超时设成 0」在运维上等于「关掉启动闸门」，不该做成一个顺手能敲的命令。
+   */
+  readonly integrityTimeoutMs?: number;
   readonly now?: () => number;
   readonly onWarning: (message: string) => void;
 };
@@ -247,6 +259,9 @@ export async function runMaintenance(
     db: o.db,
     writer: o.writer,
     ...(o.now === undefined ? {} : { now: o.now }),
+    ...(o.integrityTimeoutMs === undefined
+      ? {}
+      : { timeoutMs: o.integrityTimeoutMs }),
   });
 
   // 三种「没备份」在退出码上必须分开（这一格是本轮写第二版时才补上的）：
@@ -268,11 +283,46 @@ export async function runMaintenance(
   let drillProblem = false;
 
   // 页面检查不过 ⇒ 不备份。理由见文件头那条「唯一的实质决定」。
-  // 判据只看 page_integrity，不看整份报告的 ok：整份报告里 not_observable
-  // 也拉不下 ok，但「没有门控决定可核」跟「文件坏了」是两件事，
-  // 后者绝不该拦备份。
-  const page = integrity.checks.find((c) => c.name === "page_integrity");
-  const pageBroken = page !== undefined && page.verdict === "violated";
+  // 判据只看 page_integrity，不看整份报告的 ok（理由写在 pageIntegrityBroken 上：
+  // not_observable 与 could_not_run 都不算损坏，用 ok 会把一大半正常巡检拦在门外）。
+  //
+  // ⚠ 0038：这一行原本是把 `pageIntegrityBroken` 的判据【就地再抄一遍】
+  // （`page.verdict === "violated"`）。而 `pageIntegrityBroken` 的注释一直写着
+  // 「它两行内联在 heartbeat/maintenance.ts 里……提出来」—— **抄一份不等于搬走一份**：
+  // 0038 改 verdict 语义时，如果只改 integrity.ts，这里会安静地得到
+  // 「instrument 故障 ⇒ 拦备份」而 Hub 那边得到「instrument 故障 ⇒ 照常启动」，
+  // 两侧各自都自洽、各自都绿。那正是这段注释当初要防的事，而它防的方式（提出来）
+  // 只完成了一半。现在这里调那个函数。
+  const pageBroken = pageIntegrityBroken(integrity);
+  /**
+   * ⭐ 0038：`unavailable` 有值 = 「这次【没跑成】页面检查」，与「跑出来说坏了」是两件事。
+   *
+   * 这里选【照常备份】+ 响一声，而【不】像 pageBroken 那样跳过备份。三条理由：
+   *  1. 少一份备份是【真损失】。保留策略只留最近 7 份，跳过一次就把可用备份往前推一天；
+   *     而「没备份」和「备了一份坏的」对使用者的差别是：前者只是没保护，后者会挤掉好备份。
+   *  2. 这条路已经有另一道闸：`createBackup` 对自己产出的那份文件跑 `integrity_check`，
+   *     不过就 `rmSync` 并在【清理旧备份之前】早退（backup.ts 那一段）。
+   *     实测：page 级损坏的源库连 `VACUUM INTO` 都过不去（当场抛
+   *     "database disk image is malformed"）⇒ 「源坏了而产物全绿」这一格我造不出来。
+   *     所以拦住这里的必要性比 pageBroken 那一支低一个档次。
+   *  3. 「没跑成」最可能的原因是这台机器的 worker / 超时，而不是库 ——
+   *     为一个仪器的毛病停掉数据保护，是给错的药。
+   *
+   * 但【必须响】：这一格以前一声不吭（src 下读 `report.unavailable` 的非注释代码 0 处），
+   * 而它输出的那一行「完整性：通过」在 0038 之后仍然会打印成「未通过」（ok 被拉下了），
+   * 光看那一行会以为「检查跑成了并报的问题」—— 那仍然是错的诊断方向。
+   * 所以这里点名【检查没跑成】并指路修环境，且明说**别照 restore.md 走**。
+   */
+  if (integrity.unavailable !== undefined) {
+    o.onWarning(
+      "页面完整性检查【没有跑成】（" +
+        integrity.unavailable +
+        "）⇒ 本轮的「备份前源库是否健康」这一道【没有】被检查过。" +
+        "\n  · 备份照做（产物自己还要过一道 integrity_check），但请修这台机器上的检查通路。" +
+        "\n  · 【不要】照 scripts/restore.md 恢复：库并没有被证明坏了，" +
+        "恢复会把一份可能完全健康的现网库覆盖掉。",
+    );
+  }
   if (o.skipBackup === true) {
     backupSkipped = "调用方显式 --no-backup";
     drillSkipped = backupSkipped;
@@ -517,8 +567,17 @@ export async function runMaintenanceCli(
   }
 }
 
-/** 人可读的一段输出。机器读者读退出码与 events，不读这里的措辞。 */
-function report(r: MaintenanceResult, io: CliIo): void {
+/**
+ * 人可读的一段输出。机器读者读退出码与 events，不读这里的措辞。
+ *
+ * ⚠ 导出它**只为了**让测试能直接喂一份 runMaintenance 的真结果进来。
+ * 走 CLI 测不到 0038 改的那两句指路文案：CLI 没有「把检查超时设成 0」那个旗
+ * （刻意不加，见 MaintenanceInput.integrityTimeoutMs 上那段），
+ * 于是 CLI 那条通路永远拿不到 unavailable。
+ * 它本身是纯函数（只读入参 + 往 io 写），所以直接喂真结果比造一份假报告强，
+ * 也比在 CLI 上开一个「关掉启动闸门」的旗强。
+ */
+export function report(r: MaintenanceResult, io: CliIo): void {
   const lines: string[] = [];
   lines.push("完整性：" + (r.integrity.ok ? "通过" : "未通过") + "（" + r.integrity.ms + "ms，" + r.integrity.via + "）");
   for (const c of r.integrity.checks) {
@@ -553,7 +612,21 @@ function report(r: MaintenanceResult, io: CliIo): void {
   }
   if (!r.integrity.ok) {
     lines.push("");
-    lines.push("→ 库可能已损坏。恢复步骤见 scripts/restore.md（先停 Hub，先改名留一份现网库）。");
+    // ⚠ 0038：这一句原本对【所有】!ok 都喊「库可能已损坏 → 照 restore.md 恢复」，
+    // 而 !ok 里混着两种相反的东西（见 runMaintenance 那段）：
+    //  · unavailable 有值 = 检查【没跑成】，库可能完全健康 —— 这一句会把人送去覆盖自己的库;
+    //  · 检查跑成了而报了问题 = 才是真要去恢复的那种。
+    // 「→ 库可能已损坏」对着一次 worker 超时喊，就是本篇要消灭的那个动作。
+    if (r.integrity.unavailable !== undefined) {
+      lines.push(
+        "→ 完整性检查【没跑成】（" +
+          r.integrity.unavailable +
+          "），不代表库坏了。要修的是这台机器上的检查通路。" +
+          "\n  【不要】照 scripts/restore.md 恢复 —— 那会覆盖一份可能完全健康的现网库。",
+      );
+    } else {
+      lines.push("→ 库可能已损坏。恢复步骤见 scripts/restore.md（先停 Hub，先改名留一份现网库）。");
+    }
   }
   io.write(lines.join("\n"));
 }

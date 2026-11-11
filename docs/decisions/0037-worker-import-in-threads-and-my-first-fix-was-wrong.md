@@ -66,7 +66,7 @@
 
 | 我写的那句话 | 复算之后 |
 | --- | --- |
-| 「全仓 10 处 `runIntegrityScan(` 调用里，没有一处断 `page_integrity` 的 verdict 是 `ok`」 | **字面成立**（复算 = 0 处）。**但它不是缺陷活下来的原因**：`integrity.test.ts:339` 断的是 `unavailable).toBeUndefined()`，`backup.test.ts` 断 `ran === true` **5 处**、`result.ok === true` **4 处** —— 这些断言【已经在要求 worker 真的跑成了】，方向是对的 |
+| 「全仓 10 处 `runIntegrityScan(` 调用里，没有一处断 `page_integrity` 的 verdict 是 `ok`」 | **字面成立**（复算 = 0 处）。**但它不是缺陷活下来的原因**：`integrity.test.ts:426` 断的是 `unavailable).toBeUndefined()`，`backup.test.ts` 断 `ran === true` **5 处**、`result.ok === true` **4 处** —— 这些断言【已经在要求 worker 真的跑成了】，方向是对的 |
 | 「没有一条用例跑在产品的命令上 ⇒ 这条路径在产品环境下没被测过」 | **前半句真，后半句假。**`assemble.test.ts` 有 **29 处** `needOk(` 断 `boot()` 的成功路径，而 `boot()` 里就含真 worker + 真页面检查 |
 | ⇒ 直接量：缺陷态下那条既有断言到底红不红 | **红**（tsx 跑真仓库：`unavailable = "worker_error"`，而断言要 `undefined`）。修好之后 `undefined`，绿。 |
 
@@ -88,14 +88,14 @@
 它单独构成第二个缺陷，另见 **0038**：
 
 `runIntegrityScan` 里那一行 `verdict: page.ok ? "ok" : "violated"`
-（`integrity.ts:179`）把「检查没跑成」和「查出损坏」压成同一个 `violated`，
+（`integrity.ts:282`）把「检查没跑成」和「查出损坏」压成同一个 `violated`，
 于是 `pageIntegrityBroken` 在**一次 instrument 故障**上返回 `true`，
 `pnpm hub:serve` **拒绝启动**并指路 `scripts/restore.md` —— 而第 3 步是
 **把现网库改名再从备份覆盖**。一台库完全健康的机器会因为
 「worker 起不来 / 120 秒没回话 / 路径打错」被引导去**覆盖自己的库**。
 
 ⚠ **「库路径打错」这一发我起初也算进去了，那是错的**：`dbPath` 不存在时
-`boot` 在 `assemble.ts:291`（`maintenance.ts:479` 同一条）就退回 `EXIT_USAGE` 了，
+`boot` 在 `assemble.ts:305`（`maintenance.ts:529` 同一条）就退回 `EXIT_USAGE` 了，
 **根本走不到这个闸门**。所以真实启动路径上能撞上这个闸门的仪器故障**只有三种**
 （`INTEGRITY_FAILURES`，`integrity.ts:102`）：`worker_unavailable` /
 `worker_timeout`（默认 **120 秒**）/ `worker_error` —— 本篇那个缺陷就是第三种。
@@ -103,7 +103,7 @@
 是 `undefined`：worker 自己跑起来了、是它开库开不了，那确实更像「库的事」而不是
 「尺子坏了」。这一格我第一版也一并算成误报，复算后**不算**。）
 
-而 `pageIntegrityBroken` 自己的注释（`integrity.ts:1135`–`1137`）写的正是相反的话：
+而 `pageIntegrityBroken` 自己的注释（`integrity.ts:1200`–`1202`）写的正是相反的话：
 「`not_observable` / `could_not_run` 都【不算】损坏：那两格说的是『这条判据没跑成』。
 据此拒绝启动，等于让一次 worker 起不来变成整台机器不可用；
 **而它该做的（响一声、指路）由调用方在别处做**」——

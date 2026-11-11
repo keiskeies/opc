@@ -49,6 +49,7 @@ import {
   EXIT_USAGE,
   parseMaintenanceArgs,
   removeDrillTarget,
+  report,
   runMaintenance,
   runMaintenanceCli,
 } from "../../src/heartbeat/maintenance.js";
@@ -334,6 +335,118 @@ describe("③ 那一条实质决定：页面检查不过就不备份", () => {
     // 一份坏备份成为「最新那份」并挤掉一份好备份，是这一步唯一防住的东西。
     expect(existsSync(broken.backupDir)).toBe(false);
     expect(warnings.join("\n")).toContain("restore.md");
+  });
+
+  /**
+   * ⭐ 0038：检查【没跑成】这一格。三条断言各挡一种错法：
+   *  1. **备份照做**（`backup.ok === true` 且目录里真有文件）——
+   *     挡「照 pageBroken 那一支把它也跳过」。那一条路的代价是【真损失】：
+   *     保留策略只留最近 7 份，为一个仪器的毛病停一天数据保护是给错的药。
+   *     ⚠ 它安全的理由不是「反正源库大概是好的」，是 `createBackup` 自己对产物
+   *     再跑一道 integrity_check、不过就 rmSync 并在清理旧备份【之前】早退
+   *     （backup.ts 那一段 + 本篇实测：page 级损坏的源库连 VACUUM INTO 都过不去）。
+   *  2. **必须响**（onWarning 里出现「没有跑成」与那个失败名）——
+   *     挡 0038 之前的「一声不吭」。
+   *  3. **ok 仍然是 false**（退出码 1）—— 挡「既然照常备份了就报成功」。
+   *     少这一条，前两条会给人一种「这轮没事」的错觉。
+   *
+   * ⚠ 造法同 assemble.test.ts 那一发：`integrityTimeoutMs: 0` 走真的 runIntegrityScan，
+   *   拿到真的 worker_timeout。CLI 那条路上【没有】这个旗（刻意的：那等于一个
+   *   「关掉启动闸门」的命令行开关），所以这一发只能直接调 runMaintenance。
+   */
+  it("⭐ 检查没跑成 ⇒ 备份照做 + 响一声 + 仍然不算成功（0038）", async () => {
+    const f = fresh();
+    const warnings: string[] = [];
+    const r = await runMaintenance({
+      dbPath: f.path,
+      db: f.q.readConnection(),
+      writer: f.q,
+      bus: f.bus,
+      backupDir: f.backupDir,
+      skipPatrol: true,
+      integrityTimeoutMs: 0,
+      now: () => T0,
+      onWarning: (m) => warnings.push(m),
+    });
+    // 前置自查：这一发要测的是「检查没跑成」而不是「检查报了损坏」。
+    expect(r.integrity.unavailable, "夹具没造出仪器故障，这一发测不到那一格").toBe("worker_timeout");
+    expect(r.backup?.ok, "检查没跑成【不该】连带跳过备份").toBe(true);
+    expect(existsSync(f.backupDir)).toBe(true);
+    expect(warnings.join("\n")).toContain("没有跑成");
+    expect(warnings.join("\n")).toContain("worker_timeout");
+    // 指路方向：修环境，而不是恢复数据。
+    expect(warnings.join("\n")).toContain("不要");
+    expect(warnings.join("\n")).not.toContain("按 scripts/restore.md 恢复");
+    expect(r.ok).toBe(false);
+  });
+
+  it("⭐ report()：仪器故障那一轮不许喊「库可能已损坏」；真损坏那一轮仍然喊（0038）", async () => {
+    /*
+     * 这一发测的是【人读到的那两行】，而它只能用直接调 report() 测：
+     * CLI 没有 integrityTimeoutMs 那个旗（刻意不加），所以 CLI 那条通路永远
+     * 拿不到 unavailable，写不出这条用例。
+     *
+     * 两条腿（缺一条整发就是恒绿的）：
+     *  · 仪器故障的 result ⇒ 出现「没跑成」+「不要……恢复」，且【不】出现
+     *    「库可能已损坏」—— 挡的是 0038 之前那句对【所有】!ok 一律喊恢复的文案。
+     *  · 真损坏的 result ⇒ 仍然出现「库可能已损坏」+ restore.md ——
+     *    挡「把那句指路整个删掉」这种把上一条变绿的改法。
+     * 两份 result 都来自【真跑一次 runMaintenance】，不是手搓的假对象：
+     * report 只读 result，喂真结果才能让「unavailable 到底长什么样」也一起被验到。
+     */
+    const brokenRun = (() => {
+      const f = fresh();
+      return runMaintenance({
+        dbPath: f.path,
+        db: f.q.readConnection(),
+        writer: f.q,
+        bus: f.bus,
+        backupDir: f.backupDir,
+        skipPatrol: true,
+        integrityTimeoutMs: 0,
+        now: () => T0,
+        onWarning: () => {},
+      });
+    })();
+    const h1 = io();
+    report(await brokenRun, h1.io);
+    const instrument = h1.out.join("\n");
+    expect(instrument).toContain("没跑成");
+    expect(instrument).toContain("不要");
+    expect(instrument).not.toContain("库可能已损坏");
+
+    // 对照腿：【真损坏】的那一轮必须仍然喊「库可能已损坏」+ 指 restore.md。
+    // 少了这条，上面那三断言可以靠「把 else 那一支整个删掉」蒙绿 ——
+    // 而删掉它等于让真损坏的那一轮【没有】指路，那比原来那句更糟。
+    // 这一跑同时补上一格空白：此前 report() 的 else 分支【没有任何用例覆盖】
+    //（CLI 那些用例里，损坏的库要么在 openDb 就抛、要么走的是 runMaintenance 直调，
+    //  两条都到不了 report()）。
+    const corruptFixture = fresh();
+    await corruptFixture.q.close();
+    queues.pop();
+    closeAllQuietly(corruptFixture.db);
+    corruptWholePages(corruptFixture.path, 6);
+    const cq = new WriteQueue(corruptFixture.path);
+    queues.push(cq);
+    const corruptRun = await runMaintenance({
+      dbPath: corruptFixture.path,
+      db: cq.readConnection(),
+      writer: cq,
+      bus: new InMemoryEventBus(),
+      skipBackup: true,
+      skipPatrol: true,
+      now: () => T0,
+      onWarning: () => {},
+    });
+    // 前置自查：这一跑得是「检查跑成了而它报损坏」，不是又一次没跑成。
+    expect(corruptRun.integrity.unavailable).toBeUndefined();
+    expect(corruptRun.integrity.ok).toBe(false);
+    const h2 = io();
+    report(corruptRun, h2.io);
+    expect(h2.out.join("\n")).toContain("库可能已损坏");
+    expect(h2.out.join("\n")).toContain("restore.md");
+    // 反向对照：损坏那一轮不许同时喊「没跑成」（那会把人送去修环境）。
+    expect(h2.out.join("\n")).not.toContain("没跑成");
   });
 
   it("库根本开不了 ⇒ 退 1 并指路 restore.md，而不是一段裸 SQLite 堆栈", async () => {

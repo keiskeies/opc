@@ -174,12 +174,7 @@ export async function runIntegrityScan(
       : await guardedProbe(o.writer);
 
   const checks: CheckResult[] = [
-    {
-      name: "page_integrity",
-      verdict: page.ok ? "ok" : "violated",
-      detail: page.pageReport.slice(0, 2000),
-      checked: 1,
-    },
+    pageCheckCell(page),
     probe,
     ...auditCoherenceReport({ db: o.db, ...(o.ftsSample === undefined ? {} : { ftsSample: o.ftsSample }) }),
   ];
@@ -248,6 +243,52 @@ type PageOutcome = {
   readonly via: "worker" | "main_thread";
   readonly unavailable?: IntegrityFailure;
 };
+
+/**
+ * `PageOutcome` → 报告里那一格 `page_integrity`。**这一格三个字段全在这里算**，
+ * 不在调用点各拼一遍（0036 §2 为 `selfWorkerUrl`、0022 §3 为 `preventionFor`
+ * 写的是同一条理由：判定只有一处，才不会两处各改各的）。
+ *
+ * ── 0038：为什么 verdict 不再是 `page.ok ? "ok" : "violated"` ──────────
+ * `page.ok === false` 有【两种】来源，而它们要求的动作完全相反：
+ *  ① 检查【跑成了】，而它说这份库坏了（含「库开不了 / 读不动」，见下面那条 ⚠）
+ *     ⇒ 要修的是数据，动作 = 恢复。
+ *  ② 检查【根本没跑成】：`unavailable` 有值 —— worker 起不来、120 秒没回话、
+ *     线程里加载失败（0037 那个缺陷就是第三种）
+ *     ⇒ 要修的是环境，数据可能【完全健康】。
+ * 压成一个 `violated` 之后，②会被 `pageIntegrityBroken` 判成损坏，于是
+ * `pnpm hub:serve` 【拒绝启动】并把人指到 scripts/restore.md —— 而那份文档第 3 步是
+ * 【把现网库改名、再从备份覆盖过去】。一台库完全健康的机器，会因为一次 worker 起不来
+ * 被引导去覆盖自己的库。这正是本仓反复记的那类失效：**兜底分支把「没跑成」翻成一条
+ * 合法结论**（0007 §4 取舍三、0018 §1 第 11 条、0037 §1.2 —— 这是它第四次）。
+ *
+ * ⇒ ②走 `could_not_run`（本模块【既有】词汇，CHECK_VERDICTS 那段就是为它写的：
+ * 「有东西可核而尺子放不下去」）。它照样拉下 `report.ok`（ok 那一支看的是 `page.ok`，
+ * 没动），所以「有一格没跑成的报告不能被人当全绿读走」那条仍然成立；
+ * 差别只在它【不】拉启动闸门 —— 而它该做的「响一声、指路」由两个调用方各自补上
+ * （assemble.ts 启动那一处 io.warn、maintenance.ts 那一处 onWarning + 那句指路）。
+ *
+ * ⚠ 留在 `violated` 的那一种（别把它当成误报）：worker 起来了、是它【开不了这份库】。
+ * `integrity.worker.ts` 自带 try/catch，会把开库抛错变成一条 `ok:false` 的消息回过来，
+ * 而 `unavailable` 是 `undefined`。判据跑成了、它的结论是「这份库我读不动」——
+ * 那是被检查对象的结论，不是尺子坏了。实测过这两种形状的读数不同：
+ * `TIMEOUT verdict=could_not_run unavailable=worker_timeout` /
+ * `NOPATH verdict=violated unavailable=undefined`。各有一条用例钉住。
+ */
+function pageCheckCell(page: PageOutcome): CheckResult {
+  const instrumentBroke = page.unavailable !== undefined;
+  return {
+    name: "page_integrity",
+    verdict: page.ok ? "ok" : instrumentBroke ? "could_not_run" : "violated",
+    detail: page.pageReport.slice(0, 2000),
+    // ⚠ 0038 顺手补的一格：`checked` 原本恒为 1，包括【一次都没查】的那两种情形。
+    // CheckResult 自己的注释写着「checked = 0 且 verdict = ok 是矛盾的」，
+    // 而它反过来那种（verdict 不是 ok 而 checked 是 1）从来没被检查过 ——
+    // 于是「没跑成的检查」在报告里长得像「查过一条并且发现问题」，
+    // 读的人会以为尺子真的落到库上过。仪器故障时它是 0：那才是实际看了多少行。
+    checked: instrumentBroke ? 0 : 1,
+  };
+}
 
 async function pageViaWorker(
   dbPath: string,
@@ -1126,15 +1167,44 @@ export function ftsIndexCoherence(
  * 「备份拦住了而 Hub 照样带伤起来」—— 两边各自都自洽、各自都绿。
  * 与 0022 §3 为 `preventionFor`、0024 §3 为 `isExternalSourceRef` 写的理由同一条。
  *
- * 判据只看 page_integrity 那一条，**不看整份报告的 ok**。这不是宽松，是量出来的：
- * `ok` 会被 `could_not_run` 与 `not_observable` 拉下来（实测：一个没有任何门控决定
- * 的合法新库，因为「没有 gate_decision 可核」而 ok = false）。
- * 用 ok 当启动闸会【把一大半真实启动挡在门外】，而拦下的理由与「文件坏了」毫无关系 ——
- * 「没有东西可核」与「库损坏」是两件事，后者绝不该拦启动，前者绝不该放行损坏。
+ * ⚠ 0038 量到：**「提出来」这件事当时只做了一半** —— maintenance.ts 里那两行
+ * 一直【还在那里】（`page.verdict === "violated"` 就地写着），本函数只有一个调用方
+ * （assemble.ts）。也就是说这段注释描述的「搬走」实际是「抄了一份而原件没删」，
+ * 而它防的那个失效（改一处不改另一处 ⇒ 两边各自自洽、各自都绿）就是 0038
+ * 改 verdict 语义时【会】遇到的那个。现在 maintenance.ts 改成调本函数了。
+ *
+ * 判据只看 page_integrity 那一条，**不看整份报告的 ok** —— 这个取舍仍然成立，
+ * 但它原来的理由【写错了】，原文留着（规则：错的陈述标错留着，不静默删）：
+ *   > `ok` 会被 `could_not_run` 与 `not_observable` 拉下来（实测：一个没有任何门控决定
+ *   > 的合法新库，因为「没有 gate_decision 可核」而 ok = false）。
+ *   > 用 ok 当启动闸会【把一大半真实启动挡在门外】……
+ * ⚠ **那两句都是假的，而第一句前面还写着「实测」。** 复算（0038）：
+ *  `ok` 的表达式是 `page.ok && !checks.some(violated || could_not_run)` ——
+ *  `not_observable` 【根本不在里面】。真跑一份「没有任何门控决定的合法新库」：
+ *    `合法新库 ok=true unavailable=undefined broken=false`
+ *    各格：page_integrity=ok/1 append_only=not_observable/0 action_enum=not_observable/0
+ *          state_machine=not_observable/0 gate_evidence=not_observable/0
+ *          harness_call=not_observable/0 fts_index=not_observable/0
+ *  也就是那份夹具的 ok 是 **true**，不是注释说的 false。
+ *  ⇒ 「用 ok 当启动闸会把一大半真实启动挡在门外」这个【后果】没发生过，
+ *    而它是那句取舍当时唯一的支撑。
+ *
+ * 取舍【为什么仍然成立】（换一个真理由）：`could_not_run` 确实拉得下 ok（表达式里有它），
+ * 而它是「有东西可核而尺子放不下去」—— 拿它当启动闸，一次 instrument 故障就会
+ * 变成整机不可用，并要求人去恢复一份可能健康的库。另一半理由在
+ * `IntegrityReport.ok` 那段：ok 是「全部格子都没问题」的合取，
+ * 它天生答不出【哪一格】出了问题，而启动闸门要的正是「只有页面坏了才拦」。
+ * ⇒ 带「实测」两个字的陈述，如果它撑的是一个【取舍】，那它坏了以后取舍会原地悬空 ——
+ *  本篇的做法是补一个真理由，而不是删掉那句错的（删掉等于抹掉「我写过一句没验的话」这个证据）。
  *
  * `verdict === "not_observable"` / `"could_not_run"` 都【不算】损坏：
  * 那两格说的是「这条判据没跑成」。据此拒绝启动，等于让一次 worker 起不来
  * 变成整台机器不可用；而它该做的（响一声、指路）由调用方在别处做。
+ * ⚠ 这最后一句在写下之后的 0037 之前【两半都没做】（复算：src 下读
+ *   `report.unavailable` 的非注释代码 0 处）—— 分工写对了而没人认领，
+ *   于是实际行为是「一声不吭地照常启动」。0038 把两半接上：
+ *   assemble.ts 启动处 io.warn，maintenance.ts 两处（onWarning + report 的那句指路）。
+ *   接线由 worker-entry.test.ts 之外的那三发用例钉住（integrity.test.ts ③ 节）。
  */
 export function pageIntegrityBroken(report: Pick<IntegrityReport, "checks">): boolean {
   const page = report.checks.find((c) => c.name === "page_integrity");

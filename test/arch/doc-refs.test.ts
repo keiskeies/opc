@@ -399,21 +399,28 @@ const SNAP: Record<string, string> = {
   // 这里它们真正证的是**位置**：0037 §1.2 的结论是「库路径打错走不到那个闸门，
   // 因为在这两行就退回 EXIT_USAGE 了」—— 那两行一旦被删（把存在性检查挪走），
   // 「走不到」这个结论就失效，快照红得其所。
-  "0037-worker-import-in-threads-and-my-first-fix-was-wrong.md>integrity.test.ts:339":
+  // ⚠ 0038 改了几行的行号，这一组五条全部重抄（sed -n '<n>p' 逐条重读）。
+  //   · integrity.test.ts:339 → 426（① 组在 339 之后插了两发）
+  //   · integrity.ts:179 → 282（pageCheckCell 前移；那一行从 `page.ok ? "ok" : "violated"`
+  //     变成新的三目，快照跟着内容走，这正是「0037 §1.2 说 0038 会改这一行」的应验）
+  //   · assemble.ts:291 → 305；maintenance.ts:479 → 529（都是前面被插入的内容顶下去的）
+  //   · integrity.ts:1135 → 1200（pageIntegrityBroken 的注释加长了）
+  "0037-worker-import-in-threads-and-my-first-fix-was-wrong.md>integrity.test.ts:426":
     "expect(viaWorker.unavailable).toBeUndefined();",
-  // ⭐ 这一条是本篇最该被钉住的一行：0037 §1.2 那个缺陷（0038）就长在这行上 ——
-  // 「检查没跑成」和「查出损坏」在这里被压成同一个 violated。0038 改它的时候这行必变、
-  // 快照必红，而红的那一刻正是该回去读 §1.2 的时候（不是「快照写错了」）。
-  "0037-worker-import-in-threads-and-my-first-fix-was-wrong.md>integrity.ts:179":
-    'verdict: page.ok ? "ok" : "violated",',
+  "0037-worker-import-in-threads-and-my-first-fix-was-wrong.md>integrity.ts:282":
+    'verdict: page.ok ? "ok" : instrumentBroke ? "could_not_run" : "violated",',
   "0037-worker-import-in-threads-and-my-first-fix-was-wrong.md>integrity.ts:102":
     "export const INTEGRITY_FAILURES = [",
-  "0037-worker-import-in-threads-and-my-first-fix-was-wrong.md>integrity.ts:1135":
+  "0037-worker-import-in-threads-and-my-first-fix-was-wrong.md>integrity.ts:1200":
     '* `verdict === "not_observable"` / `"could_not_run"` 都【不算】损坏：',
-  "0037-worker-import-in-threads-and-my-first-fix-was-wrong.md>assemble.ts:291":
+  "0037-worker-import-in-threads-and-my-first-fix-was-wrong.md>assemble.ts:305":
     "if (!existsSync(dbPath)) {",
-  "0037-worker-import-in-threads-and-my-first-fix-was-wrong.md>maintenance.ts:479":
+  "0037-worker-import-in-threads-and-my-first-fix-was-wrong.md>maintenance.ts:529":
     "if (!existsSync(dbPath)) {",
+  // 0038：本篇自己引用了 maintenance.ts:290（它讲「这一行原本就地内联」）。
+  // 一行指向「被 0038 改过的那一行」的引用，正是活坐标该被钉住的形状。
+  "0038-page-integrity-vocabulary-and-a-machine-to-boot-on.md>maintenance.ts:290":
+    '// （`page.verdict === "violated"`）。而 `pageIntegrityBroken` 的注释一直写着',
 };
 
 describe("决策文档里的「文件:行号」引用不漂移", () => {

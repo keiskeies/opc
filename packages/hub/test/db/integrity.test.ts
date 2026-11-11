@@ -40,6 +40,7 @@ import {
   CHECK_VERDICTS,
   INTEGRITY_PROBE_ACTOR,
   auditCoherenceReport,
+  pageIntegrityBroken,
   probeAppendOnly,
   replayFingerprint,
   runIntegrityScan,
@@ -265,7 +266,93 @@ describe("① 页面检查必须离开主线程（Task 6.2 的验收原文）", 
     expect(res.unavailable).toBe("worker_timeout");
     // 反向对照：unavailable 的报告不能同时是 ok。
     expect(res.ok).toBe(false);
+    /*
+     * ⚠ 0038 改了这一发的结论：原本断 `violated`，而那是本篇那个缺陷的形状 ——
+     * 「检查没跑成」和「查出损坏」共用一个词，于是 pageIntegrityBroken 在这里返回 true，
+     * `pnpm hub:serve` 会【拒绝启动】并把人指向 restore.md（第 3 步：覆盖现网库）。
+     * 一台库完全健康的机器不该因为一次 worker 超时被引导去覆盖自己的库。
+     * 现在这一格是 could_not_run（本模块既有词汇），它：
+     *  · 仍然拉下 res.ok（上面那两条断言不变 ⇒ 「没跑成不算通过」这条验收一字未改）；
+     *  · 【不】再拉启动闸门（下面那条 pageIntegrityBroken === false 就是这个取舍的锁）。
+     * ⚠ 别把它读成「超时不再算失败了」：失败仍然失败，只是失败的【修法】不同 ——
+     *   violated 的修法是恢复数据，could_not_run 的修法是修这台机器上的检查通路。
+     */
+    const page = resultByName(res.checks, "page_integrity");
+    expect(page.verdict).toBe("could_not_run");
+    // 这一发是本节改动的【落点】：闸门必须放开，而它只可能因为 verdict 变了才放开。
+    expect(pageIntegrityBroken(res)).toBe(false);
+    // 而且它得【响一声】—— 见 assemble.ts / maintenance.ts 各自那发接线用例。
+    // 这里断 checked：仪器故障时它是 0（一次都没查），不能长得像「查过一条并报出问题」。
+    expect(page.checked).toBe(0);
+  });
+
+  it("⭐ 仪器故障（worker_timeout）⇒ could_not_run 且不拉闸门；真损坏【仍然】拉", async () => {
+    /*
+     * 这一发要钉的是 0038 那条映射【两个方向】都成立：
+     *  · 仪器故障（这里造得出的是 worker_timeout）⇒ could_not_run，拉下 ok 但【不】拉闸门；
+     *  · 真损坏 ⇒ 仍然是 violated，闸门【照拉】。
+     * 两个方向必须写在同一发里，否则「把闸门改成永远 false」能绿掉其中一半 ——
+     * 而那一半恰恰是本篇改动的落点。
+     *
+     * ⚠ INTEGRITY_FAILURES 那三种（worker_unavailable / worker_timeout / worker_error）
+     *   这一发【只造得出 timeout 一种】，别把它读成「三种都验过了」：
+     *    · worker_error：只能来自 worker 的 error 事件（加载期失败），而入口恒存在 ⇒ 造不出。
+     *    · worker_unavailable：new Worker 构造期抛，而入口由 import.meta.url 推出、恒在 ⇒ 造不出
+     *      （0036 §7 那条「worker_unavailable 那一支没有用例」的登记仍然有效）。
+     *    · 把 dbPath 指向【打不开的东西】（不存在的文件 / 一个目录）不是这两支 ——
+     *      worker 起得来、是它开库时抛，而它自带 try/catch ⇒ 回一条 ok:false 的消息、
+     *      unavailable 是 undefined ⇒ 那走的是 violated（见下面专门那一发），不是仪器故障。
+     *   ⇒ 三条共用的是【同一段映射代码】（pageCheckCell 里 `unavailable !== undefined`
+     *     那一个判断），timeout 打中它 = 那一段被执行过；剩下两条是【够不到那段代码的上游】，
+     *     不是映射没测到。区别记在这里，免得将来有人以为「补个 unavailable 的用例」能变严。
+     */
+    const { path, db } = migratedDb(50);
+    const res = await runIntegrityScan({ dbPath: path, db, timeoutMs: 0 });
+    expect(res.unavailable).toBe("worker_timeout");
+    expect(resultByName(res.checks, "page_integrity").verdict).toBe("could_not_run");
+    expect(pageIntegrityBroken(res)).toBe(false);
+    expect(res.ok).toBe(false);
+
+    // 反向对照（⭐ 这一发才是「不是恒绿」的证据）：同一份检查在【真损坏】的库上
+    // 必须【仍然】判 violated 并拉闸门。少了这一发，上面那两条可以靠
+    // 「把 pageIntegrityBroken 改成永远 false」蒙绿。
+    // 夹具用本文件自己那套【截断】写法（下面那发大的也用它），不新抄一份
+    // corruptWholePages —— maintenance.test.ts 与 assemble.test.ts 各已有一份，
+    // 再加第三份就是本篇正在修的那个形状（同一判据写多处）。
+    // ⚠ 行数必须是【千级】：我第一版用上面那份 50 行的库截一半，
+    //   integrity_check 回的是 "ok" —— 截掉的那一半没有引用页，
+    //   于是这一发会变成一条「夹具根本没坏」的恒绿。那正是 0018 §1 第 11 条
+    //   与本页多条夹具反复撞的那格：造损坏要造到【尺子真的落不下去】为止。
+    const many = migratedDb(3_000);
+    const broken = join(TMP, "损坏-" + ++seq + ".db");
+    copyFileSync(many.path, broken);
+    const fd = openSync(broken, "r+");
+    ftruncateSync(fd, Math.floor(fstatSync(fd).size * 0.5));
+    closeSync(fd);
+    const r2 = await runIntegrityScan({ dbPath: broken, db, timeoutMs: 10_000 });
+    expect(r2.unavailable, "损坏库上的检查必须【跑成】，否则这一发测的是别的东西").toBeUndefined();
+    expect(resultByName(r2.checks, "page_integrity").verdict).toBe("violated");
+    expect(pageIntegrityBroken(r2)).toBe(true);
+    expect(resultByName(r2.checks, "page_integrity").checked).toBe(1);
+  });
+
+  it("库开不了（worker 起来了而它读不动这份库）⇒ 仍是 violated，不是仪器故障", async () => {
+    /*
+     * 这一发守的是映射【另一侧】的界线，而它最容易被改错：
+     * integrity.worker.ts 自带 try/catch，开库抛错会变成一条 ok:false 的【消息】
+     * 回主线程 ⇒ 主线程看到的 unavailable 是 undefined，判据【跑成了】，
+     * 它的结论是「这份库我读不动」⇒ 那是被检查对象的结论，走 violated。
+     * 如果哪天有人「顺手」把这条也改成 could_not_run，启动闸门就再也不拦损坏库了。
+     */
+    const { db } = migratedDb(5);
+    const dirPath = join(TMP, "这是个目录-" + ++seq);
+    mkdirSync(dirPath);
+    const res = await runIntegrityScan({ dbPath: dirPath, db, timeoutMs: 10_000 });
+    expect(res.via).toBe("worker");
+    expect(res.unavailable, "worker 自己 catch 掉的抛错不是仪器故障").toBeUndefined();
     expect(resultByName(res.checks, "page_integrity").verdict).toBe("violated");
+    expect(pageIntegrityBroken(res)).toBe(true);
+    expect(resultByName(res.checks, "page_integrity").checked).toBe(1);
   });
 });
 

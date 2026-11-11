@@ -159,6 +159,20 @@ export interface BootOverrides {
   readonly backupVia?: (req: BackupOffLoopRequest) => Promise<BackupOffLoopOutcome>;
   /** 备份 worker 的超时上限覆盖。不传用 BACKUP_WORKER_TIMEOUT_MS。 */
   readonly backupTimeoutMs?: number;
+  /**
+   * 启动那一发页面完整性检查的超时上限覆盖。不传用 INTEGRITY_WORKER_TIMEOUT_MS。
+   *
+   * 与 `backupTimeoutMs` 同一条理由：注入的是【时机】而不是【结论】——
+   * 0038 要给「instrument 故障 ⇒ 照常启动但【响一声】」那一格配用例，
+   * 而那一格需要一个真的 `unavailable` 从 `runIntegrityScan` 里出来。
+   * 替代方案是往 boot 再开一个 `integrityVia`（直接塞一份假报告），
+   * 但那只会测到【读那个字段的那一行】，测不到 `pageCheckCell` 那条映射真的产出了
+   * could_not_run —— 也就是本篇那个缺陷的本体。所以选超时。
+   * ⚠ 生产里把它设成 0 的后果要写明白：每次启动都会「检查没跑成 ⇒ 带警告启动」，
+   *   也就是把启动闸门整个关掉。它和 `backupTimeoutMs: 0` 是同一类脚枪，
+   *   不额外加防线（加了就变成「生产不许超时」，而那在大库上是假的）。
+   */
+  readonly integrityTimeoutMs?: number;
   readonly token?: string;
   /**
    * 心跳彻底停掉时的处置。生产传一个「结束进程」的动作（见 runServeCli）；
@@ -487,6 +501,9 @@ export async function boot(
       db: queue.readConnection(),
       writer: queue,
       ...(o.now === undefined ? {} : { now: o.now }),
+      ...(o.integrityTimeoutMs === undefined
+        ? {}
+        : { timeoutMs: o.integrityTimeoutMs }),
     });
     if (pageIntegrityBroken(report)) {
       return {
@@ -500,6 +517,39 @@ export async function boot(
           "于是连「从哪个时刻起不可信」都答不出来。" +
           "\n→ 按 scripts/restore.md 恢复（先停 Hub、先把现网库改名留一份、再从备份恢复），然后重来。",
       };
+    }
+    /**
+     * ⚠ 0038：闸门【不】拦的那一种，必须在这里【响一声】。
+     *
+     * `pageIntegrityBroken` 的注释一直写着「instrument 故障不算损坏，
+     * 而它该做的（响一声、指路）由调用方在别处做」—— 分工写对了，
+     * 但「响一声」这一半【全仓没有任何地方做】（复算：src 下读 `report.unavailable`
+     * 的非注释代码 0 处）。于是那一格的实际行为是「一声不吭地照常启动」，
+     * 而它刚从「拒绝启动 + 指路恢复文档」改过来 ——
+     * **两个方向都错，而错在同一个信息缺失上**：读的人不知道这次启动【没有】被
+     * 页面检查保护过。0037 那个缺陷（入口在 0037 之前加载不了）在改完之后
+     * 就会落到这一格：以前是拒绝启动（吓人但响），后来会变成完全静默。
+     *
+     * 所以这里 io.warn 而不是 return：库没有被证明坏了，Hub 该起（0037 §1.2）。
+     * 但它【不能像什么都没发生】—— 措辞要把「这次启动少了哪一层保护」说出来，
+     * 并且指到【修 instrument】而不是指到 restore.md：
+     * 把人送去恢复一份健康的库，就是这条改动想消灭的那个动作本身。
+     *
+     * 用 warn 而不是把 boot 判失败，还有一层：这一格在【每次启动】都可能命中
+     * （120 秒超时在大库上不是想象的），把它判失败等于让一次慢扫描变成整机不可用 ——
+     * 那正是 pageIntegrityBroken 那段注释拒绝的事。
+     */
+    if (report.unavailable !== undefined) {
+      io.warn(
+        "页面完整性检查【没有跑成】（" +
+          report.unavailable +
+          "）⇒ 本次启动【没有】被页面完整性保护过一道。" +
+          "\n  · 原因：" +
+          report.pageReport.slice(0, 300) +
+          "\nHub 照常起来（库并没有被证明坏了），但【别把它当成「检查通过」】。" +
+          "\n→ 要修的是这台机器上的检查通路（worker / 超时 / 依赖），" +
+          "不是库。**不要**照 scripts/restore.md 恢复 —— 那会把一份可能完全健康的现网库覆盖掉。",
+      );
     }
 
     const { InMemoryEventBus } = await import("../events/bus.js");
