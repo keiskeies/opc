@@ -158,6 +158,15 @@ function verify(
 }
 
 const SNAP: Record<string, string> = {
+  // 0041（引擎入口 work / decide）新写的一条，登记同轮完成（0006 §7-40 那条规矩）。
+  // 先在 cards.test.ts 里 `sed -n '438p'` 读原文再抄，不从 0041 正文里复制措辞。
+  // 键写【裸名】是实测过的：仓库里叫 cards.test.ts 的只有 packages/hub/test/approvals/ 那一个，
+  // 而同一篇 §9 那条 `db/driver.ts` 必须带目录 —— 那正是本篇记的坑（多出一个同名文件）。
+  // 这一条是**活坐标**：0041 §4 的论据是「卡片审计那行的 payload 形状跨生产者共用」，
+  // 而那个形状的唯一钉子是这一行按【顶层键】读 approval_type ——
+  // 有人把它改成嵌一层的读法，快照就该红，逼他重读 §4 那个「共用 kind 掩盖不共用部分」的坑。
+  "0041-engine-entry-work-and-decide.md>cards.test.ts:438":
+    'expect(payload["approval_type"]).toBe("escalation");',
   // 0025（Task 6.1 常驻 Hub）新写的一条。先在目标文件里 `sed -n '385p'` 读原文再抄，
   // 不凭记忆。写全路径与 0013/0016 那几组保持一致（基名这里其实也能唯一解析）。
   // 这一条是**活坐标**：0025 §0 的论据是「patrol.ts 自己明写了调度不属于它」，
@@ -179,7 +188,11 @@ const SNAP: Record<string, string> = {
     'has_review_decisions: rows.some((r) => r.action === "review_decision"),',
   "0016-parallel-branches-role-memory-and-an-assertion-engine-that-saw-nothing.md>packages/hub/src/http/real-deps.ts:291":
     'action: "approval",',
-  "0016-parallel-branches-role-memory-and-an-assertion-engine-that-saw-nothing.md>packages/hub/src/events/recorder.ts:239":
+  // 239 → 249：同一次改动带下来的漂移。engine/ 加第 9 个事件 kind RoleTurnReported 时
+  // 往 KIND_TO_ACTION / targetOf 各加一条 case（+10 行），把 DEFAULT_ACTOR 顶下去。
+  // 0016 §4 整段的论据是「节点执行的事件 actor 落成 system/hub」，那一行是它的出处，
+  // 所以它必须跟着漂而不是删掉。
+  "0016-parallel-branches-role-memory-and-an-assertion-engine-that-saw-nothing.md>packages/hub/src/events/recorder.ts:249":
     'const DEFAULT_ACTOR = { actorType: "system", actorId: "hub" } as const;',
   "0016-parallel-branches-role-memory-and-an-assertion-engine-that-saw-nothing.md>packages/hub/test/graph/audit-interrupt.test.ts:200":
     'expect(r[0]?.actor_type).toBe("system");',
@@ -256,10 +269,23 @@ const SNAP: Record<string, string> = {
   // ApprovalTokenRedeemed 时又往 KIND_TO_ACTION / targetOf 各加了一条 case（+10 行）。
   // 同一个坐标被顶两次、理由一模一样，说明【在表尾加 case】是这段代码的日常操作，
   // 而不是偶发事故 —— 这一格以后每次动那张表都要预期它漂。
-  "0007-test-type-coverage-blindspot.md>events/recorder.ts:385": "try {",
-  "0007-test-type-coverage-blindspot.md>recorder.ts:258":
+  // 385 → 395：第三次，同一个原因。engine/ 那条路线加第 9 个事件 kind
+  // RoleTurnReported 时又是这两张表各加一条 case（+10 行，见 0041）。
+  // 三次同号同因 ⇒ 「加 case 会漂这一段」已经是这段代码的既有性质，
+  // 谁的下一份改动没预期到它，就会再把这条守卫撞红一次。
+  "0007-test-type-coverage-blindspot.md>events/recorder.ts:395": "try {",
+  // 258 → 268：同一次改动带下来的【第二个】站点，同一文件同一原因。
+  // 这一条不是 try 而是那句「默认必须【可见】而不是静默」的注释 —— 0007 §那一节
+  // 整段的论据就是这句话存在而 onBroadcastError 在 test/ 里零命中，所以它必须跟着漂，
+  // 不能为了省事把引用删掉（删引用在本守卫看来与「那句话失效了」是同一种无声）。
+  "0007-test-type-coverage-blindspot.md>recorder.ts:268":
     "// 默认必须【可见】而不是静默：投影失败是可用性事故（前端看不到进度），",
-  "0007-test-type-coverage-blindspot.md>driver.ts:30":
+  // 键从 `driver.ts:30` 改成 `db/driver.ts:30` —— 【文档正文跟着一起限定】。
+  // 起因不是文件被改，是【仓库里多了一个同名文件】：engine/ 那条路线新增的
+  // driver.ts（advance 那个循环）让 0007 里那个裸名坐标变成同名歧义，守卫直接拒答。
+  // 这正是 0007 自己那句话要指的东西（openDb 的签名），所以修法是把坐标写全，
+  // 而不是给守卫加「默认指 db/」的猜测规则 —— 那条规则下一次会指错。记在 0041 §9。
+  "0007-test-type-coverage-blindspot.md>db/driver.ts:30":
     "export function openDb(path: string): DatabaseSync {",
   "0007-test-type-coverage-blindspot.md>driver-preflight.test.ts:17":
     'type Db = InstanceType<typeof import("node:sqlite")["DatabaseSync"]>;',

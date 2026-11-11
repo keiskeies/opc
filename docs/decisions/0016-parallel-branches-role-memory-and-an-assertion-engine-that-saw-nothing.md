@@ -37,7 +37,7 @@ Task 3.7。计划那行给的 Files 是 `src/graph/branches.ts`、`src/memory/ro
    ⇒ 『历史决定与理由』这个形状**只有 CEO 那一格今天真有数据**。
 3. **图里节点执行写的事件，actor 是 `system` / `hub`，不是执行它的那个角色。**
    `packages/hub/src/graph/audit-middleware.ts` 不传 actor，于是
-   `packages/hub/src/events/recorder.ts:239` 那个 `DEFAULT_ACTOR` 顶上；
+   `packages/hub/src/events/recorder.ts:249` 那个 `DEFAULT_ACTOR` 顶上；
    现成的断言在 `packages/hub/test/graph/audit-interrupt.test.ts:200`
    （`expect(r[0]?.actor_type).toBe("system")`）。
    而节点体当场**知道**角色 id（`company.ts` 的 `askModel` 里 `charter.roleId` 就在手边）。

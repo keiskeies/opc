@@ -235,9 +235,9 @@ M1/M2 说明扫描静默失效时，扫描断言自己永远「绿」；M3 说�
 | `db/driver.ts:64`、`db/migrate.ts:120`、`checkpoint/saver.ts:378`、`checkpoint/tx-scope.ts:86`、`graph/audit-middleware.ts:167` | 安全，且方向正确：都在回滚路径上，注释写着【事务可能已被 SQLite 自行中止，别盖掉原始异常】——吞掉回滚失败是为了保住真正那条错误 |
 | `db/migrate-cli.ts:120`、`internal/direct-run.ts:19` | 安全。`isDirectRun` 判不出时返回 false 是唯一合理解释：宁可什么都不做，也不要被 import 时跑副作用 |
 | `db/write-queue.ts:258`、`:284` | 安全。`return this.#rejected(e)` 是把失败交给调用方，不是就地消化 |
-| `events/recorder.ts:385` | 【真缺口】见下 |
+| `events/recorder.ts:395` | 【真缺口】见下 |
 
-`#flush()` 逐条 `try/catch`，`recorder.ts:258` 的注释写着「默认必须【可见】而不是静默」。`git grep` 显示 `onBroadcastError`
+`#flush()` 逐条 `try/catch`，`recorder.ts:268` 的注释写着「默认必须【可见】而不是静默」。`git grep` 显示 `onBroadcastError`
 在 `test/` 里【零命中】。变异实测，补断言之前：
 
 - ME 删掉 `catch` 里 `this.#onBroadcastError(e)` 这一行（彻底静默）→ 存活（`Tests 32 passed`）
@@ -316,7 +316,7 @@ hub 内的探针【无报警】。规则方向正确 —— 界外禁止、界�
 
 > 【撤回】本节初稿对 `TS2345` 的根因写过一句猜测：「`Db` 类型不匹配，多半是 `openDb`
 > 返回类型与 `DatabaseSync` 的别名/包装不一致」。**这句未经任何验证，而且是错的**：
-> `driver.ts:30` 的签名就是 `openDb(path: string): DatabaseSync`，既没有别名也没有包装层。
+> `db/driver.ts:30` 的签名就是 `openDb(path: string): DatabaseSync`，既没有别名也没有包装层。
 > 实测真因是测试侧自己手写了三份互不相同的 `type Db` 桩 ——
 > `driver-preflight.test.ts:17` 用 `InstanceType<typeof import(...)[DatabaseSync]>`，
 > 而 `migrate.test.ts:16` 与 `schema-0001.test.ts:18` 各写了一份结构体桩，于是传给要

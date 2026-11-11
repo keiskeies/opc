@@ -81,7 +81,45 @@ export type DomainEvent =
    *   更不是决定。少那一行过滤的后果不是崩，是【角色的 few-shot 里多一条伪决定】，
    *   静默且长期。见 memory/role-memory.ts 里那段过滤。
    */
-  | { kind: "ApprovalTokenRedeemed"; taskId: string; interruptId: string };
+  | { kind: "ApprovalTokenRedeemed"; taskId: string; interruptId: string }
+  /**
+   * 第 9 个 kind（engine/ 的调度器）。它【不是「想让界面看到什么」】，而是被
+   * 与 ApprovalTokenRedeemed 【一字不差的同一条 seq 论证】逼出来的：
+   *
+   * 引擎路线上一轮 agent 执行可能【不产生状态跃迁】—— wait、缺决策段、越权交接被拦、
+   * 执行失败。这四支都得留痕（否则「任务为什么停着」在回放里查不到），
+   * 而留痕就是写一行 events，而 events.id 就是 seq。
+   * 写了不 publish ⇒ 每跑一轮不出边的活，活着的 SSE 订阅就撞一个空洞、
+   * 把 link 标成 stale 去重拉快照一次（0010 §4 量的正是这个形状）。
+   * 「任务停着不动」的时候界面反而【每分钟自己刷一次全量】，比少一条更新难看得多。
+   *
+   * 为什么不复用 TaskStateChanged：那条的语义是【状态动了】（from/to 两个必填值），
+   * 而这一条成立的唯一条件正是【状态没动】。复用会让 web/projection.ts 的
+   * TaskStateChanged 分支收到一条 from === to 的边并把 status 原地写一遍 ——
+   * 那是让「没发生」在投影里长得像「发生了一次」。
+   *
+   * ⚠ action 取 'tool_call'，【不开第 11 个 action 值】（§22.1 的枚举 append-only，
+   * 与 ApprovalTokenRedeemed 共用 'approval' 同一条立场）。选 'tool_call' 是因为它是
+   * 十个值里唯一语义为「某个 agent 干了一件事而没做决定」的。
+   * 顺带一条依赖要说清：memory/role-memory.ts 的 MEMORY_ROWS_SQL 只捞
+   * action IN ('approval','review_decision')，所以这一行【不会】进任何角色的 few-shot
+   * —— 这是想要的（记忆要的是决定，一句没结论的「我跑了一轮」不是决定）。
+   * 那条 SQL 将来若放宽，这一条就得跟着加显式过滤。
+   */
+  | {
+      kind: "RoleTurnReported";
+      taskId: string;
+      /** 开口的那个角色（= events.actor_id，两处同值而不是各写一份）。 */
+      role: string;
+      /** 这一轮结束时任务【仍旧】停在这个状态 —— 字段名是 to 是为了与 TaskStateChanged
+       *  同一套读法，但它的含义是「没动到哪去」，不是「去了哪」。 */
+      state: string;
+      /** 为什么没动（人话，进回放）。 */
+      note: string;
+      /** 这一轮花掉的美分。带它是因为失败轮/等待轮的钱也要能被预算护栏看到，
+       *  而 events.id 正是 BudgetTracker 的幂等键（同一条 seq 两用）。 */
+      costCents: number;
+    };
 
 export type EventKind = DomainEvent["kind"];
 

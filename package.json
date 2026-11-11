@@ -17,6 +17,7 @@
     "migrate": "tsx packages/hub/src/db/migrate-cli.ts",
     "hub": "tsx packages/hub/src/cli.ts",
     "hub:serve": "tsx packages/hub/src/serve/hub-serve.ts",
+    "hub:engine": "tsx packages/hub/src/engine/hub-work.ts",
     "hub:maintenance": "tsx packages/hub/src/heartbeat/maintenance.ts"
   },
   "devDependencies": {

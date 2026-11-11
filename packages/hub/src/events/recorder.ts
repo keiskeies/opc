@@ -45,6 +45,11 @@ export const KIND_TO_ACTION: Record<EventKind, AuditAction> = {
   // 选 'approval' 时记的那条理由）。它在库里的身份靠 payload.kind，
   // 而 role-memory 那边已经有一道显式过滤认领这件事（它不是决定，不该进记忆）。
   ApprovalTokenRedeemed: "approval",
+  // 第 9 个 kind（engine/ 调度器的「跑了一轮但没推进」）。同样【不开新的 action 值】，
+  // 理由与上面那条一字不差；选 'tool_call' 是因为它是十个值里唯一语义为
+  // 「agent 干了事而没做决定」的那个。role-memory 的 SQL 只捞 approval /
+  // review_decision 两种 action，所以这一行天然不进记忆（那条 SQL 放宽时要回头看这里）。
+  RoleTurnReported: "tool_call",
 };
 
 /** 单条 events 插入：8 列 8 个匿名问号，单语句无分号。 */
@@ -224,6 +229,11 @@ function targetOf(e: DomainEvent): string | null {
       return e.node;
     case "BudgetPaused":
       return null; // 没有更具体的对象，回落到 taskId
+    case "RoleTurnReported":
+      // 落回角色名而不是 taskId：target 这一列回答的是「对什么做了什么」，
+      // 而这一行里比 taskId 更有信息量的正是【谁跑的这一轮】。taskId 在 task_id 列上，
+      // 写进 target 等于把同一件事存两遍（与 HeartbeatStalled 落 node 同一取向）。
+      return e.role;
   }
 }
 

@@ -268,7 +268,7 @@ describe("events 插入语句与参数", () => {
     expect(eventParams(noCreated, () => 42)[7]).toBe(42);
   });
 
-  it("kind 到 action 的映射覆盖全部 8 个 kind，且值都在 §22.1 枚举内", () => {
+  it("kind 到 action 的映射覆盖全部 9 个 kind，且值都在 §22.1 枚举内", () => {
     // 6 → 7：实现侧加了 ApprovalDecided（CEO 批完一张卡片这件事，规格 §5.8 那张
     // 六行表里【没有】）。改这个数是【有意偏离规格】的一处，偏离的理由、
     // 丢掉的东西与「为什么不能靠随后的 TaskStateChanged 代替」记在
@@ -284,8 +284,14 @@ describe("events 插入语句与参数", () => {
     // 要么广播它，要么不写它，而「不写」会让凭据消费查无此刻。
     // 记这一条是因为将来有人问「这个 kind 有谁在渲染吗？没有就删了吧」——
     // 答案是【没有消费者，而它仍然不能删】。
+    // 8 → 9：engine/ 的调度器加 RoleTurnReported（「跑了一轮而没推进状态」）。
+    // 与 7→8 那一条【同一条理由】，值得再记一次因为「把常量 +1」这个动作零成本：
+    // 引擎路线上不出边的轮次必须留一行 events（否则「任务为什么停着」在回放里查不到），
+    // 而 events.id 就是 seq —— 写了不 publish，就是每跑一轮不出边的活
+    // 给活着的 SSE 订阅制造一个空洞（0010 §4）。所以要么广播它，要么别写它。
+    // 它同样【没有渲染层消费者，而仍然不能删】。
     const kinds = Object.keys(KIND_TO_ACTION);
-    expect(kinds.length).toBe(8);
+    expect(kinds.length).toBe(9);
     for (const k of kinds) {
       const action = KIND_TO_ACTION[k as keyof typeof KIND_TO_ACTION];
       expect((AUDIT_ACTIONS as readonly string[]).includes(action)).toBe(true);
@@ -305,6 +311,8 @@ describe("events 插入语句与参数", () => {
     // 真正挡着的是 memory/role-memory.test.ts 里那条专门喂 ApprovalTokenRedeemed 的用例。
     expect(KIND_TO_ACTION.ApprovalTokenRedeemed).toBe("approval");
     expect(KIND_TO_ACTION.BudgetPaused).toBe("budget_consume");
+    // 第 9 个：'tool_call' 而不是新开一个 action 值（§22.1 枚举 append-only）。
+    expect(KIND_TO_ACTION.RoleTurnReported).toBe("tool_call");
     expect(KIND_TO_ACTION.MeetingSummaryReady).toBe("meeting");
     expect(KIND_TO_ACTION.HeartbeatStalled).toBe("escalation");
   });
