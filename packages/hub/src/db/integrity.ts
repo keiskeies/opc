@@ -40,7 +40,7 @@ import { requireScopeDb } from "../checkpoint/tx-scope.js";
 import { AUDIT_ACTIONS, type AuditAction } from "../events/recorder.js";
 import type { Writer } from "./write-queue.js";
 import { isPageOk, reportText } from "./page-check.js";
-import { selfWorkerUrl } from "./worker-entry.js";
+import { selfWorkerUrl, wrappedWorkerUrl } from "./worker-entry.js";
 
 /**
  * worker 入口地址：把【我自己】的后缀换成 .worker<同后缀>。
@@ -290,7 +290,12 @@ function runInWorker(
   return new Promise((resolve) => {
     let worker: Worker;
     try {
-      worker = new Worker(WORKER_URL, { workerData: { dbPath } });
+      // 0037：入口自己的兄弟 import（./page-check.js）在 worker 线程里解析不了 ——
+      // 两种跑源码态的加载器都不在线程里做 .js → .ts 映射。钩子挂在【入口外面那一层
+      // 包装】里，execArgv 一个字不碰（为什么不能用 execArgv，见 worker-entry.ts 文件头）。
+      worker = new Worker(wrappedWorkerUrl(WORKER_URL), {
+        workerData: { dbPath },
+      });
     } catch (e) {
       // 入口不存在 / 加载失败。这一条【不】自动退回主线程（见 runIntegrityScan）。
       resolve({

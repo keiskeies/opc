@@ -392,6 +392,28 @@ const SNAP: Record<string, string> = {
   // 口径一直如此，错的是我抄的时候没读比对口径（0035 §5.1 那条「先读判据再写『照判据数过』」的第三次）。
   "0035-fixture-dirs-per-process-and-a-guard-whose-scope-empties-itself.md>fixture-dir.ts:4":
     "* ── 为什么需要这一处（0025 §7 第 7 条那一格）─────────────────────────",
+  // 0037 这一组六条。⚠ 其中两条（assemble.ts:291 / maintenance.ts:479）抄下来是
+  // `if (!existsSync(dbPath)) {` —— 一行**在任何仓库里都长得一样**的代码。
+  // 我差点因此不登记它们（「这种行变了也没信息量」），但那样做等于把本节的口径改成
+  // 「只给有意思的行登记快照」，而那条口径没有判据、只有我的口味。
+  // 这里它们真正证的是**位置**：0037 §1.2 的结论是「库路径打错走不到那个闸门，
+  // 因为在这两行就退回 EXIT_USAGE 了」—— 那两行一旦被删（把存在性检查挪走），
+  // 「走不到」这个结论就失效，快照红得其所。
+  "0037-worker-import-in-threads-and-my-first-fix-was-wrong.md>integrity.test.ts:339":
+    "expect(viaWorker.unavailable).toBeUndefined();",
+  // ⭐ 这一条是本篇最该被钉住的一行：0037 §1.2 那个缺陷（0038）就长在这行上 ——
+  // 「检查没跑成」和「查出损坏」在这里被压成同一个 violated。0038 改它的时候这行必变、
+  // 快照必红，而红的那一刻正是该回去读 §1.2 的时候（不是「快照写错了」）。
+  "0037-worker-import-in-threads-and-my-first-fix-was-wrong.md>integrity.ts:179":
+    'verdict: page.ok ? "ok" : "violated",',
+  "0037-worker-import-in-threads-and-my-first-fix-was-wrong.md>integrity.ts:102":
+    "export const INTEGRITY_FAILURES = [",
+  "0037-worker-import-in-threads-and-my-first-fix-was-wrong.md>integrity.ts:1135":
+    '* `verdict === "not_observable"` / `"could_not_run"` 都【不算】损坏：',
+  "0037-worker-import-in-threads-and-my-first-fix-was-wrong.md>assemble.ts:291":
+    "if (!existsSync(dbPath)) {",
+  "0037-worker-import-in-threads-and-my-first-fix-was-wrong.md>maintenance.ts:479":
+    "if (!existsSync(dbPath)) {",
 };
 
 describe("决策文档里的「文件:行号」引用不漂移", () => {

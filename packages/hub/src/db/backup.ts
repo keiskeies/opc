@@ -57,7 +57,7 @@ import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Worker } from "node:worker_threads";
 import { openSnapshotReadonlyDb } from "./pragmas.js";
-import { selfWorkerUrl } from "./worker-entry.js";
+import { selfWorkerUrl, wrappedWorkerUrl } from "./worker-entry.js";
 
 /**
  * worker 回程消息的形状。**只能是类型导入，不能有运行时 import**：
@@ -943,7 +943,12 @@ export async function createBackupOffLoop(
   return new Promise<BackupOffLoopOutcome>((resolve, reject) => {
     let worker: Worker;
     try {
-      worker = new Worker(WORKER_URL, { workerData });
+      // 0037：同 integrity.ts 那一处。入口 `import "./backup.js"` 在 worker 线程里
+      // 解析不了，而 backup.ts 自己还有传递图（./pragmas.js），一起靠同一条钩子。
+      // 钩子挂在入口外面那一层包装里；execArgv 不碰（worker-entry.ts 文件头那两条 ⚠）。
+      worker = new Worker(wrappedWorkerUrl(WORKER_URL), {
+        workerData,
+      });
     } catch (e) {
       resolve({
         ran: false,
