@@ -37,6 +37,7 @@ import {
   humanEdge,
   makeDispatch,
   planEdge,
+  resolveCeoRoleId,
   reviewGate,
   seatOf,
   subordinateRoles,
@@ -386,6 +387,189 @@ describe("组织原语", () => {
   });
 });
 
+/* ───────────────── 0047：顶层是【结构事实】而不是一个名字 ─────────────────
+   两发探针量到的东西（原话抄在 dispatch.ts 的门 0.5 / 门 0.6 注释里）：
+
+   A. 根叫 boss 时 `up === o.ceoRoleId`（字面量比较）恒假 ⇒「已到顶层」永远判不出
+      ⇒ 任务停在 agent 席位、每轮白烧一次子进程、收件箱空着。
+   B. 汇报深度上限 5，所以【任何比 ceo←dev 更深】的图第一次 pass 上去，
+      下一位该接手的人就是 CEO 本人 —— 而 hub 会起一个子进程去【扮演 CEO】，
+      往 append-only 的审计里写一行 actor_type='agent', actor_id='ceo'。
+
+   下面两组用例分别钉这两发的【判据】，写路径（真库、真事务、真卡片）在下面
+   「门 0.5 / 0.6 的写路径」那一组里。纯函数这一组刻意不碰库：
+   判错的名字与判错的落点是【判定层】的事，那里穷尽它们不该需要 schema。 */
+
+/** 根叫 boss 的那张图（探针 A 的形状）。节点集合与 GRAPH 一致，只改根的名字。 */
+const BOSS_GRAPH: OrgGraph = {
+  nodes: {
+    boss: { role_id: "boss", can_manage: true, reports_to: null },
+    director: { role_id: "director", can_manage: true, reports_to: "boss" },
+    dev: { role_id: "dev", can_manage: false, reports_to: "director" },
+  },
+  edges: [],
+};
+
+/** 四层：ceo ← manager ← lead ← dev（探针 B 的形状，深度 4 < ORG_MAX_DEPTH=5，合法图）。 */
+const DEEP_GRAPH: OrgGraph = {
+  nodes: {
+    ceo: { role_id: "ceo", can_manage: true, reports_to: null },
+    manager: { role_id: "manager", can_manage: true, reports_to: "ceo" },
+    lead: { role_id: "lead", can_manage: true, reports_to: "manager" },
+    dev: { role_id: "dev", can_manage: false, reports_to: "lead" },
+  },
+  edges: [],
+};
+
+describe("resolveCeoRoleId —— 顶层从图里读，不从常量里猜", () => {
+  const ok = (r: ReturnType<typeof resolveCeoRoleId>): string => (r.ok ? r.roleId : "FAIL:" + r.reason);
+
+  it("⭐ 根叫 boss 也能认出来。这一条就是探针 A 的判据：名字不参与判定", () => {
+    expect(ok(resolveCeoRoleId(undefined, BOSS_GRAPH))).toBe("boss");
+    expect(ok(resolveCeoRoleId(undefined, GRAPH))).toBe(CEO);
+  });
+  it("装配显式指定的名字【优先】—— 单根图也可以被指定盖掉", () => {
+    // 指定而有效 ⇒ 用指定值。这一格存在的意义是「两个根时装配能表态」，
+    // 所以它必须真能盖掉结构判定，否则那条出路是假的。
+    expect(ok(resolveCeoRoleId("director", BOSS_GRAPH))).toBe("director");
+  });
+  it("⭐ 指定的名字【不在图上】⇒ 拒绝，而不是照收（照收的症状与探针 A 逐字相同）", () => {
+    const r = resolveCeoRoleId("ceo", BOSS_GRAPH); // 一个在这张图里压根不存在的合法名字
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    // 报错要能指着修法：把图里的根列出来，而不是只说"无效参数"
+    expect(r.reason).toContain("不在这张组织图的节点里");
+    expect(r.reason).toContain("[boss]");
+  });
+  it("原型键不算角色：\"constructor\" 在 nodes 这个普通对象上【命中】而它不是节点", () => {
+    // Object.hasOwn 那一发的证据。用 `nodes[name] !== undefined` 写法时这一条会绿得离谱：
+    // 它会返回 ok:true 而 roleId="constructor"，于是顶层判定指向一个不存在的人。
+    expect(resolveCeoRoleId("constructor", GRAPH).ok).toBe(false);
+    expect(resolveCeoRoleId("toString", GRAPH).ok).toBe(false);
+  });
+  it("空白指定 = 没指定（trim 后再判），而不是「指定了一个空名字」⇒ 拒绝", () => {
+    expect(ok(resolveCeoRoleId("   ", GRAPH))).toBe(CEO);
+    expect(ok(resolveCeoRoleId(null, GRAPH))).toBe(CEO);
+    expect(ok(resolveCeoRoleId(" director ", GRAPH))).toBe("director");
+  });
+  it("⭐ 多根 = 森林 ⇒ 拒绝。「谁是 CEO」在这里真的没有答案，随便挑一个 = 让一条不存在的汇报关系决定谁能交付", () => {
+    const forest: OrgGraph = {
+      nodes: {
+        bossA: { role_id: "bossA", can_manage: true, reports_to: null },
+        bossB: { role_id: "bossB", can_manage: true, reports_to: null },
+        dev: { role_id: "dev", can_manage: false, reports_to: "bossA" },
+      },
+      edges: [],
+    };
+    const r = resolveCeoRoleId(undefined, forest);
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.reason).toContain("2 个汇报根");
+    // 两个根都列出来（只列第一个会让人以为改另一个就行）
+    expect(r.reason).toContain("bossA");
+    expect(r.reason).toContain("bossB");
+    // 而指定值仍然能救回来 —— 这是那条报错里给的出路，必须真能走通
+    expect(ok(resolveCeoRoleId("bossB", forest))).toBe("bossB");
+  });
+  it("空图 = 没有根 ⇒ 拒绝，而不是「根是 undefined」", () => {
+    const r = resolveCeoRoleId(undefined, { nodes: {}, edges: [] });
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.reason).toContain("没有汇报根");
+  });
+  it("reports_to 写成空串也算根（库里那一版 JSON 不保证只有 null）", () => {
+    const blank: OrgGraph = {
+      nodes: { dev: { role_id: "dev", can_manage: true, reports_to: "" } },
+      edges: [],
+    };
+    expect(ok(resolveCeoRoleId(undefined, blank))).toBe("dev");
+  });
+});
+
+describe("planEdge 的 upstream 分支 —— 下一位是人类时【不起子进程扮演他】", () => {
+  const d = (action: string, extra: Record<string, unknown> = {}) => ({
+    action: action as never,
+    summary: "干完了",
+    ...extra,
+  });
+  const base = { handoffTo: null, blockedHandoff: null, review: null };
+
+  it("⭐ IN_PROGRESS + pass 而上级是 CEO ⇒ 落点【不是】直接写终格，而是 EVIDENCE_SUBMITTED + 一个标志", () => {
+    // lead 的上级是 manager，manager 的上级是 ceo ⇒ manager 这一格的上级才是 CEO。
+    // 探针 B 的现场就是这一格：manager pass 之后"下一位"是 CEO 本人。
+    const p = planEdge({
+      ...base,
+      graph: DEEP_GRAPH,
+      status: "IN_PROGRESS",
+      role: "manager",
+      decision: d("pass"),
+      ceoRoleId: "ceo",
+    });
+    expect(p.move).toBe(true);
+    expect(p.to).toBe("EVIDENCE_SUBMITTED");
+    expect(p.move && p.thenEscalateToCeo).toBe(true);
+    // 角色保持【产出方】而不是写成 ceo：approveCard 原值回填会把"升给 CEO 看"
+    // 变成一次组织分配（负责角色永久改成 CEO）。
+    expect(p.role).toBe("manager");
+    expect(p.move && p.producerRole).toBe("manager");
+    expect(p.note).toContain("CEO 本人");
+    expect(p.note).not.toContain("审阅通过");
+  });
+
+  it("三格链条【全部】落在 §7.1 已有的边上：EVIDENCE_SUBMITTED → IN_REVIEW → ESCALATED_TO_CEO", () => {
+    // 这一条是「我没有发明任何一条边」的证据。逐格对着 LEGAL（§7.1 的独立一份手抄）核。
+    expect(LEGAL.IN_PROGRESS.EVIDENCE_SUBMITTED).toBe(true);
+    expect(LEGAL.EVIDENCE_SUBMITTED.IN_REVIEW).toBe(true);
+    expect(LEGAL.IN_REVIEW.ESCALATED_TO_CEO).toBe(true);
+  });
+
+  it("⭐ 根叫 boss 时同样成立（探针 A + B 合起来的形状）：顶层判定不再依赖名字", () => {
+    const p = planEdge({
+      ...base,
+      graph: BOSS_GRAPH,
+      status: "IN_PROGRESS",
+      role: "director",
+      decision: d("pass"),
+      // 装配不再指定（undefined 那一路），由 resolveCeoRoleId 从图里读出 boss。
+      // 这里喂的是它的输出 —— 判据的输入输出各测各的，串起来那条在写路径那一组。
+      ceoRoleId: "boss",
+    });
+    expect(p.move && p.thenEscalateToCeo).toBe(true);
+    expect(p.role).toBe("director");
+  });
+
+  it("上级【不是】CEO 时一切照旧：还是「交给上级审阅」，没有那个标志", () => {
+    const p = planEdge({
+      ...base,
+      graph: DEEP_GRAPH,
+      status: "IN_PROGRESS",
+      role: "lead",
+      decision: d("pass"),
+      ceoRoleId: "ceo",
+    });
+    expect(p.move).toBe(true);
+    expect(p.to).toBe("EVIDENCE_SUBMITTED");
+    expect(p.move && p.thenEscalateToCeo).toBeUndefined();
+    expect(p.role).toBe("manager");
+  });
+
+  it("IN_REVIEW + pass 而审阅者的上级是 CEO ⇒ 直接升 CEO（原有那条 topmost 分支不换语义）", () => {
+    const p = planEdge({
+      ...base,
+      graph: DEEP_GRAPH,
+      status: "IN_REVIEW",
+      role: "manager",
+      decision: d("pass"),
+      ceoRoleId: "ceo",
+    });
+    expect(p.to).toBe("ESCALATED_TO_CEO");
+    // 这一格说的是「审阅通过了」—— 与 thenEscalateToCeo 那条【刻意不同】：
+    // 那一条的语义是「下一个该接手的人是 CEO，而没人审过」，它不能冒充"审过了"。
+    expect(p.note).toContain("审阅通过");
+    expect(p.move && p.thenEscalateToCeo).toBeUndefined();
+  });
+});
+
 describe("buildTurnPrompt —— 简报里必须有的三件事", () => {
   const p = buildTurnPrompt({
     title: "做个 AI 笔记应用",
@@ -440,8 +624,18 @@ async function newWorld(o: {
   readonly ceoApproved?: boolean;
   readonly graphVersion?: number;
   readonly writeGraph?: boolean;
+  /**
+   * 换整张组织图。0047 那两发探针吃的正是【图形状】：根叫 boss（顶层判不出）、
+   * 四层深（下一位该接手的是 CEO 本人）。默认的 GRAPH 是三层、根叫 ceo，
+   * 两发都撞不上 —— 所以这一格不是便利参数，是那两发的【存在条件】。
+   */
+  readonly graph?: OrgGraph;
+  /** 装配显式指定的 CEO（`--ceo` 那一族的替身）。不传 = 由图里的汇报根回答。 */
+  readonly ceoRoleId?: string;
   /** 出参：runTurn 被真的调用了几次。人席那几条用例断的就是它【等于 0】。 */
   readonly turns?: { n: number };
+  /** 出参：每次 runTurn 被叫去【扮演谁】。探针 B 断的就是这个数组里没有 ceo。 */
+  readonly roles?: string[];
 }): Promise<{
   db: Db;
   res: DispatchResult;
@@ -475,7 +669,7 @@ async function newWorld(o: {
       "VALUES ('t1', '做个 AI 笔记应用', ?, ?, 'intake', ?, ?, ?)",
   ).run(o.status, o.role, NOW, NOW, o.graphVersion ?? 1);
   if (o.writeGraph !== false) {
-    db.prepare(INSERT_DELEGATION_GRAPH_SQL).run("g1", 1, JSON.stringify(GRAPH), NOW, CEO, "测试用组织图");
+    db.prepare(INSERT_DELEGATION_GRAPH_SQL).run("g1", 1, JSON.stringify(o.graph ?? GRAPH), NOW, CEO, "测试用组织图");
   }
   const cost: { seq: number; cents: number }[] = [];
   const published: { kind: string; seq: number }[] = [];
@@ -503,12 +697,16 @@ async function newWorld(o: {
     roleSession: () => null,
     runTurn: async (i) => {
       if (o.turns !== undefined) o.turns.n += 1;
+      // 记录【被叫去扮演谁】：探针 B 的那一发（hub 起子进程扮演 CEO）唯一的
+      // 可见证据就是这个入参 —— 状态与账面上它都长得像"正常跑了一轮"。
+      if (o.roles !== undefined) o.roles.push(i.role);
       // 简报里必须带着【这一轮该说话的角色】，否则 resume 会串到别人的会话上
       return state.turn;
     },
     recentSummaries: () => [],
     lastProducer: () => o.lastProducer ?? null,
     ceoApproved: () => o.ceoApproved ?? false,
+    ...(o.ceoRoleId === undefined ? {} : { ceoRoleId: o.ceoRoleId }),
     onCost: (c) => cost.push({ seq: c.seq, cents: c.costCents }),
     publish: (e, seq) => {
       published.push({ kind: e.kind, seq });
@@ -856,5 +1054,149 @@ describe("dispatch 的写路径（真 schema：约束、索引、守卫只有真
       publish: () => {},
     });
     await expect(dispatch({ taskId: "ghost", nowMs: NOW, maxBudgetUsd: 1 })).rejects.toThrow(/不存在的任务烧 token/);
+  });
+});
+
+/* ───────────── 0047 门 0.5 / 门 0.6 的写路径（真库、真事务、真卡片）─────────────
+   上面那两组纯函数用例证的是【判据】，这一组证的是【代价】：
+   探针量到的两发都是「判据写对了也照样白烧一轮、照样写下那行假审计」，
+   所以断言一律看三样东西 ——
+    · turns.n（子进程起没起）：钱只有计数能证明；
+    · events 里 actor_type='agent' 且 actor_id=CEO 的行数：那行假审计；
+    · approvals 里那张卡：任务停在人席时那个人手上有没有入口（0046 那一发）。
+   结果本身（moved / status）反而排在最后 —— 它可以由任何一条提前 return 造出来。 */
+
+describe("0047 顶层判定与「下一位是人类」的写路径", () => {
+  it("⭐ 四层图 + manager pass ⇒ 一次跑动写【三条】状态边，停在 ESCALATED_TO_CEO 且【带一张卡】", async () => {
+    const turns = { n: 0 };
+    const roles: string[] = [];
+    const { db, res, events } = await newWorld({
+      graph: DEEP_GRAPH,
+      status: "IN_PROGRESS",
+      role: "manager", // 它的上级正是 ceo
+      turns,
+      roles,
+      turn: turn(said({ action: "pass", summary: "模块联调完了" })),
+    });
+    // 只跑了一轮 —— 产出方那一轮。CEO 那一格【没有】第二轮（探针 B 里 roles 是
+    // ["manager","ceo"]，那一发就是这一条要断言红的东西）。
+    expect(turns.n).toBe(1);
+    expect(roles).toEqual(["manager"]);
+
+    expect(res.status).toBe("ESCALATED_TO_CEO");
+    expect(res.moved).toBe(true);
+    const chain = events
+      .filter((e) => e["action"] === "state_change")
+      .map((e) => {
+        const p = JSON.parse(String(e["payload"])) as Record<string, unknown>;
+        return String(p["from"]) + "→" + String(p["to"]);
+      });
+    // 中间那两格在历史上【留着】：回放不能看到"从 IN_PROGRESS 直接升到 CEO"
+    expect(chain).toEqual([
+      "IN_PROGRESS→EVIDENCE_SUBMITTED",
+      "EVIDENCE_SUBMITTED→IN_REVIEW",
+      "IN_REVIEW→ESCALATED_TO_CEO",
+    ]);
+    // ⭐ 每一格的起点 = 上一格的落点。这是「第三格的起点取自链尾而不是写死
+    // IN_REVIEW」的【可见性质】：写死的话一旦自动边形状变了，这里会写出
+    // 一条 from 与 to 不同源的边，而 assertTaskTransition 照样放行。
+    const legs = events
+      .filter((e) => e["action"] === "state_change")
+      .map((e) => JSON.parse(String(e["payload"])) as Record<string, unknown>);
+    for (let i = 1; i < legs.length; i++) {
+      expect(String(legs[i]?.["from"])).toBe(String(legs[i - 1]?.["to"]));
+    }
+
+    // ⭐ 那行假审计【一行都没有】：CEO 没有以 agent 身份跑过任何一轮
+    const fake = db
+      .prepare("SELECT COUNT(*) AS n FROM events WHERE actor_type='agent' AND actor_id='ceo'")
+      .get() as Row;
+    expect(Number(fake["n"])).toBe(0);
+
+    // 负责角色保持产出方，【没有】被改成 ceo（否则一次"升给 CEO 看"= 一次组织分配）
+    expect(String(db.prepare("SELECT assigned_role FROM tasks").get()["assigned_role"])).toBe("manager");
+
+    // 0046 那一发：停在人席 ⇒ 手上必须有一张卡，否则这一发只是换了个姿势的死路
+    const cards = db.prepare("SELECT * FROM approvals").all();
+    expect(cards.length).toBe(1);
+    expect(String(cards[0]["card_key"])).toBe("seat:ESCALATED_TO_CEO:" + String(res.stateEventSeq));
+    expect(res.card).not.toBeNull();
+  });
+
+  it("⭐ 根叫 boss 的图：顶层照样判得出，任务到 CEO 席位而不是停在 agent 席位", async () => {
+    // 探针 A 的原样形状（修复前：status 停在 IN_REVIEW/agent 席位、每轮白烧、卡片数 0）。
+    // 装配【不指定】ceoRoleId —— 顶层由图里的汇报根回答，这是"名字不参与判定"的完整链路。
+    const turns = { n: 0 };
+    const { res } = await newWorld({
+      graph: BOSS_GRAPH,
+      status: "IN_PROGRESS",
+      role: "director",
+      turns,
+      turn: turn(said({ action: "pass", summary: "第一版做完" })),
+    });
+    expect(turns.n).toBe(1);
+    expect(res.status).toBe("ESCALATED_TO_CEO");
+    expect(res.seat).toBe("agent"); // 返回值上这一格仍是本轮的执行席位，看 status 才是落点
+  });
+
+  it("⭐ 图没有汇报根（成环 / 空图）⇒ 【一轮都不跑】、一条事件都不写，note 说得出修法", async () => {
+    const turns = { n: 0 };
+    const cyclic: OrgGraph = {
+      nodes: {
+        a: { role_id: "a", can_manage: true, reports_to: "b" },
+        b: { role_id: "b", can_manage: true, reports_to: "a" },
+      },
+      edges: [],
+    };
+    const { res, events } = await newWorld({
+      graph: cyclic,
+      status: "IN_PROGRESS",
+      role: "a",
+      turns,
+      turn: turn(said({ action: "pass", summary: "自审自过" })),
+    });
+    // 判在 runTurn 之前 = 钱没烧。这一格与"判对但代价照付"是这一发的全部区别。
+    expect(turns.n).toBe(0);
+    expect(res.moved).toBe(false);
+    expect(events.length).toBe(0);
+    expect(res.note).toContain("没有汇报根");
+  });
+
+  it("装配指定的 CEO 不在这版图上 ⇒ 响亮拒绝，而不是静采用一个无效名字", async () => {
+    const turns = { n: 0 };
+    const { res } = await newWorld({
+      graph: BOSS_GRAPH,
+      status: "IN_PROGRESS",
+      role: "director",
+      ceoRoleId: "ceo", // 一个在 BOSS_GRAPH 里不存在的角色名
+      turns,
+      turn: turn(said({ action: "pass", summary: "干完了" })),
+    });
+    expect(turns.n).toBe(0);
+    expect(res.moved).toBe(false);
+    expect(res.note).toContain("[ceo]");
+    expect(res.note).toContain("[boss]");
+  });
+
+  it("⭐ 任务【一开始】就建在 CEO 角色上 ⇒ 不起子进程扮演他，且不写任何审计", async () => {
+    const turns = { n: 0 };
+    const roles: string[] = [];
+    const { res, events } = await newWorld({
+      graph: DEEP_GRAPH,
+      status: "IN_PROGRESS",
+      role: "ceo",
+      turns,
+      roles,
+      // 替身会乖乖交出 pass。它必须根本没被跑到：CEO 是人类席位，
+      // hub 起子进程扮演他 = 审计里一行「CEO 以 agent 身份跑了一轮」，append-only 删不掉。
+      turn: turn(said({ action: "pass", summary: "我自己批自己" })),
+    });
+    expect(turns.n).toBe(0);
+    expect(roles).toEqual([]);
+    expect(res.moved).toBe(false);
+    expect(res.status).toBe("IN_PROGRESS");
+    expect(events.length).toBe(0);
+    expect(res.note).toContain("人类席位");
+    expect(res.note).toContain("扮演");
   });
 });

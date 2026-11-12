@@ -268,10 +268,114 @@ export function upstreamOf(graph: OrgGraph, roleId: string): string | null {
   return up === undefined || up === "" ? null : up;
 }
 
+/**
+ * 「哪一个是 CEO 的角色」—— 由【这张图】回答，而不是由一个字符串常量回答。
+ *
+ * ── 动手前量的事实（探针，组织图的根角色 role_id 叫 `boss` 而不是字面量 `ceo`）──
+ *
+ *   IN_REVIEW/director + pass ⇒ IN_PROGRESS/boss  →  IN_PROGRESS/boss（没动）
+ *   spawn 次数 = 2
+ *   note = boss 在组织图上没有上级，产出无处可交
+ *
+ * 三行读下来是一件事：**任务永远到不了 ESCALATED_TO_CEO，而每一轮真烧一次子进程。**
+ * 链条是 `topmost` 那一支的判据 `up === o.ceoRoleId`（字面量比较）：根叫 boss 时它恒假，
+ * 于是「已到顶层」这个判断永远不会成立 ⇒ 机器把活儿交给根角色去"再审一轮"，
+ * 而根没有上级，下一轮 `upstream` 那一支判「没有上级」停下。
+ * 停下本来就该是终点，而它停下的那一格是 `IN_PROGRESS` —— 一个 **agent 席位**，
+ * 于是 0046 那套「落到人席才补卡」的判据【判不出这里有问题】（这一格不该有卡，
+ * 它该有的是上一格），收件箱里什么都没有。
+ *
+ * 而 `runtime.ts` 那条注释早就写着 `?? "ceo"` 的作用是「图里没标 CEO 时仍能判顶层」——
+ * 那句话把【一个常量】当成了【一个事实】。图里其实【标了】CEO：`reports_to = null`
+ * 的那个节点就是（`contracts/org/graph.ts` 的 `orgNodeSchema` 明写「CEO 为 null」）。
+ * 顶层是图的【结构性质】，而代码问的是【命名】。所以修法是去读那个结构，
+ * 而不是往更长的常量名单里再加一个名字。
+ *
+ * ── 为什么【不回退】到 "ceo" 那一个字面量 ─────────────────────────────
+ * 回退分支正是上面那发的成因。补一条「读不出根就用 ceo」等于把同一颗雷重新埋回去，
+ * 而它埋的地方比原来更深一层（原来只在"名字不匹配"时炸，现在在"图形状意外"时炸）。
+ * 判不出就【明说】，理由与本文件头「不猜一条边写进 append-only 的审计库」同一条。
+ *
+ * ── 判不出只有两种形状，都值一句人话 ─────────────────────────────────
+ *  · 【没有根】= 每个节点都有上级 = 汇报关系成环。`validateOrgChange` 里的
+ *    `report_cycle_present` 不让这种图提交进来（org/commit.ts 真的调它），
+ *    但 dispatch 读的是【任务那一版的历史 JSON】，而校验只管提交那一侧 ——
+ *    成环的图照样能从库里读出来（0011 §6 那条探针量到的正是「坏图上的静默放行」）。
+ *  · 【多个根】= 一片森林而不是一棵树。「谁是 CEO」在这里真的没有答案，
+ *    随便挑一个 = 让某一条不存在的汇报关系决定谁的任务能交付。
+ * 两种都在【跑任何一轮之前】判掉 —— 一轮就是钱，而这两种图跑多少轮都到不了人席。
+ */
+export type CeoRoleResolution =
+  | { readonly ok: true; readonly roleId: string }
+  | { readonly ok: false; readonly reason: string };
+
+/**
+ * @param declared 装配方显式给的角色名（`--ceo` 那一族）。它【优先】，但**必须在这张图里存在** ——
+ *   「优先而须有效」而不是「优先而照收」：照收的话，一个拼错的名字被静默采用，
+ *   症状与本篇那一发【逐字相同】（顶层判不出 ⇒ 任务停在 agent 席位、每轮烧一次、收件箱空着），
+ *   而这次连"图里其实标了"这条退路都没了。一个写错的参数该响亮地失败。
+ */
+export function resolveCeoRoleId(
+  declared: string | undefined | null,
+  graph: OrgGraph,
+): CeoRoleResolution {
+  const name = declared?.trim() ?? "";
+  if (name !== "") {
+    // Object.hasOwn 而不是 `graph.nodes[name] !== undefined`：nodes 是普通对象，
+    // "constructor" / "toString" 这类原型键会命中而【根本不是角色】。
+    // 同一个坑在 graph/status.ts 的 assertKnown 里已经记过一次并那样修。
+    if (Object.hasOwn(graph.nodes, name)) return { ok: true, roleId: name };
+    return {
+      ok: false,
+      reason:
+        "装配指定的 CEO 角色 [" +
+        name +
+        "] 不在这张组织图的节点里。" +
+        "指定的名字【照收】的话，顶层判定（topmost）会永远判不出，任务会停在 agent 席位上" +
+        "每轮白烧一次子进程而到不了 CEO 收件箱 —— 所以这里直接拒绝。" +
+        "图里的汇报根是：" +
+        (rootsOf(graph).length === 0
+          ? "（一个都没有 —— 汇报关系成环）"
+          : rootsOf(graph).map((r) => "[" + r + "]").join(" / ")) +
+        "。要么改那个指定值，要么把指定的角色加进组织图。",
+    };
+  }
+  const roots = rootsOf(graph);
+  if (roots.length === 1) return { ok: true, roleId: roots[0] as string };
+  return {
+    ok: false,
+    reason:
+      roots.length === 0
+        ? "这张组织图里【没有汇报根】（每个角色都有上级 ⇒ 汇报关系成环）。" +
+          "成环的图【提交不进来】，但它可能已经在历史版本里：dispatch 读的是任务创建时那一版" +
+          "（§18.4），而校验只管提交那一侧。顶层判定需要一个根，这里不猜 —— " +
+          "猜一个顶层 = 让一条不存在的汇报关系决定谁能宣布交付。"
+        : "这张组织图有 " + roots.length + " 个汇报根（" + roots.join(" / ") +
+          "），而「谁是 CEO」只能有一个答案：多个根意味着这是一片森林而不是一棵树。" +
+          "要么装配里指定 --ceo，要么把图改成单根。",
+  };
+}
+
+/** 汇报根（`reports_to` 为 null 或空串的那些角色），排序保证报错与测试的确定性。 */
+function rootsOf(graph: OrgGraph): string[] {
+  return Object.values(graph.nodes)
+    .filter((n) => n.reports_to === null || n.reports_to === "")
+    .map((n) => n.role_id)
+    .sort();
+}
+
 /* ───────────────────────── 判定（纯函数）───────────────────────── */
 
 export type EdgePlan =
-  | { readonly move: true; readonly to: TaskState; readonly role: string; readonly note: string; readonly producerRole?: string }
+  | { readonly move: true; readonly to: TaskState; readonly role: string; readonly note: string; readonly producerRole?: string;
+      /**
+       * 「这一轮的落点之后还要再走一格，因为【该接手的下一位是人类】」——
+       * 见下面 `upstream` 那一支。写成一个【标志】而不是直接把 to 写成最终落点，
+       * 是因为中间那两格（EVIDENCE_SUBMITTED / IN_REVIEW）本身是真的发生过的：
+       * 产出确实进了审阅队列，只是审阅者是个真人。审计里要留下这一段，
+       * 否则回放看到"从 IN_PROGRESS 直接升到 CEO"，中间那一步在历史上是缺的。
+       */
+      readonly thenEscalateToCeo?: true }
   | { readonly move: false; readonly to: TaskState; readonly role: string; readonly note: string };
 
 /**
@@ -342,6 +446,68 @@ export function planEdge(o: {
   } else if (edge.next === "upstream") {
     const up = upstreamOf(o.graph, o.role);
     if (up === null) return stay(o.role + " 在组织图上没有上级，产出无处可交（状态不变）。" + d.summary);
+    /**
+     * ⭐ 上级就是【CEO 本人】⇒ 这一轮【不该交给他去"审"】，而是直接升到他手上等人裁决。
+     *
+     * ── 探针量到的原话（组织图 ceo ← manager ← lead ← dev，任务停在 manager/IN_PROGRESS）──
+     *
+     *   ⚠ 起了一个子进程，身份 =[你是 manager…]
+     *   轮1: IN_REVIEW/ceo moved=true          ← manager 的 pass 把任务交给了 CEO
+     *   轮2: （旧代码）又起一个子进程，--append-system-prompt 写着
+     *        "你在一人公司里担任角色 [ceo]。CEO（角色 ceo）是唯一的决策者…"
+     *   被叫去干活的 = ["manager","ceo"]        ← 第二发就是这一格
+     *   审计里 actor 是 agent/ceo 的行数 = 1
+     *
+     * **一个 AI 被告知自己是那个人，然后把那个人要做的审阅替他做完了。**
+     * 而且这不是什么边缘图：汇报深度上限 5（ORG_MAX_DEPTH），
+     * 也就是【任何比"ceo ← dev"更深的组织图】第一次 pass 上去都会踩一遍。
+     * 一人公司画到第三层就中招。
+     *
+     * 两件不可逆的害处叠在一起：
+     *  ① 钱：那一轮真起子进程、真烧 token。它【不是白烧而无用】—— 它烧完确实把状态
+     *    从 IN_REVIEW 推到了 ESCALATED_TO_CEO，而这正是问题：那一格本来就该由
+     *    【上一轮结束】直接到达（下面那条边就是干这个的），现在的代价是
+     *    【多烧一轮真钱 + 留下一行假审计】才走到同一个落点。
+     *  ② 审计：那一轮落的是 `actor_type='agent', actor_id='ceo'` ——
+     *    一行「CEO 以 agent 身份跑了一轮」的【假记录】，而 events 是 append-only
+     *    （§20.4），写下去删不掉。更糟的是【规格】§7.2 步骤 8 那一格
+     *    （琥珀卡、CEO 裁决）被【它自己要回答的那个问题】抢先答了一遍，
+     *    而界面与审计都不会说这件事发生过。
+     *
+     * ── 为什么落 ESCALATED_TO_CEO 而【不是】"停在 IN_REVIEW 报一句话" ──────
+     * 我第一版写的就是 stop（一句人话、不写边），跑完探针发现那不够：
+     * IN_REVIEW 【不在 HUMAN_EDGES 里】⇒ needsSeatCard 判 false ⇒ 收件箱【一张卡都没有】。
+     * 那等于用"不花钱、不造假"换来了「任务停在一个既没有 agent 会动、
+     * 也没有人类入口的格子里」—— 正是 0046 那一篇在修的那个症状的**第三种皮**，
+     * 而我不能一边修那一格一边造出新的那一格。
+     *
+     * 而落 ESCALATED_TO_CEO 【不需要我造任何一条新边】，三条腿全是【规格】§7.1 已有的：
+     *   IN_PROGRESS → EVIDENCE_SUBMITTED（§7.1 769→770，本轮 pass 本来就是"产出交上去"）
+     *   EVIDENCE_SUBMITTED → IN_REVIEW（hub 自动那一格，§7.1 从它只有一个出口）
+     *   IN_REVIEW → ESCALATED_TO_CEO（§7.1 774，六个出口之一）
+     * 语义也说得出口：这一格说的是「这件事需要 CEO 拍板」—— **而它此刻就是需要**，
+     * 因为下一个该接手的人是 CEO。它【没有】说"审阅通过了"（那才是 ESCALATED 说不出口的话，
+     * 也是为什么不落 APPROVED_UPWARD / FINAL_REVIEW：那两个会把"没人审过"包装成"审过了"）。
+     *
+     * 顺带修掉一条【一直存在】的口径问题：这条路上任务的 assigned_role 保持
+     * 【产出方那个 agent】而【不变 ceo】。写 ceo 的话，approveCard 原值回填会把
+     * 负责角色永久改成 CEO —— 一次"升给 CEO 看"变成一次组织分配，
+     * 而下一格（FINAL_REVIEW 之后）的负责角色也跟着错了。
+     */
+    if (up === o.ceoRoleId) {
+      return {
+        move: true,
+        // 落点写 EVIDENCE_SUBMITTED 而不是直接写终格：见 EdgePlan.thenEscalateToCeo 那条
+        // 「中间那两格是真发生过的，审计里要留下这一段」。
+        to: "EVIDENCE_SUBMITTED",
+        role: o.role,
+        thenEscalateToCeo: true,
+        producerRole: o.role,
+        note:
+          "本轮产出交上去，而它的上级 [" + up + "] 是【CEO 本人】—— 直接升给 CEO 等人裁决，" +
+          "不起子进程去扮演他：" + d.summary,
+      };
+    }
     nextRole = up;
   } else if (edge.next === "topmost") {
     // §7.1 从 IN_REVIEW 同时给了 APPROVED_UPWARD 与 ESCALATED_TO_CEO 两条边，
@@ -592,7 +758,6 @@ export function orgGateAtVersion(
 }
 
 export function makeDispatch(deps: DispatchDeps): (o: DispatchOptions) => Promise<DispatchResult> {
-  const ceo = deps.ceoRoleId ?? "ceo";
   return async (o: DispatchOptions): Promise<DispatchResult> => {
     const task = deps.loadTask(o.taskId);
     if (task === null) {
@@ -628,6 +793,62 @@ export function makeDispatch(deps: DispatchDeps): (o: DispatchOptions) => Promis
         "任务负责角色 [" + task.role + "] 不在组织图 v" + task.graphVersion + " 上。" +
           "任务用的是创建时那一版组织图（§18.4），这里不能拿最新图顶上 —— 要么这一版确实没有它，" +
           "要么任务行与图版本对不上，两种都需要人看。",
+      );
+    }
+
+    // ── 门 0.5：谁是 CEO（顶层判定的输入，判在【跑任何一轮之前】）──────
+    /**
+     * 这一道门排在 `runTurn` 【之前】是本篇唯一一处位置上的判断，而它值钱就值钱在这：
+     * 探针量到的是「顶层判不出 ⇒ 每轮白烧一次子进程」（0 美分那条是探针省事，
+     * 真是 `runRole` 就是真金白银），而那种轮【永远不会把人席走到】。
+     * 判在之后 = 判据正确而代价照付，本仓对这一族的原话是「白拿一次 BEGIN IMMEDIATE」的放大版。
+     *
+     * 走 `stop()` 而【不抛】：这一格与门 0（图读不出来）是同一类 —— 库里那一版图的形状
+     * 不合预期，不是这次的请求不成立。抛上去到了 CLI 会变成「执行失败」，
+     * 而「你这版组织图没有根」是照着就能修的话。
+     */
+    const ceoRes = resolveCeoRoleId(deps.ceoRoleId, graph);
+    if (!ceoRes.ok) return stop(ceoRes.reason);
+    const ceo = ceoRes.roleId;
+
+    /**
+     * ── 门 0.6：CEO 本人是【下一位该接手的人】⇒ 【不跑这一轮】─────────────
+     *
+     * 探针量到的原话（组织图 ceo ← manager ← lead ← dev，任务停在 manager/IN_PROGRESS，
+     * 每一轮都 pass）：
+     *
+     *   轮1: IN_REVIEW/ceo moved=true      ← manager 的 pass 把任务交给了 CEO 那一格
+     *   轮2: ⚠ 起了一个子进程，身份 = "你在一人公司里担任角色 [ceo]。CEO（角色 ceo）
+     *            是唯一的决策者…"           ← hub 扮演 CEO 把审阅做完了
+     *   被叫去干活的 = ["manager","ceo"]
+     *   审计里 actor 是 agent/ceo 的行数 = 1
+     *
+     * 这一发不是边缘图：汇报深度上限 5（ORG_MAX_DEPTH），所以【任何比 ceo←dev 更深的
+     * 一张图】第一次 pass 上去都会踩。一人公司画到第三层就中招。
+     *
+     * 拦在 runTurn 【之前】买到的是两件不可逆的东西：
+     *  ① 钱：那一轮真起子进程、真烧 token，而它【不推进任何该推进的东西】；
+     *  ② 审计：那一轮落 actor_type='agent', actor_id='ceo' —— 一行「CEO 以 agent
+     *     身份跑了一轮」的假记录，append-only 删不掉（§20.4）。而【规格】§7.2 步骤 8
+     *     那一格（琥珀卡、CEO 裁决）被【它自己要回答的那个问题】抢先答了一遍。
+     *
+     * 但这一道门只是【不烧】，它【不管落点】—— 落点由 planEdge 那条 upstream 分支处理
+     * （上一轮 pass 时就直接升到 ESCALATED_TO_CEO，见那里）。所以真跑起来走到这里
+     * 只剩两种形状，两种都是"已经晚了半步"而仍要拦：
+     *  · 任务【本来就】建在 CEO 角色上（POST /tasks 的 assignedRole 由调用方给）；
+     *  · CEO 改了组织图，把某个在途任务的负责角色挪成了 CEO 自己（§18.4 让任务
+     *    留在旧图版本上，所以旧图里的 CEO 角色名照样在新图里存在）。
+     * 那两种都没有"这一轮该谁干"的答案 ⇒ stop() 说人话，绝不猜一条边写进审计库。
+     */
+    if (task.role === ceo) {
+      return stop(
+        "任务挂在 CEO 角色 [" + ceo + "] 手上，而那是【人类席位】—— hub 不会起子进程去" +
+          "【扮演你】把这件事做完（那样审计里会留下一行「CEO 以 agent 身份跑了一轮」的" +
+          "假记录，删不掉）。\n" +
+          "→ 正常路径不会走到这里：产出方 pass 的时候 hub 就已经把任务升到 CEO 席位了" +
+          "（见 planEdge 的 upstream 分支）。走到这里说明任务【一开始】就建在 CEO 角色上，" +
+          "或者组织图把某个在途任务的负责角色改成了 CEO。修法二选一：把那条想法重新下发到" +
+          "一个 agent 角色上，或者在组织图上让 CEO 不做任何 agent 出边的负责人。",
       );
     }
 
@@ -762,7 +983,7 @@ export function makeDispatch(deps: DispatchDeps): (o: DispatchOptions) => Promis
         // 而 CEO 的收件箱里也没有一张等着点开的卡：任务不是等人，是【没人接着干】。
         // 这一格本身没有判断（§7.1 从它出发只有一个出口），所以由 hub 走；
         // 真正的显式决定在下一格的审阅者那里（§8.2 第 3 条）。
-        const chain: readonly { readonly to: TaskState; readonly note: string }[] = [
+        const chain: { readonly to: TaskState; readonly note: string }[] = [
           { to: plan.to, note: plan.note },
           ...(AUTO_AFTER_EDGE[plan.to] === undefined
             ? []
@@ -773,6 +994,38 @@ export function makeDispatch(deps: DispatchDeps): (o: DispatchOptions) => Promis
                 },
               ]),
         ];
+        /**
+         * 第三格：该审阅的那一格坐着的是【人类】⇒ 升给 CEO（planEdge 的 upstream 分支）。
+         *
+         * 这一段【不新增任何边】：三段全在【规格】§7.1 的边表里
+         * （769→770 / 770→771 / 774），改的是【走不走】而不是【有没有】。
+         *
+         * ⚠ 起点取【链上最后那一格】而【不写死 "IN_REVIEW"】。写死的话，一旦上面那条
+         * 自动边的形状变了（将来给别的状态也加 AUTO_AFTER_EDGE），这里会照样写出
+         * 一条 `某状态 → ESCALATED_TO_CEO`，而 assertTaskTransition("IN_REVIEW", …)
+         * 【照样通过】—— 校验的是我脑子里那条边，写下去的是另一条。
+         * 那是「看起来有守卫而守卫判的不是被写的那件事」那一族，与 0046 §9 的 M3
+         * （验位置而不验性质）同一个错。从链尾推 ⇒ 校验的边与写的边【必然是同一条】。
+         */
+        if (plan.move && plan.thenEscalateToCeo === true) {
+          const prev = chain[chain.length - 1];
+          if (prev === undefined) {
+            // 不可达（第一格是无条件 push 的），所以【抛】而不是"跳过这一格"：
+            // 静默跳过会留下【半条链】—— 产出进了审阅队列而没人升给 CEO，
+            // 任务永久停在 EVIDENCE_SUBMITTED / IN_REVIEW（agent 不会动、人也没入口），
+            // 正是这一发要消灭的那个形状，而返回值上看起来像成功。
+            throw new Error(
+              "dispatch: thenEscalateToCeo 要求链上至少有一格，实到空链 —— " +
+                "走到这里说明上面那条 push 被改坏了。不能只补 CEO 那一格而留下半条链。",
+            );
+          }
+          chain.push({
+            to: assertTaskTransition(prev.to, "ESCALATED_TO_CEO"),
+            note:
+              "该审阅的那一格由【CEO 本人】担任，hub 不起子进程去扮演他 —— " +
+              "升到 CEO 席位，等收件箱里的一次点击（§7.1 774）。",
+          });
+        }
         let from: TaskState = task.status;
         let legNo = 0;
         for (const leg of chain) {

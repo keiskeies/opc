@@ -109,6 +109,14 @@ async function world(o: {
   readonly graphVersion?: number;
   /** 写不写组织图。不写 ⇒ 造「版本缺失」那一发。 */
   readonly writeGraph?: boolean;
+  /** 换整张图（0047 那几发要的是【根不叫 ceo】与【两个根】两种形状）。 */
+  readonly graph?: OrgGraph;
+  /**
+   * 装配的 --ceo。给 null 表示【不指定】—— 那时「谁是 CEO」只能由图回答，
+   * 这一格是 0047 那一半修复唯一的开关（原来 runtime 里写死 `?? "ceo"`，
+   * 不指定就等于宣布根叫 ceo）。
+   */
+  readonly ceoRoleId?: string | null;
 }): Promise<World> {
   const { WriteQueue } = await import("../../src/db/write-queue.js");
   const q = new WriteQueue(TMP + "/r-" + process.pid + "-" + ++fileSeq + ".db") as unknown as Queue;
@@ -120,7 +128,14 @@ async function world(o: {
       "VALUES ('t1', '做个 AI 笔记应用', ?, ?, 'intake', ?, ?, ?)",
   ).run(o.status ?? "IN_PROGRESS", o.role ?? "dev", NOW, NOW, o.graphVersion ?? 1);
   if (o.writeGraph !== false) {
-    db.prepare(INSERT_DELEGATION_GRAPH_SQL).run("g1", 1, JSON.stringify(GRAPH), NOW, "ceo", "测试用组织图");
+    db.prepare(INSERT_DELEGATION_GRAPH_SQL).run(
+      "g1",
+      1,
+      JSON.stringify(o.graph ?? GRAPH),
+      NOW,
+      "ceo",
+      "测试用组织图",
+    );
   }
   const bus = new InMemoryEventBus();
   const rt = makeRuntime({
@@ -130,7 +145,7 @@ async function world(o: {
     taskLimitCents: 1000,
     cwd: TMP,
     bin: FAKE_CLI,
-    ceoRoleId: "ceo",
+    ...(o.ceoRoleId === null ? {} : { ceoRoleId: o.ceoRoleId ?? "ceo" }),
   });
   return { db, q, rt, bus };
 }
@@ -242,6 +257,52 @@ describe("runtime 的读回调（真 schema 上的真 SQL）", () => {
     expect(w.rt.deps.ceoApproved("t1", "k-rejected")).toBe(false);
     expect(w.rt.deps.ceoApproved("t1", "没有这张卡")).toBe(false);
     expect(CEO_APPROVED_SQL).toContain("status = 'approved'");
+  });
+});
+
+describe("rolePrompt 里那句「谁是 CEO」（0047 的装配那一半）", () => {
+  const BOSS_GRAPH: OrgGraph = {
+    nodes: {
+      boss: { role_id: "boss", can_manage: true, reports_to: null, model_family: "opus" },
+      dev: { role_id: "dev", can_manage: false, reports_to: "boss", model_family: "claude" },
+    },
+    edges: [],
+  };
+
+  it("根叫 boss ⇒ 简报里写的是 boss，而【不是】那个字面量 ceo", async () => {
+    // 修前这里是 `?? "ceo"`：简报会告诉一个 agent「CEO（角色 ceo）是唯一的决策者」，
+    // 而这张图里没有 ceo 这个人 —— agent 照着喊一句汇报对象，对象不存在。
+    const w = await world({ graph: BOSS_GRAPH, ceoRoleId: null });
+    w.rt.deps.loadTask("t1"); // 图跟着任务钉进来（不 loadTask 就没有 cacheGraph）
+    const p = w.rt.deps.rolePrompt("dev");
+    expect(p).toContain("角色 boss");
+    expect(p).not.toContain("角色 ceo");
+  });
+
+  it("⭐ 判不出【不退回任何名字】，而是把「说不出来」原样写进简报", async () => {
+    // 两个根的图 + 不指定 ⇒ resolveCeoRoleId 拒绝。这一条守的是"编一个名字出去"
+    // 那条退路：编出来的名字会让 agent 对着一个不存在的同事汇报。
+    const forest: OrgGraph = {
+      nodes: {
+        a: { role_id: "a", can_manage: true, reports_to: null, model_family: "opus" },
+        b: { role_id: "b", can_manage: true, reports_to: null, model_family: "opus" },
+      },
+      edges: [],
+    };
+    const w = await world({ graph: forest, ceoRoleId: null });
+    w.rt.deps.loadTask("t1");
+    const p = w.rt.deps.rolePrompt("a");
+    expect(p).toContain("说不出");
+    // 一个名字都没提：既不编根，也不拿 nodes 里第一个凑数
+    expect(p).not.toContain("角色 a");
+    expect(p).not.toContain("角色 b");
+    // 而它【不改变动作】—— 下一跳仍由 hub 判，这句是提示词层的全部职责
+    expect(p).toContain("由 hub 按组织图判");
+  });
+
+  it("图还没钉（没 loadTask）⇒ 同样是「说不出」那一支，而不是拿最新图顶上", async () => {
+    const w = await world({});
+    expect(w.rt.deps.rolePrompt("dev")).toContain("说不出");
   });
 });
 

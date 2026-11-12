@@ -43,7 +43,7 @@
 第二次跑，taskLimitCents = 1     ⇒ budgets.limit_cents 仍是 1000
 ```
 
-因为 `packages/hub/src/engine/runtime.ts:108` 那条 `ENSERT_TASK_BUDGET_SQL` 是
+因为 `packages/hub/src/engine/runtime.ts:109` 那条 `ENSERT_TASK_BUDGET_SQL` 是
 `ON CONFLICT(scope_type, scope_id, period) DO NOTHING` —— 那一列**第一次写进去就再也不改**。
 **拿它当门 = 门永远按这台机器第一次启动时的那个数字关着**，
 而那个数字可能来自半年前另一条命令行。

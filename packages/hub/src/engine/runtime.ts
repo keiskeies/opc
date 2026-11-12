@@ -31,6 +31,7 @@ import { randomUUID } from "node:crypto";
 import type { OrgGraph } from "@opc/contracts";
 import {
   usdToCents,
+  resolveCeoRoleId,
   type CostHook,
   type DispatchDeps,
   type DispatchTask,
@@ -208,8 +209,23 @@ export function makeRuntime(d: RuntimeDeps): EngineRuntime {
     }
   };
 
+  /**
+   * 简报里那句「谁是 CEO」。判不出返回 null 而【不返回一个名字】。
+   *
+   * 用 cacheGraph（loadTask 刚按任务那一版钉好的那份）而不是自己再读一次图：
+   * 本文件缓存的意义就是「一轮里所有只拿到 roleId 的回调读到同一个版本」，
+   * 在这里 readGraphByVersion 一次等于给「谁是 CEO」开出第二个版本来源 ——
+   * 与 modelFamily 那一格同一条理由。
+   */
+  const ceoForPrompt = (): string | null => {
+    if (cacheGraph === null) return null;
+    const r = resolveCeoRoleId(d.ceoRoleId, cacheGraph);
+    return r.ok ? r.roleId : null;
+  };
+
   const deps: DispatchDeps = {
     writer: d.writer,
+
 
     loadTask: (taskId): DispatchTask | null => {
       const row = read().prepare(LOAD_TASK_SQL).get(taskId) as Row | undefined;
@@ -242,9 +258,25 @@ export function makeRuntime(d: RuntimeDeps): EngineRuntime {
       // 所以这里只给一句最小身份描述，而不是编一份岗位书 —— 编出来的「你的职责是…」
       // 会让 agent 按一份【没有人在纸上认过】的授权干活，那比信息少更糟。
       // 接上真岗位书的口子就是这一格，缺的东西登记在 0041 §6。
-      const ceo = d.ceoRoleId ?? "ceo";
+      //
+      // CEO 那一格【从图里读】而不再写 `?? "ceo"`（0047）：那句回退是本轮修复的一半 ——
+      // 它把「顶层是谁」这件【结构事实】降级成了一个字面量，而组织图的根完全可以叫 boss。
+      // 判据本体在 dispatch 的 resolveCeoRoleId（只有一份），这里只是它的一个读者。
+      //
+      // ⚠ 判不出时【不退回任何名字】，而是把"说不出来"这句话原样写进简报。
+      // 这不是给提示词留后门：真正的顶层判定在代码里（topmost 那一支），
+      // 提示词里那句「谁是 CEO」只影响 agent 会不会在 summary 里喊错名字，
+      // 而 dispatch 那道新门根本不会让"图坏了"的这一轮跑到 runTurn。
+      // 走到这里还判不出，只可能是 charter 起草那一族【不经 dispatch】的调用方 ——
+      // 那种场合编一个 "ceo" 出去，就是让 agent 对着一个不存在的同事汇报。
+      const ceo = ceoForPrompt();
+      const ceoLine =
+        ceo === null
+          ? "CEO 是唯一的决策者（这一版组织图里 hub 认不出汇报根，所以【说不出】它的角色名 —— " +
+            "这不改变你的动作：下一跳由 hub 按组织图判，不由你判。）"
+          : "CEO（角色 " + ceo + "）是唯一的决策者";
       return (
-        "你在一人公司里担任角色 [" + roleId + "]。CEO（角色 " + ceo + "）是唯一的决策者，" +
+        "你在一人公司里担任角色 [" + roleId + "]。" + ceoLine + "，" +
         "你的汇报对象由 hub 按组织图决定，不由你决定。"
       );
     },

@@ -63,7 +63,7 @@
 而按天的消耗额今天**没有记录方**：`budgets` 只有累计的 `consumed_cents`，全仓唯一写入是 `+ ?`
 （单调不减 ⇒ 它就是「至今总共」），表上**没有** `updated_at`；唯一带时刻的是 `budget_events.created_at`。
 于是「窗口内花了多少」能给准数，「日上限是多少」给不出 ——
-角色级 `daily` 那一格**没有任何生产者**：`packages/hub/src/engine/runtime.ts:111` 与
+角色级 `daily` 那一格**没有任何生产者**：`packages/hub/src/engine/runtime.ts:112` 与
 `packages/hub/src/budget/tracker.ts:70` 两处 INSERT 都只声明 `task|<id>|per_task` 一种作用域。
 
 取舍：**给有判据的那两半，并明写缺的是哪一半**。
