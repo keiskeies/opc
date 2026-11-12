@@ -311,7 +311,12 @@ export async function cmdDecide(a: DecideArgs, io: WorkIo): Promise<WorkResult> 
         io.error(
           "错误：那条任务上有 " + cards.length + " 张待批卡片，不能替你猜要办哪一张。\n" +
             "请指定 --card <下面某个 id>：\n" +
-            cards.map((c) => "  · " + c.id + "（" + c.approvalType + "）").join("\n") +
+            // 打印 cardKey 而不是只打印 approvalType：一张任务上【两张】待批卡从今天起是
+            // 正常状态（拦截卡 + 席位补卡），而它们的 approvalType【相同】（都是 escalation），
+            // 于是原来那份清单读起来是两条一模一样的"escalation"+ 两串 UUID，
+            // 等于把"该办哪张"这个问题原样退还给看清单的人。
+            // cardKey 已经在 CardRow 里（PENDING_CARDS_SQL 带着），不用改 SQL。
+            cards.map((c) => "  · " + c.id + "（" + c.approvalType + " / " + (c.cardKey ?? "无键") + "）").join("\n") +
             "\n",
         );
         return { code: 2 };
@@ -327,7 +332,7 @@ export async function cmdDecide(a: DecideArgs, io: WorkIo): Promise<WorkResult> 
       io.error(
         "错误：卡片 [" + cardId + "] 不是任务 [" + a.task + "] 上【待批】的卡片。\n" +
           "这条任务此刻待批的是：\n" +
-          cards.map((c) => "  · " + c.id + "（" + c.approvalType + "）").join("\n") +
+          cards.map((c) => "  · " + c.id + "（" + c.approvalType + " / " + (c.cardKey ?? "无键") + "）").join("\n") +
           "\n（已经批过的卡片不能再批一次：决策是 append-only 的，重复点一次就是在历史里说「这个人又决定了一次」。）\n",
       );
       return { code: 2 };

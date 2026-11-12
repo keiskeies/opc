@@ -355,11 +355,17 @@ export async function applyDecision(
  *
  * @returns 与 HubDeps.recordDecision 同契约：true = 首次决策已落库。
  *
- * ⚠ approveCard 有六条 outcome，这个 boolean 只映射得到两条。剩下四条
- * （卡片不存在 / 卡片属于另一条任务 / 任务不存在 / 打回没带理由）【不能】咽进
- * false —— app.ts 那句 `replayed: !applied` 会把它们全都说成"已经有人决定过了"，
+ * ⚠ approveCard 有【七】条 outcome，这个 boolean 只映射得到两条。剩下五条
+ * （卡片不存在 / 卡片属于另一条任务 / 任务不存在 / 打回没带理由 /
+ *  点的是【上一格留下的过期卡片】—— 0046 §5 新增那一格）【不能】咽进 false ——
+ *  app.ts 那句 `replayed: !applied` 会把它们全都说成"已经有人决定过了"，
  * 而事实是【一行都没写】。所以这里抛：app.ts 的 catch 翻成 500 + 原文，
  * "看到报错"与"什么都没发生"重新对上。
+ * ⚠ 那五条里有两条（打回没带理由、点到过期卡片）语义上是【调用方的请求不成立】，
+ *   更对的码是 422 / 409 而【不是 500】。这一格【本篇没修】并登记在 0046 §6：
+ *   修它要把 HubDeps.recordDecision 的返回值从 boolean 换成一条【带成因】的结果，
+ *   而那会同时动 app.ts / desktop IPC / 那边的测试三处 —— 与补卡不是同一发。
+ *   现状的表现是「界面弹一句原文（原文本身说清了该点哪张）」，不是静默。
  * （applyDecision 那一条【没有】这些分支，所以旧实现不会遇到 ——
  * 换写路径换来的是【更严的失败面】，不是新的静默。）
  */

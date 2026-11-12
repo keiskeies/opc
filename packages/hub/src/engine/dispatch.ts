@@ -46,6 +46,7 @@ import { getDescendants } from "@opc/contracts";
 import { readGraphByVersion } from "../org/commit.js";
 import { assertTaskTransition, legalTransitionsFrom, type TaskState } from "../graph/status.js";
 import { DECISION_MARK, parseDecision, type RoleAction, type RoleDecision } from "./claude.js";
+import { mintSeatCard, needsSeatCard } from "./seat-card.js";
 
 /** 一轮执行的账单：CLI 报美元浮点，账上一律整数美分（§6.1）。 */
 export function usdToCents(usd: number): number {
@@ -987,6 +988,42 @@ export function makeDispatch(deps: DispatchDeps): (o: DispatchOptions) => Promis
         );
         outgoing.push({ event: evt, seq: cardSeq });
         if (p.attempt !== null) writeAttempt(p.attempt, res.approvalId);
+      }
+
+      /**
+       * ⭐ 落点若是【人类席位】，同事务补一张卡（seat-card.ts 文件头那发实测）。
+       *
+       * 为什么放在这里而不是让调用方补：CEO 推进任务的唯一入口是
+       * `POST /approvals/:id/decide`，而那个 id 只能从一张【已经存在的卡】拿到。
+       * 只写状态边 ⇒ 状态宣布"等人"而那个人手上没有入口 ⇒ 任务永久停在人席，
+       * 而它每一层看起来都正常（审计有、状态对、收件箱空）。
+       * 同一个事务写 ⇒ 「任务在人席而收件箱没有东西」在库里【不可表达】。
+       *
+       * 为什么在 onCost 【之后】：那个钩子拿的是「本轮最后写下的那条 events.id」当
+       * 幂等键，把补卡插在它前面会让同一轮的 cost seq 从状态边变成卡片行 ——
+       * 两种都算真话，但改既有语义不该是这一发的副作用。
+       *
+       * ⚠ 判的是 finalStatus 而【不是】plan.to：chain 那一族会在落点之后自动再走一格
+       *   （EVIDENCE_SUBMITTED → IN_REVIEW），中间那一格不是人席，而"任务最后停在哪"
+       *   才是这一发的问题。键取的是【最后那条边】的 seq（stateEventSeq 在 chain
+       *   循环之后已经是最后一格那一条），见 seatCardKey 那条「一次到达一个身份」。
+       */
+      if (plan.move && stateEventSeq !== null && needsSeatCard(finalStatus)) {
+        const seat = mintSeatCard(db, {
+          taskId: task.id,
+          status: finalStatus,
+          arrivalSeq: stateEventSeq,
+          why: plan.note,
+          nowMs: o.nowMs,
+        });
+        if (seat.event !== null && seat.seq !== null) {
+          // 与那两类拦截卡【共用】cardEvent 这一格是安全的，因为两者互斥：
+          // 拦截卡只在"没跃迁"那一支出现（planEdge 的两处 stay 都写着"已建卡"），
+          // 而这一发只在 plan.move 那一支。真出现两张卡的那天一进来就会撞这个赋值，
+          // 而那时要改的是 DispatchResult.card 的形状（一张 → 一批），不是这里偷偷挑一张。
+          cardEvent = seat.event;
+          outgoing.push({ event: seat.event, seq: seat.seq });
+        }
       }
       return { stateEventSeq, cardEvent, finalStatus };
     });

@@ -33,12 +33,19 @@
  */
 import type { HubWriter } from "../db/write-queue.js";
 import { assertParamCount, assertSingleStatement } from "../db/write-queue.js";
+import type { DatabaseSync } from "node:sqlite";
 import { requireScopeDb } from "../checkpoint/tx-scope.js";
 import { appendAudit, KIND_TO_ACTION } from "../events/recorder.js";
 import type { DomainEvent } from "../events/bus.js";
 import { APPROVAL_STATUS_PENDING } from "../approvals/cards.js";
 import type { TaskState } from "../graph/status.js";
 import { humanEdge, seatOf, WRITE_EDGE_SQL } from "./dispatch.js";
+import {
+  mintSeatCard,
+  needsSeatCard,
+  ownCardsOf,
+  type PendingCardLite,
+} from "./seat-card.js";
 
 /**
  * 认领那张待批的卡片。
@@ -123,6 +130,26 @@ const LOAD_CARD_SQL =
 const LOAD_TASK_STATE_SQL =
   "SELECT status, assigned_role, graph_version FROM tasks WHERE id = ?";
 
+/**
+ * 事务内读那条任务上【所有待批】卡片的 (id, card_key)。
+ *
+ * 必须在事务里、用【那条事务的】连接读而不能用 `w.readConnection()`：读连接是
+ * 另一条 WAL 连接，它看到的可能是【这一笔之前】的快照 —— 用旧快照判"谁是当前格的卡"，
+ * 判完就是一次基于过期认知的决定（与本文件 LOAD_TASK_STATE_SQL 同一条理由：
+ * 那一条也是从 requireScopeDb 那条连接读的，而注释里写着"取库里那一行而不是调用方传的"）。
+ *
+ * SQL 复用文件底部那条 PENDING_CARDS_SQL（同源），不另写一份 —— 两份"什么叫待批"
+ * 漂移的结局是：一处把已批掉的算进来，收件箱计数从此恒大于真值（0026 §9 那一族）。
+ */
+function pendingCardKeys(db: DatabaseSync, taskId: string): PendingCardLite[] {
+  const rows = db.prepare(PENDING_CARDS_SQL).all(taskId, APPROVAL_STATUS_PENDING) as Record<string, unknown>[];
+  return rows.map((r) => ({
+    id: String(r["id"] ?? ""),
+    cardKey: r["card_key"] === null || r["card_key"] === undefined ? null : String(r["card_key"]),
+  }));
+}
+
+
 export interface ApproveOptions {
   readonly taskId: string;
   readonly approvalId: string;
@@ -145,6 +172,13 @@ export interface ApproveResult {
     | "already_decided"
     /** 卡片挂在另一条任务上。拒绝，因为审计的 task_id 只能有一个答案。 */
     | "card_belongs_to_other_task"
+    /**
+     * 那张卡片问的【不是任务当前这一格】，而当前这一格【已经有】自己的入口卡在等着。
+     * 0046 §5：补卡之后「一条任务上两张 pending 卡」是正常状态，于是"点旧卡推新边"
+     * 从无从发生变成可达，而它的后果是「回答 A 问题而任务按 B 问题动」+
+     * 审计里留下一条她没做过的批准（append-only，删不掉）。【什么都不写】。
+     */
+    | "stale_card"
     /**
      * 打了回而没给理由。判在【开事务之前】：这不是「抢不到所以不写」，是这次请求
      * 本身不成立，不该让它碰到写连接（同 parseWorkArgs 把参数错排在 cmdWork 之前）。
@@ -259,6 +293,41 @@ export async function approveCard(
     // 取【库里那一行】而不是调用方传的：传一份错的就是一次静默覆盖。
     const keeper = String(taskRow["assigned_role"] ?? "");
 
+    /**
+     * ⭐ 「这张卡问的是当前这一格吗」—— 0046 §5 那一发实测补上的判据。
+     *
+     * 上面那三道检查回答的是「这张卡【属于】这条任务吗」，而它们对
+     * 「这张卡属于这条任务的【哪一格】」一字未提。一条任务上同时躺着两张 pending 卡
+     * 从今天起是正常状态（拦截卡 + 补出来的席位卡），于是那个缺口从"无从发生"变成"可达"：
+     * 实测点【旧的那张】拦截卡，机器把任务从 ESCALATED_TO_CEO 推到了 FINAL_REVIEW，
+     * 而真正在等的那张卡【仍然躺着】。⇒ CEO 回答的是 A 问题，任务按 B 问题动了，
+     * 且审计里写着「CEO 批准了升级」—— 她没有批准过升级（append-only，事后删不掉）。
+     *
+     * 判在【认领之前】：认领之后再判会留下一条「已决策而任务没动」的卡片，
+     * 那与这一发要防的那一格（收件箱有东西而推不动）是同一个症状，只是换了成因。
+     *
+     * 只在 approve 这一支判（`o.button === "approve"`）：reject / defer 不推进任何状态，
+     * 挡掉它们会让 CEO【连"这条不是我此刻要答的"都表达不出来】——
+     * 一张过期的拦截卡从此既推不动也关不掉，永远挂在待批数里。
+     *
+     * ⚠ 判据是【成员关系】而"取最新那张"那种写法不用：见 ownCardsOf 那条，
+     *   手上那份读法的次序是随机的（created_at 同轮相同 + id 是 UUID），
+     *   靠它挑一张会得到一条看起来确定、实际随机的判定。
+     */
+    const own = ownCardsOf(from, pendingCardKeys(db, o.taskId));
+    const isOwn = own.some((c) => c.id === o.approvalId);
+    if (own.length > 0 && !isOwn && o.button === "approve") {
+      return {
+        kind: "stale_card" as const,
+        status,
+        from,
+        to: from,
+        ownCount: own.length,
+        ownKey: own[0]?.cardKey ?? "（读不到卡片键）",
+      };
+    }
+
+
     // 先认领，再动任务。顺序反过来的话，「卡片已被别人抢先批掉」这一支会留下一条
     // 【没有批准记录的状态变化】，而它是回放里最难查的那种缺口。
     const claimParams: unknown[] = [
@@ -372,6 +441,32 @@ export async function approveCard(
       );
     }
 
+    /**
+     * ⭐ 落点若还是【人类席位】，同事务补下一张卡。
+     *
+     * 今天真走到这一发的只有一条路：ESCALATED_TO_CEO → FINAL_REVIEW（【规格】§7.2
+     * 步骤 8 → 步骤 9）。少了它，CEO 点完「批准上线」之后任务停在 FINAL_REVIEW，
+     * 而那一格【同样】只能靠一张卡推进 —— 于是"批了一步就再也点不动下一步"，
+     * 交付那一步（→ DELIVERED）永远发生不了。这一格比 dispatch 那一格更隐蔽：
+     * 前者的症状是"收件箱空"，后者的症状是"我明明批过了，怎么还没交付"。
+     *
+     * 键取的是【刚才那条状态边】的 seq（stateSeq），与 dispatch 那一侧同一个身份规则：
+     * 一次到达一个身份。CHARTER_PENDING 被 needsSeatCard 排除 —— 那张卡的生产者是
+     * charter.ts / 章程泵，在这里再建一张会让同一格出现两张"批准章程"。
+     */
+    if (needsSeatCard(edge.to)) {
+      const seat = mintSeatCard(db, {
+        taskId: o.taskId,
+        status: edge.to,
+        arrivalSeq: stateSeq,
+        why: edge.why,
+        nowMs: now,
+      });
+      if (seat.event !== null && seat.seq !== null) {
+        published.push({ event: seat.event, seq: seat.seq });
+      }
+    }
+
     return {
       kind: "decided" as const,
       status,
@@ -431,6 +526,21 @@ export async function approveCard(
       orgVersionUnchecked: true,
       published: [],
       note: "卡片挂在另一条任务上，不能拿它推进 [" + o.taskId + "]。",
+    };
+  }
+  if (wrote.kind === "stale_card") {
+    return {
+      outcome: "stale_card",
+      cardStatus: wrote.status,
+      from: wrote.from,
+      to: wrote.to,
+      edgeExists: false,
+      orgVersionUnchecked: true,
+      published: [],
+      note:
+        "那张卡片问的不是 [" + wrote.from + "] 这一格，而这一格已经有它自己的卡在等着（" +
+        String(wrote.ownKey) + "，共 " + String(wrote.ownCount) + " 张）。点它不会推进任务——" +
+        "任务此刻在 [" + wrote.from + "]，要批的是那张卡，不是这张过期的。什么都没写。",
     };
   }
   // 提交成功之后才广播（回滚的话那些行根本没存在过 —— §5.8）。

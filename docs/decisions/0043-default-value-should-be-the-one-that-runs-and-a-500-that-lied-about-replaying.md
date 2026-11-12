@@ -171,7 +171,7 @@ const engineRoute = o.graphFor === undefined;
 
 - `hub:engine work` **需要 `tsx`，本机装不上**（0039）。启动横幅现在**如实说出这一点**，
   而不是给一句照抄会挂的补救命令 —— 那正是改前那句 `hub resume` 犯的错。
-- **只有 `approve` 有出边**（`HUMAN_EDGES`，`dispatch.ts:136`：出边那个维度的类型是
+- **只有 `approve` 有出边**（`HUMAN_EDGES`，`dispatch.ts:137`：出边那个维度的类型是
   `Partial<Record<"approve", …>>`，**不是运行时忘了填，是类型上就只有这一个键**）。
   `reject_with_comment` / `defer_deep_review` 落库而任务原地，这是**规格的现状**
   （[规格] §7.1），本篇把它钉成断言而不是修掉它 —— 但它曾经是 500，
@@ -203,7 +203,7 @@ const engineRoute = o.graphFor === undefined;
 
 **0016 §4 那一格不是漂移，是「指的东西换了」**（0042 §7 那一族的第五次）：
 它当年指的是 `real-deps` 里第 291 行那句 `action: "approval"`。
-0043 之后**默认装配**的 CEO 决策写在 `engine/approve.ts:293`，
+0043 之后**默认装配**的 CEO 决策写在 `engine/approve.ts:362`，
 `real-deps` 那条 `applyDecision`（现在在第 298 行）只在**显式交了图工厂**时才被走到。
 两行写的 `action` 值**相同**（都从 `KIND_TO_ACTION.ApprovalDecided` 取，
 `recorder.ts:38` ⇒ `"approval"`），所以那句话的**结论照旧成立**，但今天**只查一处会得出错结论**

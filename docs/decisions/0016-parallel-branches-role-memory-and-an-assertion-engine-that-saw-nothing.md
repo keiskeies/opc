@@ -35,7 +35,7 @@ Task 3.7。计划那行给的 Files 是 `src/graph/branches.ts`、`src/memory/ro
    `packages/hub/src/http/real-deps.ts:298` 写 `action: "approval"`，
    `payload = {approvalId, resume}`（决定本身）、`state_snapshot = {note}`（理由）。
    ⚠ **0043 之后这一格的落点分成了两处，而本篇那一处不再是默认那一条**：
-   默认装配（没交图工厂）走 `packages/hub/src/engine/approve.ts:293`，写的**是同一个 `action` 值**
+   默认装配（没交图工厂）走 `packages/hub/src/engine/approve.ts:362`，写的**是同一个 `action` 值**
    （从 `KIND_TO_ACTION.ApprovalDecided` 取，`packages/hub/src/events/recorder.ts:38` ⇒ `"approval"`），
    `real-deps.ts` 那条 `applyDecision` 只在**显式交了图工厂**时才被走到。
    所以「只有 CEO 那一格今天真有数据」这句话**照旧成立**，但今天再读它要读两处，

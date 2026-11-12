@@ -195,7 +195,7 @@ const SNAP: Record<string, string> = {
   // 所以下面两格是【新增】而不是漂移 —— 它们把「同一个 action 值有两条写入路径」
   // 这件事钉在快照上：只留 real-deps 那一格的话，下一个读 0016 §4 的人
   // 会以为默认路线上没有写入方（0042 §7 抓的就是这一族：坐标没坏，指的东西换了）。
-  "0016-parallel-branches-role-memory-and-an-assertion-engine-that-saw-nothing.md>packages/hub/src/engine/approve.ts:293":
+  "0016-parallel-branches-role-memory-and-an-assertion-engine-that-saw-nothing.md>packages/hub/src/engine/approve.ts:362":
     "action: KIND_TO_ACTION.ApprovalDecided,",
   "0016-parallel-branches-role-memory-and-an-assertion-engine-that-saw-nothing.md>packages/hub/src/events/recorder.ts:38":
     'ApprovalDecided: "approval",',
@@ -208,14 +208,14 @@ const SNAP: Record<string, string> = {
     'import { Command } from "@langchain/langgraph";',
   // HUMAN_EDGES 的类型那一行。0043 §6「只有 approve 有出边」这条现状的落点：
   // 出边这个维度的类型是 Partial<Record<"approve", …>> —— 不是运行时忘了填，是类型上就只有这一个键。
-  "0043-default-value-should-be-the-one-that-runs-and-a-500-that-lied-about-replaying.md>dispatch.ts:136":
+  "0043-default-value-should-be-the-one-that-runs-and-a-500-that-lied-about-replaying.md>dispatch.ts:137":
     'export const HUMAN_EDGES: Readonly<Partial<Record<TaskState, Partial<Record<"approve", HumanEdge>>>>> = {',
   // 0043 §7 那张表的第三行：0016 那一格的【当前】落点。
   // 同一节里 0016 键下还有一格 real-deps.ts:298 —— 那是 applyDecision，
   // 只在【显式交了图工厂】时才被走到。两格一起读才说明
   // 「同一个 action 值今天有两条写入路径」这件事（0016 §4 那句话的结论没变，
   // 但只查一处会得出「默认路线上没有写入方」这个错结论）。
-  "0043-default-value-should-be-the-one-that-runs-and-a-500-that-lied-about-replaying.md>engine/approve.ts:293":
+  "0043-default-value-should-be-the-one-that-runs-and-a-500-that-lied-about-replaying.md>engine/approve.ts:362":
     "action: KIND_TO_ACTION.ApprovalDecided,",
   "0043-default-value-should-be-the-one-that-runs-and-a-500-that-lied-about-replaying.md>recorder.ts:38":
     'ApprovalDecided: "approval",',
@@ -242,7 +242,7 @@ const SNAP: Record<string, string> = {
   // 「起草比心跳慢三倍」的设计事实的另一半）、跳过那一轮的计数器（第三格，
   // 0044 §4 里我【撤回】了"静默跳过"那个说法，撤回的依据就是这一行 + 它下面那句 onError）。
   // 三格都是活坐标：被删或被改，0044 §0/§4 的结论跟着失效。
-  "0044-charter-pump-where-do-cards-come-from-and-what-a-zero-cost-failure-costs.md>http/real-deps.ts:531":
+  "0044-charter-pump-where-do-cards-come-from-and-what-a-zero-cost-failure-costs.md>http/real-deps.ts:537":
     '"INSERT INTO tasks (id, parent_id, title, status, assigned_role, current_node, " +',
   "0044-charter-pump-where-do-cards-come-from-and-what-a-zero-cost-failure-costs.md>engine/claude.ts:85":
     "}, i.timeoutMs ?? 180_000);",
@@ -571,7 +571,7 @@ const SNAP: Record<string, string> = {
     "export function silentOverBudgets(db: DatabaseSync): BudgetTierRow[] {",
   "0042-today-view-and-putting-the-criteria-on-the-server-side.md>packages/desktop/src/ipc-surface.ts:171":
     "export const EXPOSED_ENDPOINTS: readonly ApiEndpoint[] = IMPLEMENTED_ENDPOINTS;",
-  "0042-today-view-and-putting-the-criteria-on-the-server-side.md>http/real-deps.ts:580":
+  "0042-today-view-and-putting-the-criteria-on-the-server-side.md>http/real-deps.ts:586":
     "* 放进那一个事务里（与 insertCard 同事务，理由写在 cards.ts createCard 第 ① 条），",
 };
 

@@ -21,7 +21,7 @@
 
 ## 0. 这一篇补的是什么，以及为什么它排在 0043 后面
 
-`INSERT_TASK_SQL`（`http/real-deps.ts:531`）建出来的每一条任务**一落地就是 `CHARTER_PENDING`**。
+`INSERT_TASK_SQL`（`http/real-deps.ts:537`）建出来的每一条任务**一落地就是 `CHARTER_PENDING`**。
 那一格是**人类席位**：dispatch 见它连 token 都不烧，直接回「等人不等 agent」。
 而人要点的是**一张卡**，全仓只有 `engine/charter.ts` 建这种卡，而它当时只有一个调用方
 （`hub work`），而那条路要 tsx + `@langchain/langgraph`，两样在本机都装不上（0039 量的那半）。
