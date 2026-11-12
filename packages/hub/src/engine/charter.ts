@@ -340,50 +340,66 @@ export async function ensureCharterCard(
     db.prepare(LEDGER_SQL).run(...([res.costCents, o.nowMs, o.taskId] as never[]));
   };
   if (draft === null) {
-    // 失败了【也要结账】：这一轮真花了钱（claude.ts / dispatch 同一条理由），
-    // 而「卡没建 ⇒ 当什么都没发生」会让账面比实际乐观 —— 花掉的钱消失在账上，
-    // 是这一族里最难查的那种（同 dispatch 的失败轮不 return）。
+    // ── 这一轮失败了：【留痕】与【结账】是两件事，0043 之前它们被写成了同一件 ──
+    // 旧形状的写法是 `if (cost > 0) { 开事务 → 写审计 → 记账 }`：那句「失败了也要结账」
+    // 是对的（这一轮真花了钱，claude.ts / dispatch 同一条理由，而「卡没建 ⇒ 当什么都没发生」
+    // 会让账面比实际乐观），但它把【审计那一行】也一起关进了那个 if 里。
+    // 于是「花了钱」这一个判据同时管着两件事：
+    //   · 该不该记账 —— 该。没花钱就该记 0，什么都不该加。
+    //   · 该不该留痕 —— 【不该跟着钱走】。这一轮发生过、失败了，这件事与花没花钱无关。
+    // 具体漏掉的是【零花费的失败】：claude CLI 起不来 / spawn ENOENT / 权限不对
+    // 那些情况 costCents 恒为 0，探针实测（0043 §10）——
+    //   outcome='no_draft' 而 events 表【零行】，tasks.consumed_cents 也是 0。
+    // 也就是「intake 试过了、失败了、什么都没留下」。
+    // 这在 CLI 那一侧只是不便（cmdWork 会把那句人话打到 stderr，人看得见）；
+    // 而它一旦成为常驻泵的重试判据，就是**没有痕迹的无限重启子进程**：
+    // 每次心跳一次 no_draft、零行审计 ⇒ 没有任何东西能数出"这是第几次"，
+    // 也就没有任何东西能决定"别再试了"。所以修 pump 之前先修这一格。
+    // 修法是把两件事拆开：审计无条件写，记账仍然由 bill() 自己判 costCents（它一直这么判）。
     const cost = res.costCents;
     const failPublished: { event: DomainEvent; seq: number }[] = [];
-    // 判据只有【花了钱】这一条，不含「装配给了记账钩子」：onCost 少装是装配缺陷，
-    // 它不该连带让 tasks.consumed_cents 也不加 —— 那会把一个可见的缺配置
-    // 变成一个【不可见的少记账】。
-    if (cost > 0) {
-      await w.node(() => {
-        const db = requireScopeDb("engine.charter.failcost");
-        const evt: DomainEvent = {
-          kind: "RoleTurnReported",
+    await w.node(() => {
+      const db = requireScopeDb("engine.charter.failturn");
+      const evt: DomainEvent = {
+        kind: "RoleTurnReported",
+        taskId: o.taskId,
+        role,
+        state: "CHARTER_PENDING",
+        // 那句话原来写的是「没交出提案，钱照记：…」—— 零花费时「钱照记」是假的，
+        // 而这一行现在两种情况都要用，所以换成一句两都可说的话，钱由下面单独带。
+        note:
+          "章程起草那一轮没交出可用的提案：" +
+          String(res.error ?? "输出里没有可用的结构化提案") +
+          (cost > 0 ? "（这一轮花了 " + cost + " 美分，已入账）" : "（这一轮没花钱）"),
+        costCents: cost,
+      };
+      const seq = appendAudit(
+        db,
+        {
           taskId: o.taskId,
-          role,
-          state: "CHARTER_PENDING",
-          note: "章程起草那一轮没交出提案，钱照记：" + String(res.error ?? "输出里没有可用的结构化提案"),
-          costCents: cost,
-        };
-        const seq = appendAudit(
-          db,
-          {
-            taskId: o.taskId,
-            actorType: "agent",
-            actorId: role,
-            action: KIND_TO_ACTION.RoleTurnReported,
-            target: role,
-            payload: { ...evt },
-          },
-          () => o.nowMs,
-        );
-        bill(db, seq);
-        failPublished.push({ event: evt, seq });
-        return null;
-      });
-      // 同样在提交之后才广播（回滚了就没这一行）。
-      for (const p of failPublished) deps.publish(p.event, p.seq);
-    }
+          actorType: "agent",
+          actorId: role,
+          action: KIND_TO_ACTION.RoleTurnReported,
+          target: role,
+          payload: { ...evt },
+        },
+        () => o.nowMs,
+      );
+      // 判据只有【花了钱】这一条，不含「装配给了记账钩子」：onCost 少装是装配缺陷，
+      // 它不该连带让 tasks.consumed_cents 也不加 —— 那会把一个可见的缺配置
+      // 变成一个【不可见的少记账】。cost 为 0 时 bill 自己 return。
+      bill(db, seq);
+      failPublished.push({ event: evt, seq });
+      return null;
+    });
+    // 同样在提交之后才广播（回滚了就没这一行）。
+    for (const p of failPublished) deps.publish(p.event, p.seq);
     return {
       outcome: "no_draft",
       note:
         "章程起草那一轮没交出可用的提案（" + String(res.error ?? "输出里没有 <<<OPC_DECISION>>> 那一段") + "）。" +
         "没有建卡 —— 建一张内容空白的卡会让收件箱里出现一件【点开却没有内容】的事。" +
-        (cost > 0 ? " 这一轮花的 " + cost + " 美分已入账。" : ""),
+        (cost > 0 ? " 这一轮花的 " + cost + " 美分已入账。" : " 这一轮没花钱，但审计里留了这一行。"),
       costCents: cost,
       card: null,
       published: [],

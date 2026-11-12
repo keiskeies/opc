@@ -288,3 +288,117 @@ describe("备份相位：日历日，不是 24 小时计时器", () => {
     expect(() => shouldBackUp(Date.parse("2026-03-11T00:00:00Z"), Date.parse("2026-03-09T00:00:00Z"))).not.toThrow();
   });
 });
+
+/**
+ * ── 章程泵这一组参数（0044）──────────────────────────────────────────
+ * 判据的形状与 --bind 那一组是【同一条】：打开一件会动外部世界的事，
+ * 必须是这一次命令里一个看得见的参数，而且它的【上限】要一起被看见。
+ * 差别只在代价：--bind 打开的是对外暴露，这一组打开的是持续产生 token 账单。
+ */
+const PUMP = ["--charter-pump", "--max-budget-usd", "0.5", "--task-limit-cents", "500", "--agent-cwd", "/tmp/work"];
+
+describe("--charter-pump：默认不开，开了就要三件同伴", () => {
+  it("默认【不开】：结果里根本没有 charterPump 这个键", () => {
+    const r = parseServeArgs(BASE, CLEAN);
+    expect(r.error).toBeUndefined();
+    // 断「键不存在」而不是「值为 undefined」，理由与 --bind 那一发同一条：
+    // 下游 assemble 判的是【有没有填】。
+    expect(Object.prototype.hasOwnProperty.call(r, "charterPump")).toBe(false);
+  });
+
+  it("四个一起给 ⇒ 解析出来", () => {
+    const r = parseServeArgs([...BASE, ...PUMP], CLEAN);
+    expect(r.error).toBeUndefined();
+    expect(r.charterPump).toBe(true);
+    expect(r.maxBudgetUsd).toBe(0.5);
+    expect(r.taskLimitCents).toBe(500);
+    expect(r.agentCwd).toBe("/tmp/work");
+  });
+
+  it("⭐ 只给开关而少任一件同伴 ⇒ USAGE，且报错点名【缺的那一件】", () => {
+    // 为什么不能等到 makeRuntime 才炸：那时 Hub 已在监听、心跳已在跑、库已开着，
+    // 一个人会以为「Hub 起来了而泵没起来」，实际可能是【泵在跑而没有上限】。
+    // 参数层这一发是【一分钱都没花】的那一次红。
+    for (const drop of ["--max-budget-usd", "--task-limit-cents", "--agent-cwd"]) {
+      const i = PUMP.indexOf(drop);
+      const argv = [...BASE, ...PUMP.slice(0, i), ...PUMP.slice(i + 2)];
+      const r = parseServeArgs(argv, CLEAN);
+      expect(r.error).toContain(drop);
+      expect(r.charterPump).toBeUndefined();
+    }
+  });
+
+  it("⭐ 反向：给了预算而【没给开关】也判 USAGE（写了而没生效的配置最害人）", () => {
+    // 这一发看着苛求。它防的是一个人写了 --agent-cwd 与预算而漏了 --charter-pump，
+    // Hub 照常起来，而他【以为自己把泵开了】—— 症状与"从没打算开"完全一样
+    // （收件箱一直是空的），唯一排查方向是去读自己那条命令行。
+    const r = parseServeArgs([...BASE, "--max-budget-usd", "0.5"], CLEAN);
+    expect(r.error).toContain("--charter-pump");
+    expect(r.error).toContain("不生效");
+    expect((r as { maxBudgetUsd?: number }).maxBudgetUsd).toBeUndefined();
+  });
+
+  it("⭐ 没有 OPC_CHARTER_PUMP / OPC_MAX_BUDGET_USD 这类 env 缺省源", () => {
+    // 与 OPC_BIND 那一条同一手法：断言【没有】一个功能。
+    // 这一格比 --bind 更该钉：账单是【事后才知道的】，
+    // 到那时「我当时看见过这个参数」那条防线已经不在了。
+    expect(DEFAULT_SERVE_USAGE).not.toContain("OPC_CHARTER_PUMP");
+    expect(DEFAULT_SERVE_USAGE).not.toContain("OPC_MAX_BUDGET");
+    const r = parseServeArgs(BASE, {
+      OPC_CHARTER_PUMP: "1",
+      OPC_MAX_BUDGET_USD: "99",
+      OPC_AGENT_CWD: "/tmp/leaked",
+    });
+    expect(r.error).toBeUndefined();
+    expect(r.charterPump).toBeUndefined();
+    expect(r.agentCwd).toBeUndefined();
+    // 反向对照：同一组值走命令行时【确实】能被读到 ——
+    // 证明上面那两个 undefined 不是「整个泵没接上」造成的。
+    expect(parseServeArgs([...BASE, ...PUMP], CLEAN).charterPump).toBe(true);
+  });
+
+  it("--max-budget-usd 收小数（0.5 是最常见的写法，整数判据会拒一个正确用法）", () => {
+    expect(parseServeArgs([...BASE, ...PUMP], CLEAN).maxBudgetUsd).toBe(0.5);
+    // 整数也收（写成 2 而不是 2.0 的人占多数）
+    const r = parseServeArgs(
+      [...BASE, "--charter-pump", "--max-budget-usd", "2", "--task-limit-cents", "500", "--agent-cwd", "/tmp/w"],
+      CLEAN,
+    );
+    expect(r.error).toBeUndefined();
+    expect(r.maxBudgetUsd).toBe(2);
+  });
+
+  it("⭐ 上限的【形状】判据：Infinity / NaN / 负数都拒 —— Infinity 是「没有上限的上限」", () => {
+    for (const bad of ["abc", "-1", "1e400", "0.5.5", ""]) {
+      const r = parseServeArgs(
+        [
+          ...BASE,
+          "--charter-pump",
+          "--max-budget-usd",
+          bad,
+          "--task-limit-cents",
+          "500",
+          "--agent-cwd",
+          "/tmp/w",
+        ],
+        CLEAN,
+      );
+      expect(r.error).toContain("--max-budget-usd");
+    }
+  });
+
+  it("--agent-cwd 空串 ⇒ 拒，并说明这一格决定的是【角色能读到哪些文件】", () => {
+    const r = parseServeArgs(
+      [...BASE, "--charter-pump", "--max-budget-usd", "0.5", "--task-limit-cents", "500", "--agent-cwd", ""],
+      CLEAN,
+    );
+    expect(r.error).toContain("--agent-cwd");
+    expect(r.error).toContain("文件");
+  });
+
+  it("用法文本里这一组是【单独一段】，且写明了它打开的是花钱的一件事", () => {
+    expect(DEFAULT_SERVE_USAGE).toContain("--charter-pump");
+    expect(DEFAULT_SERVE_USAGE).toContain("花钱");
+  });
+});
+

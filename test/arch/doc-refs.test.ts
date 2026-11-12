@@ -219,6 +219,48 @@ const SNAP: Record<string, string> = {
     "action: KIND_TO_ACTION.ApprovalDecided,",
   "0043-default-value-should-be-the-one-that-runs-and-a-500-that-lied-about-replaying.md>recorder.ts:38":
     'ApprovalDecided: "approval",',
+  // ── 0043 §10 补写那一节时带出的三条（本轮新登记，同 0006 §7-40 那条规矩：同轮登记）──
+  // 这三格里【只有第一格是产品的行】，后两格指的是注释本身 —— 那两格守的是
+  // 「注释里那句『实测（0043 §10）events 表零行』还在不在」。听起来没价值，
+  // 而 0043 §10 的整段结论就是那一行探针实测：注释被删或被改写成"应该是零行"，
+  // 结论的证据就没了，而没有任何一条测试会因为注释消失而红。
+  // ⚠ recorder.ts 这一格本轮漂过一次（52 → 现在的 52 是对的，而它一度被误写成
+  //   "MEMORY_ROWS_SQL 在那儿"）：那句话的**注释**在 recorder.ts:51，**SQL** 在
+  //   role-memory.ts:222。同一个事实的两个出处，指错一个就会让人去改错的那个文件。
+  "0043-default-value-should-be-the-one-that-runs-and-a-500-that-lied-about-replaying.md>recorder.ts:52":
+    'RoleTurnReported: "tool_call",',
+  // ⚠ 这两条【必须带目录】：`charter.ts` 与 `charter.test.ts` 在仓库里各有两个命中
+  //   （contracts/src 与 hub/src/engine；hub/test/roles 与 hub/test/engine），
+  //   裸基名会被 resolveTarget 判成歧义而红 —— 那正是 0043 §5 自己记下的那个坑复发。
+  "0043-default-value-should-be-the-one-that-runs-and-a-500-that-lied-about-replaying.md>engine/charter.ts:351":
+    "// 那些情况 costCents 恒为 0，探针实测（0043 §10）——",
+  "0043-default-value-should-be-the-one-that-runs-and-a-500-that-lied-about-replaying.md>test/engine/charter.test.ts:331":
+    "* 那些情况 costCents 恒为 0，实测（0043 §10）events 表【零行】。",
+  // ── 0044（章程泵）这一组五格 ──────────────────────────────────────────
+  // 前三格是【产品事实的出处】：任务一落地就在 CHARTER_PENDING（第一格，
+  // 0044 §0 那条死路的起点）、起草一轮硬超时 180 秒（第二格，0044 §4 那条
+  // 「起草比心跳慢三倍」的设计事实的另一半）、跳过那一轮的计数器（第三格，
+  // 0044 §4 里我【撤回】了"静默跳过"那个说法，撤回的依据就是这一行 + 它下面那句 onError）。
+  // 三格都是活坐标：被删或被改，0044 §0/§4 的结论跟着失效。
+  "0044-charter-pump-where-do-cards-come-from-and-what-a-zero-cost-failure-costs.md>http/real-deps.ts:531":
+    '"INSERT INTO tasks (id, parent_id, title, status, assigned_role, current_node, " +',
+  "0044-charter-pump-where-do-cards-come-from-and-what-a-zero-cost-failure-costs.md>engine/claude.ts:85":
+    "}, i.timeoutMs ?? 180_000);",
+  "0044-charter-pump-where-do-cards-come-from-and-what-a-zero-cost-failure-costs.md>serve/timer.ts:336":
+    "skipped++;",
+  // ⚠ 后两格与前两格【形状不同】，这一点是这一组的内容而不是附带说明：
+  // 它们不是"证据的出处"，而是 0044 §6 那条【撤回】里被点名"指错了"的坐标 ——
+  // 文档引用它们正是为了说【这一行并不支持我原来那句话】。
+  // 那还要不要登记？要。因为那条撤回自己做了一条**可核对的主张**
+  // （"today.ts:41 是一句 import 注释"、"sse.ts:48 讲的是 seq 去重"），
+  // 而快照正是让这种主张可核对的东西：有人把今天这两行挪走或改写，
+  // 撤回那句话里"指错指在何处"的部分就过期，快照红 ⇒ 逼回来重读 §6。
+  // 反过来说：如果因为"它们反正不是证据"就不登记，那条撤回就变成一句
+  // 【只有作者读过、谁也无法复算】的话 —— 恰是 0016 §1 那族最难查的形状。
+  "0044-charter-pump-where-do-cards-come-from-and-what-a-zero-cost-failure-costs.md>overview/today.ts:41":
+    "// —— 同 `blocked_statuses` 那条「判据随响应发出」的立场。",
+  "0044-charter-pump-where-do-cards-come-from-and-what-a-zero-cost-failure-costs.md>http/sse.ts:48":
+    "/** 已经发出去的最大 seq。去重的唯一判据 —— 不看内容、不看 kind，只看 seq。 */",
   // 239 → 249：同一次改动带下来的漂移。engine/ 加第 9 个事件 kind RoleTurnReported 时
   // 往 KIND_TO_ACTION / targetOf 各加一条 case（+10 行），把 DEFAULT_ACTOR 顶下去。
   // 0016 §4 整段的论据是「节点执行的事件 actor 落成 system/hub」，那一行是它的出处，
@@ -470,7 +512,11 @@ const SNAP: Record<string, string> = {
     "export const INTEGRITY_FAILURES = [",
   "0037-worker-import-in-threads-and-my-first-fix-was-wrong.md>integrity.ts:1200":
     '* `verdict === "not_observable"` / `"could_not_run"` 都【不算】损坏：',
-  "0037-worker-import-in-threads-and-my-first-fix-was-wrong.md>assemble.ts:316":
+  // 305 → 316 → 370：两次漂移都是【同一文件上方被插入内容顶下去】（0043 的引擎 import
+  // 与 0044 的泵那两段）。⚠ 这里我【没有】按 diff 行数推算 —— 0016 那一组已经因为推算
+  // 被抓过第五次。改坐标前 `sed -n '370p' packages/hub/src/serve/assemble.ts` 读过原文，
+  // 确认还是那一行 `if (!existsSync(dbPath)) {` 才写。
+  "0037-worker-import-in-threads-and-my-first-fix-was-wrong.md>assemble.ts:370":
     "if (!existsSync(dbPath)) {",
   "0037-worker-import-in-threads-and-my-first-fix-was-wrong.md>maintenance.ts:529":
     "if (!existsSync(dbPath)) {",

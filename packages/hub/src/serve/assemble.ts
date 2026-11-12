@@ -75,6 +75,15 @@ import {
   HEARTBEAT_INTERVAL_MS,
   runPatrol,
 } from "../heartbeat/patrol.js";
+import type { EventBus } from "../events/bus.js";
+import type { HubWriter } from "../db/write-queue.js";
+import type { EngineRuntime } from "../engine/runtime.js";
+import {
+  pumpCharterCards,
+  type CharterCardDeps,
+  type PumpOptions,
+  type PumpRoundResult,
+} from "./charter-pump.js";
 import type { TaskGraph } from "../http/real-deps.js";
 import {
   DEFAULT_SERVE_USAGE,
@@ -191,6 +200,51 @@ export interface BootOverrides {
    * 「一轮巡检失败」与「进程该不该退」两件事焊死在一个模块里。
    */
   readonly onHeartbeatFatal?: () => void;
+  /**
+   * 章程泵的执行点（0044）。默认 `pumpCharterCards` —— 生产走默认值。
+   *
+   * ⚠ 注入点开在【这一整个调用】上，而【不是】开在 `cardDeps` / `runTurn` 那一层。
+   * 理由与 o.graphFor 同一条（一个注入点一个职责），而这里更硬：
+   * pumpCharterCards 内部的默认那一支会【惰性】建起真 runtime（charter-pump.ts 的
+   * engineOf），而建起来就意味着下一次调用是真 spawn 一个 claude 子进程。
+   * 所以装配层的用例要么整颗换掉这一发，要么【自己交出假的 cardDeps】——
+   * 不能"只注入一半"，否则测试一边说着不花钱，一边把会花钱的那套东西建起来了。
+   *
+   * 代价照 backupVia 那条口径写清：走注入的用例【不证】真 runtime 起得了子进程，
+   * 那一格由 engine/claude.test.ts 与 runtime.test.ts 负责。
+   */
+  readonly charterPumpVia?: (
+    w: HubWriter,
+    bus: EventBus,
+    o: PumpOptions,
+  ) => Promise<PumpRoundResult>;
+  /**
+   * 起草一轮用的那套回调（透传给 PumpOptions.cardDeps）。
+   *
+   * 有了上一条 `charterPumpVia`，这一格【为什么还要】：两者注入的不是同一件事。
+   * via 换掉的是【整趟泵】（候选 SQL、放弃判定、执行日志全都不跑了），
+   * 而装配层要钉的三条 —— 「开了才跑」「一轮只派一份」「关机等到落地」——
+   * 恰好全在【泵自己内部】那些东西的【外面】。只注入 via 的装配用例测不到
+   * 「候选为空那一轮根本不建 runtime」这一格，因为那颗假 via 让泵整个没跑。
+   * 传这一格 ⇒ 走【真 pumpCharterCards】而只把 spawn 那一步换掉。
+   *
+   * ⚠ 这一格【不】能单独把泵打开：开关永远是 args.charterPump（来自 --charter-pump）。
+   * 装配层注入一份假起草而命令行没开泵 ⇒ 什么都不该发生，
+   * 那一条有专门用例（否则「注入即生效」会变成第二条绕过显式开关的后门）。
+   */
+  readonly pumpCardDeps?: () => CharterCardDeps;
+  /** 一轮最多补几张 / 一个任务试几次。透传，测试用它把「三次」变成「一次」。 */
+  readonly pumpMaxAttempts?: number;
+  readonly pumpTaskLimit?: number;
+  /**
+   * 起草一轮落进 harness_calls 的那一笔（透传给 PumpOptions.recordTurn）。
+   *
+   * 为什么和 pumpCardDeps 分开给：engineOf（charter-pump.ts）在【注入了假起草而
+   * 没注入执行日志】时走的是 noRecorder —— 那一支是【故意】不回退去建真 runtime 的
+   * （建起来就意味着下一次调用可能 spawn）。所以装配层的用例想要同时看这两维时，
+   * 必须【两格都给】，而不是给了假的 runTurn 就指望执行日志还是真的。
+   */
+  readonly pumpRecordTurn?: EngineRuntime["recordTurn"];
 }
 
 export type BootResult =
@@ -398,6 +452,21 @@ export async function boot(
    * 「只跑一次」和「第二个调用方也要等到清完」）。
    */
   const backupWatch = createInFlightWatch<void>();
+  /**
+   * 在飞的章程起草（0044）。与 backupWatch 同一个对象、同一个理由，而【不合成一个】：
+   * 两者管的是不同任务的「不许开出第二份 / 关机后不再派新活」，合成一个之后
+   * 「备份还在飞」会挡住起草、反之亦然 —— 而这两件事的处置完全不同
+   * （备份慢了要看库多大，起草慢了是正常事：一轮本来就是几十秒）。
+   *
+   * ⚠ 这一格的存在理由是【不 await】，而那正是本篇最容易被"改对"改回去的一处：
+   * 一轮起草的上限是 claude.ts:85 那个 SIGKILL（180s），而心跳下界是 60s。
+   * 把它 await 在 job 里面 ⇒ 一轮起草跨过心跳节奏 ⇒ ticker 的
+   * 「上一轮还没结束，本轮跳过」（timer.ts:335）⇒ 【巡检与停滞检测被一个起草停掉】。
+   * 那个形状与本文件 onFatal 那句「停滞检测现在不再运行」是同一种坏，
+   * 区别是它不会被计入 consecutiveFailures、也不会退进程 —— 它是【静默的】。
+   * 所以起草走【派发】而不是【等待】，与备份同一条路：关机时由 settle 等它落地。
+   */
+  const pumpWatch = createInFlightWatch<void>();
 
   /**
    * 唯一的清理出口。成功时的 shutdown 与失败时的 finally 走【同一段代码】——
@@ -422,12 +491,39 @@ export async function boot(
    */
   let cleaning: Promise<void> | null = null;
   const giveUpInner = async (): Promise<void> => {
+    // 两道 beginCancel 【都在任何 await 之前】，而且是【两个 watch 各一次】：
+    // 0025 §3 第 ④ 条那一族管的是"关机已经开始而下面又派了新活"，
+    // 而泵与备份是两条会派新活的路 —— 只关一道，另一道在 settle 那段时间里
+    // 仍然能被【最后一轮心跳】叫到（heartbeat.stop() 只挡【新]的一轮，
+    // 已经在跑的那一轮走到派发那一行时挡不住）。
     backupWatch.beginCancel();
+    pumpWatch.beginCancel();
     heartbeat?.stop();
     // 等一份在飞的备份。settle() 永不 reject（rejection 在 watch.start 里面被吞掉，
     // 而那句「备份没得出结论」由派发处自己 catch 之后说 —— 见 job 那里），
     // 所以清理路径不会被一份备份的失败打断。
     await backupWatch.settle();
+    /**
+     * 等一轮在飞的章程起草【也必须在这一步】，而理由不是"别丢掉这次成果"那么轻：
+     * 泵的每一笔写入都走 q.node(...)（写队列），而下面就是 queue.close()。
+     * 不等 ⇒ 一次起草会在【队列已关、锁已还】之后去写这个库，
+     * 那期间另一个 Hub 可以起开并写同一个库 —— 与上面备份那一条 ① 是【同一个事故】。
+     *
+     * ⚠ 代价要写明并且体现在那句话里：等的最坏情况是 claude.ts:85 那个 180 秒 SIGKILL。
+     * 也就是 Ctrl-C 之后最坏要等三分钟才退。选它而不是"直接关队列"，
+     * 是因为后者的失效面是【脏写进 append-only 审计库】（0014 §3：删不掉），
+     * 前者的失效面是【人多等一会儿】。两者不对称。
+     * 所以这里在【真的在等】的时候说一声，而不是让人对着一句"停止顺序：…"干等三分钟
+     * —— 那句横幅承诺过的顺序与实际不符时，读的人会以为进程卡死了并去 kill -9，
+     * 而 kill -9 才是真正会留下脏 WAL 的那一步。
+     */
+    if (pumpWatch.inFlight) {
+      io.warn(
+        "有一轮章程起草还在飞 ⇒ 等它落地再关队列（最坏 180 秒，那一发自己有 SIGKILL 上限）。\n" +
+          "→ 【不要 kill -9】：等它落地只会慢，kill -9 会留下一条没关的连接与一次没写完的事务。",
+      );
+    }
+    await pumpWatch.settle();
     if (server !== null) {
       try {
         await server.close();
@@ -618,6 +714,73 @@ export async function boot(
           "校验一个身份必须交出「谁验的」，而这个名字只能由启动命令给出（不给默认值）。",
       );
     }
+    /**
+     * ⚙ 泵开着而某一格【形状不对】⇒ EXIT_USAGE，且判在【HTTP 与心跳之前】。
+     * 判据本体在 pumpBoundsOf（纯函数，直接可测），这里只剩「退什么码、说什么话」。
+     *
+     * ⚠ 「之前」到这里为止是【真的之前】，别把它读成"之前什么都没发生"：
+     * 这一刻锁已抢、库已开、迁移已跑（迁移是写入，见文件头那条顺序理由）。
+     * 所以这一发的 return 走的必须是【带清理的那条出口】—— 它就是 try 里的一条 return，
+     * finally 会把锁还掉、队列关掉。将来若把这一发上提到抢锁之前，
+     * 「不碰锁也不碰库」那条断言（assemble.test.ts 缺 dbPath 那一发的同款）才该加上。
+     *
+     * 为什么不在这里就地判形状而抽成纯函数：与 bindForAssembly 被抽出来是同一条理由
+     * （那个函数上面整段写了）—— 内联在 boot 里的判据，它的【致命那一支可能根本没有
+     * 活的分母】，于是"这条安全主张被测试过"是一句无法兑现的话。抽出来之后
+     * 「泵开着而预算缺失 ⇒ 拒」这一发不需要库、锁、假 server。
+     *
+     * 为什么判在决策写路径那两句【之前】：形状不对就直接退 2，让人先读到那句
+     * 「泵会真起子进程，所以没有上限时不能起」，而不是先读十几行启动横幅。
+     */
+    const bounds = pumpBoundsOf(args);
+    if (bounds.ok !== true && bounds.reason === "invalid") {
+      return {
+        ok: false,
+        code: EXIT_USAGE,
+        message:
+          "--charter-pump 开着而这几格不成立：" +
+          bounds.bad.join("、") +
+          "\n→ 泵会【真起一个 claude 子进程】去起草章程，所以没有上限时不能起。" +
+          "\n  走命令行时 parseServeArgs 会先拦掉；走到这一发说明 args 是直接构造的" +
+          "（Electron 主进程那条路），那就得在那里补齐这三格。",
+      };
+    }
+    // 泵开没开 = bounds 是不是带出了三格。【不另设一个 args.charterPump === true】：
+    // 两个来源判同一件事，就有两处要同步改，而忘改一处的表现是
+    // "泵关着而泵那段代码在跑"（或反之 —— 0043 §4 那族「同一个事实两个来源」）。
+    const pumpOn = bounds.ok === true;
+    if (pumpOn) {
+      // ⚠ 目录【存在与否】不在那道形状判据里，而这是有意的分界：config.ts 是纯函数、
+      // 不碰 fs（它文件头那条），到这一刻才第一次有条件看文件系统。
+      // 而这一发【不判致命】，理由要说清：目录不存在时真那一发是 spawn 时的 ENOENT，
+      // 被 charter.ts 记成一次【失败的起草轮】（有审计、计入尝试次数），
+      // 到上限后泵自己放弃并留一行 CharterDraftAbandoned。
+      // 它的失败面是「花掉至多三轮 + 四行审计然后停」，不是无限烧钱 ——
+      // 那是一个【会自己收敛的形状】。为它拒启动反而少说话：拒启动只有一句"目录不存在"，
+      // 而这条路径会在审计里留下【每一次为什么没成】的原文。
+      if (!existsSync(bounds.bounds.cwd)) {
+        io.warn(
+          "--agent-cwd 指向的目录现在【不存在】：" +
+            bounds.bounds.cwd +
+            "\n→ 泵照开，不拦。真起子进程那一刻会撞 ENOENT，那会被记成一次【失败的起草】" +
+            "（审计里有原文），试到上限后泵【自己不再试】并留一行 CharterDraftAbandoned。\n" +
+            "→ 不是致命错，但代价是【三轮失败才停】。这个目录该由谁建，是启动脚本的事。",
+        );
+      }
+      io.warn(
+        "章程泵【已开】（--charter-pump）：每隔一个心跳，停在「等章程」而收件箱里没有卡的任务，\n" +
+          "会由 assigned_role 那个角色【自己起草一份章程提案】放进 CEO 收件箱。\n" +
+          "  一轮硬顶 " +
+          bounds.bounds.maxBudgetUsd +
+          " 美元 / 单条任务上限 " +
+          bounds.bounds.taskLimitCents +
+          " 美分 / 工作目录 " +
+          bounds.bounds.cwd +
+          "\n这是【真起子进程、真花钱】的一件事，而它现在由这台常驻进程自动做。" +
+          "泵只【起草】—— 那张卡仍然要 CEO 点，没有任何一条边被自动批掉。",
+      );
+    }
+
     // 启动时就把「这一台 Hub 的决策写路径是哪一条」说出来，而不是等到有人点批准才发现。
     // 判据是【装配上给没给图工厂】—— 那正是 buildHubDeps 的选路输入本身（0043），
     // 所以这一句不可能与事实漂移：它读的就是分岔的那个值。
@@ -632,7 +795,10 @@ export async function boot(
       io.warn(
         "决策写路径 = 【引擎那一条】：CEO 点批准 ⇒ 认领卡片 + 状态边 + 审计，一个事务，\n" +
           "任务真的往前一格（例如 CHARTER_PENDING → CHARTER_APPROVED）。不需要图运行时。\n" +
-          "本入口【不跑角色也不起草章程卡】：CHARTER_APPROVED 之后的每一步都要有人跑\n" +
+          // ⚠ 下面这一句【按 pumpOn 取措辞】，别把它改回常量。理由见上面那段。
+          (pumpOn
+            ? "章程卡【由泵起草】（上面那段就是它开的），CHARTER_APPROVED 之后的每一步仍要有人跑\n"
+            : "本入口【不跑角色也不起草章程卡】：CHARTER_APPROVED 之后的每一步都要有人跑\n") +
           "  pnpm hub:engine work --db " +
           dbPath +
           " --task <id> \\\n" +
@@ -797,6 +963,37 @@ export async function boot(
     }
 
     /**
+     * 章程泵的执行点与那一轮要用的设置。两者都取在【job 外面】，
+     * 与 backupVia 同一条纪律（0025 §3 第 ② 条：job 里不许为了【拿到一个函数】而跨 await）。
+     *
+     * ⭐ 类型是 `Omit<PumpOptions, "nowMs">` 而【不是】PumpOptions，这一行就是判据本身：
+     * 时刻【不属于】启动时算好的那份设置。写成 PumpOptions 的话就得给它填一个值
+     * （类型必填），而那个值【每一轮都被覆盖掉】—— 一个"看着有内容而永远不被读"的字段，
+     * 下一次重构把它当成缺省值读走的那天，症状是【所有轮的 created_at 都等于启动时刻】：
+     * 审计里那些失败轮看起来全部同时发生，"这是第几次"从此读不出来，
+     * 而那个数字正是重试上限的判据本身（charter-pump.ts 文件头那条依赖）。
+     * 与 0036 §4 那条「备份文件名时刻必须与相位判据同源」同族而形状不同：
+     * 那边是【两个来源取值不同】，这边是【一个来源取值太早】。
+     * 用类型把时刻排除掉，比写一句注释"记得覆盖"便宜，也不会在重构时失效。
+     */
+    const pumpVia =
+      o.charterPumpVia ??
+      ((w: HubWriter, bus2: EventBus, po: PumpOptions): Promise<PumpRoundResult> =>
+        pumpCharterCards(w, bus2, po));
+    const pumpSettings: Omit<PumpOptions, "nowMs"> | null =
+      bounds.ok === true
+        ? {
+            maxBudgetUsd: bounds.bounds.maxBudgetUsd,
+            taskLimitCents: bounds.bounds.taskLimitCents,
+            cwd: bounds.bounds.cwd,
+            ...(o.pumpCardDeps === undefined ? {} : { cardDeps: o.pumpCardDeps }),
+            ...(o.pumpRecordTurn === undefined ? {} : { recordTurn: o.pumpRecordTurn }),
+            ...(o.pumpMaxAttempts === undefined ? {} : { maxAttempts: o.pumpMaxAttempts }),
+            ...(o.pumpTaskLimit === undefined ? {} : { taskLimit: o.pumpTaskLimit }),
+          }
+        : null;
+
+    /**
      * ⭐ 备份那一段的形状（0036 §3，替掉了原来那段「整段同步、一个 await 都不许有」）。
      *
      * 原来那段的前提是「`createBackup` 是同步的 ⇒ 同步的东西没有缝」。
@@ -825,6 +1022,53 @@ export async function boot(
       });
       if (r.stalled > 0) {
         io.warn("巡检：本轮新增停滞 " + r.stalled + " 个任务");
+      }
+      /**
+       * ── 章程泵（0044）：这一发【必须】在 `if (backupDir === undefined) return` 之前 ──
+       * 位置不是排版。放在那句之后，会让【没配 --backup-dir 的那台】（本机唯一在跑的
+       * 形状）永远不补卡，而命令行上 --charter-pump 明明白白写着，启动横幅也说了"已开"。
+       * 那正是本仓抓过多次的「配置写了而没生效」，而且它的症状与"从没打算开泵"一模一样
+       * （收件箱一直是空的）。判据由 assemble.test.ts 那条「没配备份目录而泵照开」判。
+       *
+       * ⚠ 这一段【没有 await】，而那是本篇最容易被"顺手改对"改坏的一处：
+       * 一轮起草的上限是 claude.ts:85 那个 SIGKILL（180s），心跳下界 HEARTBEAT_FLOOR_MS
+       * 是 60s。把它 await 在这里 ⇒ 一轮起草跨过心跳节奏 ⇒ ticker 走
+       * timer.ts:335 那条「上一轮心跳还没结束，本轮【跳过】」⇒
+       * 【停滞检测与每日备份被一次起草停掉】，而且不计入 consecutiveFailures、
+       * 不会触发 onFatal、不会退进程 —— 一个完全静默的形状。
+       * 所以这里走【派发】，与备份同一条路：pumpWatch 挡并发与关机后的新活，
+       * giveUp 里 settle 等它落地（否则一次起草会写进一个已经关掉的队列）。
+       */
+      if (pumpSettings !== null) {
+        const dispatchedPump = pumpWatch.start(async (): Promise<void> => {
+          try {
+            // 每轮自己的 nowMs —— 见上面 pumpSettings 那段那条（审计时刻不能钉在启动那一刻）。
+            const pr = await pumpVia(q, bus, {
+              ...pumpSettings,
+              nowMs: (o.now ?? scheduler.now)(),
+            });
+            reportPumpRound(pr, io);
+          } catch (e) {
+            // 与备份那一处同一条理由：watch.start() 为了让 settle() 永不 reject
+            // 会【吞掉 rejection】。这里不接住，"泵一整轮抛了"就真的没人说。
+            // 注意这与 pumpCharterCards 内部那条「逐张卡不牵连」是两层不同的东西：
+            // 里面那层挡的是"一张卡起草不动"，这一层挡的是"候选 SQL 都跑不了"。
+            io.warn(
+              "章程泵【本轮没有结论】（一整轮抛错，原文如下）——" +
+                "这与「某一张卡起草失败」不同，后者由泵自己记进审计：\n" +
+                (e instanceof Error ? e.message : String(e)),
+            );
+          }
+        });
+        if (!dispatchedPump.started && dispatchedPump.reason === "in_flight") {
+          // 只有 in_flight 要说。cancelling 保持安静，理由与备份那一处同一条：
+          // 关机路径上已经说过话了，而这一支最多发生一次。
+          io.warn(
+            "本轮跳过章程起草：上一轮起草还在飞。" +
+              "一轮起草的上限是 180 秒而心跳下界是 60 秒，所以这【可能只是慢】；" +
+              "但它每轮都出现时，说明泵实际上【补不出几张卡】—— 那要看审计，不是看这里。",
+          );
+        }
       }
       if (backupDir === undefined) return;
       /**
@@ -1037,6 +1281,132 @@ function warnSuffix(warnings: readonly string[]): string {
         warnings.map((w) => w.slice(0, 200)).join(" / ");
 }
 
+/** pumpBoundsOf 的结论。三种而不是 boolean + 可选值 —— 见下面那条理由。 */
+export type PumpBounds =
+  | { readonly ok: true; readonly bounds: Pick<PumpOptions, "maxBudgetUsd" | "taskLimitCents" | "cwd"> }
+  /** 开关没开。与下面那一种是【两件事】，合成一种就没法决定该不该退 2。 */
+  | { readonly ok: false; readonly reason: "not_pumped" }
+  | { readonly ok: false; readonly reason: "invalid"; readonly bad: readonly string[] };
+
+/**
+ * 「泵开着 ⇒ 三格上限必须成立」这条判据的本体（纯函数，不碰 fs、不起库）。
+ *
+ * ── 为什么单独一个导出函数 ───────────────────────────────────────────
+ * 与 bindForAssembly 同一条理由（那个函数上面整段写了）：判据内联在 boot 里时，
+ * 【致命那一支可能没有活的分母】，于是"这条主张被测试过"无法兑现。
+ * 抽出来之后「泵开着而 --max-budget-usd 缺失 ⇒ 拒」这一发是一行断言。
+ *
+ * ── 为什么这里是【第二道】同样的判据（config.ts 里已经有一份）──────────
+ * 因为 boot 是公开 API —— Electron 主进程直接构造 args，不经过 parseServeArgs。
+ * 这条重复是本文件既定的立场（heartbeatMs 那两发校验上面就有同一句「重复是刻意的」）。
+ * 而这一格重复的代价不对称得最厉害：漏判一支不是报错难看，是
+ * `maxBudgetUsd: undefined` 一路传到 makeRuntime，那一轮的 --max-budget-usd
+ * 【根本不带这个参数】—— 于是那条"必填的上限"存在的全部意义（一轮有上限）
+ * 在【唯一会花钱的那条路径】上消失了，而启动日志里写着"已开"。
+ *
+ * 两份判据之间会漂吗？会，而且方向是这一份【更严或等价】：本函数只要求
+ * 「有限数 / 整数 / 非空目录」，config.ts 额外管 argv 拼写。漂的时候红在
+ * test/serve/assemble.test.ts 那组直接喂 args 的用例上，不红在真命令行上 ——
+ * 那正是【该红的那一侧】（会绕过 argv 的那条路）。
+ *
+ * ── 为什么返回三种而不是 boolean + 三个可选字段 ────────────────────────
+ * 「没开泵」与「开了而配置坏」在装配层是【两个不同的处置】：前者照常启动、
+ * 后者退 2。合成 `Pick<ServeArgs,...> | null` 之后两者都是 null，
+ * 调用方就得自己再判一次 args.charterPump —— 那又回到两个来源判同一件事。
+ *
+ * ⚠ 这里【不】校验目录存在：那是 fs，而本函数要保持纯（同 config.ts 那条分界）。
+ * 存在性由 boot 那一句 warn 负责，判致命与否的理由写在那一处。
+ */
+export function pumpBoundsOf(args: ServeArgs): PumpBounds {
+  if (args.charterPump !== true) return { ok: false, reason: "not_pumped" };
+  const bad: string[] = [];
+  if (typeof args.maxBudgetUsd !== "number" || !Number.isFinite(args.maxBudgetUsd) || args.maxBudgetUsd < 0) {
+    bad.push("--max-budget-usd（一轮的美元硬顶，实到 " + String(args.maxBudgetUsd) + "）");
+  }
+  if (
+    typeof args.taskLimitCents !== "number" ||
+    !Number.isInteger(args.taskLimitCents) ||
+    args.taskLimitCents < 0
+  ) {
+    bad.push("--task-limit-cents（单条任务的预算上限，实到 " + String(args.taskLimitCents) + "）");
+  }
+  if (typeof args.agentCwd !== "string" || args.agentCwd.trim() === "") {
+    bad.push("--agent-cwd（角色能读到哪些文件，实到 " + String(args.agentCwd) + "）");
+  }
+  if (bad.length > 0) return { ok: false, reason: "invalid", bad };
+  // 上面三发【每一发都往 bad 里推】，所以走到这里三格必然都在。
+  // 这里用感叹号而不是再判一遍 undefined：再判一遍就是【第三个】来源
+  // （前两份判据在 config.ts 与本函数开头），而"编译器已经知道而代码不信"的
+  // 那种重复会让读的人以为这里还有内容。
+  return {
+    ok: true,
+    bounds: {
+      maxBudgetUsd: args.maxBudgetUsd!,
+      taskLimitCents: args.taskLimitCents!,
+      cwd: args.agentCwd!,
+    },
+  };
+}
+
+/**
+ * 一趟泵的结论怎么说给人听（与 reportBackupOutcome 同一职责的泵版本）。
+ *
+ * ── 为什么必须【逐张卡】说而不是只报一个总数 ──────────────────────────
+ * 泵是【自动】花钱的那一方。自动花钱的进程只报"本轮处理了 3 条"，
+ * 读的人无法回答他真正要回答的问题：【花的钱换回了什么】。
+ * 三种结论各有一句：
+ *  · drafted   ⇒ 收件箱里多了一张卡（这是这条链唯一的"成功"）
+ *  · attempted ⇒ 试了而没成，下一轮还会试（要看得见，否则它等于"什么都没发生"）
+ *  · gave_up   ⇒ 【CEO 必须知道而系统不会自己解决】的那一种：一个想法停在那儿，
+ *                没人起草，泵也不打算再试了。这一句必须响，不能只在库里。
+ *  · skipped   ⇒ 没试，零花费。【不打扰人】—— 它是常态（别人已经建了卡、组织图挡着），
+ *                每次启动都打的一句会被训练成噪音，而 gave_up 那句就没人看了。
+ *
+ * ⚠ 一条都不 return、一条都不抛。这是【报告】不是【判定】：
+ * 判定在 pumpCharterCards 里已经做完了，咽掉一条结论的代价是那一格变成静默，
+ * 而静默是本仓反复定义的最贵那类失效（0016 §1）。
+ */
+function reportPumpRound(r: PumpRoundResult, io: ServeIo): void {
+  if (r.cards.length === 0) return; // 无事可做那一轮不打扰（大多数轮次是这一支）
+  const drafted = r.cards.filter((c) => c.outcome === "drafted");
+  const attempted = r.cards.filter((c) => c.outcome === "attempted");
+  const gaveUp = r.cards.filter((c) => c.outcome === "gave_up");
+  const skipped = r.cards.filter((c) => c.outcome === "skipped").length;
+  if (drafted.length > 0) {
+    io.log(
+      "章程泵：本轮起草出 " +
+        drafted.length +
+        " 张卡，在 CEO 收件箱里等批。花费 " +
+        r.costCents +
+        " 美分。",
+    );
+  }
+  for (const c of drafted) io.log("  · " + c.taskId + "：" + c.note);
+  for (const c of attempted) {
+    io.warn("章程泵：一条任务的起草没成（下一轮还会试）" + c.taskId + "：" + c.note);
+  }
+  for (const c of gaveUp) {
+    io.warn(
+      "⭐ 章程泵【不再试】" +
+        c.taskId +
+        "：" +
+        c.note +
+        "\n→ 这一格【系统不会自己解决】：那条想法仍停在「等章程」而收件箱里没有它。" +
+        "要么人工看一眼，要么把那条想法撤掉。",
+    );
+  }
+  // 执行日志少一行 ⇒ 事后【看不清花了多少】，而不是"这件事没成"。
+  // 单独说一句是因为它容易被当成失败：recordTurn 返回 recorded:false 是一种结论，
+  // 而这条结论的内容通常是"这套装配没提供写入方"（测试注入），不是库坏了。
+  for (const t of r.turns) {
+    if (!t.recorded) io.warn("章程泵：这一轮没记进执行日志 " + t.taskId + "：" + t.why);
+  }
+  if (skipped > 0 && attempted.length === 0 && gaveUp.length === 0 && drafted.length === 0) {
+    // 整轮全是 skipped ⇒ 一条都不说会读成"泵没跑"；说一句总数而不逐条列。
+    io.log("章程泵：本轮 " + skipped + " 条候选都没起子进程（已有卡 / 状态不对 / 组织图挡着）。");
+  }
+}
+
 /**
  * 最近一次成功备份的时刻（毫秒），没有则 null。
  *
@@ -1209,7 +1579,10 @@ export async function runServeCli(
       r.token,
   );
   if (r.portFile !== undefined) io.log("端口已写入 " + r.portFile);
-  io.log("Ctrl-C 停止。停止顺序：停心跳 → 等备份 → 关服务 → 关队列 → 还锁。");
+  io.log(
+    "Ctrl-C 停止。停止顺序：停心跳 → 等备份 → 等在飞的章程起草 → 关服务 → 关队列 → 还锁。\n" +
+      "  （泵没开时第三步【什么都不等】。开着而真有一轮在起草时最坏等 180 秒，见上面那句提醒。）",
+  );
 
   const code = await waitForShutdown(r, io, (stop) => {
     requestStop = stop;

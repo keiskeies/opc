@@ -319,12 +319,61 @@ describe("那一轮没交出提案：钱照记，【卡不建】", () => {
     expect(w.db.prepare("SELECT consumed_cents FROM tasks").get()?.["consumed_cents"]).toBe(6);
   });
 
-  it("零成本的失败轮【不写 events】（不为一个空事实消费一个 seq）", async () => {
+  /**
+   * ⚠ 这一发【把上一版的断言掉个个儿】。上一版写的是
+   * 「零成本的失败轮不写 events（不为一个空事实消费一个 seq）」，
+   * 标题那句理由听起来是对的 —— 一条空事实凭什么占一个 seq。
+   * 它错在把【留痕】和【结账】当成同一件事：外层那句 `if (cost > 0)`
+   * 同时管着「该不该记账」（该，没花钱就什么都不该加）和
+   * 「该不该留痕」（【不该跟着钱走】—— 这一轮发生过、失败了，与花没花钱无关）。
+   *
+   * 漏掉的正好是【零花费的失败】：claude CLI 起不来 / spawn ENOENT / 权限不对
+   * 那些情况 costCents 恒为 0，实测（0043 §10）events 表【零行】。
+   * 也就是「intake 试过了、失败了、什么都没留下」。
+   *
+   * 为什么现在要翻：常驻 Hub 要把「补一张章程卡」挂到心跳上，而重试必须有界；
+   * 有界要能数「这是第几次」，而【没有痕迹就没有计数】⇒ 一个零花费的失败
+   * （本机正是这一格：CLI 装不上）会让泵每个心跳重新起一次子进程，
+   * 无限、静默、且事后看不出来。这一格不修，泵就不该上。
+   *
+   * 「不消费 seq」那句顾虑本身不成立：seq 不是稀缺资源，
+   * 【发生过而没记】才是。而且这一行 action='tool_call'，
+   * MEMORY_ROWS_SQL 只捞 ('approval','review_decision') ⇒
+   * 它【不会】进任何角色的 few-shot（bus.ts 那段早就写明这是想要的）。
+   */
+  it("⭐ 零成本的失败轮【照样留痕】—— 重试要有界，就得先数得出", async () => {
     const w = await world({});
     const r = await draft(w, { ok: false, text: "", costCents: 0, error: "压根没起来" });
     expect(r.outcome).toBe("no_draft");
-    expect(w.db.prepare("SELECT count(*) AS c FROM events").get()?.["c"]).toBe(0);
-    expect(w.published.length).toBe(0);
+    const rows = w.db.prepare("SELECT action, payload FROM events").all();
+    expect(rows.map((x) => String(x["action"]))).toEqual([KIND_TO_ACTION.RoleTurnReported]);
+    // 留痕而【不记账】：两条判据各走各的，这一发同时断两面。
+    expect(Number(task(w)["consumed_cents"])).toBe(0);
+    expect(w.db.prepare("SELECT count(*) AS c FROM budget_events").get()?.["c"]).toBe(0);
+    // 事件里带着那句失败原因（回放要答得出「这一格试过而没成」），并且明说没花钱。
+    const payload = JSON.parse(String(rows[0]?.["payload"])) as Record<string, unknown>;
+    expect(String(payload["note"])).toContain("压根没起来");
+    expect(String(payload["note"])).toContain("没花钱");
+    expect(payload["costCents"]).toBe(0);
+    // 写了 events 就必须广播（少一条就是活连接上的 seq 空洞，0010 §4）。
+    expect(w.published.map((p) => p.kind)).toEqual(["RoleTurnReported"]);
+    // 卡仍然不建 —— 这一格从来没被放宽过。
+    expect(w.db.prepare("SELECT count(*) AS c FROM approvals").get()?.["c"]).toBe(0);
+  });
+
+  it("⭐ 连续两次零成本失败 ⇒ 审计里两条，数得出「这是第二次」", async () => {
+    // 上面那一发证「有一行」，这一发证「能数」—— 泵的尝试上限靠的就是这个计数。
+    // 少了这一发，「写了一行」可能是【每次覆盖同一行】那种实现，照样绿灯。
+    const w = await world({});
+    await draft(w, { ok: false, text: "", costCents: 0, error: "第一次" });
+    await draft(w, { ok: false, text: "", costCents: 0, error: "第二次" });
+    const notes = w.db
+      .prepare("SELECT payload FROM events ORDER BY id")
+      .all()
+      .map((x) => String((JSON.parse(String(x["payload"])) as Record<string, unknown>)["note"]));
+    expect(notes).toHaveLength(2);
+    expect(notes[0]).toContain("第一次");
+    expect(notes[1]).toContain("第二次");
   });
 });
 

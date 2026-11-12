@@ -789,7 +789,18 @@ describe("④ 两条验收各自【不可测的那一半】（登记，不写成
       // 另外那半（0025 §8.2 的 approval_type 缺格）今天**消掉了**：0026 按 CEO
       // 授权选了「加一个通用 escalation 值 + reason 放 payload」，
       // 六类升级原因现在都写得进一张卡（cards.test.ts ③ 那发逐类验过）。
-      "② 的卡片生产者【有了，但只在跑不到 CEO 的那一侧】：src/engine 两条路径经 insertCard 真建卡（上一条当场判的，那条有分母），而 http/ 与 serve/ 里【一行都不建】⇒ CEO 在看板上看到的那张待批卡，今天只有先跑过 `pnpm hub:engine` 才会存在。后半句【本机验不了】：那条命令要 tsx + @langchain/langgraph，两样都装不上（0039 量的那半）—— 于是「建了卡而 CEO 看不见」这件事今天只能靠读代码发现，不能靠测试。",
+      // 【第四版｜0044（章程泵，本轮）】间接路【通了】，而这件事又是【绿着发生的】：
+      //   serve/charter-pump.ts 调 ensureCharterCard，由 assemble.ts 在 --charter-pump
+      //   打开时按心跳驱动。上面那两份 INSERT / UPDATE 全等名单【都没红】—— 泵经
+      //   ensureCharterCard → insertCard 建卡，INSERT 语句仍然只在 cards.ts 一处。
+      //   所以本轮补的是那两条【有分母】的调用方名单（ensureCharterCard / pumpCharterCards），
+      //   口径与判据一起改，见下面那两份 docblock。
+      //   ⚠ 缺口【没有】被这次改动消掉，只是换了形状：原来缺「链路」，现在缺
+      //   「有人把这个花钱的开关打开」。默认不开是刻意的（0041 §8 那条立场），
+      //   而它意味着第 6 条在默认配置下的结论与第一版那天【一样】：收件箱是空的。
+      //   另两格也没消：`pnpm hub:engine` 本机仍然跑不起来（tsx + langgraph 都装不上），
+      //   而泵这一侧的真子进程路径本机同样【没验过】（0044 §9.2 第 1 条）。
+      "② 的卡片生产者【有了，两条路，而默认哪条都不走】：src/engine 两条路径经 insertCard 真建卡（上面那条有分母的名单当场判的），serve/ 那一条由【章程泵】经 ensureCharterCard 建（0044，也是当场判的）。但它开关是 --charter-pump，默认【不开】—— 那一格打开的是「每隔一个心跳自己起子进程花钱」，所以必须显式拧。于是默认配置下 CEO 看到的收件箱【仍然是空的】，与第一版那天同结论；另外那半【本机验不了】照旧：hub:engine 要 tsx + @langchain/langgraph 两样都装不上（0039），泵那条真子进程路径同样没跑过（0044 §9.2 第 1 条）。",
     ] as const;
     expect(blockers).toHaveLength(6);
     // 各条的**性质不同**：第 1、2、6 条本文件当场判了（可复算、会随改动变红），
@@ -872,15 +883,62 @@ describe("④ 两条验收各自【不可测的那一半】（登记，不写成
       SRC + "/engine/dispatch.ts",
     ]);
     /**
-     * 而这两条【一条都不】通到 CEO 真会打开的那个界面：serve/ 与 http/ 里
-     * 【一行都不建卡】（当场判：上面那份 INSERT 名单是 toEqual 全等，里面没有它们；
-     * 另 `grep -rn "engine/" packages/hub/src/http/ packages/hub/src/serve/` 零命中，
-     * 所以连「http 调 engine、engine 再建卡」这条间接路也不通）。
-     * 所以「卡片有生产者了」这句话的【真】内容是：生产者在一台跑过
-     * `pnpm hub:engine` 的机器上，而那条命令本机跑不起来（tsx + langgraph 都缺）。
-     * 这一格【不钉成断言】—— 它讲的是两条命令的存在性与可运行性，不是 src 里的形状，
-     * 用 grep 去钉它会得到一条恒绿的装饰。「http/serve 不建卡」这件事【已经】被
-     * 上面那份 INSERT 全等名单钉住了：多一个 http 文件进去它就红。
+     * 「建卡这条路通不通到 CEO 真会打开的那个界面」—— 这一格的口径被 0044 改写过，
+     * 而【没有任何一条断言为那次改写变红】。这正是本文件记了三次的「判据没坏、
+     * 它指的事实换了」那一族，所以这一版把口径本身钉成一条【有分母】的断言。
+     *
+     * 【旧口径｜0041 那版】「serve/ 与 http/ 里一行都不建卡，连间接路也不通」。
+     *   当时那两半都成立：INSERT 名单里没有它们，而 `grep -rn "engine/" …/http/ …/serve/`
+     *   零命中 ⇒ 「http 调 engine、engine 再建卡」这条间接路不存在。
+     * 【新口径｜0044（章程泵）】间接路【通了，但开在一个人必须显式拧开的开关后面】：
+     *   serve/charter-pump.ts import engine/charter.js 并调 ensureCharterCard，
+     *   而它由 serve/assemble.ts 在 --charter-pump 打开时按心跳节奏驱动。
+     *   默认（不写那个参数）⇒ 这一整块【不存在】，行为与旧口径一模一样。
+     *
+     * 为什么钉【调用方名单】而不是钉那条 grep：grep "engine/" 命中的是 import 语句，
+     * 而"有一句 import"与"这条链真能走到建卡"是两件事（real-deps.ts 顶层那句
+     * `import { approveCard }` 早就在那儿了，它不建卡）。ensureCharterCard 是
+     * engine/ 里唯一建章程卡的入口，它的调用方名单【就是】那条间接路本身。
+     * 而且这一发【有分母】（两个文件），所以「扫描器坏了 / 路径拼错 / 注释滤掉代码」
+     * 那一族瞎法会当场显形 —— 上面那两条零名单做不到这件事，这也是它们
+     * 当年配一发 searchEvents 正向对照的同一条理由。
+     *
+     * ⚠ 它【不】证明「CEO 现在看得见卡」。它只证明这条链在源码里连得上；
+     * 开关关着、真花钱、以及本机起不起得来子进程，三件事都在断言之外
+     * （0044 §9.2 记的就是这几格）。把这条读成第 6 条消掉了，是本格最容易被读错的方式。
+     */
+    expect(callersOf("ensureCharterCard", "engine/charter.ts")).toEqual([
+      SRC + "/engine/work.ts",
+      SRC + "/serve/charter-pump.ts",
+    ]);
+    /**
+     * 上面那条名单里的第二格【有没有活调用方】—— 只判这一件，别读多。
+     *
+     * 这一发【不】证明「泵真被心跳驱动」，而那句是我写完才验的，验出来是反的：
+     * 实测把 assemble.ts 里那一整块派发【删掉】（只留 default 那支 lambda）后，
+     * 这一发【照样绿】、上面那发【也照样绿】。前者因为 `pumpCharterCards(` 这个字样
+     * 还活在 `pumpVia = o.charterPumpVia ?? ((w, bus2, po) => pumpCharterCards(...))`
+     * 里；后者因为 charter-pump.ts 里那句 `ensureCharterCard(` 在不在，跟
+     * 【有没有人去驱动 charter-pump】是两件事，派发删掉它照样在。
+     * 同一次变异真正变红的是 packages/hub/test/serve/assemble-pump.test.ts（当场 1 发红）。
+     *
+     * 对得上上面那份名单口径的是反向那一发：往 http/real-deps.ts 加一句
+     * `ensureCharterCard()` ⇒ 上面那发【红】（多一项，名单变长）。
+     * 所以三份断言各管一维，谁也别替谁背书：
+     *   上面那份【有分母的建卡入口名单】挡「又多一条建卡路径」；
+     *   本发挡「泵文件成了孤儿」；
+     *   「泵真挂在心跳上」那一维的钉子在 assemble-pump.test.ts，不在这里。
+     * 这里如果写成「证明泵由心跳驱动」，就是一句【被自己的变异实验证伪过而没改】的注释，
+     * 而那种注释比没有注释更贵（0016 §1 那一族换了个载体：断言没坏，注释吹过了）。
+     */
+    expect(callersOf("pumpCharterCards", "serve/charter-pump.ts")).toEqual([
+      SRC + "/serve/assemble.ts",
+    ]);
+    /**
+     * 「http/ 直接建卡」这一半【今天仍然成立】，而且成立的方式值得说清：
+     * real-deps.ts 顶层确实 import 了 engine/（approveCard），而它【不建卡】——
+     * 它只认领已有的卡。所以「http 里有一行 import engine/」与「http 里建卡」
+     * 是两个独立的命题，前者真、后者假，而上面那份 INSERT 全等名单钉的是后者。
      *
      * 下面这份 UPDATE 名单从【两条】变成【三条】就是 0041 那次改动顶红的东西本身
      * （第三条 = engine/approve.ts 的 CLAIM_CARD_SQL，`hub decide` 认领卡片那条）。

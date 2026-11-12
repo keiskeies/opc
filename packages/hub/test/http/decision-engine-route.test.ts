@@ -73,6 +73,10 @@ afterAll(async () => {
       /* 已关 */
     }
   }
+  // 清理在 afterAll 而不是只在 beforeAll：目录名带 pid ⇒ 下一次运行【不会】顺手删它。
+  // 少了这一行就是每跑一次漏一份 SQLite 库（fixture-dir.test.ts ④ 那条普查判的就是它，
+  // 而它先靠 fixtureTmp 的"pid 已死的兄弟目录"兜底 —— 那是兜底，不是清理）。
+  rmSync(TMP, { recursive: true, force: true });
 });
 
 /**
