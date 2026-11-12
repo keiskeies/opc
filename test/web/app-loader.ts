@@ -42,6 +42,8 @@ const EXPORTS = [
   "hierarchyColumns",
   "groupByDepth",
   "statusClass",
+  "driverNotice",
+  "driverLine",
 ] as const;
 
 export type AppExports = Record<(typeof EXPORTS)[number], (...a: never[]) => unknown>;

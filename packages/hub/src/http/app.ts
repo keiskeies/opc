@@ -47,6 +47,17 @@ import { listApprovals as listApprovalsFrom } from "../approvals/query.js";
 // 今日视图那几个聚合数的【判据】住在这里（不在 handler 里，也不在界面里算）。
 // 分法与 approvals/query.ts、replay/query.ts 同一条：判定住在模块，HTTP 只是一个入口。
 import { readToday } from "../overview/today.js";
+// 驱动器那一格的判据（0048 §7）。⚠ 这是一条【运行期】import，而它把
+// serve/driver-pump.ts（进而 engine/*）带进了本文件的模块图 —— 这与本文件
+// 对 db/write-queue.js 的处理【不一样】（那边刻意 type-only，见 deps.bindingWriter
+// 那一段：它带进来的是"写入能力"，而 HTTP 层不该有能力写）。
+// 这里带进来的只是【三个常量与三个 SQL 片段函数】，没有写通道、没有子进程，
+// 而换法只有一个：把 DRIVER_GAVE_UP_KIND / driverCellTargetSql /
+// driverCellMarkerSql 在 overview/ 里再抄一份 —— 那正是本仓为 kindOf()
+// 立过的那条规矩（0026 §0）要拦的事：同一判据两份字面写法，漂了不会有人发现。
+// 所以宁可多一条 import 边，也不要两份抄件。
+import { readDriverStatus } from "../overview/driver-status.js";
+import type { DriverRuntimeState } from "../overview/driver-status.js";
 // IM 绑定的四条路由**不写在下面那个 switch 附近**，单独住 http/bindings.ts。
 // 那不是为了分文件整洁：test/bindings/im.test.ts 有一条守卫扫 src，
 // 断言 `im_bindings` 这四个字只出现在 bindings/im.ts 一个文件里。
@@ -145,6 +156,40 @@ export interface HubDeps {
   readonly bus: EventBus;
   readonly token: string;
   readonly now: () => number;
+  /**
+   * 这台 Hub 的驱动器【此刻】的状态（0048 §7 那一站的输入）。**必填**。
+   *
+   * 为什么是一个【函数/值】而不是让读侧自己去库里看：库里【没有】这一格 ——
+   * 审计只记录它【做过】的事，而一个关着的驱动器什么都不做，
+   * 所以「这台机器开没开驱动器」在 events 里不可问（这正是它必须由装配层给的原因）。
+   *
+   * 为什么【必填】而不是一个可选项：可选的失效方式是"下一个构造 HubDeps 的人忘了传"，
+   * 而忘了传的那一屏看板读起来是「没有任何任务被放弃」（空名单），
+   * 真相可能是「这台 Hub 从来没开驱动器」或「心跳早就停了」。
+   * 那两种"没有"在屏幕上长得一样，而其中一种是【一切正常】——
+   * 这正是 0048 §7 那一整节要消灭的形状，不能由一个默认值把它放回来。
+   * 同 HubRequest.peer 那条立场：真实性质不交给默认值维持，
+   * 而是让每个构造点都必须回答这个问题（测试夹具因此必须写明自己扮演的是哪一台）。
+   *
+   * ⚠ 它是【每请求现取】的函数而不是启动时算好的常量，理由在 DriverRuntimeState 那边：
+   * 心跳连番失败之后 onFatal 会停掉整条心跳，而那一刻 HTTP 仍在服务、看板仍开着。
+   * 把启动时的 `--driver-pump` 原样回放到那一刻，就是一句"有人在推"的谎。
+   *
+   * ⚠ 【返回状态而不是返回 DriverStatus】：这一发只回答【这台机器】的三个数，
+   * 查询由 handler 用 deps.db 自己发（见下面 today()）。把查询也塞进这个注入点
+   * 会让"用哪条连接读"这件事落到装配层去决定 —— 而今日视图全部读侧的立场是
+   * 【同一条只读连接】（0010 §7 那格锁问题不该外溢到只读路径）。
+   *
+   * ⚠ 【非空】而不是 `| null`。我第一版写的是可空，理由是"Hub 嵌在没有心跳宿主
+   * 的地方时该说不知道"，而那句站不住：那种宿主下【没开驱动器】就是答案
+   * （enabled: false），而"不知道"没有任何一个真实的构造点会给出。
+   * 一个没有生产者的取值形状，界面就得为它写一条永远走不到的分支 ——
+   * 与本文件上面刚刚拒绝的那件事（给 STOPPED_SQL 加一列"将来也许用得上"）
+   * 是同一个错，只是这次错在类型上。今天"这一维取不到"在屏幕上是真的存在的，
+   * 而它的形状是【GET /today 整个失败】（app.js 里 t.error 那一支已经处理了），
+   * 不是响应里某格为 null。
+   */
+  readonly driverState: () => DriverRuntimeState;
   readonly nonces?: VerifyInput["nonces"];
   /**
    * 把一条 CEO 决策写进 approvals 与 events。【唯一的写路径】。
@@ -1071,13 +1116,20 @@ function today(deps: HubDeps, query: HubRequest["query"]): HubResponse {
       error: "window_ms 必须是非负整数毫秒，实到 " + raw,
     });
   }
-  return json(
-    200,
-    readToday(deps.db, {
-      nowMs: deps.now(),
-      ...(raw === undefined ? {} : { windowMs: Number(raw) }),
-    }),
-  );
+  const view = readToday(deps.db, {
+    nowMs: deps.now(),
+    ...(raw === undefined ? {} : { windowMs: Number(raw) }),
+  });
+  // 驱动器那一格合在同一份响应里（理由见 TodayResponse 那段：同一个读者、同一次刷新）。
+  //
+  // ⚠ deps.driverState() 每请求现取，不在这里缓存也不在装配时算死 ——
+  // 心跳停了而 HTTP 还在服务的那一刻，这一发是唯一还会变的格（0048 §7）。
+  // 查询走 deps.db（同一条只读连接），所以它【不】被写队列排住。
+  // 实测：10 万事件 / 40 条活跃 ⇒ 中位 0.56 ms；50 万事件 / 120 条活跃 ⇒ 1.53 ms
+  // （复算命令与完整 EXPLAIN 在 0049 §8，那里量的就是这一行发出去的那条 SQL）。
+  // 同一发"多带一列 EXISTS"的形状要 6.39 ms，而那一列今天没读者 ⇒ 没带。
+  const driver = readDriverStatus(deps.db, deps.driverState());
+  return json(200, { ...view, driver });
 }
 
 async function decide(

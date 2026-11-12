@@ -101,9 +101,12 @@ describe("① 渲块里不许出现判据字面量（§1「判据随响应发出
     ).toEqual([]);
   });
 
-  it("判据字段【真的被读】了：三个都得在代码里出现", () => {
+  it("判据字段【真的被读】了：全都得在代码里出现", () => {
     // 上面两条是「不许出现」，这一条是「必须出现」—— 两个方向都要，
     // 否则"把三个字段全删了"也能让前两条绿（判据没抄件，因为判据根本没用）。
+    // `driver` 是 0048 §7 那一站加进来的：hub 侧发了一整块驱动器全景，
+    // 而"发了没人读"在这块上比在别处更糟 —— 它存在的唯一理由就是让
+    // 「没有告警读起来像一切正常」在屏幕上少一种发生方式（driver-status.ts 文件头）。
     for (const f of [
       "blocked_statuses",
       "attention_statuses",
@@ -111,6 +114,55 @@ describe("① 渲块里不许出现判据字面量（§1「判据随响应发出
       "operational_approval_types",
     ]) {
       expect(appCode, f).toContain(f);
+    }
+    // ⚠ driver 这一格【不能】用同一个 toContain：那四个词在 app.js 里只作为
+    // 响应字段名出现，而 "driver" 同时也出现在我起的函数名里（driverNotice /
+    // driverLine）—— 于是「把 t.driver 的读取全删掉、只留下那两个函数」
+    // 照样能让 toContain("driver") 绿，而那一改正是这一发要拦的【发了没人读】。
+    // 所以扫的是【属性访问那个形状】。
+    expect(appCode, "t.driver").toMatch(/\b\w+\.driver\b/u);
+  });
+
+  it("⭐ 界面不许自己判「到顶了没有」：attempts 只许被【显示】而不许被【比较】", () => {
+    // 这一格的判据是「这一格里有没有一行放弃记录，且它落在本次进入这一格之后」，
+    // 而响应里额外带了 attempts / max_attempts 两个数（driver-status.ts 第 ⑤ 条：
+    // 那两个数是【驱动器当时写下的】，用来显示"第 3/3 次"）。
+    // 最省事的抄件写法就是在界面里写 `attempts >= max_attempts` ——
+    // 那是把"到顶"这件事重新判一遍，而它已经在库里判过了（配置改过一次，
+    // 两边就会给出相反的答案：屏幕说"还在试"而驱动器已经放弃了）。
+    // 扫法取的是【比较运算】而不是"出现这两个词"：driverLine 必须读它们才能拼那句
+    // "第 3/3 次"，禁的是拿去比大小。
+    const at = appCode.indexOf("function driverLine");
+    // 少了这一发，下面那两条正则在一个【已经不存在的函数】上是恒绿的：
+    // indexOf 找不到返回 -1，slice(-1) 只剩最后一个字符，扫不到比较 ⇒ "通过"。
+    // 装载器那边（app-loader.ts 的 EXPORTS）也会因为它取不到而红，
+    // 但那是另一个文件的红 —— 本文件不许依赖别的文件来证明自己扫到了东西。
+    expect(at, "app.js 里找不到 function driverLine ⇒ 这一发起码要先红在这里").toBeGreaterThan(-1);
+    const body = appCode.slice(at);
+    const seg = body.slice(0, 1600);
+    const cmp = [
+      ...seg.matchAll(/attempts\s*(?:>=|>|<|<=|===|!==)\s*[\w.]*attempts?/gu),
+      ...seg.matchAll(/max_attempts\s*(?:>=|>|<|<=|===|!==)/gu),
+    ].map((m) => String(m[0]));
+    expect(
+      cmp,
+      `driverLine 里出现了 attempts 与 max_attempts 的比较 ${JSON.stringify(cmp)} ⇒ 那是把「试到上限」判了两遍。` +
+        "正确做法是读响应里那个 cause 字段（at_limit / no_budget），它由 GET /today 给出。",
+    ).toEqual([]);
+    // 分母（正向对照）：这一发【确实】在扫得到东西的范围内 —— 造一个真的比较塞进同一段文本。
+    const fake = 'if (row.attempts >= row.max_attempts) paint("amber");';
+    expect([
+      ...fake.matchAll(/attempts\s*(?:>=|>|<|<=|===|!==)\s*[\w.]*attempts?/gu),
+    ]).toHaveLength(1);
+  });
+
+  it("⭐ 界面不许出现【驱动器写的那种审计行形状】（kind 名 / target 拼法）", () => {
+    // 「谁放弃了这一格」在库里是一行 events，判据靠 target = "状态:角色" 与
+    // payload.kind = 'DriverTurnAbandoned' 去认（driver-pump.ts 那两个常量）。
+    // 那两个东西一旦出现在渲块里，就意味着渲块在【直接读库的形状】而不是读响应 ——
+    // 而 §5.6.1 那条边界（渲染进程只经签名代理拿视图，不碰库形状）禁的正是这个。
+    for (const shape of ["DriverTurnAbandoned", "DriverTurnClaimed", "driverCellTarget"]) {
+      expect(appCode, shape).not.toContain(shape);
     }
   });
 

@@ -40,6 +40,10 @@ import { silentOverBudgets } from "../charter/budget-sync.js";
 // 名单：收件箱那张卡的颜色看的是 approval_type，而那份判据不能落在渲染进程里
 // —— 同 `blocked_statuses` 那条「判据随响应发出」的立场。
 import { OPERATIONAL_APPROVAL_TYPES } from "../approvals/cards.js";
+// 只是【类型】。TodayResponse 里那个 driver 的形状归 overview/driver-status.ts 定义，
+// 那边写了它为什么必须与驱动器同源；这里不重复那套论证，也不 import 它的函数
+// （查询由 http/app.ts 直接调，见那边 today() 那一段）。
+import type { DriverStatus } from "./driver-status.js";
 
 /** 【规格】§16.5 那句「过去 24 小时」的字面窗口。做成常量是为了让界面不必自己拼 86400000。 */
 export const DEFAULT_WINDOW_MS = 24 * 60 * 60 * 1000;
@@ -202,6 +206,32 @@ export type TodayView = {
    * 带上之后才读起来是它本来的意思：「这条链路今天还没接」。
    */
   readonly notes: readonly string[];
+};
+
+/**
+ * `GET /today` 的完整响应 = 今日那几个数 + 驱动器那一格。
+ *
+ * ── 为什么驱动器（0048 §7 拍板的那一站）合在这一份响应里 ──────────
+ * 它和这一页其余的数【同一个读者、同一次刷新】。单开一个端点会得到
+ * 「看板刷新时一个到了另一个没到」—— 同一屏上「活跃 3 条」与「驱动器在不在推」
+ * 来自两个时刻，正是本仓拒绝的第二份来源（同 DECISIONS_SQL 那条「三条查询
+ * 之间夹一次写入会得到一份自相矛盾的摘要条」的立场，只是这里跨了端点）。
+ *
+ * ── 为什么类型上【合在响应】而【不进 readToday】──────────────────
+ * 读起来最顺的写法是给 readToday 加一个 driver 入参，而那条路的代价是
+ * 【必填性落错了地方】：readToday 有 30 个测试调用点，而"这台机器有没有在推"
+ * 是【这台 Hub】的事实、不是【这一次聚合】的参数。把它挂在 deps 上
+ * （HubDeps.driverState，必填，见 http/app.ts 那一段）才是它该被问到的那一层 ——
+ * 与 HubRequest.peer 同一条：真实性质不交给默认值维持，而是让每个构造点必须回答。
+ * 所以这里 driver 是【必填】字段。而它【不可空】—— 我第一版写的是 `| null`，
+ * 理由是"Hub 嵌在没有心跳宿主的地方时该说不知道"，那句站不住：那种宿主下
+ * 【没开驱动器】就是答案（enabled: false），而"不知道"没有任何真实构造点会给出。
+ * 一个没有生产者的取值形状，界面就得为它写一条永远走不到的分支。
+ * 今天"这一维取不到"在屏幕上确实存在，而它的形状是【整个 GET /today 失败】
+ * （app.js 里 t.error 那一支已经处理了），不是响应里某格为 null。
+ */
+export type TodayResponse = TodayView & {
+  readonly driver: DriverStatus;
 };
 
 /**

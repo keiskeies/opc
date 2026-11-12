@@ -151,6 +151,63 @@ export const DRIVER_GAVE_UP_KIND = "DriverTurnAbandoned";
 export const DRIVER_ACTOR = { actorType: "system", actorId: "driver_pump" } as const;
 
 /**
+ * SQL 那一侧的【那一格】：`t.status || ':' || t.assigned_role`（`t` 换成 tasks 的别名）。
+ *
+ * ⭐ 这一格被抽成函数，是因为它现在有【两个读侧使用点 + 一个写侧】：
+ *  ① 写：`driverCellTarget(state, role)`（TS 侧，认领行/放弃行的 target 列）；
+ *  ② 写侧的自数：`driverAttemptsSql` 里那句 `p.target = <这一格>`；
+ *  ③ 读：`overview/today.ts` 的「这一格被放弃了没有」（0048 §7 那一站）。
+ * 三处各写一遍字面量，漂了的那份【不会有人发现】，而两处的失效方向不一样：
+ * ②漂 ⇒ 上限数不到东西 ⇒ 驱动器在同一格【无限花钱】；
+ * ③漂 ⇒ 界面上那一行「不再推」永远不出现 ⇒ 0048 整篇要消灭的那个状态原样回来。
+ * 挡住漂移的手法与 kindOf() 一模一样（0026 §0）：**不是注释，是同一个函数**。
+ * 而它必须是一段 SQL 而不是把 ① 的结果绑进去：这一格要拿 tasks 那一行的【当前】
+ * 两列去比（任务换了格子，旧的放弃行就不该再算数），而"当前"只有在查询里才知道。
+ *
+ * 分隔符用 DRIVER_CELL_SEP 常量拼进去，所以换分隔符会【同时】改到写侧与读侧。
+ */
+export function driverCellTargetSql(t: string): string {
+  return (
+    t +
+    ".status || '" +
+    DRIVER_CELL_SEP +
+    "' || " +
+    t +
+    ".assigned_role"
+  );
+}
+
+/**
+ * 【这一格这一次】的锚点：本条任务【最后一次进入当前这一格】那条状态边的 id。
+ *
+ * 抽成函数的理由与 driverCellTargetSql 同一条，而漂了的失效方向不同：
+ * 读侧（`overview/driver-status.ts`）若自己抄一份而【漏掉这个锚点】，
+ * 一条被打回、重新走回 `IN_PROGRESS/dev` 的任务会仍然带着上一次那行
+ * `DriverTurnAbandoned` ⇒ 界面在它【刚刚被重新推】的时候写着「不再推了」。
+ * 那比不显示更坏 —— 0048 一整篇要消灭的是"看不见的沉默"，
+ * 而这一发造出来的是【看得见的谎】。
+ *
+ * 三个条件缺一个都会算错（原文在 driverAttemptsSql 上面那段，逐条对着看）：
+ *  · kind = TaskStateChanged 且 payload.to = 当前状态 —— "进入这一格"这件事的落点；
+ *  · 用 id 而不用 created_at —— 同一毫秒可以先写边再写认领行，id 才是插入序；
+ *  · `json_valid` 那层壳由 kindOf 提供 —— 坏 payload 得 NULL 而不是抛。
+ */
+export function driverCellMarkerSql(t: string): string {
+  return (
+    "COALESCE((SELECT MAX(m.id) FROM events m " +
+    "WHERE m.task_id = " +
+    t +
+    ".id " +
+    "AND " +
+    kindOf("m") +
+    " = 'TaskStateChanged' " +
+    "AND json_extract(CASE WHEN json_valid(m.payload) THEN m.payload END, '$.to') = " +
+    t +
+    ".status), 0)"
+  );
+}
+
+/**
  * 「这条任务在当前这一格上，驱动器已经认领过几次」。
  *
  * 三个条件缺一个都会算错，方向各不同：
@@ -170,17 +227,7 @@ export const DRIVER_ACTOR = { actorType: "system", actorId: "driver_pump" } as c
  *     而 patrol 那边同类问题（PATROL_SQL 那段注释）记的正是这一发的教训。
  */
 export function driverAttemptsSql(t: string): string {
-  const marker =
-    "COALESCE((SELECT MAX(m.id) FROM events m " +
-    "WHERE m.task_id = " +
-    t +
-    ".id " +
-    "AND " +
-    kindOf("m") +
-    " = 'TaskStateChanged' " +
-    "AND json_extract(CASE WHEN json_valid(m.payload) THEN m.payload END, '$.to') = " +
-    t +
-    ".status), 0)";
+  const marker = driverCellMarkerSql(t);
   return (
     "(SELECT COUNT(*) FROM events p " +
     "WHERE p.task_id = " +
@@ -192,12 +239,8 @@ export function driverAttemptsSql(t: string): string {
     DRIVER_CLAIM_KIND +
     "' " +
     "AND p.target = " +
-    t +
-    ".status || '" +
-    DRIVER_CELL_SEP +
-    "' || " +
-    t +
-    ".assigned_role " +
+    driverCellTargetSql(t) +
+    " " +
     "AND p.id > " +
     marker +
     ")"

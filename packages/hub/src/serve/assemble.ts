@@ -818,6 +818,30 @@ export async function boot(
       ...(args.ceo === undefined || args.ceo.trim() === ""
         ? {}
         : { bindingVerifier: args.ceo.trim() }),
+      /**
+       * ⭐ 看板那一格「谁在推这条想法」的三个数（0048 §7 拍板的那一站）。
+       *
+       * 【闭包而不是值】，这一行整个的分量在这个形状上：
+       *  · `driverOn` 声明在下面（那三个上限形状判完才算得出来），
+       *    `heartbeat` 声明在更下面（ticker 要等启动横幅都打完才装）——
+       *    而这一发【只在有人 GET /today 时】才被叫，那一刻两者都已就位。
+       *    写成值的话这一刻它们还在 TDZ 里，只能拿 args 现拼一个"看着一样"的数，
+       *    而那个数【永远不会变】—— 心跳停了它还说在推（HubDeps.driverState 那段写的谎）。
+       *  · `heartbeat === null` 是【真的会出现】的一档：server 在 heartbeat 之前起
+       *    （这一发与那两步的次序在下面的注释里），所以启动头几毫秒里 HTTP 已经在服务
+       *    而 ticker 还不存在。那一档答案是"没在推"，而那正是真话。
+       *  · taskLimitCents 只在 bounds.ok 时取 —— 不 ok 时那个形状上【没有那一格】
+       *    （判别式联合），而那也不是"上限是 0"，是【没有上限这个数】。
+       *
+       * 为什么不在这里判 `args.driverPump === true` 而要用 driverOn：
+       * 那正是 0048 变异实验里 M8 那一发（`driverOn = bounds.ok`）造出来的错 ——
+       * 「开关开着」与「这一台真的在推」是两个问题，各自只有一个来源。
+       */
+      driverState: () => ({
+        enabled: driverOn,
+        pumping: heartbeat !== null && !heartbeat.stopped,
+        taskLimitCents: bounds.ok === true ? bounds.bounds.taskLimitCents : null,
+      }),
       // 组织提交（0040）：只有配了 --backup-dir 才接 commitOrgChange ——
       // §6.5 要求「改组织之前留一份能回到起点的快照」，没备份目录就不给改。
       // 备份的执行点复用同一个 backupVia（BootOverrides 可注入），于是测试对

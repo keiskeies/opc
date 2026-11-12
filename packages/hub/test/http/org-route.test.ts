@@ -30,6 +30,7 @@ import {
   type OrgGraph,
 } from "@opc/contracts";
 import { fixtureTmp } from "../fixtures/fixture-dir.js";
+import { DRIVER_OFF } from "../fixtures/driver-state.js";
 import { InMemoryEventBus } from "../../src/events/bus.js";
 import { WriteQueue } from "../../src/db/write-queue.js";
 import { migrate } from "../../src/db/migrate.js";
@@ -120,6 +121,8 @@ function harness(o: {
     recordDecision: async () => true,
     createTask: async () => {},
     resumeGraph: async () => {},
+    // 这台夹具扮演的是哪一台 Hub（HubDeps.driverState 必填的理由在那边）：同 bindings-route：这一文件测的是 POST /org 的提交顺序（备份在前），没有东西在推任务。
+    driverState: () => DRIVER_OFF,
     // 组织提交：备份(`backup` 记录) 在前，成功才落 commitOrgGraph。
     ...(o.wired === false
       ? {}

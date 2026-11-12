@@ -31,6 +31,7 @@ import {
   type SseFrame,
 } from "@opc/contracts";
 import { fixtureTmp } from "../fixtures/fixture-dir.js";
+import { DRIVER_OFF } from "../fixtures/driver-state.js";
 import type { DomainEvent } from "../../src/events/bus.js";
 import { InMemoryEventBus } from "../../src/events/bus.js";
 import { migrate } from "../../src/db/migrate.js";
@@ -140,6 +141,8 @@ async function harness(taskId = "task-1"): {
     resumeGraph: async (id: string) => {
       calls.resumed.push(id);
     },
+    // 这台夹具扮演的是哪一台 Hub（HubDeps.driverState 必填的理由在那边）：契约那一份枚举的是端点与形状，不关心哪台机器在推。
+    driverState: () => DRIVER_OFF,
   };
   // 形参就叫 target：调用方传进来的【必须】是它准备发出的那一整个请求目标。
   // 若签名函数叫 target 而调用方传的是剥过 query 的 path，那是同一个 bug 的两副面孔

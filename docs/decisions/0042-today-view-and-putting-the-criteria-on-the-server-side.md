@@ -82,7 +82,7 @@
 
 ## 3. 等 CEO 之一：「需要我注意」= 升级 ∪ 阻塞 ∪ 触及预算（我加了一维）
 
-§16.4 原文是「过滤后只显示**被升级或触及预算**的任务」。`packages/hub/src/overview/today.ts:104` 的
+§16.4 原文是「过滤后只显示**被升级或触及预算**的任务」。`packages/hub/src/overview/today.ts:108` 的
 `ATTENTION_STATUSES` 是「`ESCALATED_TO_CEO` ∪ `BLOCKED_STATUSES`」—— **多加了阻塞**。
 
 理由是这一格的读者问题：CEO 打开这一列问的是「哪几件在等我或卡着」，

@@ -393,7 +393,7 @@ verified = 0   ceo_role = 'ceo'   verified_by = 'ceo'
    桌面侧 `ipc-surface.ts:171` 的 `EXPOSED_ENDPOINTS` 是 `= IMPLEMENTED_ENDPOINTS` 的**别名**，
    不是第三份手抄 —— 别名不会漂，**手抄才会**，而我把别名数成了手抄，于是「七处」里有一处是凭影子加的。
 2. **「没有一处会替你报错」是错的，而且错在**最**该有守卫的那两处**：
-   - `app.ts:494` 是 `const impossible: never = routeHit` ——
+   - `app.ts:539` 是 `const impossible: never = routeHit` ——
      `Route` 加了一种 kind 而 `handleRequest` 没跟上 ⇒ **编译期就不过**（那段注释自己写着
      「漏分支 ⇒ 这一行编译不过」）；
    - `ipc-surface.test.ts:129-130` 断言每个 `CHANNEL_SPECS` 条目的端点**必须同时在**

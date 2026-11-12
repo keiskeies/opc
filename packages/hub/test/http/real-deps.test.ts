@@ -41,6 +41,7 @@ import {
   type TaskGraph,
   type Writer,
 } from "../../src/http/real-deps.js";
+import { DRIVER_OFF } from "../fixtures/driver-state.js";
 import { newLocalToken } from "../../src/http/auth.js";
 import { issueToken, newApprovalToken } from "../../src/http/tokens.js";
 
@@ -922,6 +923,8 @@ describe("一次性审批 token 的装配层（mint / redeem）", () => {
       token: newLocalToken(),
       graphFor: () => ({ graph: fakeGraph({}).graph, invoke: async (fn) => await fn() }),
       now: () => NOW,
+      // 这台夹具不跑心跳 ⇒ 驱动器【没在推】（HubDeps.driverState 必填的理由在那边）。
+      driverState: () => DRIVER_OFF,
     });
     expect(typeof deps.redeemApprovalToken).toBe("function");
     expect(typeof deps.issueApprovalToken).toBe("function");
@@ -948,6 +951,8 @@ describe("buildHubDeps", () => {
       graphFor: (): TaskGraph => ({ graph: g.graph, invoke: async (fn) => await fn() }),
       now: () => NOW,
       makeCommand: () => ({ __command: true }),
+      // 这台夹具不跑心跳 ⇒ 驱动器【没在推】（HubDeps.driverState 必填的理由在那边）。
+      driverState: () => DRIVER_OFF,
     });
 
     expect(
@@ -984,6 +989,8 @@ describe("buildHubDeps", () => {
       token: newLocalToken(),
       graphFor: () => ({ graph: fakeGraph({}).graph, invoke: async (fn) => await fn() }),
       now: () => ++tick,
+      // 这台夹具不跑心跳 ⇒ 驱动器【没在推】（HubDeps.driverState 必填的理由在那边）。
+      driverState: () => DRIVER_OFF,
     });
     await deps.recordDecision({ approvalId: "w-2", taskId: "task-1", resume: "approve" });
     const decided = row(db, "w-2")?.["decided_at"];

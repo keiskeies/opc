@@ -19,6 +19,7 @@ import { mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { fixtureTmp } from "../fixtures/fixture-dir.js";
+import { DRIVER_ON } from "../fixtures/driver-state.js";
 import { WriteQueue } from "../../src/db/write-queue.js";
 import { migrate } from "../../src/db/migrate.js";
 import { handleRequest, matchRoute, type HubDeps, type HubRequest } from "../../src/http/app.js";
@@ -85,6 +86,8 @@ async function world(): Promise<World> {
     recordDecision: async () => true,
     createTask: async () => {},
     resumeGraph: async () => {},
+    // 这台夹具扮演的是哪一台 Hub（HubDeps.driverState 必填的理由在那边）：⭐ 这里选 ON 而【不是】OFF：ON 才让 today() 真的去发那一发驱动查询，于是下面「顶层键名集合」那一发钉的是【查询跑过之后】的形状，而不是「关着时早退返回的那个空壳」。少这一句选择，键名集合可以在驱动器整块没跑的情况下绿。
+    driverState: () => DRIVER_ON,
   };
   return {
     db: write,
@@ -555,9 +558,26 @@ describe("⑤ 窗口与 GET /today 这个入口", () => {
         "operational_approval_types",
         "budget",
         "decisions",
+        // 0048 §7 那一站：驱动器那一格。加它的时候【这一发当场红】，报的就是这一格 ——
+        // 这正是这一发存在的理由：逐个字段点名的写法永远追不上字段的增长，
+        // 而"少发一个字段"（或者"多发了一个没人 review 过的字段"）都在这里响。
+        "driver",
         "notes",
       ].sort(),
     );
+    // ⭐ driver 那一格【不能是 undefined / 空壳】：夹具这台是 DRIVER_ON，
+    // 所以这一发同时钉住"读侧真的跑了那一发查询"（关着时 readDriverStatus 早退，
+    // 形状上仍然有 driver 这个键而内容恒空 —— 那种退化只有配上 ON 的分母才看得见）。
+    const drv = body["driver"] as Record<string, unknown>;
+    expect(drv["enabled"]).toBe(true);
+    expect(drv["pumping"]).toBe(true);
+    // ⚠ 这一格【只写 snake_case 那一个名字】，不写成 `a ?? b` 两头都认。
+    // 我第一版就是那么写的（"防命名不确定"），而那是把守卫写成装饰：
+    // 两头都认的断言在任何一侧命名变了之后仍然绿，
+    // 于是「对外口径破了」这件事恰好没人能看见（口径本身在 today.ts 文件头写着）。
+    expect(drv["task_limit_cents"]).toBe(500);
+    expect(drv["taskLimitCents"]).toBeUndefined();
+    expect(Array.isArray(drv["stopped"])).toBe(true);
     expect(Object.keys(body["budget"] as Record<string, unknown>).sort()).toEqual(
       [
         "consumed_in_window_cents",

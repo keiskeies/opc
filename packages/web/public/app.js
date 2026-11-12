@@ -447,6 +447,13 @@ async function renderBoard() {
   const decideTask = (tk) => (ceoDecide === null ? false : ceoDecide.includes(tk.status));
   const shown = boardFilter === "attention" ? tasks.filter(attentionTask) : tasks;
   const byKey = groupByDepth(shown, cols);
+  // 驱动器那一格（0048 §7）。它挂在【看板】而不是今日页：这一格问的是
+  // 「这几条停在 agent 那一格的想法，还有没有在走」，而那个问题只在看着卡片时才会问。
+  // ⚠ t.error 时（GET /today 整个失败）driver 是 undefined，driverNotice 会走
+  // "字段缺失 ⇒ 未知"那一支 —— 与上面 attention === null 那条横幅说的是同一件事，
+  // 但两句各自指着【自己的那一维】，所以我留着两句。
+  const drv = t && !t.error ? t.driver : undefined;
+  const drvNotice = driverNotice(drv);
 
   $view.innerHTML = `
     <div class="toolbar">
@@ -457,12 +464,13 @@ async function renderBoard() {
     </div>
     ${org.status !== 200 ? banner("warn", "组织图取不到 ⇒ 层级列退化成单列（列由 reports_to 派生，不是写死的六列）。") : ""}
     ${attention === null ? banner("warn", "「需要我注意」的判据来自 GET /today，此刻取不到 ⇒ 该过滤器已置灰。") : ""}
+    ${drvNotice ? banner(drvNotice.level, drvNotice.msg) : ""}
     <div class="board">
       ${byKey
         .map(
           (c) => `<div class="col">
             <div class="colhead"><span>${esc(c.label)}</span><span class="mono">${esc(c.items.length)}</span></div>
-            ${c.items.map((tk) => taskCard(tk, attentionTask(tk), decideTask(tk))).join("") || `<div class="meta">—</div>`}
+            ${c.items.map((tk) => taskCard(tk, attentionTask(tk), decideTask(tk), driverLine(tk.id, drv, t.as_of_ms))).join("") || `<div class="meta">—</div>`}
           </div>`,
         )
         .join("")}
@@ -479,6 +487,108 @@ async function renderBoard() {
 
 /** 触及预算：两个服务端给的数比一下，不算状态机判定（所以可以住在渲块里）。 */
 const overBudget = (t) => t.budget_cents !== null && t.budget_cents !== undefined && t.consumed_cents >= t.budget_cents;
+
+/**
+ * 驱动器那一格（0048 §7）。两个函数都【只排字符，不下判据】——
+ * 「哪些任务已经没人推了」「成因是哪一档」全在 GET /today 响应里（判据为什么住在
+ * hub 侧，见 overview/driver-status.ts 文件头）。这里出现的那两个字符串
+ * `at_limit` / `no_budget` 是【响应里的成因枚举值】，不是任务状态名 ——
+ * 所以它不违反 test/web/renderer-criteria.test.ts 那条（那条扫的是状态名与审批类型名）。
+ *
+ * ⚠ 为什么【不标琥珀】：§19.2 里琥珀唯一的意思是"需要 CEO 决策"，
+ * 而"驱动器不再推这条想法了"多数时候要的是【去看为什么推不动】或【放开预算】，
+ * 不是决策。给它涂琥珀会把琥珀贬值（同 §7.4 那句「预算暂停非琥珀色」）。
+ * 所以这一格用的是 warn 那条横幅 + 卡片上一行 meta，颜色走既有的低对比档。
+ */
+
+/**
+ * 看板顶部那条横幅。
+ *
+ * ⚠ 这一发的【全部价值】在"没开 / 停了"那两支：
+ * 名单为空时，若不说话，屏幕上读到的是「没有任何想法被卡住」= 一切正常，
+ * 而真相可能是"这台 Hub 从来不推任何东西"或"心跳早就停了"。
+ * 那正是 0048 整篇要消灭的形状换了个方向再发生一次，
+ * 所以 driver-status.ts 才把 enabled / pumping 与名单【绑成一次响应】发出来。
+ * 字段整个缺失（老服务端）也走"说话"那一支而不是沉默 —— 缺失意味着
+ * 这一维【没人知道】，而"不知道"与"没有异常"是两句话。
+ */
+function driverNotice(driver) {
+  // ⚠ 先验【形状】再读【值】，而这一刀不是防御式编程的口味问题：
+  // 我第一版直接写 `if (!driver.enabled)`，于是 `driver: {}`（服务端少发了字段）
+  // 会走到「这台 Hub 没开驱动器」那一句 —— 一句从【缺失】里推出来的【肯定陈述】，
+  // 与 HubDeps.driverState 拒绝给默认值是同一族（缺的东西不许被读成一个答案）。
+  // 形状不对 ⇒ 答案是"不知道"，而"不知道"与"没开"是两句话：
+  // 前者的下一步是去看服务端版本/响应，后者的下一步是去起一个开关。
+  if (!driver || typeof driver !== "object" || typeof driver.enabled !== "boolean" || typeof driver.pumping !== "boolean") {
+    return { level: "warn", msg: "服务端没给出驱动器状态 ⇒ 「有没有人推着这些想法」这一维此刻未知（不等于「没有异常」）。" };
+  }
+  if (!driver.enabled) {
+    return {
+      level: "warn",
+      msg: "这台 Hub 没开驱动器：想法停在 agent 那一格之后，不会有任何东西去推它。要自动推进请带 --driver-pump 起 Hub，或手工 hub work。",
+    };
+  }
+  if (!driver.pumping) {
+    return {
+      level: "err",
+      msg: "驱动器已开启但承载它的那条心跳已经停了（通常是一连串失败之后自己停的）⇒ 从现在起没有想法在被推着走。",
+    };
+  }
+  const stopped = Array.isArray(driver.stopped) ? driver.stopped : null;
+  // ⚠ 名单【不是数组】与【是空数组】也不许说成同一句，理由与上面那条 enabled
+  // 一模一样（这里我第一版写的是 `?? []`，于是"字段坏了"读成"没有异常"）。
+  // 今天读侧恒发数组，所以这一支不可达；它留在这里是因为这一整个函数的立场就是
+  // 「每一种没有都要说出它是哪一种」，而在这一点上给它开后门，
+  // 下一处缺字段就又会被读成一次平安。
+  if (stopped === null) {
+    return { level: "warn", msg: "驱动器状态里的「不再推的名单」形状不对 ⇒ 这一维此刻未知（不等于「没有异常」）。" };
+  }
+  if (stopped.length === 0) return null; // 开着、在推、没人被丢下 ⇒ 不打扰
+  const nBudget = stopped.filter((s) => s.cause === "no_budget").length;
+  const nLimit = stopped.length - nBudget;
+  const bits = [];
+  if (nLimit > 0) bits.push(`${nLimit} 条试到上限`);
+  if (nBudget > 0) bits.push(`${nBudget} 条被花钱的门挡住`);
+  return {
+    level: "warn",
+    msg: `驱动器在推，但已经不再推 ${stopped.length} 条想法（${bits.join("、")}）—— 详见看板上标出的那些卡片。`,
+  };
+}
+
+/**
+ * 某一张卡片上那一行「为什么它不动了」；不在名单里就返回空串（卡片形状不变）。
+ *
+ * ⚠ 返回的是【未转义的纯文本】而不是 HTML —— 转义由调用方（taskCard 里那句 esc）
+ * 做一次。这里先 esc 一遍、那边再 esc 一遍，会得到 `&amp;amp;`：
+ * 今天这几个片段（中文、数字、`/`、`·`）里没有会被转义的字符，所以双重转义
+ * 【看不出来】，而它会在有人往措辞里加一个 `<` 或 `&` 的那天变成一串乱码。
+ * 一段文本只该有一次转义，而那次发生在【插进 HTML 的地方】。
+ *
+ * ⚠ nowMs 是【传进来的】而不是在这里读 todayCache：那会让这一发依赖一段
+ * 与它无关的全局状态，test/web/app-pure.test.ts 装载它时 todayCache 恒为 null
+ * ⇒ 落进 Date.now() ⇒ 同一份输入两次跑出不同的字符串。卡片上那句
+ * 「多久之前停的」因此必须是【调用方给的时刻】（同 fmtAgo 自己的签名）。
+ *
+ * 措辞分两档是【必须】的：两档的下一步动作不同 ——
+ *  试到上限 ⇒ 去看角色那一轮为什么推不动；
+ *  被钱挡住 ⇒ 去放开预算（0045 那道门），查 bug 是白跑一趟。
+ * 合成一句"这条卡住了"就等于把选择又丢回给读的人（同 0041 §7 那条判据：
+ * 屏幕上那句话得指向【真的能做的下一步】）。
+ */
+function driverLine(taskId, driver, nowMs) {
+  const stopped = driver && Array.isArray(driver.stopped) ? driver.stopped : [];
+  const row = stopped.find((s) => s && s.task_id === taskId);
+  if (!row) return "";
+  const when = fmtAgo(row.since_ms, nowMs);
+  if (row.cause === "no_budget") {
+    return `不再推：花到了每条任务的上限（${money(driver.task_limit_cents)}）· ${when}`;
+  }
+  const tries =
+    row.attempts !== null && row.attempts !== undefined && row.max_attempts
+      ? `第 ${row.attempts}/${row.max_attempts} 次`
+      : "试到上限";
+  return `不再推：${tries}而它还在原格 · ${when}`;
+}
 
 /**
  * 由 reports_to 派生层级列：CEO 是深度 0，直属下级深度 1，以此类推。
@@ -541,7 +651,7 @@ function groupByDepth(tasks, cols) {
  * 反过来如果成员全涂琥珀，那一列的琥珀就等于"这一列的东西"，
  * 而规格要琥珀等于"这一件等你动手"：同一屏两处语义，扫视失效。
  */
-function taskCard(tk, isAttention, isDecision) {
+function taskCard(tk, isAttention, isDecision, stoppedNote) {
   return `<div class="tk${isDecision ? " decision" : ""}${isAttention && !isDecision ? " flag" : ""}" data-task="${esc(tk.id)}">
     <div class="s">${esc(tk.title)}</div>
     <div class="row" style="margin-top:6px">
@@ -549,6 +659,7 @@ function taskCard(tk, isAttention, isDecision) {
       <span class="meta">${esc(tk.assigned_role)} · ${esc(fmtAgo(tk.updated_at, todayCache ? todayCache.as_of_ms : Date.now()))}</span>
     </div>
     <div class="meta mono">${esc(tk.id.slice(0, 8))} · ${esc(money(tk.consumed_cents))}${tk.budget_cents ? " / " + esc(money(tk.budget_cents)) : " / 未设上限"}</div>
+    ${stoppedNote ? `<div class="meta" data-stopped>${esc(stoppedNote)}</div>` : ""}
   </div>`;
 }
 

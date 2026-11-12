@@ -50,6 +50,7 @@ import { INSERT_DELEGATION_GRAPH_SQL } from "../../src/org/commit.js";
 import { newLocalToken, signedHeaders, NonceGuard } from "../../src/http/auth.js";
 import { LOOPBACK_HOST } from "../../src/http/bind.js";
 import { handleRequest, type HubDeps, type HubRequest } from "../../src/http/app.js";
+import { DRIVER_OFF } from "../fixtures/driver-state.js";
 import { buildHubDeps, insertTask, type HubWriter } from "../../src/http/real-deps.js";
 
 const TMP = fixtureTmp("decision-engine-route", import.meta.url);
@@ -193,6 +194,8 @@ async function hub(opts: {
     token: TOKEN,
     ...(opts.graphFor === undefined ? {} : { graphFor: opts.graphFor as never }),
     now: () => NOW,
+    // 这一文件测的是【决策写路径】选哪条路线，不跑心跳 ⇒ 这台夹具【没在推】。
+    driverState: () => DRIVER_OFF,
     nonces: new NonceGuard(),
   });
 
@@ -398,6 +401,8 @@ describe("默认装配下 CEO 点批准：任务真的走了一条边（0043）"
           invoke: async (fn: () => unknown) => fn(),
         }) as never,
       now: () => NOW,
+      // 这一处是【给了图】那一支，同样不跑心跳 ⇒ 这台夹具【没在推】。
+      driverState: () => DRIVER_OFF,
       nonces: new NonceGuard(),
     });
     const res = await handleRequest(

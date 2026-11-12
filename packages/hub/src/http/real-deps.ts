@@ -746,6 +746,21 @@ export interface RealHubDepsOptions {
   readonly backupBeforeCommit?: (
     req: BackupOffLoopRequest,
   ) => Promise<BackupOffLoopOutcome>;
+  /**
+   * 看板那一格「这台机器有没有在推这条想法」的三个数（0048 §7）。**必填**。
+   *
+   * 与 HubDeps.driverState 同一条理由，而这里多一条【装配层特有的】理由：
+   * buildHubDeps 完全【可以】给它一个 `() => ({enabled:false,…})` 当缺省，
+   * 而那一行的效果是把「这台 Hub 的驱动器状态」这个问题【替所有人答掉】——
+   * 于是真入口忘了传的时候，看板会说「没在推」而真机上驱动器【正在推】，
+   * 症状是「驱动器在花钱而看板说没人推」，比空名单更难查（因为它是一个具体的假话，
+   * 而不是一个明显的缺失）。本文件上面那段「默认值应该是装完就能用那一条」不覆盖这一格：
+   * 那一格讲的是【装不上就退】的路线选择，这一格讲的是【事实的来源】，
+   * 事实没有缺省值。
+   *
+   * ⚠ 收的是【函数】而不是值，同 HubDeps.driverState：它是进程状态而不是配置。
+   */
+  readonly driverState: HubDeps["driverState"];
 }
 
 /**
@@ -800,6 +815,8 @@ export function buildHubDeps(o: RealHubDepsOptions): HubDeps {
     bus: o.bus,
     token: o.token,
     now,
+    // 进程状态直传（不在这里判、不在这里补默认，理由见 RealHubDepsOptions 那一条）。
+    driverState: o.driverState,
     ...(o.nonces === undefined ? {} : { nonces: o.nonces }),
     // 决策的写路径。两条路线的选路在上面的 engineRoute，理由在那段，不重抄。
     recordDecision: async ({ approvalId, taskId, resume, note }) =>

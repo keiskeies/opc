@@ -30,6 +30,7 @@ import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { HTTP_CONFLICT, HTTP_NOT_FOUND, HTTP_NOT_IMPLEMENTED } from "@opc/contracts";
 import { fixtureTmp } from "../fixtures/fixture-dir.js";
+import { DRIVER_OFF } from "../fixtures/driver-state.js";
 import { InMemoryEventBus } from "../../src/events/bus.js";
 import { WriteQueue } from "../../src/db/write-queue.js";
 import { migrate } from "../../src/db/migrate.js";
@@ -110,6 +111,8 @@ async function harness(
     recordDecision: async () => true,
     createTask: async () => {},
     resumeGraph: async () => {},
+    // 这台夹具扮演的是哪一台 Hub（HubDeps.driverState 必填的理由在那边）：这四条测的是鉴权与路由形状，与驱动器无关；选 OFF 是让【夹具扮演的这台】没在推，看板那一格不参与这些断言。
+    driverState: () => DRIVER_OFF,
   };
   return {
     deps,

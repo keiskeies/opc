@@ -33,6 +33,7 @@ import type { DatabaseSync } from "node:sqlite";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { decodeSseFrame, type SseFrame } from "@opc/contracts";
 import { fixtureTmp } from "../fixtures/fixture-dir.js";
+import { DRIVER_OFF } from "../fixtures/driver-state.js";
 import { type DomainEvent, InMemoryEventBus } from "../../src/events/bus.js";
 import { migrate } from "../../src/db/migrate.js";
 import type { HubDeps } from "../../src/http/app.js";
@@ -115,6 +116,8 @@ async function harness(): Promise<Harness> {
     // 本文件测的是 socket、订阅、状态码，不是「图有没有跑」。
     // 真恢复的接线在 test/http/real-deps.test.ts 与 contract.test.ts 那几例里钉。
     resumeGraph: async () => {},
+    // 这台夹具扮演的是哪一台 Hub（HubDeps.driverState 必填的理由在那边）：传输层（真 socket、SSE 回收）那一组；驱动器关着让它的事件源是确定的。
+    driverState: () => DRIVER_OFF,
   };
   const srv = await serveHub(deps, { port: 0 });
   servers.push(srv);

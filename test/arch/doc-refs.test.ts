@@ -292,7 +292,7 @@ const SNAP: Record<string, string> = {
     "const config = JSON.parse(prev.config) as Record<string, unknown>;",
   "0015-charter-editor-and-two-sources-of-budget.md>0001_init.sql:144":
     "CREATE TABLE role_charters (",
-  "0015-charter-editor-and-two-sources-of-budget.md>http/app.ts:1046":
+  "0015-charter-editor-and-two-sources-of-budget.md>http/app.ts:1091":
     'consumed_cents: Number(r["consumed_cents"] ?? 0),',
   "0015-charter-editor-and-two-sources-of-budget.md>tracker.ts:233":
     "const breached = before <= limit && after > limit;",
@@ -463,7 +463,7 @@ const SNAP: Record<string, string> = {
     "export const IMPLEMENTED_ENDPOINTS: readonly ApiEndpoint[] = [",
   "0030-im-binding-identity-and-three-holes-i-did-not-design.md>ipc-surface.ts:171":
     "export const EXPOSED_ENDPOINTS: readonly ApiEndpoint[] = IMPLEMENTED_ENDPOINTS;",
-  "0030-im-binding-identity-and-three-holes-i-did-not-design.md>app.ts:494":
+  "0030-im-binding-identity-and-three-holes-i-did-not-design.md>app.ts:539":
     "const impossible: never = routeHit;",
   "0030-im-binding-identity-and-three-holes-i-did-not-design.md>ipc-surface.test.ts:129":
     "expect(API_ENDPOINTS).toContain(s.endpoint);",
@@ -484,7 +484,7 @@ const SNAP: Record<string, string> = {
     "* ⚠ 脏行【被跳过】而不是 500。这个决定发生在 im.ts 的 listBindings",
   "0031-binding-http-entry-and-a-false-green-i-recorded-as-a-test-result.md>http/bindings.ts:193":
     "// 0030 §8：角色存在性的判据【需要装配方注入 knownRoles】，本模块不猜。",
-  "0031-binding-http-entry-and-a-false-green-i-recorded-as-a-test-result.md>bindings-route.test.ts:470":
+  "0031-binding-http-entry-and-a-false-green-i-recorded-as-a-test-result.md>bindings-route.test.ts:473":
     'it("⭐ 请求体里塞 verified_by ⇒ 422，且库里那一行【不会因为多带一个键就被署名】", async () => {',
   // 0035 这一条是**活坐标**，而且比上面几条更脆 —— 它指向本篇自己新写的那个文件的文件头
   // 第 4 行（「为什么需要这一处」那一行）。它脆是对的：那一行整篇的起因（0025 §7 那一格留给
@@ -553,19 +553,23 @@ const SNAP: Record<string, string> = {
     '"INSERT INTO budget_events (source_event, scope_type, scope_id, period, amount_cents, task_id, created_at) " +',
   "0042-today-view-and-putting-the-criteria-on-the-server-side.md>packages/contracts/src/org/graph.ts:65":
     "export const orgNodeSchema = z",
-  "0042-today-view-and-putting-the-criteria-on-the-server-side.md>packages/hub/src/overview/today.ts:104":
+  "0042-today-view-and-putting-the-criteria-on-the-server-side.md>packages/hub/src/overview/today.ts:108":
     'export const ATTENTION_STATUSES: readonly string[] = ["ESCALATED_TO_CEO", ...BLOCKED_STATUSES];',
   // 0045（任务级预算那道门）新写的两条，登记同轮完成（0006 §7-40 那条规矩），
   // 且都是【活坐标】—— 它们的价值全在"那一行现在还写着那句话"：
   //  ① runtime.ts:109 是 §1 那张表的成因（`ENSERT_TASK_BUDGET_SQL` 的 DO NOTHING
   //     ⇒ budgets.limit_cents 第一次写完再也不改）。有人把它改成 DO UPDATE，
   //     0045 §4「上限那一侧读参数」的那条理由就作废了，快照红逼他回去改 §4 与门本身。
-  //  ② today.ts:263 是「门与预算条读同一个累加器」这条取舍的**对面那一侧**：
+  //  ② today.ts:293 是「门与预算条读同一个累加器」这条取舍的**对面那一侧**：
   //     今日视图求和的正是 budgets.consumed_cents。它若改成读别的列，
   //     §4 那句"读另一列就是再造一个两源分叉"当场失效。
+  // ⚠ 上面 ② 与下面那条 key 的行号在 0049 那轮从 263 顶到 293（today.ts 上方加了 29 行，
+  //   其中 211 行以后是 driver 那一格）—— ① 的 runtime.ts:109 没动，因为它上面没加东西。
+  //   这里特意留下"原来是 263"这一句，是为了让下一次读到红的人知道**这次移动过**：
+  //   快照本身只说"现在那一行写着什么"，而"它被顶过几次"是另一件事（0015 §8 那段同族）。
   "0045-task-budget-gate-and-a-parameter-that-only-existed-on-the-cli.md>packages/hub/src/engine/runtime.ts:109":
     '"INSERT INTO budgets (id, scope_type, scope_id, period, limit_cents, consumed_cents, hard_stop) " +',
-  "0045-task-budget-gate-and-a-parameter-that-only-existed-on-the-cli.md>packages/hub/src/overview/today.ts:263":
+  "0045-task-budget-gate-and-a-parameter-that-only-existed-on-the-cli.md>packages/hub/src/overview/today.ts:293":
     '"SELECT COUNT(*) AS scopes, COALESCE(SUM(consumed_cents), 0) AS consumed, " +',
   "0042-today-view-and-putting-the-criteria-on-the-server-side.md>packages/hub/src/charter/budget-sync.ts:438":
     "export function silentOverBudgets(db: DatabaseSync): BudgetTierRow[] {",
@@ -581,6 +585,21 @@ const SNAP: Record<string, string> = {
   // 快照在这里红，就是逼回来重读那张表，而不是让文档继续指着一个不再写死的值讲"写死"。
   "0048-driver-pump-who-presses-enter-after-the-ceo-approves.md>dispatch.ts:1293":
     'seat: "agent",',
+  // ── 0049 §7：夹具翻车现场的【写入方】坐标 ────────────────────────────────
+  // 这三条不是"活坐标"（没有判据挂在"那一行还写着这句话"上），它们守的是
+  // **本篇 §7 那句"都是真库挡下来的，不是我看出来的"能不能被复算**：
+  // 那三条夹具缺陷各自撞的是哪一条约束，只有落到具体那一行才可复查。
+  // 尤其第 ③ 条 —— `PRAGMA foreign_keys = ON` 一旦被谁关掉，§7 第三发那个
+  // 「先写事件再写任务」的顺序就不再抛错，而那时"外键挡过我"这句话就成了
+  // 一句读不出真假的往事（本仓抓过的那族：注释承诺了实现已经不再具备的性质）。
+  // ⚠ 0001_init.sql 只有 `packages/hub/resources/migrations/` 下一份（find 实测 1 个），
+  //   所以文档里写基名不歧义；而它【不是】.ts，改迁移会换行号 —— 这正是快照在这儿的用场。
+  "0049-driver-status-on-the-board-and-a-bind-order-bug-that-was-green.md>0001_init.sql:167":
+    "id TEXT PRIMARY KEY,",
+  "0049-driver-status-on-the-board-and-a-bind-order-bug-that-was-green.md>0001_init.sql:175":
+    "CREATE UNIQUE INDEX idx_budgets_scope ON budgets(scope_type, scope_id, period);",
+  "0049-driver-status-on-the-board-and-a-bind-order-bug-that-was-green.md>pragmas.ts:28":
+    'db.exec("PRAGMA foreign_keys = ON;");',
 };
 
 describe("决策文档里的「文件:行号」引用不漂移", () => {

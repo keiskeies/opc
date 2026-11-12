@@ -38,6 +38,7 @@ import type { DatabaseSync } from "node:sqlite";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { HTTP_CONFLICT } from "@opc/contracts";
 import { fixtureTmp } from "../fixtures/fixture-dir.js";
+import { DRIVER_OFF } from "../fixtures/driver-state.js";
 import { InMemoryEventBus } from "../../src/events/bus.js";
 import { migrate } from "../../src/db/migrate.js";
 import {
@@ -166,6 +167,8 @@ async function harness(nowMs = NOW): Promise<{
     recordDecision: async () => true,
     createTask: async () => {},
     resumeGraph: async () => {},
+    // 这台夹具扮演的是哪一台 Hub（HubDeps.driverState 必填的理由在那边）：一次性审批票那一条与驱动器无关；OFF 让「没有事件」这个前提在测试里是真的而不是碰巧。
+    driverState: () => DRIVER_OFF,
     redeemApprovalToken: async ({ token, approvalId }) => {
       const r = redeemToken(db as never, {
         rawToken: token,
