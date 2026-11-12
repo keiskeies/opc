@@ -55,8 +55,18 @@ export const DEFAULT_SERVE_USAGE: string = [
   "      --charter-pump --max-budget-usd <美元/轮> --task-limit-cents <美分/任务> --agent-cwd <目录>",
   "      开了之后：停在「等章程」那一格而收件箱里没有卡的任务，每隔一个心跳会由那个角色",
   "      【自己起草一份章程提案】放进 CEO 收件箱。真起子进程、真花钱。",
-  "      ⚠ 这一组同样【没有】env 缺省源，理由与 --bind 同一条而更硬：",
-  "        --bind 打开的是对外暴露，这一组打开的是【持续产生 token 账单】的一件事。",
+  "",
+  "让常驻 Hub 自己往下推任务（默认【不开】，三个上限参数与上面那一组【共用】）：",
+  "      --driver-pump --max-budget-usd <美元/轮> --task-limit-cents <美分/任务> --agent-cwd <目录>",
+  "      开了之后：CEO 批完一张卡之后，停在 agent 那一格的任务【自己往下走】，",
+  "      不需要有人再敲一次 hub work。走到人席（等章程 / 等裁决 / 等终审）就停下等你点。",
+  "      一条任务在同一格【试到上限就不再试】并在终端【说出来】——",
+  "      因为「一直在重试」会让停滞巡检以为这一格有人在看着。每一次是第几轮写在审计行",
+  "      DriverTurnClaimed / DriverTurnAbandoned 的 payload 里（attempt / max_attempts）；",
+  "      用法文本与启动横幅都【不抄那个次数】—— 抄了就是第二个来源，而它漂的时候没人会红）。",
+  "",
+  "      ⚠ 上面两组同样【没有】env 缺省源，理由与 --bind 同一条而更硬：",
+  "        --bind 打开的是对外暴露，这两组打开的是【持续产生 token 账单】的一件事。",
   "",
   "做四件事，按这个顺序：",
   "  1) 抢库文件旁边的写者锁（<db>.lock）。别的进程持着 ⇒ 【拒绝启动】，",
@@ -125,6 +135,18 @@ export interface ServeArgs {
    * （它在那里补一句启动横幅上的实话）。
    */
   readonly agentCwd?: string;
+  /**
+   * 「让常驻 Hub 自己去推 agent 那一格」（0048）。不给 ⇒ 这一整块【不存在】。
+   *
+   * 与 `--charter-pump` 是同一条立场而代价更大：章程泵起的是【一次起草】，
+   * 这一格起的是【一条链上的每一轮】—— 一条想法可能连着烧掉好几轮真钱。
+   * 所以它【单独一个开关】而不与 --charter-pump 合并：
+   * 「补卡」与「推任务」是两件事，合并会让人以为开了一个就开了两个，
+   * 而反过来想只开补卡的人必须连带接受一个会持续跑角色的循环。
+   * 三个花钱的上限（下面那三格）是【两个泵共用】的：同一台 Hub 上
+   * 「一轮给多少美元 / 一条任务给多少美分 / 角色能看见哪些文件」不该有两个答案。
+   */
+  readonly driverPump?: boolean;
   readonly help?: boolean;
   readonly error?: string;
 }
@@ -201,6 +223,7 @@ export function parseServeArgs(
   let bind: string | undefined;
   let ceo: string | undefined;
   let charterPump = false;
+  let driverPump = false;
   let maxBudgetUsd: number | undefined;
   let taskLimitCents: number | undefined;
   let agentCwd: string | undefined;
@@ -278,6 +301,9 @@ export function parseServeArgs(
       }
       case "--charter-pump":
         charterPump = true;
+        break;
+      case "--driver-pump":
+        driverPump = true;
         break;
       case "--max-budget-usd": {
         const raw = argv[i + 1];
@@ -409,8 +435,18 @@ export function parseServeArgs(
    * 心跳已经在跑、库已经开着，而一个手抖漏了 --task-limit-cents 的运维命令
    * 会让人以为「Hub 起来了而泵没起来」，实际是【泵在跑而没有上限】。
    * 参数层判红是【一分钱都没花】的那一次红。
+   *
+   * ⚠ 这一道判据现在吃【两个】开关（charterPump / driverPump），而那两个开关
+   * 【共用】下面那三个上限参数。合用的理由写在 ServeArgs.driverPump 旁边：
+   * 同一台 Hub 上「一轮给多少美元 / 一条任务给多少美分 / 角色能看见哪些文件」
+   * 不该有两个答案。所以这里的判据是【任一开关 ⇒ 三格必填】，
+   * 而报错文案必须【点名是哪个开关要求的】—— 一句"还缺三个参数"
+   * 在命令行上只写了 --driver-pump 的人看起来像答非所问。
    */
-  if (charterPump) {
+  const pumpFlags = [charterPump ? "--charter-pump" : "", driverPump ? "--driver-pump" : ""].filter(
+    (s) => s !== "",
+  );
+  if (pumpFlags.length > 0) {
     const missing: string[] = [];
     if (maxBudgetUsd === undefined) missing.push("--max-budget-usd <美元/轮>");
     if (taskLimitCents === undefined) missing.push("--task-limit-cents <美分/任务>");
@@ -418,10 +454,10 @@ export function parseServeArgs(
     if (missing.length > 0) {
       return {
         error:
-          "--charter-pump 还缺 " +
-          missing.join("、") +
-          "。\n" +
-          "这一格开着 ⇒ 常驻 Hub 每隔一个心跳【自己起一个 claude 子进程去起草章程】，" +
+          pumpFlags.join(" 与 ") + " 还缺 " + missing.join("、") + "。\n" +
+          "这两个开关开着 ⇒ 常驻 Hub 每隔一个心跳【自己起 claude 子进程】：\n" +
+          "  · --charter-pump 补的是「停在等章程那一格而收件箱里没有卡」的那【一轮起草】\n" +
+          "  · --driver-pump   推的是「停在 agent 那一格而没人敲 hub work」的【每一轮】\n" +
           "那是真花钱、真读写文件的一件事。\n" +
           "  · --max-budget-usd 0.5      一轮的美元硬顶（直接落到 --max-budget-usd）\n" +
           "  · --task-limit-cents 500    单条任务的预算上限（美分）\n" +
@@ -431,21 +467,28 @@ export function parseServeArgs(
     }
   }
   /**
-   * 反向那一半也判：给了上限而没给开关 ⇒ USAGE。
+   * 反向那一半也判：给了上限而【两个开关都没给】⇒ USAGE。
    *
    * 这一发看着像苛求（"多给参数有什么用"），它防的是一个具体的误以为：
-   * 一个人写了 `--agent-cwd ~/opc/work --max-budget-usd 0.5` 而漏了 `--charter-pump`，
+   * 一个人写了 `--agent-cwd ~/opc/work --max-budget-usd 0.5` 而漏了那两个开关，
    * Hub 照常起来、照常监听，而他【以为自己把泵开了】。
-   * 那与"从没打算开泵"在症状上一模一样（收件箱一直是空的），
+   * 那与"从没打算开泵"在症状上一模一样（收件箱一直是空的、任务一步不动），
    * 而唯一的排查方向是去读自己那条命令行 —— 本仓抓过多次的那类「配置写了而没生效」。
+   * ⚠ 判据吃的是【两个都没开】而不是【charterPump 关着】：后者会把
+   * 只开 --driver-pump 的人当场拒掉，而那一行命令行【完全正确】。
    * 与 --no-backup / --backup-dir 那条同一手法：矛盾或意图不明的组合，
    * 在启动前判红，不靠顺序决定谁赢。
    */
-  if (!charterPump && (maxBudgetUsd !== undefined || taskLimitCents !== undefined || agentCwd !== undefined)) {
+  if (
+    pumpFlags.length === 0 &&
+    (maxBudgetUsd !== undefined || taskLimitCents !== undefined || agentCwd !== undefined)
+  ) {
     return {
       error:
-        "给了预算/工作目录而没给 --charter-pump：这一格关着的时候那三个参数【一个都不生效】。\n" +
-        "  · 想开泵 ⇒ 补上 --charter-pump（它打开的是「每隔一个心跳自己起子进程花钱」，所以必须显式）\n" +
+        "给了预算/工作目录而没给 --charter-pump 或 --driver-pump：两个开关都关着的时候那三个参数【一个都不生效】。\n" +
+        "  · 想让 Hub 自己补章程卡 ⇒ 补 --charter-pump\n" +
+        "  · 想让 Hub 自己推 agent 那一格 ⇒ 补 --driver-pump（0048：CEO 批完之后不再需要有人敲 hub work）\n" +
+        "  两者打开的都是「每隔一个心跳自己起子进程花钱」，所以必须显式。\n" +
         "  · 不想开 ⇒ 把这三个参数去掉，别留一份【写了而没生效】的配置在命令行里",
     };
   }
@@ -460,6 +503,7 @@ export function parseServeArgs(
     ...(ceo === undefined ? {} : { ceo }),
     ...(noBackup ? { noBackup: true } : {}),
     ...(charterPump ? { charterPump: true } : {}),
+    ...(driverPump ? { driverPump: true } : {}),
     ...(maxBudgetUsd === undefined ? {} : { maxBudgetUsd }),
     ...(taskLimitCents === undefined ? {} : { taskLimitCents }),
     ...(agentCwd === undefined ? {} : { agentCwd }),

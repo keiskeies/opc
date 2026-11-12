@@ -95,7 +95,7 @@
 「worker 起不来 / 120 秒没回话 / 路径打错」被引导去**覆盖自己的库**。
 
 ⚠ **「库路径打错」这一发我起初也算进去了，那是错的**：`dbPath` 不存在时
-`boot` 在 `assemble.ts:370`（`maintenance.ts:529` 同一条）就退回 `EXIT_USAGE` 了，
+`boot` 在 `assemble.ts:398`（`maintenance.ts:529` 同一条）就退回 `EXIT_USAGE` 了，
 **根本走不到这个闸门**。所以真实启动路径上能撞上这个闸门的仪器故障**只有三种**
 （`INTEGRITY_FAILURES`，`integrity.ts:102`）：`worker_unavailable` /
 `worker_timeout`（默认 **120 秒**）/ `worker_error` —— 本篇那个缺陷就是第三种。

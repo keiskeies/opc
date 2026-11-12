@@ -517,11 +517,11 @@ const SNAP: Record<string, string> = {
     "export const INTEGRITY_FAILURES = [",
   "0037-worker-import-in-threads-and-my-first-fix-was-wrong.md>integrity.ts:1200":
     '* `verdict === "not_observable"` / `"could_not_run"` 都【不算】损坏：',
-  // 305 → 316 → 370：两次漂移都是【同一文件上方被插入内容顶下去】（0043 的引擎 import
-  // 与 0044 的泵那两段）。⚠ 这里我【没有】按 diff 行数推算 —— 0016 那一组已经因为推算
-  // 被抓过第五次。改坐标前 `sed -n '370p' packages/hub/src/serve/assemble.ts` 读过原文，
-  // 确认还是那一行 `if (!existsSync(dbPath)) {` 才写。
-  "0037-worker-import-in-threads-and-my-first-fix-was-wrong.md>assemble.ts:370":
+  // 305 → 316 → 370 → 398：每一次漂移都是【同一文件上方被插入内容顶下去】（0043 的引擎 import
+  // 与 0044 的泵那两段；398 这一次是 0048 的驱动器那两段）。⚠ 这里我【没有】按 diff 行数推算 ——
+  // 0016 那一组已经因为推算被抓过第五次。改坐标前 `sed -n '398p' packages/hub/src/serve/assemble.ts`
+  // 读过原文，确认还是那一行 `if (!existsSync(dbPath)) {` 才写。
+  "0037-worker-import-in-threads-and-my-first-fix-was-wrong.md>assemble.ts:398":
     "if (!existsSync(dbPath)) {",
   "0037-worker-import-in-threads-and-my-first-fix-was-wrong.md>maintenance.ts:529":
     "if (!existsSync(dbPath)) {",
@@ -573,6 +573,14 @@ const SNAP: Record<string, string> = {
     "export const EXPOSED_ENDPOINTS: readonly ApiEndpoint[] = IMPLEMENTED_ENDPOINTS;",
   "0042-today-view-and-putting-the-criteria-on-the-server-side.md>http/real-deps.ts:586":
     "* 放进那一个事务里（与 insertCard 同事务，理由写在 cards.ts createCard 第 ① 条），",
+  // ── 0048 §4.2 ───────────────────────────────────────────────────────────
+  // dispatch 成功那一支返回的对象里 `seat` 是**写死的 "agent"**。
+  // 0048 §4.2 那条「harness_calls.exit_code 分的是『有没有放 agent 进场』而不是
+  // 『这一轮成不成』」整段结论就挂在这一格上：如果哪天成功支改成回传真实席位
+  // （例如落点是人席时回 "human"），§4.2 那张表的后两行就要重写 ——
+  // 快照在这里红，就是逼回来重读那张表，而不是让文档继续指着一个不再写死的值讲"写死"。
+  "0048-driver-pump-who-presses-enter-after-the-ceo-approves.md>dispatch.ts:1293":
+    'seat: "agent",',
 };
 
 describe("决策文档里的「文件:行号」引用不漂移", () => {

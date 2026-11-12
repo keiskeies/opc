@@ -39,6 +39,18 @@ process.stdin.on("end", () => {
     setInterval(() => {}, 1000);
     return;
   }
+  // mode=cwd：把【子进程自己的】cwd 与收到的 --max-budget-usd 塞进 decision.summary，
+  // 而不是只塞进下面那份回显 JSON。
+  // 为什么驱动器那条路需要这一档而章程那条不需要：charter.ts 会把回显 JSON 折进
+  // 卡片第二行（impact_scope），所以那边读得到 cwd 与 budget；dispatch 这条路上
+  // 进正文的只有 decision.summary（`edge.why + "：" + d.summary`），回显 JSON 整块
+  // 落在审计之外 —— 于是"--agent-cwd / --max-budget-usd 真的到了子进程"这两格
+  // 在驱动器那一侧【读不回来】。判据要能读回来，就得让桩把那两个值放进一条
+  // 【会被折进审计】的位置。
+  const summary =
+    mode === "cwd"
+      ? "cwd=" + process.cwd() + " budget=" + (argv.includes("--max-budget-usd") ? argv[argv.indexOf("--max-budget-usd") + 1] : "(缺)")
+      : "方案已成型，交技术总监审阅";
   // 把收到的关键参数回显进 result，好让测试断在【真的传了 --resume】上，
   // 而不是断在「测试作者以为传了」。
   const resumed = argv.includes("--resume") ? (argv[argv.indexOf("--resume") + 1] ?? "") : "";
@@ -55,7 +67,7 @@ process.stdin.on("end", () => {
     JSON.stringify(echoed) +
     "\n\n" +
     "<<<OPC_DECISION>>>\n" +
-    JSON.stringify({ action: "handoff", to_role: "tech", summary: "方案已成型，交技术总监审阅" });
+    JSON.stringify({ action: "handoff", to_role: "tech", summary });
   process.stdout.write(
     JSON.stringify({ is_error: false, result: body, session_id: sessionId, total_cost_usd: 0.042 }),
   );

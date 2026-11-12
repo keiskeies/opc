@@ -402,3 +402,115 @@ describe("--charter-pump：默认不开，开了就要三件同伴", () => {
   });
 });
 
+/**
+ * ── 驱动器这一组参数（0048）──────────────────────────────────────────
+ *
+ * 三个上限参数【共用】而开关是两个，所以这一组判据的重心不在"参数解析"
+ * （上面那组已经逐格判过形状了），而在【两个开关之间的四种组合】：
+ * 判据吃的是「任一开关 ⇒ 三格必填」与「两个都没给 ⇒ 三格不许出现」。
+ * 那两处任何一处写窄了（`if (charterPump)` 而不是 `if (pumpFlags.length > 0)`），
+ * 只写 --driver-pump 的人就会被一条【他自己没写过的】报错挡住，
+ * 或者反过来：写了三个上限而两个开关都没给，Hub 照常起来而他以为自己开了。
+ */
+const DPUMP = ["--driver-pump", "--max-budget-usd", "0.5", "--task-limit-cents", "500", "--agent-cwd", "/tmp/work"];
+
+describe("--driver-pump：默认不开，开了就要同样那三件同伴", () => {
+  it("默认【不开】：结果里根本没有 driverPump 这个键", () => {
+    const r = parseServeArgs(BASE, CLEAN);
+    expect(r.error).toBeUndefined();
+    // 断「键不存在」而不是「值为 undefined」：下游 assemble 判的是【有没有填】
+    // （driverPump 那一格是 `?: boolean`，而 driverOn 读的是 args.driverPump === true）。
+    expect(Object.prototype.hasOwnProperty.call(r, "driverPump")).toBe(false);
+  });
+
+  it("四个一起给 ⇒ 解析出来，而 charterPump 【不】被连带打开", async () => {
+    const r = parseServeArgs([...BASE, ...DPUMP], CLEAN);
+    expect(r.error).toBeUndefined();
+    expect(r.driverPump).toBe(true);
+    expect(r.maxBudgetUsd).toBe(0.5);
+    expect(r.taskLimitCents).toBe(500);
+    expect(r.agentCwd).toBe("/tmp/work");
+    // ⭐ 两个开关【各开各的】。连带打开的话，只开驱动器的人会同时得到一条
+    // 他没要过的、真起子进程去起草章程的路径 —— 那是两条独立的花钱决定被
+    // 一个参数打开，而 --charter-pump 那条"必须显式"的立场就没了。
+    expect(Object.prototype.hasOwnProperty.call(r, "charterPump")).toBe(false);
+  });
+
+  it("⭐ 只给 --driver-pump 而少任一件同伴 ⇒ USAGE，且报错点名【缺的那一件】与【是哪个开关】", () => {
+    for (const drop of ["--max-budget-usd", "--task-limit-cents", "--agent-cwd"]) {
+      const i = DPUMP.indexOf(drop);
+      const argv = [...BASE, ...DPUMP.slice(0, i), ...DPUMP.slice(i + 2)];
+      const r = parseServeArgs(argv, CLEAN);
+      expect(r.error).toContain(drop);
+      // 报错必须说【是 --driver-pump 要求的】。一句"还缺三个参数"对只写了
+      // --driver-pump 的人来说像答非所问 —— 他不知道自己什么时候惹到了章程泵。
+      expect(r.error).toContain("--driver-pump");
+      expect(r.driverPump).toBeUndefined();
+    }
+  });
+
+  it("⭐ 两个开关【同时】给而缺同伴 ⇒ 报错把两个开关都点出来", () => {
+    // 只点一个的坏法：一个人按两个都开去理解那句报错，去补了一个"没要求他补"的开关，
+    // 而真正缺的那一格还在缺。两个都写出来，他才知道这条命令行上有两条要求。
+    const r = parseServeArgs(
+      [...BASE, "--charter-pump", "--driver-pump", "--max-budget-usd", "0.5", "--agent-cwd", "/tmp/w"],
+      CLEAN,
+    );
+    expect(r.error).toContain("--charter-pump");
+    expect(r.error).toContain("--driver-pump");
+    expect(r.error).toContain("--task-limit-cents");
+  });
+
+  it("⭐ 只给三个上限而【两个开关都没给】⇒ USAGE，且两个开关都在建议里", () => {
+    // 判据吃的是【两个都没开】而不是【charterPump 关着】：后者会把
+    // 只开 --driver-pump 的人当场拒掉，而那一行命令行【完全正确】。
+    // 这一发就是钉那一步：先证明"只开驱动"这一行是能过的。
+    expect(parseServeArgs([...BASE, ...DPUMP], CLEAN).error).toBeUndefined();
+    const r = parseServeArgs([...BASE, "--max-budget-usd", "0.5", "--agent-cwd", "/tmp/w"], CLEAN);
+    expect(r.error).toContain("--driver-pump");
+    expect(r.error).toContain("--charter-pump");
+    expect(r.error).toContain("不生效");
+    expect((r as { maxBudgetUsd?: number }).maxBudgetUsd).toBeUndefined();
+  });
+
+  it("⭐ 只给【其中一个】开关时，反向那一半【不许】把另一条开关当成缺的东西", () => {
+    // 反向判据一旦写成"三格给了就必须两个开关都在"，只开驱动器的人会被要求
+    // 去补 --charter-pump —— 一句要求他打开【另一件花钱的事】的报错。
+    const r = parseServeArgs([...BASE, ...DPUMP], CLEAN);
+    expect(r.error).toBeUndefined();
+    const c = parseServeArgs([...BASE, "--charter-pump", ...DPUMP.slice(1)], CLEAN);
+    expect(c.error).toBeUndefined();
+  });
+
+  it("⭐ 没有 OPC_DRIVER_PUMP / OPC_* 这类 env 缺省源", () => {
+    // 与 --bind / --charter-pump 同一手法：断言【没有】一个功能。
+    // 这一格比 --bind 更该钉：账单是事后才知道的，到那时"我当时看见过这个参数"
+    // 那条防线已经不在了。而驱动器比章程泵更贵（一趟推若干格而不是一轮起草）。
+    expect(DEFAULT_SERVE_USAGE).not.toContain("OPC_DRIVER");
+    const r = parseServeArgs(BASE, { OPC_DRIVER_PUMP: "1", OPC_MAX_BUDGET_USD: "99", OPC_TASK_LIMIT_CENTS: "1" });
+    expect(r.error).toBeUndefined();
+    expect(r.driverPump).toBeUndefined();
+    // 反向对照：同一组值走命令行时【确实】能被读到 ——
+    // 证明上面那个 undefined 不是「整个开关没接上」造成的。
+    expect(parseServeArgs([...BASE, ...DPUMP], CLEAN).driverPump).toBe(true);
+  });
+
+  it("用法文本里这一组也是【单独一段】，且【不抄】按格尝试次数", () => {
+    expect(DEFAULT_SERVE_USAGE).toContain("--driver-pump");
+    // ⭐ 不写具体次数（3）：那三格上限没有 CLI 入口，只能由装配注入，
+    // 用法文本里写一个缺省常量 = 第二个来源，它漂的时候没有任何东西会红，
+    // 而读的人会拿屏幕上的数字去对审计里的 attempt/max_attempts 并判定系统坏了。
+    // 这一发钉的是【那句自我承诺】：文案说"不抄"，所以它自己必须真的没抄。
+    expect(DEFAULT_SERVE_USAGE).toContain("不抄那个次数");
+    const driverBlock = DEFAULT_SERVE_USAGE.split("\n")
+      .filter((l) => l.includes("驱动") || l.includes("driver") || l.includes("同一格"))
+      .join("\n");
+    expect(driverBlock).not.toMatch(/试\s*[0-9]+\s*次/);
+    // 而它得指一个【真的存在】的地方，而不是指回一条不含那个数的横幅
+    // （我第一版写的是"看 serve 启动横幅" —— 那条横幅【故意】不含次数，
+    //   那是一句把人支去查一样不存在的东西的话。0048 记这一条。）
+    expect(DEFAULT_SERVE_USAGE).toContain("DriverTurnClaimed");
+    expect(DEFAULT_SERVE_USAGE).toContain("max_attempts");
+  });
+});
+

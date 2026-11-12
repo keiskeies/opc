@@ -84,6 +84,15 @@ import {
   type PumpOptions,
   type PumpRoundResult,
 } from "./charter-pump.js";
+import {
+  DEFAULT_DRIVER_MAX_TURNS,
+  DEFAULT_DRIVER_TASK_LIMIT,
+  driveTasks,
+  worstDriveWaitMs,
+  type DriveOptions,
+  type DriveRoundResult,
+  type DriveTaskFn,
+} from "./driver-pump.js";
 import type { TaskGraph } from "../http/real-deps.js";
 import {
   DEFAULT_SERVE_USAGE,
@@ -245,6 +254,25 @@ export interface BootOverrides {
    * 必须【两格都给】，而不是给了假的 runTurn 就指望执行日志还是真的。
    */
   readonly pumpRecordTurn?: EngineRuntime["recordTurn"];
+  /**
+   * 驱动器的执行点（0048）。默认 `driveTasks`。与上面 `charterPumpVia` 同一条分工：
+   * 这一格换掉的是【整趟】（候选 SQL、认领行、放弃判定全都不跑）。
+   *
+   * ⚠ 装配层那三条主张（「开了才跑」「一轮只派一份」「关机等到落地」）
+   * 全在【泵自己内部】的外面，所以它们只能靠换掉整趟来数 —— 与章程泵同一条理由。
+   */
+  readonly driverPumpVia?: (w: HubWriter, bus: EventBus, o: DriveOptions) => Promise<DriveRoundResult>;
+  /**
+   * 推一条任务那一发（透传给 DriveOptions.driveTask）。与上一条的关系同
+   * charterPumpVia / pumpCardDeps 那一对：via 换整趟，这一格只换【最里面那一发】，
+   * 于是【候选 SQL、认领行、上限判定、放弃那一行】都还在跑。
+   *
+   * ⚠ 同样【不能】靠这一格把驱动器打开：开关永远是 args.driverPump。
+   */
+  readonly driveTask?: DriveTaskFn;
+  /** 透传，测试用它把「三次」变成「一次」。 */
+  readonly driverMaxAttempts?: number;
+  readonly driverTaskLimit?: number;
 }
 
 export type BootResult =
@@ -467,6 +495,32 @@ export async function boot(
    * 所以起草走【派发】而不是【等待】，与备份同一条路：关机时由 settle 等它落地。
    */
   const pumpWatch = createInFlightWatch<void>();
+  /**
+   * 在飞的驱动轮（0048）。与 pumpWatch 【分开而不合成一个】，理由与
+   * backupWatch / pumpWatch 分开那条同一条而更硬：
+   * 一轮章程起草上限 180 秒，而驱动器一次 advance 最多跑 12 格 ——
+   * 每格都可能再花到那个 180 秒上限。合成一个 watch 的话，
+   * 【一轮起草会把整趟驱动挡住】，而驱动那一趟本来就该在起草排队时照跑
+   * （两者挑的是【不同的任务】：起草挑 CHARTER_PENDING，驱动挑 agent 那一族）。
+   *
+   * 同样【不 await】：await 它会走 timer.ts 那条「上一轮心跳还没结束，本轮跳过」，
+   * 于是【一次推任务把停滞检测与每日备份停掉】，而那一支不计失败、不触发 onFatal、
+   * 不退进程 —— 完全静默（0044 量的那一发）。派发 + 关机时 settle 是同一条路。
+   */
+  const driverWatch = createInFlightWatch<void>();
+  /**
+   * 关机那句「最坏等多久」的两个乘数（0048）。真设置算出来之后被覆盖。
+   *
+   * 自带一份【与真默认值同源的】初值而不是 `const` 读下面那个 settings：
+   * 那个 settings 在 try 的很深处才赋值，而 giveUpInner 可能在它之前被 finally 触发。
+   * 今天那条路径读不到它（inFlight 为真意味着驱动轮已经在跑，那时早已赋值），
+   * 但"报出去的数字对不对"不该依赖别处一个布尔的控制流。
+   * 初值取常量而【不自己写两个数字】：抄数字就是第二个来源。
+   */
+  let driverWait: { readonly taskLimit: number; readonly maxTurns: number } = {
+    taskLimit: DEFAULT_DRIVER_TASK_LIMIT,
+    maxTurns: DEFAULT_DRIVER_MAX_TURNS,
+  };
 
   /**
    * 「因为没钱而不再补这张卡」已经对哪条任务【说过一次话】了。
@@ -481,6 +535,29 @@ export async function boot(
    *   换来的是这个信号不会把自己淹掉。登记在 0045 §6。
    */
   const pumpBudgetWarned = new Set<string>();
+  /**
+   * 驱动器那一侧的同名集合（0048）。
+   *
+   * ⚠ 我第一版给这一格写的理由是「同一个 taskId 会合法地在两侧各被挡一次」，
+   * 那句话【今天不成立】，而它是【没查就写】的：量过之后是
+   *   · `grep 'to: "CHARTER_PENDING"' packages/hub/src/` = 0 处（charter-pump.ts 文件头
+   *     记的同一条事实，那里用它支撑「计数只可能来自起草轮」），
+   *   · 而 CHARTER_PENDING 【不在】DRIVER_ELIGIBLE_STATES 里（它是人类席位，无 agent 出边）。
+   * ⇒ 两个泵挑的任务集合【今天是可证明地不交】。所以"共用一个 Set 会漏掉第二句"
+   * 是一个【我今天构造不出例子】的论证 —— 那种论证写在注释里的代价不是难看，是下一个人
+   * 会照它去"修"一个不存在的 bug（0047 §7 我刚刚为同一件事改过一次文档）。
+   *
+   * 那为什么还是两个而不是合成一个？理由要落在能量出来的那半边：
+   *   ① 今天不交 ⇒ 合成一个【今天观测不到任何差别】（既不多说一句也不少说一句）。
+   *      "合起来更简洁"因此不是一个能支持合并的证据 —— 它连红都造不出来。
+   *   ② 会打破①的那一天是【有人补上"退回的章程该去哪条边"】那天（0044 §9.1 正等这个），
+   *      那条边一存在，同一 taskId 就会在两侧各自该说一句，而共用集合会咽掉第二句。
+   *   ③ ②的代价（少一句真话，且少的那句恰好是"这条已花钱的任务又停了"）
+   *      与今天合并省下的东西（一个 Set 的声明）不对称。
+   * 所以这一格的身份是【今天不承重的保险】—— 与 charter-pump.ts 里那条
+   * 「候选为空那道早退是等价变异而今天不承重」同一类，写清楚比让它看起来像判据诚实。
+   */
+  const driverBudgetWarned = new Set<string>();
 
   /**
    * 唯一的清理出口。成功时的 shutdown 与失败时的 finally 走【同一段代码】——
@@ -505,13 +582,16 @@ export async function boot(
    */
   let cleaning: Promise<void> | null = null;
   const giveUpInner = async (): Promise<void> => {
-    // 两道 beginCancel 【都在任何 await 之前】，而且是【两个 watch 各一次】：
+    // ⭐ beginCancel 【全在任何 await 之前】，而且是【三个 watch 各一次】：
     // 0025 §3 第 ④ 条那一族管的是"关机已经开始而下面又派了新活"，
-    // 而泵与备份是两条会派新活的路 —— 只关一道，另一道在 settle 那段时间里
-    // 仍然能被【最后一轮心跳】叫到（heartbeat.stop() 只挡【新]的一轮，
-    // 已经在跑的那一轮走到派发那一行时挡不住）。
+    // 而备份 / 章程泵 / 驱动器是【三条会派新活的路】—— 只关其中两条，
+    // 剩下那条在 settle 那段时间里仍然能被【最后一轮心跳】叫到
+    // （heartbeat.stop() 只挡【新】的一轮，已经在跑的那一轮走到派发那一行时挡不住）。
+    // ⚠ 这一处从两条变三条时，注释里那句「两个 watch 各一次」也跟着改了 ——
+    //   一句写着"两个"的注释配三行代码，是下一个删掉一行的人的许可证。
     backupWatch.beginCancel();
     pumpWatch.beginCancel();
+    driverWatch.beginCancel();
     heartbeat?.stop();
     // 等一份在飞的备份。settle() 永不 reject（rejection 在 watch.start 里面被吞掉，
     // 而那句「备份没得出结论」由派发处自己 catch 之后说 —— 见 job 那里），
@@ -538,6 +618,40 @@ export async function boot(
       );
     }
     await pumpWatch.settle();
+    /**
+     * 等一趟在飞的驱动轮【也必须在这一步】，而同一条理由（写队列 + 锁）之外
+     * 还有一条更硬的：驱动器【先写认领行再花钱】（driver-pump.ts 文件头那条），
+     * 所以在【中间】被切断不会留下假记录，但会留下【半条状态链】——
+     * 一轮 advance 里那条链是一个事务（dispatch 内部），事务没提交就是【没发生】，
+     * 而 append-only 的审计库不能出现"钱花了而链半截"这种无法解释的形状。
+     *
+     * ⚠ 等的最坏情况【必须说准】，而它不是章程泵那个 180 秒。
+     * 我第一版在这里抄的是"最坏 180 秒"—— 那是【抄上一段的话而没算这一趟】，
+     * 错了一个数量级：一趟驱动 = 至多 taskLimit 条任务 × 每条至多 maxTurns 格
+     * × 每格至多 180 秒。默认 3 × 12 × 180s = 6480 秒 = 【1 小时 48 分】。
+     * （⚠ 我第一版在【这两处注释】里都写成"3 小时 12 分"—— 那是【从上一段的话推出来的数】
+     * 而不是算出来的，被 driver-pump.test.ts I 组那发红出来才改掉。0048 记这一条。）
+     * 一句"最坏三分钟"的承诺会让人老老实实等，而等到第四分钟他会判定进程死锁并 kill -9 ——
+     * 那正是这句话本来要防的那一步。所以下面那句把【三个乘数与它们的参数名】都打出来，
+     * 让人能自己判断要不要去改配置而不是去改信号。
+     * （数字来自 bounds，不写死字面量：有人把 --driver-task-limit 调小，这句话要跟着变。）
+     */
+    if (driverWatch.inFlight) {
+      io.warn(
+        "有一趟驱动还在飞 ⇒ 等它落地再关队列。\n" +
+          "→ 最坏要等【" +
+          worstDriveWaitMs(driverWait) +
+          "】：一趟 = 至多 " +
+          driverWait.taskLimit +
+          " 条任务 × 每条至多 " +
+          driverWait.maxTurns +
+          " 格 × 每格至多 180 秒（claude 那一发的 SIGKILL 上限）。\n" +
+          "→ 【不要 kill -9】：等只是慢；kill -9 会留下没关的连接、没提交的事务，" +
+          "而那时钱已经花了而状态边没落库（审计里查不到那一轮，只能从 harness_calls 反推）。\n" +
+          "→ 嫌等太久就把每轮推几条 / 每条推几格调小（那两个数就是为这件事存在的）。",
+      );
+    }
+    await driverWatch.settle();
     if (server !== null) {
       try {
         await server.close();
@@ -752,18 +866,33 @@ export async function boot(
         ok: false,
         code: EXIT_USAGE,
         message:
-          "--charter-pump 开着而这几格不成立：" +
+          "花钱的那两个开关（--charter-pump / --driver-pump）开着而这几格不成立：" +
           bounds.bad.join("、") +
-          "\n→ 泵会【真起一个 claude 子进程】去起草章程，所以没有上限时不能起。" +
+          "\n→ 两个开关都会【真起 claude 子进程】（一个起草章程，一个推角色干活），" +
+          "所以没有上限时不能起。" +
           "\n  走命令行时 parseServeArgs 会先拦掉；走到这一发说明 args 是直接构造的" +
           "（Electron 主进程那条路），那就得在那里补齐这三格。",
       };
     }
-    // 泵开没开 = bounds 是不是带出了三格。【不另设一个 args.charterPump === true】：
-    // 两个来源判同一件事，就有两处要同步改，而忘改一处的表现是
-    // "泵关着而泵那段代码在跑"（或反之 —— 0043 §4 那族「同一个事实两个来源」）。
-    const pumpOn = bounds.ok === true;
-    if (pumpOn) {
+    /**
+     * ⭐ 0048 起这里【不再是一个 pumpOn 而是两个】，而那不是一个审美决定。
+     *
+     * 原来那一句 `const pumpOn = bounds.ok === true` 把【两个不同的问题】合成一个布尔：
+     *   ① 那三格上限有效吗（bounds 回答的）
+     *   ② 章程泵开着吗（下面那句启动横幅回答的，而它读的就是 ①）
+     * 只有一个开关时 ① 与 ② 恰好等价，所以那次合成看不出问题。
+     * 加了 --driver-pump 之后它们【分岔】：只开驱动器的话 ① 真而 ② 假，
+     * 而那句横幅会说「章程卡【由泵起草】」—— 一句写在【关着的泵】上的谎话，
+     * 且它下面两行还在教人敲 hub work，两句矛盾的话打在同一屏。
+     * 所以：charterOn / driverOn 各读【各自的开关】，bounds 只贡献那三个数。
+     *
+     * 这与 0044 那句「不另设一个 args.charterPump === true」不冲突 ——
+     * 那条禁的是【同一个问题】有两个来源；这里是【两个问题】各有一个来源。
+     * 合成回去才是把"哪个泵开着"这件事变成两个来源（bounds 与开关）。
+     */
+    const charterOn = args.charterPump === true && bounds.ok === true;
+    const driverOn = args.driverPump === true && bounds.ok === true;
+    if (bounds.ok === true) {
       // ⚠ 目录【存在与否】不在那道形状判据里，而这是有意的分界：config.ts 是纯函数、
       // 不碰 fs（它文件头那条），到这一刻才第一次有条件看文件系统。
       // 而这一发【不判致命】，理由要说清：目录不存在时真那一发是 spawn 时的 ENOENT，
@@ -776,23 +905,45 @@ export async function boot(
         io.warn(
           "--agent-cwd 指向的目录现在【不存在】：" +
             bounds.bounds.cwd +
-            "\n→ 泵照开，不拦。真起子进程那一刻会撞 ENOENT，那会被记成一次【失败的起草】" +
-            "（审计里有原文），试到上限后泵【自己不再试】并留一行 CharterDraftAbandoned。\n" +
+            "\n→ 泵照开，不拦。真起子进程那一刻会撞 ENOENT，那会被记成一次【失败的执行轮】" +
+            "（审计里有原文），试到上限后泵【自己不再试】并留一行放弃记录" +
+            "（章程那侧 CharterDraftAbandoned，驱动那侧 DriverTurnAbandoned）。\n" +
             "→ 不是致命错，但代价是【三轮失败才停】。这个目录该由谁建，是启动脚本的事。",
         );
       }
-      io.warn(
-        "章程泵【已开】（--charter-pump）：每隔一个心跳，停在「等章程」而收件箱里没有卡的任务，\n" +
-          "会由 assigned_role 那个角色【自己起草一份章程提案】放进 CEO 收件箱。\n" +
-          "  一轮硬顶 " +
-          bounds.bounds.maxBudgetUsd +
-          " 美元 / 单条任务上限 " +
-          bounds.bounds.taskLimitCents +
-          " 美分 / 工作目录 " +
-          bounds.bounds.cwd +
-          "\n这是【真起子进程、真花钱】的一件事，而它现在由这台常驻进程自动做。" +
-          "泵只【起草】—— 那张卡仍然要 CEO 点，没有任何一条边被自动批掉。",
-      );
+      if (charterOn) {
+        io.warn(
+          "章程泵【已开】（--charter-pump）：每隔一个心跳，停在「等章程」而收件箱里没有卡的任务，\n" +
+            "会由 assigned_role 那个角色【自己起草一份章程提案】放进 CEO 收件箱。\n" +
+            boundsLine(bounds) +
+            "\n这是【真起子进程、真花钱】的一件事，而它现在由这台常驻进程自动做。" +
+            "泵只【起草】—— 那张卡仍然要 CEO 点，没有任何一条边被自动批掉。",
+        );
+      }
+      if (driverOn) {
+        /**
+         * 驱动器那句横幅。它与章程泵那句【分开打】而不合并成一句"泵已开"：
+         * 两个开关是两条独立的决定，而横幅是这个人唯一能看到「这台机器接下来会
+         * 自己花钱」的地方 —— 合并之后只开一个开关的人会读到两个都开了。
+         *
+         * ⚠ 那句「同一格试到上限就停并说出来」不是宣传话而是【判据的复述】：
+         * 上限本身在 driverCandidatesSql，而这一句复述的是它的【数量级承诺】。
+         * 所以这里【不写具体次数】—— 写死一个数字就是第二个来源，
+         * 它漂的时候（有人把 DEFAULT_DRIVER_MAX_ATTEMPTS 调成 5）没人会红，
+         * 而读的人会拿屏幕上的数字去对审计里的 attempt/max_attempts 并判定系统坏了。
+         */
+        io.warn(
+          "驱动器【已开】（--driver-pump）：每隔一个心跳，停在 agent 那一格（拆解 / 干活 / 审阅）的任务\n" +
+            "会被 assigned_role 那个角色【自己推一轮】，一路走到需要你的那一格才停。\n" +
+            boundsLine(bounds) +
+            "\n这是【真起子进程、真花钱】的一件事：一条想法可能连着烧掉好几轮。" +
+            "走到人席（等章程 / 等你裁决 / 等终审）它就【停下等你点】—— " +
+            "没有任何一条人类边被自动批掉。\n" +
+            "→ 同一格试到上限就不再试，并在这个终端【说出来】。那句要响：驱动器每推一轮都在审计里" +
+            "留一行，而停滞巡检把「有审计行」读成「这一格有人在看着」—— " +
+            "还在试的那几轮里巡检【看不见这一格】，到顶那一刻的当场信号只有这一句。",
+        );
+      }
     }
 
     // 启动时就把「这一台 Hub 的决策写路径是哪一条」说出来，而不是等到有人点批准才发现。
@@ -809,9 +960,18 @@ export async function boot(
       io.warn(
         "决策写路径 = 【引擎那一条】：CEO 点批准 ⇒ 认领卡片 + 状态边 + 审计，一个事务，\n" +
           "任务真的往前一格（例如 CHARTER_PENDING → CHARTER_APPROVED）。不需要图运行时。\n" +
-          // ⚠ 下面这一句【按 pumpOn 取措辞】，别把它改回常量。理由见上面那段。
-          (pumpOn
-            ? "章程卡【由泵起草】（上面那段就是它开的），CHARTER_APPROVED 之后的每一步仍要有人跑\n"
+          // ⚠ 下面这一句【按 charterOn / driverOn 取措辞】（0048 起是三态，别改回两态）。
+          // 原来那句读的是 pumpOn，而 pumpOn 当时等价于「章程泵开着」。
+          // 两态版在只开驱动器的情况下会说「CHARTER_APPROVED 之后的每一步都要有人跑」——
+          // 那正是驱动器已经不需要的那件事，而它会让人去敲一条【系统已经自己敲过】的命令。
+          (charterOn || driverOn
+            ? charterOn && driverOn
+              ? "这一台 Hub【两个泵都开着】：章程卡由泵起草，之后的每一格由驱动器自己往前推\n" +
+                "  —— 你只在三处出现：批章程、裁决升级、终审。不需要有人敲 hub work。\n"
+              : charterOn
+                ? "章程卡【由泵起草】（上面那段就是它开的），CHARTER_APPROVED 之后的每一步仍要有人跑\n"
+                : "章程卡【没人起草】（没开 --charter-pump）：CHARTER_PENDING 那一格仍要有人先跑一次 work，\n" +
+                  "  而批完之后【由驱动器自己往下推】（上面那段就是它开的），不需要再逐格敲命令\n"
             : "本入口【不跑角色也不起草章程卡】：CHARTER_APPROVED 之后的每一步都要有人跑\n") +
           "  pnpm hub:engine work --db " +
           dbPath +
@@ -1008,6 +1168,40 @@ export async function boot(
         : null;
 
     /**
+     * 驱动器（0048）的执行点与那一轮的设置，与上面 pumpVia / pumpSettings 同一对形状，
+     * 包括那条 `Omit<…, "nowMs">` —— 时刻不属于启动时算好的设置，理由写在上面那段
+     * （写成必填就得给一个值，而那个值每轮被覆盖；下一次重构把它当缺省读走的那天，
+     * 审计里所有认领行的 created_at 会等于启动时刻，而"这是第几次"正是尝试上限的判据）。
+     *
+     * ⚠ 三格上限【从同一份 bounds 取】，与章程泵共用。这不是偷懒而是那三格的语义：
+     * 「一轮给多少美元 / 一条任务给多少美分 / 角色能看见哪些文件」在一台 Hub 上
+     * 只能有一个答案，两个泵各要一份会得到"同一个子进程被两套上限管着"。
+     */
+    const driverVia =
+      o.driverPumpVia ??
+      ((w: HubWriter, bus2: EventBus, dopt: DriveOptions): Promise<DriveRoundResult> =>
+        driveTasks(w, bus2, dopt));
+    const driverSettings: Omit<DriveOptions, "nowMs"> | null =
+      driverOn && bounds.ok === true
+        ? {
+            maxBudgetUsd: bounds.bounds.maxBudgetUsd,
+            taskLimitCents: bounds.bounds.taskLimitCents,
+            cwd: bounds.bounds.cwd,
+            ...(o.driveTask === undefined ? {} : { driveTask: o.driveTask }),
+            ...(o.driverMaxAttempts === undefined ? {} : { maxAttempts: o.driverMaxAttempts }),
+            ...(o.driverTaskLimit === undefined ? {} : { taskLimit: o.driverTaskLimit }),
+            ...(args.ceo === undefined ? {} : { ceoRoleId: args.ceo }),
+          }
+        : null;
+    if (driverSettings !== null) {
+      // 关机那句报的数字换成【这一趟真用的那两个】。
+      driverWait = {
+        taskLimit: driverSettings.taskLimit ?? DEFAULT_DRIVER_TASK_LIMIT,
+        maxTurns: driverSettings.maxTurns ?? DEFAULT_DRIVER_MAX_TURNS,
+      };
+    }
+
+    /**
      * ⭐ 备份那一段的形状（0036 §3，替掉了原来那段「整段同步、一个 await 都不许有」）。
      *
      * 原来那段的前提是「`createBackup` 是同步的 ⇒ 同步的东西没有缝」。
@@ -1081,6 +1275,56 @@ export async function boot(
             "本轮跳过章程起草：上一轮起草还在飞。" +
               "一轮起草的上限是 180 秒而心跳下界是 60 秒，所以这【可能只是慢】；" +
               "但它每轮都出现时，说明泵实际上【补不出几张卡】—— 那要看审计，不是看这里。",
+          );
+        }
+      }
+      /**
+       * ── 驱动器（0048）：与章程泵同一侧、同一条派发纪律 ──
+       *
+       * 位置在那句 `if (backupDir === undefined) return` 【之前】，理由与章程泵同一条
+       * 而更硬：没配备份目录是【本机唯一在跑的形状】，驱动器挂在那句之后就是
+       * 「命令行写了而永远不生效」，症状与"从没打算开"逐字相同（任务一步不动）。
+       *
+       * ⚠ 这一段【不 await】，而这里比章程泵更不容 await：章程泵一轮的上限是
+       * 一次 SIGKILL（180 秒），驱动器一轮的上限是 taskLimit × maxTurns × 180 秒
+       * （默认 3 × 12 × 180s ≈ 1 小时 48 分）。await 在这里 ⇒ 一次驱动把
+       * 【停滞检测与每日备份停掉近两个小时】，而且心跳 skip 不计 consecutiveFailures、
+       * 不触发 onFatal、不退进程 —— 一个完全静默的形状（timer.ts:335）。
+       * 所以走派发，giveUp 里 settle 等它落地。
+       */
+      if (driverSettings !== null) {
+        const dispatchedDrive = driverWatch.start(async (): Promise<void> => {
+          try {
+            // 每轮自己的 nowMs —— 见上面 driverSettings 那段那条（认领行的时刻不能钉在启动那一刻，
+            // 而"这是第几次"那个计数读的就是这些行的先后）。
+            const dr = await driverVia(q, bus, {
+              ...driverSettings,
+              nowMs: (o.now ?? scheduler.now)(),
+            });
+            reportDriveRound(dr, io, driverBudgetWarned);
+          } catch (e) {
+            // watch.start() 为了让 settle() 永不 reject 会【吞掉 rejection】，这里不接住
+            // 就真没人说。与章程泵那一处一样是【两层】：driveTasks 内部挡"一条任务推不动"，
+            // 这一层挡"候选 SQL 都跑不了"。后者更坏 —— 它意味着驱动器【一条都没推】
+            // 而终端上一片安静，那与"库里没有可推的任务"在屏幕上无法区分。
+            io.warn(
+              "驱动器【本轮没有结论】（一整轮抛错，原文如下）——" +
+                "这与「某一条任务推不动」不同，后者由驱动器自己记进审计：\n" +
+                (e instanceof Error ? e.message : String(e)),
+            );
+          }
+        });
+        if (!dispatchedDrive.started && dispatchedDrive.reason === "in_flight") {
+          io.warn(
+            "本轮跳过推任务：上一轮驱动还在飞。" +
+              "一轮驱动【设计上就能跑到】" +
+              worstDriveWaitMs(driverWait) +
+              "（" +
+              driverWait.taskLimit +
+              " 条 × 每条 " +
+              driverWait.maxTurns +
+              " 格），所以这【可能只是慢】；" +
+              "但它【每轮都】出现时，说明有一格卡在子进程里出不来 —— 那要去看审计，不是看这里。",
           );
         }
       }
@@ -1332,7 +1576,7 @@ export type PumpBounds =
  * 存在性由 boot 那一句 warn 负责，判致命与否的理由写在那一处。
  */
 export function pumpBoundsOf(args: ServeArgs): PumpBounds {
-  if (args.charterPump !== true) return { ok: false, reason: "not_pumped" };
+  if (args.charterPump !== true && args.driverPump !== true) return { ok: false, reason: "not_pumped" };
   const bad: string[] = [];
   if (typeof args.maxBudgetUsd !== "number" || !Number.isFinite(args.maxBudgetUsd) || args.maxBudgetUsd < 0) {
     bad.push("--max-budget-usd（一轮的美元硬顶，实到 " + String(args.maxBudgetUsd) + "）");
@@ -1360,6 +1604,39 @@ export function pumpBoundsOf(args: ServeArgs): PumpBounds {
       cwd: args.agentCwd!,
     },
   };
+}
+
+/** bounds 里【成立那一支】的形状，给 boundsLine 当参数类型用。 */
+type PumpBoundsOk = Extract<PumpBounds, { readonly ok: true }>;
+
+/**
+ * 启动横幅上「这三格现在是多少」那一句。
+ *
+ * ── 为什么是一个函数而不是两条横幅里各写一遍 ─────────────────────────
+ * 0048 之前只有一条横幅（章程泵那条），那三个数是就地拼的。加驱动器时第二条
+ * 也要说同样三个数（那两个泵【共用】这三格，理由在 config.ts 的 ServeArgs.driverPump），
+ * 于是就地拼会得到两处字符串拼装。它漂移的时候没有任何东西会红：
+ * 屏幕上两行写着不同的上限，而底下真正生效的是 bounds 里那一份 ——
+ * 那与本文件反复拒绝的「注释里抄一份数字」是同一件事，只是这次抄在【人读的那一屏】上。
+ *
+ * ⚠ 这里【不】列驱动器的按格尝试上限（maxAttempts）与每任务轮数（maxTurns）：
+ * 那两格没有 CLI 入口，只能由装配注入（BootOverrides.driverMaxAttempts，测试用的），
+ * 而横幅上写一个「这台机器实际用的值」比写一个缺省常量更危险 ——
+ * 常量漂了没人红，值漂了会让人觉得审计在骗他。驱动器那条横幅因此只说「试到上限就停并说出来」，
+ * 具体次数在审计行的 payload 里（attempt / max_attempts），那儿是【逐条记录】而不是复述。
+ */
+function boundsLine(bounds: PumpBoundsOk): string {
+  const b = bounds.bounds;
+  return (
+    "  · 一轮美元硬顶 " +
+    b.maxBudgetUsd +
+    " 美元　· 单条任务预算上限 " +
+    b.taskLimitCents +
+    " 美分\n" +
+    "  · 角色能读到的目录（--agent-cwd）" +
+    b.cwd +
+    "\n"
+  );
 }
 
 /**
@@ -1444,6 +1721,91 @@ function reportPumpRound(r: PumpRoundResult, io: ServeIo, budgetWarned: Set<stri
 }
 
 /**
+ * 一趟驱动的结论怎么说给人听（reportPumpRound 的驱动器版）。
+ *
+ * ── 三条判据，各自都不是排版 ──────────────────────────────────────
+ * ① blocked 【在早退之前】：与 reportPumpRound 里那条同一条（被花钱的门筛掉的任务
+ *    按定义不在 driven 里，"本轮什么都没推 ⇒ 什么都不说"会让它永远报不出来）。
+ * ② gave_up 【要响，而且要说成「当场」而不是「唯一」】。driver-pump.ts 文件头那条
+ *    相互作用量过两遍，第一遍读错了：认领行确实会把巡检的 `last_real_event_at`
+ *    一直拨着（PATROL_SQL 读「任何带 payload.kind 的行」），但那只在【还在试的那几轮】成立；
+ *    放弃之后驱动器不再留行，实测巡检约一个阈值（默认 30 分钟）之后会自己报这一格。
+ *    所以这一句仍然必须 io.warn，理由换成三条站得住的：它是【当场】的信号（巡检那句晚约
+ *    半小时）、它【不依赖心跳还活着】、它说得出【成因】（"驱动器试到上限，而认领行自己
+ *    把计时器拨着"），而巡检那句只是"停滞 N 个任务"一个计数。
+ *    ⚠ 原来这里写的是「停滞巡检永远不会报这一格」—— 那是读了一遍 SQL 就下的结论，
+ *    跑一遍就推翻了。写错的方向不是小事：它会让人以为巡检坏了并去改巡检。
+ * ③ human_seat 要说一句总数。这是驱动器存在的意义（CEO 批完之后不需要有人敲命令），
+ *    而它成功的样子恰好是"任务不动了"—— 不说这一句，它等于一件没发生的事。
+ *
+ * skipped 那一支在这里【没有对应物】：driveTasks 的候选 SQL 已经把
+ * 「不是 agent 席位」「试到上限」「钱到顶」全筛掉，进候选就必须推。
+ *
+ * ⚠ 一条都不 return、一条都不抛：判定在 driveTasks 里已经做完，这里只是【报告】。
+ */
+function reportDriveRound(r: DriveRoundResult, io: ServeIo, budgetWarned: Set<string>): void {
+  for (const b of r.blocked) {
+    if (budgetWarned.has(b.taskId)) continue;
+    budgetWarned.add(b.taskId);
+    io.warn(
+      "⭐ 驱动器【没有】推「" +
+        b.title +
+        "」（" +
+        b.taskId +
+        "）：这条任务已花 " +
+        b.consumedCents +
+        " 美分，而 --task-limit-cents 说它最多花这么多。\n" +
+        "→ 这【不是】推不动（那种下一轮还会试，直到试到上限），而是【花钱的门关着】。" +
+        "任务【仍停在原来那一格】而不会自动升到 CEO 面前 —— 0041 §7 量过那一格没有写入方。\n" +
+        "→ 这句话对每条任务【只说一次】。要接着走：追加预算，或者人工把那一格挪一格。",
+    );
+  }
+  if (r.driven.length === 0) return; // 无事可做那一轮不打扰（大多数轮次是这一支）
+  const driven = r.driven.filter((d) => d.outcome === "driven");
+  const threw = r.driven.filter((d) => d.outcome === "threw");
+  const gaveUp = r.driven.filter((d) => d.outcome === "gave_up");
+  if (driven.length > 0) {
+    io.log(
+      "驱动器：本轮推了 " +
+        driven.length +
+        " 条任务，共 " +
+        driven.reduce((a, d) => a + d.turns, 0) +
+        " 格，花费 " +
+        r.costCents +
+        " 美分。",
+    );
+    for (const d of driven) {
+      // 停在人席的那些单独数一句：那才是「该 CEO 出现」的信号。
+      io.log("  · " + d.taskId + "（" + d.state + "/" + d.role + "）" + d.note);
+    }
+    const atHuman = driven.filter((d) => d.stopped === "human_seat").length;
+    if (atHuman > 0) {
+      io.log(
+        "→ 其中 " +
+          atHuman +
+          " 条停在【人类席位】（等章程 / 等你裁决 / 等终审）：那几张卡在你手上等点击，" +
+          "驱动器不会替你点。",
+      );
+    }
+  }
+  for (const d of threw) {
+    io.warn("驱动器：一条任务推不动（下一轮还会试，直到试到上限）" + d.taskId + "：" + d.note);
+  }
+  for (const d of gaveUp) {
+    io.warn(
+      "⭐ 驱动器【不再推】" +
+        d.taskId +
+        "：" +
+        d.note +
+        "\n→ 这一格现在【没有人推它】：没有 agent 在动，收件箱里也没有因为它而建的卡。\n" +
+        "→ 停滞巡检大约一个阈值之后【会】报它，但那是半小时后的一句计数，而这一句是当场说的，" +
+        "并且说的是【驱动器自己放弃了】这件事本身。\n" +
+        "→ 要么人工看一眼，要么把那条想法撤掉。",
+    );
+  }
+}
+
+/**
  * 最近一次成功备份的时刻（毫秒），没有则 null。
  *
  * 读的是【文件名里的时间戳】而不是 mtime：mtime 会被 cp / rsync / 网盘同步改掉，
@@ -1458,6 +1820,41 @@ export function lastBackupAtMs(backupDir: string): number | null {
   if (last === undefined) return null;
   // listBackups 给的是全路径，而 backupNameToMs 收的是名字（它是文件名格式的反函数）。
   return backupNameToMs(basename(last));
+}
+
+/**
+ * Ctrl-C 那句「停止顺序」（runServeCli 里那一行的来源）。
+ *
+ * ── 为什么抽成纯函数（与 serveBannerOf 同一条理由）────────────────────
+ * 那一行原本内联在 runServeCli 里，而 runServeCli 走到那里之后挂在
+ * waitForShutdown 上等信号 —— 测试里要走到那一行只能给自己发一发 SIGINT，
+ * 那一发会同时被同进程里其它用例留下的监听收到（waitForShutdown 注册后不注销）。
+ * 结果就是这句话的【两个分支在本机一次也没被执行过】，而它的两个分支分别承诺
+ * 两种不同的等待时长。抽出来之后两个分支都有分母，不需要真起进程、不需要发信号。
+ *
+ * ── 0048 起它【必须按开关取措辞】，而这一处值得单独记 ──────────────────
+ * 原来那句写死了「等在飞的章程起草」与「最坏等 180 秒」。加了驱动器之后那句话
+ * 有两半会坏：① 顺序里少了驱动那一格（真的会等，而屏幕上没说）；
+ * ②「最坏 180 秒」在驱动器开着时【偏小一个数量级】。第二半不是文案问题：
+ * 这一句存在的唯一理由是「别让人以为进程卡死而去 kill -9」，而一个偏小的等待承诺
+ * 恰恰会在超时那一刻促成 kill -9 —— 那句话变成了它自己要防的那件事的引线。
+ * 所以驱动开着时这里【不给具体秒数】，只指回上面那条驱动器横幅（那条是从真实配置算的，
+ * 两处各算一遍就会有两个答案，而漂移的时候没有任何东西会红）。
+ *
+ * ⚠ 这里读的是 args 上的【开关】而不是装配层的 driverOn —— 后者还要 bounds 成立，
+ * 而 bounds 不成立时进程根本起不来（退 2），走不到这一行。
+ */
+export function shutdownOrderLine(a: ServeArgs): string {
+  return (
+    "Ctrl-C 停止。停止顺序：停心跳 → 等备份 → 等在飞的章程起草" +
+    (a.driverPump === true ? " / 在飞的驱动轮" : "") +
+    " → 关服务 → 关队列 → 还锁。\n" +
+    (a.driverPump === true
+      ? "  · 泵都没开时这几步【什么都不等】。章程起草在飞最坏等 180 秒；" +
+        "驱动轮在飞的最坏等待时间【上面那条驱动器横幅里写着】（它按实际配置算，这里不重算一份）。\n" +
+        "  · 【不要 kill -9】：等只是慢，kill -9 会留下没关的连接与没提交的事务。"
+      : "  （泵没开时第三步【什么都不等】。开着而真有一轮在起草时最坏等 180 秒，见上面那句提醒。）")
+  );
 }
 
 /**
@@ -1615,10 +2012,18 @@ export async function runServeCli(
       r.token,
   );
   if (r.portFile !== undefined) io.log("端口已写入 " + r.portFile);
-  io.log(
-    "Ctrl-C 停止。停止顺序：停心跳 → 等备份 → 等在飞的章程起草 → 关服务 → 关队列 → 还锁。\n" +
-      "  （泵没开时第三步【什么都不等】。开着而真有一轮在起草时最坏等 180 秒，见上面那句提醒。）",
-  );
+  /**
+   * 「停止顺序」那一句 —— 0048 起它【必须按开关取措辞】，而这一处值得单独记。
+   *
+   * 原来那句写死了「等在飞的章程起草」与「最坏等 180 秒」。加了驱动器之后那句话
+   * 有两半会坏：① 顺序里少了驱动那一格（真的会等，而屏幕上没说）；
+   * ②「最坏 180 秒」在驱动器开着时【偏小一个数量级】。第二半不是文案问题：
+   * 这一句存在的唯一理由是「别让人以为进程卡死而去 kill -9」，而一个偏小的等待承诺
+   * 恰恰会在超时那一刻促成 kill -9 —— 那句话变成了它自己要防的那件事的引线。
+   * 所以驱动开着时这里【不给具体秒数】，只指回上面那条横幅（那条是从真实配置算的，
+   * 两处各算一遍就会有两个答案，而漂移的时候没有任何东西会红）。
+   */
+  io.log(shutdownOrderLine(a));
 
   const code = await waitForShutdown(r, io, (stop) => {
     requestStop = stop;
