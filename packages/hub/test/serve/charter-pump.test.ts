@@ -44,12 +44,14 @@ import { CHARTER_CARD_KEY, charterCardDraft } from "../../src/engine/charter.js"
 import { insertCard } from "../../src/approvals/cards.js";
 import {
   CHARTER_ATTEMPTS_SQL,
+  CHARTER_BLOCKED_SQL,
   CHARTER_CANDIDATES_SQL,
   CHARTER_GAVE_UP_KIND,
   DEFAULT_CHARTER_MAX_ATTEMPTS,
   PUMP_ACTOR,
   PUMP_GAVE_UP_TARGET,
   pumpCharterCards,
+  underTaskBudgetSql,
   type CharterCardDeps,
   type PumpOptions,
   type PumpRoundResult,
@@ -198,13 +200,18 @@ function taskIdOfPrompt(prompt: string): string {
 /** 跑一趟泵。 */
 async function pump(
   w: World,
-  o: { readonly ok?: boolean; readonly costCents?: number } & Pick<PumpOptions, "maxAttempts" | "taskLimit"> = {},
+  o: {
+    readonly ok?: boolean;
+    readonly costCents?: number;
+    /** 那道花钱的门。默认给很大 ⇒ A–H 那 28 发的语义【不被这道门掺和】（I 组才判门）。 */
+    readonly taskLimitCents?: number;
+  } & Pick<PumpOptions, "maxAttempts" | "taskLimit"> = {},
 ): Promise<PumpRoundResult> {
   return pumpCharterCards(w.q, w.bus, {
     nowMs: NOW + 1000,
     cardDeps: fakeCardDeps(w, o),
     maxBudgetUsd: 0.5,
-    taskLimitCents: 1000,
+    taskLimitCents: o.taskLimitCents ?? 2 ** 40,
     cwd: TMP,
     ...(o.maxAttempts === undefined ? {} : { maxAttempts: o.maxAttempts }),
     ...(o.taskLimit === undefined ? {} : { taskLimit: o.taskLimit }),
@@ -234,10 +241,47 @@ function attempts(w: World, taskId: string): number {
   const r = w.db.prepare(CHARTER_ATTEMPTS_SQL).get(taskId) as Row | undefined;
   return Number(r?.["n"] ?? 0);
 }
-function candidates(w: World, maxAttempts = DEFAULT_CHARTER_MAX_ATTEMPTS, limit = 3): string[] {
-  return (w.db.prepare(CHARTER_CANDIDATES_SQL).all(CHARTER_CARD_KEY, maxAttempts, limit) as Row[]).map((x) =>
-    String(x["id"]),
-  );
+/**
+ * 候选 SQL 的第四个参数是那道【花钱的门】。
+ *
+ * ⚠ 默认给一个大的（2**40）而不是跟着 pump() 那份 1000：这个 helper 的既有 12 处调用
+ * 判的是【候选的形状】（去重、排序、上限），不是门 —— 跟着 1000 会让那些用例
+ * 在"任务花过钱"之后语义改变，而那种改变与它们想判的事无关。
+ * 判门的用例【显式】传一个小的（I 组），因为那一发的靶心就是门。
+ */
+function candidates(
+  w: World,
+  maxAttempts = DEFAULT_CHARTER_MAX_ATTEMPTS,
+  limit = 3,
+  taskLimitCents = 2 ** 40,
+): string[] {
+  return (
+    w.db
+      .prepare(CHARTER_CANDIDATES_SQL)
+      .all(CHARTER_CARD_KEY, maxAttempts, taskLimitCents, limit) as Row[]
+  ).map((x) => String(x["id"]));
+}
+
+/** 被门挡住的那一批（与候选那条共用谓词，见 CHARTER_BLOCKED_SQL 那格）。 */
+function blockedRows(w: World, taskLimitCents: number, maxAttempts = DEFAULT_CHARTER_MAX_ATTEMPTS): Row[] {
+  return w.db.prepare(CHARTER_BLOCKED_SQL).all(CHARTER_CARD_KEY, maxAttempts, taskLimitCents) as Row[];
+}
+
+/**
+ * 把一条任务写成"已经花掉 cents 美分"。
+ *
+ * 写 budgets 而【不是】tasks.consumed_cents —— 门读的是前者，而仓库里有【两个】花费列
+ * （见 underTaskBudgetSql 那格）。「到底读哪一列」由下面 I 组那一发专门的对照判，
+ * 所以这里不再靠注释说明。写法则跟 addTasks 一样直接走写连接（同一个夹具、同一种同步写）。
+ */
+function spend(w: World, taskId: string, cents: number): void {
+  w.db
+    .prepare(
+      "INSERT INTO budgets (id, scope_type, scope_id, period, limit_cents, consumed_cents, hard_stop) " +
+        "VALUES (?, 'task', ?, 'per_task', ?, ?, 1) " +
+        "ON CONFLICT(scope_type, scope_id, period) DO UPDATE SET consumed_cents = excluded.consumed_cents",
+    )
+    .run("task|" + taskId + "|per_task", taskId, cents, cents);
 }
 
 /**
@@ -877,6 +921,113 @@ describe("H. 默认那一支（makeRuntime + 真子进程 + 真执行日志）",
     // 反向对照的判据在这一发里是【同一条断言的形状】：父进程 cwd 是仓库根，
     // 与 agentCwd 不同 ⇒ 一旦 cwd 没透传、子进程继承了父进程的，这句就会红。
     expect(scope).not.toContain(JSON.stringify(process.cwd()));
+  });
+});
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * I. 那道【花钱的门】：--task-limit-cents 在起子进程之前真的挡人
+ *
+ * 这一组补的是一个【已经上线的缺陷】，不是防御性用例。0044 那一版里泵拿着这个
+ * 必填参数而【一次都没读它】就去 spawn。量出来的原话（0045 §1）：
+ *   一条已花 500 美分而上限 100 的任务 ⇒ 「t1:drafted」，consumed 涨到 504。
+ * 0041 §7 早就写了「任务级上限今天是一句声明，不是一道闸」，而我把那句读成了
+ * "以后再接"，接的时候【没有回去看它】—— 于是"必填"只保证了命令行上写着这个参数。
+ *
+ * 这一组有四发不是凑数，各挡一种【互相独立】的坏法：
+ *   ① 门本身（不挡 ⇒ 花钱）
+ *   ② 门与 taskLimit 的绑参顺序（node:sqlite 绑错【不报错】，只是把 limit 当成上限）
+ *   ③ 门读哪一列（读错列 ⇒ 门永远开着一半：界面说超了而门不挡，或反之）
+ *   ④ "被挡住了"这件事【说出来】（不说 ⇒ 与"泵没开"同一个画面）
+ * 尤其 ④：前三发全过的实现仍然可以是【静默的】—— 它正确地不花钱，而那个人
+ * 看到的现象与"这个参数从没生效"完全相同。
+ * ────────────────────────────────────────────────────────────────────────── */
+describe("I. 花钱的门：到上限就不再为这条任务起子进程", () => {
+  it("⭐ 已花到上限的任务【不进候选】：一次 spawn 都不起", async () => {
+    const w = await world({});
+    spend(w, "t1", 150);
+    const r = await pump(w, { taskLimitCents: 100 });
+    // 断的是【一次都没起草】而不是"没建出卡"—— 与 A 组同一条理由：
+    // 「不花钱」与「不重试」不是同一件事，而这里要防的就是花钱。
+    expect(r.cards).toHaveLength(0);
+    expect(pendingCards(w, "t1")).toBe(0);
+    expect(attempts(w, "t1")).toBe(0);
+  });
+
+  it("⭐ 刚好等于上限也挡（§7.4 说的是「达到阈值」，达到就是达到）", async () => {
+    const w = await world({});
+    spend(w, "t1", 100);
+    expect((await pump(w, { taskLimitCents: 100 })).cards).toHaveLength(0);
+    // 反向对照：少一分钱就放行。少了这一句，"恰好相等"这一发与"门整个不在"不可区分。
+    const w2 = await world({});
+    spend(w2, "t1", 99);
+    expect((await pump(w2, { taskLimitCents: 100 })).cards[0]?.outcome).toBe("drafted");
+  });
+
+  it("⭐ taskLimit=1 时门【还是门】：两个相邻的整数没被绑串", async () => {
+    // node:sqlite 绑错顺序【不抛】。少绑/错绑一份，SQL 仍然合法，
+    // 而表现是"一轮最多补 3 张"被当成"上限 3 美分" —— 于是泵【几乎永远不起子进程】
+    // 而一声不响。这一发的形状是【上限极大而 taskLimit=1】：
+    // 门要是被 limit 顶掉，就会看到 0 张卡（3 美分 < 一轮的 4 美分花费）。
+    const w = await world({ tasks: ["t1", "t2"] });
+    const r = await pump(w, { taskLimitCents: 100_000_000, taskLimit: 1 });
+    expect(r.cards).toHaveLength(1);
+    expect(r.cards[0]?.outcome).toBe("drafted");
+  });
+
+  it("⭐ 门读的是【界面那条预算条读的同一列】，不是另一份花费", async () => {
+    // 仓库里有【两个】花费列：LEDGER_SQL 写 tasks.consumed_cents，
+    // ADD_TASK_BUDGET_SQL 写 budgets.consumed_cents（真跑一轮两处都加，实测都等于 4）。
+    // 门读哪一列不是风格问题：overview/today.ts 那条预算条求和的是 budgets，
+    // 而 §7.4 那张卡要显示「已消耗 / 上限」—— 门与界面读不同列，就会出现
+    // "条说它超了而门不挡"（或反过来），而这两句都是【真话】。
+    const w = await world({});
+    // 只写【另一列】：门必须【看不见】它，否则说明门读错了列（或读了两列）。
+    w.db.prepare("UPDATE tasks SET consumed_cents = 900 WHERE id = 't1'").run();
+    const r = await pump(w, { taskLimitCents: 100 });
+    expect(r.cards[0]?.outcome).toBe("drafted");
+    expect(r.blocked).toHaveLength(0);
+  });
+
+  it("⭐ 被挡住的那条【在 blocked 里】，而且【穿过候选为空的早退】", async () => {
+    // 这是本组最容易写错的一格：一条被门挡住的任务【按定义就不在候选里】，
+    // 所以"候选为空 ⇒ 立刻 return"那一句一旦先跑，blocked 就永远是空数组，
+    // 而这一发会红在【顺序】上而不是红在判据上 —— 我自己先踩了一次，
+    // 那次红恰好证明了这一发有分辨力。
+    const w = await world({});
+    spend(w, "t1", 150);
+    const r = await pump(w, { taskLimitCents: 100 });
+    expect(r.cards).toHaveLength(0); // 整轮无事可做 ⇒ 走的就是那条早退
+    expect(r.blocked).toEqual([{ taskId: "t1", title: "想法 t1", consumedCents: 150 }]);
+  });
+
+  it("⭐ blocked 数的正是【本来会成为候选而因为钱没成为候选】那批", async () => {
+    // 三种"没被起草"必须【只有第三种】进 blocked，否则这句话会把人指向错的方向：
+    //   已有卡的（那一格已经有东西在回答）、状态不对的（不归泵管）、超限的（这才是要说的）。
+    const w = await world({ tasks: ["t1", "t2", "t3", "t4"], status: "CHARTER_PENDING" });
+    spend(w, "t1", 150); // 超限 ⇒ 该进 blocked
+    await addCharterCard(w, "t2"); // 已有卡 ⇒ 不该进
+    w.db.prepare("UPDATE tasks SET status = 'IN_PROGRESS' WHERE id = 't3'").run(); // 不归泵管 ⇒ 不该进
+    // t4 什么都没做 ⇒ 它是正常候选，会被起草，也不该在 blocked 里
+    const r = await pump(w, { taskLimitCents: 100 });
+    expect(r.blocked.map((b) => b.taskId)).toEqual(["t1"]);
+    expect(r.cards.map((c) => c.taskId)).toEqual(["t4"]);
+    // 同源判据的直接证据：与候选 SQL 用【同一个谓词常量】，不是又抄了一份字面。
+    // 抄本漂了的表现是"门挡了而 blocked 数不到"= 沉默，或反之 = 谎报。
+    expect(CHARTER_BLOCKED_SQL).toContain(underTaskBudgetSql("t"));
+    expect(CHARTER_CANDIDATES_SQL).toContain(underTaskBudgetSql("t"));
+    // 再问一次【还是它】：这一格要说的是"这句话每轮都在"，而不是"说过一次就销案"。
+    // （assemble 那一侧的去重是【终端】的去重，不是【事实】的销案 —— 见 pumpBudgetWarned。）
+    expect((blockedRows(w, 100) as Row[]).map((b) => String(b["id"]))).toEqual(["t1"]);
+  });
+
+  it("没花钱过的任务【不受门影响】（门不在时也要放行 ⇒ 反向对照）", async () => {
+    const w = await world({});
+    const r = await pump(w, { taskLimitCents: 1 });
+    // 上限 1 美分而任务一分没花 ⇒ 0 < 1 成立 ⇒ 放行。
+    // 这一发防的是【写反的比较号】：写成 consumed > 0 会让【每条新任务】都被挡住，
+    // 而那与"泵坏了"在收件箱上完全一样（空的），且永远不花一分钱 ⇒ 永不出账单。
+    expect(r.cards[0]?.outcome).toBe("drafted");
+    expect(r.blocked).toHaveLength(0);
   });
 });
 

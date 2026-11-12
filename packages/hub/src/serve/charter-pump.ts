@@ -110,9 +110,64 @@ export const CHARTER_ATTEMPTS_SQL =
  *    【本轮那一次真金白银的 spawn】。删掉它的表现是"上限多花一次钱才生效"，
  *    所以有一发用例专门数 spawn 次数（charter-pump.test.ts A 组最后一发）。
  *
+ *  · 花钱的门（consumed < --task-limit-cents）—— 这一条是【补的】，之前【整条不存在】：
+ *    --task-limit-cents 是必填参数（0041 §8「花钱的东西不给默认值」），而 0044 那一版里
+ *    泵【一次都没读它】就去起子进程。实测（0045 §1）：一条已花 500 美分而上限 100 的任务
+ *    照样进候选、照样 spawn。所以那句"必填"当时只保证了命令行上写着它，
+ *    没保证它挡住任何东西 —— 0041 §7 早就写过「任务级上限今天是一句声明，不是一道闸」，
+ *    而我把那句话读成了"以后再接"，接的时候【没有回去看它】。
+ *    ⚠ 两侧各有一个坑，所以各写一段：
+ *      【已花的那一侧读 budgets，不读 tasks.consumed_cents】—— 仓库里有【两个】花费列
+ *      （LEDGER_SQL 写 tasks.consumed_cents，ADD_TASK_BUDGET_SQL 写 budgets.consumed_cents，
+ *       同一轮两处都加、实测都等于 4）。门读哪一列不是风格问题：
+ *      【今日视图那条预算条读的就是 budgets】（overview/today.ts:263 求和它），
+ *      而【规格】§7.4 那张卡要显示的正是「已消耗 / 上限」。门与界面读【同一个累加器】，
+ *      "门说它超了而条还空着"才不可表达；读另一列就是再造一个两源分叉（0041 §2 那一族）。
+ *      【上限的那一侧读参数，不读 budgets.limit_cents】—— 实测：runtime 那条
+ *      ENSERT_TASK_BUDGET_SQL 是 ON CONFLICT DO NOTHING，所以那一列【第一次写进去就再也不改】；
+ *      跑第二次而把上限改成 1，库里仍是第一次那个 1000（0045 §1 那张表）。
+ *      拿它当门 = 门永远按【这台机器第一次启动时】的那个数字关着。
+ *    放行条件是 `consumed < limit`，也就是【花到上限那一格就挡】（等价于挡在 `>=` 上），
+ *    而不是 `consumed <= limit`（那要多花一次才挡）：【规格】§7.4 写的是「达到预算阈值时」，
+ *    达到就是达到。
+ *    ⚠ budget-sync 那条 silentOverBudgets 用的是【严格大于】，两者不是同一个问题
+ *      （那条问"已经超了多少"，这一条问"还要不要再花"），差别【刻意留着】而写在这里，
+ *      因为两处写法不同而没人写下原因，就是下一次"顺手统一"的引信。
+ *    ⚠ 【不看 budgets.hard_stop】：那列今天全仓【没有任何代码能写成 0】
+ *      （三条 INSERT 都写字面量 1），所以把它写进判据会得到一条【造不出红】的判据
+ *      —— 恒真的判据与恒绿的装饰不可区分。等哪天有人真给"这个格子不许硬停"一个入口，
+ *      这一条要一起改（登记在 0045 §6）。
+ *    ⚠ 门在【候选 SQL】里而不在逐张卡的循环里：不在 SQL 里筛，超限的任务会
+ *      【每轮都占住那 3 个候选位之一】（taskLimit 是"上限的上限"），而 ORDER BY created_at
+ *      + LIMIT 会让一条超限的老想法把后面能补的想法【永久饿死】—— 正是本文件头
+ *      给 ORDER BY 写下的那条担心的另一个版本。代价是"被门挡住"这件事在候选结果里
+ *      【看不见】，所以另配一条【同源】的计数（CHARTER_BLOCKED_SQL，同一个谓词常量）
+ *      把它说出来：沉默的省钱与沉默的失败在库里长得一样。
+ *
  * ORDER BY created_at, id：最老的想法先补，且这一行是【确定的】——
  * 不确定排序 + 一个 limit 会出现「这轮没轮到它、下轮也没轮到它」那种饿死。
  */
+/**
+ * 「这条任务在当前这个上限下还【许不许】再花一次钱」。
+ *
+ * ⚠ 导出成【一个函数】而不是就地写在 SQL 里，理由与 patrol 的 kindOf 同一条
+ * （0026 §0 / 本文件 §3）：这个谓词有【两个】使用点 —— 候选 SQL 用它筛掉超限的，
+ * CHARTER_BLOCKED_SQL 用它数出"被门挡住的是哪些"。两处各抄一份字面，
+ * 漂了的那一份不会有人发现：候选那边漂了 = 门失效（花钱），
+ * 计数那边漂了 = 门明明挡了而终端一声不响。
+ *
+ * 绑参数量：一条 `?`（那一份上限）。两侧的形状刻意写成【可以直接 AND 进去】的样子，
+ * 因为两个使用点用的必须是【同一个方向】的判据 —— 一边 >= 一边 < 就是自相矛盾。
+ */
+export function underTaskBudgetSql(t: string): string {
+  return (
+    "COALESCE((SELECT b.consumed_cents FROM budgets b " +
+    "WHERE b.scope_type = 'task' AND b.scope_id = " +
+    t +
+    ".id AND b.period = 'per_task'), 0) < ?"
+  );
+}
+
 export const CHARTER_CANDIDATES_SQL =
   "SELECT t.id AS id, t.title AS title, t.created_at AS created_at, " +
   "(SELECT COUNT(*) FROM events p WHERE p.task_id = t.id " +
@@ -125,8 +180,43 @@ export const CHARTER_CANDIDATES_SQL =
   "  SELECT 1 FROM approvals a WHERE a.task_id = t.id AND a.card_key = ?" +
   ") " +
   "AND attempts < ? " +
-  "ORDER BY t.created_at ASC, t.id ASC " +
+  "AND " +
+  underTaskBudgetSql("t") +
+  " ORDER BY t.created_at ASC, t.id ASC " +
   "LIMIT ?";
+
+/**
+ * 「这一轮有多少条想法是【被那道花钱的门挡住的】」。
+ *
+ * 存在的理由就一句话：候选 SQL 里那道门把超限的任务【筛掉了】，于是它在候选结果里
+ * 不存在 —— 不花钱是对的，而"系统因为没钱而不再理这条想法"如果只在库里，
+ * 那个人看到的和"泵根本没开""泵在跑而一切正常"是【同一个画面】。
+ * 0044 §8 的 W10 判的就是同一族（放弃那一行只写库不说 ⇒ 补了一句 warn），这里是它的前置版：
+ * 那一族是"到上限了不再试"，这一族是"到钱了不再试"，而后者【永远不到头】——
+ * 前者三次就完，后者只要不追加预算就一直挡着，说一次的"跳过"三天后就是噪音，
+ * 所以这句话必须带上【该干嘛】（追加预算或撤掉那条想法）。
+ *
+ * 判据与候选 SQL【同源】（同一个 underTaskBudgetSql、同一个 NOT EXISTS 形状），
+ * 差别只在把"还能试"那两条留着而把"没超钱"反过来 —— 于是它数的正是
+ * 「本来会成为候选而因为钱没成为候选」那一批，不多不少。
+ */
+export const CHARTER_BLOCKED_SQL =
+  "SELECT t.id AS id, t.title AS title, " +
+  "COALESCE((SELECT b.consumed_cents FROM budgets b " +
+  "WHERE b.scope_type = 'task' AND b.scope_id = t.id AND b.period = 'per_task'), 0) AS consumed " +
+  "FROM tasks t " +
+  "WHERE t.status = 'CHARTER_PENDING' " +
+  "AND NOT EXISTS (" +
+  "  SELECT 1 FROM approvals a WHERE a.task_id = t.id AND a.card_key = ?" +
+  ") " +
+  "AND (SELECT COUNT(*) FROM events p WHERE p.task_id = t.id " +
+  " AND " +
+  kindOf("p") +
+  " = 'RoleTurnReported') < ? " +
+  "AND NOT (" +
+  underTaskBudgetSql("t") +
+  ") " +
+  "ORDER BY t.created_at ASC, t.id ASC";
 
 /** 一轮最多补几张卡。它是【上限的上限】，方向是省，所以给得起默认值。 */
 export const DEFAULT_PUMP_TASK_LIMIT = 3;
@@ -276,9 +366,25 @@ export type PumpRoundResult = {
    * `recorded: false` 不是失败而是一种【结论】，所以原样带出来而不是咽掉。
    */
   readonly turns: readonly { readonly taskId: string; readonly recorded: boolean; readonly why: string }[];
+  /**
+   * 本轮【被那道花钱的门挡住】的想法（已花的钱 + 任务 id）。
+   *
+   * ⚠ 这一格必须【穿过那个候选为空的早退】才有效：一条被门挡住的任务
+   * 【按定义就不在候选里】，所以"候选为空 ⇒ 直接返回"那一条一旦先跑，
+   * 被挡住的这批就永远报不出来 —— 而报不出来正是这一格存在的全部理由。
+   * 这也是它不做成 cards 里一个 outcome 的原因：cards 是"本轮真去看了的"那张表，
+   * 而被挡住的没被看过。
+   */
+  readonly blocked: readonly { readonly taskId: string; readonly title: string; readonly consumedCents: number }[];
 };
 
-const nothingRound: PumpRoundResult = { cards: [], costCents: 0, abandoned: [], turns: [] };
+const nothingRound: PumpRoundResult = {
+  cards: [],
+  costCents: 0,
+  abandoned: [],
+  turns: [],
+  blocked: [],
+};
 
 /**
  * 一趟泵。心跳每轮叫一次；测试也直接叫这一发。
@@ -308,11 +414,31 @@ export async function pumpCharterCards(
   }
 
   type Candidate = { id: string; title: string; attempts: number };
+  // ⚠ 绑参顺序 = SQL 里 ? 的出现顺序：card_key, attempts 上限, 【任务级花钱的门】, limit。
+  // 门那一格插在 limit 之前而不是最后，是因为它在 SQL 里就写在那个位置；
+  // 而 node:sqlite 绑错顺序【不报错】—— 它会把 limit 那个数字当成上限去比，
+  // 于是"一轮最多补 3 张"变成"上限 3 美分"，表现是泵【几乎永远不起子进程】而一声不响。
+  // 所以这一处有两个数字相邻而语义无关，配一发判据：taskLimit=1 时门必须还是门
+  // （charter-pump.test.ts I 组倒数第二发）。
   const candidates = w
     .readConnection()
     .prepare(CHARTER_CANDIDATES_SQL)
-    .all(CHARTER_CARD_KEY, maxAttempts, perRound) as unknown as Candidate[];
-  if (candidates.length === 0) return nothingRound;
+    .all(CHARTER_CARD_KEY, maxAttempts, o.taskLimitCents, perRound) as unknown as Candidate[];
+
+  // 被门挡住的那一批要在【早退之前】问（理由见 PumpRoundResult.blocked 那格）。
+  // 绑参顺序与候选那条【只差最后没有 limit】—— 两条 SQL 共用同一个前缀，
+  // 所以这里的参数列表就是上面那一份去掉最后一项；抄成两份会漂移，
+  // 而漂移的表现是"门挡了而没人说出来"，与不报是同一种坏。
+  const blocked = (
+    w.readConnection().prepare(CHARTER_BLOCKED_SQL).all(
+      CHARTER_CARD_KEY,
+      maxAttempts,
+      o.taskLimitCents,
+    ) as unknown as { id: string; title: string; consumed: number }[]
+  ).map((b) => ({ taskId: b.id, title: b.title, consumedCents: Number(b.consumed) }));
+
+  if (candidates.length === 0 && blocked.length === 0) return nothingRound;
+  if (candidates.length === 0) return { ...nothingRound, blocked };
 
   // 候选非空【之后】才现造。⚠ 而我原来给这句话写的理由是【夸大的】，留在这里而不是删掉：
   // 我写的是「默认那一支一旦真的建起 runtime，就意味着这一趟随时可能 spawn」。
@@ -428,7 +554,7 @@ export async function pumpCharterCards(
     });
   }
 
-  return { cards, costCents, abandoned, turns };
+  return { cards, costCents, abandoned, turns, blocked };
 }
 
 /**

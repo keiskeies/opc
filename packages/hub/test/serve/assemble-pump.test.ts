@@ -760,6 +760,122 @@ describe("E 组 / 纯函数：上限缺失时不能起", () => {
   });
 });
 
+describe("H 组：花钱的门挡住时【终端上要有声音】", () => {
+  /**
+   * ⚠ 这一组判的不是【门】（那是 charter-pump.test.ts I 组的四发），
+   * 而是【门挡了之后有没有人知道】。这两件事分开是因为它们会【各自单独坏】：
+   * 泵可以正确地不花钱、正确地不建卡、正确地写库，而那个人看到的画面
+   * 与「泵根本没开」【完全一样】—— 收件箱空的、任务不动、终端安静。
+   * 本仓给这一族起过名字（0044 §8 的 W10：「一条系统不再自己解决的事实只在库里
+   * 而不在终端上，等于只有 grep 得动它的人才知道」），而门这一格比那一格更糟：
+   * gave_up 三次就完，门【只要不追加预算就一直挡着】。
+   */
+  it("⭐ 超限的任务【不起子进程】而那句理由【说出来了】", async () => {
+    const path = dbWithCharterTasks(["t1"]);
+    spendIn(path, "t1", 150);
+    const calls: string[] = [];
+    const s = createFakeScheduler(NOW);
+    const { io, warn } = ioOf();
+    const r = needOk(
+      await boot(pumpArgs(path, { taskLimitCents: 100 }), io, {
+        acquire: () => OK_LOCK,
+        serve: fakeServer().serve,
+        scheduler: s,
+        now: () => s.now(),
+        pumpCardDeps: cardDeps(calls),
+      }),
+    );
+    s.advance(60_000);
+    await r.heartbeat.tick();
+    expect(await happens(() => warn.join("\n").includes("花钱的门关着"))).toBe(true);
+    // 三样一起断，缺一样都可能是"巧合地绿"：
+    //  ① 一次都没起草（门真的挡住了）
+    expect(calls).toEqual([]);
+    //  ② 卡没建出来（挡的结果落在收件箱上）
+    expect(pendingCards(path)).toBe(0);
+    //  ③ 那句话带【该干嘛】—— 只说"没钱"而不说能做什么，下一步仍然是查代码
+    const line = warn.join("\n");
+    expect(line).toContain("追加预算");
+    expect(line).toContain("想法 t1");
+    expect(line).toContain("150");
+    await r.shutdown();
+  });
+
+  it("⭐ 同一条任务【只说一次】：每心跳重复说等于把信号淹掉", async () => {
+    // 泵每 60 秒一轮，而一条超限的想法会【永远】被挡 ⇒ 不说会沉默，
+    // 每轮都说会一天 1440 句 —— 后者的真实后果是这个人把终端静音，
+    // 于是那句只说一次的「不再试了」（gave_up）也一起被静音。
+    const path = dbWithCharterTasks(["t1"]);
+    spendIn(path, "t1", 150);
+    const calls: string[] = [];
+    const s = createFakeScheduler(NOW);
+    const { io, warn } = ioOf();
+    const r = needOk(
+      await boot(pumpArgs(path, { taskLimitCents: 100 }), io, {
+        acquire: () => OK_LOCK,
+        serve: fakeServer().serve,
+        scheduler: s,
+        now: () => s.now(),
+        pumpCardDeps: cardDeps(calls),
+      }),
+    );
+    for (let i = 0; i < 5; i++) {
+      s.advance(60_000);
+      await r.heartbeat.tick();
+    }
+    expect(await happens(() => warn.join("\n").includes("花钱的门关着"))).toBe(true);
+    const said = warn.filter((m) => m.includes("花钱的门关着")).length;
+    expect(said).toBe(1);
+    // 反向对照：确实跑了 5 轮（否则"只说一次"可能只是"只跑了一次"）。
+    // 这一句是这一发的分母 —— 少了它，去重与早退不可区分。
+    expect(s.now()).toBeGreaterThan(NOW + 4 * 60_000);
+    expect(calls).toEqual([]);
+    await r.shutdown();
+  });
+
+  it("⭐【没超限】时不说这句话（反向对照：上面两发不是恒绿）", async () => {
+    const path = dbWithCharterTasks(["t1"]);
+    const calls: string[] = [];
+    const s = createFakeScheduler(NOW);
+    const { io, warn } = ioOf();
+    const r = needOk(
+      await boot(pumpArgs(path, { taskLimitCents: 100_000 }), io, {
+        acquire: () => OK_LOCK,
+        serve: fakeServer().serve,
+        scheduler: s,
+        now: () => s.now(),
+        pumpCardDeps: cardDeps(calls),
+      }),
+    );
+    s.advance(60_000);
+    await r.heartbeat.tick();
+    expect(await happens(() => calls.length === 1)).toBe(true);
+    expect(warn.join("\n")).not.toContain("花钱的门关着");
+    await r.shutdown();
+  });
+});
+
+/**
+ * 事后给某条任务种一笔【已花掉的钱】（写 budgets，也就是门与今日视图那条预算条
+ * 共用的那一列）。真路径下 budgets 与 tasks.consumed_cents 由同一轮一起写，
+ * 所以这里只写一处不会与生产不一致 —— 而【门读哪一列】由 charter-pump.test.ts
+ * I 组那发专门的对照判，不在这里重复。
+ */
+function spendIn(path: string, taskId: string, cents: number): void {
+  const dbh = openDb(path);
+  try {
+    dbh
+      .prepare(
+        "INSERT INTO budgets (id, scope_type, scope_id, period, limit_cents, consumed_cents, hard_stop) " +
+          "VALUES (?, 'task', ?, 'per_task', ?, ?, 1) " +
+          "ON CONFLICT(scope_type, scope_id, period) DO UPDATE SET consumed_cents = excluded.consumed_cents",
+      )
+      .run("task|" + taskId + "|per_task", taskId, cents, cents);
+  } finally {
+    dbh.close();
+  }
+}
+
 /**
  * 「巡检报过停滞」的计数。
  *

@@ -555,6 +555,18 @@ const SNAP: Record<string, string> = {
     "export const orgNodeSchema = z",
   "0042-today-view-and-putting-the-criteria-on-the-server-side.md>packages/hub/src/overview/today.ts:104":
     'export const ATTENTION_STATUSES: readonly string[] = ["ESCALATED_TO_CEO", ...BLOCKED_STATUSES];',
+  // 0045（任务级预算那道门）新写的两条，登记同轮完成（0006 §7-40 那条规矩），
+  // 且都是【活坐标】—— 它们的价值全在"那一行现在还写着那句话"：
+  //  ① runtime.ts:108 是 §1 那张表的成因（`ENSERT_TASK_BUDGET_SQL` 的 DO NOTHING
+  //     ⇒ budgets.limit_cents 第一次写完再也不改）。有人把它改成 DO UPDATE，
+  //     0045 §4「上限那一侧读参数」的那条理由就作废了，快照红逼他回去改 §4 与门本身。
+  //  ② today.ts:263 是「门与预算条读同一个累加器」这条取舍的**对面那一侧**：
+  //     今日视图求和的正是 budgets.consumed_cents。它若改成读别的列，
+  //     §4 那句"读另一列就是再造一个两源分叉"当场失效。
+  "0045-task-budget-gate-and-a-parameter-that-only-existed-on-the-cli.md>packages/hub/src/engine/runtime.ts:108":
+    '"INSERT INTO budgets (id, scope_type, scope_id, period, limit_cents, consumed_cents, hard_stop) " +',
+  "0045-task-budget-gate-and-a-parameter-that-only-existed-on-the-cli.md>packages/hub/src/overview/today.ts:263":
+    '"SELECT COUNT(*) AS scopes, COALESCE(SUM(consumed_cents), 0) AS consumed, " +',
   "0042-today-view-and-putting-the-criteria-on-the-server-side.md>packages/hub/src/charter/budget-sync.ts:438":
     "export function silentOverBudgets(db: DatabaseSync): BudgetTierRow[] {",
   "0042-today-view-and-putting-the-criteria-on-the-server-side.md>packages/desktop/src/ipc-surface.ts:171":

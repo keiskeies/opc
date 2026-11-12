@@ -469,6 +469,20 @@ export async function boot(
   const pumpWatch = createInFlightWatch<void>();
 
   /**
+   * 「因为没钱而不再补这张卡」已经对哪条任务【说过一次话】了。
+   *
+   * 为什么要有这一格：泵每 60 秒跑一轮，而一条超限的想法会【永远】被门挡住 ——
+   * 每轮都说一句就是每天 1440 句同样的话。那不是"提醒"，那是【噪音】，
+   * 而噪音的实际后果是这个人把终端静音，于是那句"到上限不再试了"（gave_up，
+   * 那一格只有三次、只说一次）也一起被静音了。
+   * ⇒ 每任务一次，且【跨轮去重】。追加预算之后它会重新进候选（门放开），
+   *   下一轮再被挡住时【仍然不重复说】—— 这一格记的是"这个人已经知道这件事了"，
+   *   不是"此刻是否仍然超限"。这是刻意的取舍：代价是"追加完又花超"不会再说一次，
+   *   换来的是这个信号不会把自己淹掉。登记在 0045 §6。
+   */
+  const pumpBudgetWarned = new Set<string>();
+
+  /**
    * 唯一的清理出口。成功时的 shutdown 与失败时的 finally 走【同一段代码】——
    * 分开的两份清理一定会漂移（漂移的形式是「失败路径少了某一步」）。
    *
@@ -1047,7 +1061,7 @@ export async function boot(
               ...pumpSettings,
               nowMs: (o.now ?? scheduler.now)(),
             });
-            reportPumpRound(pr, io);
+            reportPumpRound(pr, io, pumpBudgetWarned);
           } catch (e) {
             // 与备份那一处同一条理由：watch.start() 为了让 settle() 永不 reject
             // 会【吞掉 rejection】。这里不接住，"泵一整轮抛了"就真的没人说。
@@ -1366,7 +1380,29 @@ export function pumpBoundsOf(args: ServeArgs): PumpBounds {
  * 判定在 pumpCharterCards 里已经做完了，咽掉一条结论的代价是那一格变成静默，
  * 而静默是本仓反复定义的最贵那类失效（0016 §1）。
  */
-function reportPumpRound(r: PumpRoundResult, io: ServeIo): void {
+function reportPumpRound(r: PumpRoundResult, io: ServeIo, budgetWarned: Set<string>): void {
+  // ⚠ 这一段【必须在下面那句 cards.length === 0 早退之前】：
+  // 一条被门挡住的想法【按定义就不在 cards 里】（它是被候选 SQL 筛掉的，没被看过），
+  // 所以"本轮一条卡都没动 ⇒ 什么都不说"那句一旦先跑，被挡住的这批就永远报不出来 ——
+  // 而这正是这一格存在的全部理由。（我自己先写错过一次：把 blocked 的循环加在
+  // 那个 return 后面，测试当场红，红得恰到好处。）
+  for (const b of r.blocked) {
+    if (budgetWarned.has(b.taskId)) continue;
+    budgetWarned.add(b.taskId);
+    io.warn(
+      "⭐ 章程泵【没有】为「" +
+        b.title +
+        "」（" +
+        b.taskId +
+        "）起草章程提案：这条任务已花 " +
+        b.consumedCents +
+        " 美分，而 --task-limit-cents 说它最多花这么多。\n" +
+        "→ 这【不是】起草失败（那种下一轮还会试），而是【花钱的门关着】，" +
+        "而它会一直关到那条任务的额度动过为止。\n" +
+        "→ 这句话对每条任务【只说一次】（泵每轮都会遇到它，重复说等于没说）。" +
+        "要接着走：追加预算，或把那条想法撤掉。",
+    );
+  }
   if (r.cards.length === 0) return; // 无事可做那一轮不打扰（大多数轮次是这一支）
   const drafted = r.cards.filter((c) => c.outcome === "drafted");
   const attempted = r.cards.filter((c) => c.outcome === "attempted");

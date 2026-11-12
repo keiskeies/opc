@@ -370,7 +370,8 @@ cd /Users/cjm/CodeBuddy/opc
 PATH=~/.nvm/versions/node/v24.14.0/bin:$PATH \
   node --experimental-transform-types --import /tmp/opc-harness/register.mjs \
   --test "packages/hub/test/serve/{charter-pump,assemble-pump,config}.test.ts"
-# 期望 31 / 15 / 39 全绿（charter-pump 现在 31 发：A–G 28 + H 组 3 发真子进程）
+# 期望 38 / 18 / 39 全绿（charter-pump 38 发 = A–G 28 + H 组 3 发真子进程 + I 组 7 发预算门；
+#   assemble-pump 18 发 = 原 15 + H 组 3 发「门挡了要说一声」，那三发在 0045 §9 里有变异表）
 PATH=~/.nvm/versions/node/v24.14.0/bin:$PATH \
   node --experimental-transform-types --import /tmp/opc-harness/register.mjs \
   --test "packages/hub/test/acceptance/phase3.test.ts"        # 期望 10 发全绿
