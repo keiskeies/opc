@@ -211,8 +211,14 @@ export interface PumpOptions {
   readonly nowMs: number;
   /**
    * 现造起草用的那一套回调。默认走真 runtime（makeRuntime）。
-   * 测试注入一份不 spawn 的 —— 这一发要测的是【泵的节奏】，
-   * 而「能不能起子进程」在 claude.test.ts / runtime.test.ts 里各自钉住了。
+   * 测试注入一份不 spawn 的 —— 这一发要测的是【泵的节奏】。
+   *
+   * ⚠ 我原来在这里补了一句「而『能不能起子进程』在 claude.test.ts / runtime.test.ts 里
+   *   各自钉住了」，那句话【把责任推到了一个不覆盖这一格的地方】：那两个文件钉的是
+   *   【适配器】（runRole 起不起得来、参数传没传到），而本条默认分支是
+   *   【泵会不会把 bin / cwd / 真 recordTurn 接上】—— 一件不同的事，而当时【零覆盖】
+   *   （两发变异量的：删掉 bin 透传、把默认那一支的 recordTurn 换成 noRecorder，
+   *    当时 43 发全绿）。现在由 charter-pump.test.ts 的 H 组判，跑的是真子进程。
    */
   readonly cardDeps?: () => CharterCardDeps;
   /**
@@ -308,8 +314,21 @@ export async function pumpCharterCards(
     .all(CHARTER_CARD_KEY, maxAttempts, perRound) as unknown as Candidate[];
   if (candidates.length === 0) return nothingRound;
 
-  // 候选非空【之后】才现造：engineOf 默认那一支一旦真的建起 runtime，
-  // 就意味着这一趟随时可能 spawn，而候选为空那一支（绝大多数轮次）根本不该走到这里。
+  // 候选非空【之后】才现造。⚠ 而我原来给这句话写的理由是【夸大的】，留在这里而不是删掉：
+  // 我写的是「默认那一支一旦真的建起 runtime，就意味着这一趟随时可能 spawn」。
+  // 实测不符：makeRuntime 构造时【不读库、不起进程】（runtime.ts:186 起只是闭包与常量，
+  // CLI 版本那格是注入进来的 d.harnessVersion，不是一次探测），而 engineOf 默认那一支
+  // 自己是惰性的（rt 建到第一次用到为止）。所以构造一个 runtime 是【惰性】的，
+  // 真 spawn 只在 runTurn 那一次调用上。
+  // ⇒ 这一发早退今天的真实价值是【省掉一趟空转】（一套 deps、两次 prepare），
+  //   而【不是】"挡住一次 spawn"。
+  // ⚠ 而且它【没有判据】，这一点不要读成"有"：把这一行删掉，本文件 30 发全绿
+  //   （实测，0044 §9.2 记的第三发变异）。那是一个【等价变异】—— 构造惰性的东西
+  //   早造一会儿是观测不到的。所以这一行的正确身份是"一条今天不承重的性能约定"，
+  //   而它之所以还留着：若哪天 makeRuntime 在构造期加一次真探测（CLI 版本、权限自检），
+  //   这一行立刻从"省空转"变成"承重"，而那时它会需要一条【真能红】的判据。
+  //   （我一度在这里写"这一点有判据，见 H 组第三条" —— 那是假的：第三条判的是 cwd，
+  //    与这一行无关。一句指错地方的"有判据"比一句"没有判据"更贵，见 0044 §7 那一族。）
   const eng = engineOf(o, w, bus);
   const deps = eng.deps();
   // 局部累加器写成【可变】的，返回类型才是 PumpRoundResult 里那两份 readonly：

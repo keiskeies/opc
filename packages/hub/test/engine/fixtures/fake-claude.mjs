@@ -43,7 +43,13 @@ process.stdin.on("end", () => {
   // 而不是断在「测试作者以为传了」。
   const resumed = argv.includes("--resume") ? (argv[argv.indexOf("--resume") + 1] ?? "") : "";
   const budget = argv.includes("--max-budget-usd") ? (argv[argv.indexOf("--max-budget-usd") + 1] ?? "") : "";
-  const echoed = { resumed, budget, prompt: stdin.trim() };
+  // cwd 排在【最前面】而不是 prompt 之后：调用方（charter 那条路）会把这段 JSON 折进
+  // 卡片第二行，而那一行在 600 字处截断（charter.ts 的 impactScopeOf），
+  // prompt 有几百字 —— 排在后面的字段会被截掉，那一发就会红在截断上而不是红在判据上。
+  // 读的是【子进程自己的】process.cwd()：这是"调用方给的工作目录真到了进程里"唯一
+  // 量得到的位置。测试里读父进程的 cwd 只能证明"我以为我传了"。
+  const echoed = { cwd: process.cwd(), resumed, budget, prompt: stdin.trim() };
+
   const body =
     "这是员工的一轮汇报。\n\n" +
     JSON.stringify(echoed) +

@@ -32,7 +32,7 @@
  *     node --experimental-transform-types --import /tmp/opc-harness/register.mjs \
  *     --test packages/hub/test/serve/charter-pump.test.ts
  */
-import { mkdirSync, rmSync } from "node:fs";
+import { mkdirSync, realpathSync, rmSync } from "node:fs";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { fixtureTmp } from "../fixtures/fixture-dir.js";
@@ -715,6 +715,168 @@ describe("G. 执行日志（recordTurn）", () => {
     expect(r.turns).toHaveLength(1);
     expect(r.turns[0]?.recorded).toBe(false);
     expect(r.turns[0]?.why).toContain("没有提供执行日志的写入方");
+  });
+});
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * H. 【默认那一支】—— 生产真正走的那条路，真 spawn 一个子进程
+ *
+ * 为什么这一组必须存在，而它是本篇最后加上的：A–G 那 28 发【全部】注入 cardDeps，
+ * 也就是全部绕开了 engineOf 的默认分支（makeRuntime + o.bin + 真 recordTurn）。
+ * 这不是猜的，是量出来的两发变异（0044 §9.2 第 1 条原来的说法在这里被推翻）：
+ *   · 把 `...(o.bin === undefined ? {} : { bin: o.bin })` 整行删掉 ⇒ 43 发全绿；
+ *   · 把默认那一支的 `recordTurn: () => runtime().recordTurn` 换成 noRecorder ⇒ 43 发全绿。
+ * 后者的后果是【执行日志永远少一行而卡照样建出来】，前者的后果是【生产永远 spawn 真 claude】。
+ *
+ * ⚠ 顺带更正 0044 §9.2 第 1 条那句话：「真子进程那条路本机没验过」对**泵**成立、
+ *   对**CLI 那条路**不成立 —— engine/work.test.ts:265 早就用同一份桩 CLI 真跑通过
+ *   `hub work` 整条链。所以缺的一直只是"泵自己这一侧的默认分支"，范围比我写的小。
+ *
+ * ⚠ 这一组换掉了一条我原本想写的断言。我起初打算断「没抛」——那是一条【恒绿】的断言：
+ *   删掉 bin 透传之后，本机 PATH 上真有 claude（实测 /Users/cjm/.nvm/.../v22.12.0/bin/claude），
+ *   它照样起得来、照样不抛。所以断言一律断【内容出自桩说的那句话】：
+ *   那样一来"起的是别人"必红。**而起的是别人时，这一发会从一次测试里真发出一次 API 调用** ——
+ *   这句话写在这里，是因为它只有在坏掉的那天才会被人读到，而那时它正是最该被读到的东西。
+ *
+ * 桩是 test/engine/fixtures/fake-claude.mjs（真可执行 + shebang，非 mock；
+ * 它的存在理由与"为什么不能是 mock"写在那个文件头与 work.test.ts 里，不在这里重述）。
+ * ────────────────────────────────────────────────────────────────────────── */
+const FAKE_CLI = new URL("../engine/fixtures/fake-claude.mjs", import.meta.url).pathname;
+
+/**
+ * 跑一趟【不注入 cardDeps】的泵 —— 这一句就是这一组的全部意义。
+ * A–G 用的是 pump()，那一格永远有假回调；这里刻意一格都不给。
+ */
+async function pumpReal(w: World, o: { readonly maxAttempts?: number } = {}): Promise<PumpRoundResult> {
+  return pumpCharterCards(w.q, w.bus, {
+    nowMs: NOW + 1000,
+    maxBudgetUsd: 0.5,
+    taskLimitCents: 1000,
+    cwd: TMP,
+    bin: FAKE_CLI,
+    ...(o.maxAttempts === undefined ? {} : { maxAttempts: o.maxAttempts }),
+  });
+}
+
+/** 桩那一侧的行为开关（claude.ts 是 `env: process.env` 原样透传，所以写在本进程上）。 */
+async function withFakeMode<T>(mode: string, fn: () => Promise<T>): Promise<T> {
+  const prev = process.env["FAKE_CLAUDE_MODE"];
+  process.env["FAKE_CLAUDE_MODE"] = mode;
+  try {
+    return await fn();
+  } finally {
+    if (prev === undefined) delete process.env["FAKE_CLAUDE_MODE"];
+    else process.env["FAKE_CLAUDE_MODE"] = prev;
+  }
+}
+
+function harnessCalls(w: World): Row[] {
+  return rows(
+    w,
+    "SELECT agent_role, harness, exit_code, cost_cents, session_id, args_redacted " +
+      "FROM harness_calls ORDER BY created_at, id",
+  );
+}
+
+describe("H. 默认那一支（makeRuntime + 真子进程 + 真执行日志）", () => {
+  it("⭐ 真起一个子进程 ⇒ 卡的内容出自【桩说的话】，账与执行日志各一行", async () => {
+    const w = await world({});
+    const r = await pumpReal(w);
+    expect(r.cards[0]?.outcome).toBe("drafted");
+    expect(pendingCards(w, "t1")).toBe(1);
+
+    const card = rows(w, "SELECT summary, parameters FROM approvals WHERE task_id = 't1'")[0] as Row;
+    // ⭐ 这一句是这一发的心脏，也是它不恒绿的全部理由：
+    // "方案已成型，交技术总监审阅" 只存在于【那个 .mjs 文件里】。
+    // 卡片上是这句话 ⇒ 起的一定是它 ⇒ o.bin 真的透到了 spawn(argv)。
+    expect(String(card["summary"])).toContain("方案已成型，交技术总监审阅");
+    // 命令行上那个美元硬顶【到了子进程手里】：桩把收到的 --max-budget-usd 回显进正文，
+    // 正文折进卡片第二行（impact_scope）。判"上限没到子进程"只能靠回声 ——
+    // 少这一个参数时【一切照常跑通】，只是那个上限从此不存在了。
+    // ⚠ 断的是【解出 JSON 之后】的那一行，不是原始字符串里的 `"budget":"0.5"`：
+    //   impact_scope 本身是被 JSON 转义过的，原始串里那个形状是 `\"budget\":\"0.5\"`，
+    //   照着字面断会红在一个纯粹的转义上（第一次跑就是这么红的）。
+    const params = JSON.parse(String(card["parameters"])) as { impact_scope?: string };
+    expect(String(params["impact_scope"])).toContain('"budget":"0.5"');
+
+    // 桩报 0.042 美元 = 4 美分。走的是真的 usdToCents 与真的 bill()。
+    const t = w.db.prepare("SELECT consumed_cents FROM tasks WHERE id = 't1'").get() as Row;
+    expect(Number(t["consumed_cents"])).toBe(4);
+
+    // ⭐ 执行日志那一行是【真 recordTurn】写的（默认那一支的 recordTurn 走 runtime）。
+    // 这一发在 P2 变异（换成 noRecorder）下红 —— 而那一个坏掉的形状是
+    // "卡建出来了、账也记了、执行日志永远少一行"，正是 §12.7 第 4 层要防的那一格。
+    const hc = harnessCalls(w);
+    expect(hc).toHaveLength(1);
+    expect(String(hc[0]?.["agent_role"])).toBe("intake");
+    expect(String(hc[0]?.["harness"])).toBe("claude-code");
+    expect(Number(hc[0]?.["exit_code"])).toBe(0);
+    expect(Number(hc[0]?.["cost_cents"])).toBe(4);
+    // 桩明明回了 session_id=sess-1，而这一列是 null —— 那是【现状】不是这一发的坏：
+    // CharterResult 不带 sessionId（0044 §9.2 第 2 条）。它跟着 0044 §9.1 那条
+    // 「把缺口钉成现状」的口径走：补上的那天这一发红，逼改的人看见自己在改什么。
+    expect(hc[0]?.["session_id"]).toBeNull();
+  });
+
+  it("⭐ 真子进程【失败且零花费】⇒ 卡不建，但执行日志与尝试计数【都还在】", async () => {
+    // 这一发测的是 0044 §1 那条依赖在【默认分支】上成立：
+    // 本机最可能的失败正是"子进程起来了而输出不是预期 JSON"（等价于装不上 / ENOENT），
+    // 它一分钱不花 ⇒ 一旦这种轮次不写审计，attempts 永远数出 0 ⇒ 上限永远不生效 ⇒
+    // 【每个心跳重新起一个注定失败的子进程，无限、静默、不产生账单】。
+    // A 组已在注入那一支上钉过同一件事，这里钉的是【真 spawn 那一支】——
+    // 两条分支写审计的路径是同一段代码，但"同一段代码"这件事本身正是需要一发的东西。
+    const w = await world({});
+    const r = await withFakeMode("garbage", () => pumpReal(w));
+    expect(r.cards[0]?.outcome).toBe("attempted");
+    expect(pendingCards(w, "t1")).toBe(0);
+
+    // 尝试计数 +1：这条是"上限有界"的地基。
+    expect(attempts(w, "t1")).toBe(1);
+    // 执行日志一行，exit_code=1、cost=0 —— 失败的一轮同样发生过（§12.7 第 4 层）。
+    const hc = harnessCalls(w);
+    expect(hc).toHaveLength(1);
+    expect(Number(hc[0]?.["exit_code"])).toBe(1);
+    expect(Number(hc[0]?.["cost_cents"])).toBe(0);
+    // 失败原文进结论：一个人只看库会以为"什么都没发生"，看终端才拿得到原因。
+    expect(r.cards[0]?.note).toContain("CLI 输出不是预期的 JSON");
+  });
+
+  it("⭐ 必填的 --agent-cwd【真的】到了子进程的工作目录", async () => {
+    // 这一发是补的一格，不是我一开始想到的那一格。查之前我以为"cwd 传没传"由
+    // claude.test.ts 覆盖着 —— 那里确实每发都带 cwd: HERE，而【没有一发读回来】：
+    // 它验的是 argv 上的 --max-budget-usd 与 stdin 上的 prompt，cwd 只被【传】没被【判】。
+    // ⇒ "参数一直在传"与"参数到了"是两件事，而我在读到子进程的 process.cwd() 之前分不清。
+    //
+    // 为什么这一格值得单独一发而不是顺手加在上面那条里：--agent-cwd 是泵的【三个必填同伴】
+    // 之一，而它存在的理由是"猜一个目录等于猜它能看见哪些文件"（0044 §5）。
+    // 少了这一发，那三个必填里【预算】有回声判据（上面那条），【目录】一个都没有 ——
+    // 最坏的表现是角色在【Hub 自己的目录】里干活而配置的人以为在别处，那不会红。
+    const w = await world({});
+    // ⚠ 一个【专门的、与父进程 cwd 与 TMP 都不同】的目录。用 TMP 会让这一发在
+    //   "子进程继承了父进程 cwd"那种坏法下【可能】恰好绿（父进程 cwd 就是仓库根，
+    //   而 TMP 在它外面，所以今天不会假绿 —— 但把不发红的运气写成判据是错的）。
+    const agentCwd = TMP + "/agent-cwd-probe";
+    mkdirSync(agentCwd, { recursive: true });
+    const r = await pumpCharterCards(w.q, w.bus, {
+      nowMs: NOW + 1000,
+      maxBudgetUsd: 0.5,
+      taskLimitCents: 1000,
+      cwd: agentCwd,
+      bin: FAKE_CLI,
+    });
+    expect(r.cards[0]?.outcome).toBe("drafted");
+
+    const card = rows(w, "SELECT parameters FROM approvals WHERE task_id = 't1'")[0] as Row;
+    const params = JSON.parse(String(card["parameters"])) as { impact_scope?: string };
+    const scope = String(params["impact_scope"]);
+    // realpath 而不是原样比：macOS 的 tmp 在 /tmp -> /private/tmp 那条软链下面，
+    // 子进程的 process.cwd() 报的是【物理路径】。直接比会红在符号链接上而不是红在判据上。
+    // ⚠ 这一格留个诚实的边角：realpath 意味着"同一个目录经由另一条路径进来"时这一发
+    //   分不出来 —— 而那正是这一发要防的坏法（防的是"根本没传"，不是"传了个等价别名"）。
+    expect(scope).toContain(JSON.stringify(realpathSync(agentCwd)));
+    // 反向对照的判据在这一发里是【同一条断言的形状】：父进程 cwd 是仓库根，
+    // 与 agentCwd 不同 ⇒ 一旦 cwd 没透传、子进程继承了父进程的，这句就会红。
+    expect(scope).not.toContain(JSON.stringify(process.cwd()));
   });
 });
 

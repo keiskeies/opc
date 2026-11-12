@@ -225,6 +225,8 @@ callersOf("pumpCharterCards",  "serve/charter-pump.ts") = [serve/assemble.ts]
 ## 8. 判别力：11 发变异，以及两发差点骗过我的无效变异
 
 `assemble-pump.test.ts` 15 发 / `charter-pump.test.ts` 28 发 / `config.test.ts` 39 发。
+（`charter-pump.test.ts` 后来补了 H 组，现在是 **31 发**；28 这个数是这张表**当时**的分母，
+不改回去是因为那张表的结论是按那个分母量的 —— 见 §9.2 第 1 条。）
 对 `assemble.ts` 的接线跑了 11 发变异（W1–W11），逐发**先验证变异本身有效**再下结论：
 
 | 变异 | 结果 |
@@ -248,6 +250,12 @@ callersOf("pumpCharterCards",  "serve/charter-pump.ts") = [serve/assemble.ts]
 W10 是这批里唯一的**真缺口**：到上限那一轮库里写了 `CharterDraftAbandoned`，而 `io` 一声不响。
 一条"系统不再自己解决"的事实只在库里而不在终端上，等于只有 grep 得动它的人才知道。
 补的断言判的是**那句 warn 本身**与**恰好一行审计**两件事。
+
+⚠ **而"W1–W11 打的是接线"这句话的射程要说清**：那 11 发全部打在 `assemble.ts` 上，
+`charter-pump.ts` 里 `engineOf` 的**默认那一支**当时**一发都没被覆盖**（P1/P2 两发变异全绿）。
+补的那三发（P1 bin 透传 / P2 默认那一支的 recordTurn / P4 子进程 cwd）与整段经过在 **§9.2 第 1 条**，
+那里同时记了**第三条 P3 是等价变异**（候选为空那道早退删掉不红）——
+一张变异表如果只记"红了所以有判据"，就会让人以为表上没写的都安全。
 
 另一条方法论收获：`createFakeScheduler().advance()` **同步**跑完回调链，
 所以我在测试里手动 `tick()` 一次就造出一个自找的 `skipped`。红的是夹具而不是产品，
@@ -281,10 +289,50 @@ CEO 用 `reject_with_comment` 退回一份章程提案之后：
 
 ### 9.2 本篇没做的（不写成「换种方式做到了」）
 
-1. **真子进程那条路本机没验过。** 泵的 15 + 28 发全部注入一份不 spawn 的 `cardDeps`。
-   测的是**泵的节奏**（候选、上限、不牵连、关机等待），而"能不能起子进程"在
-   `claude.test.ts` / `runtime.test.ts` 里各自钉着。这条边界与 0039 那半是同一件事：
-   我能证明接线，不能证明这台机器上真跑得起来。
+1. ~~**真子进程那条路本机没验过。**~~ ⚠ **这一条在本篇提交之后被我自己证伪，而证伪的过程比结论值钱**，所以整段重写成下面这样（原话不删，划掉留在原地）。
+
+   我原来写的是「泵的 15 + 28 发全部注入一份不 spawn 的 `cardDeps`，而『能不能起子进程』在
+   `claude.test.ts` / `runtime.test.ts` 里各自钉着」。这句话有**两处**错，方向不同：
+
+   - **对 CLI 那条路说重了**：`engine/work.test.ts:265` 早就用 `fixtures/fake-claude.mjs`
+     （真可执行 + shebang，非 mock）把 `hub work` 整条链真跑通过 —— 起真子进程、真解析、真记账。
+     所以"本机验不了真子进程"这句从一开始就不成立。
+   - **对泵自己那一支也说轻了**：它当时是**零覆盖**，而我用"别处钉着"把它解释掉了。
+     这不是文笔问题，是**一发动力的缺失被一句归因合理化了**。量出来的两发变异（都跑在改动**之前**的树上）：
+
+     | 变异 | 当时的结果 | 后果（如果一直没人管） |
+     |---|---|---|
+     | 删掉 `...(o.bin === undefined ? {} : { bin: o.bin })` | **43 发全绿** | 生产永远 spawn 真 `claude`，而"注入桩 CLI"那格参数从此是摆设 |
+     | 默认那一支 `recordTurn: () => runtime().recordTurn` → `noRecorder` | **43 发全绿** | 卡建出来、账也记了、**执行日志永远少一行**（§12.7 第 4 层那条"每次调用都留痕"静默失效） |
+
+   现在由 `charter-pump.test.ts` 的 **H 组**（3 发）判，跑的是真子进程 + 同一份桩：
+   两张卡的内容出自**桩说的那句话**（那句话只存在于 `.mjs` 里 ⇒ 起的一定是它），
+   `--max-budget-usd` 与 **`cwd`** 靠桩的**回声**判（子进程把自己收到的东西回显进正文），
+   失败的桩那一发判"尝试计数 +1 且执行日志一行不少"（§1 那条依赖在**默认分支**上成立）。
+   上面两发现有判据了（各红 2 发），另加一发：**`cwd` 不再传给子进程 ⇒ 红 1 发**（P4）。
+
+   ⭐ **两条要带走的**：
+
+   **(a) 一条断言"没抛"的判据在这一格是恒绿的**，而我起初写的就是那条。
+   本机 `PATH` 上**真有** `claude`（`~/.nvm/versions/node/v22.12.0/bin/claude`），
+   所以删掉 `bin` 透传之后照样起得来、照样不抛、照样绿。
+   判据必须断**内容出自桩说的那句话** —— 附带一句该在坏掉那天才被读到的话：
+   **真起的是别人的时候，这一发会从一次测试里真发出一次 API 调用。**
+
+   **(b) "参数一直在传"不等于"参数到了"**。我以为 `cwd` 由 `claude.test.ts` 覆盖着 ——
+   那里确实**每一发都带** `cwd: HERE`，而**没有一发把它读回来**（它读的是 argv 上的预算与
+   stdin 上的 prompt）。`--agent-cwd` 是泵的三个必填同伴之一，理由是"猜一个目录等于猜它能看见
+   哪些文件"；少了这一发，三个必填里**预算**有回声判据、**目录**一个都没有，
+   最坏表现是角色在 **Hub 自己的目录**里干活而配置的人以为在别处，而那**不会红**。
+   为此给桩加了一个 `cwd` 回显字段（排在最前：卡片第二行在 600 字截断，排在后面会红在截断上）。
+
+   ⚠ 顺带第三条，是**我自己在这篇里刚写错的**：我给源码那行早退补的注释里写了
+   "这一点有判据，见 H 组第三条" —— 第三条判的是 `cwd`，与那行早退**毫无关系**。
+   而那行早退（候选为空就 return）实际上**没有判据**：删掉它 31 发全绿，因为
+   `makeRuntime` 构造时**不读库不起进程**（CLI 版本那格是注入的 `d.harnessVersion`），
+   默认那一支自己也是惰性的 —— 那是一个**等价变异**，构造一个惰性的东西早造一会儿观测不到。
+   同一篇里我还写过那句"建起 runtime 就意味着随时可能 spawn"，同样夸大。
+   ⇒ **「有判据」这三个字要能指到那一发上；指不到就写"没有判据"**（§7 那一族的第七次）。
 2. **`harness_calls.session_id` 恒为 null。** `CharterResult` 不带 sessionId（`CharterDraftOutcome` 有，
    而 `ensureCharterCard` 不往返回值里传）。本篇**不为此改那个返回值形状** —— 它已接两条调用方，
    而这一格的信息量是"起草那一轮用哪个会话"，起草是一次性的（`resumeSessionId` 传 null），
@@ -322,7 +370,7 @@ cd /Users/cjm/CodeBuddy/opc
 PATH=~/.nvm/versions/node/v24.14.0/bin:$PATH \
   node --experimental-transform-types --import /tmp/opc-harness/register.mjs \
   --test "packages/hub/test/serve/{charter-pump,assemble-pump,config}.test.ts"
-# 期望 28 / 15 / 39 全绿
+# 期望 31 / 15 / 39 全绿（charter-pump 现在 31 发：A–G 28 + H 组 3 发真子进程）
 PATH=~/.nvm/versions/node/v24.14.0/bin:$PATH \
   node --experimental-transform-types --import /tmp/opc-harness/register.mjs \
   --test "packages/hub/test/acceptance/phase3.test.ts"        # 期望 10 发全绿
