@@ -571,9 +571,26 @@ function driverNotice(driver) {
  *
  * 措辞分两档是【必须】的：两档的下一步动作不同 ——
  *  试到上限 ⇒ 去看角色那一轮为什么推不动；
- *  被钱挡住 ⇒ 去放开预算（0045 那道门），查 bug 是白跑一趟。
+ *  被钱挡住 ⇒ 去把那个上限放开（而它【不在屏幕上】，见下面那条 ⭐）。
  * 合成一句"这条卡住了"就等于把选择又丢回给读的人（同 0041 §7 那条判据：
  * 屏幕上那句话得指向【真的能做的下一步】）。
+ *
+ * ⭐ 钱那一档为什么写的是【带更高的 --task-limit-cents 重启】而不是【追加预算】：
+ * 探针量过（0049 §12）—— 那道门的【分母】是进程里那个命令行数字
+ * （`serve/driver-pump.ts:487` 绑的是 `o.taskLimitCents`），
+ * 而【不是】 `budgets.limit_cents` 那一列。把那一列从 500 改到 5000，
+ * 门【一个字都不响应】：驱动器候选 0 条 → 0 条，看板那一行照旧报"被钱挡住"。
+ * 所以「点一下追加预算」今天在真机上是【一颗按下去不会有任何效果的按钮】，
+ * 而屏幕上这一行如果指着它，就是拿一句看着可执行的话把人送去点一颗空按钮 ——
+ * 那正是 0041 §7 那条判据要拦的事，只是这次被指着的是【我自己刚写的那一行】。
+ * 真正的按钮要先解决「`budgets.limit_cents` 这一列到底是什么意思」
+ * （0045 §7 挂着等 CEO 拍的一项，候选 (A) 的代价里明写着"追加预算这条路将来要跟它抢同一格"），
+ * 那不是实现层能单方面定的，所以这里只说【此刻真有效】的那一步。
+ *
+ * ⚠ 「命令行」那三个字留着是有用处的：看板【上面】那条预算条写的
+ * 「已声明上限合计」读的是 `budgets.limit_cents` 之和（`overview/today.ts:294`），
+ * 与这一行的数【两个来源】。少了这个限定词，同一屏上会出现两个都叫"上限"
+ * 而可以互相矛盾的数，而读者没有任何办法发现它们不同源。
  */
 function driverLine(taskId, driver, nowMs) {
   const stopped = driver && Array.isArray(driver.stopped) ? driver.stopped : [];
@@ -581,7 +598,7 @@ function driverLine(taskId, driver, nowMs) {
   if (!row) return "";
   const when = fmtAgo(row.since_ms, nowMs);
   if (row.cause === "no_budget") {
-    return `不再推：花到了每条任务的上限（${money(driver.task_limit_cents)}）· ${when}`;
+    return `不再推：花到了命令行那个单条上限（${money(driver.task_limit_cents)}）· 屏幕上放开不了，要它继续走得带更高的 --task-limit-cents 重启 · ${when}`;
   }
   const tries =
     row.attempts !== null && row.attempts !== undefined && row.max_attempts

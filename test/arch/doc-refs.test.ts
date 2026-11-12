@@ -600,6 +600,32 @@ const SNAP: Record<string, string> = {
     "CREATE UNIQUE INDEX idx_budgets_scope ON budgets(scope_type, scope_id, period);",
   "0049-driver-status-on-the-board-and-a-bind-order-bug-that-was-green.md>pragmas.ts:28":
     'db.exec("PRAGMA foreign_keys = ON;");',
+  // ── 0049 §11.2 / §12：调研与探针的【现场坐标】────────────────────────────
+  // 这一组守的不是"判据还写着那句话"，而是**那几条结论还能不能被复算**：
+  //  §11.2 那三条（`createCard` 零生产调用方 / `insertCard` 有三个真调用方 /
+  //    `auto-approve.ts` 那句现在时断言已过期）每一条都指着一个具体那一行，
+  //    行号漂了那三条就退化成"某人说过"，而复算的人连从哪一行开始看都不知道。
+  //  §12 那两条是"追加预算那颗按钮为什么是空按钮"这条判断的**唯一物证**：
+  //    `driver-pump.ts:487` 绑的是 `o.taskLimitCents`（门读参数），
+  //    `today.ts:294` 求和的是 `limit_cents`（界面读那一列）。
+  //    ⚠ 这两行**必须同时被改**才不会造出"屏幕上没超而门挡着"那种分叉 ——
+  //    快照在这里红，就是逼改的人去看另一侧动没动，而不是各自改各自的。
+  "0049-driver-status-on-the-board-and-a-bind-order-bug-that-was-green.md>seat-card.ts:254":
+    "const res = insertCard(db, draft, { nowMs: o.nowMs });",
+  "0049-driver-status-on-the-board-and-a-bind-order-bug-that-was-green.md>engine/charter.ts:449":
+    "const card = insertCard(db, cardDraft, { nowMs: o.nowMs });",
+  "0049-driver-status-on-the-board-and-a-bind-order-bug-that-was-green.md>dispatch.ts:1182":
+    "const res = insertCard(db, p.draft, { nowMs: o.nowMs });",
+  "0049-driver-status-on-the-board-and-a-bind-order-bug-that-was-green.md>policy/auto-approve.ts:433":
+    "//   ① 那一行不存在（今天的真库就是这种：src 里没有任何 INSERT INTO approvals）；",
+  "0049-driver-status-on-the-board-and-a-bind-order-bug-that-was-green.md>cards.ts:237":
+    '"INSERT INTO approvals (id, task_id, approval_type, summary, parameters, " +',
+  "0049-driver-status-on-the-board-and-a-bind-order-bug-that-was-green.md>charter-pump.test.ts:231":
+    "function pendingCards(w: World, taskId: string): number {",
+  "0049-driver-status-on-the-board-and-a-bind-order-bug-that-was-green.md>serve/driver-pump.ts:487":
+    ".all(...states, maxAttempts, o.taskLimitCents, perRound) as unknown as {",
+  "0049-driver-status-on-the-board-and-a-bind-order-bug-that-was-green.md>today.ts:294":
+    '"COALESCE(SUM(limit_cents), 0) AS declared FROM budgets WHERE scope_type = ? AND period = ?";',
 };
 
 describe("决策文档里的「文件:行号」引用不漂移", () => {
