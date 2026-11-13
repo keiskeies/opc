@@ -675,6 +675,18 @@ const SNAP: Record<string, string> = {
     "REJECTED_DOWNWARD: [",
   "0050-abandoned-task-never-resumes-and-a-knob-that-does-not-exist.md>today.ts:55":
     "* 不含 `MEETING_REQUIRED`：它同样是死路（出边空数组），但规格里它的名字属于【会议】",
+  // 0051（端到端那一发）两条，同轮登记（0006 §7-40）。两条都先在目标文件里
+  // `sed -n '<n>p'` 把原文读出来再抄，不从 0051 正文里复制措辞。
+  // runtime.ts:108 是**活坐标而带一段历史**：0051 §2b 记的正是「这一行曾被我把符号名接错」，
+  // 而快照比的是【行文本】—— 它挡得住「这一行不再是 REJECTION_COUNT_SQL」，
+  // 挡不住「行号对而符号名错」（那一族 0051 §6-6 登记为无守卫）。
+  "0051-end-to-end-one-idea-to-delivered-and-two-false-readings-of-my-own-harness.md>runtime.ts:108":
+    "export const REJECTION_COUNT_SQL =",
+  // bus.ts:256 也是活坐标：0051 §3 那句「不能 for await 那个订阅」的唯一依据是
+  // 【空队列时 next() 挂住而不是返回 done】。有人把它改成空就返回，
+  // 那条测试写法就能删掉这层包装 —— 快照该红，逼他重读那一段。
+  "0051-end-to-end-one-idea-to-delivered-and-two-false-readings-of-my-own-harness.md>bus.ts:256":
+    "return new Promise<IteratorResult<FeedItem>>((resolve) => {",
 };
 
 describe("决策文档里的「文件:行号」引用不漂移", () => {
