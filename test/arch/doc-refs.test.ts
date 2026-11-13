@@ -208,7 +208,7 @@ const SNAP: Record<string, string> = {
     'import { Command } from "@langchain/langgraph";',
   // HUMAN_EDGES 的类型那一行。0043 §6「只有 approve 有出边」这条现状的落点：
   // 出边这个维度的类型是 Partial<Record<"approve", …>> —— 不是运行时忘了填，是类型上就只有这一个键。
-  "0043-default-value-should-be-the-one-that-runs-and-a-500-that-lied-about-replaying.md>dispatch.ts:137":
+  "0043-default-value-should-be-the-one-that-runs-and-a-500-that-lied-about-replaying.md>dispatch.ts:237":
     'export const HUMAN_EDGES: Readonly<Partial<Record<TaskState, Partial<Record<"approve", HumanEdge>>>>> = {',
   // 0043 §7 那张表的第三行：0016 那一格的【当前】落点。
   // 同一节里 0016 键下还有一格 real-deps.ts:298 —— 那是 applyDecision，
@@ -547,7 +547,7 @@ const SNAP: Record<string, string> = {
   // 将来 `callersOf("insertCard")` 因为一句补了括号的注释而误报时，这条快照会先红并指回这一组注释。
   "0042-today-view-and-putting-the-criteria-on-the-server-side.md>packages/web/public/app.js:445":
     "attention === null ? false : attention.includes(tk.status) || overBudget(tk);",
-  "0042-today-view-and-putting-the-criteria-on-the-server-side.md>packages/hub/src/engine/runtime.ts:112":
+  "0042-today-view-and-putting-the-criteria-on-the-server-side.md>packages/hub/src/engine/runtime.ts:135":
     '"INSERT INTO budget_events (source_event, scope_type, scope_id, period, amount_cents, task_id, created_at) " +',
   "0042-today-view-and-putting-the-criteria-on-the-server-side.md>packages/hub/src/budget/tracker.ts:70":
     '"INSERT INTO budget_events (source_event, scope_type, scope_id, period, amount_cents, task_id, created_at) " +',
@@ -557,17 +557,22 @@ const SNAP: Record<string, string> = {
     'export const ATTENTION_STATUSES: readonly string[] = ["ESCALATED_TO_CEO", ...BLOCKED_STATUSES];',
   // 0045（任务级预算那道门）新写的两条，登记同轮完成（0006 §7-40 那条规矩），
   // 且都是【活坐标】—— 它们的价值全在"那一行现在还写着那句话"：
-  //  ① runtime.ts:109 是 §1 那张表的成因（`ENSERT_TASK_BUDGET_SQL` 的 DO NOTHING
+  //  ① runtime.ts:132 是 §1 那张表的成因（`ENSERT_TASK_BUDGET_SQL` 的 DO NOTHING
   //     ⇒ budgets.limit_cents 第一次写完再也不改）。有人把它改成 DO UPDATE，
   //     0045 §4「上限那一侧读参数」的那条理由就作废了，快照红逼他回去改 §4 与门本身。
   //  ② today.ts:293 是「门与预算条读同一个累加器」这条取舍的**对面那一侧**：
   //     今日视图求和的正是 budgets.consumed_cents。它若改成读别的列，
   //     §4 那句"读另一列就是再造一个两源分叉"当场失效。
   // ⚠ 上面 ② 与下面那条 key 的行号在 0049 那轮从 263 顶到 293（today.ts 上方加了 29 行，
-  //   其中 211 行以后是 driver 那一格）—— ① 的 runtime.ts:109 没动，因为它上面没加东西。
-  //   这里特意留下"原来是 263"这一句，是为了让下一次读到红的人知道**这次移动过**：
-  //   快照本身只说"现在那一行写着什么"，而"它被顶过几次"是另一件事（0015 §8 那段同族）。
-  "0045-task-budget-gate-and-a-parameter-that-only-existed-on-the-cli.md>packages/hub/src/engine/runtime.ts:109":
+  //   其中 211 行以后是 driver 那一格）。**而 ① 也被顶过一次**：0049 那轮写下的
+  //   「① 的 runtime.ts:109 没动，因为它上面没加东西」在 0050 那轮【作废】——
+  //   0050 在 runtime.ts 上方加了 `REJECTION_COUNT_SQL` 那一格，109 → 132。
+  //   留着这一句而不是删掉它，是因为它正是这类注释的命运样本：
+  //   "它上面没加东西"是一个【关于未来的断言】，而写下它的人不在场。
+  //   这里特意留下"原来是 263 / 原来是 109"这两句，是为了让下一次读到红的人知道
+  //   **这次移动过**：快照本身只说"现在那一行写着什么"，而"它被顶过几次"是另一件事
+  //   （0015 §8 那段同族）。
+  "0045-task-budget-gate-and-a-parameter-that-only-existed-on-the-cli.md>packages/hub/src/engine/runtime.ts:132":
     '"INSERT INTO budgets (id, scope_type, scope_id, period, limit_cents, consumed_cents, hard_stop) " +',
   "0045-task-budget-gate-and-a-parameter-that-only-existed-on-the-cli.md>packages/hub/src/overview/today.ts:293":
     '"SELECT COUNT(*) AS scopes, COALESCE(SUM(consumed_cents), 0) AS consumed, " +',
@@ -583,7 +588,7 @@ const SNAP: Record<string, string> = {
   // 『这一轮成不成』」整段结论就挂在这一格上：如果哪天成功支改成回传真实席位
   // （例如落点是人席时回 "human"），§4.2 那张表的后两行就要重写 ——
   // 快照在这里红，就是逼回来重读那张表，而不是让文档继续指着一个不再写死的值讲"写死"。
-  "0048-driver-pump-who-presses-enter-after-the-ceo-approves.md>dispatch.ts:1293":
+  "0048-driver-pump-who-presses-enter-after-the-ceo-approves.md>dispatch.ts:1452":
     'seat: "agent",',
   // ── 0049 §7：夹具翻车现场的【写入方】坐标 ────────────────────────────────
   // 这三条不是"活坐标"（没有判据挂在"那一行还写着这句话"上），它们守的是
@@ -614,7 +619,7 @@ const SNAP: Record<string, string> = {
     "const res = insertCard(db, draft, { nowMs: o.nowMs });",
   "0049-driver-status-on-the-board-and-a-bind-order-bug-that-was-green.md>engine/charter.ts:449":
     "const card = insertCard(db, cardDraft, { nowMs: o.nowMs });",
-  "0049-driver-status-on-the-board-and-a-bind-order-bug-that-was-green.md>dispatch.ts:1182":
+  "0049-driver-status-on-the-board-and-a-bind-order-bug-that-was-green.md>dispatch.ts:1341":
     "const res = insertCard(db, p.draft, { nowMs: o.nowMs });",
   "0049-driver-status-on-the-board-and-a-bind-order-bug-that-was-green.md>policy/auto-approve.ts:433":
     "//   ① 那一行不存在（今天的真库就是这种：src 里没有任何 INSERT INTO approvals）；",
@@ -626,6 +631,50 @@ const SNAP: Record<string, string> = {
     ".all(...states, maxAttempts, o.taskLimitCents, perRound) as unknown as {",
   "0049-driver-status-on-the-board-and-a-bind-order-bug-that-was-green.md>today.ts:294":
     '"COALESCE(SUM(limit_cents), 0) AS declared FROM budgets WHERE scope_type = ? AND period = ?";',
+  // ── 0050 §6：打回那条边，以及它新造出来的那个循环 ──────────────────────
+  // 这批里只有两格是【活坐标】（主张的形状就是"那一行现在写着这句话"）：
+  //  · runtime.ts:108 —— `REJECTION_COUNT_SQL` 那一行本身，它就是 §4.2.1 那个分子的实现。
+  //    漂了要回来重读 0050 §6.5（为什么数 `payload.$.to` 而**不数** `action`：
+  //    一次打回写两条 state_change 边，数 action 会恒翻倍 ⇒ 上限提前一倍咬）。
+  //  · status.ts:59 —— 合法表里那条**一直存在**的补边。它是"三张表两有一无"里
+  //    **有**的那一张；将来有人删了它，0050 §6.1 那句"合法表说有"就作废。
+  // 其余是**登记**性质（正文写了坐标就同轮登记，0006 §7-40），不挂判据。
+  // ⚠ 这里的键全部是**文档里写的那个形态**（`dispatch.ts:101` 而不是全路径），
+  //   因为 verify 用的是 `doc + ">" + ref.file + ":" + ref.ln`，而 ref.file 是
+  //   **正则从正文里抓到的那段字符**。写成解析后的全路径会得到"两边各说一半"：
+  //   那一批条目**全部**报"快照里没有"，同时每一条**又**报"快照里有而文档里没有"——
+  //   我第一次插就是错的这一边，两条错向**互相掩护**（总数看着只多不少）。
+  // ⚠ 这里**只有 13 条而正文有 14 处引用**：`INDEX.md:382` 那一条登记过一次又被删掉，
+  //   删的原因是它**自我拆台** —— 主张是「本仓有这种形状」（一个关于先例的主张），
+  //   而 `INDEX.md` 正是每篇都要往上插条目而**必然漂移**的那个文件：
+  //   我插 0050 自己那一条的时候，就把刚登记好的那一行顶走了。
+  //   行号对这个主张不是证据，正文里那段**逐字引文**才是（0048 §9 同一条判断）。
+  "0050-abandoned-task-never-resumes-and-a-knob-that-does-not-exist.md>app.js:528":
+    "msg: \"这台 Hub 没开驱动器：想法停在 agent 那一格之后，不会有任何东西去推它。要自动推进请带 --driver-pump 起 Hub，或手工 hub work。\",",
+  "0050-abandoned-task-never-resumes-and-a-knob-that-does-not-exist.md>app.js:675":
+    "<span class=\"pill ${statusClass(tk.status)}\">${esc(tk.status)}</span>",
+  "0050-abandoned-task-never-resumes-and-a-knob-that-does-not-exist.md>assemble.ts:274":
+    "readonly driverMaxAttempts?: number;",
+  "0050-abandoned-task-never-resumes-and-a-knob-that-does-not-exist.md>assemble.ts:1646":
+    "* ⚠ 这里【不】列驱动器的按格尝试上限（maxAttempts）与每任务轮数（maxTurns）：",
+  "0050-abandoned-task-never-resumes-and-a-knob-that-does-not-exist.md>dispatch.ts:101":
+    "DECOMPOSING: { handoff: { to: \"IN_PROGRESS\", next: \"target\", why: \"拆解完成，活儿交给被点名的角色\" } },",
+  "0050-abandoned-task-never-resumes-and-a-knob-that-does-not-exist.md>dispatch.ts:1207":
+    "action: \"state_change\",",
+  "0050-abandoned-task-never-resumes-and-a-knob-that-does-not-exist.md>driver-pump.ts:354":
+    "* 这个数字【不是预算】，是最后一道闸 —— advance 文件头写的就是\"防上面两条判据被",
+  "0050-abandoned-task-never-resumes-and-a-knob-that-does-not-exist.md>graph/company.ts:254":
+    "if (state.current === \"REJECTED_DOWNWARD\") await write(\"IN_PROGRESS\");",
+  "0050-abandoned-task-never-resumes-and-a-knob-that-does-not-exist.md>heartbeat/patrol.ts:139":
+    "export function kindOf(alias: string): string {",
+  "0050-abandoned-task-never-resumes-and-a-knob-that-does-not-exist.md>runtime.ts:108":
+    "export const REJECTION_COUNT_SQL =",
+  "0050-abandoned-task-never-resumes-and-a-knob-that-does-not-exist.md>status-machine.test.ts:172":
+    "it(\"§7.1 未给出路的三态【当前】是死路 —— 显式钉住这个已知缺口\", () => {",
+  "0050-abandoned-task-never-resumes-and-a-knob-that-does-not-exist.md>status.ts:59":
+    "REJECTED_DOWNWARD: [",
+  "0050-abandoned-task-never-resumes-and-a-knob-that-does-not-exist.md>today.ts:55":
+    "* 不含 `MEETING_REQUIRED`：它同样是死路（出边空数组），但规格里它的名字属于【会议】",
 };
 
 describe("决策文档里的「文件:行号」引用不漂移", () => {

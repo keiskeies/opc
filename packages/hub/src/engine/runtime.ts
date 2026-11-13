@@ -86,6 +86,29 @@ export const PRODUCER_SCAN_SQL =
   "SELECT payload FROM events WHERE task_id = ? AND action = 'state_change' " +
   "ORDER BY id DESC LIMIT 20";
 
+/**
+ * 「这条想法已经被打回几次」—— §4.2.1 `max_rejections` 的分子。
+ *
+ * 为什么数 events 而【不】数 tasks.status、也不新开一列：
+ * 打回这件事的【事实源】就是那条 `payload.$.to = 'REJECTED_DOWNWARD'` 的状态边
+ * （dispatch 那一轮写的，append-only）。数 tasks 行只会得到"现在是不是被打回态"
+ * —— 而任务早已被 AUTO_AFTER_EDGE 落到 IN_PROGRESS 重做了，那个数恒为 0。
+ * 新开一列 rejection_count 则要过一次迁移，并且造出【两份同一事实】
+ * （计数器与那串边可以不一致 = 又一处"账面与审计各说一半"）。
+ *
+ * ⚠ 数的是 `to`，不是 `action`。一条打回写【两条】边（REJECTED_DOWNWARD 那一跳
+ * 加上 AUTO_AFTER_EDGE 自动补的 IN_PROGRESS 那一跳，见 dispatch 的 chain），
+ * 而只有第一条的 `to` 是 REJECTED_DOWNWARD —— 所以这个 COUNT 恰好等于打回次数，
+ * 不会翻倍。这一点是这条 SQL 全部的正确性所在，被 driver 那条注释说反过一次，
+ * 所以由 runtime.test.ts 那条"打回一轮 ⇒ 恰好 +1"的断言守着（不是靠这段注释）。
+ *
+ * 不用 LIMIT 窗口：窗口会【少数】，而少数直接等于上限晚触发（多烧钱），
+ * 与 PRODUCER_SCAN_SQL 那种"找第一条"的用法不同 —— 那里窗口只影响找不找得到。
+ */
+export const REJECTION_COUNT_SQL =
+  "SELECT COUNT(*) AS n FROM events WHERE task_id = ? AND action = 'state_change' " +
+  "AND json_extract(payload, '$.to') = 'REJECTED_DOWNWARD'";
+
 /** 同一件事是否已被 CEO 批过（同源审阅的放行凭据）。 */
 export const CEO_APPROVED_SQL =
   "SELECT 1 AS hit FROM approvals WHERE task_id = ? AND card_key = ? AND status = 'approved' LIMIT 1";
@@ -332,6 +355,12 @@ export function makeRuntime(d: RuntimeDeps): EngineRuntime {
         }
       }
       return null;
+    },
+
+    rejectionCount: (taskId) => {
+      // 见 REJECTION_COUNT_SQL：判据是那条 append-only 的状态边，不是 tasks 那一行。
+      const row = read().prepare(REJECTION_COUNT_SQL).get(taskId) as { n: number | bigint } | undefined;
+      return row === undefined ? 0 : Number(row.n);
     },
 
     ceoApproved: (taskId, cardKey) =>

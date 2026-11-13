@@ -113,15 +113,115 @@ export const AGENT_EDGES: Readonly<Partial<Record<TaskState, Partial<Record<Role
 };
 
 /**
- * EVIDENCE_SUBMITTED → IN_REVIEW 是 hub 自动走的边。
+ * 落点之后 hub 【不问任何人】再自动走的那一格，以及那一格在审计里该说的那句话。
  *
+ * ── 为什么是【两张信息一张表】而不是两张表 ────────────────────────────
+ * 第一版这一张只装 `TaskState` 而把那句 note 写死在调用点（`chain` 那一处）。
+ * 今天它只有一个键，所以那句写死的「产出已进入 X 的审阅队列」恰好总是对的。
+ * 而它【结构上】给不出正确的第二行：打回那一跳自动补的那格说的是
+ * 「交回下游重做」，不是「进审阅队列」。往这张表加第二个键而不动 note，
+ * 就是往 append-only 的 events 里写一句【听起来像那么回事的假话】——
+ * 0047 §4 记的正是这件事的另一半（那里是「起点写死 ⇒ 将来加边会写出假边而绿着」，
+ * 而它当时改的是链尾推导；note 这一半当时没动，因为那时还没有第二个键）。
+ * 所以 note 与 to 【必须】同一处定义：加一格的人被迫同时说清那一格发生了什么。
+ *
+ * ── EVIDENCE_SUBMITTED → IN_REVIEW ───────────────────────────────────
  * 「自动」在这里不是偷懒：§7.1 从这一状态【只有一个出口】，没有任何判断发生 ——
  * 产出进了审阅队列，下一个动作是审阅者开口（§8.2 第 3 条把显式决定放在【审阅】那一格，
  * 不在「进入队列」这一格）。同一事务里多写一条边，审计反而更完整。
+ *
+ * ── ⭐ REJECTED_DOWNWARD → IN_PROGRESS ───────────────────────────────
+ * 这一格是【对账】补上的，不是新增语义：`status.ts:59` 那张合法表【一直】有这条边
+ * （「【补边】§7.2 打回路径说明：任务沿边回退到上游重新处理」），
+ * 旧的 langgraph 路线也真的走它（`graph/company.ts:254`），
+ * 而引擎换路线时它【没有搬过来】—— AGENT_EDGES 与 HUMAN_EDGES 两张表都查不到
+ * `REJECTED_DOWNWARD` 这个键。三张表两有一无，于是：
+ *
+ *   审阅者（一个 agent）在 IN_REVIEW 打回 ⇒ 这是【合法的一条 agent 边】
+ *   ⇒ 任务落到 REJECTED_DOWNWARD ⇒ seatOf 判它 human（因为 AGENT_EDGES 没这个键）
+ *   ⇒ 驱动器不推它（DRIVER_ELIGIBLE_STATES 派生自 AGENT_EDGES，实测不含它）
+ *   ⇒ 也不给 CEO 发卡（needsSeatCard 要 HUMAN_EDGES[S] 存在，实测 false）
+ *   ⇒ CEO 就算手上有卡也推不动（humanEdge(S,"approve") 实测 null）
+ *   ⇒ 而它【不在】看板任何一列（不在 ATTENTION_STATUSES，也不在 BLOCKED_STATUSES）
+ *
+ * 也就是「审阅者一说打回，这条想法就永久停在一个既没人干活、也没人入口、
+ * 屏幕上还不出现在任何一列的格子里」。`status.ts:59` 那条补边注释自己写着
+ * 「不补就跑不通文档自己的示例」，而 `status-machine.test.ts:172` 那条
+ * 「已知缺口快照」的原文是「届时这里变红，逼人来对账」—— 现在对的就是这一笔。
+ *
+ * ⚠ 为什么【不】改成给 AGENT_EDGES 加一条出边：那意味着要【起一个子进程】在
+ * REJECTED_DOWNWARD 那一格让下游角色自己决定接不接 —— 多烧一轮真钱，
+ * 而那个决定【审阅者刚才已经替他做过了】。打回这一跳的语义是"决定已做出、
+ * 只是没落到干活那一格"，与 EVIDENCE_SUBMITTED 同一类：hub 直接落到底。
+ * 负责角色也因此天然正确：handoff 那条 plan 的 `role` 已经是【被点名的下游】
+ * （`planEdge` 的 `next: "target"` 那一支），所以自动那一格落的是 `IN_PROGRESS/下游`。
  */
-export const AUTO_AFTER_EDGE: Readonly<Partial<Record<TaskState, TaskState>>> = {
-  EVIDENCE_SUBMITTED: "IN_REVIEW",
+export const AUTO_AFTER_EDGE: Readonly<
+  Partial<Record<TaskState, { readonly to: TaskState; readonly note: (role: string, from: TaskState) => string }>>
+> = {
+  EVIDENCE_SUBMITTED: {
+    to: "IN_REVIEW",
+    note: (role, from) =>
+      "产出已进入 " + role + " 的审阅队列（§7.1 从 " + from + " 只有一个出口，不需要判断）",
+  },
+  REJECTED_DOWNWARD: {
+    to: "IN_PROGRESS",
+    note: (role, from) =>
+      "打回已落到 " + role + " 手上，任务回到执行那一格（§7.2 打回路径：沿边回退到上游重新处理；" +
+      "这一格不需要任何人再表态，所以由 hub 直接落到底 —— 停在 " + from + " 会既没有 agent 会动、也没有人类入口）",
+  },
 };
+
+/**
+ * 「同一需求最多被打回几次」——规格 §4.2.1 的 `max_rejections`（设计文档 319 行）。
+ *
+ * 原文：「`max_rejections` 防止无限打回循环 —— 3 次未收敛自动升级到 CEO，不在总监层内耗」，
+ * 配置块里紧挨着的那行是 `escalation_on_exceed: "ceo"`。
+ * 所以这一格【不是本仓发明的策略】，是规格里写着而引擎没实现的那一条。
+ *
+ * ── 为什么必须有人实现它（本篇探针量出来的）────────────────────────
+ * `REJECTED_DOWNWARD → IN_PROGRESS` 接上之前（0050 §8），打回是【终点】，
+ * dev ⇄ 审阅者这种循环在生产上根本走不出来，所以没有这条上限也没事。
+ * 接上之后它可能了，而现存的三道封顶【一道都拦不住它】：
+ *  · 驱动器那条按格 attempts —— 每次回到 IN_PROGRESS 都是一条新的状态边
+ *    ⇒ 新的 marker ⇒ 计数归零。这是 0048 刻意的设计（「合法重访不该被算成失败」），
+ *    后果是它【结构上】看不见跨格循环（探针 54：maxAttempts=2 跑 12 轮一次没触发）。
+ *  · advance 的「不动就停」—— 每一轮都真的写了一条边 ⇒ `moved` 恒真 ⇒ 判据恒假
+ *    （探针 53：单轮 advance 跑满 12 格、480 美分，停在 limit）。
+ *  · `maxTurns` —— 它文件头自己写着「这一格不是预算，是最后一道闸」，
+ *    而且它是【每轮 advance】的闸：驱动器每心跳起一次新的 advance，于是每心跳都能
+ *    再烧 12 格，永远碰不到它。
+ * 剩下的只有那条命令行上的花钱上限（`--task-limit-cents`）。也就是说没有这一格的话，
+ * 「审阅者每轮都打回」的代价是【每个心跳 12 次真子进程，直到单条任务的钱烧完】，
+ * 而屏幕上什么都不会说（它还好好停在 agent 那一格，见 §文件末那条测试）。
+ */
+export const DEFAULT_MAX_REJECTIONS = 3;
+
+/**
+ * 打回次数超限时落哪一格：【不另立一份常量】，运行时从规格那条【已有的】升级边上取
+ * —— `AGENT_EDGES.IN_REVIEW.blocked.to`（§7.1「审阅者要求 CEO 裁决」，§8.3）。
+ * 抄那个 `to` 而不是手抄 `"ESCALATED_TO_CEO"` 的差别：若将来有人把那条边改去别的落点，
+ * 「打回超限」跟着走（同一个"交给 CEO 裁决"的语义）；写死字符串的话两处会【安静地】
+ * 指向不同的格子，而这两处本来是一句话。连 `next` 一起读（见调用点），
+ * 于是"负责角色跟着落点走"也不是我判的。
+ */
+
+/**
+ * 落点那一格在审计里说的那句话。
+ *
+ * ⚠ 数字用的是【已经打回过几次】而【不是 +1】。第一版写的是 `rejections + 1` 并配一句
+ * 「这是第 N 次打回」—— 那句话是【假的】，而且假在 append-only 的那一侧：
+ * 这一轮【没有发生打回】（它的落点是 ESCALATED_TO_CEO，不是 REJECTED_DOWNWARD，
+ * 也没有派回下游），写成"第 4 次打回"就往 events 里记了一次根本没发生的打回，
+ * 而 §4.2.1 那个额度、§20.4 的回放、以及任何"这条想法被打回几次"的读法读的就是那串行。
+ * 措辞因此只能说「已打回 N 次」—— N 是那条 SQL 数出来的真数，一句话不外加。
+ */
+export function rejectionCapNote(rejections: number, role: string, summary: string): string {
+  return (
+    "这条想法已被打回 " + rejections + " 次，达到 " + DEFAULT_MAX_REJECTIONS + " 次上限 —— " + role +
+    " 与下游没有收敛，本轮【不再派回下游】，按 §4.2.1「超限自动升级到 CEO」升给人裁决。审阅原文：" + summary
+  );
+}
 
 /** CEO 的三个席位 + 交付。只有人类决策能走（§9）。 */
 export interface HumanEdge {
@@ -399,6 +499,16 @@ export function planEdge(o: {
   /** pass 落点需要沿树上移时用的当前角色上级（CEO 判定的入口）。 */
   readonly ceoRoleId: string;
   /**
+   * 这条任务上【已经发生的打回次数】（§4.2.1 `max_rejections` 的分子）。
+   *
+   * 【可选而默认 0】，与 dispatch 那侧的 `rejectionCount` 必填【刻意相反】，理由是两侧
+   * 失效的代价不同：这里是纯函数测试面（三十来个调用点大多没有"打回"这一维，
+   * 强制它们写 0 只会让每一处都要解释那个 0 是什么），而"没有打回"确实是绝大多数
+   * 轮次的真相；那里是装配面，忘了接线 = 上限【永不触发】，属于"配置写了而没生效"，
+   * 所以必须让 TS 响。
+   */
+  readonly rejections?: number;
+  /**
    * 这一轮执行【失败】的原文。非 null 时任何动作都不推进状态 ——
    * 判在 parseDecision 之前是有实据的：CLI 被 SIGKILL 或预算掐断时，stdout 上可能
    * 留着【上半轮的】半截输出，而那里头完全可以有一个格式完好的决策段。
@@ -436,6 +546,35 @@ export function planEdge(o: {
         "状态跃迁（§7.1 从 " + o.status + " 出发：" + (outs.length === 0 ? "无出路，死路" : outs.join(" / ")) + "）。" +
         "状态不变。要改的是状态机（需 CEO 拍板），不是让它走过去。",
     );
+  }
+
+  // ⭐ 打回超限 ⇒ 不派回下游，改升给 CEO（§4.2.1 `max_rejections` + `escalation_on_exceed`）。
+  //
+  // 排在【上面那些 stay 之后、边表查中之后、nextRole/to 算出之前】，两个位置都是判出来的：
+  //  · 排在 blockedHandoff 之后 ⇒ 越权的打回仍然先按越权处理（建卡等人裁决），
+  //    不会因为"反正要打回"就把一条机器不认的交接洗成一次升级；
+  //  · 排在 edge 查到之后 ⇒ 只有【真的会打回】的那一轮受这条上限管。
+  //    一轮 wait、一轮动作不合法、一轮执行失败，都不该消耗这个额度，
+  //    也不该被"升给 CEO"这件事打断（它们各自有自己的 stay 分支与人话）。
+  //
+  // ⚠ 落点【从边表那条升级边上读】，这一支里不许出现字面量 "ESCALATED_TO_CEO"：
+  // `AGENT_EDGES.IN_REVIEW.blocked` 的 `to` 就是规格那句"交给 CEO 裁决"的落点。
+  // 判"落哪一格"于是与那条边【同源】；写死两处字符串会得到"两条语义相同的边
+  // 安静地指向不同格子"，而那正是这一篇在整个仓库里反复在消灭的那一族。
+  // 负责角色同理保持 o.role（那条边是 `next: "same"`，不换人）—— 这条不变量
+  // 由 dispatch.test.ts 那条"升完 CEO 负责角色还是审阅者"的断言守着，
+  // 而不是靠 EdgePlan 上再加一个只写不读的标志（那正是"写了而没生效"本身）。
+  // 取不到那条边（有人删了它）⇒ 落回原来的打回路径而【不是】抛：
+  // 规格没那条边时这条上限就没有合法的落点可用，此时最诚实的行为是照旧打回，
+  // 而抛会把一整轮已花掉的钱变成一次崩溃。
+  const cap = AGENT_EDGES.IN_REVIEW?.["blocked"];
+  if (edge.to === "REJECTED_DOWNWARD" && (o.rejections ?? 0) >= DEFAULT_MAX_REJECTIONS && cap !== undefined) {
+    return {
+      move: true,
+      to: assertTaskTransition(o.status, cap.to),
+      role: o.role,
+      note: rejectionCapNote(o.rejections ?? 0, o.role, d.summary),
+    };
   }
 
   let nextRole = o.role;
@@ -721,6 +860,16 @@ export interface DispatchDeps {
   readonly recentSummaries: (taskId: string) => readonly string[];
   /** 这条任务上最近一次【提交审阅】的产出方角色（独立性判定的输入）。 */
   readonly lastProducer: (taskId: string) => string | null;
+  /**
+   * 这条任务上【已经发生的打回次数】—— §4.2.1 `max_rejections` 的分子。必填。
+   *
+   * 为什么必填而【不是】可选带默认 0：默认 0 = 忘了接线时上限【永不触发】，
+   * 而那正是这一格要消灭的失效形状（配置写了而没生效）。它和 `lastProducer`
+   * 同一类：读错的那一侧不会崩，只会安静地不再拦。
+   *
+   * 语义是【这条任务上】的打回总数，不按角色分档 —— 规格那句是「同一需求最多被打回 3 次」。
+   */
+  readonly rejectionCount: (taskId: string) => number;
   /** 同一件事是否已被 CEO 批过（同源审阅放行凭据）。 */
   readonly ceoApproved: (taskId: string, cardKey: string) => boolean;
   readonly ceoRoleId?: string;
@@ -905,6 +1054,19 @@ export function makeDispatch(deps: DispatchDeps): (o: DispatchOptions) => Promis
     }
 
     // ── 门 1：状态机（跃迁合法性在【写入之前】判）──────────────────────
+    /**
+     * ⭐ 打回次数【无条件】读，不在"这轮看起来像打回"时才读。
+     *
+     * 省一次 COUNT 的写法是 `task.status === "IN_REVIEW" && decision?.action === "handoff"
+     * ? deps.rejectionCount(...) : 0` —— 而那会造出本仓最擅长发现的那一族缺陷：
+     * 【分子与判据分处两处，各自收窄一次就永久失真】。这条上限的触发条件是
+     * planEdge 里那个 `edge.to === "REJECTED_DOWNWARD"`，而它由【边表】决定；
+     * 上面那个条件是【手抄的状态名 + 动作名】。今天两者等价，而"今天等价"不是同源
+     * （0050 §3 那条探针与 §2 那条 UI 误判都是在这一件事上栽的）：将来给别的状态
+     * 加一条打回落点的边，planEdge 会认而分子恒 0 ⇒ 上限【永不触发】而不报错，
+     * 正是这一格要消灭的形状。一次 COUNT 走只读连接，比这个风险便宜。
+     */
+    const rejections = deps.rejectionCount(task.id);
     const plan = planEdge({
       status: task.status,
       role: task.role,
@@ -915,6 +1077,7 @@ export function makeDispatch(deps: DispatchDeps): (o: DispatchOptions) => Promis
       review,
       ceoRoleId: ceo,
       failure,
+      rejections,
     });
 
     // 需要建卡的两类拦截（越权交接 / 同源审阅）。判在事务外，写在里面。
@@ -983,16 +1146,12 @@ export function makeDispatch(deps: DispatchDeps): (o: DispatchOptions) => Promis
         // 而 CEO 的收件箱里也没有一张等着点开的卡：任务不是等人，是【没人接着干】。
         // 这一格本身没有判断（§7.1 从它出发只有一个出口），所以由 hub 走；
         // 真正的显式决定在下一格的审阅者那里（§8.2 第 3 条）。
+        const auto = AUTO_AFTER_EDGE[plan.to];
         const chain: { readonly to: TaskState; readonly note: string }[] = [
           { to: plan.to, note: plan.note },
-          ...(AUTO_AFTER_EDGE[plan.to] === undefined
+          ...(auto === undefined
             ? []
-            : [
-                {
-                  to: assertTaskTransition(plan.to, AUTO_AFTER_EDGE[plan.to] as TaskState),
-                  note: "产出已进入 " + plan.role + " 的审阅队列（§7.1 从 " + plan.to + " 只有一个出口，不需要判断）",
-                },
-              ]),
+            : [{ to: assertTaskTransition(plan.to, auto.to), note: auto.note(plan.role, plan.to) }]),
         ];
         /**
          * 第三格：该审阅的那一格坐着的是【人类】⇒ 升给 CEO（planEdge 的 upstream 分支）。

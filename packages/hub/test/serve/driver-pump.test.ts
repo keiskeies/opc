@@ -65,6 +65,7 @@ import {
   type DriveRoundResult,
 } from "../../src/serve/driver-pump.js";
 import { DEFAULT_STALL_THRESHOLD_MS, patrolTasks } from "../../src/heartbeat/patrol.js";
+import { readDriverStatus } from "../../src/overview/driver-status.js";
 import { TASK_STATES } from "../../src/graph/status.js";
 
 const TMP = fixtureTmp("serve-driver-pump", import.meta.url);
@@ -493,6 +494,63 @@ describe("C. 同一格试到上限 ⇒ 一次都不再推，并且【说话】",
     expect(status(w, "t1")).toBe("IN_REVIEW");
     expect(driverRows(w, DRIVER_GAVE_UP_KIND)).toHaveLength(0);
     expect(driverRows(w, DRIVER_CLAIM_KIND)).toHaveLength(1);
+  });
+
+  /**
+   * 写侧真写出的那一行，读侧【读得到】—— 0048 §7 那一格的接缝。
+   *
+   * 为什么这一发存在，而 `driver-status.test.ts` 那 54 发不算：那一整份文件的放弃行
+   * 是**自己手写 INSERT 造的**（它的 `raw()` 写 `'system','driver_pump','tool_call'`），
+   * 而驱动器自己那一份出自 `writeGaveUp`。所以那 54 发守的是「**给定**一行这个样子，
+   * 判据算得对不对」，而**没有任何一发问过「驱动器写的那一行是不是那个样子」**。
+   *
+   * ⚠ 而它的**分量要说准**（我第一版这段注释把它写得比实测重，这里以变异实验为准）：
+   *  · **写侧键名漂**（`attempts`→`attempt`）⇒ 这一发红，而**既有那发「到顶那一轮留下
+   *    一行 DriverTurnAbandoned，内容是那一格」也红** —— 它直接 json.parse 那一行。
+   *  · **读侧键名漂** ⇒ 这一发红，而 driver-status.test.ts 里**四条**也红。
+   *  也就是说**两侧各自都已被覆盖，这一发不是唯一能红的**。它唯一的独特之处是
+   *  【行出自生产写入点】，因此它挡的是那一族里更窄的一格：两侧**各自都改得自洽**
+   *  而只有"真实那一行"能暴露的漂法（例：`appendAudit` 那层的 payload 编码变了、
+   *  或 writeGaveUp 换了 target 的拼法而测试跟着改）。
+   *  留着它的理由就这一条，加上它是这一格**唯一一条端到端**（drive 到放弃 → 问看板）。
+   *  ⛔ 别把它读成"没它就没测" —— 那是本仓 0048 §9 的 M7 与 0049 §0-3 记过的那族错
+   *  （给一道守卫写一段它能挡什么的注释，而那一句没跑过）。
+   */
+  it("⭐ 驱动器自己写的放弃行 ⇒ 读侧（GET /today 那一格）真的报它", async () => {
+    const w = await world();
+    await drive(w, { maxAttempts: 1 }); // 一轮就到顶 ⇒ 驱动器自己写放弃行
+    const gone = driverRows(w, DRIVER_GAVE_UP_KIND);
+    expect(gone).toHaveLength(1); // 先确认写侧写了（否则下面那发会绿在"根本没数据"上）
+
+    const st = readDriverStatus(w.db as never, {
+      enabled: true,
+      pumping: true,
+      taskLimitCents: 2 ** 40, // 钱那一档开到不可能触及 ⇒ 名单里只可能是 at_limit
+    });
+    expect(st.stopped).toHaveLength(1);
+    const row = st.stopped[0];
+    expect(row?.task_id).toBe("t1");
+    expect(row?.cause).toBe("at_limit");
+    // 那两列出自 payload 的 json_extract —— 键名漂了就变成 null，
+    // 屏幕上那句会退化成「试到上限」而丢掉「第 1/1 次」。
+    expect(row?.attempts).toBe(1);
+    expect(row?.max_attempts).toBe(1);
+    // since_ms 那次回表取的是放弃行的 created_at，不是任务的 updated_at。
+    expect(row?.since_ms).toBe(Number(gone[0]?.["created_at"]));
+  });
+
+  it("⭐ 反过来对照：只花钱不到上限时读侧【不该】报它（否则上面那发是恒真）", async () => {
+    // 上面那发如果没有这一发配对，"名单里有一条" 可以由任何别的东西造成
+    // （比如判据写成"凡是 agent 格里的任务都算不再推"）—— 那具空断言等于没断。
+    const w = await world();
+    await drive(w, { maxAttempts: 5 }); // 只试了一次，远不到顶
+    const st = readDriverStatus(w.db as never, {
+      enabled: true,
+      pumping: true,
+      taskLimitCents: 2 ** 40,
+    });
+    expect(st.stopped).toEqual([]);
+    expect(driverRows(w, DRIVER_GAVE_UP_KIND)).toHaveLength(0);
   });
 });
 

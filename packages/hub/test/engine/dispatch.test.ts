@@ -28,6 +28,7 @@ import type { OrgGraph } from "@opc/contracts";
 import { fixtureTmp } from "../fixtures/fixture-dir.js";
 import { migrate } from "../../src/db/migrate.js";
 import { INSERT_DELEGATION_GRAPH_SQL } from "../../src/org/commit.js";
+import { REJECTION_COUNT_SQL } from "../../src/engine/runtime.js";
 import type { EventBus, EventSubscription } from "../../src/events/bus.js";
 import {
   AGENT_EDGES,
@@ -621,6 +622,10 @@ async function newWorld(o: {
   readonly role: string;
   readonly turn: TurnOutcome;
   readonly lastProducer?: string | null;
+  /** 已发生的打回次数（§4.2.1 max_rejections 的分子）。默认 0 = 从没被打回过。 */
+  readonly rejections?: number;
+  /** 传了数组就记下 rejectionCount 每次被调用时的 taskId —— 用来测"读没读"。 */
+  readonly rejectionCalls?: string[];
   readonly ceoApproved?: boolean;
   readonly graphVersion?: number;
   readonly writeGraph?: boolean;
@@ -705,6 +710,14 @@ async function newWorld(o: {
     },
     recentSummaries: () => [],
     lastProducer: () => o.lastProducer ?? null,
+    rejectionCount: (id) => {
+      o.rejectionCalls?.push(id);
+      // 显式给了数字就用它（那几发要的是"假装已经打过 N 次"这一维）；
+      // 【没给】就走【真 SQL】而不是 return 0 —— 否则循环那一发数到的是我手写的常数，
+      // 它绿不证明真 SQL 数得对（那正是 dispatch.test.ts 这个文件结构性测不到的一类，
+      // 见 runtime.test.ts 文件头）。
+      return o.rejections ?? countRejections(db, id);
+    },
     ceoApproved: () => o.ceoApproved ?? false,
     ...(o.ceoRoleId === undefined ? {} : { ceoRoleId: o.ceoRoleId }),
     onCost: (c) => cost.push({ seq: c.seq, cents: c.costCents }),
@@ -728,6 +741,18 @@ async function newWorld(o: {
       return await dispatch({ taskId: "t1", nowMs: NOW + 2000, maxBudgetUsd: 0.5 });
     },
   };
+}
+
+/**
+ * 真 SQL 数的打回次数（SQL 从 runtime.ts import，【不在这份测试里重抄一遍】——
+ * 重抄就是造一份第二判据：runtime 那条改了而这里没改，两边会各自绿着说不同的话，
+ * 而这一发测的恰好是"两边说的是不是同一件事"。
+ * 读的是 writeConnection：这里没有 WAL 那层"读不到自己刚写的"边界（见 runtime.ts 文件头），
+ * 因为循环那一发每一轮都是【独立的 dispatch 事务】，写在上一轮就提交了。
+ */
+function countRejections(db: { prepare: (sql: string) => { get: (...a: unknown[]) => unknown } }, id: string): number {
+  const r = db.prepare(REJECTION_COUNT_SQL).get(id) as { n: number | bigint } | undefined;
+  return r === undefined ? 0 : Number(r.n);
 }
 
 const turn = (text: string, over: Partial<TurnOutcome> = {}): TurnOutcome => ({
@@ -772,6 +797,226 @@ describe("dispatch 的写路径（真 schema：约束、索引、守卫只有真
     expect(t["consumed_cents"]).toBe(4);
   });
 
+  /**
+   * ⭐ 审阅者（一个 agent）打回 ⇒ 任务【必须】落回干活的那一格。
+   *
+   * 这一发是本篇唯一一条"跑出来才发现生产上是死的"的用例（0050 §7）。修之前它停在
+   * `REJECTED_DOWNWARD`，而那一格在两张边表里【都没有键】，于是一整套判据同时沉默：
+   *
+   *   seatOf = human（AGENT_EDGES 没这个键）      ⇒ 驱动器不推（候选集派生自它）
+   *   needsSeatCard = false（HUMAN_EDGES 没这个键）⇒ 不给 CEO 发卡
+   *   humanEdge(S,"approve") = null               ⇒ 就算有卡也点不动
+   *   不在 ATTENTION_STATUSES / BLOCKED_STATUSES  ⇒ 看板哪一列都不出现它
+   *
+   * 也就是【审阅者一说打回，这条想法就永久停住，而屏幕上没有任何一格显示它停住了】。
+   * 而它【不在】任何已登记的死路名单里 —— 0041 §5 / 0046 §7 列的都是
+   * MEETING_REQUIRED / BLOCKED，而 `status-machine.test.ts:172` 那条"已知缺口快照"
+   * 扫的是【合法表】（`legalTransitionsFrom`），合法表里这条边【一直有】
+   * （`status.ts:59`「§7.2 打回路径」），所以那具快照看不到这个洞：
+   * **合法表有、可执行的两张边表没有**，正是三张表两有一无那一族。
+   *
+   * 断的四件事各自挡一种坏法：
+   *  ① 终态是 IN_PROGRESS 而【不是】REJECTED_DOWNWARD —— 挡"只写第一格"；
+   *  ② 负责角色是【被点名的下游 dev】而【不是】审阅者 director —— 挡"打回打回自己手上"
+   *     （审阅者刚说完这活不行，任务又归他，等于没打回）；
+   *  ③ 【两条】状态边都在 —— 挡"直接 UPDATE tasks 而不留那一路"（append-only 回放要的
+   *     恰好是"曾经被打回"这件事，见 0047 §3 同一条理由）；
+   *  ④ 第二条边的 summary 说的是【交回下游】而【不是】"进入审阅队列" —— 挡 note 写死
+   *     （修之前那句是硬编码的，给 AUTO_AFTER_EDGE 加第二个键而不动 note，
+   *     就会往审计里写一句听起来像那么回事的假话）。
+   */
+  it("⭐ handoff 打回 ⇒ 两条边一路落到 IN_PROGRESS/下游，审计不说「进审阅队列」", async () => {
+    const turns = { n: 0 };
+    const { db, res, events } = await newWorld({
+      status: "IN_REVIEW",
+      role: "director", // 审阅者
+      turn: turn(said({ action: "handoff", to_role: "dev", summary: "登录模块缺鉴权，打回重做" })),
+      turns,
+    });
+    expect(res.status).toBe("IN_PROGRESS");
+    expect(res.role).toBe("dev");
+    expect(res.moved).toBe(true);
+
+    const states = events.filter((e) => e["action"] === "state_change");
+    expect(states.length).toBe(2);
+    const leg = (i: number) => JSON.parse(String(states[i]?.["payload"])) as Record<string, string>;
+    expect(leg(0)?.["to"]).toBe("REJECTED_DOWNWARD");
+    expect(leg(1)?.["from"]).toBe("REJECTED_DOWNWARD");
+    expect(leg(1)?.["to"]).toBe("IN_PROGRESS");
+    // ④ 那句审计话必须描述【这一格真的发生了什么】
+    expect(String(leg(1)?.["summary"])).toContain("打回");
+    expect(String(leg(1)?.["summary"])).not.toContain("审阅队列");
+
+    const t = db.prepare("SELECT * FROM tasks WHERE id='t1'").get();
+    expect(t["status"]).toBe("IN_PROGRESS");
+    expect(t["assigned_role"]).toBe("dev");
+    // 自动那一格【不】再烧一轮钱、【不】再起子进程（打回这个决定审阅者刚做过）
+    expect(turns.n).toBe(1);
+    expect(t["consumed_cents"]).toBe(4);
+  });
+
+  it("⭐ 反向对照：打回落点那一格【此刻真的可驱动】（否则上面那发只是换个格子停住）", async () => {
+    // 上面那发断的是"不再停在 REJECTED_DOWNWARD"。而"挪了一格"本身不是修好 ——
+    // 挪去另一格死路，那一发照绿。所以这一发直接问【驱动器的判据源】：它认这一格吗。
+    // 问的是 seatOf / AGENT_EDGES 本身而【不是】 DRIVER_ELIGIBLE_STATES ——
+    // 后者是前者的派生（driver-pump.ts:117 明写"派生而不是抄"），
+    // 在这一层断派生物等于多绕一层而没多判任何东西，还要为此多一条跨模块 import。
+    const { res } = await newWorld({
+      status: "IN_REVIEW",
+      role: "director",
+      turn: turn(said({ action: "handoff", to_role: "dev", summary: "打回" })),
+    });
+    expect(res.status).toBe("IN_PROGRESS");
+    expect(seatOf(res.status as never)).toBe("agent");
+    expect(AGENT_EDGES[res.status as never]).toBeDefined();
+    // 而修之前那一格确实是死的 —— 这一句是这条用例的【对照物】，
+    // 少了它，上面那一发无法区分"修好了"与"这一格一直不是死路"。
+    expect(seatOf("REJECTED_DOWNWARD" as never)).toBe("human");
+    expect(AGENT_EDGES["REJECTED_DOWNWARD" as never]).toBeUndefined();
+    expect(HUMAN_EDGES["REJECTED_DOWNWARD" as never]).toBeUndefined();
+    expect(humanEdge("REJECTED_DOWNWARD" as never, "approve")).toBeNull();
+  });
+
+  it("⭐ 打回到第 3 次 ⇒ 不再派回下游，升给 CEO（§4.2.1 max_rejections）", async () => {
+    // 规格原文（设计文档 319/323 行）：「同一需求最多被打回3次」
+    // +「max_rejections 防止无限打回循环 —— 3 次未收敛自动升级到 CEO，不在总监层内耗」，
+    // 配置块里紧挨着的另一行是 `escalation_on_exceed: "ceo"`。
+    // 这一发测的是【规格写着而引擎没实现】的那一条被补上了。
+    //
+    // 为什么必须有它（0050 §8 探针 53/54 量的）：REJECTED_DOWNWARD→IN_PROGRESS 接上之后
+    // dev ⇄ 审阅者这个循环才可能，而现存三道封顶一道都不拦它：
+    // 按格 attempts 每次重访归零（maxAttempts=2 跑 12 轮一次没触发）、
+    // advance 的"不动就停"因为每轮都 moved=true 而恒假、
+    // maxTurns 是【每轮 advance】的闸而驱动器每心跳起一次新的。
+    const turns = { n: 0 };
+    const { db, res, events } = await newWorld({
+      status: "IN_REVIEW",
+      role: "director",
+      rejections: 3, // 已经打回过 3 次
+      turn: turn(said({ action: "handoff", to_role: "dev", summary: "还是缺鉴权" })),
+      turns,
+    });
+    // 落 CEO 席位而【不是】IN_PROGRESS/dev
+    expect(res.status).toBe("ESCALATED_TO_CEO");
+    // ⭐ 负责角色【还是审阅者】而不变 ceo。0047 同一格的原话：写 ceo 的话
+    // approveCard 原值回填会把负责角色永久改成 CEO —— 一次"升给 CEO 看"变成一次组织分配。
+    expect(res.role).toBe("director");
+    const t = db.prepare("SELECT * FROM tasks WHERE id='t1'").get();
+    expect(t["status"]).toBe("ESCALATED_TO_CEO");
+    expect(t["assigned_role"]).toBe("director");
+
+    // 只有一条边：这条上限是【替换】那一跳的落点，不是在打回之后又追一跳
+    // （追一跳会写出 REJECTED_DOWNWARD → ESCALATED_TO_CEO，规格里没有那条边）。
+    const states = events.filter((e) => e["action"] === "state_change");
+    expect(states.length).toBe(1);
+    const leg = JSON.parse(String(states[0]?.["payload"])) as Record<string, string>;
+    expect(leg["from"]).toBe("IN_REVIEW");
+    expect(leg["to"]).toBe("ESCALATED_TO_CEO");
+    // 审计里那句只能说【已打回 3 次】。曾经这里写的是"这是第 4 次打回"—— 而这一轮
+    // 根本没有打回（落点是 CEO 那一格），那句话会往 append-only 的 events 里
+    // 记一次没发生过的打回。措辞与那个数字的口径由这一句钉住。
+    expect(String(leg["summary"])).toContain("已被打回 3 次");
+    expect(String(leg["summary"])).not.toMatch(/第 ?\d+ ?次打回/);
+    // 审计不许把这件事写成"打回"或"审阅通过"：它两者都不是
+    expect(String(leg["summary"])).not.toContain("审阅队列");
+    // 烧的那一轮就是审阅者这一轮（升级不额外起子进程、不扮演 CEO —— 0047 那一格）
+    expect(turns.n).toBe(1);
+    expect(t["consumed_cents"]).toBe(4);
+    // 收件箱里有卡：ESCALATED_TO_CEO 在 HUMAN_EDGES 里 ⇒ needsSeatCard 为真。
+    // 这一句是这一发的【落点有效性】—— 落到另一格死路的话，上面那些断言照绿。
+    const cards = db.prepare("SELECT card_key, status FROM approvals WHERE task_id='t1'").all();
+    expect(cards.length).toBe(1);
+    expect(String(cards[0]?.["card_key"])).toContain("ESCALATED_TO_CEO");
+    expect(cards[0]?.["status"]).toBe("pending");
+  });
+
+  it("⭐ 反向对照：第 2 次打回仍然照旧派回下游（上限不许提前咬）", async () => {
+    // 没有这一发，"把阈值判据写成 >= 1"或">= 0"都能让上面那发绿，
+    // 而代价是【第一次打回就不再重做】—— 打回这个动作直接被废掉。
+    const { db, res } = await newWorld({
+      status: "IN_REVIEW",
+      role: "director",
+      rejections: 2,
+      turn: turn(said({ action: "handoff", to_role: "dev", summary: "缺鉴权" })),
+    });
+    expect(res.status).toBe("IN_PROGRESS");
+    expect(res.role).toBe("dev");
+    expect(db.prepare("SELECT status FROM tasks WHERE id='t1'").get()["status"]).toBe("IN_PROGRESS");
+    expect(db.prepare("SELECT COUNT(*) AS n FROM approvals WHERE task_id='t1'").get()["n"]).toBe(0);
+  });
+
+  it("⭐ ⭐ 打回次数是【无条件】读的：不许按状态/动作筛（筛了上限就永不触发）", async () => {
+    // 装配层那句 `deps.rejectionCount(task.id)` 排在 planEdge 【之前】而无条件。
+    // 省一次 COUNT 的写法是 `task.status === "IN_REVIEW" && decision?.action === "handoff"
+    // ? deps.rejectionCount(...) : 0` —— 看着等价（今天确实等价），而分子与判据从此
+    // 分处两处、各自收窄一次就永久失真：判据是边表里的 `edge.to === "REJECTED_DOWNWARD"`，
+    // 那个筛是【手抄的状态名 + 动作名】。将来给别的状态加一条落点是打回的边，
+    // planEdge 会认而分子恒 0 ⇒ 上限【永不触发】而全仓没有任何一处会红。
+    // 「配置写了而没生效」正是这一格存在的理由，被实现成一个哑弹。
+    //
+    // 所以这一发【故意】让任务状态与决策动作都"不像打回"（IN_PROGRESS + wait），
+    // 而问的是【读没读】。这一发绿的唯一条件是那次读没有前置条件。
+    // ⚠ 它测的是"读了"，不是"用了" —— "用了"由上面那发（3 次 ⇒ 升 CEO）与
+    // 反向那发（2 次 ⇒ 照旧打回）管。两件事分开测，是因为它们能被两次不同的改动各自弄坏。
+    const calls: string[] = [];
+    const { res } = await newWorld({
+      status: "IN_PROGRESS", // 不在 IN_REVIEW
+      role: "dev", // 不是审阅者
+      turn: turn(said({ action: "wait", summary: "继续写" })), // 不是 handoff
+      rejectionCalls: calls,
+    });
+    expect(calls).toEqual(["t1"]);
+    expect(res.status).toBe("IN_PROGRESS");
+    expect(res.moved).toBe(false); // wait 不动状态：读了不等于用了
+  });
+
+  it("⭐ ⭐ 真循环：审阅者【每轮都打回】，第 4 轮必然停在 CEO 那一格（有界，不是「再推一次看看」）", async () => {
+    // 这一发是整篇的落点。上面几发测的是"某一轮判对了"，而 0050 §8 那两发探针量到的是
+    // 【跨轮】的事：单轮 advance 跑满 12 格 / 480 美分，驱动器每心跳又能重新起一轮，
+    // 按格 attempts 每次回到 IN_PROGRESS 就归零 ⇒ 三道封顶一道都不拦这个循环。
+    // 修好 REJECTED_DOWNWARD 之后这个循环【第一次成为可能】，所以必须有一发
+    // 把"它会不会自己停"钉在仓库里，而不是靠我跑一次 /tmp 探针然后相信它。
+    //
+    // 全程只【导演角色的嘴】（每一轮给什么决策文本），计数与落点全走生产代码：
+    // 分子是真 SQL 数出来的（见 countRejections 那条注释），落点是真状态机走的。
+    const w = await newWorld({
+      status: "IN_PROGRESS",
+      role: "dev",
+      turn: turn(said({ action: "pass", summary: "登录模块写完" })),
+    });
+    const db = w.db;
+    const status = () => String(db.prepare("SELECT status FROM tasks WHERE id='t1'").get()["status"]);
+    const role = () => String(db.prepare("SELECT assigned_role FROM tasks WHERE id='t1'").get()["assigned_role"]);
+    const trail: string[] = ["IN_PROGRESS/dev"];
+
+    let r = w.res;
+    let rounds = 0;
+    // 上限是"最多 12 轮"而【期望远小于它】：如果实现退化到探针里那种不设防的样子，
+    // 这一发会跑满 12 轮并红在下面那句"停在 CEO"上 —— 那一红就是探针量到的那个事故。
+    while (status() !== "ESCALATED_TO_CEO" && rounds < 12) {
+      const next =
+        status() === "IN_PROGRESS"
+          ? said({ action: "pass", summary: "补上了，再审" }) // dev：交上去
+          : said({ action: "handoff", to_role: "dev", summary: "鉴权还是缺，打回" }); // 审阅者：永远不满意
+      r = await w.again(turn(next));
+      rounds += 1;
+      trail.push(status() + "/" + role());
+      void r;
+    }
+    // ⭐ 有界：三轮打回之后升 CEO，循环【不是靠预算烧完才停的】
+    expect(status()).toBe("ESCALATED_TO_CEO");
+    // dev 交 → 审阅者打回 × 3 → 第 4 轮升上去 = 7 轮。钉住这个数字是因为
+    // "有界"这件事本身没有内容：12 轮也有界，而代价是每心跳多烧 5 轮真钱。
+    expect(rounds).toBe(7);
+    expect(trail.filter((x) => x === "IN_PROGRESS/dev").length).toBe(4); // 初次 + 三次重做
+    expect(db.prepare("SELECT COUNT(*) AS n FROM events WHERE task_id='t1' AND action='state_change' AND json_extract(payload,'$.to')='REJECTED_DOWNWARD'").get()["n"]).toBe(
+      3,
+    );
+    // 而且它【真的进了人的收件箱】—— 不是停在一个没人能动的格子（0050 §8 那一族）
+    const cards = db.prepare("SELECT card_key FROM approvals WHERE task_id='t1' AND status='pending'").all();
+    expect(cards.length).toBe(1);
+  });
+
   it("tasks 与 events 同事务：守卫拦下第二次跃迁时，【第一条也不留】", async () => {
     // 造「agent 执行期间状态被人改了」：loadTask 读到 IN_PROGRESS，写入时库里已是别的。
     const { WriteQueue } = await import("../../src/db/write-queue.js");
@@ -808,6 +1053,7 @@ describe("dispatch 的写路径（真 schema：约束、索引、守卫只有真
       },
       recentSummaries: () => [],
       lastProducer: () => null,
+      rejectionCount: () => 0,
       ceoApproved: () => false,
       publish: (e, seq) => bus.publishPersisted(e, seq),
     });
@@ -1048,6 +1294,7 @@ describe("dispatch 的写路径（真 schema：约束、索引、守卫只有真
       runTurn: async () => turn("x"),
       recentSummaries: () => [],
       lastProducer: () => null,
+      rejectionCount: () => 0,
       ceoApproved: () => false,
       // publish 现在是【必填】：这一发跑不到广播那一步（loadTask 就抛了），但让它可选
       // 等于允许装配时漏传，而漏传的后果是 TS 不响、测试照绿、只有前端看得见空洞。

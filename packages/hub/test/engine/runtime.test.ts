@@ -30,6 +30,7 @@ import { fixtureTmp } from "../fixtures/fixture-dir.js";
 import { migrate } from "../../src/db/migrate.js";
 import { INSERT_DELEGATION_GRAPH_SQL } from "../../src/org/commit.js";
 import { InMemoryEventBus } from "../../src/events/bus.js";
+import { appendAudit } from "../../src/events/recorder.js";
 import { makeDispatch } from "../../src/engine/dispatch.js";
 import {
   CEO_APPROVED_SQL,
@@ -218,6 +219,68 @@ describe("runtime 的读回调（真 schema 上的真 SQL）", () => {
     // 一条提交都没有 ⇒ null（不是拿最近一条的 producerRole 顶上，也不是拿 assigned_role）
     const fresh = await world({});
     expect(fresh.rt.deps.lastProducer("t1")).toBeNull();
+  });
+
+  it("⭐ rejectionCount 数的是【打回那一条边】，一次打回 = 1 而不是 2", async () => {
+    // §4.2.1 max_rejections 的分子。这条 SQL 全部的正确性在"数 payload.$.to
+    // 而【不数 action】"，而这件事只能在这一层测：dispatch.test.ts 喂的是手写回调。
+    //
+    // 为什么【必须】用生产的 appendAudit 写这些行而不用裸 INSERT：
+    // 一次打回在 dispatch 那一轮写的是【两条】state_change 边（REJECTED_DOWNWARD 那一跳
+    // + AUTO_AFTER_EDGE 自动补的 IN_PROGRESS 那一跳）。裸 INSERT 手写两条是我【以为的】
+    // 写入形状；appendAudit 写的才是库里的真形状。真形状变了（比如将来有人把自动那一跳
+    // 的 payload.to 也写成 REJECTED_DOWNWARD），裸 INSERT 那一发照样绿。
+    const w = await world({});
+    expect(w.rt.deps.rejectionCount("t1")).toBe(0); // 干净库 ⇒ 0，不是 null / undefined
+
+    // 一轮打回 = 两条边（形状抄 dispatch.ts 那条 chain 循环）
+    const edge = (from: string, to: string): void => {
+      appendAudit(
+        w.db as never,
+        {
+          taskId: "t1",
+          actorType: "agent",
+          actorId: "director",
+          action: "state_change",
+          target: to,
+          payload: { kind: "TaskStateChanged", taskId: "t1", from, to, summary: "测试" },
+          createdAt: NOW,
+        },
+        () => NOW,
+      );
+    };
+    edge("IN_REVIEW", "REJECTED_DOWNWARD");
+    edge("REJECTED_DOWNWARD", "IN_PROGRESS");
+    const rows = w.db.prepare("SELECT COUNT(*) AS n FROM events WHERE action='state_change'").get();
+    expect(rows?.["n"]).toBe(2); // 一轮确实留了两条 state_change
+    expect(w.rt.deps.rejectionCount("t1")).toBe(1); // ⭐ 而分子只能是 1
+
+    // 再来两轮 ⇒ 3。上限正好在 3 这一格触发（dispatch.test.ts 那两发接的就是这个数），
+    // 所以这一句同时钉住"分子不多不少"：数成 6 会让上限【提前一倍】咬，
+    // 屏幕上没有任何一处会说"这次升级是因为计数算重了"。
+    edge("IN_REVIEW", "REJECTED_DOWNWARD");
+    edge("REJECTED_DOWNWARD", "IN_PROGRESS");
+    edge("IN_REVIEW", "REJECTED_DOWNWARD");
+    edge("REJECTED_DOWNWARD", "IN_PROGRESS");
+    expect(w.rt.deps.rejectionCount("t1")).toBe(3);
+
+    // 别的动作不算打回（同一件事换个 action 就是另一件事）
+    appendAudit(
+      w.db as never,
+      {
+        taskId: "t1",
+        actorType: "agent",
+        actorId: "director",
+        action: "review_decision",
+        target: "REJECTED_DOWNWARD",
+        payload: { kind: "ReviewDecided", taskId: "t1", to: "REJECTED_DOWNWARD" },
+        createdAt: NOW,
+      },
+      () => NOW,
+    );
+    expect(w.rt.deps.rejectionCount("t1")).toBe(3);
+    // 另一条任务的打回不串号（分子是【这条想法】被打回几次）
+    expect(w.rt.deps.rejectionCount("ghost")).toBe(0);
   });
 
   it("recentSummaries 拿到的是 payload.summary，脏 payload 不会掀翻整轮", async () => {

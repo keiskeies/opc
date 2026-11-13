@@ -364,6 +364,7 @@ async function runDispatch(o: {
     runTurn: async () => o.turn,
     recentSummaries: () => [],
     lastProducer: () => o.lastProducer ?? null,
+    rejectionCount: () => 0,
     ceoApproved: () => false,
     publish: (e, seq) => {
       published.push({ kind: e.kind, seq });
@@ -448,6 +449,7 @@ describe("dispatch 把人席当终点时，同事务补一张卡", () => {
       runTurn: async () => turn(said({ action: "pass", summary: "全绿" })),
       recentSummaries: () => [],
       lastProducer: () => "dev",
+      rejectionCount: () => 0,
       ceoApproved: () => false,
       onCost: (c) => cost.push({ seq: c.seq, cents: c.costCents }),
       publish: () => {},
@@ -509,6 +511,7 @@ describe("dispatch 把人席当终点时，同事务补一张卡", () => {
       },
       recentSummaries: () => [],
       lastProducer: () => "dev",
+      rejectionCount: () => 0,
       ceoApproved: () => false,
       publish: () => {},
     });
@@ -554,6 +557,7 @@ describe("点【过期那张】不能推进当前这一格", () => {
       runTurn: async () => turn(said({ action: "pass", summary: "全绿" })),
       recentSummaries: () => [],
       lastProducer: () => "dev",
+      rejectionCount: () => 0,
       ceoApproved: () => false,
       publish: () => {},
     });

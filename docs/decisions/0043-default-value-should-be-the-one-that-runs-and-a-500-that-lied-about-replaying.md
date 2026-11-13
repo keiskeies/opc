@@ -171,7 +171,7 @@ const engineRoute = o.graphFor === undefined;
 
 - `hub:engine work` **需要 `tsx`，本机装不上**（0039）。启动横幅现在**如实说出这一点**，
   而不是给一句照抄会挂的补救命令 —— 那正是改前那句 `hub resume` 犯的错。
-- **只有 `approve` 有出边**（`HUMAN_EDGES`，`dispatch.ts:137`：出边那个维度的类型是
+- **只有 `approve` 有出边**（`HUMAN_EDGES`，`dispatch.ts:237`：出边那个维度的类型是
   `Partial<Record<"approve", …>>`，**不是运行时忘了填，是类型上就只有这一个键**）。
   `reject_with_comment` / `defer_deep_review` 落库而任务原地，这是**规格的现状**
   （[规格] §7.1），本篇把它钉成断言而不是修掉它 —— 但它曾经是 500，

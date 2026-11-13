@@ -444,7 +444,7 @@ M15 值得说一句：它**不是**"把共享函数 `driverCellTargetSql` 改掉
    是边表里那两条出边不存在** —— 修法完全不同，别再照着函数名去找。
 2. **`createCard` 在 src 里仍然零生产调用方**（`grep -rn 'createCard(' packages/*/src`
    只命中它自己的定义那一行；`insertCard` 才有三个生产调用方：`seat-card.ts:254`、
-   `engine/charter.ts:449`、`dispatch.ts:1182`）。
+   `engine/charter.ts:449`、`dispatch.ts:1341`）。
    ⇒ 这是本仓记过最多次的那一族的现役样本（`createCard` = 建卡 + 落审计 + 事务，
    而生产里三个建卡点全都绕过它直接调 `insertCard`）。
 3. ⭐ **我顺带断言 `cards.ts` 文件头那句 grep「已经不成立了」—— 这一句是我错的**，

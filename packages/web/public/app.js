@@ -604,7 +604,7 @@ function driverLine(taskId, driver, nowMs) {
     row.attempts !== null && row.attempts !== undefined && row.max_attempts
       ? `第 ${row.attempts}/${row.max_attempts} 次`
       : "试到上限";
-  return `不再推：${tries}而它还在原格 · ${when}`;
+  return `不再推：${tries}而它还在原格 · 要它继续走得先查那一轮为什么没推进（次数记在审计里，屏幕上和命令行都没有能放开的地方）· ${when}`;
 }
 
 /**
