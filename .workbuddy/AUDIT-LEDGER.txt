@@ -1,7 +1,7 @@
 ======================================================================
  防假绿审计台账 v6（round156～227，19 守卫（18 arch + 1 hub fixture-dir） + 门禁 7 控制全有触发证据）
- HEAD: 430abdf
- 生成: 2026-11-14T14:20:52.975Z
+ HEAD: f67c9bb
+ 生成: 2026-11-14T14:34:54.624Z
  较 v3 更新：round184-187 纠正基线 + EPERM 根因定位并修复 c633cda + claude 验证
 ======================================================================
 A. ARCH 变异验证 15 个（均立即红 + 原样恢复，括号=round）
@@ -11,7 +11,7 @@ A. ARCH 变异验证 15 个（均立即红 + 原样恢复，括号=round）
   可执行性(round212)：vitest include 两 glob(test/** + packages/*/test/**)全覆盖 —— 全套实测收集 19 个守卫文件
     (18 arch + fixture-dir 26 例)全部执行；断言求和 2334=基线，无静默排除。claude.test.ts 是唯一不在 vitest
     的 node:test 文件(已知设计良性)。
-  doc-coords[156] doc-ids[159] comment-citations[159] doc-refs[156] doc-refs-input-234
+  doc-coords[156] doc-ids[159] comment-citations[159] doc-refs[156] doc-refs-input-234 doc-ids-input-235
   fixture-dir[156] decision-index[168] no-null-bytes[168] production-deps[167]
   no-native-deps[167] pending-inventory[166] test-inventory[166]
   pending-decisions[176] config-match[176] harness-invariants[176]
@@ -61,6 +61,10 @@ E. 纠正后的诚实基线（round184 发现 round175 漏报文件级错误；1
       将 SNAP 键 0025>patrol.ts:385 推到 390 → doc-refs 单跑 2绿→1红(× 全部完整形态引用与快照一致,
       expected '0025-resident-hub-and-four-silent-bug…' to deeply equal '') → git checkout 字节还原 → 2绿/worktree 净。
       证据:【round234-docrefs-mutation-evidence.txt】;台账行 A.14 增补 doc-refs-input-234。
+   9. round235 复核（HEAD f67c9bb 后）: 输入域变异复证 doc-ids 非空 —— docs/decisions/0016 文末注入 +参见 0099（round235 注入的不存在编号，未预约）
+      基线 2绿→1红(× 真实文档：正文提到的每个编号要么存在、要么被 INDEX 预约，0099 不存在且未被预约) →
+      git checkout 字节还原 → 2绿/worktree 净。
+      证据:【round235-docids-mutation-evidence.txt】;台账行 A.14 增补 doc-ids-input-235。
 
 F. 开放项（report-only，等 CEO/owner）
   1. isPidAlive 双实现：非注册守卫（report-only）。verify-open-invariants.mjs 已机械校验 4 条语义

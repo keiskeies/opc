@@ -1,0 +1,31 @@
+round235 doc-ids 输入域变异证据
+HEAD 起: f67c9bb / 开始: 2026-11-14T14:26:52.088Z
+目标守卫: test/arch/doc-ids.test.ts（真实文档: 正文编号要么存在、要么被 INDEX 预约）
+注入: docs/decisions/0016-parallel-branches-role-memory-and-an-assertion-engine-that-saw-nothing.md 文末追加正文引用 0099（不存在号、未预约）
+
+基线: exit=0 Test Files  1 passed (1) Tests  2 passed (2)
+
+   基线尾行: Tests  2 passed (2)
+变异 diff (+1 行):
+diff --git a/docs/decisions/0016-parallel-branches-role-memory-and-an-assertion-engine-that-saw-nothing.md b/docs/decisions/0016-parallel-branches-role-memory-and-an-assertion-engine-that-saw-nothing.md
+--- a/docs/decisions/0016-parallel-branches-role-memory-and-an-assertion-engine-that-saw-nothing.md
++++ b/docs/decisions/0016-parallel-branches-role-memory-and-an-assertion-engine-that-saw-nothing.md
+@@ -440,3 +440,4 @@ grep '✖' /tmp/run.txt | sed 's/^ *//' | sed -E 's/ \([0-9.]+ms\)$//' | sort -u
+ ⑤ 那条**依赖 `/tmp` 里的夹具**，所以它不是一个可长期依赖的门禁 —— 这正是 §2e 把断言
+ 本身（而不是夹具源码）写进 `test/arch/` 的原因：夹具没了的时候，那条守卫会跟着报
+ 「判据失效」而不是「一切正常」（同 0007 §4 取舍三那条立场：判据坏掉必须能与「没问题」区分开）。
++参见 0099（round235 注入的不存在编号）。
+
+变异后: exit=1 | Test Files  1 failed (1) | Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+失败段:
+   ❯ test/arch/doc-ids.test.ts (2 tests | 1 failed) 14ms
+       × 真实文档：正文提到的每个编号要么存在、要么被 INDEX 预约 12ms
+   Test Files  1 failed (1)
+        Tests  1 failed | 1 passed (2)
+
+字节还原: git checkout -- docs/decisions/0016-parallel-branches-role-memory-and-an-assertion-engine-that-saw-nothing.md → diff 空 / 字节一致=true
+
+还原后: exit=0 | Test Files  1 passed (1) | Tests  2 passed (2)
+
+终态 HEAD=f67c9bb / worktree 变更=[]（预期仅本证据文件未跟踪）
+结束: 2026-11-14T14:26:57.797Z
