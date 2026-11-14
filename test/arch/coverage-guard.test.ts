@@ -2,7 +2,8 @@ import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { expect, it } from "vitest";
+import { afterAll, expect, it } from "vitest";
+import { fixtureTmp } from "../../packages/hub/test/fixtures/fixture-dir.js";
 
 /**
  * 门控文件覆盖率下限的机械守卫（round197）。
@@ -17,19 +18,21 @@ import { expect, it } from "vitest";
  *     否则就是 glob 没匹配上（空对空），直接抛错，绝不放绿过去。
  *  2. 下限断言【独立重算】来源（json-summary 里每个文件的 lines/branches/functions），
  *     不抄 config 里的阈值数字 —— 万一 config 阈值被改成 0，本守卫照样能挡住掉到 90 的回归。
- *  3. worker 并发会互相污染 coverage 输出目录，这里用独立 reportsDirectory + 结束后清理。
+ *  3. worker 并发会互相污染 coverage 输出目录，这里用 fixtureTmp（pid 后缀 + afterAll 清理），
+ *     正好落进 fixture-dir 判据认可的 helper 用法。
  */
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "../..");
-const TMP = join(ROOT, ".tmp", "cov-guard");
+const TMP = fixtureTmp("cov-guard", import.meta.url);
 
-const GATE_FILES = [
-  "author-reviewer.ts",
-  "evaluate.ts",
-];
+const GATE_FILES = ["author-reviewer.ts", "evaluate.ts"];
 
 // 下限：与 config 的 per-glob 阈值同一水平（但不复制其数字）。
 const MIN = { lines: 95, branches: 95, functions: 95, statements: 90 };
+
+afterAll(() => {
+  rmSync(TMP, { recursive: true, force: true });
+});
 
 it("门控判定内核文件覆盖率 ≥ 下限（反假绿：文件必须在场、红即失败）", () => {
   rmSync(TMP, { recursive: true, force: true });
@@ -58,16 +61,17 @@ it("门控判定内核文件覆盖率 ≥ 下限（反假绿：文件必须在�
   const out = (r.stdout ?? "") + (r.stderr ?? "");
 
   const sumFile = join(TMP, "coverage-summary.json");
-  // 哨兵 1：summary 必须在场 —— 没产出 = 调用没成功 = 不能当通过。
+  // 哨兵：summary 必须在场 —— 没产出 = 调用没成功 = 不能当通过。
   if (!existsSync(sumFile))
     throw new Error("coverage-summary.json 未生成。vitest 输出（尾 300 字）：\n" + out.slice(-300));
   const sum = JSON.parse(readFileSync(sumFile, "utf8"));
 
-  // 哨兵 2：两个门控源文件真的被 v8 纳入统计了 —— 空对空跑绿是假通过。
-  const found = Object.keys(sum).filter((k) => GATE_FILES.some((f) => k.replace(/\\/g, "/").endsWith("/" + f)));
+  // 反假绿 2：两个门控源文件真的被 v8 纳入统计了 —— 空对空跑绿是假通过。
+  const found = Object.keys(sum).filter((k) =>
+    GATE_FILES.some((f) => k.replace(/\\/g, "/").endsWith("/" + f)));
   expect(found.length).toBe(GATE_FILES.length);
 
-  // 每条独立的、重算来源的下限断言。
+  // 反假绿 3：每条独立的、重算来源的下限断言。
   for (const k of found) {
     const v = sum[k];
     const fname = k.replace(/\\/g, "/").split("/").pop();
@@ -76,6 +80,7 @@ it("门控判定内核文件覆盖率 ≥ 下限（反假绿：文件必须在�
     expect(v.functions?.pct, fname + " functions").toBeGreaterThanOrEqual(MIN.functions);
   }
 
-  // 哨兵 3：vitest 进程本身应当成功（其余断言捕捉逻辑红；这里兜底调用层错误）。
-  if (r.status !== 0) throw new Error("vitest --coverage 非零退出 " + r.status + "，输出尾：\n" + out.slice(-500));
+  // 兜底：vitest 进程本身应当成功。
+  if (r.status !== 0)
+    throw new Error("vitest --coverage 非零退出 " + r.status + "：\n" + out.slice(-500));
 });

@@ -1,14 +1,11 @@
-=== round197 第 18 条守卫：coverage-guard 机械强制门控阈值 ===
-time: 2026-11-14T12:58:51.123Z
+=== round197 第 18 条守卫 coverage-guard（含自伤修复）===
+time: 2026-11-14T13:00:54.716Z
 
-1) 现状：round194 给 graph/gates/**.ts 设了 per-glob 阈值 95/95/100/90，但只在有人手动跑 --coverage 时生效，
-   是【文档化但没人机械执行】的软门槛。
-2) 新增 test/arch/coverage-guard.test.ts（18 号守卫）：每轮跑门控 4 个测试文件 + v8 coverage，
-   读 coverage-summary.json 独立断言两条防线：
-   · 反假绿-文件在场：两个门控源文件必须出现在 summary 里（glob 空对空=假通过 → 抛错）；
-   · 反假绿-下限重算：lines/branches/functions 各 ≥95/95/95（不抄 config 数字，config 被改成 0 也挡得住）。
-3) 变异验证：evaluate.ts 追加未测导出 → evaluate.ts lines 94.87，守卫精确红（'> evaluate.ts lines: expected 94.87');
-   恢复后回绿。非空转。
-4) arch 套件 17→18 文件，137→138 测试，全包 2.5s（覆盖 4 文件 1.3s 成本可接受），0 fail。
-5) 配合 round196：真实回退会红(手动) 与 机械守卫每轮必跑(自动) 双保险。
-   台账 v6 '17 守卫' → '18 守卫'。
+1) 初版(1154ce1)用 join(ROOT, '.tmp', 'cov-guard') 建报告目录 —— 自己撞上 fixture-dir 判据：
+   fixedTmpDirNames 认成 ['cov-guard']，'零命中' 从 0→1 红。全套从 8 红变 9 红。
+   这是 0007 §4.1 抓到自己人的活例：守卫自己制造了它防的那种违规。
+2) 修复：改经 fixtureTmp('cov-guard', import.meta.url)（pid 后缀 + helper 用法，afterAll 清理）——
+   fixture-dir 判据的 sanctioned 路径。重写后：guard 单跑绿、fixture-dir 26/26 回绿。
+3) 变异复验：evaluate.ts 追加未测导出 → branches 93.33，重写守卫仍精确红；恢复回绿。非空转保持。
+4) 全套回到 8 设计红（2334/2320/8/6，EPERM 0）—— 无杂散红。
+5) arch 18 文件 / 138 测试，2.5s。
