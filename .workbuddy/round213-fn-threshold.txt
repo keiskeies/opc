@@ -1,0 +1,8 @@
+=== round213 coverage-guard functions 阈值对齐 95→100 ===
+time: 2026-11-14T13:25:11.714Z
+
+1) 发现漂移：guard MIN.functions=95，config per-glob 阈值 functions=100 —— 守卫比官方松一格，
+   96-99 的函数覆盖率会静默通过守卫(但 config 要求 100)。
+2) 实测两门控文件 functions 均=100，收紧无脆性。
+3) 改 <95→100> 后：guard 绿；变异(加未测函数→functions 80)精确红『expected 80 >= 100』；恢复绿。
+4) 台账 I 节补 round213，守卫与 config 对齐闭环。

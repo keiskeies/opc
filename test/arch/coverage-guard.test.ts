@@ -27,8 +27,8 @@ const TMP = fixtureTmp("cov-guard", import.meta.url);
 
 const GATE_FILES = ["author-reviewer.ts", "evaluate.ts"];
 
-// 下限：与 config 的 per-glob 阈值同一水平（但不复制其数字）。
-const MIN = { lines: 95, branches: 95, functions: 95, statements: 90 };
+// 下限：与 config 的 per-glob 阈值一致(lines95/br95/fn100/st90)，不复制其数字但同水平。
+const MIN = { lines: 95, branches: 95, functions: 100, statements: 90 };
 
 afterAll(() => {
   rmSync(TMP, { recursive: true, force: true });
