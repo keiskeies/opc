@@ -1,0 +1,20 @@
+round243 gate-selfcheck 守卫触发级变异复证（真实数据臂）
+HEAD: 0bebb09924f52ee902280e4afc1950a5b1135b0c
+目的: 守卫自身判域(docs/review/check-gate.mjs)注入“打印★FAIL 却不记账”退化 → RED → 字节还原 → GREEN
+
+①基线: vitest run test/arch/gate-selfcheck.test.ts → 7 passed (exit 0)。
+   check-gate.mjs = 26718 B; HEAD blob sha256 b8a9d54e9313a6b425fd3954824512fe5c63f56a7110cda308938673f16588ac。
+   守卫结构(7 臂): 脚本存在 / 阳性对照码位互证 / 探针甲(双向蕴含 code==0⇔claimed==0) /
+    探针乙(仓库外记账+非零退出) / ★FAIL 必须进清单(l.192) / 结论必须在 KNOWN_RED / 探针落点选择。
+②注入: ok() 函数体(l.29-34)新增 1 行 —— say("  ★FAIL  许可证判定注入确认 → 你已拿到这一票")
+   且【不加 fail.push】。这是守卫头注释(l.17-19)点名要杀的退化形状: 打印了红却不计入退出码依据。
+   hash 变化: b8a9d54e… → 85b5aade693ee01ec671286823f297b7fe56484e4911f849ff9df682cfde0563。
+③RED: exit 1, 1 failed | 6 passed (7)。
+   红臂=★FAIL 必须进清单(l.192); stderr AssertionError: 
+     “这些不符项只打印未记账，退出码因此可能仍为 0: expected '许可证判定注入确认 | 许可证判定注入确认 |
+      许可证判定注入确认 | 许可证判定注入确认 | 许可证判定注入确认 | 许可证判定注入确认 | 许可证判定注入确认' to be ''”
+      (toStrict/toBe equal, l.200-201)
+   其余 6 臂全绿 → 证明是真实数据臂(探针甲在仓库内跑真实门禁)触发, 不是合成输入。
+④还原: 用注入前原始 Buffer 字节精确写回 check-gate.mjs, sha256 b8a9d54e… == HEAD blob; 删临时备份。
+⑤GREEN: vitest run → 7 passed (exit 0), git status 净 (仅本次证据+台账)。
+台账: A.14 增补 gate-selfcheck-input-243; E.16 增补 复核 3 行; 头第3行 HEAD 校正至 0bebb09。

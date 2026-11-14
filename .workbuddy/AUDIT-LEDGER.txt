@@ -1,6 +1,6 @@
 ======================================================================
  防假绿审计台账 v6（round156～227，19 守卫（18 arch + 1 hub fixture-dir） + 门禁 7 控制全有触发证据）
- HEAD: b0765f3
+ HEAD: 0bebb09
  生成: 2026-11-14T15:54:03Z
  较 v3 更新：round184-187 纠正基线 + EPERM 根因定位并修复 c633cda + claude 验证
 ======================================================================
@@ -11,7 +11,7 @@ A. ARCH 变异验证 15 个（均立即红 + 原样恢复，括号=round）
   可执行性(round212)：vitest include 两 glob(test/** + packages/*/test/**)全覆盖 —— 全套实测收集 19 个守卫文件
     (18 arch + fixture-dir 26 例)全部执行；断言求和 2334=基线，无静默排除。claude.test.ts 是唯一不在 vitest
     的 node:test 文件(已知设计良性)。
-  doc-coords[156] doc-ids[159] comment-citations[159] doc-refs[156] doc-refs-input-234 doc-ids-input-235 comment-citations-input-237 production-deps-input-238 pending-decisions-input-239 test-inventory-input-240 doc-coords-input-241 pending-inventory-input-242
+  doc-coords[156] doc-ids[159] comment-citations[159] doc-refs[156] doc-refs-input-234 doc-ids-input-235 comment-citations-input-237 production-deps-input-238 pending-decisions-input-239 test-inventory-input-240 doc-coords-input-241 pending-inventory-input-242 gate-selfcheck-input-243
   fixture-dir[156] decision-index[168] no-null-bytes[168] production-deps[167]
   no-native-deps[167] pending-inventory[166] test-inventory[166]
   pending-decisions[176] config-match[176] harness-invariants[176]
@@ -89,6 +89,10 @@ E. 纠正后的诚实基线（round184 发现 round175 漏报文件级错误；1
    16. round242 复核（HEAD b0765f3 后）: 守卫触发级变异复证 pending-inventory —— 真实被收集测试文件 config-match.test.ts 文末注入名单外顶层 it.skip(...)（注入前该文件无 skip、非名单内、现代链从未变异）
        基线 16绿→2红(真实数据臂 collect() 扫到该 skip: l.255 一条问题都不报 → 报「config-match.test.ts 第 74 行…不在跳过名单里」、l.266 唯一带跳过文件 toEqual 失配, 2 failed|14 passed; 其余 14 条合成臂仍绿 ⇒ 真实数据臂触发) → git show HEAD 字节还原(sha256 3e1b069…==HEAD blob) → 16绿/worktree 净。
        证据:【round242-pending-inventory-mutation-evidence.txt】;台账行 A.14 增补 pending-inventory-input-242;头部第 3 行 HEAD 校正至当前 HEAD b0765f3。
+   17. round243 复核（HEAD 0bebb09 后）: 守卫触发级变异复证 gate-selfcheck —— 真实门禁脚本 docs/review/check-gate.mjs 的 ok() 函数体内注入『打印 ★FAIL 却不 fail.push』的退化（正是守卫头注释点名要杀的只打印不记账形状，l.17-19）
+       基线 7绿→1红(探针甲在仓库内跑真实门禁脚本抓到 print-only ★FAIL: stderr AssertionError『这些不符项只打印未记账，退出码因此可能仍为 0: expected 许可证判定注入确认 | …(7条) to be 空』l.200-201, 1 failed|6 passed; 其余 6 臂仍绿 ⇒ 真实数据臂触发) → 字节还原(sha256 b8a9d54e…==HEAD blob) → 7绿/worktree 净。
+       判据洞察: 这是『注入守卫判据本体文件(非测试文件)却被守卫自己抓回』的案例 —— 注入点不在 test/arch/，而在它守护的门禁脚本；守卫的双向蕴含 + ★FAIL↔记账强绑定 + 探针甲真实运行，精确捕获只打印不记账的退化。
+       证据:【round243-gate-selfcheck-mutation-evidence.txt】;台账行 A.14 增补 gate-selfcheck-input-243;头部第 3 行 HEAD 校正至当前 HEAD 0bebb09。
 
 
 F. 开放项（report-only，等 CEO/owner）
