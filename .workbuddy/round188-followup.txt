@@ -1,0 +1,10 @@
+=== round188 收尾：gate 29→30 澄清（非漂移）===
+time: 2026-11-14T12:44:24.282Z
+HEAD: 558b98a docs(review): 可复算校验脚本 verify-open-invariants——isPidAlive 双实现语义 + 关键哈希；10/10 PASS
+
+gate 输出 PASS 由我先前计 29 变 30 —— 排查结论：那第 30 条是 C7 块常驻的
+『阳性对照：词表非空且规模合理→13 个词』，一直存在，只是之前的快速正则没把它算进去。
+门禁权威信号=exit 0 + ★FAIL 0，两者均绿。未引入漂移。
+
+本 HEAD(558b98a)状态：arch 137/137，gate exit0/0 FAIL，全套 2333/2319/8/6(EPERM 0)，
+verify-open-invariants 10/10 PASS。worktree clean。
