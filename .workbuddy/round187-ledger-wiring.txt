@@ -1,0 +1,17 @@
+=== round187 台账 v4 + wiring v3 + claude 原生验证 ===
+time: 2026-11-14T12:42:58.140Z
+HEAD: ff08762 docs(workbuddy): 8 设计红接线清单 v3 —— HEAD fff255b 全套实测逐条原文（c633cda 修复后 + fff255b 台账v4 + ff08762 wiring v3）
+
+1) claude.test.ts 良性确认：vitest 报 "No test suite"（node:test 文件不进 vitest 收集），
+   node --test 原生跑 13/13 绿 exit0。绝非回归——是设计上的另一套 runner。
+
+2) 台账 v3→v4（fff255b）：纠正基线（round184 发现 round175 漏 8 EPERM 文件级错误）；
+   登记 c633cda EPERM 修复；claude 13/13 验证入档。
+
+3) wiring matrix v3（ff08762）：8 设计红逐条原文 @ HEAD 全套实测：
+   phase3×3 / budget-sync×1 / store×2 / auto-approve×2，全为「接上那天会红」的诚实占位。
+
+4) gate 非空性复核：C1-C7 各控制含阳性/阴性对照，实值（C2 l.1648、C3 间字差 2、
+   C6 company.ts interrupt=0 + 6 条对照）——29 PASS exit0。C7 轮次相对指称 0/6 违例。
+
+5) 全套 @ HEAD ff08762：2333/2319/8/6，EPERM 0。
