@@ -244,14 +244,14 @@ const SNAP: Record<string, string> = {
   // 三格都是活坐标：被删或被改，0044 §0/§4 的结论跟着失效。
   "0044-charter-pump-where-do-cards-come-from-and-what-a-zero-cost-failure-costs.md>http/real-deps.ts:537":
     '"INSERT INTO tasks (id, parent_id, title, status, assigned_role, current_node, " +',
-  "0044-charter-pump-where-do-cards-come-from-and-what-a-zero-cost-failure-costs.md>engine/claude.ts:85":
+  "0044-charter-pump-where-do-cards-come-from-and-what-a-zero-cost-failure-costs.md>engine/claude.ts:88":
     "}, i.timeoutMs ?? 180_000);",
   "0044-charter-pump-where-do-cards-come-from-and-what-a-zero-cost-failure-costs.md>serve/timer.ts:336":
     "skipped++;",
   // 0044 §9.2 第 1 条那条【证伪】的证据：CLI 那条路早就真跑过子进程，
   // 所以"本机验不了真子进程"那句从一开始就不成立。判的是【那一发用例真的存在】——
   // 它一旦被改名或删掉，那条证伪就失去出处，而文档会替它继续说话。
-  "0044-charter-pump-where-do-cards-come-from-and-what-a-zero-cost-failure-costs.md>engine/work.test.ts:265":
+  "0044-charter-pump-where-do-cards-come-from-and-what-a-zero-cost-failure-costs.md>engine/work.test.ts:266":
     'it("CHARTER_PENDING ⇒ 起一轮起草、建出一张 charter 卡、任务【原地不动】、退出 0", async () => {',
   // ⚠ 后两格与前两格【形状不同】，这一点是这一组的内容而不是附带说明：
   // 它们不是"证据的出处"，而是 0044 §6 那条【撤回】里被点名"指错了"的坐标 ——
@@ -625,7 +625,7 @@ const SNAP: Record<string, string> = {
     "//   ① 那一行不存在（今天的真库就是这种：src 里没有任何 INSERT INTO approvals）；",
   "0049-driver-status-on-the-board-and-a-bind-order-bug-that-was-green.md>cards.ts:237":
     '"INSERT INTO approvals (id, task_id, approval_type, summary, parameters, " +',
-  "0049-driver-status-on-the-board-and-a-bind-order-bug-that-was-green.md>charter-pump.test.ts:231":
+  "0049-driver-status-on-the-board-and-a-bind-order-bug-that-was-green.md>charter-pump.test.ts:232":
     "function pendingCards(w: World, taskId: string): number {",
   "0049-driver-status-on-the-board-and-a-bind-order-bug-that-was-green.md>serve/driver-pump.ts:487":
     ".all(...states, maxAttempts, o.taskLimitCents, perRound) as unknown as {",

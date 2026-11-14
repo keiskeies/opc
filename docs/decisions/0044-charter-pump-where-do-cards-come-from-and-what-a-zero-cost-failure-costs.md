@@ -106,7 +106,7 @@ CREATE UNIQUE INDEX idx_approvals_card_identity
 ## 4. 泵挂在心跳上的形状：非阻塞派发
 
 心跳一轮做的是巡检 + 备份相位；起草一轮要起子进程，上限 **180 秒**
-（`engine/claude.ts:85` 那个 `i.timeoutMs ?? 180_000` 到点 `SIGKILL`），
+（`engine/claude.ts:88` 那个 `i.timeoutMs ?? 180_000` 到点 `SIGKILL`），
 而心跳下界是 **60 秒**（`HEARTBEAT_FLOOR_MS`）。**起草比心跳的节奏慢三倍**，这是设计事实不是意外。
 
 所以泵在 `job` 里是**派发**而不是 `await`（`serve/assemble.ts` 里 `pumpWatch.start(...)`）。
@@ -294,7 +294,7 @@ CEO 用 `reject_with_comment` 退回一份章程提案之后：
    我原来写的是「泵的 15 + 28 发全部注入一份不 spawn 的 `cardDeps`，而『能不能起子进程』在
    `claude.test.ts` / `runtime.test.ts` 里各自钉着」。这句话有**两处**错，方向不同：
 
-   - **对 CLI 那条路说重了**：`engine/work.test.ts:265` 早就用 `fixtures/fake-claude.mjs`
+   - **对 CLI 那条路说重了**：`engine/work.test.ts:266` 早就用 `fixtures/fake-claude.mjs`
      （真可执行 + shebang，非 mock）把 `hub work` 整条链真跑通过 —— 起真子进程、真解析、真记账。
      所以"本机验不了真子进程"这句从一开始就不成立。
    - **对泵自己那一支也说轻了**：它当时是**零覆盖**，而我用"别处钉着"把它解释掉了。

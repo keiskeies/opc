@@ -459,7 +459,7 @@ M15 值得说一句：它**不是**"把共享函数 `driverCellTargetSql` 改掉
    —— 这一句是**现在时**，没有"写之前"这类限定，而它**今天为假**：
    `cards.ts:237` 就是那句 INSERT，被 `insertCard` 用着，而 `insertCard` 有上面那三个
    生产调用方（章程泵经 `ensureCharterCard`、dispatch/approve 经 `mintSeatCard`）——
-   `charter-pump.test.ts:231` 那个 `pendingCards()` 数的正是真库里的 `approvals` 行。
+   `charter-pump.test.ts:232` 那个 `pendingCards()` 数的正是真库里的 `approvals` 行。
    它在那里的作用**不是无害的**：那是 `changes === 0` 那一支的成因 ①，
    注释把一个**今天已经不常见**的成因写成"真库今天就是这样"，
    下一个人读到就会以为「认领不中 ≈ 常态」而不去查它为什么认领不中。
