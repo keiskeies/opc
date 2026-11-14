@@ -1,0 +1,9 @@
+=== round203 biome 债分解：294/109/2 → 286 自动 + 119 人工 ===
+time: 2026-11-14T13:05:37.136Z
+
+1) 用平台 biome.exe(2.6.5) 重测全仓：254 文件 / 294 错 / 109 警告 / 2 info（与 round190 的 253/294/110/2 基本一致，+1 文件是新守卫，110→109 是 organize 计数）。债未增长。
+2) 关键分解（此前是雾数）：405 条诊断里 ~286 条是一条 `biome check --write` 就能自动消掉的
+   （organizeImports×101 + format×128 + 其它 safe fix）；余 119 条人工：
+   noNonNullAssertion×50 / noUnusedVariables×15 / noUnusedImports×13 / useOptionalChain×10 / 其余 ~31。
+3) 区域：packages/hub 占大头(238err+80warn/136文件)；test/desktop|web|org|arch|replay 与 contracts/web/desktop 各 ~2-21。
+4) 已写入台账 H 节 —— report-only，不亲手修（外部/技术债）；owner 动手顺序：--write 一次消 286，再手消 119。

@@ -58,6 +58,11 @@ H. round190 复核：biome 全仓金额修正（v4 记『7 外部』→ 实测 4
   · 全仓 44 文件含 packages/hub/src 生产文件(dispatch/backup/runtime/gateway/org/real-deps/assemble/config)
     与测试文件；noNonNullAssertion×50 / noUnusedVariables×16 / noUnusedImports×13 / useOptionalChain×10 …
     属全仓整洁度债（非 arch 守卫范围），外部/技术债，不设机械守卫；谁修谁把新数字写回本台账。
+  · round203 分解（同一把 exe 重测，294/109/2 稳定）：405 条诊断中约 286 条可一条 `biome check --write`
+    自动消掉（organizeImports×101 + format×128 + 其它 safe fix），余 119 条需人工，按规则：
+    noNonNullAssertion×50 / noUnusedVariables×15 / noUnusedImports×13 / useOptionalChain×10 /
+    noPrototypeBuiltins×6 / noAssignInExpressions×4 / 其余19条。packages/hub 占大头(238err+80warn/136文件)。
+    ⇒ owner 动手顺序：先 `biome check --write` 一次(消 286)，再手消 119。
 
 I. round193-194 coverage 解锁 + 非空阈值（原 F.3 开放项转为已修）
   · 前提纠正：vitest 4.1.12 原生支持 per-glob thresholds（key=glob），非需 projects 拆配置。
