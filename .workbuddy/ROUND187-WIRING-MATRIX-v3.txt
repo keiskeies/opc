@@ -1,0 +1,21 @@
+=== wiring matrix v3 —— 8 设计红 verified at HEAD（round187）===
+time: 2026-11-14T12:42:38.707Z
+HEAD: fff255b docs(workbuddy): 审计台账 v3→v4 —— 纠正基线(round184) + EPERM 修复(c633cda) + claude 13/13 验证
+
+全套 2333 total / 2319 pass / 8 fail(全为自我声明的设计红) / 6 skip
+failed suites 5 = phase3+budget-sync+store+auto-approve(=8 红) + claude(良性)
+
+8 设计红断言（逐条原文，含义=「某某接线上那天会红」的诚实占位）：
+  phase3 ①   『重跑同类任务』今天仍无路可跑：调用链多一环没人调
+  phase3 ②   『在日报可见』只有数据面：readAutoApprovalReport 也零调用方
+  phase3 ③   门禁诚实口径：本文件跑绿≠Task 3.8 通过
+  budget-sync  src 还没有任何地方调用写入口（接上那天这条会红，逼着更新 0015）
+  store ①     src 还没有任何地方调用 saveCharterVersion（写侧接线已知缺口）
+  store ②     写通道不过任何 HTTP/组织图路径（孤岛，接上那天会红）
+  auto-approve① 创建路径已有而零生产者 ⇒ 认领那一路在真库走不到
+  auto-approve② policy 模块在生产 src 还没有调用方（已知缺口非实现遗漏）
+
+EPERM 文件：0（修前 8，c633cda）。claude.test.ts=node:test 文件，vitest 收集报
+  "No test suite" 属良性；node --test 13/13 绿（round187 实测）。
+
+owner 接线清单（接上那天各自的红会消失）仍待外部 owner，本 v3 是实测全集。
