@@ -1,7 +1,7 @@
 ======================================================================
  防假绿审计台账 v6（round156～227，19 守卫（18 arch + 1 hub fixture-dir） + 门禁 7 控制全有触发证据）
- HEAD: df08901
- 生成: 2026-11-14T15:38:56Z
+ HEAD: e9663a4
+ 生成: 2026-11-14T15:48:25Z
  较 v3 更新：round184-187 纠正基线 + EPERM 根因定位并修复 c633cda + claude 验证
 ======================================================================
 A. ARCH 变异验证 15 个（均立即红 + 原样恢复，括号=round）
@@ -11,7 +11,7 @@ A. ARCH 变异验证 15 个（均立即红 + 原样恢复，括号=round）
   可执行性(round212)：vitest include 两 glob(test/** + packages/*/test/**)全覆盖 —— 全套实测收集 19 个守卫文件
     (18 arch + fixture-dir 26 例)全部执行；断言求和 2334=基线，无静默排除。claude.test.ts 是唯一不在 vitest
     的 node:test 文件(已知设计良性)。
-  doc-coords[156] doc-ids[159] comment-citations[159] doc-refs[156] doc-refs-input-234 doc-ids-input-235 comment-citations-input-237 production-deps-input-238
+  doc-coords[156] doc-ids[159] comment-citations[159] doc-refs[156] doc-refs-input-234 doc-ids-input-235 comment-citations-input-237 production-deps-input-238 pending-decisions-input-239
   fixture-dir[156] decision-index[168] no-null-bytes[168] production-deps[167]
   no-native-deps[167] pending-inventory[166] test-inventory[166]
   pending-decisions[176] config-match[176] harness-invariants[176]
@@ -76,6 +76,10 @@ E. 纠正后的诚实基线（round184 发现 round175 漏报文件级错误；1
         (typescript 仅 hub devDependencies、非 dependencies —— prod 安装会缺模块)。基线 5绿→1红(× 没有任何生产 import 落在 devDependencies 或未声明处,
         'packages/hub/src/index.ts → typescript 只在 devDependencies', 1 failed|4 passed) → 字节还原(sha256 d657a15b… 与 HEAD 逐字节一致) → 5绿/worktree 净。
         证据:【round238-production-deps-mutation-evidence.txt】;台账行 A.14 增补 production-deps-input-238。
+
+   13. round239 复核（HEAD e9663a4 后）: 守卫触发级变异复证 pending-decisions —— docs/decisions/0007 文末追加标题级待决小节『### 5.1 留给 CEO 的一项补充决定（round239 复证注入，未登记入口）』（与 round176 的前向腐烂相反，走【后向漏报】方向 —— 守卫源码明示这就是『本轮实际发生的那种』）
+       基线 19绿→1红(× 真仓库的待决小节与登记表双向一致, '0007 > 5.1 的标题声明在等决策，却没登记在入口处', 1 failed|18 passed) → 字节还原(sha256 f146c6de… 与 HEAD 逐字节一致) → 19绿/worktree 净。
+       证据:【round239-pending-decisions-mutation-evidence.txt】;台账行 A.14 增补 pending-decisions-input-239;头部第 3 行 HEAD 校正至当前 HEAD e9663a4（收口 round238 末尾未同步头部的遗留）。
 
 F. 开放项（report-only，等 CEO/owner）
   1. isPidAlive 双实现：非注册守卫（report-only）。verify-open-invariants.mjs 已机械校验 4 条语义

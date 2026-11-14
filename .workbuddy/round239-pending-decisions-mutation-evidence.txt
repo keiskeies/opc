@@ -1,0 +1,22 @@
+=== round239 守卫触发级变异复证 pending-decisions ===
+time: 2026-11-14T15:48:25Z
+HEAD: e9663a4（round238 后，本轮完成时仍 e9663a4）
+守卫：pending-decisions（待决登记双向一致性，纯输入域：docs/decisions/*.md 标题级待决小节 ↔ docs/INDEX.md 登记表）
+方向：与 round176 初证（前向腐烂 INDEX §0007§5→§99）相反的【后向漏报】—— 文档里新增待决小节、入口未登记。
+     守卫源码注释明示这就是『本轮实际发生的那种腐烂』。
+
+注入（真实缺陷，偏转真实扫描结果）：
+  docs/decisions/0007-test-type-coverage-blindspot.md 文件末尾追加一行：
+    ### 5.1 留给 CEO 的一项补充决定（round239 复证注入，未登记入口）
+  0007 篇原只 1 条标题级待决（## 5. 留给 CEO 的一项决定），追加后 2 条；INDEX.md 登记表未同步 → 后向臂『没登记在入口处』应触发。
+  字节基线：HEAD blob sha256 f146c6de…（25395B）→ 注入后 25439B，sha256 2f599793e7c3…
+RED（隔离单跑 test/arch/pending-decisions.test.ts，退出 1）：
+  Test Files 1 failed | Tests 1 failed | 18 passed (19)
+  × 真仓库的待决小节与登记表双向一致（正向：守卫在真数据上不空转）
+  收到：'0007 > 5.1 的标题声明在等决策，却没登记在入口处 —— 只读入口的人发现不了它（标题原文：5.1 留给 CEO 的一项补充决定（round239 复证注入，未登记入口））'
+  其余 18 条（含兼容 canary、合成输入 canary、下限、入口小节存在）全绿 —— 缺陷被单向臂精确捕获，无非目标波及。
+
+还原：fs.writeFileSync(path, git show HEAD:<TARGET>) 字节级写回
+  restored sha256 f146c6de… == HEAD blob f146c6de…（逐字节一致），worktree 净。
+GREEN（隔离单跑，退出 0）：Test Files 1 passed | Tests 19 passed (19)。
+台账：A.14 增补 pending-decisions-input-239；E 节新增 13. round239 复核；头部第 3 行 HEAD 校正至 e9663a4（沿用 round237 『校正头部』先例，修 round238 遗留的 df08901 stale）。
