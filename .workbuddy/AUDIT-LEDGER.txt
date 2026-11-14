@@ -3,6 +3,7 @@
  HEAD: 1be4463 docs(vitest.config): coverage 阻塞面复核收窄 —— 现只缺 coverage-v8 一枚包（round189 store 实测）
  生成: 2026-11-14T12:47:16.718Z
  较 v3 更新：round184-187 纠正基线 + EPERM 根因定位并修复 c633cda + claude 验证
+======================================================================
 A. ARCH 变异验证 14 个（均立即红 + 原样恢复，括号=round）
   doc-coords[156] doc-ids[159] comment-citations[159] doc-refs[156]
   fixture-dir[156] decision-index[168] no-null-bytes[168] production-deps[167]

@@ -1,0 +1,16 @@
+=== round190 biome 全仓复核：『7 外部』→ 实测 44 文件/294 错 ===
+time: 2026-11-14T12:48:13.648Z
+HEAD: a63de08 docs(workbuddy): ledger v5 修正 —— H 节移到 G 之后（此前误插头部）
+
+1) 用 biome 原生二进制(bin/biome)全仓 check：Checked 253 files / 294 errors / 110 warnings / 2 info
+   （此前误以为只 3 文件——那是 --max-diagnostics 默认上限只显示前几条。升上限后 44 文件。）
+2) 修正台账 v4『biome 7 外部』欠账口径 → v5『44 文件/294 错』（round190）。
+   旧数字并非守卫失效，而是当年只统计了静态探针可见面；全仓债远大于 7。
+3) arch 守卫不受影响：dependency-boundary 用 biome 只扫探针(noRestrictedImports)，4/4 绿，
+   arch 137/137 @ 1be4463 —— 与全仓 biome 债正交。
+4) 债务组成：noNonNullAssertion×50 / noUnusedVariables×16 / noUnusedImports×13 / useOptionalChain×10 /
+   noPrototypeBuiltins×6 / noAssignInExpressions×4 …含 hub 生产文件(dispatch/backup/runtime/…)。
+   属全仓整洁度债（外部/技术债），不设机械守卫，谁修谁更新台账。
+
+过程诚实：首版误将 H 节插到 header 后，且 edit 期间分隔符被 regex 弄丢两处；
+逐行重建后 A–H 顺序 + 2 分隔符结构收敛正确（a63de08 + 本次分隔恢复）。
