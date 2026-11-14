@@ -1,0 +1,9 @@
+=== round217 commit-msg-refs 变异证（死引用判据负载承载，双 canary 互保）===
+time: 2026-11-14T13:27:49.179Z
+
+1) 变异：把 check() 里死引用分支条件改成恒 true（跳过一切当 existing）→ 死引用永不报。
+2) 结果：两个 canary 同时红 —— (a) 种违规 canary: expected [Array(1)] to deeply equal [...(2)]
+   (bbbb222 死引用没被报)；(b) 预约号 canary 也红（同样依赖死引用判据）。
+3) 恢复 → 绿，worktree clean。证明『死引用』与『scope 撒谎』两种判据各自有 canary，
+   被翻弱即红 —— 不是恒绿装饰。
+4) 至此 4 canary 中已变异证 3：gate-selfcheck(215)、matcher-oracle(216)、commit-msg-refs(217)。
