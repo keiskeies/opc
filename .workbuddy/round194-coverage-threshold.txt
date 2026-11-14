@@ -1,0 +1,15 @@
+=== round194 coverage 门控阈值非空化：per-glob 原生支持 ===
+time: 2026-11-14T12:55:18.153Z
+HEAD: 5d830b2 feat(dev): 解锁 coverage —— 装 @vitest/coverage-v8@4.1.12 并实测：门控 99.15%lines/97.87%br、全仓 84.73%（round193）（在 round193 解锁 coverage 之上）
+
+1) 关键纠正：vitest 4.1.12【原生支持 per-glob thresholds】—— thresholds 对象里 key=glob 即可
+   （config.d 里 Thresholds 定义：'src/utils/**.ts': { lines: 100, ... }）。
+   0039/round193 写的『需 projects 拆两份配置 / perFile 限定』是过时前提，本轮已实测。
+2) 已设门控专属阈值：'packages/hub/src/graph/gates/**.ts' → branches 95 / functions 100 / lines 95 / statements 90；
+   全局留 0（全仓 84.73% 因接线缺口，恒红无诊断价值，一旦接线完再升）。
+3) 实测：跑 gates 套件 --coverage exit0，覆盖 99.23 stmt / 97.87 br / 100 fn / 99.15 lines —— 全过。
+   coverage 对【门控判定分支】不再空转（0007 §4.1 反假绿）：若 evaluate.ts 新增未测分支掉到 <95 会红。
+4) 编辑边界验证：正常 arch run exit0、gate exit0、无坏字 —— coverage 块改动不影响常规测试。
+5) 把 round193 的过时指引修正为 round194 实测（写下 'round194: per-glob 原生支持已直接设上'）。
+
+至此 coverage 项：解锁(193) + 非空阈值(194)。全仓阈值仍 0 是唯一的接线驱动项。

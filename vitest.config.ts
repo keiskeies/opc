@@ -61,13 +61,29 @@ export default defineConfig({
      *     低于 95 的原因【恰是那 8 个设计红模块】—— charter/store、budget-sync、auto-approve 0~17%，
      *     另有入口文件 cli/index/main/hub-serve 0%。即覆盖率赤字=接线缺口，非测试缺失。
      *   ⇒ 结论维持：全局 95 会因接线缺口恒红（不可用）；门控专属 95 现可设（99.15 有余）。
-     *     门控阈值需 projects 拆配置或用 coverage.perFile 限定 graph/gates/**；谁接线谁把它设上。
+     *   · round194：vitest 4.1.12 原生支持 per-glob thresholds（补在 thresholds 对象里，key=glob）——
+     *     已在下方直接设上（gates 95/95/100/90），coverage 门控分支不再空转。
      * （gate 套件在 vitest 4.1.5 下实测 59/59 全绿，见 0039 §3。）
      */
     coverage: {
       provider: "v8",
       include: ["packages/hub/src/**"],
-      thresholds: { branches: 0, functions: 0, lines: 0, statements: 0 },
+      thresholds: {
+        // 全局 0 —— 全仓 lines 84.73%（round193），因 8 个设计红接线缺口模块 0~17% + 入口文件 0%。
+        // 一旦接线这些缺口消失、全仓过 95，再升全局阈值。当前设非 0 会恒红且是接线缺口而非测试缺失。
+        branches: 0,
+        functions: 0,
+        lines: 0,
+        statements: 0,
+        // 门控专属：graph/gates/** 实测 lines 99.15% / branches 97.87% / functions 100%（round193），
+        // 95 有裕量 —— 这条让 coverage 对【门控判定分支】不再空转（0007 §4.1 反假绿）。
+        "packages/hub/src/graph/gates/**.ts": {
+          branches: 95,
+          functions: 100,
+          lines: 95,
+          statements: 90,
+        },
+      },
     },
   },
 });
