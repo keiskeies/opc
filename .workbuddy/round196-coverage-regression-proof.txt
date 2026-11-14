@@ -1,0 +1,13 @@
+=== round196 coverage 门控双重反假绿证明（真实回退也会红）===
+time: 2026-11-14T12:57:36.079Z
+
+1) round194 已证：阈值 95→999 触发红（阈值侧）。
+2) 本轮更硬：在 evaluate.ts 追加一个【无任何测试调用】的导出函数（~24 行），
+   覆盖率真实回退：
+     evaluate.ts: lines 88.09% / branches 84.84% / functions 80%
+     gates total: lines 92.18% / branches 90.19% / functions 92.85%
+   → 门控阈值【三条同时红】：'does not meet threshold (95%)' / functions vs 100% / branches vs 95%。
+   证明 coverage 门控对『覆盖率真实回退』会红 —— 非空转（0007 §4.1 金标准）。
+3) byte-exact 恢复（sha256 92a96b07… 前后一致），再跑 coverage exit0 回绿，worktree clean。
+4) 至此 coverage 项验证链闭环：解锁(193) + 阈值非空(194) + 真实回退会红(196)。
+   全仓 95 阈值在 8 接线缺口消失前不设 —— 仍是唯一接线驱动项。
