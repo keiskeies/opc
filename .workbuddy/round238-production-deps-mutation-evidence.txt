@@ -1,0 +1,41 @@
+# round238 production-deps 守卫输入域变异复证（该红即红/该绿即绿）
+
+回合基线：HEAD 605b5ac（parent df08901）。
+生成: 2026-11-14T15:38:56Z
+
+目标守卫：production-deps —— 契约：packages/*/src/ 的生产 import 必须落进本包自己的 dependencies；
+落在 devDependencies（或谁也没声明）→ 判为违约，prod 安装会缺模块。
+判据本体 test/arch/production-deps.test.ts：packages() 逐个读 packages/*/package.json，tsFiles() 收集
+各包 src/（目录缺失→跳过），SPEC_RES 是 4 条锚定行首([ \t]*)的 import 正则，packageName() 负责解析
+（relative/node:/built-in→null；scoped 包需 2+ 段、路径段检查只压 unscoped）；每文件收集 seen(name)，
+凡不在本包 dependencies → findings；主断言 seen.size>3 且 findings toEqual([])。另有子路径 scoped 专测
+（守住 @langchain/core/runnables 这类不被整体跳过）。
+
+为何选它复证：round167 只做过初证（graph/company.ts+cli.ts 引 @langchain/langgraph 但仅 devDeps，当时
+prod 安装 CLI 起不来），从未进 round213-237 独立复证系列；本轮补这一发输入域触发级注入。
+
+【该红即红】注入：packages/hub/src/index.ts 文末追加『import "typescript";』。
+  typescript 只在 hub 的 devDependencies、不在 dependencies —— 真实违约（prod 安装会找不到模块）。
+  注：选 typescript 而非 @langchain/*，因它同时是 root devDeps 的既有依赖、且是纯类型包，
+  与 no-native-deps（原生 SQLite 探针）/依赖安装侧互相独立，注入不会误伤旁系守卫、也不会碰网络。
+  - 注入前 sha256 = d657a15b726c9b83f2220fdd3808ae8b70d4e54ce08f42782409b75b055a3a8f
+    （等于本轮注入前实测；blob 23175d7f181d2700b9f53f85233dd1d50a69b454 == HEAD:true）
+  - 注入后 sha256 = 32e176b1a5910451d127148cc3936c7420ac59d0a67fd28b66edfe7bbde798b4（+21B）
+  - vitest run test/arch/production-deps.test.ts → exit 1，1 failed（1 failed|4 passed）：
+      × 没有任何生产 import 落在 devDependencies 或未声明处 ——
+        packages/hub/src/index.ts  →  typescript 只在 devDependencies: expected [ Array(1) ] to deeply equal []
+      → 判据按文件相对路径精确定位违约，其余 4 条（scoped 子路径/Phase0/探针名/非空）仍绿。
+
+【该绿即绿】字节还原：写回 HEAD:packages/hub/src/index.ts 内容。
+  - 还原后 sha256 回到 d657a15b…（等于注入前，本轮复算一致）
+  - git hash-object == HEAD:packages/hub/src/index.ts（23175d7f…）
+  - vitest run test/arch/production-deps.test.ts → exit 0，5/5 绿（本轮复测实录）→ git diff --exit-code 0
+  - git status --porcelain 空（证据文件与台账随 commit 入册）
+
+终态：HEAD=605b5ac / parent=df08901 / worktree 变更=[]（git status --porcelain 空）。
+
+判据鉴别力确认：注入单个真实越界 import 即让主断言红（其余 4 条 other it 不受扰），
+剔掉即回全绿 —— 判据绑的是「src/ 生产 import 必须在本包 dependencies」这条真实契约，
+非恒绿装饰、非全类误杀（scoped 子路径专测证明 @langchain/core/runnables 未被整体跳过）。
+
+本文件 7-hex 引用：[ 605b5ac df08901 ] 均可 git cat-file -e 解析。（全数字7位由扫描器跳过）

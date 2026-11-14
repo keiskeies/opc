@@ -1,7 +1,7 @@
 ======================================================================
  防假绿审计台账 v6（round156～227，19 守卫（18 arch + 1 hub fixture-dir） + 门禁 7 控制全有触发证据）
  HEAD: df08901
- 生成: 2026-11-14T15:28:35Z
+ 生成: 2026-11-14T15:38:56Z
  较 v3 更新：round184-187 纠正基线 + EPERM 根因定位并修复 c633cda + claude 验证
 ======================================================================
 A. ARCH 变异验证 15 个（均立即红 + 原样恢复，括号=round）
@@ -11,7 +11,7 @@ A. ARCH 变异验证 15 个（均立即红 + 原样恢复，括号=round）
   可执行性(round212)：vitest include 两 glob(test/** + packages/*/test/**)全覆盖 —— 全套实测收集 19 个守卫文件
     (18 arch + fixture-dir 26 例)全部执行；断言求和 2334=基线，无静默排除。claude.test.ts 是唯一不在 vitest
     的 node:test 文件(已知设计良性)。
-  doc-coords[156] doc-ids[159] comment-citations[159] doc-refs[156] doc-refs-input-234 doc-ids-input-235 comment-citations-input-237
+  doc-coords[156] doc-ids[159] comment-citations[159] doc-refs[156] doc-refs-input-234 doc-ids-input-235 comment-citations-input-237 production-deps-input-238
   fixture-dir[156] decision-index[168] no-null-bytes[168] production-deps[167]
   no-native-deps[167] pending-inventory[166] test-inventory[166]
   pending-decisions[176] config-match[176] harness-invariants[176]
@@ -72,6 +72,10 @@ E. 纠正后的诚实基线（round184 发现 round175 漏报文件级错误；1
         基线 25绿→1红(× 真实仓库：注释里的限定引用全部指向存在的东西，1 failed|24 passed，539ms) → 字节还原(sha256 前缀 521daf21ad25ad6c 与 HEAD 逐字节一致) → 25绿/worktree 净。
         注：单次提及『0001 §1 不存在』守卫抓到仍绿(negated=false) —— 判据对『同子句重述』是真实要求；重述才红。
         证据:【round237-comment-citations-mutation-evidence.txt】;台账行 A.14 增补 comment-citations-input-237;并收口 round236 交付漏推进头部之缺陷(本轮头部校正至当前 HEAD df08901)。
+    12. round238 复核（HEAD 605b5ac 后）: 守卫触发级变异复证 production-deps —— packages/hub/src/index.ts 文末追加『import "typescript";』
+        (typescript 仅 hub devDependencies、非 dependencies —— prod 安装会缺模块)。基线 5绿→1红(× 没有任何生产 import 落在 devDependencies 或未声明处,
+        'packages/hub/src/index.ts → typescript 只在 devDependencies', 1 failed|4 passed) → 字节还原(sha256 d657a15b… 与 HEAD 逐字节一致) → 5绿/worktree 净。
+        证据:【round238-production-deps-mutation-evidence.txt】;台账行 A.14 增补 production-deps-input-238。
 
 F. 开放项（report-only，等 CEO/owner）
   1. isPidAlive 双实现：非注册守卫（report-only）。verify-open-invariants.mjs 已机械校验 4 条语义
