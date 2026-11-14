@@ -1,0 +1,14 @@
+=== round197 第 18 条守卫：coverage-guard 机械强制门控阈值 ===
+time: 2026-11-14T12:58:51.123Z
+
+1) 现状：round194 给 graph/gates/**.ts 设了 per-glob 阈值 95/95/100/90，但只在有人手动跑 --coverage 时生效，
+   是【文档化但没人机械执行】的软门槛。
+2) 新增 test/arch/coverage-guard.test.ts（18 号守卫）：每轮跑门控 4 个测试文件 + v8 coverage，
+   读 coverage-summary.json 独立断言两条防线：
+   · 反假绿-文件在场：两个门控源文件必须出现在 summary 里（glob 空对空=假通过 → 抛错）；
+   · 反假绿-下限重算：lines/branches/functions 各 ≥95/95/95（不抄 config 数字，config 被改成 0 也挡得住）。
+3) 变异验证：evaluate.ts 追加未测导出 → evaluate.ts lines 94.87，守卫精确红（'> evaluate.ts lines: expected 94.87');
+   恢复后回绿。非空转。
+4) arch 套件 17→18 文件，137→138 测试，全包 2.5s（覆盖 4 文件 1.3s 成本可接受），0 fail。
+5) 配合 round196：真实回退会红(手动) 与 机械守卫每轮必跑(自动) 双保险。
+   台账 v6 '17 守卫' → '18 守卫'。
