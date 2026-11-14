@@ -1,0 +1,69 @@
+round244 decision-index 守卫触发级变异复证
+==================================================================
+守卫     : test/arch/decision-index.test.ts（判据本体 test/arch/index-diff.ts）
+判域     : docs/decisions/*.md 文件名单 与 docs/INDEX.md 行首 - **NNNN** 列表的双向一致
+注入缺陷 : 往 docs/decisions/ 注入一个 INDEX 未列出的『幽灵决策文件』0099-round244-injection.md
+         （漏更新方向：文件在但索引没列 —— 判据自己注释点名的那一半）
+
+① 基线（HEAD ef901692365304063084a7fec0e1e05a1ca48862 = ef90169，worktree 净）:
+   decision-index.test.ts → Test Files 1 passed (1) | Tests 2 passed (2)  exit 0  ［绿］
+   decisions/*.md = 52 个（0001..0052），INDEX 完整列出 ⇒ diffIds={missing:[],extra:[]}
+
+② 注入:
+   新文件 docs/decisions/0099-round244-injection.md（INDEX 无 0099）
+   内容: # 0099 — Round244 探针决策 ...（五行假决策）
+   git blob = 8396d239c517e60df96213d58cbcf5d87ad5b242
+   git hash-object 校验 = (已还原)
+
+③ 真实数据臂 RED（探针甲：真实 decisions/ 目录 vs 真实 INDEX）:
+   decision-index.test.ts → Test Files 1 failed (1) | Tests 1 failed | 1 passed  exit 1  !!! 直接多检
+   stderr AssertionError（完整原文）:
+────────────────────────────────────────────
+(node:62876) [DEP0190] DeprecationWarning: Passing args to a child process with shell option true can lead to security vulnerabilities, as the arguments are not escaped, only concatenated.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  test/arch/decision-index.test.ts > 决策索引与 decisions/ 目录一致 > decisions/ 的每个编号都在 INDEX 列出，且 INDEX 不列不存在的号
+AssertionError: expected { missing: [ '0099' ], extra: [] } to deeply equal { missing: [], extra: [] }
+
+- Expected
++ Received
+
+  {
+    "extra": [],
+-   "missing": [],
++   "missing": [
++     "0099",
++   ],
+  }
+
+ ❯ test/arch/decision-index.test.ts:60:37
+     58|     expect(actual.length).toBeGreaterThanOrEqual(6);
+     59|     expect(listed.length).toBeGreaterThanOrEqual(6);
+     60|     expect(diffIds(actual, listed)).toEqual({ missing: [], extra: [] }…
+       |                                     ^
+     61|   });
+     62| });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+────────────────────────────────────────────
+   关键: 只有『decisions/ 的每个编号都在 INDEX 列出』那条真数据臂红（missing:[0099]），
+         另一条 canary 仍绿 ⇒ 判定被真实缺陷精确触发。
+
+④ 还原（byte-exact 回 HEAD = 删除注入文件）:
+   rm docs/decisions/0099-round244-injection.md
+   注入前该文件不存在 → 删除后 decisions/ 与 INDEX 双向回到一致
+   git status --porcelain = 空（除本证据未跟踪外）  ⇒  worktree 净
+
+⑤ GREEN:
+   decision-index.test.ts → Test Files 1 passed (1) | Tests 2 passed (2)  exit 0  ［绿］
+   注入文件在 GREEN 时不存在 ⇒ 字节级还原完成
+
+结论: 在守卫判域内（索引漏更新方向的真实数据）注入幽灵决策文件，守卫的真实数据臂
+     产生 pinned stderr AssertionError'{ missing: [ 0099 ] }'而红；删除还原后守卫绿。
+     该注入文件从未进入 git（untracked 临时文件）⇒ 外包无污染。
+
+台账: A.14 增补 decision-index-input-244; HEAD 行校正至当前 HEAD ef90169。
