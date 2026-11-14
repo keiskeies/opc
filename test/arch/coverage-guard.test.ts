@@ -78,6 +78,7 @@ it("门控判定内核文件覆盖率 ≥ 下限（反假绿：文件必须在�
     expect(v.lines?.pct, fname + " lines").toBeGreaterThanOrEqual(MIN.lines);
     expect(v.branches?.pct, fname + " branches").toBeGreaterThanOrEqual(MIN.branches);
     expect(v.functions?.pct, fname + " functions").toBeGreaterThanOrEqual(MIN.functions);
+    expect(v.statements?.pct, fname + " statements").toBeGreaterThanOrEqual(MIN.statements);
   }
 
   // 兜底：vitest 进程本身应当成功。
