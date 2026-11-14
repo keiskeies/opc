@@ -1,0 +1,12 @@
+=== round192 完整基线复验 @ 1c24fa6 ===
+time: 2026-11-14T12:50:32.073Z
+HEAD: 1c24fa6 docs(workbuddy): round191 反射 —— biome 债归属审计，我的 2 处已清（距上轮全套已累积 6 提交，做全身检查）
+
+1) vitest 全套 2333/2319/8/6，EPERM 0（修前 8），106 suites/101 passed。
+   8 红逐条仍为自我声明的设计红：phase3×3 / budget-sync×1 / store×2 / auto-approve×2。
+2) node:test 文件精确盘点：仓库里【只有 1 个】真 node:test runner 文件 = claude.test.ts。
+   node --test 原生 exit0（13 断言绿）。vitest 的 'No test suite' 属良性。
+   （中途误报 dispatch.test.ts 也命中 —— 是它注释里提到 node:test + junction 重复；
+    它在【vitest 下正常通过】，node --test 下挂是因 .js 说明符解析，系选错 runner 的伪象。）
+3) EPERM 全扫 0；arch 137/137、gate exit0 此前已复核。
+4) 结论：经 6 提交累积，诚实基线无回归。开放项口径不变。
