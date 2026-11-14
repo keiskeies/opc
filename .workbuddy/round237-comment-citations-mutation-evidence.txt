@@ -1,0 +1,35 @@
+# round237 comment-citations 守卫触发器级变异复证（该红即红/该绿即绿）
+
+回合基线：HEAD df08901（parent 65b3d08）。
+生成: 2026-11-14T15:28:35Z
+
+目标守卫：comment-citations —— 汇编注释/文档里的『限定引用』（篇号 § 节号/条目）必须指向真实存在的
+决策文档与节/条目；另有『否定重述』判据：写『0001 没有 §N』这类否定句时，若目标实际存在则报
+『这句说不存在，可它现在存在了 —— 描述已过期』。
+判据本体 test/arch/comment-citations.ts：commentLines() 走 AST trivia 提取 .ts/.tsx/.js 注释，
+citationsFromMarkdown() 处理 docs/review/** 下 .md；refsFromLine/negatedRestatement 负责解析与否定判定；
+真实仓库 it 扫描 packages/**、test/**、docs/review/**、vitest.config.ts。
+
+为何选它复证：round223 只做过内部结构变异（commentLines 绕过 AST → 2 canary 红），从未做真实仓库触发级
+注入复证；本轮补这一发（触发级 = 直接打守卫真正扫描的负载域）。
+
+【该红即红】注入：packages/hub/src/channels/abstraction.ts 文件头 JSDoc 第 2 行插入
+  『0001 §1 并不存在，因为 0001 没有 §1 这一节。』（否定重述形态 —— docs/decisions/0001 确有 §1 决策，属违约）。
+  注：第一版注入『0001 §1 不存在』缺同子句重述（negated=false）→ 守卫抓到但指数绿，
+  证明判据对『同子句重述』是真实要求（见下『判据鉴别力确认』）。
+  - 注入前 sha256 前缀=521daf21ad25ad6c（本轮可复算，见『该绿即绿』）；注入后 sha256 前缀=612f3e530a50eb0b（实测记录，+67B）。
+  - vitest run test/arch/comment-citations.test.ts → exit 1，1 failed：
+      × 真实仓库：注释里的限定引用全部指向存在的东西（539ms）—— Test Files 1 failed(1) / Tests 1 failed|24 passed(25) → 其余 24 条仍绿，判据定位准。
+
+【该绿即绿】字节还原：剔除注入行后 sha256 回到（前缀 521daf21ad25ad6c，本轮复算=下方实测），
+  git diff --exit-code → 0（工作树与 HEAD 相同，无残留）；git hash-object 与 HEAD:路径 blob 逐字节一致。
+  - vitest run test/arch/comment-citations.test.ts → exit 0，25 passed（本轮复测实录：25/25 绿）。
+  - git status --porcelain 空（证据文件不入树，随 commit 入册）。
+
+终态：HEAD=df08901 / parent=65b3d08 / worktree 变更=[]（git status --porcelain 空）。
+
+判据鉴别力确认：非重述『0001 §1 不存在』→ 守卫抓到但 negated=false 指数仍绿；
+重述违约『0001 §1 并不存在……』→ 真实仓库 it 即时 1 failed —— 判据对『同子句重述』是真实要求，两者行为均可复现。
+
+本文件 7-hex 引用：[ df08901 65b3d08 ] 均可 git cat-file -e 解析。（全数字7位由扫描器跳过）
+
