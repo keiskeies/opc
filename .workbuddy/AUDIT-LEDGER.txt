@@ -1,6 +1,6 @@
 ======================================================================
  防假绿审计台账 v6（round156～227，19 守卫（18 arch + 1 hub fixture-dir） + 门禁 7 控制全有触发证据）
- HEAD: d6e1bd8
+ HEAD: 0dbc7a4
  生成: 2026-11-14T15:54:03Z
  较 v3 更新：round184-187 纠正基线 + EPERM 根因定位并修复 c633cda + claude 验证
 ======================================================================
@@ -11,7 +11,7 @@ A. ARCH 变异验证 15 个（均立即红 + 原样恢复，括号=round）
   可执行性(round212)：vitest include 两 glob(test/** + packages/*/test/**)全覆盖 —— 全套实测收集 19 个守卫文件
     (18 arch + fixture-dir 26 例)全部执行；断言求和 2334=基线，无静默排除。claude.test.ts 是唯一不在 vitest
     的 node:test 文件(已知设计良性)。
-  doc-coords[156] doc-ids[159] comment-citations[159] doc-refs[156] doc-refs-input-234 doc-ids-input-235 comment-citations-input-237 production-deps-input-238 pending-decisions-input-239 test-inventory-input-240
+  doc-coords[156] doc-ids[159] comment-citations[159] doc-refs[156] doc-refs-input-234 doc-ids-input-235 comment-citations-input-237 production-deps-input-238 pending-decisions-input-239 test-inventory-input-240 doc-coords-input-241
   fixture-dir[156] decision-index[168] no-null-bytes[168] production-deps[167]
   no-native-deps[167] pending-inventory[166] test-inventory[166]
   pending-decisions[176] config-match[176] harness-invariants[176]
@@ -83,6 +83,9 @@ E. 纠正后的诚实基线（round184 发现 round175 漏报文件级错误；1
    14. round240 复核（HEAD d6e1bd8 后）: 守卫触发级变异复证 test-inventory —— 仓库根新建 include 外的幽灵测试样文件 round240-ghost.test.ts（不属于 test/** 亦不属于 packages/*/test/**）
        基线 7绿→1红(× 磁盘上每个测试样文件都在 include 覆盖范围内, expected [ 'round240-ghost.test.ts' ] to deeply equal [], 1 failed|6 passed) → 删除幽灵文件字节还原 → 7绿/worktree 净。
        证据:【round240-test-inventory-mutation-evidence.txt】;台账行 A.14 增补 test-inventory-input-240;头部第 3 行 HEAD 校正至当前 HEAD d6e1bd8。
+   15. round241 复核（HEAD 0dbc7a4 后）: 守卫触发级变异复证 doc-coords —— docs/decisions/0008 文末注入不存在的条目坐标 `0006 §7 第 998 条`(注入前 0008 无任何 `0006 §7 第` 形状、0006 items 仅~28 ⇒ 998 必不存在、非撤回/无外部限定词 ⇒ 守卫必红)
+       基线 3绿→1红(stderr 详判: ref 0008 l.225 → 0006 §7 第 998 条 / why 那一篇的 §7 没有第 998 条, 1 failed|2 passed; 其余 2 臂仍绿证明是真实数据臂触发) → git show HEAD 字节还原(sha256 03bf24d…==HEAD blob) → 3绿/worktree 净。
+       证据:【round241-doc-coords-mutation-evidence.txt】;台账行 A.14 增补 doc-coords-input-241;头部第 3 行 HEAD 校正至当前 HEAD 0dbc7a4。
 
 
 F. 开放项（report-only，等 CEO/owner）
@@ -120,4 +123,5 @@ I. round193-194 coverage 解锁 + 非空阈值（原 F.3 开放项转为已修�
   · 反假绿2(196)：evaluate.ts 追加未测导出 → lines 88.09/br 84.84/fn 80，阈值三线齐红；恢复后回绿 —— 真实回退也会红。
   · round213：coverage-guard 的 MIN.functions 95→100 与 config 对齐(实测两文件均100)；变异(加未测函数→functions 80)精确红，恢复绿 —— 修正守卫比 config 松一格的漂移。
   · round214：presence 哨兵变异证(GATE_FILES 加不存在文件→红『expected 2 to be 3』)—— 两条反假绿(threshold+presence)均有变异证据。
+
 

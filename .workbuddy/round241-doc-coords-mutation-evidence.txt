@@ -1,0 +1,32 @@
+round241 doc-coords 守卫触发器级变异复证（真实决策文档输入域）
+================================================================
+目标守卫： test/arch/doc-coords.test.ts（判域=决策文档里的节号/§7条目/短哈希坐标）
+  此前变异史： round156（古早）+ round224（合成 secExists canary）；本轮为真实数据触发级复证。
+
+前置基线（隔离跑 doc-coords.test.ts）： 3 passed (3) exit 0
+  HEAD: 0dbc7a4 / 0dbc7a4364eddc575975b17c92640380b9c87eac
+
+注入（docs 输入域，真实决策文档被改）：
+  docs/decisions/0008-phase1-gate-semantics.md 文末追加一行（ITEM_RE 形状『0006 §7 第 998 条』）：
+
+    0006 §7 第 998 条 —— 这不是任何已登记条目（round241 复证注入，还原基准 03bf24d…）。
+
+  0008 此前无任何『0006 §7 第』既有形状（注入前命中 0）；0006 items 仅 ~28 条 ⇒ 998 必不存在 ⇒ 非撤回、
+  无外部限定词 ⇒ 守卫必当坏引用报出。该注入不属于 round156/224 的既有变异变体（round156 增删引用、round224 合成 canary）。
+
+RED（隔离跑，json reporter 掩 kill，以 stderr 详判）+ 判据触发点 test/arch/doc-coords.test.ts:259 verify(...)toBe([])：
+  1 failed | 2 passed exit 1
+    ref: 0008 l.225 → 0006 §7 第 998 条
+    why: 那一篇的 §7 没有第 998 条
+  （其余 2 臂仍绿：判据自身判别力 / 短哈希边界，证明是真实数据臂触发而非整个守卫崩坏。）
+
+字节还原： git show HEAD:docs/decisions/0008-phase1-gate-semantics.md 写回
+  还原后 sha256 == HEAD blob： 03bf24d15241da01b40505d1d9bd4807a8a403a9e98205ade8fe59d4f17e40ec ✓(逐字节一致)
+  注入态 sha256（对照）： 57489ab868b41c7d9cb34a4b9caa59ebfbd00db6f2d554f8160c9d67d8e86e07
+
+GREEN（隔离跑）： 3 passed (3) exit 0  worktree 净（git status --porcelain 为空）
+
+台账联动： A.14 增补 doc-coords-input-241；E 项 15 记录本轮；头部第 3 行 HEAD 校正至 0dbc7a4。
+
+反假绿说明： 本轮走【真实数据】而不是改守卫源码/测试源码 —— 缺陷在 guards 的检测域内（决策文档坐标），
+  守卫判据零改动、子类测试零改动；RED 的 why 文本（§7 没有第 998 条）证明是守卫检测逻辑而非测试断言接住了假坐标。
