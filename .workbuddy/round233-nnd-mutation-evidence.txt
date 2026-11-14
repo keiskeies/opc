@@ -1,0 +1,18 @@
+round233-nnd-mutation-evidence.txt
+标题：no-native-deps（D6-a）at HEAD a60c3fb 独立变异复证 —— 守卫体证（非台账背书）
+守卫文件：test/arch/no-native-deps.test.ts（第1测试「生产源码不依赖任何原生 SQLite 模块（D6-a）」）
+节点：D:\nodejs\node.exe node_modules/vitest/vitest.mjs run test/arch/no-native-deps.test.ts
+
+[1] 基线（无探针）…… exit 0，Tests 2 passed（2）
+[2] 变异探针：在守卫扫描的真实源码树内写入不可忽略的探针文件：
+      packages/hub/src/r233-scratch-native.ts = import Database from "better-sqlite3";
+      实测 exit 1：
+        × 生产源码不依赖任何原生 SQLite 模块（D6-a）     34ms      ← 命中，守卫真的拦
+        ✓ 豁免名单的第二个目录也必须生效（历史上这一条无人可测） 1ms  ← 豁免 canary 不受牵连
+        Tests 1 failed | 1 passed（2）
+
+      因果对照：失败者恰是被测守卫自身（D6-a）；同文件豁免 canary 仍绿 → 排除“整文件坏掉”误红，
+      且探针落在官方豁免目录(poc)之外 → 证明守卫判别逻辑真在扫描生产源码，而非仅探针目录。
+[3] 删除探针 → exit 0，Tests 2 passed（2），git status--porcelain 空（探针字节级还原，无残留）。
+
+对账：本次为守卫体证（独立于台账文字），任何未来把不相关文件写进 hub/src 都会被 D6-a 拦为红。
