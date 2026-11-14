@@ -69,9 +69,12 @@ export async function runRole(i: RoleRunInput): Promise<RoleRunResult> {
 
   const { spawn } = await import("node:child_process");
   const bin = i.bin ?? "claude";
+  // Windows 下无法直接 exec 带 shebang 的 .js/.mjs 脚本（spawn 会报 EFTYPE/ENOENT）：
+  // 当 bin 指向 JS 脚本时绕 process.execPath 跑，真的 claude 二进制仍直接跑。
   const raw = await new Promise<{ code: number | null; stdout: string; stderr: string; timedOut: boolean }>(
     (resolveP) => {
-      const p = spawn(bin, args, { cwd: i.cwd, env: process.env });
+      const argv = /\.[cm]?js$/.test(bin) ? [bin, ...args] : args;
+      const p = spawn(/\.[cm]?js$/.test(bin) ? process.execPath : bin, argv, { cwd: i.cwd, env: process.env });
       // prompt 走 stdin 而不是 argv：想法文本由 CEO 输入，放进 argv 会出现在
       // `ps` 里，也会被下一个写适配器的人顺手拼进 shell 字符串。
       p.stdin.write(i.prompt);

@@ -17,6 +17,7 @@
  * 是一条只有真失败才能证明的性质。
  */
 import { mkdirSync, rmSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { fixtureTmp } from "../fixtures/fixture-dir.js";
@@ -255,7 +256,7 @@ describe("advance + 真 dispatch（桩 CLI，真库）", () => {
       maxBudgetUsd: 0.5,
       taskLimitCents: 1000,
       cwd: TMP,
-      bin: new URL("./fixtures/fake-claude.mjs", import.meta.url).pathname,
+      bin: fileURLToPath(new URL("./fixtures/fake-claude.mjs", import.meta.url)),
     });
     const dispatch = makeDispatch(rt.deps);
     const r = await advance(rt, (o) => dispatch(o), { taskId: "t1", maxBudgetUsd: 0.5, maxTurns: 4 });

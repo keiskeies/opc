@@ -33,6 +33,7 @@
  *     --test packages/hub/test/serve/driver-pump.test.ts
  */
 import { mkdirSync, readFileSync, realpathSync, rmSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { fixtureTmp } from "../fixtures/fixture-dir.js";
@@ -917,7 +918,7 @@ describe("I. 手抄的数字有对照物（漂了会红，而不是靠注释）"
  * ⚠ 而起的是别人时这一发会【真发出一次 API 调用】：这句话只有坏掉那天才会被读到，
  * 而那时它正是最该被读到的东西。
  * ────────────────────────────────────────────────────────────────────────── */
-const FAKE_CLI = new URL("../engine/fixtures/fake-claude.mjs", import.meta.url).pathname;
+const FAKE_CLI = fileURLToPath(new URL("../engine/fixtures/fake-claude.mjs", import.meta.url));
 
 /** 桩那一侧的行为开关（claude.ts 是 `env: process.env` 原样透传，所以写在本进程上）。 */
 async function withFakeMode<T>(mode: string, fn: () => Promise<T>): Promise<T> {

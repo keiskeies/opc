@@ -23,6 +23,7 @@
  *     --test packages/hub/test/engine/runtime.test.ts
  */
 import { chmodSync, mkdirSync, rmSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import type { OrgGraph } from "@opc/contracts";
@@ -42,7 +43,7 @@ import {
 
 const TMP = fixtureTmp("engine-runtime", import.meta.url);
 const NOW = 1_700_000_000_000;
-const FAKE_CLI = new URL("./fixtures/fake-claude.mjs", import.meta.url).pathname;
+const FAKE_CLI = fileURLToPath(new URL("./fixtures/fake-claude.mjs", import.meta.url));
 
 type Row = Record<string, unknown>;
 type Db = {

@@ -21,6 +21,7 @@
  *     --test packages/hub/test/engine/work.test.ts
  */
 import { mkdirSync, rmSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { fixtureTmp } from "../fixtures/fixture-dir.js";
@@ -31,7 +32,7 @@ import { runEngineCli } from "../../src/engine/hub-work.js";
 import { DECIDE_USAGE, WORK_USAGE, parseDecideArgs, parseWorkArgs } from "../../src/engine/work.js";
 
 const TMP = fixtureTmp("engine-work", import.meta.url);
-const FAKE_CLI = new URL("./fixtures/fake-claude.mjs", import.meta.url).pathname;
+const FAKE_CLI = fileURLToPath(new URL("./fixtures/fake-claude.mjs", import.meta.url));
 const NOW = 1_700_000_000_000;
 
 type Row = Record<string, unknown>;

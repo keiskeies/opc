@@ -33,6 +33,7 @@
  *     --test packages/hub/test/serve/charter-pump.test.ts
  */
 import { mkdirSync, realpathSync, rmSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { fixtureTmp } from "../fixtures/fixture-dir.js";
@@ -785,7 +786,7 @@ describe("G. 执行日志（recordTurn）", () => {
  * 桩是 test/engine/fixtures/fake-claude.mjs（真可执行 + shebang，非 mock；
  * 它的存在理由与"为什么不能是 mock"写在那个文件头与 work.test.ts 里，不在这里重述）。
  * ────────────────────────────────────────────────────────────────────────── */
-const FAKE_CLI = new URL("../engine/fixtures/fake-claude.mjs", import.meta.url).pathname;
+const FAKE_CLI = fileURLToPath(new URL("../engine/fixtures/fake-claude.mjs", import.meta.url));
 
 /**
  * 跑一趟【不注入 cardDeps】的泵 —— 这一句就是这一组的全部意义。
