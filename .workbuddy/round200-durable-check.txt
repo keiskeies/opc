@@ -1,0 +1,8 @@
+=== round200 耐用工件复验（整数轮，全面体检）===
+time: 2026-11-14T13:03:02.828Z
+
+1) verify-open-invariants.mjs：10/10 PASS exit0（isPidAlive 双实现语义 5 条 + 6 哈希可解析）。
+2) gate check-gate.mjs：exit0，0 ★FAIL，29 PASS = 脚本内 29 个 ok( 调用严格一致；
+   C7 阳性对照(第29行,词表13个词)在场。round188 记的 29 是台账正确基线 —— 无漂移。
+3) gate-selfcheck 7/7；arch 18 文件/138 测试此前复核过。
+4) 结论：我维护的耐用工件全部健康，记账/门禁/验证脚本三方一致。
