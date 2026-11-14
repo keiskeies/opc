@@ -26,6 +26,7 @@
     "@langchain/langgraph-checkpoint": "^1.2.2",
     "@langchain/langgraph-checkpoint-sqlite": "^1.1.0",
     "@types/node": "^26.6.6",
+    "@vitest/coverage-v8": "4.1.12",
     "tsx": "^4.23.15",
     "typescript": "^5.9.3",
     "vitest": "^4.0.12"

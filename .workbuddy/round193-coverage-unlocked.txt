@@ -1,0 +1,17 @@
+=== round193 coverage 解锁：装包 + 实测数字写回 ===
+time: 2026-11-14T12:53:48.463Z
+
+1) 网络探测：registry.npmmirror.com / npmjs.org:443 可达，pnpm ping 0 ⇒ 离线 store 限制已不适用。
+2) 装上 @vitest/coverage-v8@4.1.12（lock 里本就有位，现在真实落盘）——blocker 清除。
+3) 实测（可复现）：
+   · 门控 graph/gates/**（跑 gates/escalation/phase1 测试）：lines 99.15% / br 97.87% / fn 100%
+     author-reviewer 100/100/100；evaluate 98.66/96.55/100。
+   · 全 hub/src（排除 4 设计红 + claude）：lines 84.73% / br 77.99% / fn 85.68%。
+4) 关键诊断：全仓低于 95 的【原因】是 8 个设计红接线缺口模块（store/budget-sync/auto-approve 0~17%）
+   + 入口文件（cli/index/main/hub-serve 0%）—— 是接线缺口不是测试缺失。与预案预测一致。
+5) 结论写回 vitest.config：全局 95 会因接线恒红；门控专属 95 可设（99.15 有余），
+   需 projects/perFile 限定 graph/gates/** —— 谁接线谁设上（外部 owner）。
+6) 验证：arch 137/137、gate exit0、frozen-lockfile 离线校验 0 / 'Lockfile up to date'——
+   依赖与 lock 一致、可复现、不影响常规 run。
+
+这是 coverage 开放项的关键一步：从『阈值 0 + 数字拿不到』变成『数字在手 + 门控达标可设阈值』。

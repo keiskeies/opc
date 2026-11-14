@@ -54,6 +54,14 @@ export default defineConfig({
      * （及其 istanbul 表亲）的 tarball 与 offline metadata 都不在 store —— 实测
      * pnpm add --offline 报 ERR_PNPM_NO_OFFLINE_META（coverage-v8.json 缺失）。
      * ⇒ 现在只需补这一枚包即可量覆盖率，不必再串整条 vite/esbuild 链。
+     * ── round193 实测：@vitest/coverage-v8@4.1.12 已装（网络可达），真实数字到手：
+     *   · 门控文件（graph/gates/**，仅跑 gates/escalation/phase1 测试）：lines 99.15% / branches 97.87% /
+     *     functions 100% —— author-reviewer.ts 100/100/100；evaluate.ts 98.66/96.55/100。已达 95 上限。
+     *   · 全 hub/src（排除 4 个设计红文件与 claude）：lines 84.73% / branches 77.99% / functions 85.68%。
+     *     低于 95 的原因【恰是那 8 个设计红模块】—— charter/store、budget-sync、auto-approve 0~17%，
+     *     另有入口文件 cli/index/main/hub-serve 0%。即覆盖率赤字=接线缺口，非测试缺失。
+     *   ⇒ 结论维持：全局 95 会因接线缺口恒红（不可用）；门控专属 95 现可设（99.15 有余）。
+     *     门控阈值需 projects 拆配置或用 coverage.perFile 限定 graph/gates/**；谁接线谁把它设上。
      * （gate 套件在 vitest 4.1.5 下实测 59/59 全绿，见 0039 §3。）
      */
     coverage: {
