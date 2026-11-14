@@ -212,7 +212,6 @@ const gateFor = (
   });
 
 async function newCharterRun(): Promise<{ q: WriteQueue; db: AnyDb; store: EvidenceStore }> {
-  const { openDb } = await import("../../src/db/driver.js");
   const path = join(TMP, "ch-" + process.pid + "-" + ++fileSeq + ".db");
   const q = new WriteQueue(path) as WriteQueue;
   queues.push(q);

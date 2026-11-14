@@ -133,7 +133,7 @@ function freshWithPath(): { db: DatabaseSync; q: WriteQueue; path: string } {
     const wq = new WriteQueue(path);
     queues.push(wq);
     return { db, q: wq, path };
-  };
+  }
 }
 
 afterAll(async () => {
