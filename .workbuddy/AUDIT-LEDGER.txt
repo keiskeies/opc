@@ -1,7 +1,8 @@
 ======================================================================
- 防假绿审计台账 v3（round156～183，17 守卫 + 门禁 7 控制全有触发证据）
- HEAD: f172fae test(arch): matcher-oracle 头部升级为「装不上」证伪后的真实前提
- 生成: 2026-11-14T12:32:08.711Z
+ 防假绿审计台账 v4（round156～187，17 守卫 + 门禁 7 控制全有触发证据）
+ HEAD: c633cda test(hub): 修复 8 文件 rmSync(TMP) 的 Windows EPERM —— 等待并关闭全部 SQLite/WriteQueue 句柄后再删目录
+ 生成: 2026-11-14T12:42:03.802Z
+ 较 v3 更新：round184-187 纠正基线 + EPERM 根因定位并修复 c633cda + claude 验证
 ======================================================================
 
 A. ARCH 变异验证 14 个（均立即红 + 原样恢复，括号=round）
@@ -25,16 +26,26 @@ C. 门禁 gate C1-C7 当 HEAD 变异触发（round178/179/182）
   C6  [178] company.ts 加 interrupt → 红
   C7  [178] INDEX 本轮 → 红
 
-D. 引擎修复 @ HEAD
+D. 引擎/夹具修复 @ HEAD c633cda
   2126e1e fix(hub) Windows spawn 经 process.execPath
-  ─ 复跑 driver 11/11、work 31/31；fixture 修复 b192b4a
+  b192b4a test(hub) fixture-dir
+  f172fae matcher-oracle 前置修正
+  c633cda [186] fixture-EPERM 修复：8 文件→0 EPERM
+    根因三类（WriteQueue 不追踪 / async close 不 await / role-memory 6 泄漏），
+    全 await close 后再 rmSync；doc-0041+doc-refs 活坐标 438→448 同步。
 
-E. 开放项（report-only，等 CEO/owner，见 round180/181）
-  1. isPidAlive 双实现无机械守卫（181 已实证当前行为等价，仅未来漂移风险）
-  2. commit-hash 引用无机械守卫（180 发现：1877e8e / 2126e1e 均真实但未守）
-  3. 外部 owner：8 故意红接线(wiring matrix v2) + biome 7 外部文件 + coverage
-      + langgraph PoC 外部 store 复跑
+E. 纠正后的诚实基线（round184 发现 round175 漏报文件级错误；186 修复后）
+  修前(184) 2333/2319/8 设计红/6 skip + 8 EPERM 文件级错误
+  修后(186) 2333/2319/8 设计红/6 skip + 0 EPERM；5 failed suites 全为设计红或良性
+            claude.test.ts = node:test 文件，vitest "No test suite" 良性；node --test 13/13 绿
+  arch 137/137 gate 29 PASS exit0 gate-selfcheck passed
 
-F. 层级发现（176）harness-invariants 的 globalSetup 自检在每轮 vitest 启动先跑,
-  与 .test.ts 断言形成双防线；json reporter zeros 会掩盖 globalSetup 中止, 判读须看 stderr。
+F. 开放项（report-only，等 CEO/owner）
+  1. isPidAlive 双实现无机械守卫（181 已实证当前等价，仅漂移风险）
+  2. commit-hash 引用无机械守卫（180：1877e8e/2126e1e 均真实但未守）
+  3. 外部 owner：8 故意红接线(wiring matrix v2) + biome 7 外部 + coverage + PoC store
+  4. claude.test.ts 不在 vitest include（node:test 文件，属已知设计，不接）
+
+G. 层级发现（176）harness-invariants globalSetup 自检每轮先跑，与断言双防线；
+  json reporter zeros 掩盖 globalSetup 中止，判读须看 stderr。
 ======================================================================
