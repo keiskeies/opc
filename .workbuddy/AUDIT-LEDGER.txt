@@ -1,7 +1,7 @@
 ======================================================================
  防假绿审计台账 v6（round156～202，19 守卫（18 arch + 1 hub fixture-dir） + 门禁 7 控制全有触发证据）
- HEAD: f0a4032 docs(review): round206 verify-open-invariants 全量 hash 扫描 —— 6→64 个 prose 引用全部 git 可解析（变异证非空，report-only）
- 生成: 2026-11-14T13:19:26.546Z
+ HEAD: 6d552a8 docs(workbuddy): round207 全量 hash 扫描自净 —— 反射文件误报已修(裸token改述)，verifier 复绿
+ 生成: 2026-11-14T13:20:38.302Z
  较 v3 更新：round184-187 纠正基线 + EPERM 根因定位并修复 c633cda + claude 验证
 ======================================================================
 A. ARCH 变异验证 15 个（均立即红 + 原样恢复，括号=round）
@@ -46,8 +46,11 @@ E. 纠正后的诚实基线（round184 发现 round175 漏报文件级错误；1
             gate 29 PASS / ★FAIL 0 / invariants 10/10 —— 基线健康
 
 F. 开放项（report-only，等 CEO/owner）
-  1. isPidAlive 双实现无机械守卫（181 已实证当前等价，仅漂移风险）
-  2. commit-hash 引用无机械守卫（180：1877e8e/2126e1e 均真实但未守）
+  1. isPidAlive 双实现：非注册守卫（report-only）。verify-open-invariants.mjs 已机械校验 4 条语义
+     （前置守卫/EPERM→true/ESRCH→false/意外→true 三返回），等价漂移会被 script 抓到；但脚本不进 arch 套件。
+  2. commit-hash 引用：非注册守卫（report-only）。round206 起 verify-open-invariants.mjs 已把扫描扩到
+     全量 prose（.workbuddy+docs 里 64 个去重真实引用，git cat-file 逐条解析，round207 反射自净证明了
+     它抓得到腐烂）—— 机械覆盖已有但仍是独立脚本，不进 arch 套件；若要成为正式守卫(20号)需 CEO 点头。
   3. 外部 owner：8 故意红接线(wiring matrix v3【ROUND187-WIRING-MATRIX-v3.txt】) + biome 全仓实测 44 文件/294 错(round190)
      + 全仓 coverage 95 阈值（仍被 8 接线缺口压住，见 I）+ PoC store
   4. claude.test.ts 不在 vitest include（node:test 文件，属已知设计，不接）

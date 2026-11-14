@@ -1,0 +1,7 @@
+=== round208 台账 F.1/F.2 描述精确化（report-only 现实对齐）===
+time: 2026-11-14T13:20:38.302Z
+
+1) F.1/F.2 原写『无机械守卫』，但 round188+206 的 verify-open-invariants.mjs 其实已在机械校验
+   （isPidAlive 4 条语义 + 全量 64 hash 解析）—— 只是没注册成 arch 守卫(独立脚本)。
+2) 改述为『非注册守卫(report-only)』+ 现状(4 语义 / 64 hash / 反射自净照)，如实反映。
+3) 要变成正式守卫(20号)需 CEO 点头 —— 维持 report-only 口径。
