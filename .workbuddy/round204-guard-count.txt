@@ -1,0 +1,8 @@
+=== round204 守卫清点对账：18 → 19（fixture-dir 此前未计入）===
+time: 2026-11-14T13:07:07.056Z
+
+1) 逐文件对账：全仓 19 守卫 = test/arch 18 个 + packages/hub/test/fixtures/fixture-dir 1 个。
+2) 18 arch：14 个变异验证(A节) + 4 个 canary/契约型(commit-msg-refs / dependency-boundary /
+   gate-selfcheck / matcher-oracle)。fixture-dir 在 A 节是变异[156]但位于 hub 包，此前没计入 '18 守卫'。
+3) 台账头部 '18 守卫' → '19 守卫（18 arch + 1 hub fixture-dir）'；A 节加对账行自证。
+4) 全部 19 守卫均有触发证据（变异 15 + canary/契约 4），0007 §4.1 无悬案。

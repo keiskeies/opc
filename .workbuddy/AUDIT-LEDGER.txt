@@ -1,10 +1,12 @@
 ======================================================================
- 防假绿审计台账 v6（round156～202，18 守卫 + 门禁 7 控制全有触发证据）
- HEAD: cd29552 docs(workbuddy): round201 coverage-guard 并发复验 138/138 无残留；观察 verify-open-invariants 可升 19 号守卫
- 生成: 2026-11-14T13:04:16.482Z
+ 防假绿审计台账 v6（round156～202，19 守卫（18 arch + 1 hub fixture-dir） + 门禁 7 控制全有触发证据）
+ HEAD: cd79768 docs(workbuddy): round203 biome 债分解 —— 294 错中 286 可用 --write 一次消掉，119 人工（按规则/按区域）
+ 生成: 2026-11-14T13:06:58.992Z
  较 v3 更新：round184-187 纠正基线 + EPERM 根因定位并修复 c633cda + claude 验证
 ======================================================================
 A. ARCH 变异验证 15 个（均立即红 + 原样恢复，括号=round）
+  对账：全仓 19 守卫 = 18 arch（其中 14 变异 + 4 canary/契约）+ hub fixture-dir(变异156)。
+          4 个 canary 型：commit-msg-refs / dependency-boundary / gate-selfcheck / matcher-oracle（触发证据=内嵌正向对照或 FAIL 契约）
   doc-coords[156] doc-ids[159] comment-citations[159] doc-refs[156]
   fixture-dir[156] decision-index[168] no-null-bytes[168] production-deps[167]
   no-native-deps[167] pending-inventory[166] test-inventory[166]
