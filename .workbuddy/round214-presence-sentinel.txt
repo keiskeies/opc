@@ -1,0 +1,9 @@
+=== round214 coverage-guard 第二哨兵(presence) 变异证 ===
+time: 2026-11-14T13:25:48.456Z
+
+1) 上轮(213)确认四项阈值 config vs guard 完全对齐(lines/br 95 fn 100 st 90)。
+2) 本轮独立证 presence 哨兵：GATE_FILES 加不存在的文件 → guard 红『expected 2 to be 3』，
+   = glob 匹配漏掉文件时不会静默绿；恢复绿。
+3) 至此 coverage-guard 两条反假绿哨兵均有变异证据：(a) threshold 命题(213: fn 80 即红)；
+   (b) presence 命题(214: 缺文件即红)。
+4) 台账 I 节补充说明。
