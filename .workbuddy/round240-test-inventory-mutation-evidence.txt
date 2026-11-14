@@ -1,0 +1,21 @@
+=== round240 守卫触发级变异复证 test-inventory ===
+time: 2026-11-14T15:54:03Z
+HEAD: d6e1bd8（round239 后，本轮完成时仍 d6e1bd8）
+守卫：test-inventory（磁盘上每个测试样文件都在 vitest include 覆盖范围内，纯输入域断言）
+方向：新增 include 外的幽灵测试样文件 —— 仓库根放一个 *.test.ts（不属于 test/** 亦不属于 packages/*/test/**），
+     断言『每一项都被认领』应红。与 round166 初证同形状；本轮是自 166 后首次复证（守卫新鲜）。
+
+注入（真实缺陷，偏转真实扫描结果）：
+  仓库根新建 round240-ghost.test.ts（内容：// round240 复证注入：include 外的幽灵测试样文件）
+  枚举规则 looksLikeTest 比 include 宽（\.(test|spec)\.[cm]?[jt]sx?$ 任意位置）→ 进 expected；
+  includedByVitest 对根级 test.ts 返回 false → uncollected 非空 → 主断言应红。
+RED（隔离单跑 test/arch/test-inventory.test.ts，退出 1）：
+  Test Files 1 failed | Tests 1 failed | 6 passed (7)
+  × 磁盘上每个测试样文件都在 include 覆盖范围内
+  AssertionError: expected [ 'round240-ghost.test.ts' ] to deeply equal []
+  诊断: [未被 vitest 收集] round240-ghost.test.ts —— 位置不在 test/ 或 packages/*/test/ 下
+  其余 6 条（含反向 canary、逐字比对 config、消失容错、survivesStat 三态、diffInventory 正对照）全绿 —— 缺陷被主断言精确捕获，无非目标波及。
+
+还原：删除注入的 round240-ghost.test.ts（该文件本不在 HEAD，删即字节还原），worktree 净。
+GREEN（隔离单跑，退出 0）：Test Files 1 passed | Tests 7 passed (7)。
+台账：A.14 增补 test-inventory-input-240；E 节新增 14. round240 复核；头部第 3 行 HEAD 校正至 d6e1bd8。
