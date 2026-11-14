@@ -1,0 +1,8 @@
+=== round216 matcher-oracle 变异证（最深 canary：断言引擎本身）===
+time: 2026-11-14T13:27:19.153Z
+
+1) oracle 10 例单跑在真 vitest 4.1.12 下全绿 —— 前提成立：它测比较语义而非执行器。
+2) 免职(反序)变异：把『内容不同的 Set 不相等』反转为 .toEqual —— 真 vitest 判定两者不等，
+   于是弱化断言红『expected Set{a} to deeply equal Set{zzz}』—— 证明它在真抓东西(负载承载)。
+3) 恢复 → 绿。这是把『断言引擎瞎过一次(0016 §1 夹具)』后的比较分辨力钉进版本控制的最深一层。
+4) oracle 共 3 条 .not.toEqual(new Set 断言互为冗余，任一条被翻弱都会红。
