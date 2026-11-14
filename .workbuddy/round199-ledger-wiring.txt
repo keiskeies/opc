@@ -1,0 +1,7 @@
+=== round199 台账 F.3 wiring 引用修正 ===
+time: 2026-11-14T13:02:06.387Z
+
+把 F.3 里过时的 'wiring matrix v2【v3/v4 待重出】' 改成 'v3【ROUND187-WIRING-MATRIX-v3.txt】' ——
+v3 是 8 设计红逐条原文的实测全集（round187 写的），不存在 v4，'待重出'是残留误记。
+扫了一遍全台账其余 v2/v4/待 引用均为合理历史叙述，无其它 stale。
+结构：2 分隔 / A~I / bad 0。

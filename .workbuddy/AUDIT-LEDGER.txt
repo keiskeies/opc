@@ -44,7 +44,7 @@ E. 纠正后的诚实基线（round184 发现 round175 漏报文件级错误；1
 F. 开放项（report-only，等 CEO/owner）
   1. isPidAlive 双实现无机械守卫（181 已实证当前等价，仅漂移风险）
   2. commit-hash 引用无机械守卫（180：1877e8e/2126e1e 均真实但未守）
-  3. 外部 owner：8 故意红接线(wiring matrix v2【v3/v4 待重出】) + biome 全仓实测 44 文件/294 错(round190)
+  3. 外部 owner：8 故意红接线(wiring matrix v3【ROUND187-WIRING-MATRIX-v3.txt】) + biome 全仓实测 44 文件/294 错(round190)
      + 全仓 coverage 95 阈值（仍被 8 接线缺口压住，见 I）+ PoC store
   4. claude.test.ts 不在 vitest include（node:test 文件，属已知设计，不接）
 
