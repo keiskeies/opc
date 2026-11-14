@@ -1,0 +1,9 @@
+=== round211 biome --write 实测（隔离 worktree，修正 round203 乐观估计）===
+time: 2026-11-14T13:23:47.061Z
+
+1) 在 .tmp/biome-probe 隔离 worktree 上跑真 `biome check --write`（主仓零触碰）。
+2) 结果：changed 173 文件 / 81 未动 / 13843+ 4587- 行。之后 errors 294→12、warnings 109→98。
+3) round203 说的『286 自动消』偏乐观 —— 正确口径是 --write 把错误从 294 压到 12，
+   但涉及 173 文件/1.8 万行（多为 format+organizeImports），应作独立 PR 审阅。
+4) 剩余 ~110 人工判断集中在 correctness 规则(noNonNull×50/noUnused×28/useOptionalChain×10)。
+5) 实测后 worktree 已移除，主仓 biome 复验 294/109/254 未污染。
