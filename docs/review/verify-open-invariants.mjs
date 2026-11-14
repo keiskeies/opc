@@ -32,7 +32,7 @@ for (const h of HASHLIST) {
 // round209 确认：docs/_source-deepseek-share-raw.json 是外部导出的聊天原稿，
 //   其中 hash(如 外部项目 hash)属于外部 OSS 项目（搜索摘要里的引文），非本仓提交，不应纳入扫描；
 //   故只扫 .txt/.md/.mjs（作者 prose），排除 raw 数据。40-hex 全 hash 无使用，7-hex 短形式足够。
-const FAKE = new Set(["1234567","1111111","2222222","3333333","4444444","5555555","6666666","8888888","9999999","0123456","deadbee","deadbea","deadfac","beef00d","feedbac","cafe123","cceeded","abc1234","aaaaaaa","bbbbbbb","ccccccc","ddddddd","eeeeeee","ffffff0","0000000","a1b2c3d","83697c4"]);
+const FAKE = new Set(["aaaa111","bbbb222","cccc333","eeee555","1234567","1111111","2222222","3333333","4444444","5555555","6666666","8888888","9999999","0123456","deadbee","deadbea","deadfac","beef00d","feedbac","cafe123","cceeded","abc1234","aaaaaaa","bbbbbbb","ccccccc","ddddddd","eeeeeee","ffffff0","0000000","a1b2c3d","83697c4"]);
 const walk = (dir, acc, depth) => {
   if (depth > 6) return acc;
   let ents; try { ents = readdirSync(dir); } catch { return acc; }
