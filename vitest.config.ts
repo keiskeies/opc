@@ -48,6 +48,12 @@ export default defineConfig({
      * 圈一个作用域去设阈值 —— vitest 的 thresholds 没有「按 glob 给不同阈值」的
      * 形状，所以要么用 projects 拆成两份配置，要么把 95 加在只含门控的第二份
      * coverage 配置上。谁做这件事，请把量到的数字一并写回这里，别让下一个人数。
+     * ── round189 复核（HEAD dd6f9c6）：store 现状更新 —— vite@8.3.6 / esbuild@0.28.2 /
+     * @esbuild/win32-x64@0.28.2 的 tarball+metadata 现在【都在】D:\.pnpm-store\v10，
+     * 0039 断言的『那两套不在』已自愈。真正还缺的只有一枚：@vitest/coverage-v8@4.1.12
+     * （及其 istanbul 表亲）的 tarball 与 offline metadata 都不在 store —— 实测
+     * pnpm add --offline 报 ERR_PNPM_NO_OFFLINE_META（coverage-v8.json 缺失）。
+     * ⇒ 现在只需补这一枚包即可量覆盖率，不必再串整条 vite/esbuild 链。
      * （gate 套件在 vitest 4.1.5 下实测 59/59 全绿，见 0039 §3。）
      */
     coverage: {

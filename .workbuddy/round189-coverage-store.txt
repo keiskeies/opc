@@ -1,0 +1,17 @@
+=== round189 coverage 开放项复核：阻塞面收窄的实证 ===
+time: 2026-11-14T12:45:46.299Z
+HEAD(改前): dd6f9c6 docs(workbuddy): round188 收尾 —— gate 29/30 计数澄清 + 全套/守卫复核
+
+0039 时代断言『pin 的 4.1.12 与 coverage 归因所需 vite@8.3.6/esbuild@0.28.2 都不在 store』。
+本轮实测 store = D:\.pnpm-store\v10：
+  · vite@8.3.6 / esbuild@0.28.2 / @esbuild/win32-x64@0.28.2 的 tarball+metadata【现在都在】
+    ⇒ 0039 那两套缺位已自愈（store 更新过）。
+  · 但 @vitest/coverage-v8@4.1.12（及 istanbul 表亲）的 tarball / offline metadata
+    物理为 0 —— 实测 pnpm add -D --offline 报 ERR_PNPM_NO_OFFLINE_META（coverage-v8.json
+    在 mirror 缓存里没有）。
+
+结论（写回 vitest.config 注释供下一个人）：coverage 现在只需补一枚包即可量出真实数字，
+不必再串整条 vite/esbuild 链。阈值仍是 0 是【基础设施唯一缺位=provider 包】。
+
+验证：doc-refs/arch 137/137、gate exit0 未受配置注释追加影响。
+附注：写入途中我两次手误（缩进错成 **、一行漏对齐），已 checkout 重置后一次写对 —— 诚实记录。
