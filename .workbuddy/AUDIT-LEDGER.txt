@@ -1,12 +1,15 @@
 ======================================================================
  防假绿审计台账 v6（round156～210，19 守卫（18 arch + 1 hub fixture-dir） + 门禁 7 控制全有触发证据）
- HEAD: 83c0d57 docs(workbuddy): round210 全套基线 2334/2320/8/6 EPERM0 + 台账时效 round156～210 HEAD c478f49
- 生成: 2026-11-14T13:23:47.061Z
+ HEAD: 62f9f58 docs(workbuddy): H 节补 round211 biome --write 实测修正(上轮 anchor 未中, 本轮补上)
+ 生成: 2026-11-14T13:24:30.574Z
  较 v3 更新：round184-187 纠正基线 + EPERM 根因定位并修复 c633cda + claude 验证
 ======================================================================
 A. ARCH 变异验证 15 个（均立即红 + 原样恢复，括号=round）
   对账：全仓 19 守卫 = 18 arch（其中 14 变异 + 4 canary/契约）+ hub fixture-dir(变异156)。
           4 个 canary 型：commit-msg-refs / dependency-boundary / gate-selfcheck / matcher-oracle（触发证据=内嵌正向对照或 FAIL 契约）
+  可执行性(round212)：vitest include 两 glob(test/** + packages/*/test/**)全覆盖 —— 全套实测收集 19 个守卫文件
+    (18 arch + fixture-dir 26 例)全部执行；断言求和 2334=基线，无静默排除。claude.test.ts 是唯一不在 vitest
+    的 node:test 文件(已知设计良性)。
   doc-coords[156] doc-ids[159] comment-citations[159] doc-refs[156]
   fixture-dir[156] decision-index[168] no-null-bytes[168] production-deps[167]
   no-native-deps[167] pending-inventory[166] test-inventory[166]

@@ -1,0 +1,7 @@
+=== round212 守卫可执行性确认（无静默排除）===
+time: 2026-11-14T13:24:30.574Z
+
+1) vitest include 两 glob(test/** + packages/*/test/**) 全覆盖 19 守卫位置。
+2) 全套实测(2334 断言求和确认=基线)：18 arch + fixture-dir 26 例全部执行，无静默跳过。
+3) 唯一不在 vitest 的是 claude.test.ts(node:test，已知设计良性)。
+4) 台账 A 节补『可执行性(round212)』说明，与对账行互为印证。
