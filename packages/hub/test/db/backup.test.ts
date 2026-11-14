@@ -45,7 +45,7 @@ import {
   writeFileSync,
   closeSync,
 } from "node:fs";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { fixtureTmp } from "../fixtures/fixture-dir.js";
@@ -810,8 +810,8 @@ describe("⑥ 恢复演练：备份成功 ≠ 恢复可用", () => {
     // ③ 反向对照：同名、另一个目录 ⇒ 不是同一个文件，必须照常演练
     const other = freshDir("drill-selfguard-other");
     const sameNameElsewhere = join(other, src.slice(TMP.length + 1));
-    expect(sameNameElsewhere.slice(sameNameElsewhere.lastIndexOf("/") + 1))
-      .toBe(src.slice(src.lastIndexOf("/") + 1));
+    expect(basename(sameNameElsewhere))
+      .toBe(basename(src));
     expect(isSamePath(src, sameNameElsewhere)).toBe(false);
     const d = restoreDrill({
       dbPath: src,

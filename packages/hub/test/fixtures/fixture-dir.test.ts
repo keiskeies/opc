@@ -62,7 +62,7 @@ function realSources(): Map<string, string> {
   const out = new Map<string, string>();
   for (const root of SCAN_ROOTS) {
     for (const abs of walk(root)) {
-      const rel = abs.slice(REPO_ROOT.length + 1);
+      const rel = abs.slice(REPO_ROOT.length + 1).split("\\").join("/"); // Windows 下统一为 '/' 分隔符
       out.set(rel, readFileSync(abs, "utf8"));
     }
   }
@@ -153,7 +153,7 @@ describe("② fixtureTmp：路径形状与「不建目录」", () => {
       root: "/tmp/definitely-not-a-fixture-root",
       prune: false,
     });
-    expect(dir).toBe(`/tmp/definitely-not-a-fixture-root/guardprobe-${process.pid}`);
+    expect(dir).toBe(join("/tmp/definitely-not-a-fixture-root", `guardprobe-${process.pid}`));
   });
 });
 
