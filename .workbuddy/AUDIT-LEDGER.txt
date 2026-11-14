@@ -1,7 +1,7 @@
 ======================================================================
  防假绿审计台账 v6（round156～210，19 守卫（18 arch + 1 hub fixture-dir） + 门禁 7 控制全有触发证据）
- HEAD: 5c3dee3 docs(workbuddy): round217 反射重写 —— 去掉全部裸 7-hex token(·描述)，verifier 复绿
- 生成: 2026-11-14T13:29:21.027Z
+ HEAD: 77606ed docs(workbuddy): round225 doc-refs 变异证 —— 快照不符不报即红，doc:line 漂移被机械捕捉
+ 生成: 2026-11-14T13:34:23.033Z
  较 v3 更新：round184-187 纠正基线 + EPERM 根因定位并修复 c633cda + claude 验证
 ======================================================================
 A. ARCH 变异验证 15 个（均立即红 + 原样恢复，括号=round）
@@ -16,6 +16,9 @@ A. ARCH 变异验证 15 个（均立即红 + 原样恢复，括号=round）
   no-native-deps[167] pending-inventory[166] test-inventory[166]
   pending-decisions[176] config-match[176] harness-invariants[176]
   coverage-guard[197] 变异(加未测导出→evaluate 94.87/branches 93.33 即红) + 自伤修复(fixtureTmp) 两段都验过
+  独立复核(round213-225，全部该红即红/该绿即绿/字节恢复)：coverage-guard 阈值对齐(fn95→100 与 config 一致)
+     + presence 哨兵(缺文件即红; 220 harness-missing 恒空 3红; 221 decision 闭合; 222 config 新增; 223 AST 注释;
+     224 secExists; 225 doc-refs 快照) —— 连同 215-218 canary 变异证，9 个守卫有直接复证或新证。
 B. ARCH 构造/核对 4 个
   dependency-boundary  真写探针真调 biome 断言 code!=0
   gate-selfcheck [182] 变异(INDEX本轮→门禁意外红)也红了 --- 从构造升为可触发

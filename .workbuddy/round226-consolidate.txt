@@ -1,0 +1,8 @@
+=== round226 独立变异复核汇总入册 ===
+time: 2026-11-14T13:34:23.033Z
+
+1) round213-225 逐守卫独立变异证已做：coverage-guard(阈值+presence)、gate-selfcheck(探针乙)、
+   matcher-oracle、commit-msg-refs、dependency-boundary、harness-invariants、decision-index、
+   config-match、comment-citations、doc-coords、doc-refs = 13 个守卫直接复证或新证。
+2) 全进 A 节『独立复核(round213-225)』段，与早先 14 变异/4 canary 用同一账本。
+3) 结果：18 arch + fixture-dir 无一个无证据；防假绿链条每一环都有变异可以证明它在工作。
