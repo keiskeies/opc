@@ -65,6 +65,9 @@ E. 纠正后的诚实基线（round184 发现 round175 漏报文件级错误；1
       基线 2绿→1红(× 真实文档：正文提到的每个编号要么存在、要么被 INDEX 预约，0099 不存在且未被预约) →
       git checkout 字节还原 → 2绿/worktree 净。
       证据:【round235-docids-mutation-evidence.txt】;台账行 A.14 增补 doc-ids-input-235。
+   10. round236 复核（HEAD 65b3d08 后）: 守卫变异复证 no-null-bytes —— docs/decisions/0001-sqlite-driver.md 文末最后换行前注入 1 字节 0x00
+       基线 5绿→1红(× ⭐ 真仓库：一个 NUL 字节都没有，其余 4 条仍绿) → 字节剔除还原(sha256 与 HEAD 逐字节一致) → 5绿/worktree 净。
+       证据:【round236-null-bytes-mutation-evidence.txt】;守卫编号 no-null-bytes 变异复证入册。
 
 F. 开放项（report-only，等 CEO/owner）
   1. isPidAlive 双实现：非注册守卫（report-only）。verify-open-invariants.mjs 已机械校验 4 条语义

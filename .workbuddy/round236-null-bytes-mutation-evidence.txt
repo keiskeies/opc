@@ -1,0 +1,31 @@
+# round236 no-null-bytes 守卫变异复证（该红即红/该绿即绿）
+
+回合基线：HEAD 65b3d08（parent f67c9bb）。
+生成: 2026-11-14T15:05:37.077Z
+
+目标守卫：no-null-bytes —— 源码/迁移里不许出现字面 NUL 字节（0x00）。
+判据本体 test/arch/no-null-bytes.ts：扫 .ts/.tsx/.mjs/.cjs/.js/.sql/.md/.json/.yaml/.yml
+（SCANNED_SUFFIXES），找 Buffer 里字节 0x00，报 行号+前后30字节上下文(<NUL>)。
+扫描根：packages/hub/src，packages/contracts/src，packages/desktop/src，packages/web/src，
+        packages/hub/resources，packages/hub/test，test，docs。
+
+为何选它复证：该守卫自设立以来（rules 档案记录两起真 NUL 事故：channels/abstraction.ts 的
+Write 工具把 \0 字符串写成真字节、harness/gateway.ts:380 的 tool+\0 曾 commit 进树且
+未触发任何守卫）未见独立变异复证入册 —— 本轮补这一发。
+
+【该红即红】注入：docs/decisions/0001-sqlite-driver.md（被扫描 .md）文末最后换行之前插入 1 字节 0x00。
+  - 注入后 sha256=186fc3a4aa4b151a…，文件含 NUL 字节数=1。
+  - vitest run test/arch/no-null-bytes.test.ts → exit 1，1 failed：
+      × ⭐ 真仓库：一个 NUL 字节都没有（其余 4 条仍绿 —— 判据定位准）。
+
+【该绿即绿】字节还原：剔除唯一 0x00，sha256 回到 8dcc5974ae536174…（与 HEAD 版本逐字节一致），
+  git diff --exit-code → 0（工作树与 HEAD 相同，无残留）。
+  - vitest run test/arch/no-null-bytes.test.ts → exit 0，5 passed。
+
+终态：HEAD=65b3d08 / parent=f67c9bb / worktree 变更=[]（git status --porcelain 空）。
+
+判据鉴别力确认（对应 test 内『判据本身有判别力』）：一个纯文本无 NUL 的 Buffer 判 0 命中；
+一个夹 NUL 的 Buffer 报 1 命中且行号=2、上下文含 <NUL>；中文（UTF-8 多字节）不被误判为 NUL。
+
+本文件 7-hex 引用：[ 65b3d08 f67c9bb ] 均可 git cat-file -e 解析。（全数字7位由扫描器跳过）
+
