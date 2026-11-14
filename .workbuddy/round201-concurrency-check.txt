@@ -1,0 +1,10 @@
+=== round201 coverage-guard 并发健壮性复验 + 开放项观察 ===
+time: 2026-11-14T13:03:34.978Z
+
+1) arch 全套(fork 并发)含 coverage-guard：138/138 0fail 2.54s，coverage-guard passed；
+   跑后 .tmp 无 cov-guard-* 残留（afterAll 清理生效），无陈旧目录。
+2) 观察(非行动)：verify-open-invariants.mjs 已同时覆盖 F.1(isPidAlive 双实现)与 F.2(6 哈希解析)，
+   但脚本自述『不注册为守卫，仅给 CEO/owner 复算』—— 它是有存在的软守卫。
+   若 CEO 想关 F.1/F.2，把它接进 arch 即成 19 号守卫；未经指示不改开放项状态。
+3) 保持 report-only：isPidAlive 语义/哈希引用两开放项口径不变。
+4) 清理确认：仅 round 报告 json 存于 .tmp，无泄漏。
