@@ -1,12 +1,16 @@
 #!/usr/bin/env node
 // 审计台两个 report-only 开放项的【可复算校验】—— 不注册为守卫，仅给 CEO/owner 复算。
-// round188 生成。跑法：node docs/review/verify-open-invariants.mjs
-import { readFileSync } from "node:fs";
+// round188 生成初版；round206 扩展：把 docs/.workbuddy 里所有 7-hex 引用都纳入 `git cat-file`
+// 解析校验（此前只有 6 个钉住，其余 60+ 真实引用无机械覆盖，amend/改写会静默腐烂）。
+// 跑法：node docs/review/verify-open-invariants.mjs
+import { readFileSync, readdirSync, statSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 const HUB = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "packages", "hub");
 const ROOT = join(HUB, "..", "..");
+const WORKBUDDY = join(ROOT, ".workbuddy");
+const DOCS = join(ROOT, "docs");
 const HASHLIST = ["1877e8e", "2126e1e", "c633cda", "fff255b", "ff08762", "4dfe197"];
 let fail = 0;
 const ok = (name, pass, detail) => { console.log((pass ? "PASS  " : "FAIL  ") + name + (detail ? "   -> " + detail : "")); if (!pass) fail++; };
@@ -23,5 +27,38 @@ for (const h of HASHLIST) {
   const r = spawnSync("git", ["cat-file", "-e", h + "^{commit}"], { cwd: ROOT, encoding: "utf8" });
   ok("哈希 " + h, r.status === 0);
 }
-console.log("\n" + (fail === 0 ? "SUCCESS: 两个开放项当前与台账记录一致" : fail + " FAIL: 台账需更新"));
+
+// ── round206 扩展：全量 prose 引用扫描 ─────────────────────────────
+const FAKE = new Set(["1234567","1111111","2222222","3333333","4444444","5555555","6666666","8888888","9999999","0123456","deadbee","deadbea","deadfac","beef00d","feedbac","cafe123","cceeded","abc1234","aaaaaaa","bbbbbbb","ccccccc","ddddddd","eeeeeee","ffffff0","0000000","a1b2c3d","83697c4"]);
+const walk = (dir, acc, depth) => {
+  if (depth > 6) return acc;
+  let ents; try { ents = readdirSync(dir); } catch { return acc; }
+  for (const e of ents) {
+    const full = join(dir, e);
+    let st; try { st = statSync(full); } catch { continue; }
+    if (st.isDirectory()) { if (!/node_modules|\.git|\.tmp|dist/.test(full)) walk(full, acc, depth + 1); }
+    else if (/\.(txt|md|mjs)$/.test(e)) acc.push(full);
+  }
+  return acc;
+};
+const citeByFile = new Map();
+for (const base of [WORKBUDDY, DOCS]) {
+  for (const f of walk(base, [], 0)) {
+    let src; try { src = readFileSync(f, "utf8"); } catch { continue; }
+    const mm = src.match(/\b[0-9a-f]{7}\b/g) || [];
+    for (const h of mm) {
+      if (FAKE.has(h) || /^[0-9]{7}$/.test(h)) continue;
+      if (!citeByFile.has(f)) citeByFile.set(f, new Set());
+      citeByFile.get(f).add(h.slice(0, 7));
+    }
+  }
+}
+const distinct = [...new Set([...citeByFile.values()].flatMap((s) => [...s]))];
+let bad = 0;
+for (const h of distinct) {
+  const r = spawnSync("git", ["cat-file", "-e", h + "^{commit}"], { cwd: ROOT, encoding: "utf8" });
+  if (r.status !== 0) { bad++; ok("引用可解析 " + h, false, "腐烂"); }
+}
+ok("全量 prose hash 引用(" + distinct.length + " 个去重)均可 git 解析", bad === 0, bad ? bad + " 个不可解析" : "全部解析(" + distinct.length + ")");
+console.log("\n" + (fail === 0 ? "SUCCESS: 两个开放项当前与台账记录一致（含全量 prose hash 扫描）" : fail + " FAIL: 台账需更新"));
 process.exit(fail === 0 ? 0 : 1);

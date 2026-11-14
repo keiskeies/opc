@@ -1,0 +1,10 @@
+=== round206 verify-open-invariants 全量 hash 扫描扩展（F.2 范围，report-only 增强）===
+time: 2026-11-14T13:19:21.196Z
+
+1) 背景：脚本此前只钉 HASHLIST 六个哈希，但 docs/.workbuddy 全仓有 63+ 个真实提交引用
+   （ADR/台账/反射），amend 或改写会静默腐烂，没有任何机械校验。
+2) 扩展：递归扫 .workbuddy + docs 里所有 7-hex token，过滤纯数字/已知占位(FAKE 表)，
+   git cat-file 逐个验证。现覆盖 64 个去重真实引用。
+3) 变异证明非空：把台账 b192b4a 改成不存在的 b192b4b → exit1 + '腐烂'红；恢复后 exit0。
+4) 仍 report-only：脚本保持『不注册为守卫，仅给 CEO/owner 复算』，不碰 arch 套件。
+5) gate 29PASS/exit0、arch 18 文件 138/138 均不受影响。
