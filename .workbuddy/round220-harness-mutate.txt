@@ -1,0 +1,8 @@
+=== round220 harness-invariants 变异证（missing 判据负载承载）===
+time: 2026-11-14T13:30:30.344Z
+
+1) 变异：把 checkHarness 调用的 missing() 判体换成恒返回空数组 —— include 缺失/空解码/变窄
+   三种退化全部不再报警。
+2) 结果：3 个 canary 同时红 —— 'vitest include 少一条' / 'biome 丢 test 目录' / 'include 变窄'
+   （都 expected N 却 got 0）。恢复 → 绿。
+3) 意义：测试装置配置被改窄（删 include/globalSetup/requireAssertions）会被真抓，非装饰。
