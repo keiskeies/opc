@@ -69,6 +69,10 @@ H. round190 复核：biome 全仓金额修正（v4 记『7 外部』→ 实测 4
     noNonNullAssertion×50 / noUnusedVariables×15 / noUnusedImports×13 / useOptionalChain×10 /
     noPrototypeBuiltins×6 / noAssignInExpressions×4 / 其余19条。packages/hub 占大头(238err+80warn/136文件)。
     ⇒ owner 动手顺序：先 `biome check --write` 一次(消 286)，再手消 119。
+  · round211 实测（隔离 worktree 上跑真实 --write，未污染主仓）：changed 173 文件/未动 81，
+    13843+ / 4587- 行(多为 format+organizeImports 排序)。再 check：errors 294→12、warnings 109→98。
+    故『286 自动消』偏乐观 —— 正确口径：--write 把错误从 294 压到 12，但涉及 173 文件/1.8 万行，
+    应作独立 PR 审阅而非静默合并；剩余 ~110 人工判断不变(noNonNull×50/noUnused×28/useOptionalChain×10)。
 
 I. round193-194 coverage 解锁 + 非空阈值（原 F.3 开放项转为已修）
   · 前提纠正：vitest 4.1.12 原生支持 per-glob thresholds（key=glob），非需 projects 拆配置。
