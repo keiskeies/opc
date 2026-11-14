@@ -1,0 +1,9 @@
+=== round215 gate-selfcheck 探针乙变异证（门禁退化成恒绿也逃不掉）===
+time: 2026-11-14T13:26:52.050Z
+
+1) gate-selfcheck 共 6 个 it：存在性/词码位互证/探针甲(双向蕴含)/探针乙(仓库外确定性)/
+   ★FAIL 必须记账/结论在已知红名单。
+2) 最狠变异：把 check-gate.mjs 末尾 exit(fail.length?1:0) 改为 exit(0)（门禁无论多少 FAIL 都绿）。
+   探针乙立刻红：『仓库外还能 exit 0 = 门禁对[读不到]视而不见: expected +0 not to be +0』。
+3) 恢复 exit 逻辑 → 绿。字节恢复 worktree clean。
+4) 意义：门禁最重要的防退化(恒绿/只打印不记账)被确定性探针锁定 —— 变不回去。
