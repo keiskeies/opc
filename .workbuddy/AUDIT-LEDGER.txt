@@ -1,7 +1,7 @@
 ======================================================================
  防假绿审计台账 v6（round156～227，19 守卫（18 arch + 1 hub fixture-dir） + 门禁 7 控制全有触发证据）
- HEAD: baf479e
- 生成: 2026-11-14T14:06:11.339Z
+ HEAD: 430abdf
+ 生成: 2026-11-14T14:20:52.975Z
  较 v3 更新：round184-187 纠正基线 + EPERM 根因定位并修复 c633cda + claude 验证
 ======================================================================
 A. ARCH 变异验证 15 个（均立即红 + 原样恢复，括号=round）
@@ -11,7 +11,7 @@ A. ARCH 变异验证 15 个（均立即红 + 原样恢复，括号=round）
   可执行性(round212)：vitest include 两 glob(test/** + packages/*/test/**)全覆盖 —— 全套实测收集 19 个守卫文件
     (18 arch + fixture-dir 26 例)全部执行；断言求和 2334=基线，无静默排除。claude.test.ts 是唯一不在 vitest
     的 node:test 文件(已知设计良性)。
-  doc-coords[156] doc-ids[159] comment-citations[159] doc-refs[156]
+  doc-coords[156] doc-ids[159] comment-citations[159] doc-refs[156] doc-refs-input-234
   fixture-dir[156] decision-index[168] no-null-bytes[168] production-deps[167]
   no-native-deps[167] pending-inventory[166] test-inventory[166]
   pending-decisions[176] config-match[176] harness-invariants[176]
@@ -57,6 +57,10 @@ E. 纠正后的诚实基线（round184 发现 round175 漏报文件级错误；1
   7. round233 复核（HEAD a60c3fb 后）: 门禁 check-gate 29 PASS exit0 + invariants 10/10 exit0 + vitest test/arch+coverage 18文件/138PASS/0失败全绿；
      对账行 E.6（round228）仍在。no-native-deps(D6-a)@a60c3fb 守卫体证复证：【round233-nnd-mutation-evidence.txt】基线2绿→hub/src注入
      better-sqlite3 探针→× 生产源码不依赖任何原生 SQLite 模块（D6-a）(1 failed/1 canary绿)→字节还原→2绿/worktree 净。
+   8. round234 复核（HEAD 430abdf 后）: 输入域变异复证 doc-refs 非空 —— patrol.ts:385 插入 5 行真实前置行
+      将 SNAP 键 0025>patrol.ts:385 推到 390 → doc-refs 单跑 2绿→1红(× 全部完整形态引用与快照一致,
+      expected '0025-resident-hub-and-four-silent-bug…' to deeply equal '') → git checkout 字节还原 → 2绿/worktree 净。
+      证据:【round234-docrefs-mutation-evidence.txt】;台账行 A.14 增补 doc-refs-input-234。
 
 F. 开放项（report-only，等 CEO/owner）
   1. isPidAlive 双实现：非注册守卫（report-only）。verify-open-invariants.mjs 已机械校验 4 条语义
