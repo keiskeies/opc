@@ -1,8 +1,15 @@
 ======================================================================
- 防假绿审计台账 v4（round156～187，17 守卫 + 门禁 7 控制全有触发证据）
- HEAD: c633cda test(hub): 修复 8 文件 rmSync(TMP) 的 Windows EPERM —— 等待并关闭全部 SQLite/WriteQueue 句柄后再删目录
- 生成: 2026-11-14T12:42:03.802Z
+ 防假绿审计台账 v5（round156～190，17 守卫 + 门禁 7 控制全有触发证据）
+ HEAD: 1be4463 docs(vitest.config): coverage 阻塞面复核收窄 —— 现只缺 coverage-v8 一枚包（round189 store 实测）
+ 生成: 2026-11-14T12:47:16.718Z
  较 v3 更新：round184-187 纠正基线 + EPERM 根因定位并修复 c633cda + claude 验证
+H. round190 复核：biome 全仓金额修正（v4 记『7 外部』→ 实测 44 文件/294 错误/110 警告/2 info）
+  · arch 守卫强调：dependency-boundary 调 biome 只扫探针文件(noRestrictedImports)—— 4/4 绿，
+    与全仓 biome 债正交，守卫未受影响（arch 137/137 @ 1be4463）。
+  · 全仓 44 文件含 packages/hub/src 生产文件(dispatch/backup/runtime/gateway/org/real-deps/assemble/config)
+    与测试文件；noNonNullAssertion×50 / noUnusedVariables×16 / noUnusedImports×13 / useOptionalChain×10 …
+    属全仓整洁度债（非 arch 守卫范围），外部/技术债，不设机械守卫；谁修谁把新数字写回本台账。
+
 ======================================================================
 
 A. ARCH 变异验证 14 个（均立即红 + 原样恢复，括号=round）
@@ -43,7 +50,7 @@ E. 纠正后的诚实基线（round184 发现 round175 漏报文件级错误；1
 F. 开放项（report-only，等 CEO/owner）
   1. isPidAlive 双实现无机械守卫（181 已实证当前等价，仅漂移风险）
   2. commit-hash 引用无机械守卫（180：1877e8e/2126e1e 均真实但未守）
-  3. 外部 owner：8 故意红接线(wiring matrix v2) + biome 7 外部 + coverage + PoC store
+  3. 外部 owner：8 故意红接线(wiring matrix v2) + biome 全仓实测 44 文件/294 错(round190) + coverage + PoC store
   4. claude.test.ts 不在 vitest include（node:test 文件，属已知设计，不接）
 
 G. 层级发现（176）harness-invariants globalSetup 自检每轮先跑，与断言双防线；
