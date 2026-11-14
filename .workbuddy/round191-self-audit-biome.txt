@@ -1,0 +1,12 @@
+=== round191 自审：round186 我引入的 biome 债 2 处已清 ===
+time: 2026-11-14T12:49:25.423Z
+HEAD(改前): 88a9268; HEAD(改后): 见 git log
+
+对 round190『44 文件/294 错』做归属审计：哪些是我(round186 EPERM 修复)带入的：
+  · im.test.ts:137 孤儿分号（块作用域后多余 ;→noUnreachable）—— 已删，74/74 绿
+  · phase3.test.ts:215 未用 openDb import（EPERM 修复不再需要）—— 已删，7/10 含 3 设计红
+  · doc-refs.test.ts:655 ${...} 是 SNAP 逐字快照内容 —— 故意保留（改就坏守卫）
+  · versioning.test.ts 5 处(noExplicitAny×3/noUnusedVariables/useConst) 是历史既有，非我引入
+
+验证：arch 137/137、gate exit0、im 74/74、phase3 7/10(3 设计红不变)、无 EPERM。
+biome 全仓 44/294 里我的贡献现在只剩 organizeImports 这类无害风格(phase3 l.38)。
