@@ -1,0 +1,9 @@
+=== round218 dependency-boundary 变异证（4/4 canary 全部变异证完）===
+time: 2026-11-14T13:29:21.027Z
+
+1) 变异：biome.json 的 noRestrictedImports level error → off（desktop/web SQLite 越界不再被拦）。
+2) 结果：desktop 与 web 两个探针测试同时红 —— 期望输出含 noRestrictedImports 却没含
+   （Checked 1 file. No fixes = lint 放行）。
+3) 恢复 → 绿。证明依赖边界 lint 是真拦越界，不是恒绿装饰。
+4) 至此 canary/contract 组 4 个全部有变异证据：gate-selfcheck(215) / matcher-oracle(216)
+   / commit-msg-refs(217) / dependency-boundary(218)。
