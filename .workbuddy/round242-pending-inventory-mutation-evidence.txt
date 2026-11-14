@@ -1,0 +1,23 @@
+round242 - pending-inventory 守卫触发级变异复证（古早守卫 modern 化复证）
+目标守卫: test/arch/pending-inventory.test.ts（判据本体 pending-inventory.ts）
+判域: 真实仓库全部被收集测试文件（vitest list --files-only 列举，include test/**/*.test.{ts,tsx} + packages/*/test/**/*.test.{ts,tsx}）
+      findSkipForms 识别名单外属性写 it.skip/todo/only/skipIf/runIf 与裸写 xit/xtest/xdescribe；
+      checkSkipCoverage 对名单外跳过必报（悄悄少跑用例、报告却全绿）。
+复证设计: 往真实被收集、非名单内、现代链从未变异的 test/arch/config-match.test.ts（最小守卫文件 2052 B）
+          文末追加一行名单外顶层 it.skip(...)（不会改变任何现有用例的执行语义，字节可还原）。
+          守卫真实数据臂 collect() 会扫到该 skip 并报 Red；还原即 Green。
+流程时序（全部真实执行，非推断）:
+  ① 基线（注入前, b0765f3 HEAD）: vitest run test/arch/pending-inventory.test.ts → exit 0, 16 passed (16)。
+  ② 注入: config-match.test.ts 文末追加 'it.skip("round242 复证注入（名单外跳过，还原基准不动）" , () => {});'
+     注入态文件 git hash-object = 211a103257fb36636745938e10f406adb06a7ce4（基线工作树 8823b0a…）。
+  ③ RED: 同一命令 re-run → exit 1, 2 failed | 14 passed（16）。
+     两条真实数据臂红（其余 14 条合成臂仍绿 ⇒ 是真实数据臂触发，非整守卫崩坏）:
+       · l.255 被收集的真文件必须一条问题都不报: 'test/arch/config-match.test.ts 第 74 行的 it.skip（原文: it.skip("round242 复证注入…" , () => {})）不在跳过名单里 —— 用例不执行而报告会全绿'
+       · l.266 真仓库里唯一带跳过的文件正是名单里那一个: expect(skipping).toEqual([ALLOW_SKIP_FILES.sort()]) 得
+         ['packages/hub/test/checkpoint/saver.contract.test.ts', +'test/arch/config-match.test.ts']（断言点 l.255 / l.266:22）。
+  ④ 还原: git show HEAD:test/arch/config-match.test.ts 字节写回 ⇒ sha256 3e1b069891d4d2409001fd1abdaad38a0212e9878f40817acbf52917d6c210a2 == HEAD blob（逐字节一致）。
+  ⑤ GREEN: re-run → exit 0, 16 passed (16)；git status --porcelain 为（clean）。
+台账联动: A.14 增补 pending-inventory-input-242；E 项 16 三行；头部第 3 行 HEAD 校正（本提交后）。
+反假绿说明: 还原基准这三条都钉在同一基线上——若通路坏掉，②→④ 的【注入不生效】会让 RED 永远不出现；
+            而 RED 只报在真实数据臂、其余 14 条合成臂仍绿，证明注入确被 collect() 扫到且守卫确有判别力。
+本提交在 0dbc7a4 → b0765f3 链上叠加（b0765f3 = round241 台账提交）。
