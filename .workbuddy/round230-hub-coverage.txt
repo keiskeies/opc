@@ -1,0 +1,13 @@
+=== round230 全仓 hub 覆盖率权威实测 ===
+time: 2026-11-14T13:40:43.366Z
+
+1) 测法：hub 测试全集(--exclude 4 设计红套件 + claude.test.ts 良性 node:test)，v8 provider，72 套件全绿后报告写出。
+2) 结果 total：lines 84.73 / branches 77.99 / functions 85.68 / statements 83.69；hub/src 86/87 文件，
+   46 个 ≥95%，未覆盖行合计 ~870/5699。
+3) 缺口来源（87 文件里未覆盖行最多）：cli.ts 0%（159 行）、charter/store.ts 0%（90）、
+   charter/budget-sync.ts 8.8%（83）、policy/auto-approve.ts 17.2%（82）—— 这 4 个正是 8 设计红的
+   wiring 缺口模块（其测试套件就是红，排除后才绿），加上 poc/*.mjs 0%。
+4) 门禁 gate glob（author-reviewer.ts / evaluate.ts）实测 100% / 98.66% —— 已超阈值(95/95/100/90)。
+5) 结论：整仓 84.73→95 的缺口被 wiring 缺口主导（~450 行直接来自 4 个未接线模块），
+   接线完工(现在 CEO 侧)那些套件翻绿、覆盖率同来 —— F.3 的权威量化口径。
+6) HEAD: 385f33a
