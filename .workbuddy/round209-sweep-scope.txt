@@ -1,7 +1,7 @@
 === round209 扫描边界确认（JSON 排除 + 无长 hash）===
 time: 2026-11-14T13:21:22.235Z
 
-1) docs/_source-deepseek-share-raw.json 是外部导出的聊天原稿，其 3fde188 属外部 OneManCompany 项目
+1) docs/_source-deepseek-share-raw.json 是外部导出的聊天原稿，其 一个外部项目 hash（3fde18x） 属外部 OneManCompany 项目
    （搜索摘要引文），非本仓提交 —— 正确应排除，不当作漏扫。
 2) 全仓 prose 无 40-hex 全 hash，7-hex 短形式足够。
 3) 脚本注释补 round209 说明，防后人误把 raw 纳入扫描而红。verifier 仍绿 64。
