@@ -113,6 +113,7 @@ const T1 = T0 + 60_000;
 const ROLES = new Set(["ceo", "dev", "tech", "product", "test", "report", "assistant"]);
 
 const opened: Array<{ close(): void }> = [];
+const queues: Array<{ close(): Promise<void> }> = [];
 let seq = 0;
 
 mkdirSync(TMP, { recursive: true });
@@ -128,13 +129,24 @@ function freshWithPath(): { db: DatabaseSync; q: WriteQueue; path: string } {
   const db = openDb(path) as unknown as DatabaseSync;
   opened.push(db);
   migrate(db);
-  return { db, q: new WriteQueue(path), path };
+  {
+    const wq = new WriteQueue(path);
+    queues.push(wq);
+    return { db, q: wq, path };
+  };
 }
 
-afterAll(() => {
+afterAll(async () => {
   for (const c of opened) {
     try {
       c.close();
+    } catch {
+      /* 已关 */
+    }
+  }
+  for (const q of queues) {
+    try {
+      await q.close();
     } catch {
       /* 已关 */
     }

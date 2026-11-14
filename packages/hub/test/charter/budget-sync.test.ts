@@ -605,17 +605,17 @@ async function q(db: AnyDb, stmts: readonly string[]): Promise<void> {
   });
 }
 
-afterAll(() => {
+afterAll(async () => {
   for (const x of queues) {
     try {
-      (x as unknown as { close?: () => void }).close?.();
+      await (x as unknown as { close?: () => Promise<void> | void }).close?.();
     } catch {
       /* 关掉失败不影响别的 */
     }
   }
   for (const c of conns) {
     try {
-      c.close();
+      await Promise.resolve(c.close());
     } catch {
       /* 同上 */
     }

@@ -1,0 +1,23 @@
+=== round164 发现: isPidAlive 双实现无机械一致性守卫 ===
+time: 2026-11-14T12:15:53.486Z
+HEAD: f172fae test(arch): matcher-oracle 头部升级为「装不上」证伪后的真实前提
+
+排查经过:
+  • 回顾是否有守卫覆盖 isPidAlive 双实现一致性 → 无
+    (harness-invariants / doc-refs / production-deps / comment-citations 均不触及)
+  • 对比 lock.ts 与 fixture-dir.ts 两个 isPidAlive 实现:
+    遇料外错误码的处理一致（均 EPERM=在 / ESRCH=不在 / 其他=当在）
+    编码“函数体规范化空白后对比”= 不等价
+    差异仅在解释注释文字，逻辑句子一符不差。
+  • fixture-dir.ts 注释自认“与 src/serve/lock.ts 同一套语义”，
+    并明确说不 import 适口（测试层依赖生产代码只为一个 kill(pid,0) 不值）。
+    彩约方向: “测试把自己的活目录删了”。
+
+结论:
+  当前两实现功能等价，不存在空跑/驱动问题。
+  但这是一个“没有守卫的不变量”: 若未来有人改交用
+  函実时只改了一边，无任何机器会红。
+  按遵命事项级（“报告噪音表向守网而不是大卫”）报送不加卫。
+
+本轮另:认定 doc-coords 已覆盖节号引用检查（完内）
+  不需要新建。上轮 matcher-oracle 修正已提交 f172fae。

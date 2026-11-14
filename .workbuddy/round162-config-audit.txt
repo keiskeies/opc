@@ -1,0 +1,20 @@
+=== round162 配置层抗假绿审计：测试模组的几个承重壁开关 ===
+time: 2026-11-14T12:13:34.009Z
+HEAD: b192b4a fix(hub/test): backup/fixture-dir 的日志引用移到 Windows 分隔符下仍立
+
+变异/独立验证两发:
+  ① expect.requireAssertions=true：放空 body 测试 => vitest 红
+     “expected any number of assertion, but got none” —— 防空跑开关生效
+  ② include 两条 glob：106 个 .test.ts 全部落在射程内
+     （除 test/ 与 packages/*/test/ 之外的主检索回 0）
+
+配置评价:
+  ③ coverage 阈值 4 个全 0 ——但是在注释里明认“这项没有落地”
+     并给了原因（coverage 归因 offline 不可达）与正确做法。
+     这不是假绿，是“明认的已知缺口”。
+  ④ globalSetup 在解析前构建 @opc/contracts，卡片时析。
+
+前几轮已证实:版 arch 17/17、门禁 29/29、
+跨文件合约、node:test 13/13。
+
+基线: arch=137/137, gate=29/29, 工作区 ?? .workbuddy/

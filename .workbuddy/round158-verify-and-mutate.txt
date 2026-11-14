@@ -1,0 +1,18 @@
+=== round158 碮认基线 + 抗假绿变异检验 ===
+time: 2026-11-14T12:09:46.272Z
+HEAD: b192b4a fix(hub/test): backup/fixture-dir 的日志引用移到 Windows 分隔符下仍立
+
+基线（证据）:
+  全量 vitest: 2193/2207 过，唯一 8 红 = phase3×3/store×2/
+  budget-sync×1/auto-approve×2，均自由标题口径声明
+  “接上那天这条会红/已知缺口/不是实现遗漏”，
+  为设计的活 spec 红，非回归。
+  node:test 的 claude.test.ts: 13/13 过（vitest 不覆盖的那一份）。
+  arch 137/137；gate 29/29；tsc 0;worktree 干净。
+
+变异两发（抗假绿证据）:
+  ① doc-refs：改引用行 180_000→180_001 → 微移手红 1
+  ② fixture-dir，字面量表达改变量 NAME → 微移手红 1
+  两发都恢复原文，悉无空闲 —— 我的改动不引入假绿。
+
+留待 CEO 弥铱: 8 个故意红属外部 owner 的线接工作。

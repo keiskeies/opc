@@ -576,10 +576,10 @@ describe("④ 接线状态", () => {
   });
 });
 
-afterAll(() => {
+afterAll(async () => {
   for (const q of queues) {
     try {
-      (q as unknown as { close?: () => void | Promise<void> }).close?.();
+      await (q as unknown as { close?: () => Promise<void> | void }).close?.();
     } catch {
       /* 关掉失败不影响别的 */
     }

@@ -1,0 +1,13 @@
+=== round171 全量基线重算 + 8红走线矩阵 ===
+time: 2026-11-14T12:21:54.652Z
+HEAD: f172fae test(arch): matcher-oracle 头部升级为「装不上」证伪后的真实前提
+
+全量 @ f172fae：106 文件 / 2207 总 / 2193 过 / 8 败 / 6 跳过
+  败之唯一 suite：phase3×3 + budget-sync×1 + store×2 + auto-approve×2
+  与 round158 基线完全一致，零漂移。
+
+交付：.workbuddy/ROUND171-WIRING-MATRIX.txt
+  每条红的“接线完成标志”（需接的调用方/路由/同步文件）
+  给外部 owner作为接线起点，红字换市绿时即为完成。
+
+基线徢实：arch=137/137, gate=29/29

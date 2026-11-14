@@ -1,0 +1,18 @@
+=== round163 修正被证伪的活守卫前提（matcher-oracle） ===
+time: 2026-11-14T12:15:15.108Z
+HEAD: b192b4a fix(hub/test): backup/fixture-dir 的日志引用移到 Windows 分隔符下仍立
+
+问题: test/arch/matcher-oracle.test.ts l.5 写“本机跑不起真 vitest
+  （0009 §2）”。70037 §7/7039 已证伪为“4.1.5 能装、
+  pin 的 4.1.12 当时无实体”；本会话 2126e1e 起真 vitest 4.1.12
+  本仓跑起全量 2207 例 —— “本机跑不起”已完全被证伪。
+
+修正: 向＃【3 行语——把前提改成历史序列补充：
+  0009 §2 时代装不上 → 0037 §7/7039 证伪为“4.1.5 能装、4.1.12 无实体”
+  → 随 2126e1e 真 vitest 4.1.12 跑起全量 2207 例。原来的“假绿·单向”
+  解释保持不变。认灵持• 0009·常 0037·常 0039常 2126e1e 全部实在点。
+
+验证: matcher-oracle + comment-citations + doc-coords + doc-ids = 40/40
+  arch 全套 137/137，gate 29/29 exit 0。改动 +3/-1，局限于 l.5-7。
+
+基线: 全量 2193/2207（8 自声明活 spec）、node:test 13/13、tsc 0。

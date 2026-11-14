@@ -1,0 +1,15 @@
+=== round161 交叉文件合约审计：BOUNDARY_PROBE 唯一真相 + 变异验证 ===
+time: 2026-11-14T12:13:02.122Z
+HEAD: b192b4a fix(hub/test): backup/fixture-dir 的日志引用移到 Windows 分隔符下仍立
+
+审计对象: test/arch/run-fixtures.ts 的 BOUNDARY_PROBE 名字约定
+  用户：dependency-boundary / no-native-deps / production-deps 三家
+  exactly共享——包含 production-deps 内部就有一条防漂移守卫
+  （l.242 “探针名只允许定义在 run-fixtures.ts 里”）。
+
+变异捂一发: 放 zz-scratch-probe.test.ts 含硬编 指__boundary_probe字符串
+  → production-deps 立即红且名指该文件；删除 scratch 后恢复。
+  证实指__boundary_probe 名字约定被机械执行，非妄至分散本。
+
+结论: 跨文件内容约定也证实非空跑。
+  基线: arch=137/137, worktree 干净。

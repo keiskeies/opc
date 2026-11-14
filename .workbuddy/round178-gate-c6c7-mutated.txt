@@ -1,0 +1,13 @@
+=== round178 门禁 C6/C7 变异验证（关闭最后一个未探射位） ===
+time: 2026-11-14T12:28:31.099Z
+HEAD: f172fae test(arch): matcher-oracle 头部升级为「装不上」证伪后的真实前提
+
+C6变异：company.ts 引入可执行 interrupt() → gate 红
+  “CLI 那张图里可执行的 interrupt 调用 = 0 → 1 处”
+  (tsc 报错是预期的：interrupt 未导入；变异即时恢复)
+C7变异：INDEX.md 头部加“本轮” → gate 红
+  “入口里的轮次相对指称 = 0 → l.1 含 本轮”
+
+两发 PASS 29→28、exit 1、恢复后 29/29。
+至此：门禁历史上最易受击的 C6/C7 控制降与局已当 HEAD 变异验证。
+基线：gate=29/29

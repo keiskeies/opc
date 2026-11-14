@@ -1,0 +1,14 @@
+=== round176 最后 3 个读证守卫也完成变异验证 + 发现 globalSetup 层级限防 ===
+time: 2026-11-14T12:27:06.805Z
+HEAD: f172fae test(arch): matcher-oracle 头部升级为「装不上」证伪后的真实前提
+
+1. pending-decisions: INDEX 登记段 §0007§5→§99 → 红“0007 > 99 登记在入口处但对应文档里没有这一节的标题”
+2. config-match (real): INCLUDE_PATTERNS 加 .zzz → 红“手抄常量与 include 逐字一致”
+3. harness-invariants: biome 移除 test/**/*.{ts,tsx} → globalSetup 在测试收集前就中止全套,
+   报“测试装置自检失败（globalSetup）：缺 test 66模式”。
+   → 关键发现：这条守卫建在 globalSetup 里（build-contracts.ts:45），
+   每次 vitest 启动都先自检，逾越“测试文件本身可被跳过”—— 双层限防。
+   （我第一次用 json reporter 看到 total=0 误判成“未触发”—— 实际是 globalSetup 击杀先于收集，正确作用）
+
+至此：全部 17 个 arch 守卫都有可查证的变异证据或构造重台证据。
+基线：arch=137/137 gate=29/29

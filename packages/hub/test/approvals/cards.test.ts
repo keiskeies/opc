@@ -65,14 +65,17 @@ const T0 = Date.parse("2026-03-04T05:06:07.000Z");
 const HOUR = 3_600_000;
 
 const opened: Array<{ close(): void }> = [];
+const queues: Array<{ close(): Promise<void> }> = [];
 let seq = 0;
 
 function fresh(): { path: string; db: DatabaseSync; q: WriteQueue } {
   const path = join(TMP, "ap-" + ++seq + ".db");
   const db = openDb(path) as unknown as DatabaseSync;
   opened.push(db);
+  const q = new WriteQueue(path);
+  queues.push(q);
   migrate(db);
-  return { path, db, q: new WriteQueue(path) };
+  return { path, db, q };
 }
 
 function addTask(db: DatabaseSync, id: string): void {
@@ -101,10 +104,17 @@ function draft(over: Record<string, unknown> = {}) {
   } as never;
 }
 
-afterAll(() => {
+afterAll(async () => {
   for (const o of opened) {
     try {
       o.close();
+    } catch {
+      /* 已关 */
+    }
+  }
+  for (const q of queues) {
+    try {
+      await q.close();
     } catch {
       /* 已关 */
     }

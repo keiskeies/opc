@@ -1,0 +1,26 @@
+=== round159 抗假绿审计补全：9 个未审计防守全部证实非空置 ===
+time: 2026-11-14T12:11:09.626Z
+HEAD: b192b4a fix(hub/test): backup/fixture-dir 的日志引用移到 Windows 分隔符下仍立
+
+审计方法：变异探针（round156 同款）——改动
+真实被守卫的内容，看守卫是否立即红。
+
+本轮新证实（均红 1且原样恢复）:
+  ① doc-coords：第一处引用的短哈希 83697c3→83697c4
+     → “全部坐标引用…对得上”红
+  ② doc-ids：0044 正文插入“参见 0099”（不存在号）
+     → “正文提到的每个编号…不指空号”红
+  ③ comment-citations：claude.ts 头注释插入虚假跨篇引用
+     → “注释里的限定引用全部指向存在…”红且名指 claude.ts:2
+
+构形上就不可能空置（无需变异）:
+  ④ dependency-boundary：真写探针文件到 packages/{desktop,web}/src/
+     → 真调 biome check 硔认 code!=0 且含 noRestrictedImports
+  ⑤ gate-selfcheck：真跑门禁（含仓库外探针）
+     → 确认“红被正确记账”+“结论要人看”（KNOW_RED 纪律）
+
+结果：17 个 arch 防守全部证实非空置
+（round156 “8 个新防守”+ 本轮补全其余 9 个）。
+
+基线（证据）: arch 137/137、gate 29/29、tsc 0、
+claude(node:test) 13/13、全量 2193/2207（8 红 = 设计的活 spec）。

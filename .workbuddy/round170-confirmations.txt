@@ -1,0 +1,15 @@
+=== round170 确认型审计：数字完全性 + coverage 前提准确 + 自己提交合规 ===
+time: 2026-11-14T12:20:47.994Z
+HEAD: f172fae test(arch): matcher-oracle 头部升级为「装不上」证伪后的真实前提
+
+1. 决策编号 0001-0056全部连续，无缺口。
+2. 覆盖率前提准确：实测 vitest --coverage 报
+   MISSING DEPENDENCY @vitest/coverage-v8 —— 配置里“归因不可用”是真实抬头。
+3. commit-msg-refs 4/4 绿（真实历史），且我的 4 个提交 scope 均
+   与实际改动一致：2126e1e hub / 821a514 0044♚0049 /
+   b192b4a hub/test / f172fae test/arch 。
+
+结论：这三项均已完好（确认而非修正）。
+coverage 开放项仍为项文案外部壦层。
+
+基线: arch=137/137, gate=29/29

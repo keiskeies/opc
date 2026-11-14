@@ -1,0 +1,44 @@
+======================================================================
+ 走线完成矩阵 v2：8 个故意红活 spec 各自「接上哪天会绿」
+ 拉源: round165 失败消息 + round171 基线 + round173 phase3 分母/自过期机制
+ 生成: 2026-11-14T12:23:34.618Z
+ HEAD: f172fae test(arch): matcher-oracle 头部升级为「装不上」证伪后的真实前提
+======================================================================
+
+【新增 round173 事实】设计红的 callersOf 断言是【自过期】的：
+  · 现在 toEqual([]) 表示「零调用方=诚实 blocker」
+  · 一旦接线落地产生调用方，toEqual([]) 会【再次变红】
+  · 接线人也【必须】改写断言为新调用方名单 + 同步 test③ 的 blockers 清单
+    （phase3 l.757 写明：断言会过期，改动必须一起改）
+
+—— phase3.test.ts (3 红) ——
+  ① 重跑同类任务无路可跑：verifier 调 evaluateGate 而 verifyFix 零调用方
+     → 缺口上移一环：需接通 verifyFix 的调用方（目前零）
+  ② 日报只有数据面：readAutoApprovalReport + readCharterConfig 均零调用方
+     → 接上日报端点/读侧；断言 toEqual([]) 需改为新名单
+  ③ 门禁诚实口径（Task 3.8 未通过）：blockers 清单断言，①与②接通后
+     必须同步改这份清单，否则它也红（自过期）
+  （对照组：insertCard/ensureCharterCard/pumpCharterCards 的有分母断言
+    ——insertCard=[engine/charter,dispatch,seat-card], ensureCharterCard=
+   [engine/work,serve/charter-pump], pumpCharterCards=[serve/assemble]
+    ——这些已绿，是「有分母才可信」的样板）
+
+—— budget-sync.test.ts (1 红) ——
+  0015 整预算同步写入口零调用方 (charter/budget-sync)
+     → src 调用该写入口并同步更新 0015
+
+—— store.test.ts (2 红) ——
+  ① saveCharterVersion 写侧零调用方
+  ② 写通道不经过 HTTP/组织图路径（孤岛）
+     → 两条接上 HTTP 路由→写通道→数据库
+
+—— auto-approve.test.ts (2 红) ——
+  ① 创建路径已有而零生产者：writers 唯一允许 = approvals/cards.ts (l.688)
+     → 创建路径真正调用认领（走通真库）
+  ② policy 自动批准模块 src 零调用方（「已知缺口」0014 §3）
+     → 日报成形时调用决策核心
+
+—— 基线 ——
+  f172fae 全量：106 文件 / 2207 / 2193 / 败 8 / 跳 6；零漂移
+  matcher-oracle 10/10；22 处 Set/Map/Date toEqual 用法皆有 oracle 守住
+======================================================================

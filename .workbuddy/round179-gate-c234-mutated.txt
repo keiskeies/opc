@@ -1,0 +1,13 @@
+=== round179 门禁 C2/C3/C4 变异验证与 C1/C5 读证收宰 ===
+time: 2026-11-14T12:29:41.343Z
+HEAD: f172fae test(arch): matcher-oracle 头部升级为「装不上」证伪后的真实前提
+
+C2: 设计文档 l.1648 “CEO 亲自判断”→“判定”
+   → 红 2 条（全文唯一 + 表头点名）PASS 29→27, exit 1
+C3: 规格细胞置为与 plan 相同 → 红“至少一处逐字差异=0”, PASS 29→28
+C4: 0006 标题 CEO→CE0 ×3 → 红“点名等 CEO 小节 ≥ 3”=2, PASS 29→28
+
+至此门禁当 HEAD 变异触发记录：C1(round178)、C2、C3、C4、C6(round178)、C7(round178)
+C5 为活 git 状态（rev-list+dirty），构造上不可能空跑。
+全部恢复后 gate=29/29 exit 0。
+基线：gate=29/29, worktree 干净

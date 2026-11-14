@@ -99,18 +99,18 @@ beforeAll(() => {
   mkdirSync(TMP, { recursive: true });
 });
 
-afterAll(() => {
+afterAll(async () => {
   // Windows：不 close 就 rm 会 EBUSY（phase1 同一处理）。
   for (const q of queues) {
     try {
-      q.close();
+      await Promise.resolve(q.close());
     } catch {
       /* 已关 */
     }
   }
   for (const db of plain) {
     try {
-      db.close();
+      await Promise.resolve(db.close());
     } catch {
       /* 已关 */
     }

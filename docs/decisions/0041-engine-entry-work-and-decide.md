@@ -108,7 +108,7 @@ CEO 的原话是「别用 langchain，每个 agent 都是灵活的，不是写�
 变成一个**不可见的少记账**。
 
 同一族的另一发：卡片审计那行的 payload 形状。`createCard`（http / 巡检建卡走的那条）落
-`evt.payload`（`{kind, approval_type, summary, evidence_refs}` 在**顶层**，被 `cards.test.ts:438` 钉住），
+`evt.payload`（`{kind, approval_type, summary, evidence_refs}` 在**顶层**，被 `cards.test.ts:448` 钉住），
 而 `dispatch.ts` 从前写 `{...evt}`（字段嵌一层）。**共用的 `kind` 掩盖了不共用的部分** ——
 role-memory 那个 `payload.kind` 判别式一直看起来是对的，而按 `approval_type` 数待批事项的读法
 会漏掉引擎建的那一类。两处一起纠正，并由 `charter.test.ts` 那条**跨生产者**用例钉住

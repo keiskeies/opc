@@ -1,0 +1,21 @@
+=== round165 抗衰强审计：skip/故意红 假绿家整审计 ===
+time: 2026-11-14T12:16:49.799Z
+HEAD: f172fae test(arch): matcher-oracle 头部升级为「装不上」证伪后的真实前提
+
+A. 8 个“故意红”活 spec 的失败原因全部与文档对应：
+  phase3 ×3/ budget-sync×1/ store×2/ auto-approve×2
+  各失败消息均为“缺少接线”（零调用方 / 孤岛路径），
+  与各自标题的自声明目的一致，无漂移。
+
+B. 全仓 .skip/.todo 共 19 处——其中 18 在守卫自身的
+  检测模式里（pending-inventory / doc-refs 的正反样本），
+  不是真 skip。1 个真 skip：
+  packages/hub/test/checkpoint/saver.contract.test.ts l.447（Sqlite 专属用例对
+  Memory 变体 skip）——但被元守卫护住：
+  afterAll 确认 exclusiveRuns === SQLITE_EXCLUSIVE_CASES(6)，
+  实测该套 32 过 / 6 skip / 0 败，元守卫满足。
+  假如条材变形当，所有专属测试默默 it.skip，
+  exclusiveRuns=0 → 元守卫当场红（正好是 0007 §6.1 B2 的设计）。
+
+结论: skip / 故意红 表面不存在“静默变绿”的路径。
+  无需修改。worktree 干净。

@@ -1,0 +1,12 @@
+=== round177 台账 v2 ：把 17/17 守卫证据写成单源、修复过时缺口 ===
+time: 2026-11-14T12:27:38.372Z
+HEAD: f172fae test(arch): matcher-oracle 头部升级为「装不上」证伪后的真实前提
+
+台账 v1 (round169) 写了“15个变异验证”，但 176 进了 pending-decisions/
+config-match/harness-invariants 三个—— 重新标准后为“变异 14 + 构造 2
++ 维护型核对 2 = 17/17”。
+
+修复：“15”过时数字去掉——变成 A/B/C 三类证据、每条带 round 。
+修前“变异 15”会误导后人以为多了一个。
+
+基线：arch=137/137, gate=29/29, worktree 干净

@@ -59,6 +59,7 @@ const MIN = 60_000;
 const HOUR = 60 * MIN;
 
 const opened: { close(): void }[] = [];
+const queues: Array<{ close(): Promise<void> }> = [];
 let seq = 0;
 
 type Fix = {
@@ -72,7 +73,9 @@ function fresh(): Fix {
   const db = openDb(path);
   opened.push(db);
   migrate(db as never);
-  return { path, db, q: new WriteQueue(path) };
+  const q = new WriteQueue(path);
+  queues.push(q);
+  return { path, db, q };
 }
 
 function addTask(
@@ -130,6 +133,13 @@ afterAll(async () => {
   for (const o of opened) {
     try {
       o.close();
+    } catch {
+      /* 已关 */
+    }
+  }
+  for (const q of queues) {
+    try {
+      await q.close();
     } catch {
       /* 已关 */
     }

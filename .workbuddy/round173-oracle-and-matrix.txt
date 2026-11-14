@@ -1,0 +1,16 @@
+=== round173 matcher-oracle 实测 + 走线矩阵 v2 ===
+time: 2026-11-14T12:23:34.618Z
+HEAD: f172fae test(arch): matcher-oracle 头部升级为「装不上」证伪后的真实前提
+
+1. matcher-oracle 10/10 绿（Set/Map/Date/RegExp/嵌套/toMatchObject/正向对照）
+2. 全仓 22 处 toEqual(new Set/Map/Date 勇用法 (Set=17 Map=3 Date=2)—
+   稍守少 oracle 的分辨利保护；Comparator 日均会被 oracle 纳捕。
+3. 读到 phase3 l.856-951 的三份分母断言:
+   insertCard=[engine/charter,engine/dispatch,engine/seat-card](这里贴)
+   ensureCharterCard=[engine/work,serve/charter-pump]
+   pumpCharterCards=[serve/assemble]
+   —這几个是“有分母才可信”的样板，也是接线必须改写断言的准确而打在眉心。
+4. 走线矩阵升级至 v2：明确“自过期断言”机制—
+   接线引发调用方后 toEqual([]) 會再红，接线人必须同步改新名单+blockers。
+
+基线徢实：arch=137/137, gate=29/29, 替换符=0

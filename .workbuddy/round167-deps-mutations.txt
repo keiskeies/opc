@@ -1,0 +1,18 @@
+=== round167 变异验证依赖类守卫（production-deps + no-native-deps） ===
+time: 2026-11-14T12:18:51.103Z
+HEAD: f172fae test(arch): matcher-oracle 头部升级为「装不上」证伪后的真实前提
+
+① production-deps：在 cli.ts 头部加一行真实 import
+  import * as ts from "typescript"（hub 的 devDependencies 独有包）
+  → 红“生产代码引用了未进 dependencies 的包”。恢复。
+  正向精度：既有的“typescript”字值引用（worker 格式字符串 +
+  注释）被正确忽略——判断的是【import】而不是【单词出现】。
+
+② no-native-deps：在 cli.ts 头部加一行
+  import Database from "better-sqlite3"（止禁的第三方 SQLite）
+  → 红 D6-a“生产源码不依赖任何原生 SQLite 模块”。恢复。
+
+结论：依赖类守卫双向探测均引发，无空跑。
+  worktree 干净。
+
+基线: arch=137/137, gate=29/29

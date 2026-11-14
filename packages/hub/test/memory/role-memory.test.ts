@@ -62,10 +62,12 @@ type Db = {
 const NOW = 1_700_000_000_000;
 let fileSeq = 0;
 
+const opened: Db[] = [];
 function newDb(): Db {
   const path = join(TMP, "mem-" + process.pid + "-" + ++fileSeq + ".db");
   const db = openDb(path) as unknown as Db;
   migrate(db as never);
+  opened.push(db);
   return db;
 }
 
@@ -1000,5 +1002,12 @@ describe("⑥ few-shot 渲染：标注是数据而不是指令，且不改写内
 });
 
 afterAll(() => {
+  for (const db of opened) {
+    try {
+      db.close();
+    } catch {
+      /* 已关 */
+    }
+  }
   rmSync(TMP, { recursive: true, force: true });
 });

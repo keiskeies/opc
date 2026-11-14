@@ -1,0 +1,17 @@
+=== round168 变异验证 decision-index + no-null-bytes ===
+time: 2026-11-14T12:19:37.186Z
+HEAD: f172fae test(arch): matcher-oracle 头部升级为「装不上」证伪后的真实前提
+
+① decision-index：INDEX.md 中 0007→0070 翻转
+  → 红“decisions/ 每个编号都在 INDEX 列出且不列不存在的号”
+  错误曝出 missing:['0007'] extra:['0070']。恢复。
+
+② no-null-bytes：cli.ts 末尾填一个字面 NUL 字节
+  → 红“真仓库：一个 NUL 字节都没有”，报出 cli.ts:529 带上下文。恢复。
+  并确认 gateway.ts 的“逃逸”形状正被专门回归试锤住（l.88）。
+
+至此 17 个 arch 守卫里已变异验证 15 个，
+另 2 个（dependency-boundary / gate-selfcheck）从构造上就不可能空跑。
+全部 17 个均证实非空跑。
+
+基线: arch=137/137, gate=29/29, 工作区 干净。

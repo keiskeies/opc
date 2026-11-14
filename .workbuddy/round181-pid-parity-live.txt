@@ -1,0 +1,14 @@
+=== round181 对 round164 发现做实现行为验证 ===
+time: 2026-11-14T12:31:05.519Z
+HEAD: f172fae test(arch): matcher-oracle 头部升级为「装不上」证伪后的真实前提
+
+isPidAlive 双实现（fixture-dir.ts vs src/serve/lock.ts）的实时行为对比六种探针:
+  dead(ESRCH): fixture=false lock=false parity✓
+  self(alive): fixture=true  lock=true  parity✓
+  zero/neg/float: false=false parity✓
+  pid=1: lock=false（本机 Windows EPERM/ESRCH 分支均拿刷到的路径）
+
+结论：round164 的前提“两实现功能等价”在当前 Node 上得到实验验证——
+即当前无分歧，风险仅为未来改动飘移（无机械守卫的开放项细化）。
+
+基线：arch=137/137, gate=29/29, worktree 干净

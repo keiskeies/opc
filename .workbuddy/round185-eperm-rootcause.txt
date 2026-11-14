@@ -1,0 +1,28 @@
+=== round185 fixture-EPERM 根因定位 + 修复方向实证 ===
+time: 2026-11-14T12:35:50.829Z
+HEAD: f172fae test(arch): matcher-oracle 头部升级为「装不上」证伪后的真实前提
+
+背景：8 个文件 EPERM（versioning/cards/im/patrol/role-memory + phase3/budget-sync/store 也承载）。
+
+排除过的假设（各自带复现实验）：
+  1. 残留 tmp 目录碰撞 —— 清空后仍 EPERM（排除）
+  2. 并发 mkdir/rm —— 8 进程并跑零 EPERM（排除）
+  3. 目录内开着 SQLite 连接再 rmSync —— 稳定复现 EPERM（命中）
+
+关键栈（versioning.test.ts:139）：
+  afterAll(() => {
+    for (const q of queues) void q.close();   // 138：不 await，fire-and-forget
+    rmSync(TMP, { recursive: true, force: true }); // 139：EPERM
+  });
+  Serialized Error: { errno: 1, code: 'EPERM', syscall: 'rm' }
+
+根因：Windows 上 WriteQueue/DB 的 async close() 尚未释放句柄时，同目录的 rmSync
+  立即执行 → 目录被占用 → EPERM。void（不 await）是触发条件。
+
+修复方向（最小复现实证）：
+  变体A void close() 后 rmSync  → EPERM
+  变体B await close() 后 rmSync → OK
+  ⇒ 把 afterAll 里的 void q.close() 改成 await q.close() 即可。
+
+处置：仍按外部 owner（改动跨 8 文件测试，未获 CEO 方向时不动仓）。本表给出可执行修复。
+附件：/tmp 级最小复现（sqlite-open-then-rm + race 变体）。

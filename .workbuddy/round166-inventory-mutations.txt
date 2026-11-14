@@ -1,0 +1,16 @@
+=== round166 变异验证 pending-inventory + test-inventory ===
+time: 2026-11-14T12:17:55.448Z
+HEAD: f172fae test(arch): matcher-oracle 头部升级为「装不上」证伪后的真实前提
+
+① pending-inventory：在非名单内文件 phase3.test.ts 尾部
+  新增一条 it.skip → 红 2 条：
+  · “被收集的真文件必须一条问题都不报”
+  · “真仓库里唯一带跳过的文件正是名单里那一个”
+  证实新无条件 skip 无法静默存在。
+
+② test-inventory：在仓库根放一个 include 外 .test.ts
+  → 红“磁盘上每个测试样文件都在 include 覆盖范围内”
+  并名指该文件。证实幽灵 test 不可能静默存在。
+
+反弹两向均和典向外（恢复原样，工作区静止）。
+基线: arch=137/137, gate=29/29

@@ -1,0 +1,17 @@
+=== round180 打开发现：桇式 commit hash 引用无机械守卫 ===
+time: 2026-11-14T12:30:38.821Z
+HEAD: f172fae test(arch): matcher-oracle 头部升级为「装不上」证伪后的真实前提
+
+发现：测试头/注释里的 git commit hash 引用本地缚不被任何守卫验证存在。
+目前两处：
+  1877e8e  — test/arch/no-null-bytes.ts（已存在，feat(harness): gateway interface）
+  2126e1e  — test/arch/matcher-oracle.test.ts（已存在，fix(hub) Windows）
+
+类型：非逻辑“守卫缺口”—— 是文档/注释层的漂移风险：人改写头部时
+写成一个不存在的 hash，守卫不会红。
+适贴逻辑问：doc-refs 不覆盖、commit-msg-refs 只验证“版本表”不验证“引用的 hash”。
+
+处置：补开放项（report-only per 遵命—— 不单方面加守卫）。
+已完成回顾：请对注：存在地两处目前均为真实提交，无假引用。
+
+基线：arch=137/137, gate=29/29, worktree 干净

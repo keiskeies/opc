@@ -134,8 +134,8 @@ const versionAt = (db: Db): number =>
 beforeAll(() => {
   mkdirSync(TMP, { recursive: true });
 });
-afterAll(() => {
-  for (const q of queues) void q.close();
+afterAll(async () => {
+  for (const q of queues) await q.close();
   rmSync(TMP, { recursive: true, force: true });
 });
 

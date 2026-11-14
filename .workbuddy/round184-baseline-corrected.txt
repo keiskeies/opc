@@ -1,0 +1,21 @@
+=== round184 全套重基线：找回 @opc/contracts 解析 + 暴露 round175 基线漏报(并非仅设计红接线) ===
+time: 2026-11-14T12:34:33.555Z
+HEAD: f172fae test(arch): matcher-oracle 头部升级为「装不上」证伪后的真实前提
+
+关键发现 1 — 环境：根级 node_modules/@opc/contracts 链接丢失；
+  修复= pnpm install (恢复@rolldown 选项包) + 根级 symlink → packages/contracts。
+  “Cannot find package @opc/contracts”和“rolldown wasm binding”都解决了。
+  （我第一次 pnpm --no-optional 自动删除 4 个选项包，已用带选项包的 install 恢复）
+
+关键发现 2 — baseline rigorous 分离：
+  设计红断言 8 条：phase3×3, budget-sync×1, store×2, auto-approve×2 ✔ （与设计一致）
+  错误文件 8 个：EPERM(fixture .tmp), 即 versioning/cards/im/patrol/role-memory +
+    phase3/budget-sync/store 同时承载 EPERM 但仍保留它们的设计红。
+  claude.test.ts “No test suite” = node:test 文件被 vitest 误收集（已知）。
+
+重磅发现— round175 话述“失败套件恰好 4 个设计红”并不准确：
+  当时只数 test-level fail，缺 8 个 EPERM-文件级错误。新基线 = 2333 total /
+  2319 pass / 8 设计红 / 6 skip / 8 EPERM 错误文件。我自己过去也误报过。
+
+处置：EPERM 仍是原有开放项（fixture Windows 权限），交外部 owner。
+基线：arch=137/137, gate=29/29, worktree 干净(node_modules 修复不进跟踪)

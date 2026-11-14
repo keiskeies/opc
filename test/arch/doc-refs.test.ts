@@ -159,13 +159,13 @@ function verify(
 
 const SNAP: Record<string, string> = {
   // 0041（引擎入口 work / decide）新写的一条，登记同轮完成（0006 §7-40 那条规矩）。
-  // 先在 cards.test.ts 里 `sed -n '438p'` 读原文再抄，不从 0041 正文里复制措辞。
+  // 先在 cards.test.ts 里 `sed -n '448p'` 读原文再抄，不从 0041 正文里复制措辞。
   // 键写【裸名】是实测过的：仓库里叫 cards.test.ts 的只有 packages/hub/test/approvals/ 那一个，
   // 而同一篇 §9 那条 `db/driver.ts` 必须带目录 —— 那正是本篇记的坑（多出一个同名文件）。
   // 这一条是**活坐标**：0041 §4 的论据是「卡片审计那行的 payload 形状跨生产者共用」，
   // 而那个形状的唯一钉子是这一行按【顶层键】读 approval_type ——
   // 有人把它改成嵌一层的读法，快照就该红，逼他重读 §4 那个「共用 kind 掩盖不共用部分」的坑。
-  "0041-engine-entry-work-and-decide.md>cards.test.ts:438":
+  "0041-engine-entry-work-and-decide.md>cards.test.ts:448":
     'expect(payload["approval_type"]).toBe("escalation");',
   // 0025（Task 6.1 常驻 Hub）新写的一条。先在目标文件里 `sed -n '385p'` 读原文再抄，
   // 不凭记忆。写全路径与 0013/0016 那几组保持一致（基名这里其实也能唯一解析）。

@@ -1,0 +1,17 @@
+=== round172 对自己的 Windows 修正做正式验证 ===
+time: 2026-11-14T12:22:28.536Z
+HEAD: f172fae test(arch): matcher-oracle 头部升级为「装不上」证伪后的真实前提
+
+审查对象: 2126e1e 的 claude.ts runRole 改。re-entering
+  /\. [cm]?js$/ 判断 bin 是否要绕 node。
+
+1. 正则完备性：全仓扫无“无 .js 后缀但带 node shebang”
+   的可执行文件；唯一脚本失例 fake-claude.mjs 被正确匹配。
+   真 claude 二进制→直襲。无安装围带/漏过。
+2. 实际触发：driver.test.ts 用 fileURLToPath(…fake-claude.mjs)
+   作为 bin，走的是真 spawn + stdin/stdout + “#!/usr/bin/env node”
+   shebang 脚本种类；就是改前 EFTYPE 的情形。
+3. 当前 HEAD 再跑证据：driver 11/11、work 31/31 全绿
+   (matcher-oracle 提交后仍然保存)。
+
+结论：Windows 修正完备且实际受测，无空跑。

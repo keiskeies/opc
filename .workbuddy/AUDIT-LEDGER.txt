@@ -1,0 +1,40 @@
+======================================================================
+ 防假绿审计台账 v3（round156～183，17 守卫 + 门禁 7 控制全有触发证据）
+ HEAD: f172fae test(arch): matcher-oracle 头部升级为「装不上」证伪后的真实前提
+ 生成: 2026-11-14T12:32:08.711Z
+======================================================================
+
+A. ARCH 变异验证 14 个（均立即红 + 原样恢复，括号=round）
+  doc-coords[156] doc-ids[159] comment-citations[159] doc-refs[156]
+  fixture-dir[156] decision-index[168] no-null-bytes[168] production-deps[167]
+  no-native-deps[167] pending-inventory[166] test-inventory[166]
+  pending-decisions[176] config-match[176] harness-invariants[176]
+
+B. ARCH 构造/核对 4 个
+  dependency-boundary  真写探针真调 biome 断言 code!=0
+  gate-selfcheck [182] 变异(INDEX本轮→门禁意外红)也红了 --- 从构造升为可触发
+  commit-msg-refs [170] 真实历史 4/4 绿 + 我 4 提交 scope 全合规
+  matcher-oracle  [163] 前置被证伪后修正 + 10 canary 全绿实况
+
+C. 门禁 gate C1-C7 当 HEAD 变异触发（round178/179/182）
+  C1  读证（主题切取阳性对照绿）
+  C2  [179] CEO 判断→判定 → 红×2
+  C3  [179] spec cell=plan → 红「逐字差异=0」
+  C4  [179] 0006 CEO 标题→CE0 → 红「≥3=2」
+  C5  活 git 状态构造非空跑
+  C6  [178] company.ts 加 interrupt → 红
+  C7  [178] INDEX 本轮 → 红
+
+D. 引擎修复 @ HEAD
+  2126e1e fix(hub) Windows spawn 经 process.execPath
+  ─ 复跑 driver 11/11、work 31/31；fixture 修复 b192b4a
+
+E. 开放项（report-only，等 CEO/owner，见 round180/181）
+  1. isPidAlive 双实现无机械守卫（181 已实证当前行为等价，仅未来漂移风险）
+  2. commit-hash 引用无机械守卫（180 发现：1877e8e / 2126e1e 均真实但未守）
+  3. 外部 owner：8 故意红接线(wiring matrix v2) + biome 7 外部文件 + coverage
+      + langgraph PoC 外部 store 复跑
+
+F. 层级发现（176）harness-invariants 的 globalSetup 自检在每轮 vitest 启动先跑,
+  与 .test.ts 断言形成双防线；json reporter zeros 会掩盖 globalSetup 中止, 判读须看 stderr。
+======================================================================

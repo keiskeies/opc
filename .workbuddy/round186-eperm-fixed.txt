@@ -1,0 +1,22 @@
+=== round186 fixture-EPERM 修复落地（8 文件→0 EPERM，设计红原样保留）===
+time: 2026-11-14T12:41:29.909Z
+HEAD（修复前）: f172fae test(arch): matcher-oracle 头部升级为「装不上」证伪后的真实前提
+
+根因（round185 定位 + 本轮补全）跨 8 文件，三类机制，全部归一为：
+  1) WriteQueue 句柄不追踪（cards/im/patrol）：fresh() 只登记 db，q(含内部 #read) 泄漏
+  2) async close 不 await（versioning void q.close()，budget-sync/store/phase3 同步 afterAll
+  3) role-memory：20 个 newDb() 只关了 14 个，6 个 WAL 连接泄漏
+  共同本质：Windows 上未释放的 SQLite/WAL 句柄让 rmSync(TMP) 对目录 EPERM。
+
+修复（10 文件，+57/-18）：
+  · cards/im/patrol: 新增 queues 数组登记 q，afterAll async await 全关
+  · role-memory: opened 登记 newDb 产物，afterAll 兜底全关
+  · budget-sync/store/phase3/versioning: afterAll async，close 全 await
+  · doc-0041+doc-refs: 活坐标 438→448（卡片 payload 行随插入 +10 下移，内容逐字节未变）
+
+验证：全套 2333/2319 pass/8 设计红/6 skip；5 failed suites = phase3(3)+budget-sync(1)+store(2)
+  +auto-approve(2)=8 设计红 + claude(0，node:test 排除，已知)；EPERM 文件 0（修前 8）。
+  arch 137/137，gate 29 PASS exit0，gate-selfcheck passed。
+  设计红零熄灭：phase3/budget-sync/store/auto-approve 的红全部原样保留。
+
+诚实标注：本改动是【测试 teardown】修复，不触碰生产代码/接线/设计红；doc-0041 仅坐标同步。

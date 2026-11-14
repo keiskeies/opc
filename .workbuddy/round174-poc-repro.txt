@@ -1,0 +1,16 @@
+=== round174 phase0-poc 证据可复现性邪废验证 ===
+time: 2026-11-14T12:24:02.855Z
+HEAD: f172fae test(arch): matcher-oracle 头部升级为「装不上」证伪后的真实前提
+
+1. phase0-poc 面 /7 文件：真实可运行代码 + POC-OUTPUT.txt
+   （2026-11-06 版本固定、node v24.14 环境键定）
+2. 重新执行 d6a.mjs → exit 0，载荷行与
+   POC-OUTPUT 逐行一致：wal / same-tx 0ms / trigger blocked
+   / rollback 1 行 / backup undefined / custom fn / blob roundtrip
+   唯一差异：ms 计时级别 (0 vs 1)，非语义漂移。
+3. als-and-bind-limits.mjs → exit 0，BIND_LIMIT_4096、COL_1000、
+   并发 ALS 上下文均保持。
+4. 结论：D6-a 证据当前头仍可复现，不是行尸
+   证第 1 组 no-native-deps 对 phase0-poc 的豁免由此继续成立。
+   （langgraph 那几发需外部 store 环境，本机未安装—
+   与 production-deps 禁用“对象即 store”一致，非盖录”）

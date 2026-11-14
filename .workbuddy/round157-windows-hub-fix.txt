@@ -1,0 +1,17 @@
+=== round157-158 hub-work Windows 根因修复 ===
+time: 2026-11-14T12:08:11.641Z
+
+根因（已证实）:
+  1) new URL(...).pathname 在 Windows 产出 /D:/... 形式 → spawn ENOENT
+  2) 改 fileURLToPath 后仍 EFTYPE：Windows 不能直接 exec 带 shebang 的 .js/.mjs
+  3) 备份/固定目前版本也有硬编 "/" 录入反斜杠失败
+
+修复（三个提交）:
+b192b4a fix(hub/test): backup/fixture-dir 的日志引用移到 Windows 分隔符下仍立
+821a514 docs(0044/0049)+test: 同步飘移后的行号引用
+2126e1e fix(hub): Windows 下 fake-claude.mjs 绕 node 起子进程
+
+效果: 全量 2193/2207 过，剩 8 金属大级只看
+  4 suite 的 8 个故意红（phase3/store/budget-sync/auto-approve）——
+  标题既写明“还没有完整的接砂向”的活哨 spec，
+  表录看 arch 137/137、gate 29/29、tsc 0、worktree 干净。
