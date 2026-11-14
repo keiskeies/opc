@@ -1,7 +1,7 @@
 ======================================================================
- 防假绿审计台账 v6（round156～195，18 守卫 + 门禁 7 控制全有触发证据）
- HEAD: f5ea59c fix(arch): coverage-guard 自伤修复 —— 报告目录改经 fixtureTmp(pid后缀) 避开 fixture-dir 判据(初版误用固定名致全套9红)
- 生成: 2026-11-14T13:01:26.431Z
+ 防假绿审计台账 v6（round156～202，18 守卫 + 门禁 7 控制全有触发证据）
+ HEAD: cd29552 docs(workbuddy): round201 coverage-guard 并发复验 138/138 无残留；观察 verify-open-invariants 可升 19 号守卫
+ 生成: 2026-11-14T13:04:16.482Z
  较 v3 更新：round184-187 纠正基线 + EPERM 根因定位并修复 c633cda + claude 验证
 ======================================================================
 A. ARCH 变异验证 15 个（均立即红 + 原样恢复，括号=round）
@@ -40,6 +40,8 @@ E. 纠正后的诚实基线（round184 发现 round175 漏报文件级错误；1
   修后(186) 2333/2319/8 设计红/6 skip + 0 EPERM；5 failed suites 全为设计红或良性
             claude.test.ts = node:test 文件，vitest "No test suite" 良性；node --test 13/13 绿
   arch 137/137 gate 29 PASS exit0 gate-selfcheck passed
+  4. round202 复核（HEAD）: 2334/2320/8 设计红/6 skip，EPERM 0，arch 18 文件全过(138/138)
+            gate 29 PASS / ★FAIL 0 / invariants 10/10 —— 基线健康
 
 F. 开放项（report-only，等 CEO/owner）
   1. isPidAlive 双实现无机械守卫（181 已实证当前等价，仅漂移风险）
