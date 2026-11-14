@@ -1,0 +1,12 @@
+=== round188 两个 report-only 开放项的可复算校验脚本 ===
+time: 2026-11-14T12:44:04.399Z
+HEAD: 4dfe197 docs(workbuddy): round187 反射 —— claude 原生13/13 + 台账v4 + wiring v3 + gate 非空性复核
+
+新增 docs/review/verify-open-invariants.mjs —— CEO/owner 可独立复算，不注册为守卫：
+  · isPidAlive 双实现(fixture-dir vs src/serve/lock)语义等价：前置守卫/EPERM→true/ESRCH→false/
+    意外→true(判错代价非对称) —— 结构计数 return true≥3
+  · 6 个关键哈希可解析：1877e8e/2126e1e/c633cda/fff255b/ff08762/4dfe197
+  实跑：10/10 PASS exit0。
+
+验证链：arch 137/137，gate 29 PASS exit0 @ HEAD 4dfe197（本头）；全套 2333/2319/8/6。
+本脚本把两个『report-only 无机械守卫』的开放项变成可复算证据：CEO 不信任台账时可自己跑。
