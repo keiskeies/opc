@@ -1,0 +1,49 @@
+{
+  "kind": "round255 补充证据｜静态检查现状更正（biome 真机实测 294 错误）",
+  "session": "audit deliverable ①–④ 已闭环于 commit bad606a；本条为 254 轮验证记录纠偏",
+  "date": "2026-11-15T04:55:30.788Z",
+  "context": [
+    "此前 tsc -b / biome check . / check-gate.mjs 均以 process.execPath 执行；经查 process.execPath = 'C:\\Program Files\\DSH NEXT\\DSH NEXT.exe'（Electron 壳），",
+    "Electron 收到 Node CLI 会优雅退 0 且不执行 → 回顾此前记录的 'exit 0' 为假 0，不可引为闸门证据。",
+    "改用真实 node（PATH 上 v24.14.0）重跑三闸，结果："
+  ],
+  "real_binary_results": {
+    "node": "v24.14.0 (PATH; where node 解析到 PATH，非 execPath)",
+    "tsc_b": {
+      "exit": 0,
+      "note": "node_modules/typescript/lib/tsc.js -b —— 真实通过"
+    },
+    "check_gate_mjs": {
+      "exit": 0,
+      "verdict": "判不了或不符的项：0 无",
+      "note": "docs/review/check-gate.mjs —— 真实通过。其输出自述：pnpm verify(全量测试+静态检查) 与审计日志人工核对 属【须用户亲跑】区，脚本不代跑。"
+    },
+    "biome_check": {
+      "exit": 1,
+      "cmd": "node node_modules/@biomejs/biome/bin/biome check .",
+      "checked_files": 254,
+      "errors": 294,
+      "warnings": 109,
+      "infos": 2,
+      "diagnostics_limit_exceeded": true,
+      "diagnostics_not_shown": 385,
+      "fixes_applied": 0,
+      "representative_findings": [
+        "packages/desktop/src/main/signed-fetch.ts:79 lint/style/useShorthandFunctionType (FIXABLE)",
+        "packages/contracts/src/org/graph.ts:167 lint/suspicious/noPrototypeBuiltins (FIXABLE)",
+        "packages/contracts/src/org/graph.ts:262 lint/complexity/useMathMinMax（改 Math.max，unsafe fix）",
+        "packages/hub/scripts/ts-resolve-hook.mjs:21 lint/correctness/noUnusedImports（unsafe fix）",
+        "packages/hub/src/db/page-check.ts format（格式化分歧）"
+      ]
+    }
+  },
+  "attribution_and_scope": [
+    "口径澄清：check-gate 的 '不符项 0' 并未声称 lint 洁净——其脚本明示 pnpm verify（含全量测试+静态检查）为其不代跑的【用户亲跑】项；biome 归此区。",
+    "故本条不是『check-gate 与 biome 口径矛盾』，而是『此前以 execPath 假跑导致的 biome exit 0 记录不实；真机首次实测后发现 294 errors』。",
+    "处置边界：本会话为只读法医审计，不代改源码文件跑 biome safe-fix；biome 红线清单已给代表性条目（底部含大量格式分歧/未用导入），修复归项目/pnpm verify 流程。",
+    "处置边界：本会话为只读法医审计，不代改 26 个源码文件；biome 红线清单已在代表性条目给出，修复属项目/pnpm verify 流程。"
+  ],
+  "integrity": {
+    "evidence_file_sha256_prefix": "fead1942daa68f98"
+  }
+}
