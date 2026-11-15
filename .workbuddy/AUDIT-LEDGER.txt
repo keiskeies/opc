@@ -238,3 +238,10 @@ J. 全矩阵 20×64 位串内容摘要核验（round255 补证，文件 round255
   · 注入态串（round242/244 等的 211a1032/8396d239…）cat-file -t 全不在对象库 → 已还原删除，合理。
   · 结论：无第二处 round241 式硬伤；round255『其余 17 份通过』在摘要维度复核依然成立。
   · 复核固化（round255-append-verdict-statement.txt）：cat-file -p 逐字节 Buffer 复算，11 条纯 sha256 前缀全 MATCH 无一不符；注入态 absent；check-gate 退出 0（pnpm verify 依项目规矩待人亲跑）。工作树仅本台账+两份补证待提交。
+L. round256 终验（be07d9a）——审计链自证完整。
+   · 三工件 hash 与 HEAD 逐字节一致：台账 98a4b9d5… / 矩阵证据 b1fe55c4… / 判定书 bd3b2304…。
+   · 11 条纯 sha256 逐行重算（HEAD:xx raw Buffer，cat-file -p + 16 位前缀）全部 MATCH 无一不符。
+   · check-gate.mjs（真 node v24.14.0）exit 0，不符项：0。pnpm verify 与日志人工核对依项目规矩待用户亲跑。
+   · vitest arch 套件真机实测（真 node、--reporter=json 落盘）：39 suites / 138 tests / 138 passed / 0 failed。
+   · 复核过程本身发生两次脚本级误引用（漏 HEAD: 前缀 → 空对象名），已当场修正重算，非内容问题。
+   · 结论：①–④ 目标链保持成立；『其余 17 份通过』复核仍成立。

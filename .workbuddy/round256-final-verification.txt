@@ -1,0 +1,3 @@
+round256 终验（be07d9a）
+上文台账 L 节。新证据：vitest 真机 39/138, biome 294err 已于 fd2c81c（真 node 纠偏）。
+台账 sha256(前16)= a2dda1784db39454
