@@ -110,6 +110,14 @@ E. 纠正后的诚实基线（round184 发现 round175 漏报文件级错误；1
        备注: config-match 是 canary 纯函数判据（真配置读不出 include 会把断言文件摘出收集，round245 已实测 No test files found），
        判据每一报错分支均有断言锁，本体变异必红，无假绿缝隙。
        证据:【round246-config-match-mutation-evidence.txt】;台账行 A.14 增补 config-match-input-246。
+   21. round247 复核（HEAD 606737b 后）: 守卫触发级变异复证 coverage-guard —— 首份 evidence 落档，阈值回归连锁
+       基线 1/1 绿 →注入(MIN.functions 100→101)→ RED: author-reviewer.ts functions expected 100 >= 101
+       (独立重算下限断言 coverage-guard.test.ts:80 当场抓住，无 vacuous)。
+       git checkout 字节还原(sha256 722d621b...) → 1/1 复绿；arch 全 18 文件/138 例绿。
+       备注: 台账 round196/213 曾做阈值变异但无 evidence 文件，本轮补首份并实证 round213『functions 与
+       config 对齐=100』后再漂 1 即红的回归连锁；防假绿2(文件恒在场)+防假绿3(独立重算)均在此变异下显形。
+       证据:【round247-coverage-guard-mutation-evidence.txt】;台账行 A.14 增补 coverage-guard-input-247。
+
 
 
 

@@ -1,0 +1,32 @@
+===================================================================
+round247 coverage-guard 阈值回归连锁触发级变异复证（首份 evidence 落档）
+===================================================================
+objective: 继续  round: 247/256  HEAD 基线: 606737b  时间: 2026-11-15T00:58:19.041Z
+
+【动机】coverage-guard 在台账里 round196（阈值 95→999 红）/ round213（functions 95→100 与
+  config 对齐）有变异记录，但从未落成独立 evidence 文件。本轮补首份：验证 round213 对齐后的
+  阈值『再漂移 1 即红』这一回归连锁，并核对『独立重算的下限断言』一直真实执行。
+
+【守卫性质】coverage-guard 是真实数据臂：spawn 真实 vitest --coverage(v8+json-summary)，
+  读回 coverage-summary.json，检查两个门控源文件（author-reviewer.ts/evaluate.ts）确在统计内
+  （反假绿2），再对其 lines/branches/functions/statements 逐条独立重算下限断言（反假绿3）。
+  MIN = lines95/branches95/functions100/statements90，与 vitest.config 的 per-glob 阈值同水平。
+
+【注入——阈值向上漂移】
+  test/arch/coverage-guard.test.ts 内 MIN.functions 100 → 101。
+  注入前 sha256: 722d621b2bb4474bd500837db8b810376b49d97d757587d4abbf3cf7ed882f97
+  注入后 sha256: a1b21328f1fbf2ae9f3e0e9efa2836d3028ee3a999a461182518e8050fac7a9c
+
+【RED 捕获】变异后 coverage-guard.test.ts exit=1，Tests 1 failed (1):
+   AssertionError: author-reviewer.ts functions: expected 100 to be greater than or equal to 101
+   (coverage-guard.test.ts:80 独立重算的 functions 下限断言)
+   → 真实来源 author-reviewer.ts functions=100，MIN 漂到 101 立即红，无 vacuous 空间。
+
+【还原 + GREEN】git checkout -- coverage-guard.test.ts → sha256 逐字节一致 722d621b...
+  还原后 1/1 通过 exit=0；git status --porcelain 仅剩本 evidence（clean）。
+
+【结论】round213 将 functions 对齐到 config(=config lines95/br95/fn100/st90 同水平)后，
+  判据仍在位：阈值上漂 1 即被『独立重算』assert 当场抓住。coverage 门槛不是文档软文而是
+  arch 套件每轮机械执行的硬闸。
+  台账 A.14 行: coverage-guard-input-247 追加弧形证据。
+===================================================================
