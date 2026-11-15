@@ -1,0 +1,33 @@
+===================================================================
+round248 commit-msg-refs 真实历史臂受控变异复证（首份专门 evidence）
+===================================================================
+objective: 继续  round: 248/256  HEAD 基线: d3fc8e3  时间: 2026-11-15T01:01:55.255Z
+
+【动机】commit-msg-refs 在台账 canary 变异证 215-218 有判据级探测，且本会话 round244/245 曾两次
+  亲眼见证其真实历史臂对真实幽灵号泄漏的自主捕获（amend 去号复绿、evidence 补记防泄漏），但该
+  守卫从未有专门 mutation-evidence 文件。本轮补首份：以受控真实提交构造同类死引用，验证真实臂
+  的判别力可复现、可还原。
+
+【守卫性质】commit-msg-refs 是『唯一读真实 git 历史』的 canary：git log --all --name-only 拉全量
+  提交消息（subject+body），docIds 正则 (?<![A-Za-z0-9_/.-])(0[0-9]{3})(?![A-Za-z0-9_-]) 抓独立四位号，
+  与 existingIds(docs/decisions)/reservedIds(docs/INDEX 预约)/EXEMPT 比对，不存在的号报『死引用』。
+  前提断言先确认读到了 ≥60 条提交，杜绝空对空假绿。
+
+【注入——受控真实历史死引用】
+  制造一条临时提交，消息正文含一行孤立四位号 (此号) —— 经叕验证该号不存在于现存决策 52 号、
+  INDEX 预约、EXEMPT 三者，是纯正死引用。载体文件随 reset 移除，不污染工作区。
+  临时提交: 7109a8c  docs(audit): round247 临时载体（将被 reset 删除）
+
+【RED 捕获】注入后 commit-msg-refs.test.ts exit=1，Tests 1 failed | 3 passed (4):
+   AssertionError: expected '7109a8c 死引用: 提到不存在的 (此号)' to deeply equal ''
+   → 与 round244/245 史的同类泄漏同形：真实历史臂当场抓住制造出的死引用提交，非空对空。
+
+【还原 + GREEN】git reset --hard d3fc8e3（删除临时提交）→ log --all 已无 (此号)，
+  commit-msg-refs 4/4 复绿 exit=0；arch 全 18 文件/138 例绿；
+  git status --porcelain 仅剩本 evidence（临时载体已随 reset 移除）。
+
+【结论】commit-msg-refs 控真实历史数据臂：人类一时失手在提交消息里写个死号，guard 会在下一轮
+  arch 套件里当场把它钉在测试输出上 —— 判别力可复现、可还原、不污染历史。这是 canary 判据级
+  (215-218) 之外的独立真实臂维度，专档成证据。
+  台账 A.14 行: commit-msg-refs-input-248 追加弧形证据。
+===================================================================

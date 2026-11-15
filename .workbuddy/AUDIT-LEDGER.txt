@@ -117,6 +117,15 @@ E. 纠正后的诚实基线（round184 发现 round175 漏报文件级错误；1
        备注: 台账 round196/213 曾做阈值变异但无 evidence 文件，本轮补首份并实证 round213『functions 与
        config 对齐=100』后再漂 1 即红的回归连锁；防假绿2(文件恒在场)+防假绿3(独立重算)均在此变异下显形。
        证据:【round247-coverage-guard-mutation-evidence.txt】;台账行 A.14 增补 coverage-guard-input-247。
+   22. round248 复核（HEAD d3fc8e3 后）: 守卫真实臂变异复证 commit-msg-refs —— 首份专门 evidence
+       受控真实历史死引用：临时提交 7109a8c 消息正文含孤立 (此号)（经确证不在现存52号/INDEX预约/EXEMPT）→
+       RED: expected '7109a8c 死引用: 提到不存在的 (此号)' to deeply equal ''，4/4 中 1 failed。
+       git reset --hard d3fc8e3 删除临时提交 → log --all 无 (此号)，4/4 复绿；arch 全 18 文件/138 例绿。
+       备注: 与 round244/245 史同类泄漏同形（守卫生效那次先被荒历史 blame）；本守卫真实历史臂判别力
+       可复现、可还原、不污染历史。canary 判据级(215-218)之外的独立真实臂维度。
+       证据:【round248-commit-msg-refs-mutation-evidence.txt】附 round248-red-full.txt;台账行 A.14 增补
+       commit-msg-refs-input-248。
+
 
 
 
