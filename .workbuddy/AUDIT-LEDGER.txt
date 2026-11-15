@@ -164,6 +164,19 @@ E. 纠正后的诚实基线（round184 发现 round175 漏报文件级错误；1
        结论：现存代码与账本 zero 独立四位号泄漏，纲约全链有效。无新增四位号；arch 全 18 文件/138 例绿；status 净。
        证据: 扫描脚本输出（21 commit/35 hit 全甄别）；台账行 HEAD 基线 3e0d9f5。
 
+   29. round255 复核（restore-verify 真值审计）: 对 18 份 mutation-evidence 逐一核对其声称的『字节还原基线』是否
+       可在对象库验证。发现 round241 证据的还原基线记录错误：
+       · L24 称『还原后 sha256 == HEAD blob 03bf24d…』，但该 64 位串既非合法 git hash、03bf24d 短引用在对象库
+         不存在，且与 L23 自证的『git show HEAD:…(此号) 写回』自相矛盾 —— 还原后文件即 HEAD blob，真实 hash 应为
+         3b7d385e409b5d4c92c57caf0c6c20d6c240ba14。L12 短基准同样误记。
+       · 已修正：两处伪基线替换为真实 HEAD blob 3b7d385e…（还原基准与 L23/现场一致，逐字节可验）。
+       其余 17 份证据的还原基线核对：round238 完整 hash 23175d7f… 为合法 blob（==HEAD）；round242/244 的
+       注入态 hash（211a1032…/8396d239…）为未入库的注入文件 hash-object 计算值，还原即删故对象不存在，
+       属注入态对照而非还原基线，正常。结论：restore-verify 真值链已闭合（round241 修正越早、越难追但已追平）。
+       证据: git cat-file -t 逐 hash 核对 + round241 evidence 两处修正 diff。无新增四位号；
+       arch 全 18 文件/138 例绿；status 净。
+
+
 
 
 
