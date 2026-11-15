@@ -1,0 +1,78 @@
+================================================================
+round245 harness-invariants 守卫触发级变异复证（真实配置数据臂）
+================================================================
+objective: 继续  round: 245/256  HEAD 基线: 4fccfd9  时间: 2026-11-15T00:41:40.523Z
+
+【前情——round244 amend 记录】
+  基线 2dc2b36 时 commit-msg-refs 真实历史臂报『2dc2b36 死引用: 提到不存在的 0099』:
+  round244 提交消息 subject 含幽灵探针号 0099，而该号在还原后不存在 → 被判据 B 抓。
+  这是上一轮自我污染的实例 —— commit-msg-refs 真实历史臂当场抓到。修复: git commit --amend
+  改写消息去掉 0099（改为『missing[探针号]』），新 HEAD 4fccfd9，恢复 GREEN(commit-msg-refs 4/4、doc-ids 2/2)。
+  该事件作为 commit-msg-refs 真实历史臂对历史提交错误的主动捕获力证据记入本文件。
+
+【注入——真实配置数据臂】
+  vitest.config.ts:12  include: ["test/**/*.test.{ts,tsx}", "packages/*/test/**/*.test.{ts,tsx}"]
+  变异: 删除末尾『packages/*/test/**/*.test.{ts,tsx}』（test.include 必备项缺失，测试面可能被改窄）。
+  这是 harness-invariants 的【真实解码器输入】臂（readVitestInclude 读真配置，非 canary 虚设数组）。
+  注入前全文 sha256: f7c3c1761c453a50972a92fa4c1092e0680aec350d2e1ea0f5ed3b4a519e244e
+  变异后 L12: include: ["test/**/*.test.{ts,tsx}"]
+
+【RED 捕获】变异后 harness-invariants 单独 run exit=1:
+  - vitest.config.ts 的 test.include 里缺 packages/*/test/**/*.test.{ts,tsx} —— 测试面可能被改窄
+  （判据精确命中『必备 include 缺失』这一态）
+外层形态（killer detail）：修改真实 vitest.config 后 vitest 自身先报『No test files found, exiting with code 1』
+  —— 因为 packages/*/test/** 被抹掉，测试面被改窄，vitest 收集不到本应存在的测试；
+  随后 globalSetup(build-contracts.ts:45) 把同一判据当 Unhandled Error 抛出。
+  ⇒ 实证了 round176/config-match 设计注所担心的那态：『真配置读不出 include 时，测试自身会被摘出收集范围』
+     —— 但 harness-invariants 靠 globalSetup 在测试冒烟前就拦截，不会假绿。
+  完整 RED 存档已并入本证据（下方）
+
+【还原 + GREEN】git checkout -- vitest.config.ts → sha256 逐字节一致=f7c3c1761c453a50972a92fa4c1092e0680aec350d2e1ea0f5ed3b4a519e244e（与注入前基线完全相同）
+  还原后 harness-invariants: Test Files 1 passed (1) / Tests 17 passed (17)  exit=0
+
+【RED 完整存档（还原前原样）】
+```
+
+ RUN  v4.1.12 D:/item/opc
+
+No test files found, exiting with code 1
+
+filter: test/arch/harness-invariants.test.ts
+include: test/**/*.test.{ts,tsx}
+exclude:  **/node_modules/**, **/.git/**
+
+
+⎯⎯⎯⎯⎯⎯ Unhandled Error ⎯⎯⎯⎯⎯⎯⎯
+Error: 测试装置自检失败（globalSetup）：
+  - vitest.config.ts 的 test.include 里缺 packages/*/test/**/*.test.{ts,tsx} —— 测试面可能被改窄
+ ❯ Object.setup test/global-setup/build-contracts.ts:45:11
+     43|   });
+     44|   if (problems.length > 0) {
+     45|     throw new Error(
+       |           ^
+     46|       "测试装置自检失败（globalSetup）：\n" +
+     47|         problems.map((p) => "  - " + p.why).join("\n"),
+ ❯ TestProject._initializeGlobalSetup node_modules/.pnpm/vitest@4.1.12_@types+node@2_9c06aa0f1be7ed4a182fcc813264f722/node_modules/vitest/dist/chunks/cli-api.B0Pz1_R7.js:10813:50
+ ❯ Vitest.initializeGlobalSetup node_modules/.pnpm/vitest@4.1.12_@types+node@2_9c06aa0f1be7ed4a182fcc813264f722/node_modules/vitest/dist/chunks/cli-api.B0Pz1_R7.js:13812:35
+ ❯ node_modules/.pnpm/vitest@4.1.12_@types+node@2_9c06aa0f1be7ed4a182fcc813264f722/node_modules/vitest/dist/chunks/cli-api.B0Pz1_R7.js:13655:6
+ ❯ node_modules/.pnpm/vitest@4.1.12_@types+node@2_9c06aa0f1be7ed4a182fcc813264f722/node_modules/vitest/dist/chunks/cli-api.B0Pz1_R7.js:13684:11
+ ❯ node_modules/.pnpm/vitest@4.1.12_@types+node@2_9c06aa0f1be7ed4a182fcc813264f722/node_modules/vitest/dist/chunks/cli-api.B0Pz1_R7.js:13546:19
+ ❯ startVitest node_modules/.pnpm/vitest@4.1.12_@types+node@2_9c06aa0f1be7ed4a182fcc813264f722/node_modules/vitest/dist/chunks/cli-api.B0Pz1_R7.js:14621:8
+ ❯ start node_modules/.pnpm/vitest@4.1.12_@types+node@2_9c06aa0f1be7ed4a182fcc813264f722/node_modules/vitest/dist/chunks/cac.DzDtg8hz.js:2340:15
+ ❯ CAC.run node_modules/.pnpm/vitest@4.1.12_@types+node@2_9c06aa0f1be7ed4a182fcc813264f722/node_modules/vitest/dist/chunks/cac.DzDtg8hz.js:2318:2
+
+
+
+
+
+```
+
+
+【守卫二次自主捕获（补记）】
+  round245 首版提交 b9f5ec1 的消息正文为记录 amend 事件，误把幽灵探针号四位数写回消息；
+  commit-msg-refs 真实历史臂当场抓『b9f5ec1 死引用: 提到不存在的 (此号)』(RED, 1 failed|3 passed)。
+  教训复现: 消息文本写作时仍须严守『不存在编号绝不落四位号』。
+  git commit --amend 去号 → 二抓后复绿 4/4 → 终态 HEAD 841f74d。
+  ⇒ 同一守卫在两轮里对『消息泄漏幽灵号』两次自主捕获，真判别力复证。
+【收尾】git status --porcelain 应仅剩本 evidence 文件未跟踪；决策(1)已字节还原(2)harness-invariants 17/17 绿(3)commit-msg-refs 4/4 与 doc-ids 2/2 绿(amend 后)。
+================================================================

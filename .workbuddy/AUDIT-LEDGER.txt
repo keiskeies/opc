@@ -97,6 +97,13 @@ E. 纠正后的诚实基线（round184 发现 round175 漏报文件级错误；1
        基线 2绿(52 决策文件 0001..0052 全被 INDEX 列出) →注入→真实数据臂红: stderr AssertionError『expected { missing: [ 0099 ], extra: [] } to deeply equal { missing: [], extra: [] }』(fileIds=observe 0099→missing half, 1 failed|1 passed) → 删除还原(注入文件未进 git) → 2绿/worktree 净
        判据洞察: decision-index 是少数对【真实仓库数据】做质询的守卫 —— 它不像 canary 只测纯函数,而是当场读 decisions/ 目录与 INDEX.md 双向 diff。注入幽灵文件让 missing 侧 =1 正好激活『漏更新』那半个判域，证明该守卫对『有人建了新决策但忘了更新索引』的真实生产缺陷有触发级响应。
        证据:【round244-decision-index-mutation-evidence.txt】;台账行 A.14 增补 decision-index-input-244;头部第 3 行 HEAD 校正至当前 HEAD ef90169。
+   19. round245 复核（HEAD 4fccfd9，round244 经 amend 后）: 守卫触发级变异复证 harness-invariants ——【真实配置数据臂】注入 vitest.config.ts test.include 抹掉必需项『packages/*/test/**/*.test.{ts,tsx}』
+       基线 17/17 绿 →注入→ RED: guard 在 globalSetup(build-contracts.ts:45) 抛『测试装置自检失败: test.include 里缺 packages/*/test/**』，
+       外层形态是 vitest 自身先『No test files found』—— 实证了 round176/config-match 设计注担心的『真配置读不出 include 时测试自身被摘出收集』，
+       而 harness-invariants 靠 globalSetup 在测试冒烟前拦截，不会假绿。还原(git checkout)后 sha256 逐字节一致，17/17 复绿。
+       附带 amend 记录: round244 提交消息 subject 曾含幽灵号 0099，commit-msg-refs 真实历史臂当场抓为『死引用』→ git commit --amend 去掉 → 恢复 4/4 绿。
+       证据:【round245-harness-invariants-mutation-evidence.txt】;台账行 A.14 增补 harness-invariants-input-245。
+
 
 
 F. 开放项（report-only，等 CEO/owner）
