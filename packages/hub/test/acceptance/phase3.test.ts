@@ -53,6 +53,7 @@ import {
   saveCharterVersion,
 } from "../../src/charter/store.js";
 import { fixtureTmp } from "../fixtures/fixture-dir.js";
+import { toPosix } from "../fixtures/paths.js";
 import { WriteQueue } from "../../src/db/write-queue.js";
 import { migrate } from "../../src/db/migrate.js";
 import { evaluateGate } from "../../src/graph/gates/evaluate.js";
@@ -72,7 +73,20 @@ import { searchEvents } from "../../src/replay/search.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const HUB = join(HERE, "..", "..");
-const SRC = join(HUB, "src");
+/**
+ * `SRC` 存的是**正斜杠**形状（0053），不是笔误也不是美化。
+ *
+ * 下面 ④ 段有 13 发期望值写成 `SRC + "/engine/work.ts"` 这种拼接，而取材侧
+ * （`tsFiles`）走 `join()`。Windows 上 `join()` 给反斜杠 ⇒ 两侧永不相等，
+ * 那三发【门禁的诚实口径】的断言就恒红，红的成因是分隔符而不是它们声称的
+ * 「调用方名单不对」。把 SRC 归一化 + tsFiles 也归一化，两侧同形，拼接才成立。
+ *
+ * 为什么归一化在取材/SRC 这一侧而不是把期望值改成 `join()`：期望值与 0014 / 0015
+ * 那些文档里的名单都用正斜杠；而真正的理由是**失效方向** —— 见 fixtures/paths.ts 文件头
+ * 那一段（一句话：这一族断言不能承受的是"少算"，`join()` 期望会让新写的断言在
+ * 另一台机器上少算而照样绿）。`SRC` 仍可直接喂 `readFileSync`（Windows 收正斜杠）。
+ */
+const SRC = toPosix(join(HUB, "src"));
 const TMP = fixtureTmp("acceptance3", import.meta.url);
 
 /** 固定在 2026-01-02（UTC）。日报的「哪一天」用 UTC 日划界（auto-approve.ts 文件头）。 */
@@ -642,12 +656,21 @@ describe("③ 岗位书里的 escalate 标准到不了升级路由（本轮实�
 
 /* ═══════════ ④ 门禁【判不了】的部分：钉成断言而不是写在注释里 ═══════════ */
 
+/**
+ * 枚举 src 下的 .ts。两条理由要求结果必须是**正斜杠**形状（`toPosix`）：
+ *  ① 与 `SRC` 同形 —— 上面那 13 发期望值是 `SRC + "/…"` 拼接；
+ *  ② 这一发 `out.sort()` 的**次序**也是判据的一部分（`toEqual` 比的是有序数组，
+ *     而 `engine/charter` → `engine/dispatch` → `engine/seat-card` 这种名单就靠它）。
+ *     反斜杠是 0x5C、正斜杠是 0x2F，混排时排序结果与纯正斜杠**不同**，
+ *     于是同一份源码在两台机器上能排出两种名单 —— 那是比"比不中"更坏的形状：
+ *     它偶尔会对，而错的时候看不出原因。
+ */
 function tsFiles(dir: string): string[] {
   const out: string[] = [];
   for (const n of readdirSync(dir)) {
     const p = join(dir, n);
     if (statSync(p).isDirectory()) out.push(...tsFiles(p));
-    else if (n.endsWith(".ts")) out.push(p);
+    else if (n.endsWith(".ts")) out.push(toPosix(p));
   }
   return out.sort();
 }

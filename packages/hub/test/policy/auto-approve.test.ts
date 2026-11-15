@@ -44,6 +44,7 @@ import {
   readAutoApprovalReport,
 } from "../../src/policy/auto-approve.js";
 import { fixtureTmp } from "../fixtures/fixture-dir.js";
+import { relPosix, toPosix } from "../fixtures/paths.js";
 import { type ActionDraft, matchForbidden, policyDecide } from "../../src/policy/engine.js";
 import { migrate } from "../../src/db/migrate.js";
 import { openDb } from "../../src/db/driver.js";
@@ -57,13 +58,22 @@ const TMP = fixtureTmp("auto-approve", import.meta.url);
  */
 const SRC = join(HUB, "..", "src");
 
-/** 静态扫源码树用。写成顶层函数而不是每个用例里各抄一份 walk：抄的那份会各自漂移。 */
+/**
+ * 静态扫源码树用。写成顶层函数而不是每个用例里各抄一份 walk：抄的那份会各自漂移。
+ *
+ * 枚举结果统一走 `toPosix()`（0053）—— 不是美化，是这一节的判据在 Windows 上的
+ * 存续条件：本文件后面三发都拿【正斜杠字面量】比路径（`endsWith("policy/auto-approve.ts")`、
+ * `replace(SRC + "/", "")`），而 `join()` 在 Windows 给的是反斜杠。两侧不同形时
+ * 「排除定义处」那个 filter 永不生效、`.replace` 永不剥前缀 ⇒ ⑧ 那三发恒红，
+ * 红的成因是分隔符而不是它们声称的「零调用方」。归一化放在取材侧而不是期望侧的理由
+ * 写在 fixtures/paths.ts 文件头（一句话：少算才是这一族不能承受的那一侧）。
+ */
 function tsFiles(dir: string): string[] {
   const out: string[] = [];
   for (const n of readdirSync(dir)) {
     const p = join(dir, n);
     if (statSync(p).isDirectory()) out.push(...tsFiles(p));
-    else if (n.endsWith(".ts")) out.push(p);
+    else if (n.endsWith(".ts")) out.push(toPosix(p));
   }
   return out;
 }
@@ -685,14 +695,14 @@ describe("⑧ 接线状态（接线那天这条会红，逼着同时更新 0014�
     const writers = files.filter((f) =>
       /["']INSERT INTO approvals[ (]/u.test(readFileSync(f, "utf8")),
     );
-    expect(writers.map((f) => f.replace(SRC + "/", ""))).toEqual(["approvals/cards.ts"]);
+    expect(writers.map((f) => relPosix(f, SRC))).toEqual(["approvals/cards.ts"]);
     // 而它【没有调用方】：createCard 在 src 里零命中（cards.ts 自己不算）。
     const callers = files.filter(
       (f) =>
         !f.endsWith("approvals/cards.ts") &&
         readFileSync(f, "utf8").includes("createCard("),
     );
-    expect(callers.map((f) => f.replace(SRC + "/", ""))).toEqual([]);
+    expect(callers.map((f) => relPosix(f, SRC))).toEqual([]);
   });
 
   it("policy 模块的自动批准在生产 src 里【还没有调用方】（已知缺口，不是实现遗漏）", async () => {
@@ -702,7 +712,7 @@ describe("⑧ 接线状态（接线那天这条会红，逼着同时更新 0014�
         !f.endsWith("policy/auto-approve.ts") &&
         /autoApprove\(|recordAutoApproval\(/u.test(readFileSync(f, "utf8")),
     );
-    expect(callers.map((f) => f.replace(SRC + "/", ""))).toEqual([]);
+    expect(callers.map((f) => relPosix(f, SRC))).toEqual([]);
   });
 
   it("消费侧【已经】接上：回放视图会带上这条标注（生产者到位那天立刻有数据）", () => {

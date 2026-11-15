@@ -1,0 +1,99 @@
+=== round257 证据｜那 8 发「设计红」在 Windows 上恒红（分隔符），修完的分辨力靠 7 发变异量出来 ===
+time: 2026-11-15T13:36:00Z
+HEAD（修前基线）: 462c2e8 docs(audit): round256-终验 审计链自证完整 11/11 MATCH
+决策记录: docs/decisions/0053-eight-designed-reds-that-were-never-firing-and-a-separator-nobody-normalized.md
+
+────────────────────────────────────────────────────────────────
+① 红因是分隔符，不是「零调用方」——决定性证据在失败输出自己里
+────────────────────────────────────────────────────────────────
+实测（HEAD 462c2e8，全套）：2334 total / 2320 pass / 8 fail / 6 skip，8 发即 ROUND187 矩阵所列。
+两条原始失败片段（内容相同、只有分隔符不同）：
+
+  - Expected: []
+  + Received: ["D:\\item\\opc\\packages\\hub\\src\\charter\\store.ts"]
+
+  - Expected: "D:\\item\\opc\\packages\\hub\\src/harness/verifier.ts"
+  + Received: "D:\\item\\opc\\packages\\hub\\src\\harness\\verifier.ts"
+
+第二发的期望值里 `src/harness/verifier.ts` 是手写的、`D:\item\opc\packages\hub\src` 是 join() 给的
+⇒ 同一条路径混两种分隔符，「两侧不同形」由证据本身体现，不靠推断。
+
+判据两侧不同形的后果是判据**反过来**：`!f.includes("/charter/")` 永不排除自己 ⇒
+模块把自己数成外部调用方 ⇒「零调用方」恒不成立 ⇒ 恒红，红因与它声称的缺口无关。
+
+按台账/矩阵记录的期望值把 11 个判据在**分隔符归一后**全部复算：全部交出文档写着的那个值
+⇒ 这 8 发今天本该绿。（缺口的真实性另见 ④，本轮一条没消。）
+
+────────────────────────────────────────────────────────────────
+② 修前/修后对照（同一批文件，分母相同）
+────────────────────────────────────────────────────────────────
+命令：npx vitest run packages/hub/test/charter/ \
+        packages/hub/test/policy/auto-approve.test.ts \
+        packages/hub/test/acceptance/phase3.test.ts
+
+  HEAD 462c2e8          → 4 failed files | 8 failed | 87 passed (95)
+  工作树（本轮改动后）  → 0 failed files | 0 failed | 95 passed (95)
+  另加新夹具自测        → packages/hub/test/fixtures/paths.test.ts  11 passed (11)
+
+分母同为 95 ⇒ 同一批断言换了结果，不是换掉了断言。
+git diff 核对：每条 toEqual(...) 的**期望值一字未动**（toEqual([])、toEqual(["approvals/cards.ts"])），
+改的全是取材侧（walk 出口 toPosix、SRC 归一、.replace(SRC+"/") → relPosix(f, SRC)）。
+
+全套：2345 total / 2339 pass / 6 skip / 0 failed test
+     （2334 基线 + 11 新发；claude.test.ts 报 "No test suite" 属既有良性 —— node:test 文件，
+       vitest 收不到，node --test 下 13/13 绿，见 round187）
+arch：18 files / 138 tests / 138 passed
+
+────────────────────────────────────────────────────────────────
+③ 7 发变异复证（分辨力的唯一证据）
+------------------------------------------------------------
+脚本：.workbuddy/round257-sepfix-mutate.mjs（入库；ROOT 由本文件位置推导，不写死绝对路径）
+注入点：packages/hub/src/overview/today.ts（真 src，必须在判据射程内且当前不在名单里）
+还原：保存原始字节 → writeFileSync 写回 → 逐字节比对，不等即 RESTORE-FAIL 停机
+前置：① 名字必须真是定义文件的 export（防假变异）② 注入处 `name(` 计数**严格增加**（防落地恒真）
+      ③ 注入目标开工前 git 必须干净（防把别人的改动当基线）
+
+  PASS  store ④ saveCharterVersion 出现 charter/ 外调用方   | 注入后 failed=1/23  还原后 failed=0/23
+  PASS  store ④ 写通道出现 charter/ 外 writer               | 注入后 failed=1/23  还原后 failed=0/23
+  PASS  budget-sync ⑦ 写入口出现调用方                      | 注入后 failed=1/20  还原后 failed=0/20
+  PASS  auto-approve ⑧ autoApprove 出现调用方               | 注入后 failed=1/42  还原后 failed=0/42
+  PASS  auto-approve ⑧ createCard 出现调用方                | 注入后 failed=1/42  还原后 failed=0/42
+  PASS  phase3 ④ verifyFix 出现调用方                       | 注入后 failed=2/10  还原后 failed=0/10
+  PASS  phase3 ④ readAutoApprovalReport 出现调用方          | 注入后 failed=2/10  还原后 failed=0/10
+
+  PASS 7 / 7，终检 git status --porcelain -- packages/hub/src 为空（脚本自带该终检，非人工翻）
+
+两轮都跑过：第一版在仓库外（TEMP），7/7 PASS 但 ROOT 写死、还原是裸 writeFileSync；
+入库前硬化了三处（ROOT 由 import.meta.url 推导 / 还原改重试+比对，理由 round185 量过 Windows
+句柄未释放会让写删 EPERM / 加 src 洁净终检），硬化后重跑仍是 7/7 且终检净。
+
+────────────────────────────────────────────────────────────────
+④ 缺口一条没消（这份证据**不**证明接上了）
+────────────────────────────────────────────────────────────────
+saveCharterVersion / syncCharterBudgets / autoApprove / createCard 的**生产调用方仍为零**；
+readAutoApprovalReport 仍只到数据面；HTTP/桌面仍到不了 policy/auto-approve.ts（0052 §3 差账）。
+7 发变异证明的是**断言会红**，不是**缺口已补**。ROUND187 矩阵的 owner 接线清单照旧待外部 owner。
+
+────────────────────────────────────────────────────────────────
+⑤ 静态闸门
+────────────────────────────────────────────────────────────────
+biome（4 个改动文件）：修前修后**同为 8 error + 1 warning**，规则构成逐条 diff 一致
+  （assist/source/organizeImports ×4 + lint/correctness/noUnusedImports ×1）⇒ 本轮零新增、也没修掉既有的。
+biome（新建 paths.ts / paths.test.ts）：0 错（格式化过一次）。
+biome（vitest.config.ts）：0 错 —— 本轮只改注释，阈值 4 个 0 与门控 95/95/100/90 一字未动。
+check-gate.mjs：exit 0，判不了或不符的项 0；C7「入口轮次相对指称」= 0
+  （0053 的 INDEX 条目第一版含「本轮」两处被 C7 拦下，按入口既有惯例改「本篇」后过）。
+pnpm verify 全链与审计日志可读性人工核对：依项目规矩待人亲跑。
+
+────────────────────────────────────────────────────────────────
+⑥ 顺带撞见、本轮**没修**的既有竞态（登记）
+────────────────────────────────────────────────────────────────
+test/arch/no-native-deps.test.ts 的 walk() 那层 readdirSync 无保护，报过一次
+  ENOENT: scandir 'D:\item\opc\packages\hub\.tmp\tx-scope-probe-51388'
+机理：别的测试 afterAll 正在 rmSync 自己那份夹具目录；fixtureTmp() 还会替别人
+pruneStaleFixtureDirs（test/fixtures/fixture-dir.ts），窗口比单个 teardown 更宽。
+同文件 readFileSync 早已有 try/catch，BOUNDARY_PROBE 那一族文件头也记过同类撞法。
+复现率实测：HEAD 连跑 3 次全套 0 复现；工作树 2 次全套 0 复现（另 1 次出现在改动前那趟）；
+no-native-deps + checkpoint/ 定向连跑 6 次 0 复现 ⇒ 只在**全套负载**下撞的竞态，非本轮引入的回归。
+修法已定位（walk 的 readdirSync 包 try/catch 跳过消失的目录，与 readFileSync 同形），
+与分隔符是两条独立因果链，故不混进同一提交。

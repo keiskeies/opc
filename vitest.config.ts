@@ -57,9 +57,12 @@ export default defineConfig({
      * ── round193 实测：@vitest/coverage-v8@4.1.12 已装（网络可达），真实数字到手：
      *   · 门控文件（graph/gates/**，仅跑 gates/escalation/phase1 测试）：lines 99.15% / branches 97.87% /
      *     functions 100% —— author-reviewer.ts 100/100/100；evaluate.ts 98.66/96.55/100。已达 95 上限。
-     *   · 全 hub/src（排除 4 个设计红文件与 claude）：lines 84.73% / branches 77.99% / functions 85.68%。
-     *     低于 95 的原因【恰是那 8 个设计红模块】—— charter/store、budget-sync、auto-approve 0~17%，
+     *   · 全 hub/src（排除当时那 4 个「设计红」文件与 claude）：lines 84.73% / branches 77.99% / functions 85.68%。
+     *     低于 95 的原因【是接线缺口】—— charter/store、budget-sync、auto-approve 0~17%，
      *     另有入口文件 cli/index/main/hub-serve 0%。即覆盖率赤字=接线缺口，非测试缺失。
+     *     ⚠ 0053 §5 更正的是**归因**而不是数字：那 8 发红在 Windows 上的成因是【路径分隔符】，
+     *     不是它们声称的「零调用方」，所以「赤字恰是那 8 发红模块」这句话的因果写反过。
+     *     数字与阈值一分未动 —— 0053 只改测试的取材侧、不动 src，覆盖率不可能变。
      *   ⇒ 结论维持：全局 95 会因接线缺口恒红（不可用）；门控专属 95 现可设（99.15 有余）。
      *   · round194：vitest 4.1.12 原生支持 per-glob thresholds（补在 thresholds 对象里，key=glob）——
      *     已在下方直接设上（gates 95/95/100/90），coverage 门控分支不再空转。
@@ -69,7 +72,8 @@ export default defineConfig({
       provider: "v8",
       include: ["packages/hub/src/**"],
       thresholds: {
-        // 全局 0 —— 全仓 lines 84.73%（round193），因 8 个设计红接线缺口模块 0~17% + 入口文件 0%。
+        // 全局 0 —— 全仓 lines 84.73%（round193），因接线缺口模块 0~17%（charter/store、budget-sync、
+        // auto-approve 的 src 侧至今零生产调用方，见 0053 §8）+ 入口文件 0%。
         // 一旦接线这些缺口消失、全仓过 95，再升全局阈值。当前设非 0 会恒红且是接线缺口而非测试缺失。
         branches: 0,
         functions: 0,

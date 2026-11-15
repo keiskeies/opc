@@ -17,6 +17,7 @@ import { fileURLToPath } from "node:url";
 import type { CharterInput } from "@opc/contracts";
 import { afterAll, describe, expect, it } from "vitest";
 import { fixtureTmp } from "../fixtures/fixture-dir.js";
+import { relPosix, toPosix } from "../fixtures/paths.js";
 import { WriteQueue } from "../../src/db/write-queue.js";
 import {
   assertCharterShape,
@@ -419,13 +420,16 @@ describe("③ 门控消费口：Task 3.6 那条 Test 的可测形态", () => {
 describe("④ 接线状态", () => {
   it("src 里【还没有】任何地方调用 saveCharterVersion（写侧接线的已知缺口）", async () => {
     const { readdirSync, readFileSync, statSync } = await import("node:fs");
-    const SRC = join(HUB, "src");
+    // 取材与判据必须同形，否则这一发在 Windows 上恒红而红因与它声称的无关（0053）：
+    // 下面 filter 用正斜杠的 "charter/store.ts"，而 join() 在本机给反斜杠 ⇒
+    // 「排除定义处」永不生效，store.ts 自己会被数成一个生产者。
+    const SRC = toPosix(join(HUB, "src"));
     const walk = (d: string): string[] => {
       const out: string[] = [];
       for (const n of readdirSync(d)) {
         const p = join(d, n);
         if (statSync(p).isDirectory()) out.push(...walk(p));
-        else if (n.endsWith(".ts")) out.push(p);
+        else if (n.endsWith(".ts")) out.push(toPosix(p));
       }
       return out;
     };
@@ -433,7 +437,7 @@ describe("④ 接线状态", () => {
       .filter((f) => !f.endsWith("charter/store.ts"))
       .filter((f) => /saveCharterVersion\(|gateCriteriaForRole\(/u.test(readFileSync(f, "utf8")));
     // 与 0014 §3 同一条：这条【今天成立】，接上那天它会红，逼着接的人同时更新文档。
-    expect(callers.map((f) => f.replace(SRC + "/", ""))).toEqual([]);
+    expect(callers.map((f) => relPosix(f, SRC))).toEqual([]);
   });
 
   it("保存岗位书【同时】把 budget 落进 budgets 表（否则屏幕显示新数字而执行侧按老数字放行）", async () => {
@@ -514,17 +518,21 @@ describe("④ 接线状态", () => {
   it("写通道【不经过】任何 HTTP / 组织图路径（今天它是孤岛，接上那天这条会红）", async () => {
     // 见 0015 §3。与 ④ 第一条同族：钉住【今天成立】，而不是假装已接上。
     const { readdirSync, readFileSync, statSync } = await import("node:fs");
+    // 同 ④ 第一条：walk 出来的是正斜杠，才配得上下面那个 `/charter/` 过滤器与 SRC_PREFIX。
+    // 不归一化时本机 outsideCharter 会把 charter/ 自己那两份也算成"外部"，
+    // 于是【两条】断言一起红（writers 多两项、imports 名单多一项）。
+    const SRC = toPosix(join(HUB, "src"));
     const walk = (d: string): string[] => {
       const out: string[] = [];
       for (const n of readdirSync(d)) {
         const p = join(d, n);
         if (statSync(p).isDirectory()) out.push(...walk(p));
-        else if (n.endsWith(".ts")) out.push(p);
+        else if (n.endsWith(".ts")) out.push(toPosix(p));
       }
       return out;
     };
-    const outsideCharter = walk(join(HUB, "src")).filter((f) => !f.includes("/charter/"));
-    const SRC_PREFIX = join(HUB, "src") + "/";
+    const outsideCharter = walk(SRC).filter((f) => !f.includes("/charter/"));
+    const SRC_PREFIX = SRC + "/";
     /**
      * ⚠ 这一发【原来】不止测写通道，它同时测了「charter/ 外面连这个模块都没人 import」。
      * 那个更宽的形状在 `GET /today` 那轮【自己红了】：`overview/today.ts` 为了报

@@ -245,3 +245,34 @@ L. round256 终验（be07d9a）——审计链自证完整。
    · vitest arch 套件真机实测（真 node、--reporter=json 落盘）：39 suites / 138 tests / 138 passed / 0 failed。
    · 复核过程本身发生两次脚本级误引用（漏 HEAD: 前缀 → 空对象名），已当场修正重算，非内容问题。
    · 结论：①–④ 目标链保持成立；『其余 17 份通过』复核仍成立。
+
+M. round257（0053）——那 8 发「诚实设计红」在 Windows 上从来没生效过
+   · 台账 F.3 与 ROUND187 矩阵每轮复述的『8 故意红』，实测红因**不是**它们声称的『零调用方』：
+     四份测试文件的判据拿正斜杠字面量比路径（endsWith("charter/store.ts")、includes("/charter/")、
+     f.replace(SRC + "/", "")、期望值 SRC + "/harness/verifier.ts"），而取材侧是 join() ⇒ Windows 给反斜杠。
+     后果是判据**反过来**：『排除定义处』的 filter 永不生效 ⇒ 模块把自己数成调用方 ⇒ 恒红，
+     与该缺陷的分辨能力为零（0013 §8 原话）。决定性证据在失败输出自己里：
+     期望值 "…\hub\src/harness/verifier.ts" 同一条路径混两种分隔符。
+   · 按台账记录的期望值在分隔符归一后复算 11 个判据：全部交出文档写着的那个值 ⇒ 这 8 发今天本该绿。
+   · 修：新建 test/fixtures/paths.ts（toPosix/relPosix/posixJoin，一份而非四份同 0026 §0）
+     + 4 个测试文件取材侧归一。归一化放取材侧而非期望侧的理由：期望侧若用 join() 拼本机分隔杠，
+     『零调用方』这类断言在别的 OS 上会少算而照绿；正斜杠期望 + 取材归一在出事时只会让名单变长 ⇒ 红。
+     另 out.sort() 次序也是判据的一部分（0x5C 与 0x2F 排序位置不同），混合分隔符会让同一份源码
+     在两台机器上产出两份都非空的名单，只看 length 的断言照绿。
+   · 分辨力证据（不是『修完变绿』）：7 发变异逐个注入真调用方
+     M1/M2 saveCharterVersion、M3 syncCharterBudgets、M4 autoApprove、M5 createCard、
+     M6 verifyFix、M7 readAutoApprovalReport ⇒ 7/7 注入即红、逐字节还原后回绿；
+     脚本入库 .workbuddy/round257-sepfix-mutate.mjs（自带『src 跑完必须干净』终检），
+     逐发记录见 round257-sepfix-mutation-evidence.txt。
+   · 数字：那 4 文件 8 failed/87 passed(95) → 0 failed/95 passed(95)（分母相同 ⇒ 同一批断言换结果，
+     git diff 里每条 toEqual 期望值一字未动）；全套 2345/2339 pass/6 skip/0 failed；arch 138/138；
+     gate exit0（C7 曾拦下 0053 的 INDEX 条目两处『本轮』，按入口既有惯例改『本篇』后过）。
+   · ⚠ 缺口一条没消：saveCharterVersion/syncCharterBudgets/autoApprove/createCard 生产调用方**仍为零**，
+     readAutoApprovalReport 仍只到数据面。7 发变异证明的是**断言会红**，不是**缺口已补**；
+     本段之上所有『8 设计红』的旧措辞按此更正，round187 历史证据**未回头改写**。
+   · vitest.config.ts 第 60-62 行『覆盖率赤字恰是那 8 个设计红模块』数字对而**归因错**，改注释不改阈值。
+   · 新登记（本轮没修）：test/arch/no-native-deps.test.ts 的 walk() 那层 readdirSync 无保护，
+     会被别人 afterAll 的 rmSync + fixtureTmp 的 pruneStaleFixtureDirs 撞出 ENOENT；
+     同文件 readFileSync 早有 try/catch 而 walk 少了那一层。复现率实测：HEAD 3 次全套 0 复现、
+     工作树 2 次 0 复现、定向 6 次 0 复现 ⇒ 只在全套负载下撞的竞态而非回归；
+     与分隔符是两条独立因果链，故不混进同一提交。

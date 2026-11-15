@@ -21,6 +21,7 @@ import { fileURLToPath } from "node:url";
 import type { DatabaseSync } from "node:sqlite";
 import { afterAll, describe, expect, it } from "vitest";
 import { fixtureTmp } from "../fixtures/fixture-dir.js";
+import { relPosix, toPosix } from "../fixtures/paths.js";
 import { WriteQueue } from "../../src/db/write-queue.js";
 import { migrate } from "../../src/db/migrate.js";
 import { openDb } from "../../src/db/driver.js";
@@ -535,13 +536,15 @@ describe("⑥ 与执行侧的连通：同步完，BudgetTracker 判超限用的�
 describe("⑦ 接线状态：与 0014 §3 同一条，钉住【今天成立】而不是假装已接上", () => {
   it("src 里【还没有】任何地方调用本模块的写入口（接上那天这条会红，逼着同时更新 0015）", async () => {
     const { readdirSync, readFileSync, statSync } = await import("node:fs");
-    const SRC = join(HUB, "src");
+    // 与 store.test.ts ④ 同一条修（0053）：判据用正斜杠的 "/charter/"，
+    // 取材必须同形，否则 charter/ 自己那两份会被当成外部调用方而这一发恒红。
+    const SRC = toPosix(join(HUB, "src"));
     const walk = (d: string): string[] => {
       const out: string[] = [];
       for (const n of readdirSync(d)) {
         const p = join(d, n);
         if (statSync(p).isDirectory()) out.push(...walk(p));
-        else if (n.endsWith(".ts")) out.push(p);
+        else if (n.endsWith(".ts")) out.push(toPosix(p));
       }
       return out;
     };
@@ -556,7 +559,7 @@ describe("⑦ 接线状态：与 0014 §3 同一条，钉住【今天成立】�
           readFileSync(f, "utf8"),
         ),
       );
-    expect(callers.map((f) => f.replace(SRC + "/", ""))).toEqual([]);
+    expect(callers.map((f) => relPosix(f, SRC))).toEqual([]);
   });
 
   it("本模块【不改】tracker：declareLimit 与 consume 的源码里没有被本模块塞进去的东西", async () => {
