@@ -153,6 +153,17 @@ E. 纠正后的诚实基线（round184 发现 round175 漏报文件级错误；1
        · 台账 round 条目 #4-#27 编号连续无裂，round233-252 每条有对应 evidence 或复核记录；
        三方矩阵 18/18 闭合（含 no-null-bytes↔null-bytes-input-236↔no-null-bytes.test.ts 别名对）。
        证据: 本次脚本输出即对账矩阵；无新增四位号。arch 全 18 文件/138 例绿；status 净。
+   28. round254 复核（反泄漏纲约全链审计）: 对 round233..round253（a60c3fb..HEAD 共 21 commit）逐条 git show -p 新增行
+       做 word-boundary 独立四位号扫描，35 行命中逐一甄别：
+       · 决策号车道（docs/decisions 四位文件号）为仓库固有 ID 设计，属既有实体引述，非新增号；
+       · 探针车道：round241 注入坐标 (此号)、round244 幽灵文件 (此号)、round235 (此号) 等均为
+         当轮故意注入的『该红即红』引发物，正是被测试的非法引用自身，非泄漏；
+       · round234 SNAP 键 (此号) 为守卫输入设计记号；
+       · round245 记录证明 round244 提交消息曾含幽灵号 (此号)、被 commit-msg-refs 真实历史臂当场抓住并 amend 清除 ——
+         属『已修复』纠正记录而非现存泄漏；
+       结论：现存代码与账本 zero 独立四位号泄漏，纲约全链有效。无新增四位号；arch 全 18 文件/138 例绿；status 净。
+       证据: 扫描脚本输出（21 commit/35 hit 全甄别）；台账行 HEAD 基线 3e0d9f5。
+
 
 
 
