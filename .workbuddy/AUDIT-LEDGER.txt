@@ -124,6 +124,14 @@ E. 纠正后的诚实基线（round184 发现 round175 漏报文件级错误；1
        备注: 与 round244/245 史同类泄漏同形（守卫生效那次先被荒历史 blame）；本守卫真实历史臂判别力
        可复现、可还原、不污染历史。canary 判据级(215-218)之外的独立真实臂维度。
        证据:【round248-commit-msg-refs-mutation-evidence.txt】附 round248-red-full.txt;台账行 A.14 增补
+   23. round249 复核（HEAD 82dc8f0 后）: 守卫判据本体变异复证 matcher-oracle —— 最后补档两守卫之一
+       契约型 canary（测真 vitest matcher 对 Set/Map/Date/RegExp/Error/toMatchObject 的分辨力，(此号) §1 教训）：
+       核心哨兵 expect(new Set(['a'])).not.toEqual(new Set(['zzz'])) 去 .not 改为 toEqual（必假命题）→
+       RED: AssertionError expected Set{ 'a' } to deeply equal Set{ 'zzz' }（38 行），1 failed | 9 passed →
+       git checkout 字节还原（sha256 f750e60e…）→ 10/10 复绿，arch 全 18 文件/138 例绿。
+       备注: 判据翻转成必假即红，证明『恒绿而比较器瞎』那状态一旦有人把哨兵改坏就会被钉住。
+       证据:【round249-matcher-oracle-mutation-evidence.txt】;台账行 A.14 增补 matcher-oracle-input-249。
+
        commit-msg-refs-input-248。
 
 

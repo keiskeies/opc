@@ -1,0 +1,35 @@
+===================================================================
+round249 matcher-oracle 契约型断言核心哨兵变异复证（首份专门 evidence）
+===================================================================
+objective: 继续  round: 249/256  HEAD 基线: 82dc8f0  时间: 2026-11-15T01:05:55.106Z
+
+【动机】matcher-oracle 在台账 canary 变异证 215-218 有判据级探测，但从未有专门 mutation-evidence
+  文件。它是 18 个 arch 守卫里『比较型断言对无枚举键类型的分辨力』的守卫（(此号) §1 出处：某 /tmp
+  替身比较器曾因为 Set/Map/Date/RegExp 内容不落在可枚举键上而把内容不同的 Set 判成相等，造成
+  全仓 9 条 toEqual(Set) 假绿）。本轮补首份：变异判据本体核心哨兵，验证对『比较器失效』的判别力。
+
+【守卫性质】matcher-oracle 为契约型 canary：10 条固定 expect 断言，不读外部数据，全在真 vitest
+  语义下也成立的命题（与执行器无关，将来 pnpm verify 照绿）。文件头核心哨兵『内容不同的 Set
+  不相等』（expect(...).not.toEqual(...)）是消灭『恒绿而比较器瞎』状态的关键形。
+
+【注入——核心哨兵判据翻转】
+  test/arch/matcher-oracle.test.ts 第 38 行：
+    expect(new Set(["a"])).not.toEqual(new Set(["zzz"])) → 去 .not 改为 toEqual
+  即把「内容不同的 Set 不相等」谬改为「内容不同的 Set 相等」—— 必假的命题。
+  注入前 sha256: f750e60e30df27dd1a8a330573284b2bd2e5d1254e8b56a742394d0eadde45f4
+  注入后 sha256: 6d17736fda62266902d1797147f188e0d039e0760e6daad91fc328aff561dcf5
+
+【RED 捕获】变异后 matcher-oracle.test.ts exit=1，Tests 1 failed | 9 passed (10):
+   × 内容不同的 Set 不相等
+   AssertionError: expected Set{ 'a' } to deeply equal Set{ 'zzz' }（第 38 行）
+   → 真 vitest 语义立即分清两个内容不同的 Set，变异哨兵当场被钉为红；其余 9 条仍绿，
+     证明红点就是变异的那一条，非误伤。
+
+【还原 + GREEN】git checkout -- matcher-oracle.test.ts → sha256 逐字节一致 f750e60e…，
+  还原后 10/10 通过 exit=0；git status --porcelain 净。
+
+【结论】matcher-oracle 对『比较器失效』的判别力可复现：把核心哨兵判据翻转成必假命题即红，
+  真 vitest 语义对 Set 的分辨力不受执行器影响。本守卫作为 (此号) §1 教训的版本化钉子，判据本体
+  一旦被改坏（像替身那样把 Set 判相等），arch 套件会在下一轮当场暴露。
+  台账行 A.14 增补 matcher-oracle-input-249。
+===================================================================
