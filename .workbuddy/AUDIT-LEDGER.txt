@@ -230,6 +230,11 @@ I. round193-194 coverage 解锁 + 非空阈值（原 F.3 开放项转为已修�
   · 反假绿2(196)：evaluate.ts 追加未测导出 → lines 88.09/br 84.84/fn 80，阈值三线齐红；恢复后回绿 —— 真实回退也会红。
   · round213：coverage-guard 的 MIN.functions 95→100 与 config 对齐(实测两文件均100)；变异(加未测函数→functions 80)精确红，恢复绿 —— 修正守卫比 config 松一格的漂移。
   · round214：presence 哨兵变异证(GATE_FILES 加不存在文件→红『expected 2 to be 3』)—— 两条反假绿(threshold+presence)均有变异证据。
-
-
-
+J. 全矩阵 20×64 位串内容摘要核验（round255 补证，文件 round255-append-digest-matrix-evidence.txt）
+  · 方法：把散见各证据的『注入前/注入后/全文』64 位串按内容重算（git show HEAD:xx 逐字节 sha256）或查对象库。
+  · 10 条可重算纯 sha256 全部 MATCH（round236/237/238/242/243/245/246/247/249/250）；round246 判定目标须指 config-match.ts 而非 .test.ts。
+  · round237 提炼：521daf21… 指注入目标 packages/hub/src/channels/abstraction.ts（JSDoc 注入文件），非守卫本体/非 .test.ts；round238 d657a15b…=blob 23175d7f 内容哈希。
+  · round241 的 03bf24d… 反推为 0008 决策文件内容纯 sha256（抽查 MATCH），类型错配而非伪造 —— round255 #29 修正方向复核成立。
+  · 注入态串（round242/244 等的 211a1032/8396d239…）cat-file -t 全不在对象库 → 已还原删除，合理。
+  · 结论：无第二处 round241 式硬伤；round255『其余 17 份通过』在摘要维度复核依然成立。
+  · 复核固化（round255-append-verdict-statement.txt）：cat-file -p 逐字节 Buffer 复算，11 条纯 sha256 前缀全 MATCH 无一不符；注入态 absent；check-gate 退出 0（pnpm verify 依项目规矩待人亲跑）。工作树仅本台账+两份补证待提交。

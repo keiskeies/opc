@@ -1,0 +1,36 @@
+# round255-append 复核声明（第三份：判定固化）
+
+方法说明（致复核人）：
+  A. check-gate.mjs 按项目规矩【审计主张由脚本代验；pnpm verify 全量测试+静态检查
+     须由你亲自跑，脚本不代跑】。本轮补证只新增 evidence 文本 + 台账追加两文件，
+     不动任何可编译单元 —— 回归面为零。
+  B. 判定 A（对象解析）/ C（摘要重算）/ D（工作树干净 / 注入态不在库）在脚本检查范围，
+     本轮补证仅涉及这三项，check-gate 退出码 0 = 判不了或不符的项为零。
+  C. 摘要重算由本文件复核：git cat-file -p 逐字节 Buffer → sha256 与证据前缀比对。
+  D. 本环境沙箱吞子进程 stdout / vitest 退出码不可信（哨兵必失败却退 0），故测试
+     请按项目规矩亲自 pnpm verify；本补证已代跑的只有退出码语义可靠的 git/只读复算。
+
+判定结果（往返基线与摘要，raw Buffer 复算）：
+  round236 注入前/还原后    8dcc5974ae536174… → MATCH（目标：docs/decisions/0001-sqlite-driver.md）
+  round237 注入前/还原后    521daf21ad25ad6c… → MATCH（目标：packages/hub/src/channels/abstraction.ts）
+  round238 注入前/还原后    d657a15b726c9b83f2220fdd3808ae8b7… → MATCH（目标：packages/hub/src/index.ts（=blob 23175d7f 内容哈希））
+  round242 还原后        3e1b069891d4d240… → MATCH（目标：test/arch/config-match.test.ts）
+  round243 注入前(HEAD)  b8a9d54e9313a6b4… → MATCH（目标：docs/review/check-gate.mjs）
+  round245 注入前/还原后    f7c3c1761c453a50… → MATCH（目标：vitest.config.ts）
+  round246 注入前        82f072d9c0928183… → MATCH（目标：test/arch/config-match.ts（守卫本体））
+  round247 注入前        722d621b2bb4474b… → MATCH（目标：test/arch/coverage-guard.test.ts）
+  round249 注入前        f750e60e30df27dd… → MATCH（目标：test/arch/matcher-oracle.test.ts）
+  round250 注入前        1615732198a4c12b… → MATCH（目标：biome.json）
+  round241 修正复核       03bf24d15241da01… → MATCH（目标：docs/decisions/0008-phase1-gate-semantics.md）
+  结论：全 11 条判定 MATCH 无一不符。
+
+  注入态对照（git cat-file -t 判不出 = 已还原删除）：
+    round242 211a103257fb… → absent ✓
+    round244 8396d239c517… → absent ✓
+
+工作树（提交前）：M .workbuddy/AUDIT-LEDGER.txt（台账追加#30）
+                ?? .workbuddy/round255-append-digest-matrix-evidence.txt（补证）
+                ?? .workbuddy/round255-append-verdict-statement.txt（本文件）
+本轮不新增可编译单元改动。
+check-gate 退出码：0（判不了/不符=0；pnpm verify 待你亲跑）
+HEAD：11cc7459d793…
