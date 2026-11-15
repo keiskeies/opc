@@ -276,3 +276,70 @@ M. round257（0053）——那 8 发「诚实设计红」在 Windows 上从来�
      同文件 readFileSync 早有 try/catch 而 walk 少了那一层。复现率实测：HEAD 3 次全套 0 复现、
      工作树 2 次 0 复现、定向 6 次 0 复现 ⇒ 只在全套负载下撞的竞态而非回归；
      与分隔符是两条独立因果链，故不混进同一提交。
+
+N. round258（0054）test/arch/no-native-deps 的 walk() ENOENT 竞态——修的是「崩」不是「竞态」
+
+   做 0053 §7 登记没修的那一格。修法三行，0054 的正文几乎全在讲【怎么证明修好了】
+   以及【我第一条证明办法是假的】。
+   · 缺陷：walk() 递归进入某目录前调 readdirSync(dir,{withFileTypes:true}) 无保护；
+     同文件 60 行之外的 readFileSync 早有 try/catch，文件头 71~77 行还把 BOUNDARY_PROBE
+     那一族记成「跨文件并行的已知撞法」⇒ 同一类问题少了一层。
+     可达性：跳过名单只有 {node_modules,dist,out} ⇒ 会下到 packages/<pkg>/.tmp/。
+   · 复现率（重量一遍确认 0053 没记错）：定向 8 次 0、HEAD 全套 3 次 0、工作树全套 2 次 0
+     ⇒ 负载下的竞态而非回归，没有「跑一下就红」这种验收方式可用。
+   · 核心：第一条「确定性复现」测了个空。真磁盘建 parent/child/nested.ts + sibling.ts、
+     rmSync(child)、断言 walk(parent) 不抛 —— 它绿；把 walk 退回裸 readdirSync 它【照样绿】。
+     机理：readdirSync(parent) 交的是【那一刻的快照】，先删再列 ⇒ child 不在清单里
+     ⇒ walk 从不 readdir(child) ⇒ 老代码走不到会抛那句，测试与缺陷完全错开。
+     真正的失效点必须是【快照里有它、递归下去时没了】= 时序，外部安排不了
+     ⇒ 把 readdir 抽成可注入参数，用假清单把那一毫秒摆成静态状态。
+     与实测那次同形：scandir 报的是那个目录【自己】，不是它的父。测不到的那条删了。
+   · 变异 8 发全抓：.workbuddy/round258-racefix-mutate.mjs（入库，自带收尾字节自检）。
+     基线取【探针启动那一刻的字节】而不是 HEAD —— 被改的就是未提交的本轮工作，
+     第一版照抄 round257 的「相对 HEAD 干净」前置 ⇒ 一进场就 ABORT 自杀。
+     M1 判据恒真 / M2 判据恒假（与 M1 成对：只测恒真时写成恒假也能让「ENOENT 被宽容」照绿）/
+     M3 连权限错误一起吞 / M4 null 判断写反 / M5 不调注入的 readdir /
+     M6 退回无保护【= 唯一一发复现原始失效模式，才是「修好了」的证据】/
+     M7 walk 忽略注入硬用真 readdirSync / M8 递归处丢掉注入 ⇒ M7/M8 钉「可注入不是装饰」。
+     结果 8/8：改坏即红、逐字节还原后回绿。
+   · 四个 walker 各因不同原因没坏，「顺手一起修」是错的：
+     no-native-deps.walk 下到 .tmp 且 readdirSync 裸奔 ⇒ 就是它，本篇修；
+     harness-invariants.walkFiles SKIP_DIRS 含 .tmp 且不用 stat ⇒ 不修；
+     test-inventory.enumerate IGNORED_DIRS 含 .tmp 且 statSync 已被 survivesStat 包着 ⇒ 不修（模式从它抄）；
+     production-deps.tsFiles 只走 packages/*/src 而夹具在 packages/<pkg>/.tmp ⇒ 到不了，
+     那颗裸 statSync【登记不修】：实测全仓无一处在 packages/**/src 下建目录，且 BOUNDARY_PROBE
+     是一个【文件】、isRuntimeFixture 在 stat 之前按名字拦掉 —— 是「今天没有并发引爆者」
+     不是「没有雷」。
+   · 否掉的省事修法「把 .tmp 加进跳过名单」：实测 packages/** 可扫源码 197 个，
+     跳 .tmp/coverage/.next 今天少扫 0 个、看着白捡；但本守卫是零容忍扫描器，
+     多跳一个目录 = 多看不见一片源码，等 coverage/ 里落进带 better-sqlite3 的产物就永远看不见。
+     跳过=少算（静默假绿），撞不上=多报（红，有人会去看）
+     ⇒ 与 0053 §3「归一化放取材侧而不是期望侧」同一个不对称在这一族的第二次应用。
+   · 「biome 与 HEAD 逐条同」这句话差点写假的三个坑：
+     ① --max-diagnostics 默认 20，而汇总行 Found 294 errors 不受该上限影响
+       ⇒ 拿默认输出算规则构成等于在 20 条样本上说 294 条的话
+       （我第一次抽出 10 条标签 123 字节，拦住我的是「123 字节装不下 294 条」这个数量级直觉）；
+     ② 输出顺序每次不同：同一份工作树连跑两次整份差 158179 字节，sort 后差 112（耗时行）
+       ⇒ 直接 diff 测的是排序不是差异；
+     ③ 第一版提取式只覆盖 241/294 ⇒ 比出的「IDENTICAL」只覆盖 82%。
+     最终口径 --max-diagnostics=none + 剥耗时行 + sort + 整份 diff ⇒ 26322 行逐条同，
+     294 error / 109 warning / 2 info 与 HEAD 一致，零新增零修掉。
+   · 自伤五条：① continue 写在 for 外面（语法错；tsc -b 不覆盖 test/** ⇒ 只有跑才抓得到）；
+     ② 第一条确定性复现测了个空（代价最大，靠变异抓到）；
+     ③ as Dirent 造假目录项 = TS2352 且 test/** 不在 tsc 射程 ⇒ 改 Pick<Dirent,"name"|"isDirectory">；
+     ④ 块注释里写源码树通配形状、*/ 把注释提前闭合 —— 这坑我读过两遍
+       （test-inventory.test.ts 文件头 + 0053 §6 第 4 条「读了、写进了注释、又犯一遍」）
+       第三次还是犯 ⇒ 光写进文档不阻止再踩，拦住它的是「改完就跑一次」这个动作；
+     ⑤ 拿 node -e 做字符串手术改探针锚点，改到第三处 ANCHOR-MISS ⇒ 放弃手术、照新形状重写。
+   · 数字：test/arch 18 文件 / 138 → 141 例全绿（+3）；全套 2348 / 2342 pass / 6 skip（+3）；
+     tsc -b exit0；对 test/arch/no-native-deps.test.ts 的一次性 tsc --noEmit --strict exit0；
+     biome 全仓与 HEAD 逐条同；gate exit0；变异 8/8。
+   · 没修 / 别当成做到了：修的是【崩】不是【竞态本身】—— 目录扫描途中消失现在静默跳过这一层，
+     理论上会跳过一个「扫描期间存在过、随后被删」的真实越界文件；这是本文件对 readFileSync
+     早就做过的同一取舍，补上缺失那一层而没消除它。没有新增守卫防「以后写第四个裸遍历」：
+     上面三处「没坏」的理由各不相同（跳过名单 / survivesStat / 没有并发删除者）
+     且【没有一个是机械强制的】。production-deps 的裸 statSync 登记不修。
+     M6 证明的是「退回无保护会红」不是「修完后真竞态不会再撞」—— 原始 ENOENT 修复前后
+     都一次没复现过，信心来自形状比对 + M6，不来自一次「干净地跑过真竞态」。
+     变异探针手工跑、不进 CI。为 test/** 补的那发 tsc 是手工动作不是闸门。
+     不动 src ⇒ 覆盖率不可能变（推论，本轮没跑 coverage）。0053 §7 与 M 段登记没回头改写。

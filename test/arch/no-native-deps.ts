@@ -26,3 +26,29 @@ export function isExemptPosix(
   }
   return relPosix.endsWith(fixtureTail);
 }
+
+/**
+ * 遍历目录时，「读不动」该跳过还是该照抛 —— 注入式纯函数。
+ *
+ * 判据与 `test-inventory.ts` 的 `survivesStat` 是同一条，但**不 import 它**：那边判的是
+ * 单个文件还在不在（stat），这边判的是一整个目录读不读得动（readdir），两者的返回语义
+ * 不同（一个给 boolean 存在性，一个给「这一层要不要跳过」）。抽成纯函数的理由与那边
+ * 一字不差：三种态（消失 / 在 / 权限拒绝）都能用合成输入钉住，不靠真造真删去撞时间窗 ——
+ * 那种测试本身就是流动的，撞不响的那一次不是通过，只是没撞。
+ *
+ * 只宽容「消失了」这一类（ENOENT / ENOTDIR）：并行的另一条守卫随时在删自己上一轮留下
+ * 的夹具，撞上是正常路径。**权限类错误照抛**：吞掉它等于让零容忍扫描器静默少扫一整片
+ * 目录，而它的全部价值就在于「扫到的每一条都算数」。
+ */
+export function readdirSurvives(readdir: () => unknown[]): boolean {
+  try {
+    readdir();
+    return true;
+  } catch (e) {
+    const code = (e as { code?: string }).code;
+    if (code === "ENOENT" || code === "ENOTDIR") {
+      return false;
+    }
+    throw e;
+  }
+}
