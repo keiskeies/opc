@@ -343,3 +343,71 @@ N. round258（0054）test/arch/no-native-deps 的 walk() ENOENT 竞态——修�
      都一次没复现过，信心来自形状比对 + M6，不来自一次「干净地跑过真竞态」。
      变异探针手工跑、不进 CI。为 test/** 补的那发 tsc 是手工动作不是闸门。
      不动 src ⇒ 覆盖率不可能变（推论，本轮没跑 coverage）。0053 §7 与 M 段登记没回头改写。
+
+O. round259（0055）claude.test.ts 从 node:test 搬进 vitest——一个从不 exit 0 的 pnpm test
+
+   0053 §7 我写过「claude.test.ts 报 No test suite found 属既有良性」，那句是错的，
+   原句照留、就地追加【撤回】（0055 §4）。
+   · 机理对而结论错：那是 node:test 文件、vitest 收不到（机理成立），但收不到 ⇒
+     ① npx vitest run 恒 exit 1 ⇒ pnpm verify（lint && typecheck && test）恒不可能通过
+       （一条恒不可能通过的验收命令 = 一条恒红的断言；0007 §4.1 记的是恒红信号会让人学会跳过它）
+     ② 那 13 发在门禁下一发都没跑。实测：把 parseDecision 的 lastIndexOf 改成 indexOf
+       （正是「取最后一个决策段」那发明令禁止的改法），门禁输出与基线逐字节同、退出码同、
+       测试数同（no tests）⇒ 对目标缺陷分辨能力为零（0013 §8 那七个字第二次落在同一个仓里）
+     ③ 文件头那句兜底跑法依赖 /tmp/opc-harness/register.mjs，该文件本机不存在
+       ⇒ 「node --test 下 13/13 绿」是照抄 round187、我没复算，而现在也复算不了
+     可迁移的形状：给一个红灯找到【正确的机理】，不等于给它找到【无害的结论】。
+   · 修法：搬进 vitest。选「搬」而不是「exclude + 另加 node --test 步骤」，因为后者要新增
+     script、要 TS transform，而结果仍然是这 14 发不在 pnpm test 里（覆盖率不计、门禁不看）。
+     搬迁把 assert.equal（宽松 ==）换成 expect().toBe（严格 ===）= 判据变严；
+     按「若红则是真发现、不许改断言迁就」执行 ⇒ 14 发全绿（这是观测，不是推断它们一定相等）。
+   · 搬完必须重证判别力（「搬进来就绿」不是证据）：改坏【生产源码】claude.ts 逐处必须红。
+     探针入库 .workbuddy/round259-vitest-port-mutate.mjs，14 发照文件头自己那句承诺挑
+     （参数没传过去 / 输出不是 JSON / 进程挂住不退 / 非零退出被当成功）。
+     第一轮 11/14，三发逃掉，成因各不相同且【没有一个是断言写松了】：
+       P3 rolePrompt 不上 argv —— 测试标题一直写着「rolePrompt 真的出现在 argv 上」而
+          体内从没断过它，桩也从不回显那一格；
+       P4 空 resumeSessionId 也推 --resume —— 桩把「不带 --resume」与「带空串」回显成
+          一模一样（都是 "resumed":""）⇒ 两种实现无法区分；
+       N1 只看 is_error 把非零退出当成功 —— 桩的 nonzero 档同时给 is_error:true 与 exit(1)，
+          两个失败信号绑死 ⇒ 对「只信一个」毫无分辨力。
+     补法都在桩那一侧（新增 systemPrompt / resumeFlag / silentfail）+ 补两条断言 ⇒ 14/14，
+     src 逐字节还原自检通过。
+     ⭐ P3 的形状：标题写着某性质而断言里没有那一格 ⇒ 那一格谁都没守，且 13 发全绿无提示。
+        标题不是断言。动作：读测试时把「标题承诺什么」与「体内断了什么」做差。
+        P4/N1 是同一缺陷的另一侧成因：夹具把两个应可区分的状态回显成同一个值
+        （与 0053 §2「排除定义处的 filter 永不生效」同族，那侧坏在判据、这侧坏在桩）。
+     silentfail 那发的现实性【没实测】（离线、CLI 装不上，真 CLI 会不会给 is_error:false
+     却非零退出不知道）⇒ 它钉的是「适配器不许只信一个信号」而不是「真 CLI 长这样」，
+     这句话写在测试自己的注释里，不只在决策文档里。
+   · biome 本篇减少 3 条：294 → 291 error（109 warning / 2 info 不变），逐条比新增 0，
+     被消掉的 3 条全是我改那两个文件自己的既有问题。fake-claude.mjs 的格式问题先量出
+     「修前 HEAD 就有 1 个 format error」才决定格式化，免得把既有问题混进本篇 diff 说不清。
+     口径同 0054 §6（--max-diagnostics=none + 剥耗时行 + sort + 整份 diff）。
+   · 自伤七条：① 搬迁第一版把路径导入写成 __dirname（ESM 没有，正确写法就在我正要覆盖的
+     那份文件里，抄的时候丢了）；② 一次 Edit 手滑删掉函数体第一行
+     （process.env[...] = "garbage"），没发现就会红在「环境变量没设」上而红因与判据无关；
+     ③ 注释里第三次写坏中文括号（0054 §7 第 4 条刚写过「光把坑写进文档不阻止我再踩」，
+     本篇换一种坏法又踩），修法用 node 做字符串替换、不重打那串中文；
+     ④ 213 那个数读错过一次：引擎目录连跑两次都是 213 就以为「加了一发而数没变」，
+     实际两次都已在新增之后，对的是全套 2361 → 2362（0051 §5 同一课）。
+     ⑤ 自己探针里的计数正则会返回 0 条诊断而同样的输出里明明写着 Found 3 errors —— 0053 §2
+       那一族（过滤条件写错恒不命中，「没抓到」被读成「没有」），靠 0 与 3 互相矛盾才发现，
+       改用 --reporter=summary（biome 自己聚合）才拿到能用的分解；
+     ⑥ 把一个总数拆成分解时没做加法：0055 §5 原写「organizeImports 1 + format 3」而 1+3=4；
+       总数一直对，错的是分解，而分解恰是我论证「这 3 条属于本篇」的依据。实测 HEAD 上那两个
+       文件的 3 条 = organizeImports 1（claude.test.ts）+ format 2（两文件各 1）。
+     ⑦ 为量 HEAD 的 biome 计数在仓里建了 tmpprobe/ 临时目录、用完没删 ⇒ test-inventory
+       那一发真的红了（uncollected 列出它）；核对副本与 HEAD blob 逐字节相同后才删。
+       ⇒ 这一发不是 0053 那种从来没生效的设计红，它确实会红。
+   · 数字：pnpm test 第一次 exit 0；全套 2362 / 2356 pass / 6 skip，108 文件全绿；
+     那一份文件 0 → 14 发在门禁里跑；engine 目录 8 文件 / 213 例；arch 18 / 141；
+     tsc -b exit0；gate exit0；变异 14/14；biome 291（-3，新增 0）。
+   · 没修 / 别当成做到了：搬迁不等于那 14 发以前是假的（内容一直对、node --test 下确实通过），
+     坏的是它们在门禁里不被执行，本篇改的是【谁执行它们】。fake-claude.mjs 是多文件共用的
+     （charter / dispatch 也读它的 cwd/budget）⇒ 跑过整个 packages/hub/test/engine/ 213 例
+     而不只这一份。pnpm verify 整条链仍【没跑】（项目规矩待人亲跑）—— 我分别跑过
+     biome / tsc / vitest 三段，⚠ 这不等于 pnpm verify 绿（pnpm 还带别的包与其自身检查）。
+     tsc -b 不覆盖 test/**（0007 §5 待 CEO 那条）⇒ 这份测试的类型只靠一次性 tsc --noEmit
+     手工核过，不是闸门。变异探针不进 CI。门禁 exit 0 说的是「今天没有红的东西」
+     而不是「没有缺口」—— 0053 §8 那四条仍是零调用方，本篇只让「红」重新成为有意义的信号。

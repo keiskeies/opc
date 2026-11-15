@@ -159,6 +159,14 @@
 `packages/hub/test/engine/claude.test.ts` 报 "No test suite found" 属**既有良性**：
 那是 `node:test` 文件，vitest 收不到，`node --test` 下 13/13 绿（round187 已记）。
 
+> 【撤回 0055 §4】上面那句**既有良性**是错的，原句照留。错的不是机理而是结论：
+> vitest 收不到 ⇒ ① `npx vitest run` **恒 exit 1** ⇒ `pnpm verify`（`lint && typecheck && test`）
+> **恒不可能通过**；② 那 13 发在门禁下**一发都没跑**（把 `parseDecision` 的 `lastIndexOf` 改成 `indexOf`，
+> 门禁输出与基线逐字节同）。机理对（node:test 收不到）不等于结论无害 ——
+> **给一个红灯找到正确的机理，不等于给它找到无害的结论**。而我那句「13/13 绿」是照抄 round187、
+> 没有自己复算（它依赖的 `/tmp/opc-harness/register.mjs` 本机已不存在）。修的过程与三条
+> 「标题写着而断言没写」见 0055。
+
 ---
 
 ## 8. 别当成做到了

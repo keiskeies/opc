@@ -39,6 +39,22 @@ process.stdin.on("end", () => {
     setInterval(() => {}, 1000);
     return;
   }
+  if (mode === "silentfail") {
+    // ⚠ 这一档是为 round259 的变异 N1 加的：原先 nonzero 档【同时】给 is_error:true 与
+    //   exit(1)，于是「适配器只看 is_error、把非零退出当成功」这个改法改完照样全绿 ——
+    //   两个信号绑在一起，测试对其中任何一个都没有分辨力。真的 CLI 会不会给出
+    //   is_error:false 却非零退出，我没有实测过（离线、装不上 CLI），所以这一档钉的是
+    //   【适配器不许只信一个信号】，不是【真 CLI 长这样】。
+    process.stdout.write(
+      JSON.stringify({
+        is_error: false,
+        result: "（CLI 说自己没错，但它是以非零码退出的）",
+        session_id: sessionId,
+        total_cost_usd: 0.042,
+      }),
+    );
+    process.exit(3);
+  }
   // mode=cwd：把【子进程自己的】cwd 与收到的 --max-budget-usd 塞进 decision.summary，
   // 而不是只塞进下面那份回显 JSON。
   // 为什么驱动器那条路需要这一档而章程那条不需要：charter.ts 会把回显 JSON 折进
@@ -49,18 +65,45 @@ process.stdin.on("end", () => {
   // 【会被折进审计】的位置。
   const summary =
     mode === "cwd"
-      ? "cwd=" + process.cwd() + " budget=" + (argv.includes("--max-budget-usd") ? argv[argv.indexOf("--max-budget-usd") + 1] : "(缺)")
+      ? "cwd=" +
+        process.cwd() +
+        " budget=" +
+        (argv.includes("--max-budget-usd")
+          ? argv[argv.indexOf("--max-budget-usd") + 1]
+          : "(缺)")
       : "方案已成型，交技术总监审阅";
   // 把收到的关键参数回显进 result，好让测试断在【真的传了 --resume】上，
   // 而不是断在「测试作者以为传了」。
-  const resumed = argv.includes("--resume") ? (argv[argv.indexOf("--resume") + 1] ?? "") : "";
-  const budget = argv.includes("--max-budget-usd") ? (argv[argv.indexOf("--max-budget-usd") + 1] ?? "") : "";
+  const resumed = argv.includes("--resume")
+    ? (argv[argv.indexOf("--resume") + 1] ?? "")
+    : "";
+  const budget = argv.includes("--max-budget-usd")
+    ? (argv[argv.indexOf("--max-budget-usd") + 1] ?? "")
+    : "";
+  // resumeFlag 与 resumed 分开报，是为了让「不带 --resume」与「带一个空串的 --resume」
+  // 在测试里【可区分】。只看 resumed 的话这两种情况都是 ""，于是
+  // 「把守卫从 `!== undefined && !== ""` 放宽成只判 `!== undefined`」这个改法测不出来
+  // —— 变异 P4 就是这么存活过一次（round259）。
+  const resumeFlag = argv.includes("--resume");
+  // rolePrompt 回显：这一格原先桩不回收，「角色身份真的上了 argv」就无从断言
+  //（变异 P3 存活的原因就是这个位置不存在，不是断言写松了）。
+  const systemPrompt = argv.includes("--append-system-prompt")
+    ? (argv[argv.indexOf("--append-system-prompt") + 1] ?? "")
+    : "";
   // cwd 排在【最前面】而不是 prompt 之后：调用方（charter 那条路）会把这段 JSON 折进
   // 卡片第二行，而那一行在 600 字处截断（charter.ts 的 impactScopeOf），
   // prompt 有几百字 —— 排在后面的字段会被截掉，那一发就会红在截断上而不是红在判据上。
+  // 新增的 resumeFlag / systemPrompt 同样排在 prompt【之前】，同一个理由。
   // 读的是【子进程自己的】process.cwd()：这是"调用方给的工作目录真到了进程里"唯一
   // 量得到的位置。测试里读父进程的 cwd 只能证明"我以为我传了"。
-  const echoed = { cwd: process.cwd(), resumed, budget, prompt: stdin.trim() };
+  const echoed = {
+    cwd: process.cwd(),
+    resumed,
+    resumeFlag,
+    budget,
+    systemPrompt,
+    prompt: stdin.trim(),
+  };
 
   const body =
     "这是员工的一轮汇报。\n\n" +
@@ -69,7 +112,12 @@ process.stdin.on("end", () => {
     "<<<OPC_DECISION>>>\n" +
     JSON.stringify({ action: "handoff", to_role: "tech", summary });
   process.stdout.write(
-    JSON.stringify({ is_error: false, result: body, session_id: sessionId, total_cost_usd: 0.042 }),
+    JSON.stringify({
+      is_error: false,
+      result: body,
+      session_id: sessionId,
+      total_cost_usd: 0.042,
+    }),
   );
   process.exit(0);
 });
