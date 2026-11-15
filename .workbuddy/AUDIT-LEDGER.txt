@@ -131,6 +131,15 @@ E. 纠正后的诚实基线（round184 发现 round175 漏报文件级错误；1
        git checkout 字节还原（sha256 f750e60e…）→ 10/10 复绿，arch 全 18 文件/138 例绿。
        备注: 判据翻转成必假即红，证明『恒绿而比较器瞎』那状态一旦有人把哨兵改坏就会被钉住。
        证据:【round249-matcher-oracle-mutation-evidence.txt】;台账行 A.14 增补 matcher-oracle-input-249。
+   24. round250 复核（HEAD dc5ad7e 后）: 守卫真配置臂变异复证 dependency-boundary —— 最后补档守卫收口
+       真实数据臂（绑真 biome noRestrictedImports，Task 0.2 验收 §5.6.1 依赖边界）：biome.json 全局
+       style/noRestrictedImports level error→off（desktop/web 唯一被挡来源消失，hub override 不动）→
+       RED: biome 对真实探针漏判，desktop 静态/ web 静态/ 动态 import 三条全放行（3 failed|1 passed），
+       error 即「Checked 1 file」无 noRestrictedImports；hub 放行侧仍绿。→ git checkout 字节还原
+       （sha256 1615732198…）→ 4/4 复绿，arch 全 18 文件/138 例绿，status 净。
+       备注: 至此 18 个 arch 守卫全部有专门 mutation-evidence 收口 完 235-250 连续 16 份。
+       证据:【round250-dependency-boundary-mutation-evidence.txt】;台账行 A.14 增补 dependency-boundary-input-250。
+
 
        commit-msg-refs-input-248。
 

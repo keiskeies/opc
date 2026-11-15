@@ -1,0 +1,40 @@
+===================================================================
+round250 dependency-boundary 真实 biome 配置臂变异复证（首份专门 evidence）
+===================================================================
+objective: 继续  round: 250/256  HEAD 基线: dc5ad7e  时间: 2026-11-15T01:10:00.239Z
+
+【动机】dependency-boundary 在台账 canary 变异证 215-218 有判据级探测，但从未有专门
+  mutation-evidence 文件。它绑真 biome noRestrictedImports 真实臂（Task 0.2 验收：desktop/web
+  越界 import SQLite 被 lint 挡、hub 放行，规格 §5.6.1 / 计划 §2）。本轮补首份，真配置臂是
+  唯一判定『依赖边界真实存在』的数据。
+
+【守卫性质】dependency-boundary 为真实数据臂 canary：往 packages/desktop、web、hub/src 注入
+  探针（static import node:sqlite / better-sqlite3，dynamic import node:sqlite），直接定位 biome
+  平台二进制 shell:false 跑 biome check，断言 desktop/web 输出含 noRestrictedImports 且 exit!=0
+  （禁止侧），hub exit=0（放行侧）。三条防假通过先决：Windows .cmd 陷阱、biome 平台二进制直链、
+  断言前确认输出含 Checked（否则 parse error/调用失败冒充拦截成功）。
+
+【注入——真实 biome 配置的禁止侧边界消失】
+  biome.json 全局 style/noRestrictedImports 的 level: error → off（第 44 行），desktop/web 唯一
+  被挡来源消失；packages/hub override（level off）不动。
+  注入前 sha256: 1615732198a4c12bf00b6f77ec512b4a21baeac4e57bf4fcfc4a9fab150e8263
+  注入后 sha256: d3107f02937f2d2aed9f82b1aa73c2429b2d9ea1d08d76273a415b52ed06c92a
+
+【RED 捕获】变异后 dependency-boundary.test.ts exit=1，Tests 3 failed | 1 passed (4):
+   × packages/desktop 禁止依赖 SQLite（静态 import） —— 放行了
+   × packages/web 禁止依赖 SQLite（静态 import） —— 放行了
+   × 动态 import 越界同样被挡 —— 放行了
+   ✓ packages/hub 允许依赖 SQLite（边界不误伤）
+   AssertionError: expected 'Checked 1 file ... No fixes applied.' to contain
+   the string 'noRestrictedImports' —— biome 对真实探针漏判，禁止侧三条全红。
+   对照: hub 放行侧 1 条仍绿，证明红点精确落在『禁止侧边界消失』，非误伤。
+
+【还原 + GREEN】git checkout -- biome.json → sha256 逐字节一致 1615732198…，
+  还原后 4/4 通过 exit=0；git status --porcelain 净。
+
+【结论】dependency-boundary 真配置臂判别力可复现：把全局禁止侧关掉，biome 对真实探针的
+  漏判立即被三条断言钉住（desktop 静态/web 静态/动态 import 全放行），而 hub 放行侧不受牵连。
+  这条守卫防的是『依赖边界配置被误删/误关』——边界消失时它当场红，证明 Task 0.2 验收
+  §5.6.1 边界是活的。
+  台账行 A.14 增补 dependency-boundary-input-250。
+===================================================================
