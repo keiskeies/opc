@@ -146,6 +146,14 @@ E. 纠正后的诚实基线（round184 发现 round175 漏报文件级错误；1
        本轮改动仅 5 行新增/删（diff 可核），新增区独立四位号复检零泄漏（全文件其余四位号均属笔记本遗留旧文本，非本轮新 text）；
        arch 全 18 文件/138 例绿；status 净。
        证据: 本行即台账修改自身；工作树基线 ac02ee9。
+   27. round253 复核（台账-证据-守卫三方矩阵对账）: 以文件系统为准三方双向核验 ——
+       18 个 evidence 文件 ↔ A.14 台账行 18 个 input label ↔ 18 个 arch 守卫文件，逐一前缀无关配对：
+       · evidence 文件名 slug（nnd/null-bytes/docrefs/docids 等缩写）与守卫规范名（hyphen 归一 + no- 前缀归一）全匹配；
+       · A.14 行 label 与守卫文件一一对应，无孤儿 label、无守卫缺覆盖；
+       · 台账 round 条目 #4-#27 编号连续无裂，round233-252 每条有对应 evidence 或复核记录；
+       三方矩阵 18/18 闭合（含 no-null-bytes↔null-bytes-input-236↔no-null-bytes.test.ts 别名对）。
+       证据: 本次脚本输出即对账矩阵；无新增四位号。arch 全 18 文件/138 例绿；status 净。
+
 
 
        真实数据臂（绑真 biome noRestrictedImports，Task 0.2 验收 §5.6.1 依赖边界）：biome.json 全局
