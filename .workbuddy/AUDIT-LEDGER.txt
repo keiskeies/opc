@@ -11,7 +11,7 @@ A. ARCH 变异验证 15 个（均立即红 + 原样恢复，括号=round）
   可执行性(round212)：vitest include 两 glob(test/** + packages/*/test/**)全覆盖 —— 全套实测收集 19 个守卫文件
     (18 arch + fixture-dir 26 例)全部执行；断言求和 2334=基线，无静默排除。claude.test.ts 是唯一不在 vitest
     的 node:test 文件(已知设计良性)。
-  doc-coords[156] doc-ids[159] comment-citations[159] doc-refs[156] doc-refs-input-234 doc-ids-input-235 comment-citations-input-237 production-deps-input-238 pending-decisions-input-239 test-inventory-input-240 doc-coords-input-241 pending-inventory-input-242 gate-selfcheck-input-243 decision-index-input-244
+  doc-coords[156] doc-ids[159] comment-citations[159] doc-refs[156] no-native-deps-input-233 doc-refs-input-234 doc-ids-input-235 null-bytes-input-236 comment-citations-input-237 production-deps-input-238 pending-decisions-input-239 test-inventory-input-240 doc-coords-input-241 pending-inventory-input-242 gate-selfcheck-input-243 decision-index-input-244 harness-invariants-input-245 config-match-input-246 coverage-guard-input-247 commit-msg-refs-input-248 matcher-oracle-input-249 dependency-boundary-input-250
   fixture-dir[156] decision-index[168] no-null-bytes[168] production-deps[167]
   no-native-deps[167] pending-inventory[166] test-inventory[166]
   pending-decisions[176] config-match[176] harness-invariants[176]
@@ -132,6 +132,14 @@ E. 纠正后的诚实基线（round184 发现 round175 漏报文件级错误；1
        备注: 判据翻转成必假即红，证明『恒绿而比较器瞎』那状态一旦有人把哨兵改坏就会被钉住。
        证据:【round249-matcher-oracle-mutation-evidence.txt】;台账行 A.14 增补 matcher-oracle-input-249。
    24. round250 复核（HEAD dc5ad7e 后）: 守卫真配置臂变异复证 dependency-boundary —— 最后补档守卫收口
+   25. round251 复核（A.14 台账行补全收口）: 权威台账行（第 14 行）此前只登记到 decision-index-input-244，
+       245-250 六轮 evidence 均只在其尾部条目写『台账行 A.14 增补 xxx-input-NNN』而未落实到权威行 ——
+       本次把 harness-invariants-input-245 / config-match-input-246 / coverage-guard-input-247 /
+       commit-msg-refs-input-248 / matcher-oracle-input-249 / dependency-boundary-input-250 六个 label 追加
+       至第 14 行，A.14 行从 16 个 → 18 个（本轮补上 233/236），233-250 全部 evidence 在权威台账行收口；
+       新增区独立四位号复检零泄漏；arch 全 18 文件/138 例绿；status 净。
+       证据: 本行即台账行（A.14）自身；台账行 HEAD 基线 44c5b80。
+
        真实数据臂（绑真 biome noRestrictedImports，Task 0.2 验收 §5.6.1 依赖边界）：biome.json 全局
        style/noRestrictedImports level error→off（desktop/web 唯一被挡来源消失，hub override 不动）→
        RED: biome 对真实探针漏判，desktop 静态/ web 静态/ 动态 import 三条全放行（3 failed|1 passed），
