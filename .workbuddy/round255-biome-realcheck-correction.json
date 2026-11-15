@@ -44,6 +44,7 @@
     "处置边界：本会话为只读法医审计，不代改 26 个源码文件；biome 红线清单已在代表性条目给出，修复属项目/pnpm verify 流程。"
   ],
   "integrity": {
-    "evidence_file_sha256_prefix": "fead1942daa68f98"
+    "content_baseline_sha256_prefix": "919a5f423c0ca85c",
+    "method": "sha256(JSON.stringify(content, 不含 integrity 字段)) 取前16位"
   }
 }
