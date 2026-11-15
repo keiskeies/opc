@@ -103,6 +103,14 @@ E. 纠正后的诚实基线（round184 发现 round175 漏报文件级错误；1
        而 harness-invariants 靠 globalSetup 在测试冒烟前拦截，不会假绿。还原(git checkout)后 sha256 逐字节一致，17/17 复绿。
        附带 amend 记录: round244 提交消息 subject 曾含幽灵号 0099，commit-msg-refs 真实历史臂当场抓为『死引用』→ git commit --amend 去掉 → 恢复 4/4 绿。
        证据:【round245-harness-invariants-mutation-evidence.txt】;台账行 A.14 增补 harness-invariants-input-245。
+   20. round246 复核（HEAD 2be5e93 后）: 守卫触发级变异复证 config-match —— 唯一史无发酵证守卫，补首份判据本体变异证
+       基线 7/7 绿 →注入(移除判据 extra 扫描报错分支)→ RED: 2 failed|5 passed，两用例同报『expected [] to deeply equal
+       [ {why: 真配置有 c/.../手抄常量没有} ]』『真配置有 z/...』—— 守卫漏报即断言红，非 vacuous。
+       git checkout 字节还原(sha256 82f072d9...) → 7/7 复绿；arch 全 18 文件/138 例绿。
+       备注: config-match 是 canary 纯函数判据（真配置读不出 include 会把断言文件摘出收集，round245 已实测 No test files found），
+       判据每一报错分支均有断言锁，本体变异必红，无假绿缝隙。
+       证据:【round246-config-match-mutation-evidence.txt】;台账行 A.14 增补 config-match-input-246。
+
 
 
 

@@ -1,0 +1,38 @@
+===================================================================
+round246 config-match 判据本体触发级变异复证（首份发酵证）
+===================================================================
+objective: 继续  round: 246/256  HEAD 基线: 2be5e93  时间: 2026-11-15T00:54:05.490Z
+
+【动机】18 arch 守卫中 config-match 是唯一从未有过变异发酵证的守卫：
+  trend 233-245 覆盖了 doc-refs/doc-ids/null-bytes/comment-citations/production-deps/
+  pending-decisions/test-inventory/doc-coords/pending-inventory/gate-selfcheck/
+  decision-index/harness-invariants，canary 变异证 215-218 覆盖 gate-selfcheck/matcher-oracle/
+  commit-msg-refs/dependency-boundary。config-match 处于两者缝隙 —— 从未被发酵。
+
+【守卫性质】config-match 是 canary/契约型：判据 checkConfigMatch(real,hand) 纯函数无副作用，
+  测试直接喂虚设数组比对『真配置 include』与『手抄常量』的一致性。
+  其设计注释 (config-match.test.ts 头) 明确：真配置读不出 include 时会把承载断言的文件从
+  收集范围摘掉（No test files found，round245 已实地实测过该态）→ 故抽成纯函数供单测。
+
+【注入——判据本体变异】
+  test/arch/config-match.ts 是守卫本体。变异: 移除第 3 段『真配置有额外模式 → 报错』扫描分支。
+  注入前 sha256: 82f072d9c0928183ac815dbc84ee46b2bad2ee4d0d7368c2af77cdb86848b12b
+  注入后 sha256: 2d15237b9ba0dca174a8490f009261ea9b3fc2d9bc837da7fdbc517fcd1e60e4
+  变异点: 删掉 seen-set 扫描 + !hand.includes(r) 报错；return problems 提前。
+
+【RED 捕获】变异后 config-match.test.ts exit=1:
+  Tests 2 failed | 5 passed (7)
+   FAIL  include 与手抄常量的一致性比对 > 真配置合法新增一条而手抄未同步要报
+     AssertionError: expected [] to deeply equal [ Array(1) ]
+       - "why": "真配置有 c/**/*.test.ts，手抄常量没有",
+   FAIL  include 与手抄常量的一致性比对 > 真配置里同一条未同步的模式重复出现...
+     AssertionError: expected [] to deeply equal [ Array(1) ]
+       - "why": "真配置有 z/**/*.test.ts，手抄常量没有",
+  两个用例覆盖守卫 extra 分支，守卫坏掉（漏报）→ 断言当场红 → 非 vacuous pass。
+
+【还原 + GREEN】git checkout -- test/arch/config-match.ts → sha256 逐字节一致 82f072d9...
+  还原后 config-match 7/7 通过 exit=0；git status --porcelain 仅剩本 evidence（clean）。
+
+【结论】config-match 判据的每一报错分支都有断言锁；守卫本体变异必红，无假绿缝隙。
+  台账 A.14 行: config-match-input-246 追加弧形证据。
+===================================================================
