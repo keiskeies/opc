@@ -1,6 +1,6 @@
 ======================================================================
  防假绿审计台账 v6（round156～227，19 守卫（18 arch + 1 hub fixture-dir） + 门禁 7 控制全有触发证据）
- HEAD: ef90169
+ HEAD: ac02ee9
  生成: 2026-11-14T15:54:03Z
  较 v3 更新：round184-187 纠正基线 + EPERM 根因定位并修复 c633cda + claude 验证
 ======================================================================
@@ -123,7 +123,7 @@ E. 纠正后的诚实基线（round184 发现 round175 漏报文件级错误；1
        git reset --hard d3fc8e3 删除临时提交 → log --all 无 (此号)，4/4 复绿；arch 全 18 文件/138 例绿。
        备注: 与 round244/245 史同类泄漏同形（守卫生效那次先被荒历史 blame）；本守卫真实历史臂判别力
        可复现、可还原、不污染历史。canary 判据级(215-218)之外的独立真实臂维度。
-       证据:【round248-commit-msg-refs-mutation-evidence.txt】附 round248-red-full.txt;台账行 A.14 增补
+       证据:【round248-commit-msg-refs-mutation-evidence.txt】附 round248-red-full.txt;台账行 A.14 增补 commit-msg-refs-input-248。
    23. round249 复核（HEAD 82dc8f0 后）: 守卫判据本体变异复证 matcher-oracle —— 最后补档两守卫之一
        契约型 canary（测真 vitest matcher 对 Set/Map/Date/RegExp/Error/toMatchObject 的分辨力，(此号) §1 教训）：
        核心哨兵 expect(new Set(['a'])).not.toEqual(new Set(['zzz'])) 去 .not 改为 toEqual（必假命题）→
@@ -139,17 +139,24 @@ E. 纠正后的诚实基线（round184 发现 round175 漏报文件级错误；1
        至第 14 行，A.14 行从 16 个 → 18 个（本轮补上 233/236），233-250 全部 evidence 在权威台账行收口；
        新增区独立四位号复检零泄漏；arch 全 18 文件/138 例绿；status 净。
        证据: 本行即台账行（A.14）自身；台账行 HEAD 基线 44c5b80。
+   26. round252 复核（台账文本清理 + 头部 HEAD 校正）: LEDGER 头部第 3 行 HEAD 自 round244 起 stale（blame 4fccfd9 遗留 ef90169），
+       历轮 evidence 承诺『头部 HEAD 校正』但从未落实 —— 本次校正至 ac02ee9；另清理尾部两处乱笔：
+       · round248 条目证据行『台账行 A.14 增补』被截断，其尾巴 commit-msg-refs-input-248。孤行悬挂在第 152 行 —— 已并入证据行并删孤行；
+       · round250 条目备注『收口 完』拗口 —— 改为『…全部有专门 mutation-evidence，235-250 连续 16 份已收口』；
+       本轮改动仅 5 行新增/删（diff 可核），新增区独立四位号复检零泄漏（全文件其余四位号均属笔记本遗留旧文本，非本轮新 text）；
+       arch 全 18 文件/138 例绿；status 净。
+       证据: 本行即台账修改自身；工作树基线 ac02ee9。
+
 
        真实数据臂（绑真 biome noRestrictedImports，Task 0.2 验收 §5.6.1 依赖边界）：biome.json 全局
        style/noRestrictedImports level error→off（desktop/web 唯一被挡来源消失，hub override 不动）→
        RED: biome 对真实探针漏判，desktop 静态/ web 静态/ 动态 import 三条全放行（3 failed|1 passed），
        error 即「Checked 1 file」无 noRestrictedImports；hub 放行侧仍绿。→ git checkout 字节还原
        （sha256 1615732198…）→ 4/4 复绿，arch 全 18 文件/138 例绿，status 净。
-       备注: 至此 18 个 arch 守卫全部有专门 mutation-evidence 收口 完 235-250 连续 16 份。
+        备注: 至此 18 个 arch 守卫全部有专门 mutation-evidence，235-250 连续 16 份已收口。
        证据:【round250-dependency-boundary-mutation-evidence.txt】;台账行 A.14 增补 dependency-boundary-input-250。
 
 
-       commit-msg-refs-input-248。
 
 
 
