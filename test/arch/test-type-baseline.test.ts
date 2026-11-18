@@ -178,6 +178,90 @@ describe("类型棘轮：计数与路径归一", () => {
     expect(parseListFiles([...inside, ...outside].join("\n"), ROOT)).toBe(2);
   });
 
+  it("⭐ 往上跳（`../`）的仓外路径【不许】折进仓内目录 —— 两种消费各一条（round300）", () => {
+    // 洞与 round296 那一发同形而方向相反。绝对式落在仓外是【红】的：带盘符的目录名
+    // 进配额表 ⇒ 报「基线外的测试目录」，难看但看得见。`../` 式是【绿】的：
+    // toRepoRelative 的 while (startsWith("../")) 把前缀整段抹掉，
+    // `../packages/hub/test/engine/x.ts` 出来就是一条地道的仓内路径 ⇒ 那条错
+    // 【花掉本仓那个目录的配额】。
+    // 实测的坏读数（round300，落判据之前）：把 TYPE_BASELINE 每一格按
+    // `../<该格目录>/xN.ts` 灌满 ⇒ 归一出 291 条而 diffTypeBaseline 返回空字符串
+    // ⇒ 一次「include 指向隔壁仓」的事故会逐字读出本仓的配额表并宣布合格。
+    const dir = "packages/hub/test/engine";
+    const up = `../${dir}/x.test.ts`;
+    // 前提自证【两条方向相反】，缺一判就分不出「判据在做事」与「判据恒拒」：
+    // ① 坏形状【确实】长得像仓内路径 —— 洞就在这儿，不归一就看不见。
+    expect(toRepoRelative(up, ROOT)).toBe(`${dir}/x.test.ts`);
+    // ② 仓内绝对路径【仍然】归一成功。少了这一发，把判据写成「raw 里有斜杠就排除」
+    //    也过：unix checkout 上 tsc 的仓内路径本来就是 /d/item/opc/… 式，
+    //    那会被整个错排掉 ⇒ 判据变成恒拒，而恒拒在这一族【同样绿】。
+    expect(
+      toRepoRelative(`${ROOT.split("\\").join("/")}/${dir}/a.ts`, ROOT),
+    ).toBe(`${dir}/a.ts`);
+    // 甲 · 配额这一侧：仓外 ⇒ 目录名留在 raw 上 ⇒ diffTypeBaseline 报「基线外」。
+    const outside = parseTscOutput(
+      `${up}(1,1): error TS2322: Type 'a' is not assignable.`,
+      ROOT,
+    );
+    expect(outside.errors).toEqual([{ file: up, code: "TS2322" }]);
+    // 反斜杠同一条路（tsc 在 Windows 上给的就是 `..\`）—— 单独一发，因为它走的是
+    // escapesUpward 自己那次 split/join，而不是 toRepoRelative 里的那次。
+    expect(
+      parseTscOutput(
+        `..\\${dir}\\x.test.ts(1,1): error TS2322: Type 'a' is not assignable.`,
+        ROOT,
+      ).errors,
+    ).toEqual([{ file: up, code: "TS2322" }]);
+    expect(outside.unparsed).toBe(0);
+    const msg = diffTypeBaseline(countTypeErrorsByDir(outside.errors));
+    expect(msg).toContain("基线外的测试目录");
+    expect(msg).toContain("../" + dir + "=1");
+    // 乙 · 单变量对照：同一个位置写回仓内 ⇒ 那条目录【在基线里】⇒ 不报新目录。
+    //  两发配起来才把口径钉成「判的是在不在仓内」，而不是「认不认识 ../」。
+    const inside = parseTscOutput(
+      `${dir}/x.test.ts(1,1): error TS2322: Type 'a' is not assignable.`,
+      ROOT,
+    );
+    expect(diffTypeBaseline(countTypeErrorsByDir(inside.errors))).toBe("");
+    // 丙 · 语料那一侧：同一个形状在 parseListFiles 上给 filesChecked 灌水
+    //  （0006 §7 第 41 条「include 被改窄」那条哨兵会被外来文件替本仓作证）。
+    expect(parseListFiles(up, ROOT)).toBe(0);
+    expect(parseListFiles(`${dir}/x.test.ts`, ROOT)).toBe(1);
+  });
+
+  it("⭐ 仓外路径【计数】而不是丢掉：红着比读空字符串好（round300 立的分工）", () => {
+    // 三种仓外形状在 parseTscOutput 上必须【都留下】并撞上「基线外」那条红话。
+    // 为什么不是「排除掉」：这条错是真的，它说的是「这个 project 吃进了仓外的文件」。
+    // 丢掉 = 把一次 include 事故读成「那些文件没有类型错」⇒ 绿，而那正是本守卫
+    // 一路在堵的方向（与 parseListFiles 相反，那边数的是【本仓语料有多少】，
+    // 见那里的注释 —— 两处口径不同是有意的，别把它们改成一样）。
+    const r = ROOT.split("\\").join("/");
+    // 四条路径【一份清单】，两种形状从它派生 —— 否则这两发测的不是同一批字节。
+    // ⚠ parseListFiles 吃的是【纯路径一行一个】（--listFilesOnly 的形状），
+    //   把带 `(行,列): error TS…` 后缀的整行喂给它会因 `!endsWith(".ts")` 全部跳过，
+    //   那是一种【恒 0】的假读数（本轮自己先踩了一次才写下的）。
+    const paths = [
+      `${r}/packages/hub/test/engine/in.ts`,
+      "E:/other/repo/pkg/x.ts",
+      "/other/repo/pkg/y.ts",
+      "../other-repo/pkg/z.ts",
+    ];
+    const out = paths
+      .map((p, i) => `${p}(${i + 1},${i + 1}): error TS2322: 一条错.`)
+      .join("\n");
+    const parsed = parseTscOutput(out, ROOT);
+    expect(parsed.unparsed).toBe(0);
+    expect(parsed.errors.map((e) => e.file)).toEqual([
+      "packages/hub/test/engine/in.ts",
+      "E:/other/repo/pkg/x.ts",
+      "/other/repo/pkg/y.ts",
+      "../other-repo/pkg/z.ts",
+    ]);
+    // 同一份路径清单喂给 parseListFiles ⇒ 只有仓内那一条计进语料（那边【排除】仓外，
+    // 因为它数的是「本仓语料有多少」—— 口径相反是有意的，见判据处注释）。
+    expect(parseListFiles(paths.join("\n"), ROOT)).toBe(1);
+  });
+
   it("⭐ 另外三种形状：`../` 前缀、`./` 前缀、根本身（注释吹的「实测三种」在这儿）", () => {
     // toRepoRelative 的注释写着「三种形状是实测出来的」，round296 之前【只有绝对路径
     // 那一型有测试】—— 相对调用目录与相对根那两型没有任何一发覆盖，把 `while (p.startsWith("../"))`

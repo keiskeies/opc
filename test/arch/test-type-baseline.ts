@@ -224,6 +224,17 @@ export function toRepoRelative(raw: string, root: string): string {
  * 「0 条类型错 ⇒ 绿」，而它真实的意思是「什么都没扫」。
  * 诊断的续行（`  Type 'undefined' is not assignable ...`）以空白开头，两型都不匹配，
  * 直接跳过 —— 它们不是新的一发错。
+ *
+ * ⚠ 仓外路径【保留原形状进 errors】，不折进仓内目录（round300）。两种形状在这儿
+ * 汇成同一个读数：绝对式由 `toRepoRelative` 原样退回（`E:/other/repo/pkg/x.ts`），
+ * `../` 式由这里【不剥前缀】地留下（`../other-repo/pkg/x.ts`）。两者都不是本仓的目录
+ * ⇒ `diffTypeBaseline` 报「基线外的测试目录」并点名 ⇒ 红。
+ * 为什么红着而不是丢掉：这条错是【真的】，它说的是「这个 project 吃进了仓外的文件」。
+ * 丢掉它就把一次 include 事故读成「那些文件没有类型错」⇒ 绿 —— 正是这里要堵的方向。
+ * 与 `parseListFiles` 的处置【相反】（那边仓外【不计】），也不矛盾：那边数的是
+ * 「本仓的语料有多少」，把外来的算进来会让下限替本仓作证；这边问的是「谁有类型错」，
+ * 外来的有类型错正是要人来看一眼的事。round296 对绝对式就是这个分工，
+ * round300 只是把 `../` 式接回同一条口径。
  */
 export function parseTscOutput(
   output: string,
@@ -239,7 +250,12 @@ export function parseTscOutput(
       unparsed++;
       continue;
     }
-    const file = toRepoRelative(m[1] as string, root);
+    const raw = (m[1] as string).split("\\").join("/");
+    // 往上跳的那一条【不交给 toRepoRelative】—— 它会把前缀整段抹掉，
+    // 于是仓外文件领走一个已登记目录的配额。见 `escapesUpward`。
+    const file = escapesUpward(raw)
+      ? raw
+      : toRepoRelative(m[1] as string, root);
     if (file === "") {
       unparsed++;
       continue;
@@ -265,20 +281,67 @@ function isStillAbsolute(rel: string): boolean {
 }
 
 /**
+ * 归一之前【往上跳】吗 —— 也就是 `../…` 那一型。
+ *
+ * 只能在【归一之前】看见：`toRepoRelative` 的 `while (p.startsWith("../"))` 会把
+ * 前缀整段抹掉，`../packages/hub/test/engine/x.ts` 出来是一条地道的仓内路径。
+ * 所以这条判据读 raw，`isStillAbsolute` 读归一后的结果 —— 不是两种风格，是
+ * 两种形状各自只在某一侧留痕：仓内绝对路径（`/d/item/opc/test/x.ts`）归一后
+ * 盘符/前导斜杠已经没了 ⇒ 判据必须读结果，读 raw 会把 unix checkout 的【仓内】
+ * 绝对路径整个错排掉；`../` 反过来只在 raw 上留痕。
+ */
+function escapesUpward(raw: string): boolean {
+  const p = raw.split("\\").join("/");
+  return p === ".." || p.startsWith("../");
+}
+
+/**
+ * 这条【不在本仓】吗 —— 三种形状合并成一个定义。
+ *
+ * ⚠ 共用的是【定义】，不是【处置】：`parseListFiles` 拿它【排除】（那边数的是
+ * 「本仓语料有多少」，外来的算进来会让下限替本仓作证）；`parseTscOutput` 反过来
+ * 【保留】仓外那几条，只借用 `escapesUpward` 那一半阻止前缀被抹掉（那边问的是
+ * 「谁有类型错」，外来的有类型错正是要人来看一眼的事）。两处口径相反是故意的，
+ * 见 `parseTscOutput` 的注释 —— 但「什么叫仓外」只许有一个答案，所以判据只有这一处。
+ *
+ * round300 补的是 `../` 那一型，而它的方向与 round296 那一发【相反】：
+ * 绝对式落在仓外是【红】的（带盘符的目录名进配额表 ⇒ 报「基线外的测试目录」，
+ * 难看但看得见）；`../` 式落在仓外是【绿】的 —— 抹掉前缀之后它就落进一个
+ * 【已登记的目录】里，于是那几条错【花掉的是本仓那个目录的配额】。
+ * 实测（round300，`.workbuddy/probe300-fold.ts`）：把 TYPE_BASELINE 每一格按
+ * `../<该格目录>/xN.ts` 灌满 ⇒ 归一出 291 条、`diffTypeBaseline` 返回空字符串。
+ * 也就是一次「include 指向了隔壁仓」的事故会【逐字读出本仓的配额表并宣布合格】。
+ * 同一个形状在 `parseListFiles` 那边给 `filesChecked` 灌水 ⇒ 0006 §7 第 41 条
+ * 那条「语料被改窄」的哨兵会被仓外文件替本仓作证。两处都是【绿】的方向。
+ *
+ * 误判方向：真把人家的仓内路径判成仓外 ⇒ `parseTscOutput` 记一条 `unparsed`
+ * （哨兵 2 当场红，且红话带尾 1200 字）⇒ 是【看得见】的那一侧；而漏判是
+ * 读空字符串。不对称在这里，所以这一条宁可判宽。
+ * 登记的残留：`test/../other/x.ts` 那种【中间】带 `..` 的混合写法不在射程内
+ * （它归不归得对取决于前缀，且不是 tsc 会输出的形状）。
+ */
+function isOutsideRepo(raw: string, rel: string): boolean {
+  return isStillAbsolute(rel) || escapesUpward(raw);
+}
+
+/**
  * 解析 `--listFilesOnly` 的输出，数出【本仓自己的】.ts 文件。
  *
  * 口径只有一条排除：`node_modules`。lib 的 `lib.dom.d.ts` 那一批就在
  * `node_modules/typescript/lib/` 下，所以这一条同时把它们挡掉了；剩下的就是
- * 这次检查真正吃进去的语料。不在仓内的绝对路径也排除（跨仓 project 引用不属本守卫）
- * —— 见 `isStillAbsolute`：那条注释在 round296 之前只对 unix 式成立，windows 式漏计。
+ * 这次检查真正吃进去的语料。不在仓内的路径也排除（跨仓 project 引用不属本守卫）
+ * —— 见 `isOutsideRepo`：那条「注释里写了而实现只做一半」的病在 round296 犯过一次
+ * （绝对式只排掉了 unix 那一半），round300 又在同一条口径的第二半上量到一次
+ * （`../` 式整个被 `toRepoRelative` 洗成仓内路径 ⇒ 给语料灌水）。
  * 不用「必须以 test/ 或 packages/ 开头」那种前缀白名单：那种写法只对根 project 成立，
  * 拿它去量另一个 project 会恒 0，而恒 0 看起来正是「include 被改窄」想要报的形状。
  */
 export function parseListFiles(output: string, root: string): number {
   let n = 0;
   for (const rawLine of output.split(/\r?\n/u)) {
-    const rel = toRepoRelative(rawLine.trim(), root);
-    if (rel === "" || isStillAbsolute(rel) || !rel.endsWith(".ts")) continue;
+    const raw = rawLine.trim().split("\\").join("/");
+    const rel = toRepoRelative(raw, root);
+    if (rel === "" || isOutsideRepo(raw, rel) || !rel.endsWith(".ts")) continue;
     if (rel.split("/").includes("node_modules")) continue;
     n++;
   }
