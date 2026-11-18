@@ -340,6 +340,50 @@ describe("类型棘轮：判据", () => {
     const msg = diffTypeBaseline(countTypeErrorsByDir(mutated));
     expect(msg).toContain("基线外的测试目录");
     expect(msg).toContain("packages/hub/test/newdir=1");
+    // ⚠ 反向对照（round304 落 round300 残留②时配的）：真新目录【不许】被指成
+    //   include 事故。少了这一发，把那句尾巴【无条件】拼上去也全绿 —— 而那正是
+    //   那条红话的新病灶：它会把「去 TYPE_BASELINE 点名」这件正确的事，
+    //   指到「去改 tsconfig」那件错误的事上（两类处置动作相反）。
+    expect(msg).not.toContain("吃进了仓外的文件");
+  });
+
+  it("⭐ 仓外形状的那格：红话自己说清病灶是 include，而不是让人猜（round300 残留②）", () => {
+    // 这条红历史上对两类事返回同一副面孔：真新目录（处置 = 登记）与 include 指错
+    // 吃到隔壁仓（处置 = 修 tsconfig，【绝不能】登记）。下面三发把「两类」钉成
+    // 「两句不同的话」：甲钉仓外那一型有病灶句 + 格数，乙钉真新目录那一型没有（在
+    // 上面那一发的反向对照里），丙钉混合时【只数仓外那一格】—— 计数错了同样会误导。
+    const up = parseTscOutput(
+      "../other-repo/pkg/z.ts(1,1): error TS2322: 一条错.",
+      ROOT,
+    );
+    const msg = diffTypeBaseline(countTypeErrorsByDir(up.errors));
+    expect(msg).toContain("基线外的测试目录");
+    expect(msg).toContain("../other-repo/pkg=1");
+    expect(msg).toContain("其中 1 格是【仓外形状】");
+    expect(msg).toContain("吃进了仓外的文件");
+    expect(msg).toContain(
+      "登记进 TYPE_BASELINE 等于让本仓的配额表永久接受隔壁仓下单",
+    );
+    // 丙 · 混合：一格真新目录 + 一格仓外 ⇒ 尾巴上的计数只算仓外那一格。
+    const mixed = parseTscOutput(
+      [
+        "packages/hub/test/newdir/x.ts(1,1): error TS2322: 一条错.",
+        "E:/other/repo/pkg/y.ts(2,2): error TS2322: 一条错.",
+      ].join("\n"),
+      ROOT,
+    );
+    const mixedMsg = diffTypeBaseline(countTypeErrorsByDir(mixed.errors));
+    expect(mixedMsg).toContain("其中 1 格是【仓外形状】");
+    expect(mixedMsg).not.toContain("其中 2 格");
+    // 甲 的另一半方向：绝对式（带盘符、没有 `../`）也要走同一格 —— 它靠的是
+    // isOutsideRepo 的【另一半】判据（读归一后的绝对形状），与 甲 的 `../` 式不同源。
+    const drive = parseTscOutput(
+      "E:/other/repo/pkg/y.ts(3,3): error TS2322: 一条错.",
+      ROOT,
+    );
+    expect(diffTypeBaseline(countTypeErrorsByDir(drive.errors))).toContain(
+      "其中 1 格是【仓外形状】",
+    );
   });
 
   it("变异：新目录藏在一条已有错后面 ⇒ 仍然点名（不是『只看最大值』那种假判据）", () => {

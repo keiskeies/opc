@@ -130,6 +130,14 @@ export function countTypeErrorsByDir(
  * ⚠ 顺序有讲究：先报「配额外的新目录」，再报「超出」。反过来会让人以为
  * 只是数字涨了，而真实情况是「多出一个从没登记过的测试目录」—— 那是要单独
  * 做一次决定的事（同 lint 那条对「基线外的新 error 类目」的处置）。
+ *
+ * ⚠ 仓外形状的红话【自己说清病灶】（round304 落 round300 的残留②）。这条红历史上
+ *   对两类事返回同一副面孔：真新目录（处置 = 去 TYPE_BASELINE 点名）与
+ *   include 指错吃到隔壁仓（处置 = 去改 tsconfig，【绝不能】登记进表 —— 登记等于
+ *   让配额表永久接受隔壁仓下单）。两类处置动作相反，而旧红话让读的人自己认出
+ *   「这是 include 指错」（round300 §残留② 原话）。现在区分句直接写进红话里，
+ *   且【只】在 isOutsideRepo 命中时出现 —— 反向对照钉在 .test.ts：
+ *   无条件拼尾巴会让真新目录也被指成 include 事故，那发必须红。
  */
 export function diffTypeBaseline(
   counts: ReadonlyMap<string, number>,
@@ -137,21 +145,34 @@ export function diffTypeBaseline(
 ): string {
   const cap = new Map(baseline.map((b) => [b.dir, b.atMost]));
   const unregistered: string[] = [];
+  let outsideCount = 0;
   const over: string[] = [];
   for (const [dir, n] of counts) {
     const allowed = cap.get(dir);
     if (allowed === undefined) {
       unregistered.push(dir + "=" + n);
+      // 目录名自身就是那条路径的去尾形状：`../other-repo/pkg` 与 `E:/other/repo`
+      // 在这里仍是仓外形状（raw 与 rel 同值传给 isOutsideRepo 是有意的，
+      // 它的两个判据各读一侧：绝对式看 rel，`../` 式看 raw，见它的注释）。
+      if (isOutsideRepo(dir, dir)) outsideCount++;
       continue;
     }
     if (n > allowed) over.push(dir + " " + allowed + "→" + n);
   }
   if (unregistered.length > 0) {
-    return (
+    const base =
       "出现了基线外的测试目录（" +
       unregistered.sort().join(", ") +
       "）—— 新目录里的类型错必须先在 TYPE_BASELINE 里点名并写明理由，" +
-      "否则它会顺着「反正测试本来就不在 tsc -b 射程里」混过去"
+      "否则它会顺着「反正测试本来就不在 tsc -b 射程里」混过去";
+    if (outsideCount === 0) return base;
+    return (
+      base +
+      "。⚠ 其中 " +
+      outsideCount +
+      " 格是【仓外形状】（`../` 前缀或绝对路径）：这一发的病灶是【这个 tsc project " +
+      "吃进了仓外的文件】，去查 tsconfig 的 include/project 引用并修掉它 ——" +
+      " 把它们登记进 TYPE_BASELINE 等于让本仓的配额表永久接受隔壁仓下单。"
     );
   }
   if (over.length > 0) {
