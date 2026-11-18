@@ -4328,7 +4328,7 @@ round302 · 夹具里那个我手写的 `[ x ]`：它让新格【看起来不承
 ■ ⑨ 下一轮已量好方向（本轮【只量不动】）
   `packages/hub/src/harness/safety.ts:381-393` 的 normalizeAbs【只按 / 拆】，喂给
   isInsideWorkspace（:374-379）⇒ workspaceContainmentBlock（:397）⇒ gateway.ts:542。
-  本轮用真函数跑过（.workbuddy/probe303-direction.test.ts + probe303-vitest.config.mjs）：
+  本轮用真函数跑过（.workbuddy/probe303-direction.probe.ts + probe303-vitest.config.mjs）：
     · 全反斜杠 ⇒ FAIL CLOSED（`D:\repo\ws` + 仓内真路径被误拒）；且 gateway.ts:678
       先拦 workspace 不以 / 开头的那一支 ⇒ 那一型在产线上不可达。
     · 【混合形状 ⇒ FAIL OPEN】：`/repo/ws` + target `/repo/ws/x\..\..\secret\k.txt`
@@ -4371,7 +4371,7 @@ round303 · 那条判据只读了一半的分隔符：以及我三处被量纠�
 ■ ③ 「本轮改了哪些行为」由新旧真字节对出来，不由我推
   probe303-slice-old.mjs 用 `git show HEAD:…safety.ts`（execFileSync + 定长数组，
   不用 shell 字符串版）切出旧函数体 → probe303-old-safety.ts（含「切出来的必须含
-  split("/") 那一行」的自检，HEAD 漂了就抛）→ probe303-compare.test.ts 同时 import
+  split("/") 那一行」的自检，HEAD 漂了就抛）→ probe303-compare.probe.ts 同时 import
   新旧两份跑同一张 21 对的表。读数【变了 3 / 21】，三对全是混合形状逃逸那一族，
   没有一对从「放行」变成「拒」⇒ 交集【没有多拦任何东西】。
   ⚠ 切旧字节的那一步是被迫的：我第一版把「代价」写成两句话，两句都被这张表证否（④）。
@@ -4437,7 +4437,7 @@ round303 · 那条判据只读了一半的分隔符：以及我三处被量纠�
   ② 交集是【两种】读法，不是【三种】。真实世界还有 UNC（两条反斜杠开头的 server\share）、
      设备前缀（问号开头、两条反斜杠加问号的长路径前缀）与大小写不敏感
      （Windows 上 /Repo 与 /repo 同一目录）。本轮【没碰】这些：判据仍是「字符串段比较」，
-     实测（.workbuddy/probe303-residual.test.ts，同 probe303-vitest.config.mjs 跑）：
+     实测（.workbuddy/probe303-residual.probe.ts，同 probe303-vitest.config.mjs 跑）：
        "D:/REPO" + "D:/repo/x" ⇒ outside
        "D:/repo" + "D:/REPO/x" ⇒ outside
      ⇒ 方向是【多拦】（fail-closed）。登记为已知边界，不是已修。
@@ -4498,3 +4498,53 @@ round304a · round300 残留②：一条红话对两类相反的事返回同一�
     带 project 要把 parseTscOutput 的返回形状改掉（另起一轮的账）。
   ② `test/../other/x.ts` 那种【中间】带 .. 的混合写法仍在 isOutsideRepo 射程外
     （round300 登记的残留①，本轮【没有】顺手修，方向未量）。
+
+════════════════════════════════════════════════════════════════════════════
+round304b · 全量跑抓出我上一轮自己违的约：探针不该叫 `.test.ts`
+════════════════════════════════════════════════════════════════════════════
+  起因：用户令「全量测试留到最后做」⇒ 本轮补跑全量。1 发红：
+  test/arch/test-inventory.test.ts › 磁盘上每个测试样文件都在 include 覆盖范围内
+  ⇒ [没有任何 runner 认领] .workbuddy/probe303-{compare,direction,residual}.test.ts。
+
+■ ① 红是对的，违的是【我自己上一轮立的约】
+  round302 §⑦ 写过：新机器一律 .workbuddy/*.mjs，「不进那条谓词」——谓词是
+  test-inventory.ts:10 的 TEST_NAME = /\.(test|spec)\.[cm]?[jt]sx?$/，它对【全盘】
+  任何测试样命名主张「这里有一发测试，必须有 runner 认领」。round303 我留档证据时
+  把三份探针写成了 .test.ts：它们只有靠 probe303-vitest.config.mjs 那份一次性配置
+  才跑得起来，主 include（test/** 与 packages/*/test/**）永远不收 ⇒
+  文件名在主张「这发测试 CI 会跑」，而真相是「CI 不跑」。
+  ⇒ 处置：【改名不改谓词】（.probe.ts）。放宽谓词（给 .workbuddy 开豁免）是
+    把守卫改瞎去迁就一个违例，而违例是新的、守卫是旧的且判对了 ——
+    这一族判断在 round302 §①（改夹具不改判式）已经立过一次。
+
+■ ② ⭐⭐ 本轮最值钱的一发不在改名上，在【我把绿读错了两次】
+  ⑴ 第一次全量我跑的是 `--reporter=basic`。vitest 4 没有这个 reporter ⇒
+     Startup Error: Failed to load custom Reporter from basic ⇒【一个用例都没跑】。
+     这正是 round301 给计数型变异机补的格① 那一族（「读不到」被读成「通过」），
+     只不过这次踩坑的是我【跑测试的手】而不是变异机的读数器。
+  ⑵ 更要紧的：我那条命令写成 `... > file 2>&1; echo "TEST_EXIT=$?"`，而后台任务
+     通知报的 exit code 0 是【这条复合命令】的（echo 永远成功），不是 vitest 的。
+     我差点据此登记「全量绿」。⇒ 口径：复合命令里的 exit code 必须紧跟 vitest
+     本体（`; echo VITEST_EXIT=$?` 之前不许插入任何会成功的命令），且登记前
+     【回到 vitest 自己的汇总行】核对（Test Files / Tests / 无 Failed Tests 段）。
+     这条与项目记忆「判绿只认 vitest 自己的退出码」是同一句话的【实现层】版本：
+     退出码要拿对的那个进程的。
+
+■ ③ 证据链与留下的东西
+  .workbuddy/round304-inventory-red.txt —— 那一发的【完整红屏】（含三条
+    [没有任何 runner 认领] 与断言 diff），改前的现场按原样留档，不删。
+  .workbuddy/round304-full-green.txt —— 改后全量：137 files / 3032 passed /
+    6 skipped，VITEST_EXIT=0。
+  三份探针改名 .probe.ts；probe303-vitest.config.mjs 的 include 跟着改；
+  probe303-compare.txt 重跑重抓（打印出的文件名已是新名，读数不变：变了 3 / 21）；
+  safety.ts / safety.test.ts / 台账里的引用逐处改掉（grep 残留 = 0）。
+  ⚠ dist/ 里那份 safety.d.ts 还印着旧名 —— 它是构建产物、被 .gitignore 挡着、
+    下次 tsc -b 自然刷新，不是「漏改的引用」。
+  守卫那一发（test-inventory）改后 12 发全绿，且它【不需要】任何修改 ——
+  这是这条守卫第三次替我抓住【新写的东西没进射程】（前两次：0006 §7 第 41 条、
+  round302 §⑦ 那条扫描范围）。
+
+■ ④ 账
+  主张表 / docs / TYPE_BASELINE / LINT_BASELINE 全部未动。
+  本轮无生产代码改动 ⇒ 无变异机（改名不改变任何判据行为；承重证据就是
+  那条守卫自己的红→绿）。

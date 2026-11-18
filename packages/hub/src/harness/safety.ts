@@ -377,7 +377,7 @@ export function sandboxTierBlock(
  *   工作区 `/repo/ws`、目标 `/repo/ws/x\..\..\secret\k.txt`
  *   旧读数 = inside（`x\..\..\secret\k.txt` 被当成【一个】文件名段，`..` 从不被看见，
  *   前缀匹配过）⇒ Windows 上 OS 会把它解析成 `/repo/secret/k.txt` ⇒ **越出工作区却被
- *   放行**。本轮实测过（.workbuddy/probe303-direction.test.ts），危害方向是 fail-OPEN。
+ *   放行**。本轮实测过（.workbuddy/probe303-direction.probe.ts），危害方向是 fail-OPEN。
  * 可达性写清楚，别把它读成「现网可打」：`target` 是工具调用参数里的原样字符串
  * （gateway.ts 的 pathArg，上游零归一化），但本文件今天【零生产 import】（文件头那句
  * 横幅 + dead-modules 的 claimSites 盯着）⇒ 这条是【接线即成真】，不是当前在跑的洞。

@@ -1,0 +1,443 @@
+
+[1m[30m[46m RUN [49m[39m[22m [36mv4.1.12 [39m[90mD:/item/opc[39m
+
+(node:20800) [DEP0190] DeprecationWarning: Passing args to a child process with shell option true can lead to security vulnerabilities, as the arguments are not escaped, only concatenated.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+(node:31444) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:57488) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:69600) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:60084) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:15096) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:48880) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:41432) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:62980) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:55112) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:64416) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:34984) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:29900) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:50388) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:30664) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:8428) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:4328) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:63612) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:69320) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:36608) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:67936) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:45740) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:48444) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:53036) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:51696) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:56864) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:60944) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+warning: in the working copy of 'docs/decisions/0009-only.md', LF will be replaced by CRLF the next time Git touches it
+ [32m✓[39m test/arch/comment-citations.test.ts [2m([22m[2m25 tests[22m[2m)[22m[33m 1576[2mms[22m[39m
+     [33m[2m✓[22m[39m 真实仓库：注释里的限定引用全部指向存在的东西 [33m 1243[2mms[22m[39m
+ [32m✓[39m test/arch/pending-inventory.test.ts [2m([22m[2m16 tests[22m[2m)[22m[33m 1803[2mms[22m[39m
+     [33m[2m✓[22m[39m 被收集的真文件必须一条问题都不报，且扫描通路确实读到了东西 [33m 897[2mms[22m[39m
+     [33m[2m✓[22m[39m 真仓库里唯一带跳过的文件，正是名单里那一个 [33m 885[2mms[22m[39m
+ [32m✓[39m packages/hub/test/budget/tracker.test.ts [2m([22m[2m22 tests[22m[2m)[22m[33m 2103[2mms[22m[39m
+     [33m[2m✓[22m[39m 累计一万笔「一分」正好是一百分（浮点口径在这里会漂） [33m 714[2mms[22m[39m
+ [32m✓[39m packages/hub/test/db/write-queue.test.ts [2m([22m[2m23 tests[22m[2m)[22m[33m 2135[2mms[22m[39m
+     [33m[2m✓[22m[39m 同事务内 events 写失败 → saver 写的 checkpoint 一起回滚 [33m 632[2mms[22m[39m
+(node:60944) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+[0003] 第四个探测：尾部是真实事件 0.005ms / 尾部是心跳事件 0.173ms
+(node:34984) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:48996) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ [32m✓[39m packages/hub/test/memory/role-memory.test.ts [2m([22m[2m29 tests[22m[2m)[22m[33m 2468[2mms[22m[39m
+     [33m[2m✓[22m[39m 扫描窗口扫满时 has_more 必须为 true（那个乘数拍错了的唯一探测器） [33m 600[2mms[22m[39m
+
+[bench] 逐条 1268ms / 批量(取 3 趟最小) 96ms / 比值 13.2×
+ [32m✓[39m packages/hub/test/http/bindings-route.test.ts [2m([22m[2m32 tests[22m[2m)[22m[33m 2287[2mms[22m[39m
+ [32m✓[39m test/replay/search.test.ts [2m([22m[2m30 tests[22m[2m)[22m[33m 2514[2mms[22m[39m
+ [32m✓[39m packages/hub/test/engine/runtime.test.ts [2m([22m[2m26 tests[22m[2m)[22m[33m 2439[2mms[22m[39m
+ [32m✓[39m packages/hub/test/serve/im-channels.test.ts [2m([22m[2m31 tests[22m[2m)[22m[33m 2382[2mms[22m[39m
+ [32m✓[39m packages/hub/test/events/batch.test.ts [2m([22m[2m15 tests[22m[2m)[22m[33m 2803[2mms[22m[39m
+     [33m[2m✓[22m[39m 同一份数据：批量 vs 逐条事务 [33m 1835[2mms[22m[39m
+ [32m✓[39m packages/hub/test/heartbeat/patrol.test.ts [2m([22m[2m34 tests[22m[2m)[22m[33m 2786[2mms[22m[39m
+     [33m[2m✓[22m[39m 第四个探测靠 max(created_at) 的索引序【提前收尾】—— 尾部是心跳事件时才退化 [33m 1312[2mms[22m[39m
+ [32m✓[39m packages/hub/test/http/contract.test.ts [2m([22m[2m49 tests[22m[2m)[22m[33m 2554[2mms[22m[39m
+(node:59600) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ [32m✓[39m packages/hub/test/overview/today.test.ts [2m([22m[2m34 tests[22m[2m)[22m[33m 2707[2mms[22m[39m
+ [32m✓[39m packages/hub/test/serve/assemble-pump.test.ts [2m([22m[2m18 tests[22m[2m)[22m[33m 2731[2mms[22m[39m
+(node:57780) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ [32m✓[39m packages/hub/test/heartbeat/maintenance.test.ts [2m([22m[2m22 tests[22m[2m)[22m[33m 3042[2mms[22m[39m
+     [33m[2m✓[22m[39m 健康库备份出来了（对照），损坏库【没有】备份出来 [33m 431[2mms[22m[39m
+     [33m[2m✓[22m[39m ⭐ report()：仪器故障那一轮不许喊「库可能已损坏」；真损坏那一轮仍然喊（0038） [33m 303[2mms[22m[39m
+(node:45256) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:66388) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:13728) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:58528) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ [32m✓[39m packages/hub/test/engine/dispatch.test.ts [2m([22m[2m82 tests[22m[2m)[22m[33m 3355[2mms[22m[39m
+     [33m[2m✓[22m[39m 被机器拦下的那些轮次【一条都不发】：拦下不算做成了一个判定 [33m 360[2mms[22m[39m
+ [32m✓[39m packages/hub/test/serve/assemble-driver.test.ts [2m([22m[2m19 tests[22m[2m)[22m[33m 3305[2mms[22m[39m
+ [32m✓[39m test/arch/coverage-guard.test.ts [2m([22m[2m1 test[22m[2m)[22m[33m 3930[2mms[22m[39m
+   [33m[2m✓[22m[39m 门控判定内核文件覆盖率 ≥ 下限（反假绿：文件必须在场、红即失败） [33m 3926[2mms[22m[39m
+(node:67232) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ [32m✓[39m packages/hub/test/serve/charter-pump.test.ts [2m([22m[2m39 tests[22m[2m)[22m[33m 3500[2mms[22m[39m
+(node:63684) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:47276) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:17532) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:24584) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:62644) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ [32m✓[39m packages/hub/test/acceptance/new-role-to-its-own-criteria.test.ts [2m([22m[2m11 tests[22m[2m)[22m[33m 3627[2mms[22m[39m
+     [33m[2m✓[22m[39m ⭐ 证据④的六条拒绝：每种坏形状 422 + 对的 code + 库里零残留（零新版本、零审计） [33m 1973[2mms[22m[39m
+ [32m✓[39m packages/hub/test/serve/driver-pump.test.ts [2m([22m[2m43 tests[22m[2m)[22m[33m 3877[2mms[22m[39m
+     [33m[2m✓[22m[39m ⭐ maxTurns=1 真的掐住那一趟（不是写死 12）：stopped=limit + 执行日志【只一行】 [33m 379[2mms[22m[39m
+ [32m✓[39m packages/hub/test/bindings/im.test.ts [2m([22m[2m74 tests[22m[2m)[22m[33m 4466[2mms[22m[39m
+(node:66380) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:12724) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:66688) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:67968) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:45740) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:52448) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ [32m✓[39m packages/hub/test/engine/work.test.ts [2m([22m[2m31 tests[22m[2m)[22m[33m 2530[2mms[22m[39m
+ [32m✓[39m test/org/versioning.test.ts [2m([22m[2m27 tests[22m[2m)[22m[33m 2091[2mms[22m[39m
+ [32m✓[39m test/arch/gate-selfcheck.test.ts [2m([22m[2m7 tests[22m[2m)[22m[33m 2345[2mms[22m[39m
+   [33m[2m✓[22m[39m 探针甲：退出码与不符项数同为零（双向蕴含，不预设现在是零） [33m 1034[2mms[22m[39m
+   [33m[2m✓[22m[39m 门禁的【结论】必须在已知红名单里（记账对 ≠ 有人看结论，见 0017 §2） [33m 840[2mms[22m[39m
+ [32m✓[39m test/poc/resume.test.ts [2m([22m[2m8 tests[22m[2m)[22m[33m 5721[2mms[22m[39m
+     [33m[2m✓[22m[39m 全新进程重启后 next 与 values 完整恢复，且已完成节点不重复执行 [33m 737[2mms[22m[39m
+     [33m[2m✓[22m[39m 重复 invoke 会重放已完成节点，且不推进审批 [33m 3911[2mms[22m[39m
+ [32m✓[39m packages/hub/test/approvals/cards.test.ts [2m([22m[2m29 tests[22m[2m)[22m[33m 2065[2mms[22m[39m
+ [32m✓[39m packages/hub/test/acceptance/phase3.test.ts [2m([22m[2m13 tests[22m[2m)[22m[33m 1707[2mms[22m[39m
+     [33m[2m✓[22m[39m ① 的『重跑同类任务』今天仍无路可跑：调用链多了一环，而那一环也没人调 [33m 333[2mms[22m[39m
+     [33m[2m✓[22m[39m 门禁的诚实口径：本文件跑绿【不等于】Task 3.8 通过 [33m 555[2mms[22m[39m
+ [32m✓[39m packages/hub/test/engine/seat-card.test.ts [2m([22m[2m30 tests[22m[2m)[22m[33m 1986[2mms[22m[39m
+ [32m✓[39m packages/hub/test/engine/approve.test.ts [2m([22m[2m20 tests[22m[2m)[22m[33m 1612[2mms[22m[39m
+ [32m✓[39m packages/hub/test/policy/auto-approve.test.ts [2m([22m[2m42 tests[22m[2m)[22m[33m 1799[2mms[22m[39m
+ [32m✓[39m packages/hub/test/overview/driver-status.test.ts [2m([22m[2m25 tests[22m[2m)[22m[33m 1948[2mms[22m[39m
+ [32m✓[39m packages/hub/test/http/real-deps.test.ts [2m([22m[2m32 tests[22m[2m)[22m[33m 1879[2mms[22m[39m
+ [32m✓[39m packages/hub/test/db/migrate-cli.test.ts [2m([22m[2m6 tests[22m[2m)[22m[33m 2093[2mms[22m[39m
+   [33m[2m✓[22m[39m 首次执行建库并报告应用的迁移 [33m 427[2mms[22m[39m
+   [33m[2m✓[22m[39m 第二次执行是 no-op：退出码 0 且不报 table already exists [33m 1061[2mms[22m[39m
+   [33m[2m✓[22m[39m OPC_DB 环境变量作为缺省来源 [33m 309[2mms[22m[39m
+ [32m✓[39m packages/hub/test/db/worker-entry.test.ts [2m([22m[2m18 tests[22m[2m)[22m[33m 1827[2mms[22m[39m
+     [33m[2m✓[22m[39m 子进程跑通了 [33m 896[2mms[22m[39m
+     [33m[2m✓[22m[39m 反向对照：NODE_OPTIONS 那条读数【读得到东西】（否则上一条恒绿） [33m 794[2mms[22m[39m
+ [32m✓[39m packages/hub/test/http/server.test.ts [2m([22m[2m20 tests[22m[2m)[22m[33m 1829[2mms[22m[39m
+ [32m✓[39m packages/hub/test/charter/store.test.ts [2m([22m[2m25 tests[22m[2m)[22m[33m 1755[2mms[22m[39m
+(node:59660) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ [32m✓[39m packages/hub/test/http/tokens.test.ts [2m([22m[2m25 tests[22m[2m)[22m[33m 1360[2mms[22m[39m
+ [32m✓[39m packages/hub/test/approvals/query.test.ts [2m([22m[2m23 tests[22m[2m)[22m[33m 1472[2mms[22m[39m
+ [32m✓[39m packages/hub/test/channels/deliver.test.ts [2m([22m[2m17 tests[22m[2m)[22m[33m 1446[2mms[22m[39m
+ [32m✓[39m packages/hub/test/engine/claude.test.ts [2m([22m[2m16 tests[22m[2m)[22m[33m 1462[2mms[22m[39m
+     [33m[2m✓[22m[39m 进程挂住 ⇒ 超时被杀死并报错（不能让一个角色把整个 hub 拖死） [33m 723[2mms[22m[39m
+(node:45960) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:49552) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+[90mstdout[2m | test/arch/dead-modules.test.ts[2m > [22m[2m死模块哨兵[2m > [22m[2m真实语料：解析量非零（判据坏起来的第一个症状是一条边都没解析出来）
+[22m[39m  [死模块哨兵] 模块 92 · 边 287 · 静态入口 7 · 动态入口 2 · 不可达 14
+
+ [32m✓[39m packages/hub/test/engine/charter.test.ts [2m([22m[2m17 tests[22m[2m)[22m[33m 1137[2mms[22m[39m
+ [32m✓[39m packages/hub/test/charter/seed.test.ts [2m([22m[2m37 tests[22m[2m)[22m[33m 1442[2mms[22m[39m
+(node:60084) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ [32m✓[39m packages/hub/test/charter/budget-sync.test.ts [2m([22m[2m20 tests[22m[2m)[22m[33m 1128[2mms[22m[39m
+(node:53808) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ [32m✓[39m test/arch/commit-msg-refs.test.ts [2m([22m[2m4 tests[22m[2m)[22m[33m 1060[2mms[22m[39m
+     [33m[2m✓[22m[39m 真实历史: 标题 scope 与实际改动一致，且不引用不存在的编号 [33m 1055[2mms[22m[39m
+(node:67504) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ [32m✓[39m packages/hub/test/checkpoint/saver.contract.test.ts [2m([22m[2m38 tests[22m[2m | [22m[33m6 skipped[39m[2m)[22m[33m 1415[2mms[22m[39m
+(node:41928) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:69484) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:64128) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:69640) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ [32m✓[39m packages/hub/test/http/org-route.test.ts [2m([22m[2m15 tests[22m[2m)[22m[33m 979[2mms[22m[39m
+(node:66636) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ [32m✓[39m test/arch/dead-modules.test.ts [2m([22m[2m23 tests[22m[2m)[22m[33m 1297[2mms[22m[39m
+(node:55112) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:16100) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+[90mstderr[2m | packages/hub/test/events/recorder.test.ts[2m > [22m[2mseq = events.id，且只在提交后广播[2m > [22m[2m广播失败不能污染已提交的事务（前端断了不该让审计写入失败）
+[22m[39m[events] 投影广播失败（events 表已落库，不影响审计）: Error: SSE 写失败
+    at FakeBus.bus.publishPersisted (D:/item/opc/packages/hub/test/events/recorder.test.ts:691:13)
+    at AuditRecorder.#flush (D:/item/opc/packages/hub/src/events/recorder.ts:396:19)
+    at AuditRecorder.#commitCurrentStep (D:/item/opc/packages/hub/src/events/recorder.ts:387:10)
+[90m    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)[39m
+    at AuditRecorder.run (D:/item/opc/packages/hub/src/events/recorder.ts:370:7)
+    at D:/item/opc/packages/hub/test/events/recorder.test.ts:694:5
+    at async [90mfile:///D:/item/opc/[39mnode_modules/[4m.pnpm[24m/@vitest+runner@4.1.12/node_modules/[4m@vitest/runner[24m/dist/chunk-artifact.js:1903:20
+
+(node:21988) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:53292) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:58784) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ [32m✓[39m packages/hub/test/channels/feishu-http.test.ts [2m([22m[2m9 tests[22m[2m)[22m[33m 867[2mms[22m[39m
+ [32m✓[39m packages/hub/test/acceptance/im-reply-approves-card.test.ts [2m([22m[2m12 tests[22m[2m)[22m[33m 908[2mms[22m[39m
+ [32m✓[39m test/arch/lint-baseline.test.ts [2m([22m[2m12 tests[22m[2m)[22m[33m 948[2mms[22m[39m
+     [33m[2m✓[22m[39m `pnpm lint` 今天的 error 全部在基线内，且读数本身可信 [33m 939[2mms[22m[39m
+ [32m✓[39m packages/hub/test/db/migrate.test.ts [2m([22m[2m10 tests[22m[2m)[22m[33m 657[2mms[22m[39m
+ [32m✓[39m packages/hub/test/events/recorder.test.ts [2m([22m[2m34 tests[22m[2m)[22m[33m 855[2mms[22m[39m
+ [32m✓[39m packages/hub/test/db/driver-preflight.test.ts [2m([22m[2m16 tests[22m[2m)[22m[33m 710[2mms[22m[39m
+ [32m✓[39m test/arch/mutation-parser-screen.test.ts [2m([22m[2m13 tests[22m[2m)[22m[33m 354[2mms[22m[39m
+ [32m✓[39m packages/hub/test/serve/lock.test.ts [2m([22m[2m23 tests[22m[2m)[22m[33m 908[2mms[22m[39m
+     [33m[2m✓[22m[39m N 个进程同时写同一文件的 wx flag ⇒ 恰有一个成功（原语成立） [33m 651[2mms[22m[39m
+ [32m✓[39m packages/hub/test/db/schema-0001.test.ts [2m([22m[2m7 tests[22m[2m)[22m[33m 548[2mms[22m[39m
+ [32m✓[39m test/arch/claims-registry.test.ts [2m([22m[2m145 tests[22m[2m)[22m[33m 603[2mms[22m[39m
+ [32m✓[39m test/arch/no-null-bytes.test.ts [2m([22m[2m10 tests[22m[2m)[22m[33m 613[2mms[22m[39m
+ [32m✓[39m packages/hub/test/evidence/bundle.test.ts [2m([22m[2m33 tests[22m[2m)[22m[33m 964[2mms[22m[39m
+ [32m✓[39m packages/hub/test/http/tokens-route.test.ts [2m([22m[2m18 tests[22m[2m)[22m[33m 1008[2mms[22m[39m
+ [32m✓[39m packages/hub/test/approvals/timeout.test.ts [2m([22m[2m9 tests[22m[2m)[22m[33m 756[2mms[22m[39m
+ [32m✓[39m packages/hub/test/http/decision-engine-route.test.ts [2m([22m[2m9 tests[22m[2m)[22m[33m 704[2mms[22m[39m
+ [32m✓[39m test/arch/zero-producer.test.ts [2m([22m[2m11 tests[22m[2m)[22m[33m 505[2mms[22m[39m
+ [32m✓[39m packages/hub/test/fixtures/fixture-dir.test.ts [2m([22m[2m28 tests[22m[2m)[22m[33m 567[2mms[22m[39m
+ [32m✓[39m packages/hub/test/db/backup.test.ts [2m([22m[2m39 tests[22m[2m)[22m[33m 7939[2mms[22m[39m
+     [33m[2m✓[22m[39m 只留最近 KEEP_BACKUPS 份，删的是最旧的 [33m 415[2mms[22m[39m
+     [33m[2m✓[22m[39m 目标旁边留着【别的库的】-wal ⇒ 必须被清掉，内容必须等于备份 [33m 413[2mms[22m[39m
+     [33m[2m✓[22m[39m ⭐ 备份期间【主线程仍在推进】；而同步版会把主线程停住（反向对照） [33m 3133[2mms[22m[39m
+     [33m[2m✓[22m[39m ⭐ 注入的时刻【必须】跟着进 worker：文件名用的是它，不是墙钟 [33m 420[2mms[22m[39m
+(node:48972) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ [32m✓[39m test/arch/irreversible-token.test.ts [2m([22m[2m8 tests[22m[2m)[22m[33m 492[2mms[22m[39m
+ [32m✓[39m test/arch/dependency-boundary.test.ts [2m([22m[2m4 tests[22m[2m)[22m[33m 372[2mms[22m[39m
+(node:38748) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+桌面壳推送失败，事件流已停：渲染进程已销毁，事件流停止
+ [32m✓[39m packages/hub/test/graph/e2e-linear.test.ts [2m([22m[2m13 tests[22m[2m)[22m[33m 7820[2mms[22m[39m
+       [33m[2m✓[22m[39m SIGKILL 后：已提交的超步都在库里，被杀那个超步一条事件都没留下 [33m 1351[2mms[22m[39m
+       [33m[2m✓[22m[39m 新进程续跑：补齐剩下所有边，已完成节点不产生重复事件（V3） [33m 5925[2mms[22m[39m
+ [32m✓[39m packages/hub/test/serve/timer.test.ts [2m([22m[2m29 tests[22m[2m)[22m[33m 320[2mms[22m[39m
+(node:62208) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ [32m✓[39m test/arch/doc-coords.test.ts [2m([22m[2m3 tests[22m[2m)[22m[33m 336[2mms[22m[39m
+(node:64920) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:70272) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ [32m✓[39m test/desktop/wire.test.ts [2m([22m[2m16 tests[22m[2m)[22m[33m 327[2mms[22m[39m
+(node:47548) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ [32m✓[39m packages/hub/test/graph/audit-interrupt.test.ts [2m([22m[2m13 tests[22m[2m)[22m[32m 203[2mms[22m[39m
+桌面壳推送失败，事件流已停：WebContents 已销毁
+(node:4872) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ [32m✓[39m test/arch/doc-refs.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 232[2mms[22m[39m
+ [32m✓[39m test/arch/pending-decisions.test.ts [2m([22m[2m19 tests[22m[2m)[22m[32m 74[2mms[22m[39m
+ [32m✓[39m test/arch/no-native-deps.test.ts [2m([22m[2m6 tests[22m[2m)[22m[32m 233[2mms[22m[39m
+ [32m✓[39m test/arch/doc-ids.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 60[2mms[22m[39m
+ [32m✓[39m test/desktop/event-stream.test.ts [2m([22m[2m23 tests[22m[2m)[22m[32m 235[2mms[22m[39m
+ [32m✓[39m test/arch/claim-coords.test.ts [2m([22m[2m8 tests[22m[2m)[22m[32m 94[2mms[22m[39m
+ [32m✓[39m packages/hub/test/acceptance/phase1-gates.test.ts [2m([22m[2m13 tests[22m[2m)[22m[32m 208[2mms[22m[39m
+(node:60084) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ [32m✓[39m test/arch/production-deps.test.ts [2m([22m[2m7 tests[22m[2m)[22m[32m 95[2mms[22m[39m
+ [32m✓[39m packages/hub/test/engine/driver.test.ts [2m([22m[2m11 tests[22m[2m)[22m[32m 256[2mms[22m[39m
+ [32m✓[39m packages/hub/test/acceptance/rejected-waiver-still-asks.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 216[2mms[22m[39m
+ [32m✓[39m packages/hub/test/acceptance/idea-to-delivered.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 162[2mms[22m[39m
+ [32m✓[39m packages/hub/test/graph/step-tx.test.ts [2m([22m[2m8 tests[22m[2m)[22m[33m 572[2mms[22m[39m
+ [32m✓[39m test/arch/harness-invariants.test.ts [2m([22m[2m17 tests[22m[2m)[22m[32m 52[2mms[22m[39m
+(node:47796) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ [32m✓[39m packages/hub/test/serve/dev-entry.test.ts [2m([22m[2m14 tests[22m[2m)[22m[32m 88[2mms[22m[39m
+ [32m✓[39m packages/hub/test/roles/charter.test.ts [2m([22m[2m32 tests[22m[2m)[22m[32m 103[2mms[22m[39m
+(node:70492) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+[90mstderr[2m | packages/hub/test/channels/channel.test.ts[2m > [22m[2m抽象层契约 —— 队列型 fake A[2m > [22m[2m⭐ 一条通道 pull 抛错 ⇒ 另一条照常处理（坏通道不许带走好通道）
+[22m[39m[channel] pull 失败 broken：Error: fetch 抛错
+
+[90mstderr[2m | packages/hub/test/channels/channel.test.ts[2m > [22m[2m抽象层契约 —— 分批型 fake B[2m > [22m[2m⭐ 一条通道 pull 抛错 ⇒ 另一条照常处理（坏通道不许带走好通道）
+[22m[39m[channel] pull 失败 broken：Error: 长连接断了
+
+[90mstderr[2m | packages/hub/test/channels/channel.test.ts[2m > [22m[2m违约实验：把 fake 改坏，清单必须恰好红在管那一维的那一发[2m > [22m[2m违约「pull 倒序」会被清单抓住
+[22m[39m[channel] pull 失败 broken：Error: fetch 抛错
+
+[90mstderr[2m | packages/hub/test/channels/channel.test.ts[2m > [22m[2m违约实验：把 fake 改坏，清单必须恰好红在管那一维的那一发[2m > [22m[2m违约「pull 倒序」会被清单抓住
+[22m[39m[channel] pull 失败 broken：Error: 长连接断了
+
+[90mstderr[2m | packages/hub/test/channels/channel.test.ts[2m > [22m[2m违约实验：把 fake 改坏，清单必须恰好红在管那一维的那一发[2m > [22m[2m违约「实现无视 canAct」会被清单抓住
+[22m[39m[channel] pull 失败 broken：Error: fetch 抛错
+
+[90mstderr[2m | packages/hub/test/channels/channel.test.ts[2m > [22m[2m违约实验：把 fake 改坏，清单必须恰好红在管那一维的那一发[2m > [22m[2m违约「实现无视 canAct」会被清单抓住
+[22m[39m[channel] pull 失败 broken：Error: 长连接断了
+
+[90mstderr[2m | packages/hub/test/channels/channel.test.ts[2m > [22m[2m违约实验：把 fake 改坏，清单必须恰好红在管那一维的那一发[2m > [22m[2m违约「send 静默丢」会被清单抓住
+[22m[39m[channel] pull 失败 broken：Error: fetch 抛错
+
+[90mstderr[2m | packages/hub/test/channels/channel.test.ts[2m > [22m[2m违约实验：把 fake 改坏，清单必须恰好红在管那一维的那一发[2m > [22m[2m违约「send 静默丢」会被清单抓住
+[22m[39m[channel] pull 失败 broken：Error: 长连接断了
+
+[90mstderr[2m | packages/hub/test/channels/channel.test.ts[2m > [22m[2m两个 fake 的旋钮一一对应，而且每个都真的承重[2m > [22m[2m旋钮「pullThrows=true 让那一轮标 failedOpen」在两个 fake 上都生效
+[22m[39m[channel] pull 失败 fake-a：Error: fetch 抛错
+
+[90mstderr[2m | packages/hub/test/channels/channel.test.ts[2m > [22m[2m两个 fake 的旋钮一一对应，而且每个都真的承重[2m > [22m[2m旋钮「pullThrows=true 让那一轮标 failedOpen」在两个 fake 上都生效
+[22m[39m[channel] pull 失败 fake-b：Error: 长连接断了
+
+ [32m✓[39m packages/hub/test/channels/channel.test.ts [2m([22m[2m70 tests[22m[2m)[22m[32m 46[2mms[22m[39m
+(node:66320) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ [32m✓[39m test/desktop/ipc-surface.test.ts [2m([22m[2m31 tests[22m[2m)[22m[32m 14[2mms[22m[39m
+ [32m✓[39m test/arch/plan-refs.test.ts [2m([22m[2m10 tests[22m[2m)[22m[32m 21[2mms[22m[39m
+ [32m✓[39m packages/hub/test/checkpoint/tx-scope-probe.test.ts [2m([22m[2m5 tests[22m[2m)[22m[33m 411[2mms[22m[39m
+ [32m✓[39m test/arch/role-spawn-boundary.test.ts [2m([22m[2m11 tests[22m[2m)[22m[32m 21[2mms[22m[39m
+ [32m✓[39m packages/hub/test/harness/gateway.test.ts [2m([22m[2m48 tests[22m[2m)[22m[32m 25[2mms[22m[39m
+ [32m✓[39m test/web/app-pure.test.ts [2m([22m[2m47 tests[22m[2m)[22m[32m 18[2mms[22m[39m
+(node:35112) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:68924) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ [32m✓[39m packages/hub/test/channels/feishu.test.ts [2m([22m[2m40 tests[22m[2m)[22m[32m 14[2mms[22m[39m
+ [32m✓[39m test/org/validate.test.ts [2m([22m[2m59 tests[22m[2m)[22m[32m 14[2mms[22m[39m
+ [32m✓[39m packages/hub/test/harness/verifier.test.ts [2m([22m[2m39 tests[22m[2m)[22m[32m 26[2mms[22m[39m
+ [32m✓[39m test/arch/desktop-honest-label.test.ts [2m([22m[2m7 tests[22m[2m)[22m[32m 15[2mms[22m[39m
+ [32m✓[39m packages/hub/test/serve/config.test.ts [2m([22m[2m47 tests[22m[2m)[22m[32m 11[2mms[22m[39m
+ [32m✓[39m packages/hub/test/gates/determinism.test.ts [2m([22m[2m32 tests[22m[2m)[22m[32m 16[2mms[22m[39m
+ [32m✓[39m packages/hub/test/charter/prompt.test.ts [2m([22m[2m25 tests[22m[2m)[22m[32m 19[2mms[22m[39m
+ [32m✓[39m packages/hub/test/graph/foreign-model-loop.test.ts [2m([22m[2m6 tests[22m[2m)[22m[33m 503[2mms[22m[39m
+ [32m✓[39m test/arch/plan-gate-paths.test.ts [2m([22m[2m11 tests[22m[2m)[22m[32m 17[2mms[22m[39m
+ [32m✓[39m packages/hub/test/heartbeat/retry.test.ts [2m([22m[2m22 tests[22m[2m)[22m[32m 10[2mms[22m[39m
+ [32m✓[39m test/web/hub-projection.test.ts [2m([22m[2m34 tests[22m[2m)[22m[32m 15[2mms[22m[39m
+ [32m✓[39m test/desktop/signed-fetch.test.ts [2m([22m[2m17 tests[22m[2m)[22m[32m 11[2mms[22m[39m
+(node:37412) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ [32m✓[39m packages/hub/test/harness/safety.test.ts [2m([22m[2m43 tests[22m[2m)[22m[32m 11[2mms[22m[39m
+ [32m✓[39m packages/hub/test/serve/assemble.test.ts [2m([22m[2m54 tests[22m[2m)[22m[33m 9947[2mms[22m[39m
+     [33m[2m✓[22m[39m ⭐ 中间一页被写坏 ⇒ 【拒绝启动】：库打得开、迁移过得去，只有 page_integrity 看得见 [33m 1041[2mms[22m[39m
+     [33m[2m✓[22m[39m 反向对照：同一份夹具【不损坏】时能起来（否则上面那条绿是恒红换来的） [33m 374[2mms[22m[39m
+     [33m[2m✓[22m[39m ⭐ 反向对照：同一份库【检查跑成了】时不许出现那句警告（否则上一条恒绿） [33m 346[2mms[22m[39m
+     [33m[2m✓[22m[39m ⭐ 首轮心跳就落一份【真的】备份；同一天再推两轮 ⇒ 仍然只有一份 [33m 789[2mms[22m[39m
+     [33m[2m✓[22m[39m 第二天 ⇒ 该再多一份（否则上面那个「只有一份」可能是恒不备） [33m 440[2mms[22m[39m
+     [33m[2m✓[22m[39m 备份目录是多层不存在的路径 ⇒ createBackup 自己 mkdir，备成功 [33m 305[2mms[22m[39m
+     [33m[2m✓[22m[39m ⭐ 关机之后【不再开始】新备份，且任何已落盘的一份都是完整的 [33m 420[2mms[22m[39m
+     [33m[2m✓[22m[39m ⭐⭐ 巡检跑一半时关机 ⇒ 那一轮【跑完之后】仍然不备（变异实验验过它确实会红） [33m 411[2mms[22m[39m
+     [33m[2m✓[22m[39m ⭐ 连续失败到阈值 ⇒ onHeartbeatFatal 被叫到，且 HTTP【仍在服务】 [33m 345[2mms[22m[39m
+     [33m[2m✓[22m[39m ⭐ 真的 serveHub、真的回环端口、真的 token：一次完整的起停 [33m 328[2mms[22m[39m
+ [32m✓[39m packages/hub/test/routing/escalation.test.ts [2m([22m[2m23 tests[22m[2m)[22m[32m 10[2mms[22m[39m
+ [32m✓[39m packages/hub/test/graph/branches.test.ts [2m([22m[2m20 tests[22m[2m)[22m[32m 6[2mms[22m[39m
+ [32m✓[39m packages/hub/test/http/bind.test.ts [2m([22m[2m18 tests[22m[2m)[22m[32m 7[2mms[22m[39m
+ [32m✓[39m packages/hub/test/harness/routing.test.ts [2m([22m[2m37 tests[22m[2m)[22m[32m 10[2mms[22m[39m
+ [32m✓[39m packages/hub/test/graph/interrupt-resume.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 264[2mms[22m[39m
+ [32m✓[39m packages/hub/test/events/bus.test.ts [2m([22m[2m12 tests[22m[2m)[22m[32m 7[2mms[22m[39m
+ [32m✓[39m packages/hub/test/search/policy.test.ts [2m([22m[2m36 tests[22m[2m)[22m[32m 9[2mms[22m[39m
+ [32m✓[39m test/arch/test-inventory.test.ts [2m([22m[2m12 tests[22m[2m)[22m[33m 3478[2mms[22m[39m
+     [33m[2m✓[22m[39m 磁盘上每个测试样文件都在 include 覆盖范围内 [33m 3470[2mms[22m[39m
+ [32m✓[39m test/arch/matcher-oracle.test.ts [2m([22m[2m10 tests[22m[2m)[22m[32m 6[2mms[22m[39m
+ [32m✓[39m test/arch/decision-index.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 6[2mms[22m[39m
+(node:17752) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ [32m✓[39m packages/hub/test/memory/prompt.test.ts [2m([22m[2m12 tests[22m[2m)[22m[32m 4[2mms[22m[39m
+ [32m✓[39m packages/hub/test/gates/author-reviewer.test.ts [2m([22m[2m22 tests[22m[2m)[22m[32m 6[2mms[22m[39m
+(node:44680) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ [32m✓[39m test/web/renderer-criteria.test.ts [2m([22m[2m11 tests[22m[2m)[22m[32m 7[2mms[22m[39m
+ [32m✓[39m test/web/dev-server-sign.test.ts [2m([22m[2m5 tests[22m[2m)[22m[32m 6[2mms[22m[39m
+ [32m✓[39m packages/hub/test/fixtures/paths.test.ts [2m([22m[2m11 tests[22m[2m)[22m[32m 6[2mms[22m[39m
+ [32m✓[39m packages/hub/test/graph/status-machine.test.ts [2m([22m[2m17 tests[22m[2m)[22m[32m 5[2mms[22m[39m
+ [32m✓[39m test/arch/config-match.test.ts [2m([22m[2m7 tests[22m[2m)[22m[32m 4[2mms[22m[39m
+ [32m✓[39m packages/hub/test/search/mcp.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 3[2mms[22m[39m
+ [32m✓[39m packages/hub/test/policy/classify.test.ts [2m([22m[2m20 tests[22m[2m)[22m[32m 8[2mms[22m[39m
+ [32m✓[39m test/arch/census.test.ts [2m([22m[2m12 tests[22m[2m)[22m[32m 7[2mms[22m[39m
+ [32m✓[39m packages/hub/test/search/observe.test.ts [2m([22m[2m11 tests[22m[2m)[22m[32m 5[2mms[22m[39m
+ [32m✓[39m test/arch/stub-terminal-write.test.ts [2m([22m[2m30 tests[22m[2m)[22m[32m 14[2mms[22m[39m
+ [32m✓[39m test/arch/comment-test-readers.test.ts [2m([22m[2m12 tests[22m[2m)[22m[32m 6[2mms[22m[39m
+
+[Task 6.4 基准实测]
+  批量 2000 行 125.0ms / 逐条事务 749.3ms / 比值 6.0×（计划阈值 < 50 ms，见 0019 §3）
+  5 轮巡检并发下，20 次写最晚在 57.3ms 落地（【历史对照，非本轮测量】摘掉同一条索引时约 1.7s 量级；摘索引后的巡检单趟耗时见 bench-recompute.mjs §1-9 第②臂）
+  回放检索 P50 0.76ms P95 1.52ms（阈值 500ms）
+  20 次回放检索共 22.9ms 期间，20 次写最晚在 55.4ms 落地
+  归因对照：检索占 317.7ms 时写最晚 350.2ms；空转占 317.7ms 时写最晚 350.9ms
+ [32m✓[39m packages/hub/test/acceptance/perf-thresholds.test.ts [2m([22m[2m8 tests[22m[2m)[22m[33m 11783[2mms[22m[39m
+     [33m[2m✓[22m[39m 10 万行的库上：批量仍显著快于逐条事务 [33m 1154[2mms[22m[39m
+     [33m[2m✓[22m[39m 空转对照：卡住写队列的是【主线程被占】，不是锁或 WAL [33m 702[2mms[22m[39m
+ [32m✓[39m packages/hub/test/db/integrity.test.ts [2m([22m[2m37 tests[22m[2m)[22m[33m 14703[2mms[22m[39m
+     [33m[2m✓[22m[39m 默认路径走 worker：报告里 via = worker，且扫描期间主线程仍在推进 [33m 11718[2mms[22m[39m
+     [33m[2m✓[22m[39m ⭐ 仪器故障（worker_timeout）⇒ could_not_run 且不拉闸门；真损坏【仍然】拉 [33m 678[2mms[22m[39m
+     [33m[2m✓[22m[39m 主线程那一支【捕获】PRAGMA 的抛错：损坏库要出报告，不是出一个 rejection [33m 744[2mms[22m[39m
+ [32m✓[39m packages/hub/test/cli/stub-write-guard.test.ts [2m([22m[2m8 tests[22m[2m)[22m[33m 15650[2mms[22m[39m
+     [33m[2m✓[22m[39m 桩新建的库会被自动认领，且能接着 resume [33m 2327[2mms[22m[39m
+     [33m[2m✓[22m[39m 一条【已有内容、但不是桩建的】库被拒：退出 2，且库一个字节没变 [33m 3295[2mms[22m[39m
+     [33m[2m✓[22m[39m ⭐ 一条【全新的】真库也被拒（这条是守卫与设计文档原方案的差别所在） [33m 3575[2mms[22m[39m
+     [33m[2m✓[22m[39m resume 同样被挡（只挡 run 等于留了一个『第一次不许、第二次随便』的门槛） [33m 2485[2mms[22m[39m
+     [33m[2m✓[22m[39m status 不被挡：只读命令不该需要写权限 [33m 1213[2mms[22m[39m
+     [33m[2m✓[22m[39m 打不开的那个库【不能】被放行：读不出标记就等于不是桩的 [33m 908[2mms[22m[39m
+     [33m[2m✓[22m[39m 守卫本身有判别力：把标记值改掉一位，桩自己的库就会被拒 [33m 1824[2mms[22m[39m
+ [32m✓[39m test/arch/test-type-baseline.test.ts [2m([22m[2m26 tests[22m[2m)[22m[33m 16129[2mms[22m[39m
+     [33m[2m✓[22m[39m 真跑一次：今天的数在表内，且读数本身可信 [33m 8956[2mms[22m[39m
+     [33m[2m✓[22m[39m test/arch 自己必须是 0 条（round277 清到 0，这一发钉住它不漂回去） [33m 6823[2mms[22m[39m
+     [33m[2m✓[22m[39m ⭐ 射程 ② 不是散文：一个语法错的探针会【关掉整个类型检查】，本守卫的读数会塌 [33m 336[2mms[22m[39m
+ [32m✓[39m packages/hub/test/cli/smoke.test.ts [2m([22m[2m19 tests[22m[2m)[22m[33m 25787[2mms[22m[39m
+       [33m[2m✓[22m[39m --help 退出 0，且三条子命令都在用法里 [33m 987[2mms[22m[39m
+       [33m[2m✓[22m[39m 没有 --db 时报错退出 2，绝不编一个默认库路径 [33m 1746[2mms[22m[39m
+       [33m[2m✓[22m[39m 未知子命令退出 2，而不是被当成裸参数吃掉 [33m 2611[2mms[22m[39m
+       [33m[2m✓[22m[39m 缺 --idea 或缺 --task 都退出 2 并指名缺哪个 [33m 5688[2mms[22m[39m
+       [33m[2m✓[22m[39m 拒绝 --thread：退出 2、不建库、且拒绝行自己给出 --task [33m 951[2mms[22m[39m
+       [33m[2m✓[22m[39m --thread=值 这种写法同样被拒绝并指路 [33m 941[2mms[22m[39m
+       [33m[2m✓[22m[39m OPC_DB 生效：不带 --db 也能跑通，库落在指定路径 [33m 960[2mms[22m[39m
+       [33m[2m✓[22m[39m OPC_DB 是纯空白时不算设置了它：退出 2，不去 cwd 建库 [33m 868[2mms[22m[39m
+       [33m[2m✓[22m[39m 在临时目录建库、跑完桩图、退出码 0 [33m 866[2mms[22m[39m
+       [33m[2m✓[22m[39m 超步事务真的滚动，不是一个事务包整趟 [33m 734[2mms[22m[39m
+       [33m[2m✓[22m[39m 每次运行都声明用的是桩模型：不联网、不计费 [33m 660[2mms[22m[39m
+       [33m[2m✓[22m[39m 第二次退出 2，且没有把已完成的任务再推一遍 [33m 1251[2mms[22m[39m
+       [33m[2m✓[22m[39m 不同 task 互不影响 [33m 1247[2mms[22m[39m
+       [33m[2m✓[22m[39m 已完成的 thread 上 resume：退出 0，events 行数一条不多 [33m 1222[2mms[22m[39m
+       [33m[2m✓[22m[39m 对不存在的 task 做 resume / status 都退出 2 并指名 task [33m 1703[2mms[22m[39m
+       [33m[2m✓[22m[39m 库文件不存在时 resume 退出 2，且不创建任何文件 [33m 529[2mms[22m[39m
+       [33m[2m✓[22m[39m 库文件不存在时 status 退出 2，且不创建任何文件 [33m 523[2mms[22m[39m
+       [33m[2m✓[22m[39m 打印任务状态与完整状态机轨迹 [33m 1140[2mms[22m[39m
+       [33m[2m✓[22m[39m 轨迹只含状态跃迁：混进来的别类事件被 action 过滤掉 [33m 1150[2mms[22m[39m
+
+[2m Test Files [22m [1m[32m137 passed[39m[22m[90m (137)[39m
+[2m      Tests [22m [1m[32m3032 passed[39m[22m[2m | [22m[33m6 skipped[39m[90m (3038)[39m
+[2m   Start at [22m 16:24:11
+[2m   Duration [22m 27.37s[2m (transform 17.61s, setup 0ms, import 61.64s, tests 241.86s, environment 9ms)[22m
+

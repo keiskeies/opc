@@ -1,5 +1,5 @@
 // round303 一次性：验台账 §⑧②③ 那两句是【实测】还是【我的推理】。
-// 跑法（从仓库根）：npx vitest run .workbuddy/probe303-residual.test.ts
+// 跑法（从仓库根）：npx vitest run --config .workbuddy/probe303-vitest.config.mjs
 import { describe, expect, it } from "vitest";
 import { isInsideWorkspace } from "../packages/hub/src/harness/safety.js";
 

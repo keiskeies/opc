@@ -5,6 +5,6 @@ export default defineConfig({
   root: "D:/item/opc",
   test: {
     environment: "node",
-    include: [".workbuddy/probe303-*.test.ts"],
+    include: [".workbuddy/probe303-*.probe.ts"],
   },
 });
