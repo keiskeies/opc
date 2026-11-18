@@ -1834,6 +1834,251 @@ describe("主张登记表：变异 r23（整图委派边门控自检）", () => 
   });
 });
 
+/* ── r24（round299）：「节点键 === node.role_id」今天【由 schema 判】───────
+ * 判据读三份落点：org/graph.ts 的那一段（权威）+ api.ts 与 org/commit.ts（前提）。
+ * 家规照 r20–r23：每一发变异带 not.toContain 排除别的红因；【整份不见】各有一发，
+ * 因为 fakeFiles 的缺键是【抛】——判据没包 try 时它会红成一句和「文件没了」逐字
+ * 一样的话（r23 踩过，那边把这条纪律写进了 fakeFiles 的注释）。
+ * 两枚反向对照走 r22 之九·乙的剧本：同一份字节【在注释里】该绿、【在代码里】该红 ——
+ * 那一对是 withoutComments 在这一族上【方向】的唯一证据（只留绿的那发是空转）。 */
+describe("主张登记表：变异 r24（节点键与 role_id 的 schema 判据）", () => {
+  const R24_GRAPH = "contracts:org/graph.ts";
+  const R24_API = "contracts:api.ts";
+  const R24_COMMIT = "org/commit.ts";
+  /** r24 判据在合成语料下【不红】所需的最小一份好输入 = 真字节原文。 */
+  const r24Good = (
+    over: Record<string, string> = {},
+  ): Record<string, string> => ({
+    [R24_GRAPH]: realFiles.contracts("org/graph.ts"),
+    [R24_API]: realFiles.contracts("api.ts"),
+    [R24_COMMIT]: realFiles.src("org/commit.ts"),
+    ...over,
+  });
+  /** 换掉一段字节，并【先证明那段在】—— 锚点写错会变成空变异而测试"通过"。 */
+  const swap = (text: string, from: string, to: string): string => {
+    expect(text.includes(from)).toBe(true);
+    const out = text.replace(from, to);
+    expect(out).not.toBe(text);
+    return out;
+  };
+  /** superRefine 那一段的原文（从函数头到段尾），供「摘掉它」的几发整段替换。 */
+  const superRefineBlock = (): string => {
+    const t = realFiles.contracts("org/graph.ts");
+    const a = t.indexOf("  .superRefine((graph, ctx) => {");
+    expect(a).toBeGreaterThan(-1);
+    const b = t.indexOf("export type OrgGraph", a);
+    expect(b).toBeGreaterThan(a);
+    return t.slice(a, b);
+  };
+
+  it("r24 的真仓库那一半：三处取材都读得到那几行字节（红=取材坏了）", () => {
+    expect(realFiles.contracts("org/graph.ts")).toContain(".superRefine(");
+    expect(realFiles.contracts("org/graph.ts")).toContain(
+      "Object.entries(graph.nodes)",
+    );
+    expect(realFiles.contracts("api.ts")).toContain("graph: orgGraphSchema");
+    expect(realFiles.src("org/commit.ts")).toContain(
+      "INSERT_DELEGATION_GRAPH_SQL",
+    );
+  });
+
+  it("r24 控制组：三份原文一字不改 ⇒ 判据返回空（剥注释那几格在真语料上不误伤）", () => {
+    expect(checkOne("r24", fakeFiles(r24Good()))).toBe("");
+  });
+
+  it("变异 r24 之一：graph.ts 整份不见 ⇒ 红在【不在了】而不是红在「superRefine 没了」", () => {
+    const without = r24Good();
+    delete without[R24_GRAPH];
+    const msg = checkOne("r24", fakeFiles(without));
+    expect(msg).toContain("org/graph.ts 不在了");
+    expect(msg).not.toContain("上不再有 superRefine");
+  });
+
+  it("变异 r24 之二：定义整段改名 ⇒ 红在【取材】而不是红在「判据被摘」", () => {
+    const mutated = swap(
+      realFiles.contracts("org/graph.ts"),
+      "export const orgGraphSchema = z",
+      "export const orgGraphSchemaV2 = z",
+    );
+    const msg = checkOne("r24", fakeFiles(r24Good({ [R24_GRAPH]: mutated })));
+    expect(msg).toContain("读不到 orgGraphSchema 那一段");
+    expect(msg).not.toContain("上不再有 superRefine");
+  });
+
+  it("变异 r24 之三：整条 superRefine 摘掉 ⇒ 红（主张本体没了）", () => {
+    const mutated = realFiles
+      .contracts("org/graph.ts")
+      .replace(superRefineBlock(), "\n");
+    expect(mutated).not.toContain(".superRefine(");
+    const msg = checkOne("r24", fakeFiles(r24Good({ [R24_GRAPH]: mutated })));
+    expect(msg).toContain("上不再有 superRefine");
+    expect(msg).not.toContain("遍历的【不再是 nodes】");
+  });
+
+  it("⭐ 变异 r24 之四：摘掉后【留成块注释】⇒ 照样红（注释字节不许替「判了」投票）", () => {
+    // 没有这一发，「判剥注释后的字节」在①上从没被验过：判据若退化成判原文，
+    // 一份被摘掉却留了遗言的判据会在登记表里继续绿着 —— 正是本仓治过的那一族。
+    const block = superRefineBlock();
+    const wrapped =
+      "  /* 摘掉过，留原文当反面教材：\n" +
+      block
+        .split("\n")
+        .map((l) => "   *" + l)
+        .join("\n") +
+      "\n   */\n";
+    const mutated = realFiles.contracts("org/graph.ts").replace(block, wrapped);
+    // 前提自证：字节【进了语料】且被注释包着 —— 否则这一发是空转变异。
+    expect(mutated).toContain(".superRefine(");
+    const msg = checkOne("r24", fakeFiles(r24Good({ [R24_GRAPH]: mutated })));
+    expect(msg).toContain("上不再有 superRefine");
+  });
+
+  it("变异 r24 之五（M3）：遍历对象从 nodes 换成 edges ⇒ 红（判据存在≠判的是这件事）", () => {
+    const mutated = swap(
+      realFiles.contracts("org/graph.ts"),
+      "Object.entries(graph.nodes)",
+      "Object.entries(graph.edges)",
+    );
+    const msg = checkOne("r24", fakeFiles(r24Good({ [R24_GRAPH]: mutated })));
+    expect(msg).toContain("遍历的【不再是 nodes】");
+    expect(msg).not.toContain("上不再有 superRefine");
+    expect(msg).not.toContain("这个方向");
+  });
+
+  it("⭐ 变异 r24 之六（M1）：比较方向翻成 !== ⇒ 红（最像「修好了」的坏法）", () => {
+    const mutated = swap(
+      realFiles.contracts("org/graph.ts"),
+      "if (node.role_id === key) continue;",
+      "if (node.role_id !== key) continue;",
+    );
+    const msg = checkOne("r24", fakeFiles(r24Good({ [R24_GRAPH]: mutated })));
+    expect(msg).toContain("这个方向");
+    expect(msg).not.toContain("遍历的【不再是 nodes】");
+    expect(msg).not.toContain("break/return");
+  });
+
+  it("变异 r24 之七（M5）：path 塌成一层 ⇒ 红（拒对了但说不出是哪一个键）", () => {
+    const mutated = swap(
+      realFiles.contracts("org/graph.ts"),
+      'path: ["nodes", key, "role_id"],',
+      'path: ["nodes"],',
+    );
+    const msg = checkOne("r24", fakeFiles(r24Good({ [R24_GRAPH]: mutated })));
+    expect(msg).toContain("不再把 issue 的 path 指到");
+    expect(msg).not.toContain("这个方向");
+  });
+
+  it("变异 r24 之八：加 break ⇒ 红（多坏键只报第一个）", () => {
+    const mutated = swap(
+      realFiles.contracts("org/graph.ts"),
+      "      ctx.addIssue({",
+      "      if (reported >= 1) break;\n      ctx.addIssue({",
+    );
+    const msg = checkOne("r24", fakeFiles(r24Good({ [R24_GRAPH]: mutated })));
+    expect(msg).toContain("break/return");
+    expect(msg).not.toContain("不再把 issue 的 path 指到");
+  });
+
+  it("⭐ 变异 r24 之九（反向对照）：那些锚点字节【只写在行注释里】⇒ 该绿", () => {
+    const anchor =
+      "    for (const [key, node] of Object.entries(graph.nodes)) {";
+    const payload =
+      "    // 曾经的错法存档：.superRefine( 曾遍历 graph.edges 还带 break;\n";
+    const mutated = swap(
+      realFiles.contracts("org/graph.ts"),
+      anchor,
+      payload + anchor,
+    );
+    // 前提自证：注入【进了语料】且【在切片内】，且锚点字节真的多了一份 ——
+    // 少任何一行自证，这一发就可能在测一个不存在的注入（空转绿）。
+    expect(mutated.split(".superRefine(").length - 1).toBe(2);
+    expect(mutated).toContain("break;");
+    expect(checkOne("r24", fakeFiles(r24Good({ [R24_GRAPH]: mutated })))).toBe(
+      "",
+    );
+  });
+
+  it("⭐ 变异 r24 之十（之九的单变量对照）：同一批字节【进了代码】⇒ 该红", () => {
+    // 与上一发只差 `// ` 前缀：绿红各归其位才钉住「剥注释」的方向。
+    // 若剥注释整个坏掉 ⇒ 之九转红（被上一发抓）；若剥过头把代码也剥掉 ⇒ 这一发红转绿。
+    const anchor =
+      "    for (const [key, node] of Object.entries(graph.nodes)) {";
+    const mutated = swap(
+      realFiles.contracts("org/graph.ts"),
+      anchor,
+      "    if (reported >= 1) break; // 曾遍历 graph.edges\n" + anchor,
+    );
+    const msg = checkOne("r24", fakeFiles(r24Good({ [R24_GRAPH]: mutated })));
+    expect(msg).toContain("break/return");
+  });
+
+  it("变异 r24 之十一：api.ts 整份不见 ⇒ 红在前提格（schema 那三格照样绿的形状）", () => {
+    const without = r24Good();
+    delete without[R24_API];
+    const msg = checkOne("r24", fakeFiles(without));
+    expect(msg).toContain("api.ts 不在了");
+    expect(msg).not.toContain("上不再有 superRefine");
+  });
+
+  it("变异 r24 之十二：api.ts 的请求体内联一份自己的图形状 ⇒ 红（这条路上不用它了）", () => {
+    const mutated = swap(
+      realFiles.contracts("api.ts"),
+      "graph: orgGraphSchema",
+      "graph: z.record(z.string(), z.unknown())",
+    );
+    const msg = checkOne("r24", fakeFiles(r24Good({ [R24_API]: mutated })));
+    expect(msg).toContain("不再直接挂 orgGraphSchema");
+    // ⚠ 这一发的形状值得看清：schema 那三格在它下面【全绿】——红只来自前提格。
+    expect(msg).not.toContain("上不再有 superRefine");
+    expect(msg).not.toContain("遍历的【不再是 nodes】");
+    expect(msg).not.toContain("这个方向");
+  });
+
+  it("⭐ 变异 r24 之十二·乙（反向对照）：接线断了但【注释里留着那句话】⇒ 照样红", () => {
+    /*
+     * 前提格判【剥掉注释之后】的字节，方向选得比 schema 那几格更实用：这一格找的是
+     * 「api 的 graph 字段还挂着这份 schema」，而下一版本极可能有人写一句诚实的注释
+     * （「这里改成内联形状了，原本用 orgGraphSchema」）。判原文的话那句注释会替一条
+     * 已经断掉的接线投一票 —— 这是「手抄的那份会在真那份改动后继续绿着」的又一形状。
+     * 与上一发只差那三行注释：两发红绿各归其位，才是「剥注释」在前提格上生效的证据。
+     */
+    const broken = swap(
+      realFiles.contracts("api.ts"),
+      "graph: orgGraphSchema",
+      "graph: z.record(z.string(), z.unknown())",
+    );
+    const mutated = swap(
+      broken,
+      "  graph: z.record(z.string(), z.unknown()),",
+      "  // 这里以前写的是 graph: orgGraphSchema，改成内联是为了前端草稿态\n" +
+        "  graph: z.record(z.string(), z.unknown()),",
+    );
+    // 前提自证：那句话【进了语料】—— 少了这一行，这一发可能在测一个不存在的注入。
+    expect(mutated).toContain("graph: orgGraphSchema");
+    const msg = checkOne("r24", fakeFiles(r24Good({ [R24_API]: mutated })));
+    expect(msg).toContain("不再直接挂 orgGraphSchema");
+  });
+
+  it("变异 r24 之十三：commit.ts 整份不见 ⇒ 红在前提格", () => {
+    const without = r24Good();
+    delete without[R24_COMMIT];
+    const msg = checkOne("r24", fakeFiles(without));
+    expect(msg).toContain("org/commit.ts 不在了");
+    expect(msg).not.toContain("org/graph.ts 不在了");
+  });
+
+  it("变异 r24 之十四：commit.ts 把那条 SQL 改名 ⇒ 红（「进不了库」那句的前提漂了）", () => {
+    const mutated = realFiles
+      .src("org/commit.ts")
+      .split("INSERT_DELEGATION_GRAPH_SQL")
+      .join("WRITE_GRAPH_ROW_SQL");
+    expect(mutated).not.toContain("INSERT_DELEGATION_GRAPH_SQL");
+    const msg = checkOne("r24", fakeFiles(r24Good({ [R24_COMMIT]: mutated })));
+    expect(msg).toContain("不再出现 INSERT_DELEGATION_GRAPH_SQL");
+    expect(msg).not.toContain("不在了");
+  });
+});
+
 describe("主张登记表：出口文档渲染", () => {
   it("docs/OPC-OS-功能优化设计.md 有登记表小节，且与 REGISTRY 渲染逐字一致", () => {
     const md = readFileSync(OPCOS, "utf8");

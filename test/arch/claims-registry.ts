@@ -1606,6 +1606,150 @@ function delegationEdgeSelfCheckCheck(f: Files): string {
   return "";
 }
 
+/**
+ * r24 的判据：「节点键 === node.role_id」这条不变量今天【由 schema 判】。
+ *
+ * 权威落点只有一份：`packages/contracts/src/org/graph.ts` 的 orgGraphSchema。
+ * 本文件不抄那条判据的字节，只做「那句话的权威字节此刻还在不在」的核对。
+ *
+ * 为什么值得单独一条主张，而不是算在 r22 名下：r22 判的是【add_node 那条路】
+ * 的结构与分工，它自己的射程④ 明写「键与 role_id 不一致这一格今天没有任何判据」。
+ * 那一格今天翻向了 —— 继续把它留在 r22 的射程里，那条主张就变成一句过期陈述。
+ * 所以 r22 的射程④ 本轮要改口，而翻向后的事实由本条管。
+ *
+ * ⚠ 七格全判【剥掉注释之后】的字节（`withoutComments` 的两个洞见 r22 的 method）。
+ *   这一族的注释比代码长得多：那段 superRefine 的函数头有整段在解释
+ *   「为什么不落在 validate.ts」，判原文的话那些话会替「判了」投一票。
+ *   两处前提格也剥注释，理由不同但更硬：那两格找的是「这条接线还在」，
+ *   而断线之后最可能出现的一句话就是「这里以前用的是 orgGraphSchema」。
+ *
+ * ⚠ 三处读取各包 try（r23 那一族的纪律）：fakeFiles 缺键是【抛】，不包的话
+ *   夹具自己的毛病会红成「权威落点没了」——把测试的 bug 伪装成主张过期。
+ */
+export function nodeKeyIdentityCheck(f: Files): string {
+  // ⚠ 三处读取各包一层 try：fakeFiles 的 contracts()/src() 在【缺键】时抛，
+  // 而抛出去的红与「文件真的没了」在断言上逐字一样（r23 同一族，那边踩过）。
+  // 没有这层包装，夹具少给一个键会红成「那条判据没了」——那是本项目最坏的一种红：
+  // 它把测试自己的毛病伪装成主张过期。
+  let graph: string;
+  try {
+    graph = f.contracts("org/graph.ts");
+  } catch {
+    return (
+      "packages/contracts/src/org/graph.ts 不在了 —— 「键必须等于 role_id 由 schema 判」" +
+      "这句话的权威落点没了，本条无物可判。" +
+      "（另一种触发方式是【夹具少交了这个键】，fakeFiles 的缺键就是抛；" +
+      "所以合成用例每一发都得经 r24Good() 交出这个键，见 claims-registry.test.ts）"
+    );
+  }
+  const seg = sliceFrom(
+    graph,
+    "export const orgGraphSchema = z",
+    "export type OrgGraph",
+  );
+  if (seg === null) {
+    return (
+      "读不到 orgGraphSchema 那一段 —— 本条主张的权威落点改名或挪走了。" +
+      "（读不到定义与定义被搬走在这里同为红：两种情况下这条判据都在核对一个它找不到的东西）"
+    );
+  }
+  const code = withoutComments(seg);
+
+  // ── ① 取材自证：切片【确实】切到了带 superRefine 的那一段 ──────────────
+  // 没有这一格，下面每一发"没找到"都分不清是【判据被摘】还是【切片切早了】。
+  if (!code.includes(".superRefine(")) {
+    return (
+      "orgGraphSchema 上不再有 superRefine —— 「键必须等于 node.role_id」这条【整个没了】。" +
+      "键空间读者（gate 0 / handoff / modelFamily / 岗位书落库）与值空间读者" +
+      "（汇报根 rootsOf、下级名单 subordinateRoles）会再度各说一半，" +
+      "而升级判据那句 `上级 === CEO` 两头各拿一半 ⇒ 永不成立 ⇒ 升级永不触发。"
+    );
+  }
+  // 遍历的是 nodes 而不是别的集合（round299 变异机 M3 那一发逼出来的格子）：
+  // 写成 Object.entries(graph.edges) 时判据"存在"，而且凶到把合法图全拒。
+  if (!code.includes("Object.entries(graph.nodes)")) {
+    return (
+      "那条 superRefine 还在，但它遍历的【不再是 nodes】—— 判据存在不等于判据判的是这件事。" +
+      "（实测：换成遍历 edges，schema 会把每一张带委派边的合法图拒掉，" +
+      "同时放过真正的键≠自称 —— 一种同时漏判与误判的错法）"
+    );
+  }
+  // ── ② 比较【方向】：一致才跳过 ────────────────────────────────────────
+  // 这是最像"修好了"的坏法：反着写照样会拒一批请求，所以只判"坏图被拒"抓不到它。
+  if (!code.includes("if (node.role_id === key) continue;")) {
+    return (
+      "那条 superRefine 里读不到 `node.role_id === key` 这个方向 —— 判据方向" +
+      "一旦翻成「不一致才跳过」，它会把所有合法图当坏图、把坏图当合法图，" +
+      "而它【照样会拒请求】，所以只看状态码的测试发现不了"
+    );
+  }
+  // ── ③ 诊断指得到那一个键 ─────────────────────────────────────────────
+  // path 是两处消费者唯一读得出的字段（hub 的 org.ts issuesOf 出 422 正文、
+  // hub 的 db/integrity.ts issueSummary 出自检报告），塌成一层就两边同时失去"是哪一个"。
+  if (!code.includes('path: ["nodes", key, "role_id"]')) {
+    return (
+      "那条 superRefine 不再把 issue 的 path 指到 nodes.<键>.role_id —— " +
+      "图【照样被拒】，但 422 正文与自检报告同时说不出是哪一个键自称了别的 id，" +
+      "提交的人只能自己逐节点找（0006 §7 那一族：拒对了但没人能修）"
+    );
+  }
+  // 报的是【每一个】坏键，不是遇到第一个就退：一次 422 要能看完就修完。
+  if (code.includes("break;") || code.includes("return;")) {
+    return (
+      "那条 superRefine 里出现了 break/return —— 多个坏键时只报第一个，" +
+      "CEO 要改一次发一次、连改 N 轮才看到全貌"
+    );
+  }
+
+  // ── ④ HTTP 那一路【吃的就是这一份】schema ─────────────────────────────
+  // 本条主张里有半句是「直接交一张新图【进不了库】」—— 那半句的成立前提是
+  // 请求体里的 graph 字段用的就是上面那份 orgGraphSchema。api.ts 哪天内联一份
+  // 自己的 graph 形状，这半句就过期，而上面三格会【全绿】（它们只判 schema 本身）。
+  let api: string;
+  try {
+    api = f.contracts("api.ts");
+  } catch {
+    return (
+      "packages/contracts/src/api.ts 不在了 —— 于是「HTTP 那一路吃的就是这份 schema」" +
+      "这一格读不到了。⚠ 上面那几格在这一发下【照样是绿的】：它们判的是 schema 本身。"
+    );
+  }
+  // ⚠ 判【剥掉注释之后】的字节，与上面五格同一口径。差别在这里更实用：这一格找的是
+  // 「那个字段还挂着这份 schema」，而一份写着「graph 字段改成内联形状了，
+  // 原本用 orgGraphSchema」的诚实注释，在判原文的口径下会替那条已经断掉的接线投一票。
+  if (!withoutComments(api).includes("graph: orgGraphSchema")) {
+    return (
+      "api.ts 里 `graph:` 字段不再直接挂 orgGraphSchema —— 请求体吃的可能是另一份形状。" +
+      "⚠ 上面三格在这一发下【全绿】：它们判的是 schema 本身，判不出【这条路上用的是它】。" +
+      "（r23 那一条教过同一件事：读取口全是强转时，schema 判得再对也没人执行它）"
+    );
+  }
+  // ── ⑤ 落库那一侧仍然只有一条 INSERT（否则"进不了库"这句要重算）────────
+  // 主张说的是「这条路塞不进库」。hub 里若长出第二个写 delegation_graphs 的口子，
+  // 那条 schema 判据管不到它，这句话就从"契约层"的实话变成"全局"的假话。
+  let commit: string;
+  try {
+    commit = f.src("org/commit.ts");
+  } catch {
+    return (
+      "packages/hub/src/org/commit.ts 不在了 —— 「键≠role_id 的图进不了库」那句的" +
+      "前提（写入口就是那一条 INSERT）读不到了。" +
+      "⚠ 上面那几格在这一发下【照样是绿的】。"
+    );
+  }
+  // ⚠ 同样判剥注释后的字节：这个名字现在【只出现在代码里】（一份定义 + 三处调用，
+  // 实测过），所以剥注释不会误伤；而将来一句「这条 SQL 以前叫 INSERT_DELEGATION_GRAPH_SQL」
+  // 的注释会在判原文的口径下替一个已经不存在的写入口投一票。
+  if (!withoutComments(commit).includes("INSERT_DELEGATION_GRAPH_SQL")) {
+    return (
+      "org/commit.ts 里不再出现 INSERT_DELEGATION_GRAPH_SQL —— " +
+      "「键≠role_id 的图进不了库」这句话依赖【写入口就是这一条】这个前提，" +
+      "前提漂了本条就得重算（而不是自动成立）"
+    );
+  }
+  return "";
+}
+
 /* ═════════════════════ 登记表 ═════════════════════ */ export const REGISTRY: readonly RegistryEntry[] =
   [
     {
@@ -1772,7 +1916,7 @@ function delegationEdgeSelfCheckCheck(f: Files): string {
       checkedAt: "2026-11-17",
       source: {
         doc: "docs/OPC-OS-功能优化设计.md",
-        line: 1687,
+        line: 1688,
         sentence: "本篇之外还有一份计划文档，而它的出口门前提今天不成立",
       },
       check: r10LintGuardCheck,
@@ -1791,7 +1935,7 @@ function delegationEdgeSelfCheckCheck(f: Files): string {
       checkedAt: "2026-11-17",
       source: {
         doc: "docs/OPC-OS-功能优化设计.md",
-        line: 1778,
+        line: 1779,
         sentence: "上一格那条计划引用守卫，落地后被自己的变异打回过一次",
       },
       check: r11PlanRefsGuardCheck,
@@ -1810,7 +1954,7 @@ function delegationEdgeSelfCheckCheck(f: Files): string {
       checkedAt: "2026-11-17",
       source: {
         doc: "docs/OPC-OS-功能优化设计.md",
-        line: 1809,
+        line: 1810,
         sentence: "计划的 6 道出口门禁，今天",
       },
       check: r12GatePathGuardCheck,
@@ -1832,7 +1976,7 @@ function delegationEdgeSelfCheckCheck(f: Files): string {
       checkedAt: "2026-11-17",
       source: {
         doc: "docs/OPC-OS-功能优化设计.md",
-        line: 1873,
+        line: 1874,
         sentence:
           "今天真的员工身上唯一生效的安全边界，此前一条守卫都没有 —— 顺带量到 `tsc -b` 从不检查测试",
       },
@@ -1855,7 +1999,7 @@ function delegationEdgeSelfCheckCheck(f: Files): string {
       checkedAt: "2026-11-17",
       source: {
         doc: "docs/OPC-OS-功能优化设计.md",
-        line: 1929,
+        line: 1930,
         sentence: "本篇自己的坐标从来没有门禁",
       },
       check: claimCoordsGuardCheck,
@@ -1925,7 +2069,7 @@ function delegationEdgeSelfCheckCheck(f: Files): string {
       checkedAt: "2026-11-17",
       source: {
         doc: "docs/OPC-OS-功能优化设计.md",
-        line: 1970,
+        line: 1971,
         sentence: "O8 那条端到端验收写出来了",
       },
       check: orgAddNodeGapCheck,
@@ -2111,7 +2255,7 @@ function delegationEdgeSelfCheckCheck(f: Files): string {
       checkedAt: "2026-11-17",
       source: {
         doc: "docs/OPC-OS-功能优化设计.md",
-        line: 1896,
+        line: 1897,
         sentence: "round285：这一格接成了门禁，形状是棘轮（登记为 r19）",
       },
       check: testTypeRatchetCheck,
@@ -2207,7 +2351,7 @@ function delegationEdgeSelfCheckCheck(f: Files): string {
       checkedAt: "2026-11-17",
       source: {
         doc: "docs/OPC-OS-功能优化设计.md",
-        line: 2210,
+        line: 2211,
         sentence: "round293 第二段落地并登记为 r21",
       },
       check: gateExemptionAccountCheck,
@@ -2230,9 +2374,14 @@ function delegationEdgeSelfCheckCheck(f: Files): string {
         "那条判据，它今天不存在（本轮台账「没做的下一格」）；" +
         "③ 类型层那格（加第四种 kind 而漏分派 ⇒ `tsc` 红）本条只核对那个兜底【还在】，" +
         "不重跑编译器；" +
-        "④ nodes 的【键】与 node.role_id 不一致这一格【今天没有任何判据】—— " +
-        "zod 的 record 不比对键与值里那个 id，`rejectMalformed` 与 `validateNewNode` 都不拦；" +
-        "`add_node` 这条路天然产生不出它（键恒取 role_id），但直接交一张新图能造出来",
+        "④ ⚠【round299 改口】nodes 的【键】与 node.role_id 不一致这一格，本条登记时" +
+        "写的是「今天没有任何判据」—— 那句话今天【过期了】：orgGraphSchema 上挂了一条 " +
+        "superRefine 在判它，翻向后的事实归 r24 管，别在本条下面找它。" +
+        "当时那句话本身是真的（zod 的 record 不比对键与值里那个 id，rejectMalformed 与 " +
+        "validateNewNode 都不拦），留着这段改口是因为它记着本仓的一条家规：" +
+        "射程里那句「不判 X」是【某个时刻的读数】，X 被关掉时主张要跟着改口，" +
+        "否则下一条主张就建立在一句过期陈述上" +
+        "（r22 自己判的「add_node 那条路带判据」与此无关，那格仍由本条的①–③管）",
       method:
         "test/arch/claims-registry.test.ts › r22 判据：读三份【权威落点】、一份都不抄 —— " +
         "kind 名单只在 contracts 的 schema 里（且只取 `orgChangeSchema` 到 `export type OrgChange` " +
@@ -2279,7 +2428,7 @@ function delegationEdgeSelfCheckCheck(f: Files): string {
       checkedAt: "2026-11-17",
       source: {
         doc: "docs/OPC-OS-功能优化设计.md",
-        line: 2334,
+        line: 2335,
         sentence: "round294 落地并登记为 r22",
       },
       check: addNodeDispatchCheck,
@@ -2347,10 +2496,83 @@ function delegationEdgeSelfCheckCheck(f: Files): string {
       checkedAt: "2026-11-18",
       source: {
         doc: "docs/OPC-OS-功能优化设计.md",
-        line: 2451,
+        line: 2452,
         sentence: "round298 落地并登记为 r23",
       },
       check: delegationEdgeSelfCheckCheck,
+    },
+    {
+      id: "r24",
+      claim:
+        "r22 射程④ 那一格（『nodes 的键与 node.role_id 不一致今天没有任何判据』）" +
+        "从【登记】翻向【schema 判】：`orgGraphSchema` 上挂着一条 superRefine，" +
+        "它遍历 `Object.entries(graph.nodes)`、按 `node.role_id === key` 这个方向判、" +
+        "把 issue 的 path 指到 `nodes.<键>.role_id`，且【每个】坏键各报一条。" +
+        "落点在 schema 而不是 validate.ts 有三个理由：rejectMalformed 在三个入口各调" +
+        "一次、判的都是【本次变更之前】那张图，而 add_edge 那条根本不进 " +
+        "validateNewNode（缝在图上就该由图的形状管）；orgGraphSchema 今天已经是" +
+        "两处判据的公共入口（api.ts 的请求体 + integrity.ts 那条 delegation_edges_gated" +
+        "逐版本 safeParse），落在这里 ⇒ 写侧拦新的、读侧自检顺手拿到同一条不变量；" +
+        "validateNewNode 只收到一个 node，拿不到那个键。" +
+        "⚠ 射程六条：① 本条判的是【那条判据的权威字节还在 + 这条路上用的是它】，" +
+        "它不打开数据库、不重跑请求 —— 端到端那一发归 org-route.test.ts；" +
+        "② 它【不判】「老库里没有这种图」：真库 delegation_graphs 今天 0 行（实测，" +
+        ".workbuddy/probe-node-key.ts 可复算），而 0 行既可能是【没有坏图】也可能是" +
+        "【根本没有图】—— 所以【这条收紧不破坏存量】这句话靠的不是那个 0，" +
+        "是【仓内每一处生产节点的代码都按 role_id 取键】那份静态普查；" +
+        "③ 判据方向翻成【不一致才跳过】时它【照样会拒请求】，所以只判状态码的测试" +
+        "发现不了 —— 那一格由本条的比较方向那一发钉住；" +
+        "④ 它不判「键≠role_id 一定会被 schema 抓到」这件事在【不走 schema 的调用】" +
+        "上成立：把一张坏图直接喂给 rejectMalformed 它今天照样放行" +
+        "（validate.test.ts 里那两发【旧注释里那两条也不管】仍在钉这件事）；" +
+        "⑤ 键与值【同时】写错成另一个合法角色（键和 role_id 都写 bob）" +
+        "这条判据看不见 —— 它判的是【同一个节点的两个身份来源不一致】，" +
+        "不是【这个角色该不该存在】；" +
+        "⑥ 它是【收紧】：一张仓外客户端提交的键≠自称的图，今天从 200 变 422。" +
+        "那正是目的，但别把它读成【契约没变】。",
+      method:
+        "判据：test/arch/claims-registry.ts 的 nodeKeyIdentityCheck —— 读一份" +
+        "【权威落点】（packages/contracts/src/org/graph.ts 里 orgGraphSchema 那一段，" +
+        "用 sliceFrom 掐到 `export type OrgGraph` 之前）+ 两处【前提】各一格：" +
+        "api.ts 的 `graph: orgGraphSchema`（请求体吃的就是这一份）、" +
+        "hub 的 org/commit.ts 仍指名 INSERT_DELEGATION_GRAPH_SQL（写入口就是那一条）。" +
+        "七格全判【剥掉注释之后】的字节 —— 那段 superRefine 的函数头注释比代码长得多，" +
+        "判原文的话「为什么不落在 validate.ts」那几段话会替「判了」投一票；两处前提" +
+        "同样剥注释，否则一句「这里以前挂的是 orgGraphSchema」的诚实注释会替一条" +
+        "已经断掉的接线投一票。" +
+        "⭐ 反向格三枚：遍历对象从 nodes 换成别的 ⇒ 红 / 比较方向翻 ⇒ 红 / " +
+        "path 不再指到那一个键 ⇒ 红（那一发同时打中 422 正文与自检报告：issuesOf 与 " +
+        "issueSummary 都只读 path）。另有一格判【不许 break/return】—— 只报第一个坏键" +
+        "会让提交的人改一次发一次。" +
+        "外加打在合成语料上的一族变异（claims-registry.test.ts 的 r24 那一族，不碰盘，" +
+        "发数以那个文件当场为准；含两对【只差注释前缀】的对照 —— 之九/之十 钉 schema " +
+        "那几格、之十二/之十二·乙 钉前提格：同一批字节在注释里该绿、在代码里该红）。" +
+        "外加打在【真生产字节】上的六发自回滚变异" +
+        "（.workbuddy/round299-mutate-node-key-gate.mjs，逐字节核对、单独跑、" +
+        "不与任何测试并发；命中 6/6、机器自证 12/12，证据 " +
+        ".workbuddy/round299-node-key-mutation-evidence.txt）：" +
+        "M0 控制组该绿 / M1 比较方向翻 ⇒ 五发全红 / M2 摘掉遍历 ⇒ 红三发而" +
+        "【两发反向对照按设计全绿】（反向对照只防恒红，防不了无判据 —— 登记的盲区）" +
+        " / M3 遍历错集合 ⇒ 五发全红 / M4 诊断退化 ⇒ 只红甲那一发而【端到端那发全绿】" +
+        "（它读的是 path 拼出来的点号串，正文可用性只有 schema 那一发挡）/ " +
+        "M5 path 退化 ⇒ 甲乙双红。" +
+        "⚠ 这台比 round298 那台多两件【打在自己身上】的自证：" +
+        "(a) 变异打在 contracts 的【src】上而被测的吃【dist】 ⇒ 有一发自证真往 src " +
+        "塞一个记号、重编、去 dist 里找它、再撤掉验它消失 —— 它验的是这台机器的【供电】，" +
+        "不是判据；缺这一条，「改了 src 而 dist 是旧的」会让 6/6 全绿而那一格从没被测过。" +
+        "⭐ (b) 那台的第一版把「盲区那一栏」的方向写反了（把【出现在 FAIL 行里】当成" +
+        "仍绿），后果是 M0 控制组一份都没红却报「0/4 盲区仍绿」—— " +
+        "一个恒不可能成立的判据就是一句装饰（round298 ⑥·乙 那条【在本机自己身上】复发），" +
+        "现在有一发自证喂「一发红一发绿」的合成读数逼它两种各数一次。" +
+        "本条判据不打开数据库、不重跑那台机器，口径同 r12/r13/r21/r22/r23",
+      judge: "claims-registry",
+      checkedAt: "2026-11-18",
+      source: {
+        doc: "docs/OPC-OS-功能优化设计.md",
+        line: 2525,
+        sentence: "round299 落地并登记为 r24",
+      },
+      check: nodeKeyIdentityCheck,
     },
   ];
 

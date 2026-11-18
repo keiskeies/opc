@@ -882,6 +882,14 @@ const SNAP: Record<string, string> = {
   // ⇒ 这格守的不是文档措辞，是那条撤回的方向。
   "OPC-OS-功能优化设计.md>packages/hub/src/serve/im-channels.ts:377":
     "const pass = await runDeliverPass({",
+  // §7 第 25 格（round299）里那句「本仓自己把『每一轮真烧一次子进程、人类席位永远
+  // 等不到』列为最贵的那类故障」的落点。抄法照旧：node 读第 382 行的 trim 原文。
+  // ⚠ 文档里写的是区间 `dispatch.ts:382-387`，而提取器只认【区间起点】（既有取舍），
+  //   所以键是 382。这一格是【活坐标且承重】：那句话是整个改动的动机，而动机指的是
+  //   `up === o.ceoRoleId` 这一行的字面量比较 —— 有人把那句判据改成读结构（本该如此），
+  //   这一格就红，那时要重读的是 §7 第 25 格「为什么值得修而不是继续登记」那一段。
+  "OPC-OS-功能优化设计.md>dispatch.ts:382":
+    "* 链条是 `topmost` 那一支的判据 `up === o.ceoRoleId`（字面量比较）：根叫 boss 时它恒假，",
 
   // ── docs/INDEX.md round288 同轮接进扫描范围时带的 20 格 ─────────────────────
   // 这 20 条的值【不是手抄的】：由 .workbuddy/round288-index-snap-gen.mjs 从目标文件读出来
