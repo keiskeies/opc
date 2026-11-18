@@ -1,0 +1,27 @@
+===================================================================
+round263 claims-registry 守卫（O14 动作 2 主张登记表）判据本体变异复证
+===================================================================
+objective: 继续  round: 263/256  HEAD 基线: 61467b5  时间: 2026-11-17T01:05Z
+
+【动机】O14 动作 2（docs/OPC-OS-功能优化设计.md §O14）「主张登记表」落地的守卫测试。
+  它有 7 条纯判据（r1–r4 合成输入直测，r5–r8 引用既有守卫登记表）。首份 evidence
+  直接变异【判据本体】，验证「判据写坏」会给到红 —— 因为判据坏掉的形状是
+  【该条恒绿】，只有变异能抓。
+
+【守卫性质】claims-registry 是数据文件 + 守卫测试：登记表（八条主张）在
+  test/arch/claims-registry.ts，测试在读真实仓库的同时喂合成语料判每条判据。
+  家规落点：docs/OPC-OS-功能优化设计.md 的「O14 主张登记表」只渲染【判据方法 +
+  核对时刻】，不渲染条数（docs/review/README.md「入口文档不写会漂移的数」）。
+
+【注入——r1 判据恒恶化】
+  test/arch/claims-registry.ts 的 hardStopZeroCheck：
+    if (v === "0") { bad = "…"… } → 改成 { void m; }（漏掉 0 判定 = 恒绿）
+  注入前 sha256 由管线记录，注入后 git diff 可复算。
+
+【RED 捕获】变异后 `npx vitest run test/arch/claims-registry.test.ts -t "变异 r1"`
+  立即红：14 skipped / 1 failed 「变异 r1：budgets 的 hard_stop 写成 0 必须红」
+  —— 合成输入 VALUES (…, 0, 0) 不再被报，说明判据确实把红吞了。而「变异 r1 反向：
+  写 1 不红」仍绿 —— 证明变异点精确落在 0 判定，非误伤。
+
+【还原 + GREEN】把 { void m; } 改回原判据（字节等价），16/16 通过 exit=0；
+  git status --porcelain 只剩本轮的登记表 + 文档渲染改动，无残留变异。

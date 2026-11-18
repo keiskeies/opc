@@ -1,0 +1,93 @@
+
+[1m[30m[46m RUN [49m[39m[22m [36mv4.1.12 [39m[90mD:/item/opc[39m
+
+ [31m❯[39m test/arch/claim-coords.test.ts [2m([22m[2m8 tests[22m[2m | [22m[31m1 failed[39m[2m)[22m[32m 54[2mms[22m[39m
+[31m     [31m×[31m 登记表每一条主张登记的行号上，读得到它自己的主张[39m[32m 5[2mms[22m[39m
+     [32m✓[39m 取材非空：这条守卫不是在空转[32m 1[2mms[22m[39m
+     [32m✓[39m 锚点句在文档里至少命中一处（否则「对得上」是假的）[32m 38[2mms[22m[39m
+     [32m✓[39m 把行号挪到别处 ⇒ 点名这一条，并交出当前命中行[32m 5[2mms[22m[39m
+     [32m✓[39m 行号指向一个与主张无关的行 ⇒ 报「全文无命中」而不是空白[32m 2[2mms[22m[39m
+     [32m✓[39m 锚点句为空 ⇒ 不判成「对任何行都成立」[32m 2[2mms[22m[39m
+     [32m✓[39m 同一句话命中多处不算漂，登记行不在其中才算[32m 0[2mms[22m[39m
+     [32m✓[39m 样式不参与比对：文档带 `code` 与 **粗体**，锚点不带[32m 0[2mms[22m[39m
+ [32m✓[39m test/arch/doc-ids.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 92[2mms[22m[39m
+ [32m✓[39m test/arch/harness-invariants.test.ts [2m([22m[2m17 tests[22m[2m)[22m[32m 96[2mms[22m[39m
+ [32m✓[39m test/arch/doc-refs.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 289[2mms[22m[39m
+ [32m✓[39m test/arch/matcher-oracle.test.ts [2m([22m[2m10 tests[22m[2m)[22m[32m 5[2mms[22m[39m
+ [32m✓[39m test/arch/decision-index.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 9[2mms[22m[39m
+ [32m✓[39m test/arch/desktop-honest-label.test.ts [2m([22m[2m7 tests[22m[2m)[22m[32m 23[2mms[22m[39m
+ [32m✓[39m test/arch/plan-gate-paths.test.ts [2m([22m[2m10 tests[22m[2m)[22m[32m 30[2mms[22m[39m
+ [32m✓[39m test/arch/pending-decisions.test.ts [2m([22m[2m19 tests[22m[2m)[22m[32m 142[2mms[22m[39m
+ [32m✓[39m test/arch/role-spawn-boundary.test.ts [2m([22m[2m11 tests[22m[2m)[22m[32m 30[2mms[22m[39m
+ [32m✓[39m test/arch/claims-registry.test.ts [2m([22m[2m73 tests[22m[2m)[22m[33m 772[2mms[22m[39m
+     [33m[2m✓[22m[39m 每条登记的 check 对今天的仓库返回空 [33m 407[2mms[22m[39m
+ [32m✓[39m test/arch/no-native-deps.test.ts [2m([22m[2m6 tests[22m[2m)[22m[33m 427[2mms[22m[39m
+   [33m[2m✓[22m[39m 生产源码不依赖任何原生 SQLite 模块（D6-a） [33m 418[2mms[22m[39m
+ [32m✓[39m test/arch/census.test.ts [2m([22m[2m12 tests[22m[2m)[22m[32m 9[2mms[22m[39m
+ [32m✓[39m test/arch/dependency-boundary.test.ts [2m([22m[2m4 tests[22m[2m)[22m[33m 766[2mms[22m[39m
+ [31m❯[39m test/arch/production-deps.test.ts [2m([22m[2m7 tests[22m[2m | [22m[31m1 failed[39m[2m)[22m[32m 171[2mms[22m[39m
+     [32m✓[39m 没有任何生产 import 落在 devDependencies 或未声明处[32m 1[2mms[22m[39m
+     [32m✓[39m 【带子路径的 scoped 包】确实在扫描范围内[32m 0[2mms[22m[39m
+     [32m✓[39m Phase 0 不引入真实 LLM provider 依赖[32m 8[2mms[22m[39m
+     [32m✓[39m 探针名只允许定义在 run-fixtures.ts 里（防止再出现硬编码的消费者）[32m 53[2mms[22m[39m
+     [32m✓[39m 名单不为空，也不吞掉真实源文件[32m 0[2mms[22m[39m
+[31m     [31m×[31m 每一个 readdirSync 的使用者都在名单里过了一遍[39m[32m 60[2mms[22m[39m
+     [32m✓[39m 接了名单的取材函数在【探针真的存在】时不列出它[32m 47[2mms[22m[39m
+ [31m❯[39m test/arch/lint-baseline.test.ts [2m([22m[2m12 tests[22m[2m | [22m[31m1 failed[39m[2m)[22m[33m 1340[2mms[22m[39m
+     [32m✓[39m 只数 error，warning / info 不进基线（它们不参与 lint 的退出码）[32m 1[2mms[22m[39m
+     [32m✓[39m 运行期夹具探针不进基线（否则与 dependency-boundary 并发时随机红）[32m 0[2mms[22m[39m
+     [32m✓[39m 路径分隔符两种写法都归一（Windows 的 JSON 给反斜杠）[32m 0[2mms[22m[39m
+     [32m✓[39m 恰好在基线上 ⇒ 绿（控制组：判据不是恒红装饰）[32m 0[2mms[22m[39m
+     [32m✓[39m 比基线少 ⇒ 绿（这一发只许减不许增，往下调正是它鼓励的）[32m 0[2mms[22m[39m
+     [32m✓[39m 变异：某类目多一条 ⇒ 红，且红话点名是哪一类、从几到几[32m 0[2mms[22m[39m
+     [32m✓[39m 变异：冒出基线外的新 error 类目 ⇒ 红并点名（防『反正 lint 本来就红』混过去）[32m 0[2mms[22m[39m
+     [32m✓[39m 变异：新增类目藏在一个已有类目之后 ⇒ 仍然红（不是『只看最大值』那种假判据）[32m 0[2mms[22m[39m
+     [32m✓[39m 真把整仓修干净 ⇒ 绿（绝不造出一条恒不可能通过的验收命令）[32m 0[2mms[22m[39m
+     [32m✓[39m 某类目修到 0 条 ⇒ 报「请把这条豁免删掉」（豁免不许比现实活得久）[32m 1[2mms[22m[39m
+     [32m✓[39m biome 平台二进制找得到（找不到就抛，不空跑成假通过）[32m 4[2mms[22m[39m
+[31m     [31m×[31m `pnpm lint` 今天的 error 全部在基线内，且读数本身可信[39m[33m 1332[2mms[22m[39m
+ [32m✓[39m test/arch/doc-coords.test.ts [2m([22m[2m3 tests[22m[2m)[22m[33m 869[2mms[22m[39m
+     [33m[2m✓[22m[39m ⭐ 英文单词不被切成短哈希，而真哈希挨着标点仍被扫到 [33m 344[2mms[22m[39m
+     [33m[2m✓[22m[39m 全部坐标引用与设计文档、计划、仓库提交对得上 [33m 519[2mms[22m[39m
+ [32m✓[39m test/arch/plan-refs.test.ts [2m([22m[2m10 tests[22m[2m)[22m[32m 18[2mms[22m[39m
+ [32m✓[39m test/arch/irreversible-token.test.ts [2m([22m[2m8 tests[22m[2m)[22m[33m 837[2mms[22m[39m
+ [32m✓[39m test/arch/zero-producer.test.ts [2m([22m[2m11 tests[22m[2m)[22m[33m 776[2mms[22m[39m
+ [32m✓[39m test/arch/config-match.test.ts [2m([22m[2m7 tests[22m[2m)[22m[32m 3[2mms[22m[39m
+[90mstdout[2m | test/arch/dead-modules.test.ts[2m > [22m[2m死模块哨兵[2m > [22m[2m真实语料：解析量非零（判据坏起来的第一个症状是一条边都没解析出来）
+[22m[39m  [死模块哨兵] 模块 92 · 边 287 · 静态入口 7 · 动态入口 2 · 不可达 14
+
+ [32m✓[39m test/arch/comment-test-readers.test.ts [2m([22m[2m12 tests[22m[2m)[22m[32m 4[2mms[22m[39m
+ [32m✓[39m test/arch/no-null-bytes.test.ts [2m([22m[2m10 tests[22m[2m)[22m[33m 1221[2mms[22m[39m
+     [33m[2m✓[22m[39m 取材非空（一条扫不到任何文件的守卫，报【干净】是假的） [33m 476[2mms[22m[39m
+     [33m[2m✓[22m[39m ⭐ 真仓库：一个 NUL 字节都没有 [33m 377[2mms[22m[39m
+     [33m[2m✓[22m[39m 取材非空且真仓库【一个都没有】（0047 那处已就地修回） [33m 357[2mms[22m[39m
+ [32m✓[39m test/arch/dead-modules.test.ts [2m([22m[2m23 tests[22m[2m)[22m[33m 1836[2mms[22m[39m
+ [32m✓[39m test/arch/comment-citations.test.ts [2m([22m[2m25 tests[22m[2m)[22m[33m 3079[2mms[22m[39m
+     [33m[2m✓[22m[39m 真实仓库：注释里的限定引用全部指向存在的东西 [33m 1479[2mms[22m[39m
+     [33m[2m✓[22m[39m 取材为空必须抛判据失效，不能读成【没有坏引用】 [33m 1020[2mms[22m[39m
+     [33m[2m✓[22m[39m 真实入口文档：引用与短哈希全部对得上 [33m 373[2mms[22m[39m
+ [32m✓[39m test/arch/stub-terminal-write.test.ts [2m([22m[2m30 tests[22m[2m)[22m[32m 14[2mms[22m[39m
+ [32m✓[39m test/arch/pending-inventory.test.ts [2m([22m[2m16 tests[22m[2m)[22m[33m 4358[2mms[22m[39m
+     [33m[2m✓[22m[39m 被收集的真文件必须一条问题都不报，且扫描通路确实读到了东西 [33m 2511[2mms[22m[39m
+     [33m[2m✓[22m[39m 真仓库里唯一带跳过的文件，正是名单里那一个 [33m 1831[2mms[22m[39m
+ [32m✓[39m test/arch/commit-msg-refs.test.ts [2m([22m[2m4 tests[22m[2m)[22m[33m 5213[2mms[22m[39m
+     [33m[2m✓[22m[39m 真实历史: 标题 scope 与实际改动一致，且不引用不存在的编号 [33m 5210[2mms[22m[39m
+ [32m✓[39m test/arch/test-inventory.test.ts [2m([22m[2m12 tests[22m[2m)[22m[33m 4406[2mms[22m[39m
+     [33m[2m✓[22m[39m 磁盘上每个测试样文件都在 include 覆盖范围内 [33m 4399[2mms[22m[39m
+ [32m✓[39m test/arch/gate-selfcheck.test.ts [2m([22m[2m7 tests[22m[2m)[22m[33m 5827[2mms[22m[39m
+   [33m[2m✓[22m[39m 探针甲：退出码与不符项数同为零（双向蕴含，不预设现在是零） [33m 2786[2mms[22m[39m
+   [33m[2m✓[22m[39m 探针乙：仓库外必须把读不到与外部命令失败都记上账并非零退出 [33m 476[2mms[22m[39m
+   [33m[2m✓[22m[39m 打印出来的每条 ★FAIL 都得在失败清单里，不许只打印不记账 [33m 405[2mms[22m[39m
+   [33m[2m✓[22m[39m 门禁的【结论】必须在已知红名单里（记账对 ≠ 有人看结论，见 0017 §2） [33m 2157[2mms[22m[39m
+ [32m✓[39m test/arch/coverage-guard.test.ts [2m([22m[2m1 test[22m[2m)[22m[33m 12009[2mms[22m[39m
+   [33m[2m✓[22m[39m 门控判定内核文件覆盖率 ≥ 下限（反假绿：文件必须在场、红即失败） [33m 12003[2mms[22m[39m
+ [32m✓[39m test/arch/test-type-baseline.test.ts [2m([22m[2m20 tests[22m[2m)[22m[33m 22728[2mms[22m[39m
+     [33m[2m✓[22m[39m 真跑一次：今天的数在表内，且读数本身可信 [33m 11366[2mms[22m[39m
+     [33m[2m✓[22m[39m test/arch 自己必须是 0 条（round277 清到 0，这一发钉住它不漂回去） [33m 10345[2mms[22m[39m
+     [33m[2m✓[22m[39m ⭐ 射程 ② 不是散文：一个语法错的探针会【关掉整个类型检查】，本守卫的读数会塌 [33m 971[2mms[22m[39m
+
+[2m Test Files [22m [1m[31m3 failed[39m[22m[2m | [22m[1m[32m29 passed[39m[22m[90m (32)[39m
+[2m      Tests [22m [1m[31m3 failed[39m[22m[2m | [22m[1m[32m398 passed[39m[22m[90m (401)[39m
+[2m   Start at [22m 00:59:01
+[2m   Duration [22m 28.24s[2m (transform 16.76s, setup 0ms, import 30.03s, tests 67.45s, environment 2ms)[22m
+

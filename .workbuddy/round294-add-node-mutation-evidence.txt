@@ -1,0 +1,34 @@
+  读数自证  合成绿/合成红各读对（红文件归因认得出那两份路径）
+  命中    M0 控制组：一字不改  [应绿]  红发=0 绿发=201 红文件=无
+  命中    M1 revalidate 不再调 validateNewNode（只剩一条注释说它走了 L1）  [应红]  红发=16 绿发=185 红文件=test/arch/claims-registry.test.ts,packages/hub/test/acceptance/new-role-to-its-own-criteria.test.ts
+  命中    M2 applyChangeToGraph 收下节点而不写进 nodes  [应红]  红发=15 绿发=186 红文件=test/arch/claims-registry.test.ts,packages/hub/test/acceptance/new-role-to-its-own-criteria.test.ts
+  命中    M3 重名那一判整条短路掉  [应红]  红发=3 绿发=198 红文件=test/org/validate.test.ts,packages/hub/test/acceptance/new-role-to-its-own-criteria.test.ts
+  命中    M3b 重名理由里的措辞换掉（保留 reparent，该绿）  [应绿]  红发=0 绿发=201 红文件=无
+  命中    M4 自环那一判短路掉  [应红]  红发=2 绿发=199 红文件=test/org/validate.test.ts,packages/hub/test/acceptance/new-role-to-its-own-criteria.test.ts
+  命中    M5 森林判据改成「它是根就拒」（丢掉空图例外）  [应红]  红发=1 绿发=200 红文件=test/org/validate.test.ts
+  命中    M6 深度那一判照抄 reparent 的 heightBelow（变异等价，该绿）  [应绿]  红发=0 绿发=201 红文件=无
+  命中    M7 在 validateNewNode 里也判一遍 model_family（同一件事两处口径）  [应红]  红发=9 绿发=192 红文件=test/arch/claims-registry.test.ts,test/org/validate.test.ts
+  命中    M8 revalidate 的分派里把 add_node 那一支短路掉  [应红]  红发=16 绿发=185 红文件=test/arch/claims-registry.test.ts,packages/hub/test/acceptance/new-role-to-its-own-criteria.test.ts
+
+══════════ round294 变异矩阵（打在真生产字节上，逐字节自回滚）══════════
+✓ M0 控制组：一字不改  [应绿] 红发=0 绿发=201 红文件=无
+    绿是后面每一发红的前提；同时自证这台读得出红与绿
+✓ M1 revalidate 不再调 validateNewNode（只剩一条注释说它走了 L1）  [应红] 红发=16 绿发=185 红文件=test/arch/claims-registry.test.ts,packages/hub/test/acceptance/new-role-to-its-own-criteria.test.ts
+    坏形状该全部放行变 200；r22 的判据也该红（它判的就是【剥掉注释后有没有这个调用】）。单测【不该红】：它直接调 validateNewNode，不经过 revalidate
+✓ M2 applyChangeToGraph 收下节点而不写进 nodes  [应红] 红发=15 绿发=186 红文件=test/arch/claims-registry.test.ts,packages/hub/test/acceptance/new-role-to-its-own-criteria.test.ts
+    比缺校验更坏的一种：审计里的 after 快照与库里那张图分家 ⇒ 端到端与判据都该红；单测不经过 applyChangeToGraph ⇒ 不该红
+✓ M3 重名那一判整条短路掉  [应红] 红发=3 绿发=198 红文件=test/org/validate.test.ts,packages/hub/test/acceptance/new-role-to-its-own-criteria.test.ts
+    同名提交变成静默覆盖；「重名抢在自环之前」那一发也该红（它靠这两判的【顺序】）
+✓ M3b 重名理由里的措辞换掉（保留 reparent，该绿）  [应绿] 红发=0 绿发=201 红文件=无
+    判据仍拦、code 不变、指路关键词还在 ⇒ 全组该绿。红了说明有断言在钉【措辞】而不是【判决】——那要先问那句断言值不值得留
+✓ M4 自环那一判短路掉  [应红] 红发=2 绿发=199 红文件=test/org/validate.test.ts,packages/hub/test/acceptance/new-role-to-its-own-criteria.test.ts
+    自环会退化成一句「上级 [x] 不在图里」而 x 就是他自己。⚠ 我原本写的是「端到端不该红，它没对自环单独断 code」—— 【实测否证】：那发矩阵逐条断 code，自环那一发断的正是 would_create_cycle ⇒ 端到端也红。写矩阵前先读矩阵，别按印象登记谁红谁不红
+✓ M5 森林判据改成「它是根就拒」（丢掉空图例外）  [应红] 红发=1 绿发=200 红文件=test/org/validate.test.ts
+    该红在 test/org 那发反向 canary（往空图加第一个节点必须成功）——少了那一发，这条判据会被读成「永远拒根」而没人发现。端到端【不该红】：它那条矩阵里 多出一个根 那一发照样拿 multiple_roots，而【空图】那一格端到端没有 ⇒ 「第一格永远加不进去」这句话只有单测在看
+✓ M6 深度那一判照抄 reparent 的 heightBelow（变异等价，该绿）  [应绿] 红发=0 绿发=201 红文件=无
+    绿 = 函数头那句「照抄同一个数」是真话；红 = 它已经过期，那条注释要改口
+✓ M7 在 validateNewNode 里也判一遍 model_family（同一件事两处口径）  [应红] 红发=9 绿发=192 红文件=test/arch/claims-registry.test.ts,test/org/validate.test.ts
+    该红两处：test/org 那发「与 model_family 不重叠」（单测直接看到行为变化）+ r22 的判据（它判的就是那段【代码】里不许出现 model_family）。端到端那一份【不该红】—— 它的反向 canary 只断 code，而 code 恰好同值 ⇒ 这正是本轮把这一格交给 r22 而不是交给那发测试的理由
+✓ M8 revalidate 的分派里把 add_node 那一支短路掉  [应红] 红发=16 绿发=185 红文件=test/arch/claims-registry.test.ts,packages/hub/test/acceptance/new-role-to-its-own-criteria.test.ts
+    新节点提交会走到 noUntouchedKind 而抛；单测不该红（它不经 revalidate）⇒ 这一行就是「端到端与单测各守一半」的证据。⭐ 这一发【逼出了判据的一格】：判据那一版只查【调用在不在】，而那份文件里调用字节【还在】⇒ 端到端红而 r22 不红。现在它多判一条「分派条件本身要真」，于是 CRIT 也红了 —— 这台机器给判据本身补了一颗牙齿，这是它本轮最实在的产出
+命中 10 / 10

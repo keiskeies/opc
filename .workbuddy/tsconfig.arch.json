@@ -1,0 +1,6 @@
+{
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": { "noEmit": true, "composite": false, "types": ["node"],
+    "paths": { "@opc/contracts": ["../packages/contracts/src/index.ts"] } },
+  "include": ["../test/arch/**/*.ts"]
+}

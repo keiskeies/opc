@@ -1,0 +1,40 @@
+  "INDEX.md>0001_init.sql:249":
+    "CREATE TABLE im_bindings (",   // 目标 packages/hub/resources/migrations/0001_init.sql，doc:47
+  "INDEX.md>harness/gateway.ts:380":
+    "const reject = (code: GatewayRejectCode, reason: string): GatewayOutcome => ({",   // 目标 packages/hub/src/harness/gateway.ts，doc:48
+  "INDEX.md>app.ts:441":
+    "...(deps.nonces === undefined ? {} : { nonces: deps.nonces }),",   // 目标 packages/hub/src/http/app.ts，doc:49
+  "INDEX.md>ipc-surface.test.ts:129":
+    "expect(API_ENDPOINTS).toContain(s.endpoint);",   // 目标 test/desktop/ipc-surface.test.ts，doc:49
+  "INDEX.md>harness-invariants.ts:156":
+    ");",   // 目标 test/arch/harness-invariants.ts，doc:58
+  "INDEX.md>today.ts:263":
+    "* 之间夹一次写入会得到一份自相矛盾的摘要条」的立场，只是这里跨了端点）。",   // 目标 packages/hub/src/overview/today.ts，doc:64
+  "INDEX.md>serve/driver-pump.ts:487":
+    ".all(...states, maxAttempts, o.taskLimitCents, perRound) as unknown as {",   // 目标 packages/hub/src/serve/driver-pump.ts，doc:68
+  "INDEX.md>assemble.ts:274":
+    "* 全在【泵自己内部】的外面，所以它们只能靠换掉整趟来数 —— 与章程泵同一条理由。",   // 目标 packages/hub/src/serve/assemble.ts，doc:70
+  "INDEX.md>app.js:675":
+    "<span class=\"pill ${statusClass(tk.status)}\">${esc(tk.status)}</span>",   // 目标 packages/web/public/app.js，doc:70
+  "INDEX.md>status.ts:59":
+    "REJECTED_DOWNWARD: [",   // 目标 packages/hub/src/graph/status.ts，doc:70
+  "INDEX.md>graph/company.ts:254":
+    "if (state.current === \"REJECTED_DOWNWARD\") await write(\"IN_PROGRESS\");",   // 目标 packages/hub/src/graph/company.ts，doc:70
+  "INDEX.md>runtime.ts:109":
+    "* 加上 AUTO_AFTER_EDGE 自动补的 IN_PROGRESS 那一跳，见 dispatch 的 chain），",   // 目标 packages/hub/src/engine/runtime.ts，doc:73
+  "INDEX.md>runtime.test.ts:465":
+    "expect(\"这些格没进提示词: [\" + missing.join(\", \") + \"]\").toBe(",   // 目标 packages/hub/test/engine/runtime.test.ts，doc:81
+  "INDEX.md>bindings/im.test.ts:102":
+    "function stripComments(text: string): string {",   // 目标 packages/hub/test/bindings/im.test.ts，doc:81
+  "INDEX.md>web/renderer-criteria.test.ts:53":
+    "function stripComments(src: string): string {",   // 目标 test/web/renderer-criteria.test.ts，doc:81
+  "INDEX.md>roles/preset.ts:27":
+    "export const NODE_TO_TEMPLATE: Record<CompanyNode, string> = {",   // 目标 packages/hub/src/roles/preset.ts，doc:82
+  "INDEX.md>http/real-deps.ts:807":
+    "});",   // 目标 packages/hub/src/http/real-deps.ts，doc:82
+  "INDEX.md>approvals/cards.ts:252":
+    "\"INSERT INTO approvals (id, task_id, approval_type, summary, parameters, \" +",   // 目标 packages/hub/src/approvals/cards.ts，doc:102
+  "INDEX.md>tokens.ts:208":
+    "\"INSERT INTO im_tokens (token, approval_id, expires_at, used) VALUES (?, ?, ?, ?)\";",   // 目标 packages/hub/src/http/tokens.ts，doc:102
+  "INDEX.md>im.ts:164":
+    "\"INSERT INTO im_bindings (id, platform, external_user_id, ceo_role, verified, created_at) \" +",   // 目标 packages/hub/src/bindings/im.ts，doc:102
