@@ -566,13 +566,17 @@ const SNAP: Record<string, string> = {
   //   · integrity.ts:1135 → 1200（pageIntegrityBroken 的注释加长了）
   //   · 0064 又改 gateEvidenceCheck 的 not_observable 文案（+3 行）：integrity.ts:1216 → 1219
   //     （sed -n '1219p' 重读后再改键 —— 0016 那条「别按 diff 行数推算」的规矩）
-  "0037-worker-import-in-threads-and-my-first-fix-was-wrong.md>integrity.test.ts:426":
+  //   round298 又漂一次，且【三个不同的偏移量】：integrity.ts 里 import 之上 +0、
+  //   import 与 CHECK_NAMES 之下 +2、新加的那 170 行委派边自检之下 +170（1219→1389）；
+  //   测试文件只多了一条 import ⇒ +1。逐条 sed 重读目标行确认【内容一字未动】，
+  //   漂移全部来自「上方插了东西」—— 与下面那条 305→316→370→399→460 的账同形。
+  "0037-worker-import-in-threads-and-my-first-fix-was-wrong.md>integrity.test.ts:427":
     "expect(viaWorker.unavailable).toBeUndefined();",
-  "0037-worker-import-in-threads-and-my-first-fix-was-wrong.md>integrity.ts:291":
+  "0037-worker-import-in-threads-and-my-first-fix-was-wrong.md>integrity.ts:293":
     'verdict: page.ok ? "ok" : instrumentBroke ? "could_not_run" : "violated",',
-  "0037-worker-import-in-threads-and-my-first-fix-was-wrong.md>integrity.ts:111":
+  "0037-worker-import-in-threads-and-my-first-fix-was-wrong.md>integrity.ts:113":
     "export const INTEGRITY_FAILURES = [",
-  "0037-worker-import-in-threads-and-my-first-fix-was-wrong.md>integrity.ts:1219":
+  "0037-worker-import-in-threads-and-my-first-fix-was-wrong.md>integrity.ts:1389":
     '* `verdict === "not_observable"` / `"could_not_run"` 都【不算】损坏：',
   // 305 → 316 → 370 → 399 → 460：每一次漂移都是【同一文件上方被插入内容顶下去】（0043 的引擎 import
   // 与 0044 的泵那两段；399 那一次是 0048 的驱动器那两段；460 这一次是 round281 的

@@ -45,6 +45,7 @@ import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import type { DatabaseSync } from "node:sqlite";
 import { Worker } from "node:worker_threads";
+import { orgGraphSchema } from "@opc/contracts";
 import { requireScopeDb } from "../checkpoint/tx-scope.js";
 import { AUDIT_ACTIONS, type AuditAction } from "../events/recorder.js";
 import type { Writer } from "./write-queue.js";
@@ -75,6 +76,7 @@ export const CHECK_NAMES = [
   "state_machine_agrees_with_events",
   "gate_evidence_reference",
   "harness_call_recorded",
+  "delegation_edges_gated",
 ] as const;
 export type CheckName = (typeof CHECK_NAMES)[number];
 
@@ -767,6 +769,7 @@ export function auditCoherenceReport(o: CoherenceInput): readonly CheckResult[] 
     guarded("state_machine_agrees_with_events", () => stateMachineAgreement(o.db)),
     guarded("gate_evidence_reference", () => gateEvidenceCheck(o.db)),
     guarded("harness_call_recorded", () => harnessCallCheck(o.db)),
+    guarded("delegation_edges_gated", () => delegationEdgeGateCheck(o.db)),
     guarded("fts_index", () => ftsIndexCoherence(o.db, sample)),
   ];
 }
@@ -1047,6 +1050,173 @@ function harnessCallCheck(db: DatabaseSync): CheckResult {
       " 条 harness 调用，凡有花费的那几条评论上都能在 budget_events 里找到对应任务行。",
     checked: rows.length,
   };
+}
+
+/**
+ * 「图上有没有【不带审阅门控】的委派边」—— 0064 §6 第 4 条登记的那一格。
+ *
+ * ── 为什么它必须在【自检】里而不是只在保存期 ──────────────────────────
+ * 保存期那条判据存在（validate.ts 的 missing_review_gate），但它只看【增量】：
+ * revalidate 按 change 的 kind 分派，`add_edge` 那一支拿到的是 change.edge，
+ * 整张图里【已经躺着】的那些边一条都没被看过（commit.ts 的 revalidate 是全部判据）。
+ * 于是存量脏图需要一个跑在整图上的扫描 —— 这是 0064 当时登记的理由，本轮照做。
+ *
+ * ── 本轮量出来一件比 0064 那句更糟的事 ────────────────────────────────
+ * 0064 假设脏图来自「手工修库」。实测【不需要手工修库】：
+ *   · HTTP 那一侧信【请求体带来的整张图】（http/org.ts 把 o.graph 原样交给
+ *     commitOrgChange），而 orgGraphSchema 里 review_gate 是 `z.boolean()`
+ *     —— 带 `review_gate: false` 的边【过 schema】；
+ *   · 上一段说的 revalidate 又不看整图。
+ *   ⇒ 两道真实存在的闸门都放行。探针实测：一张形状完全合法的图带着
+ *     {from:"a", to:"b", review_gate:false} 过 safeParse ⇒ true，
+ *     而那一轮真跑的 validateNewNode ⇒ ok:true。没有任何一条判据看过那条边。
+ * 所以这一格不是「防有人手滑改库」，是【产品自己就能把无门控边写进历史】。
+ * 修法在保存期补一条整图判据才算堵住；那条属改判据（会动既有路由的可用性），
+ * 本轮只把「看得见」做出来，登记在 round298。
+ *
+ * ── 为什么扫【所有版本】而不是只扫最新那张 ────────────────────────────
+ * 老版本是【活的】：任务创建时盖 graph_version，dispatch/runtime/charter 都按那个
+ * 版本号读图（readGraphByVersion），而且它【刻意】在版本缺失时抛错而不退回最新版
+ * （§18.4 阶段 3）。⇒ 一条躺在 v3 里的无门控边，会在 v7 已是干净的之后
+ * 继续被那个老任务用下去。只扫最新 = 报告 ok 而生产照跑脏图。
+ *
+ * ── 三种结论各对应哪一种实测状态 ──────────────────────────────────────
+ *   not_observable  表没建 / 表里零行 / 有图但整库一条委派边都没有。
+ *                   ⚠ 文案【不】写「src 里没有写入方」—— 那句是假的：
+ *                   INSERT_DELEGATION_GRAPH_SQL 存在且生产路径在调（commit.ts）。
+ *                   空表说的是【这一份库】还没提交过组织图（实测 dev.db 就是 0 行）。
+ *                   本文件头 ④ 那一节记的就是「把假句子写进 not_observable 文案」
+ *                   这个坑（0063 / zero-producer.ts），此处照那条写。
+ *   violated        有边没带门控（点名到版本 + 那条边），或某行的 graph_json
+ *                   读不出/不合规。后者也算 violated 而不是 could_not_run：
+ *                   判据跑成了，它的结论是「这份数据我读不动」——那是【被检查对象】
+ *                   的结论。与本文件 pageCheckCell 那条「开不了这份库 ⇒ violated」
+ *                   同一个口径（0037 §1.2 那一族的第四次）。
+ *   could_not_run   留给【查询自己抛】（表在而 SELECT 失败，例如库截断），由 guarded 兜。
+ */
+function delegationEdgeGateCheck(db: DatabaseSync): CheckResult {
+  const name: CheckName = "delegation_edges_gated";
+  const missing = missingTables(db, ["delegation_graphs"]);
+  if (missing.length > 0) {
+    return {
+      name,
+      verdict: "not_observable",
+      detail: "这些表不在这一份库里：" + missing.join(", ") + "（未跑过迁移？）。",
+      checked: 0,
+    };
+  }
+  const rows = db
+    .prepare(
+      "SELECT id AS id, version AS version, graph_json AS graph_json " +
+        "FROM delegation_graphs ORDER BY version",
+    )
+    .all() as { id: string; version: number | bigint; graph_json: string }[];
+  if (rows.length === 0) {
+    return {
+      name,
+      verdict: "not_observable",
+      detail:
+        "delegation_graphs 是空的 —— 这一份库还没提交过任何一版组织图，" +
+        "所以「每条委派边都带审阅门控」【没有对象】。不是通过。" +
+        "⚠ 空表说的不是「没有写入方」：写入方是 org/commit.ts 的 " +
+        "INSERT_DELEGATION_GRAPH_SQL（生产路径经 commitOrgGraph）。",
+      checked: 0,
+    };
+  }
+  /* 逐行读数。三种结果分开攒，因为它们的修法不同：
+     unreadable = 那一行的 graph_json 不是 JSON；malformed = 是 JSON 而不过 orgGraphSchema；
+     ungated = 合规图上 review_gate 不为 true 的边。 */
+  const unreadable: string[] = [];
+  const malformed: string[] = [];
+  const ungated: string[] = [];
+  let edges = 0;
+  for (const r of rows) {
+    const at = "v" + Number(r.version) + "(" + r.id + ")";
+    let raw: unknown;
+    try {
+      raw = JSON.parse(r.graph_json) as unknown;
+    } catch (e) {
+      unreadable.push(at + "：" + String(e).slice(0, 80));
+      continue;
+    }
+    const parsed = orgGraphSchema.safeParse(raw);
+    if (!parsed.success) {
+      malformed.push(at + "：" + issueSummary(parsed.error));
+      continue;
+    }
+    for (const e of parsed.data.edges) {
+      edges += 1;
+      if (e.review_gate !== true) {
+        ungated.push(at + ": " + e.from + " → " + e.to);
+      }
+    }
+  }
+  const broken = unreadable.length + malformed.length;
+  if (broken > 0 || ungated.length > 0) {
+    const parts: string[] = [];
+    if (unreadable.length > 0) {
+      parts.push(
+        unreadable.length + " 个版本的 graph_json 不是合法 JSON（" +
+          unreadable.slice(0, 3).join("; ") + "）",
+      );
+    }
+    if (malformed.length > 0) {
+      parts.push(
+        malformed.length + " 个版本不过 orgGraphSchema（" +
+          malformed.slice(0, 3).join("; ") + "）",
+      );
+    }
+    if (ungated.length > 0) {
+      parts.push(
+        ungated.length + " 条委派边没有审阅门控（" + ungated.slice(0, 5).join(", ") + "）",
+      );
+    }
+    return {
+      name,
+      verdict: "violated",
+      detail:
+        "扫了 " + rows.length + " 个版本、" + edges + " 条边：" + parts.join("；") +
+        "。§8.2 第 4 条要求门控绑在边上、不可绕过，而这条判据【只看增量】" +
+        "（validate.ts 的 missing_review_gate 拿的是本次新增那条边），" +
+        "整图里已躺着的边没人看 —— 且这些版本【都还活着】：任务按自己盖的 " +
+        "graph_version 读图，版本缺失时宁可抛错也不退回最新版（§18.4 阶段 3），" +
+        "所以脏在 v3 的边会在 v7 干净之后继续被那个老任务用下去。",
+      checked: edges,
+    };
+  }
+  if (edges === 0) {
+    return {
+      name,
+      verdict: "not_observable",
+      detail:
+        "库里有 " + rows.length + " 版组织图，而它们【一条委派边都没有】—— " +
+        "「每条委派边都带审阅门控」在这里没有对象。不是通过。" +
+        "（空图是合法的数据形状：orgGraphSchema 的 edges 缺省 []。）",
+      checked: 0,
+    };
+  }
+  return {
+    name,
+    verdict: "ok",
+    detail:
+      rows.length + " 个版本、" + edges +
+      " 条委派边全部带 review_gate=true。注意本条判的是【边上的标记】，" +
+      "不看那个门控实际有没有跑（审阅真的发生与否归 author-reviewer / events）。",
+    checked: edges,
+  };
+}
+
+/** zod 错误压成一句能点名的短话；读不出结构也不抛（抛会被 guarded 翻成 could_not_run，那会盖掉真正的读数）。 */
+function issueSummary(err: unknown): string {
+  const list = (err as { issues?: { path: (string | number)[]; code: string }[] })
+    ?.issues;
+  if (!Array.isArray(list)) return "schema 拒绝（读不出细节）";
+  return (
+    list
+      .slice(0, 3)
+      .map((i) => (i.path.length > 0 ? i.path.join(".") : "<根>") + ":" + i.code)
+      .join(", ") + (list.length > 3 ? " 等 " + list.length + " 条" : "")
+  );
 }
 
 function missingTables(db: DatabaseSync, names: readonly string[]): string[] {

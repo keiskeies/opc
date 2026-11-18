@@ -29,6 +29,7 @@ import { mkdirSync, rmSync, copyFileSync, openSync, ftruncateSync, fstatSync, cl
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { commitOrgChangeRequestSchema, validateNewNode } from "@opc/contracts";
 import { fixtureTmp } from "../fixtures/fixture-dir.js";
 import { openDb } from "../../src/db/driver.js";
 import { openSnapshotReadonlyDb } from "../../src/db/pragmas.js";
@@ -827,6 +828,176 @@ describe("⑤ §22.4 审计自洽：三条规则 + FTS + 枚举", () => {
     expect(c.verdict).toBe("not_observable");
     expect(c.detail).toContain("显式关掉");
     expect(c.checked).toBe(0);
+  });
+});
+
+describe("⑤b 委派边门控（0064 §6 第 4 条：存量脏图归自检，不归保存期增量判据）", () => {
+  /*
+   * 这一节判的是【整图】：delegation_graphs 里每一版的每条边都带 review_gate 吗。
+   * 保存期那条（validate.ts 的 missing_review_gate）只看【本次新增】那条边，
+   * 整图里已躺着的边没人看 —— 0064 §6 第 4 条登记的就是这个缺口，本轮落成自检。
+   * 夹具走真迁移库 + 真 INSERT（与 test/graph/e2e-linear.test.ts 同一形状），
+   * 因为这条自检读的就是 graph_json 这一列的【真实读法】。
+   */
+  const GATE_NAME = "delegation_edges_gated";
+  /** 三个节点的合法汇报树；edges 由每一发自己给。 */
+  function graphJson(
+    edges: { from: string; to: string; review_gate: boolean }[],
+  ): string {
+    return JSON.stringify({
+      nodes: {
+        ceo: { role_id: "ceo", can_manage: true, model_family: "f", reports_to: null },
+        a: { role_id: "a", can_manage: false, model_family: "f", reports_to: "ceo" },
+        b: { role_id: "b", can_manage: false, model_family: "f", reports_to: "ceo" },
+      },
+      edges,
+    });
+  }
+  function insertGraph(
+    db: ReturnType<typeof openDb>,
+    id: string,
+    version: number,
+    graphJsonText: string,
+  ): void {
+    db.prepare(
+      "INSERT INTO delegation_graphs (id, version, graph_json, effective_from, created_by, change_summary) " +
+        "VALUES (?,?,?,?,?,?)",
+    ).run(id, version, graphJsonText, 1_700_000_000_000, "test", "v" + version);
+  }
+
+  it("delegation_graphs 零行 ⇒ not_observable，且文案【承认写入方存在】", () => {
+    const { db } = migratedDb(5);
+    const c = resultByName(auditCoherenceReport({ db }), GATE_NAME);
+    expect(c.verdict).toBe("not_observable");
+    expect(c.checked).toBe(0);
+    // ⚠ 下面这两行【不是】这一族的守卫，别把它当守卫用（round298 变异矩阵实测）：
+    //   把假句子「src 里没有任何 INSERT INTO delegation_graphs」写回文案，
+    //   这两行【全绿】—— 因为假句与真句（"写入方是 …INSERT_DELEGATION_GRAPH_SQL"）
+    //   可以【并存】，toContain/not.toContain 这种子判据抓不住"多了一句假话"。
+    //   真抓它的是 test/arch/zero-producer.ts（登记表 + 双向对账，M5 实测红且
+    //   点名 integrity.ts 那一行）。这里留两行只当【便宜的取样】。
+    // 判据形状的来源是 0063 / zero-producer.ts：文案里的事实断言【会过期】而
+    // 文案本身恒绿 —— 那条守卫的存在理由就是这件事不能靠散文自证。
+    expect(c.detail).toContain("INSERT_DELEGATION_GRAPH_SQL");
+    expect(c.detail).not.toContain("零 INSERT");
+  });
+
+  it("有图而整库一条边都没有 ⇒ not_observable（空图是合法形状，不是通过）", () => {
+    const { db } = migratedDb(5);
+    insertGraph(db, "g1", 1, graphJson([]));
+    const c = resultByName(auditCoherenceReport({ db }), GATE_NAME);
+    expect(c.verdict).toBe("not_observable");
+    expect(c.checked).toBe(0);
+    expect(c.detail).toContain("没有对象");
+  });
+
+  it("每条边都带门控 ⇒ ok + checked=边数；把其中一条翻成 false ⇒ 立刻 violated", () => {
+    const { db } = migratedDb(5);
+    insertGraph(
+      db,
+      "g1",
+      1,
+      graphJson([
+        { from: "a", to: "b", review_gate: true },
+        { from: "b", to: "a", review_gate: true },
+      ]),
+    );
+    const okCell = resultByName(auditCoherenceReport({ db }), GATE_NAME);
+    expect(okCell.verdict).toBe("ok");
+    expect(okCell.checked).toBe(2);
+    // 反向对照（本文件的家规：每一格 ok 后面跟一发必须变红的）：
+    // 同一个库，把一条边的门控翻掉 —— 不是换新库，是证明判据真的在看那个布尔。
+    db.exec("UPDATE delegation_graphs SET graph_json = replace(graph_json, '\"review_gate\":true', '\"review_gate\":false')");
+    const bad = resultByName(auditCoherenceReport({ db }), GATE_NAME);
+    expect(bad.verdict).toBe("violated");
+    expect(bad.detail).toContain("a → b");
+    expect(bad.detail).toContain("v1");
+  });
+
+  it("⭐ 脏在老版本也抓：v7 干净而 v3 有一条无门控边 ⇒ violated 点名 v3", () => {
+    /*
+     * 这一发钉的是「只扫最新那张图」这个诱人错法。老版本是【活的】：
+     * 任务盖着自己的 graph_version，dispatch/runtime/charter 按版本号读图，
+     * 且 readGraphByVersion 在版本缺失时【刻意抛错】而不退回最新版（§18.4 阶段 3）。
+     * ⇒ 一条躺在 v3 里的无门控边，会在 v7 干净之后继续被那个老任务用下去。
+     * 只扫最新 = 报告 ok 而生产照跑脏图。
+     */
+    const { db } = migratedDb(5);
+    insertGraph(db, "g7", 7, graphJson([{ from: "a", to: "b", review_gate: true }]));
+    insertGraph(db, "g3", 3, graphJson([{ from: "b", to: "a", review_gate: false }]));
+    const c = resultByName(auditCoherenceReport({ db }), GATE_NAME);
+    expect(c.verdict).toBe("violated");
+    expect(c.detail).toContain("v3(g3)");
+    expect(c.checked).toBe(2); // 两版各一条边，都数了
+  });
+
+  it("graph_json 不是合法 JSON ⇒ violated 点名那一版（判据跑成了，读不动是【数据】的结论）", () => {
+    const { db } = migratedDb(5);
+    insertGraph(db, "g1", 1, "{这不是 JSON");
+    const c = resultByName(auditCoherenceReport({ db }), GATE_NAME);
+    expect(c.verdict).toBe("violated");
+    expect(c.verdict).not.toBe("could_not_run");
+    expect(c.detail).toContain("v1(g1)");
+    expect(c.detail).toContain("不是合法 JSON");
+  });
+
+  it("⭐ 形状不合契约也抓：edges 写成对象 ⇒ violated 说「不过 orgGraphSchema」", () => {
+    /*
+     * 这不是假想的形状 —— test/graph/e2e-linear.test.ts 的存根图当年就写了
+     * `{ nodes: {}, edges: {} }`（edges 是对象），而读取口全部用
+     * `JSON.parse(...) as OrgGraph`【强转】，没有任何一条测试判过"那过不过 schema"。
+     * 强转把「契约说不」变成了「没人知道」。这一发把那个没人知道变成红。
+     */
+    const { db } = migratedDb(5);
+    insertGraph(db, "g9", 9, JSON.stringify({ nodes: {}, edges: {} }));
+    const c = resultByName(auditCoherenceReport({ db }), GATE_NAME);
+    expect(c.verdict).toBe("violated");
+    expect(c.detail).toContain("v9(g9)");
+    expect(c.detail).toContain("orgGraphSchema");
+  });
+
+  it("前提自证：无门控边【过产品自己的两道闸门】—— 本自检的红不是只防手工修库", () => {
+    /*
+     * 0064 登记这一格时假设脏图来自「手工修库」。本轮实测【不需要手工修】：
+     * HTTP 信请求体带来的整张图（http/org.ts 把 o.graph 原样交给 commitOrgChange），
+     * 而保存期的 revalidate 只按 change 的 kind 判增量。两道真实闸门都放行。
+     * 这里用【产品自己的 schema 与判据】复现一遍：它们都点头，所以脏边能进库，
+     * 而上面那些 violated 分支不是理论可达 —— 顺带这也是本节的 ok/violated
+     * 之间那条通道存在的证明（少了它，读者只能说"夹具是我手搓的"）。
+     */
+    const graph = JSON.parse(
+      graphJson([{ from: "a", to: "b", review_gate: false }]),
+    ) as { nodes: Record<string, unknown>; edges: unknown[] };
+    const req = {
+      graph,
+      change: {
+        kind: "add_node",
+        node: {
+          role_id: "c",
+          can_manage: false,
+          model_family: "f",
+          reports_to: "ceo",
+        },
+      },
+      change_summary: "加一个角色",
+    };
+    // 闸门一：API 请求体 schema。
+    const parsed = commitOrgChangeRequestSchema.safeParse(req);
+    expect(parsed.success).toBe(true);
+    // 那条假边【原样】穿过 schema —— 若哪天 API 开始逐边判门控，这两行会红，
+    // 那时本自检降级成兜底，是好事。
+    expect(JSON.stringify(graph.edges)).toContain('"review_gate":false');
+    // 闸门二：那一轮真会跑的图级判据（add_node ⇒ validateNewNode），它不看边。
+    const verdict = validateNewNode(
+      {
+        role_id: "c",
+        can_manage: false,
+        model_family: "f",
+        reports_to: "ceo",
+      },
+      graph as never,
+    );
+    expect(verdict.ok).toBe(true);
   });
 });
 
