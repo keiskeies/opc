@@ -4548,3 +4548,172 @@ round304b · 全量跑抓出我上一轮自己违的约：探针不该叫 `.test
   主张表 / docs / TYPE_BASELINE / LINT_BASELINE 全部未动。
   本轮无生产代码改动 ⇒ 无变异机（改名不改变任何判据行为；承重证据就是
   那条守卫自己的红→绿）。
+
+════════════════════════════════════════════════════════════════════════════
+round305 · Task 6.1 接线：只重试【结构上不可能花过钱】的失败
+════════════════════════════════════════════════════════════════════════════
+  用户拍的那一格（AskUserQuestion 的原话）：「只重试零花费的失败」——
+  保留美元硬顶、harness_calls 一轮一行、账面形状三样都不动。
+  落点：packages/hub/src/engine/turn-retry.ts（新增）+ claude.ts（判据与两个新字段）
+  + runtime.ts（两个可注入钩子）；三个装配点（work.ts / driver-pump / charter-pump）
+  一行未改 —— 钩子给的是可选 + 默认值，默认就是生产要的行为。
+
+■ ① ⭐ 本轮最要紧的一条：被我【推翻】的那个判据
+  本来打算用「这次失败没花钱」（costUsd === 0）当「重试不会多烧钱」的凭据。
+  量完发现推不过去：is_error:true 那一支在 total_cost_usd 缺失时给 cost=0，
+  而【同一条分支】在字段存在时给非零 ⇒ 「没记到钱」与「没花钱」在旧返回形状里
+  【同一个读数】。超时那一支更极端：进程被 SIGKILL，没机会报账，那个 0 的含义是
+  【未知】而不是零。拿一个分不出这两者的数去决定「要不要再花一次钱」= 拿猜测当判据。
+  ⇒ 改成结构性判据（claude.ts 的 retryableWithoutCost，两格都要成立）：
+    ① started === false ⇒ 子进程从未存在 ⇒ 结构上不可能产生过账单（与任何读数无关）；
+    ② spawn 的 errno 在瞬时白名单上 ⇒ 这是「下一次可能就没了」的失败。
+  RoleRunResult 因此多了 started / spawnErrno 两格 —— 它们【不是】error 的派生量，
+  这一句是整个设计的支点。
+
+■ ② 覆盖面是【量出来的】，不是设计出来的：今天一次重试都不放行
+  .workbuddy/probe305-spawn.mjs 实测（node v24 / win32，本轮复算过一遍）：
+    二进制不存在      ⇒ 异步 error 事件，ENOENT
+    bin 指着一个目录  ⇒ 异步 error 事件，ENOENT（不是 EISDIR）
+    bin 指着普通文件  ⇒ 【同步】从 spawn() 抛 EFTYPE，根本不走 error 事件
+  ⇒ 本机可复现的 started:false 【全是】ENOENT，而 ENOENT 是确定性失败、被 ② 挡掉
+  ⇒ 结论：这条判据在今天的真机上【一次重试都不会放行】。这不是缺陷，是覆盖面。
+  ⚠ 白名单里那五个名字（EAGAIN/EMFILE/ENFILE/ECONNRESET/EPIPE）【一个真样本都没有】
+    —— 要真把系统资源打满才出得来，本轮没有制造它。它们是【按 POSIX 语义列的候选】，
+    不是【测出来的可自愈集合】。「重试在真机上会不会自愈」这一格【仍未验】。
+  ⚠ 那为什么还要接：装配错 bin 之外的资源型故障今天会让 hub 直接崩在 spawn 上，
+    接上之后变成「退避几次 + 几条 warn + 一条正常失败轮」。剩下的那一大块
+    （超时、CLI 业务错、网络抖动）等的是【每次尝试各自记一次账】—— 那要动
+    harness_calls 的写入形状与 dispatch 的记账，顺序不能反（先改账再扩判据），
+    那是 O6 接线的账，不在本轮。
+
+■ ③ 留痕那一侧：透明性是被【证】的，不是被声称的
+  重试对 dispatch 完全透明：它看到的仍是一个 outcome、一次记账、一条 state_change。
+  重试【不写】harness_calls / budget_events —— 由 ① 保证「没有发生过外部调用」，
+  给一次没发生过的调用写一行执行日志 = 在 §12.7 第 4 层里制造一条【不存在的调用】。
+  runtime.test.ts 两发钉在真表上：
+   · 「二进制不存在 ⇒ 一次都不重试，且账与留痕的形状与接线前逐字相同」（今天真机上
+     唯一真跑得通的那一支：真 spawn、真 ENOENT、真 dispatch）
+   · 「瞬时 errno 放行重试时：多烧 4 次 spawn 而一处账都不多记」（本机造不出 EMFILE
+     ⇒ 注入假执行器走真 dispatch + 真表：试 4 次 ⇒ budget_events 0 行、harness_calls
+     0 行；驱动方调一次 recordTurn 之后【恰好 1 行】、session_id null、cost_cents 0）
+
+■ ④ 残留：bin 指着普通文件 ⇒ 响亮崩溃，本轮【没有】把它抹平
+  同步抛 EFTYPE 被 Promise 构造器吞成 rejection ⇒ runRole 自己 reject 而不是返回
+  ok:false。把它转成一条正常失败轮会得到：白等 1+2+4 秒 + 四条 warn + 一条看起来
+  像「角色跑失败了」的记录，而今天的形状是【hub 起不来】。把装配期 bug 降级成
+  运行期噪声 = 更难查的方向 ⇒ turn-retry 的 rejected 那一支原样抛回，一行不吞。
+  claude.test.ts 里那发「bin 指着一个普通文件」钉的就是这个残留【还在】。
+  ⚠ 那一发带 process.platform 分支，写的是【读数不同、结论相同】而不是
+    「非 win32 就跳过」：win32 钉 EFTYPE，其他平台只钉「带得出 errno 名」
+    （非 win32 本机没实测过 ⇒ 不把本机读数抄成跨平台事实）。
+    本仓 process.platform 的先例见 test/arch/dependency-boundary.test.ts:26。
+
+■ ⑤ escalate 只发 warn，不发卡片
+  Task 6.1 的出口标准是「绝不静默停滞」，而这一格诚实的读数只有一条 warn。
+  升级到卡片要 escalation.ts —— 那个文件【不存在】（GaveUp 没有任何通往卡片的路径，
+  patrol.ts 只调 onWarning，那也是一条日志）。在这里假装发卡是把「没人看见」
+  换成「看见了一条假话」。缺口登记在此，不在代码里假装。
+  warn 文案只带坐标（第几次 / errno / 退避多久），prompt 与 stderr 一个字都不带
+  —— 日志也是一处日志（与 O11「错误字符串里不许出现请求体」同口径）。
+
+■ ⑥ ⭐⭐ 变异矩阵【之前】先推演出了一发漏网：判据有两格而只有一格承重
+  设计 M1（把 retryableWithoutCost 里的 r.started 整格抹掉）时，先把现有 10 发
+  在「抹掉之后」各读一遍：每一发 started:true 的失败，它的 spawnErrno 恰好
+  【全是空串】⇒ 名单那一半先把它们挡住了 ⇒ 十条一发都不红。
+  「两条都要成立」里的第一条【一次都没单独被要求过】—— 有两个条件而只有一个承重，
+  等于只测了一个条件，而它看起来是两条都测了。
+  ⇒ 补 turn-retry.test.ts 那发「⭐ 起过进程 + 瞬时 errno ⇒ 仍不重试」（两条各站一边：
+    名单成立而 started 不成立），【然后才】第一次跑机器。
+  ⚠ 因果要说准：这一发是【读判据推出来的】，机器随后【验证】了它承重。
+    说成「变异机跑出来的」会把「原来那一版不够」这件事抹掉。
+
+■ ⑦ 变异矩阵读数（.workbuddy/round305-mutate-retry.mjs，7 / 7，MUTATE_EXIT=0）
+  ⚠ 这台跑了【两遍】，两遍都是 7 / 7，读数留的是第二遍：第一遍跑在归一换行符【之前】，
+    而 §⑨ 那次归一会改动锚点所在文件的字节 ⇒ 证据必须对得上最终入库的那一份。
+    第二遍的回滚核对也比第一遍强：那时源文件已入库，逐字节回滚后是对着 HEAD 比。
+    副产物：锚点两种换行符下都命中 ⇒ EOL-aware 的锚点写法不是为某一型文件打的补丁。
+  写真字节（packages/hub/src/engine/*.ts），逐发按原文回写并逐字节核对，单独跑。
+  预测在跑【之前】写进机器自己的文件头（事后照实测温差 = 抄答案不是预测）。
+    M0 控制组          ⇒ 全绿 ✓
+    M1 抹掉 started     ⇒ 红在「起过进程 + 瞬时 errno」一发，与预测【逐字同】 ✓
+    M2 判据恒假         ⇒ 红 4 发：退避序列、名单逐字钉住、中途起来、warn 只说坐标。
+      ⚠ 比预测的 2 发多红 2 发 ⇒ 预测【偏低】而不是方向错：那两发我没预见到也依赖放行。
+        方向说清：恒假是 fail-closed，坏起来像「重试没生效」，不多花钱。
+    M3 放弃时改为抛     ⇒ 红 4 发（含 runtime 的透明性那一发）✓
+    M4 摘掉 reject 抛回 ⇒ 红在「reject ⇒ 原样抛回」一发 ✓
+    M5 spawned 写死 true ⇒ 红在 claude.test 的两发（ENOENT / 目录）✓
+    M6 errno 不带出     ⇒ 同上两发红 ✓
+  机器自己的两次停摆都记在这儿（都是【锚点】问题，都不是判据问题）：
+    ⑴ 第一版锚点用 \n 拼，而 claude.ts 在盘上是 CRLF ⇒ 命中 0 次 ⇒ preflight 拦下、
+      【一发没发】。这条正是锚点校验存在的全部理由：命中 0 次的变异是真空操作，
+      会让那一发「按预期绿」，假绿来自机器而不是判据（round293 同一条）。
+      处置是【锚点按行数组写、按文件自己的 EOL 拼】，不改文件换行符 ——
+      机器【不该】假设任何文件的换行符，这一点不因下面 §⑨ 那次归一而改变。
+      （§⑨ 后来确实把 claude.ts 归一回了 LF，但那是【另一件事】：那次是为了
+       提交可读性，而且是在这台机器之外、跑完全绿之后单独做的，不是为了让锚点命中。）
+    ⑵ M4 第一版把注释行一起当锚点 ⇒ 命中 0（同一类，被同一次 preflight 抓住）。
+
+■ ⑧ 真跨进程那一侧的证据（claude.test.ts 新增两发 + 老一发加三格）
+  turn-retry.test.ts 用的是注入的假执行器 —— 它判「给定 started:false + errno=X
+  放不放行」，而【真 spawn 到底给出哪个 errno】它一次都没判。链断在中间：
+  判据绿 + 装配绿，而「真机上 started 真是 false 吗」没人答。少了这一格，哪天 node
+  改了行为（把 ENOENT 挪到 close 之后发）⇒ started 恒真 ⇒ 重试层【静默】退化成
+  不重试，而全仓不红。⇒ 补「bin 指着一个目录」「bin 指着普通文件」，
+  并给「二进制不存在」那一发加 started / spawnErrno / retryableWithoutCost 三格。
+  目录那一发【不钉 errno 名】而钉「非空 + 不放行」：目录的 errno 是平台给的
+  （Linux 常见 EACCES），钉 ENOENT 会把一条本机实测抄成跨平台事实。
+
+■ ⑨ 棘轮与台账坐标（全部实测，VITEST_EXIT=0）
+  · LINT_BASELINE 未上调。中途 format 161→164 是我自己造成的：新建文件没跑 --write，
+    以及 claude.test.ts 我加的 import 与长行。归因不靠猜 ——
+    .workbuddy/round305-lint-attr.mjs 用 git archive 把 HEAD 解到临时目录逐类目比对，
+    「只在工作区脏」的集合恰好【只有一项】：packages/hub/test/engine/claude.test.ts。
+    那四份被 --write 的文件里，除它之外 HEAD 版本本就脏（早已入库的旧账），
+    而它 HEAD 版本【是干净的】⇒ 对它 --write 只会重排我自己的行
+    （git diff 的 5 个 hunk 全在我加的那两段里，实测核对）。
+    ⚠ 这就是那条棘轮注释里「只动整份未入库/HEAD 干净的文件」的可执行版本。
+  · TYPE_BASELINE（packages/hub/test/engine = 70）未破：新测试引入 0 条类型错误。
+    中途 71 过一次，成因是 results[at] ?? ... 让类型宽成 | undefined ⇒
+    改成显式 nth()（空脚本就抛「脚本是空数组」）而不是 cast 糊过去。
+  · dead-modules 基线：heartbeat/retry.ts 摘掉一行（它现在被 turn-retry.ts import，
+    而 turn-retry 被 runtime 调）⇒ 方向 B 如约先红、兑现登记过的死法之后才删行。
+    下界从 14 改 13 并把注释写成「13 = 16 − 3」+ 三条死法各自归到轮次。
+    ⚠ 模块级可达【不等于】重试放过行：判据今天一次都不放行（§②），
+      那一格由 turn-retry.test.ts 钉，别拿基线那格的绿去宣布真机自愈过。
+    读数：模块 93 · 边 290 · 静态入口 7 · 动态入口 2 · 不可达 13。
+  · role-spawn-boundary 未动判据：重试层【不 spawn】，spawn 点名单仍是两格；
+    claude.ts 的 "--permission-mode"/"plan" 相邻与「唯一生效的安全边界」标注都在。
+  · docs 本轮【未动】（改 docs 会顶漂登记坐标，且本轮没有新主张要落纸）。
+  · ⚠ 一次【纯换行符】的全文件重排差点混进提交：claude.ts 在 HEAD 是 LF，
+    我手上这份变成了 CRLF ⇒ git diff 报 586 行改动，而真改动是 137 行
+    （`git diff -w --numstat` 一眼分辨）。已归一回 LF（biome 的 formatter.lineEnding
+    本来就是 "lf"，且全仓其余文件都是 LF）。这一格值得留着的原因：
+    一次真改动被换行噪声放大四倍 ⇒ 之后没人能从 diff 里读出「哪一行是改的」，
+    而那条棘轮注释反对的正是这个（「混在一堆 diff 里没人读得出来」）。
+    提交前值得跑的核对：git diff --stat 与 git diff -w --numstat 对一眼。
+  · 目标文件全绿（逐次单独跑，Test Files 行数与给的文件数逐条核对过 ⇒ §⑩ 那一格）：
+    claude.test 18 / turn-retry 11 / runtime 28 /
+    dead-modules 23 + role-spawn-boundary 11 = 34 / lint 基线 12 / test-inventory 12 /
+    类型棘轮 test-type-baseline 26。tsc -b packages/hub --force ⇒ TSC_EXIT=0、0 行输出。
+  · 台账证据：.workbuddy/round305-{claude,turnretry,runtime,arch,baselines,typebase,mutate}.txt
+    + probe305-spawn.mjs（形状探针，.mjs ⇒ 不进 test-inventory 那条谓词，round304b；
+    探针的写目标已改到【系统临时目录】—— 第一版往 .workbuddy/ 写了一份
+    probe305-target.txt 当样本且跑完不删，那是一份只为探针存在的垃圾）。
+
+■ ⑩ ⚠ 读数器自己的一格坑（本轮【真踩了】，不是假想）
+  我跑 `npx vitest run test/arch/type-baseline.test.ts test/arch/lint-baseline.test.ts
+  test/arch/test-inventory.test.ts` 拿到 VITEST_EXIT=0 并据此想登记「三道棘轮全绿」。
+  真相：真名是 test-【type-baseline】.test.ts，我写的那个名字【不存在】⇒ 那一个过滤器
+  【什么都没跑】，而另外两个跑了 ⇒ 退出码 0。实测复现（同一条形状）：
+  `npx vitest run test/arch/no-such-file-xyz.test.ts` ⇒ exit 1「No test files found」，
+  所以 vitest 只在【所有】过滤器都落空时才非零 —— 多过滤器里的一个错名是【静默】的。
+  ⇒ 口径补一句（与项目记忆「判绿只认 vitest 自己的退出码」配套）：
+    退出码只回答「跑起来的那些发全绿吗」，不回答「我要的那发跑了吗」。
+    多个过滤器时必须回到输出【逐条核对 Test Files 的行数 = 我给的文件数】，
+    或者一次只跑一发。本轮因此重跑了一次类型棘轮（26 发全绿，实测）。
+
+■ ⑪ 下一轮要接的那一格（不在本轮，写清楚免得被读成「已经稳了」）
+  要让超时/CLI 业务错也能重试，前置是【每次尝试各自记一次账】：
+  harness_calls 从「一轮一行」变成「一次尝试一行」+ dispatch 的记账跟着改，
+  否则重试一次 = 悄悄多烧一次钱而账面看不出来。顺序必须是先改账、再扩判据。
+

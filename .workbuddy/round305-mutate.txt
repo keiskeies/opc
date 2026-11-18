@@ -1,0 +1,16 @@
+══════════ round305 重试判据变异矩阵（写生产真字节，逐发自回滚）══════════
+✓ M0 一字不改 ⇒ claude + turn-retry 两套全绿
+      | 全绿
+✓ M1 抹掉判据第一条（started）⇒ 只剩 errno 名单挡一切
+      | 红的落点正是：⭐ 起过进程 + 瞬时 errno ⇒ 仍不重试（两条都要成立，名单不能单独放行）
+✓ M2 判据恒假（fail-closed 方向）⇒ 重试整条是死代码
+      | 红的落点正是：瞬时 errno + 进程从未起来 ⇒ 退避重试，退避序列是 1s/2s/4s，额度用尽后交出最后那次、⭐ 瞬时名单逐字钉住：名单与测试的字面量必须同时改、中途起来 ⇒ 立刻交出去，不多跑一次、warn 只说坐标：第几次、errno、退避多久，一个字的 prompt / stderr 都不带
+✓ M3 额度用尽后【抛】而不是交回失败轮 ⇒ 资源型故障把 hub 弄崩
+      | 红的落点正是：瞬时 errno + 进程从未起来 ⇒ 退避重试，退避序列是 1s/2s/4s，额度用尽后交出最后那次、⭐ 瞬时名单逐字钉住：名单与测试的字面量必须同时改、warn 只说坐标：第几次、errno、退避多久，一个字的 prompt / stderr 都不带、⭐ 瞬时 errno 放行重试时：多烧 4 次 spawn 而【一处账都不多记】（透明性判据）
+✓ M4 摘掉 reject 的原样抛回 ⇒ 装配期 bug 降级成一条正常失败轮
+      | 红的落点正是：⭐ 执行器自己 reject ⇒ 原样抛回，不包成失败轮也不重试
+✓ M5 claude.ts 的 error 分支里 spawned 写死 true ⇒ started 恒真
+      | 红的落点正是：二进制不存在 ⇒ ok:false 并报出错，而不是挂在那里等一个永远不会来的 close、bin 指着一个目录 ⇒ started:false 且 retryableWithoutCost 为 false
+✓ M6 errno 名不带出 Promise ⇒ 判据的输入恒空
+      | 红的落点正是：二进制不存在 ⇒ ok:false 并报出错，而不是挂在那里等一个永远不会来的 close、bin 指着一个目录 ⇒ started:false 且 retryableWithoutCost 为 false
+命中 7 / 7（分母 = 6 发变异 + 1 发控制组，数出来的）
