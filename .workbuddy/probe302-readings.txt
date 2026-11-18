@@ -1,0 +1,45 @@
+── 计数型  round292-mutate-org-node-criterion.mjs
+     丙 抛「「Tests」摘要行里【一个数字都没有】（实得：no」
+     丁 抛「Test Files 红了 1 份而用例级【一条红都」
+     戊 抛「读到装载失败那型的 FAIL 行（test/arch」
+     己 抛「Test Files 红了 1 份而用例级【一条红都」
+── 计数型  round293-mutate-census.mjs
+     丙 抛「Tests 摘要行里【一个数字都没有】（实得：no 」
+     丁 抛「Test Files 红了 1 份而用例级【一条红都」
+     戊 抛「读到装载失败那型的 FAIL 行（test/arch」
+     己 抛「Test Files 红了 1 份而用例级【一条红都」
+── 计数型  round293-mutate-gate-exemption.mjs
+     丙 抛「Tests 摘要行里【一个数字都没有】（实得：no 」
+     丁 抛「Test Files 红了 1 份而用例级【一条红都」
+     戊 抛「读到装载失败那型的 FAIL 行（test/arch」
+     己 抛「Test Files 红了 1 份而用例级【一条红都」
+── 计数型  round294-mutate-add-node.mjs
+     丙 抛「「Tests」摘要行里【一个数字都没有】（实得：no」
+     丁 抛「Test Files 红了 1 份而用例级【一条红都」
+     戊 抛「读到装载失败那型的 FAIL 行（test/arch」
+     己 抛「Test Files 红了 1 份而用例级【一条红都」
+── 并红型  round295-mutate-frontend-egress.mjs
+     丙 读数 {"failed":1,"failedTests":0,"failedFiles":1,"passed":0,"files":1}
+     丁 读数 {"failed":1,"failedTests":0,"failedFiles":1,"passed":25,"files":1}
+     戊 读数 {"failed":3,"failedTests":1,"failedFiles":2,"passed":5,"files":2}
+     己 读数 {"failed":1,"failedTests":0,"failedFiles":1,"passed":4,"files":1}
+── 并红型  round296-mutate-path-normalization.mjs
+     丙 读数 {"failed":1,"failedTests":0,"failedFiles":1,"passed":0,"files":1,"tests":0}
+     丁 读数 {"failed":1,"failedTests":0,"failedFiles":1,"passed":25,"files":1,"tests":0}
+     戊 读数 {"failed":3,"failedTests":1,"failedFiles":2,"passed":5,"files":2,"tests":1}
+     己 读数 {"failed":1,"failedTests":0,"failedFiles":1,"passed":4,"files":1,"tests":1}
+── 并红型  round298-mutate-edge-gate.mjs
+     丙 读数 {"failed":1,"failedTests":0,"failedFiles":1,"passed":0,"files":1,"tests":0}
+     丁 读数 {"failed":1,"failedTests":0,"failedFiles":1,"passed":25,"files":1,"tests":0}
+     戊 读数 {"failed":3,"failedTests":1,"failedFiles":2,"passed":5,"files":2,"tests":1}
+     己 读数 {"failed":1,"failedTests":0,"failedFiles":1,"passed":4,"files":1,"tests":1}
+── 并红型  round299-mutate-node-key-gate.mjs
+     丙 读数 {"failedTests":0,"failedFiles":1,"failed":1,"passed":0,"files":1,"tests":0}
+     丁 读数 {"failedTests":0,"failedFiles":1,"failed":1,"passed":25,"files":1,"tests":0}
+     戊 读数 {"failedTests":1,"failedFiles":2,"failed":3,"passed":5,"files":2,"tests":1}
+     己 读数 {"failedTests":0,"failedFiles":1,"failed":1,"passed":4,"files":1,"tests":1}
+── 并红型  round300-mutate-upward-escape.mjs
+     丙 读数 {"failed":1,"failedTests":0,"failedFiles":1,"passed":0,"files":1,"tests":0}
+     丁 读数 {"failed":1,"failedTests":0,"failedFiles":1,"passed":25,"files":1,"tests":0}
+     戊 读数 {"failed":3,"failedTests":1,"failedFiles":2,"passed":5,"files":2,"tests":1}
+     己 读数 {"failed":1,"failedTests":0,"failedFiles":1,"passed":4,"files":1,"tests":1}

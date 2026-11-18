@@ -1,0 +1,63 @@
+
+[1m[30m[46m RUN [49m[39m[22m [36mv4.1.12 [39m[90mD:/item/opc[39m
+
+
+PROBE303
+{"label":"ws-win tgt-win innocent","ws":"D:\\repo\\ws","tgt":"D:\\repo\\ws\\packages\\a\\file.ts","isInsideWorkspace":false,"verdict":{"ok":false,"code":"workspace_escape","reason":"写操作目标越出工作区，被拒：工作区 [D:\\repo\\ws]，目标 [D:\\repo\\ws\\packages\\a\\file.ts]。沙箱档位管的是【能改什么类型的东西】，这一条管的是【能改哪里的东西】，两者不互相替代。","detail":{"workspace":"D:\\repo\\ws","target":"D:\\repo\\ws\\packages\\a\\file.ts"}}}
+{"label":"ws-win tgt-win .. escape","ws":"D:\\repo\\ws","tgt":"D:\\repo\\ws\\..\\secret\\k.txt","isInsideWorkspace":false,"verdict":{"ok":false,"code":"workspace_escape","reason":"写操作目标越出工作区，被拒：工作区 [D:\\repo\\ws]，目标 [D:\\repo\\ws\\..\\secret\\k.txt]。沙箱档位管的是【能改什么类型的东西】，这一条管的是【能改哪里的东西】，两者不互相替代。","detail":{"workspace":"D:\\repo\\ws","target":"D:\\repo\\ws\\..\\secret\\k.txt"}}}
+{"label":"ws-slash tgt-slash .. escape","ws":"D:/repo/ws","tgt":"D:/repo/ws/../secret/k.txt","isInsideWorkspace":false,"verdict":{"ok":false,"code":"workspace_escape","reason":"写操作目标越出工作区，被拒：工作区 [D:/repo/ws]，目标 [D:/repo/ws/../secret/k.txt]。沙箱档位管的是【能改什么类型的东西】，这一条管的是【能改哪里的东西】，两者不互相替代。","detail":{"workspace":"D:/repo/ws","target":"D:/repo/ws/../secret/k.txt"}}}
+{"label":"posix innocent","ws":"/repo/ws","tgt":"/repo/ws/x","isInsideWorkspace":true,"verdict":{"ok":true}}
+{"label":"posix .. escape","ws":"/repo/ws","tgt":"/repo/ws/../secret/k.txt","isInsideWorkspace":false,"verdict":{"ok":false,"code":"workspace_escape","reason":"写操作目标越出工作区，被拒：工作区 [/repo/ws]，目标 [/repo/ws/../secret/k.txt]。沙箱档位管的是【能改什么类型的东西】，这一条管的是【能改哪里的东西】，两者不互相替代。","detail":{"workspace":"/repo/ws","target":"/repo/ws/../secret/k.txt"}}}
+{"label":"mixed: win ws, slash-.. tgt","ws":"D:\\repo\\ws","tgt":"D:\\repo\\ws/../secret/k.txt","isInsideWorkspace":false,"verdict":{"ok":false,"code":"workspace_escape","reason":"写操作目标越出工作区，被拒：工作区 [D:\\repo\\ws]，目标 [D:\\repo\\ws/../secret/k.txt]。沙箱档位管的是【能改什么类型的东西】，这一条管的是【能改哪里的东西】，两者不互相替代。","detail":{"workspace":"D:\\repo\\ws","target":"D:\\repo\\ws/../secret/k.txt"}}}
+{"label":"FAIL-OPEN probe: slash ws + backslash dots in tgt","ws":"D:/repo/ws","tgt":"D:/repo/ws/x\\..\\..\\secret\\k.txt","isInsideWorkspace":false,"verdict":{"ok":false,"code":"workspace_escape","reason":"写操作目标越出工作区，被拒：工作区 [D:/repo/ws]，目标 [D:/repo/ws/x\\..\\..\\secret\\k.txt]。沙箱档位管的是【能改什么类型的东西】，这一条管的是【能改哪里的东西】，两者不互相替代。","detail":{"workspace":"D:/repo/ws","target":"D:/repo/ws/x\\..\\..\\secret\\k.txt"}}}
+{"label":"FAIL-OPEN probe 2: win ws, slash boundary + backslash dots","ws":"D:/repo/ws","tgt":"D:/repo/ws/a\\..\\..\\..\\secret\\k.txt","isInsideWorkspace":false,"verdict":{"ok":false,"code":"workspace_escape","reason":"写操作目标越出工作区，被拒：工作区 [D:/repo/ws]，目标 [D:/repo/ws/a\\..\\..\\..\\secret\\k.txt]。沙箱档位管的是【能改什么类型的东西】，这一条管的是【能改哪里的东西】，两者不互相替代。","detail":{"workspace":"D:/repo/ws","target":"D:/repo/ws/a\\..\\..\\..\\secret\\k.txt"}}}
+{"label":"GATEWAY-LEGAL ws /repo/ws, backslash .. escape","ws":"/repo/ws","tgt":"/repo/ws/x\\..\\..\\secret\\k.txt","isInsideWorkspace":false,"verdict":{"ok":false,"code":"workspace_escape","reason":"写操作目标越出工作区，被拒：工作区 [/repo/ws]，目标 [/repo/ws/x\\..\\..\\secret\\k.txt]。沙箱档位管的是【能改什么类型的东西】，这一条管的是【能改哪里的东西】，两者不互相替代。","detail":{"workspace":"/repo/ws","target":"/repo/ws/x\\..\\..\\secret\\k.txt"}}}
+{"label":"GATEWAY-LEGAL ws /repo/ws, pure backslash path","ws":"/repo/ws","tgt":"/repo/ws\\..\\secret\\k.txt","isInsideWorkspace":false,"verdict":{"ok":false,"code":"workspace_escape","reason":"写操作目标越出工作区，被拒：工作区 [/repo/ws]，目标 [/repo/ws\\..\\secret\\k.txt]。沙箱档位管的是【能改什么类型的东西】，这一条管的是【能改哪里的东西】，两者不互相替代。","detail":{"workspace":"/repo/ws","target":"/repo/ws\\..\\secret\\k.txt"}}}
+END
+[90mstdout[2m | .workbuddy/probe303-residual.test.ts[2m > [22m[2mprobe303 残留读数[2m > [22m[2m逐条打印：大小写 / 盘符绝对路径的 .. 残留
+[22m[39m
+──────── probe303 残留读数 ────────
+"D:/REPO" + "D:/repo/x" ⇒ outside
+"D:/repo" + "D:/REPO/x" ⇒ outside
+"D:/repo/ws" + "D:/repo/ws/../secret/k.txt" ⇒ outside
+"D:/repo/ws/.." + "D:/repo/ws/x" ⇒ inside
+"D:/repo" + "D:/repo/a/../../x" ⇒ outside
+──────────
+
+ [32m✓[39m .workbuddy/probe303-direction.test.ts [2m([22m[2m1 test[22m[2m)[22m[32m 2[2mms[22m[39m
+ [32m✓[39m .workbuddy/probe303-residual.test.ts [2m([22m[2m1 test[22m[2m)[22m[32m 2[2mms[22m[39m
+[90mstdout[2m | .workbuddy/probe303-compare.test.ts[2m > [22m[2mprobe303 新旧对照[2m > [22m[2m逐对打印 旧 → 新，并单列【行为变了】的那些
+[22m[39m
+──────── probe303 新旧对照（★变 = 本轮改了行为）────────
+  同  outside → outside   "/repo" + "/repo-evil/x.ts"
+  同  inside  → inside    "/repo" + "/repo/x.ts"
+  同  inside  → inside    "/repo" + "/repo"
+  同  inside  → inside    "/repo/" + "/repo/x"
+  同  outside → outside   "/repo" + "/repo/../etc/passwd"
+  同  inside  → inside    "/repo" + "/repo/a/../b/x.ts"
+  同  outside → outside   "/repo" + "etc/passwd"
+★变  inside  → outside   "/repo/ws" + "/repo/ws/x\\..\\..\\secret\\k.txt"
+★变  inside  → outside   "/repo/ws" + "/repo/ws/a\\..\\..\\b.ts"
+★变  inside  → outside   "/repo/ws" + "/repo/ws/deep/dir\\..\\..\\..\\etc\\passwd"
+  同  outside → outside   "/repo/ws/" + "/repo/ws\\..\\x"
+  同  inside  → inside    "/repo" + "/repo/a/b.ts"
+  同  inside  → inside    "/repo" + "/repo/weird\\name.ts"
+  同  inside  → inside    "/repo/ws" + "/repo/ws/a\\b\\c.ts"
+  同  inside  → inside    "/repo/ws" + "/repo/ws/x\\..\\y"
+  同  inside  → inside    "/repo/ws" + "/repo/ws/only\\backslash"
+  同  inside  → inside    "/repo/w\\s" + "/repo/w\\s/ok.ts"
+  同  outside → outside   "/repo/ws" + "/repo/ws\\a"
+  同  outside → outside   "D:\\repo\\ws" + "D:\\repo\\ws\\packages\\a\\file.ts"
+  同  inside  → inside    "D:/repo/ws" + "D:/repo/ws/packages/a/file.ts"
+  同  outside → outside   "D:/repo/ws" + "D:/repo/ws/../secret/k.txt"
+
+  变了 3 / 21
+──────────────
+
+ [32m✓[39m .workbuddy/probe303-compare.test.ts [2m([22m[2m1 test[22m[2m)[22m[32m 3[2mms[22m[39m
+
+[2m Test Files [22m [1m[32m3 passed[39m[22m[90m (3)[39m
+[2m      Tests [22m [1m[32m3 passed[39m[22m[90m (3)[39m
+[2m   Start at [22m 15:12:39
+[2m   Duration [22m 229ms[2m (transform 180ms, setup 0ms, import 373ms, tests 7ms, environment 0ms)[22m
+

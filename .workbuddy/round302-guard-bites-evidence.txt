@@ -1,0 +1,20 @@
+
+════ 甲 整段删掉格③ ⇒ 守卫退出码 1 ⇒ 【转红】（这就是要的）
+Tests  2 failed | 11 passed (13)
+AssertionError: 计数型 的 戊 没抛：{"failed":1,"passed":5,"files":2} ⇒ 计数型只有『抛』这一道门，它关了 ⇒ 见 round301-mutate-parser-guards.mjs: expected false to be true // Object.is equality
+AssertionError: 变异自证未命中：
+戊：抹掉格② 之后【连该拦它的格也不拦了】⇒ 那一格不该被这一发影响
+round294-mutate-add-node.mjs 的切片里没有格③ ⇒ 那台计数型把格③ 撤了或改写了；要么补回来，要么把这里的锚点跟着改（别把这一支删掉来让它过）: expected [ …(2) ] to deeply equal []
++   "戊：抹掉格② 之后【连该拦它的格也不拦了】⇒ 那一格不该被这一发影响",
++   "round294-mutate-add-node.mjs 的切片里没有格③ ⇒ 那台计数型把格③ 撤了或改写了；要么补回来，要么把这里的锚点跟着改（别把这一支删掉来让它过）",
+   回滚后字节一致 = true
+
+════ 乙 只改坏匹配判式 ⇒ 守卫退出码 1 ⇒ 【转红】（这就是要的）
+Tests  2 failed | 11 passed (13)
+AssertionError: 计数型 的 戊 没抛：{"failed":1,"passed":5,"files":2} ⇒ 计数型只有『抛』这一道门，它关了 ⇒ 见 round301-mutate-parser-guards.mjs: expected false to be true // Object.is equality
+AssertionError: 变异自证未命中：
+戊：抹掉格② 之后【连该拦它的格也不拦了】⇒ 那一格不该被这一发影响: expected [ Array(1) ] to deeply equal []
++   "戊：抹掉格② 之后【连该拦它的格也不拦了】⇒ 那一格不该被这一发影响",
+   回滚后字节一致 = true
+
+两型都让守卫转红 = true
