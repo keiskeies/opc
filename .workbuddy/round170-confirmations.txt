@@ -3,6 +3,12 @@ time: 2026-11-14T12:20:47.994Z
 HEAD: f172fae test(arch): matcher-oracle 头部升级为「装不上」证伪后的真实前提
 
 1. 决策编号 0001-0056全部连续，无缺口。
+   【round260 就地更正】这一条【写下来那天就是错的】，而且错在本题唯一要盯的东西上：
+   该文件首次落地在 c633cda，而【那个 commit 上 decisions/ 的最大号是 0052】（共 52 份，
+   0001..0052 连续）⇒「0001-0056」比实际多出 4 个不存在的号。文件标题写着「数字完全性」，
+   而它自己数错了一次 —— 没有任何守卫会红（decision-index 只核【今天】两边一致，
+   不核【历史证据里的计数】）。复算：git ls-tree --name-only c633cda docs/decisions/ | wc -l = 52。
+   今天（round260）真正的最大号是 0055，本篇是 0056。详见 0056 §5。
 2. 覆盖率前提准确：实测 vitest --coverage 报
    MISSING DEPENDENCY @vitest/coverage-v8 —— 配置里“归因不可用”是真实抬头。
 3. commit-msg-refs 4/4 绿（真实历史），且我的 4 个提交 scope 均

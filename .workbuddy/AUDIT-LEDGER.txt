@@ -175,6 +175,21 @@ E. 纠正后的诚实基线（round184 发现 round175 漏报文件级错误；1
        属注入态对照而非还原基线，正常。结论：restore-verify 真值链已闭合（round241 修正越早、越难追但已追平）。
        证据: git cat-file -t 逐 hash 核对 + round241 evidence 两处修正 diff。无新增四位号；
        arch 全 18 文件/138 例绿；status 净。
+       【round260 就地撤回本条的诊断与「修正」】上面那个「既非合法 git hash」的判定是【错的】，
+       而据它改完之后的那一行才是【假的】。三种 hash 混在一格里：git blob 的对象 id 是 sha1（恰 40 位），
+       文件内容的 sha256 是 64 位且【从来不是 git 对象】。原句『sha256 == HEAD blob』读作
+       「(内容的 sha256) 与 (HEAD blob 的内容) 一致」，从来没声称那 64 位串是 git 对象 ⇒ 它一直是对的。
+       复算口径（与 round255 不同的关键在于【先问是哪一种 hash】再问【在哪个库查】）：
+         git show HEAD:docs/decisions/0008-….md 的内容做 sha256 = 03bf24d1…（64 位，==原记录）
+         git rev-parse HEAD:docs/decisions/0008-….md           = 3b7d385e…（40 位，sha1 对象 id）
+       该文件自 0dbc7a4 起从未被改动（git log 0dbc7a4..HEAD -- 该文件为空）⇒ round241 当时与今天同内容，
+       原记录当时成立、今天仍成立。⇒ round255 把一串【真的 sha256】换成了一串【sha1】，
+       而标签仍写着 sha256：它自己造出了「标签与值不相称」这一条它声称在修的不一致。
+       已按「两种都留、各自写明是哪种 hash」改回（见该 evidence L23 起）。
+       ⚠ 这条撤回不是靠 round255 那道核对发现的 —— 它当时「核对通过」；发现它的是 round260 重写
+       prose 哈希扫描时给【内容摘要】建索引（sha256 of HEAD blob 内容）之后，摘要表里冒出了 03bf24d。
+       可迁移的是：一次「全部核对通过」的审计，覆盖面由【它认识几种 hash】决定，而不是由它跑了多少份文件决定。
+       详见 0056 §4。
 
 
 
@@ -411,3 +426,2978 @@ O. round259（0055）claude.test.ts 从 node:test 搬进 vitest——一个从�
      tsc -b 不覆盖 test/**（0007 §5 待 CEO 那条）⇒ 这份测试的类型只靠一次性 tsc --noEmit
      手工核过，不是闸门。变异探针不进 CI。门禁 exit 0 说的是「今天没有红的东西」
      而不是「没有缺口」—— 0053 §8 那四条仍是零调用方，本篇只让「红」重新成为有意义的信号。
+
+O. round260（0056）一条恒红的验收命令、一个把腐烂读成摘要的判据，和两次「审计自己数错」
+
+   · 起点是审计台那个 report-only 开放项 docs/review/verify-open-invariants.mjs（门禁要求 CEO/owner
+     亲自复跑的那条）。先量到：它在 HEAD 干净工作树上【恒 exit 1】，3 条红全是误报 ⇒ 与 round259
+     那条恒 exit 1 的 pnpm test 同形。三条红的真身（逐个复算）：03bf24d… 是 sha256(HEAD:0008 那份)
+     的内容摘要、3e1b069… 是 sha256(HEAD:config-match.test.ts)、8823b0a… 是该文件的 git blob sha1
+     对象 id ⇒ 三者从来不是提交，而旧版汇总语「台账需更新」指向了错的对象。
+   · 旧版另一侧的洞更深：只采恰好 7 位小写 + 排除 /^[0-9]{7}$/ ⇒ 6 个真提交引用从来没被看过
+     （0575943 被纯数字 filter 吃掉，它恰好 7 位且全数字；另 5 个长度 >7）⇒ 0053 §2
+     「排除定义处的 filter 永不生效」那一族。旧版那张 31 项 FAKE 白名单实测只有 2 项
+     在被扫 prose 里真的作为独立 token 出现过 ⇒ 29 项是「我以为会出现的」而不是「实际出现的」。
+   · ⭐ 本轮最该记的洞是我自己新造的：为让摘要类引用可机械验，建了 HEAD 侧索引后写了
+     `prefixOf(h, BLOBS) || prefixOf(h, DIGESTS)` 就放过 —— 错在 prefixOf 是【前缀匹配】：
+     blob sha1 短前缀与腐烂的提交引用同形，而「改坏一位恰好也是某 blob 前缀」实测真有 3 处
+     ⇒ 该判据会把改坏一位的真提交引用报成「已核验的内容摘要」并计入通过数（最坏的假绿：长得像证据）。
+     修法按「位数是否唯一指认一个对象」切：40 位 sha1 / 64 位 sha256 才硬通过；短前缀只接受
+     甲（位数 >= 门槛，门槛从索引规模现算 n/16^L <= 1e-12 ⇒ 本仓 13 位）或 乙（同行写着 blob/hash/摘要）。
+     两口【分别计数分别报数】（终版甲 29 / 乙 45），因为甲的依据是概率、乙的依据是措辞 ——
+     措辞能被改写出来，概率不行。
+   · ⭐ round255 那道专门核对哈希的审计把对改成了错：它判 round241 证据 L24 那串 sha256
+     「既非合法 git hash」并改成 blob 的 sha1 对象 id，而标签仍写着 sha256 ⇒ 原句
+     「sha256 == HEAD blob」读作「(内容的 sha256) 与 (HEAD blob 的内容) 一致」，从来没声称那串是
+     git 对象，一直是对的（该文件自 0dbc7a4 起从未改动）。已按「两种都留、各写明是哪种 hash」改回。
+     ⇒ 一次「全部核对通过」的审计，覆盖面由它认识几种 hash 决定，而不是由它跑了多少文件决定
+     （round255 当时「通过」正因为它的核对只认 git 对象这一种身份）。
+   · ⭐ .workbuddy/round170-confirmations.txt 标题写着「数字完全性」而它自己数错：第 1 条写
+     「决策编号 0001-0056 全部连续」，实测它首次落地在 c633cda，而那个 commit 上 decisions/ 共 52 份、
+     最大号 0052 ⇒ 多出 4 个不存在的号、写下来那天就是错的。没有任何守卫会红
+     （decision-index 只核今天两边一致，不核历史证据里的计数）。已就地更正。
+   · 假绿防线：索引自检（commits>=100 且 digests==blobs）、token 下限 >=300、
+     新增「桶分项求和 == token 数」（我本轮两次把同一 token 计进两个桶，输出读起来完全正常）。
+   · 变异探针 6/6（M1 真提交引用改末位 / M2 全新腐烂 / M3 40 位 blob 改末位 / M4 无 hex 散文
+     【不该红】/ M5 采集面塌 ⇒ 下限必须红 / M6 运行时取真摘要前缀改末位 ⇒ 熵放行口必须仍红），
+     且补了「红了 ≠ 因为注入的那串红」：逐发把 FAIL 行与注入串对齐，M1/M2/M3 三条红精确指向
+     被注入的 token ⇒ 否则就是 0053「恒红的断言在它声称要盯的那件事上分辨能力是零」。
+   · 自伤：① 探针自己就在被扫目录里，源码里的裸 hex 字面量会被扫 ⇒ 本轮连踩三次把基线弄红，
+       包括「我写那条警告的注释本身因为举了个真例子而把基线弄红」，改成运行时取前缀、源码零字面量；
+     ② 第一版 M7 挑了矩阵表某行注入，但那一节每行都带「注入前/还原后」⇒ ③ 先当不可证伪跳过，
+       探针测不到它声称的那条判据、会给假 FAIL ⇒ 选锚点必须先确认目标判据是该行第一个起作用的；
+     ③ 审查子代理头号主张机理两处都错（说 digest 先判 ⇒ 实测 commit 在第 8488 字符、digest 在 8568；
+       归因的 log --all 含 reflog 本仓今天也是空集 376=376）但主张本身成立，按它的结论换机理测出来了；
+       而同一个代理声称「已修复、文件 464 行」在本仓完全没落地（实际 393 行）⇒ 子代理的数必须自己复算；
+     ④ 本篇第一版被自家守卫抓 3 发（doc-coords / comment-citations / 门禁 C7），抓的正是本篇在论证的
+       东西：我把非提交的值截成 7 位 ⇒ 看着像在声称提交。修法是写完整长度而不是加豁免
+       （我第一反应是给 doc-coords 加上下文豁免 = 让判据迁就行文，与本仓规矩相反）；
+     ⑤ 门禁 C7 抓我 5 次「本轮」（C7 只管入口 docs/INDEX.md，正文里留着是设计而非遗漏）。
+   · 数字：verify-open-invariants 第一次 exit 0（472 token / 175 文件 / 桶分项和 472 == 472 / 腐烂 0 /
+     可达提交引用 313 + 悬空 5 / 摘要类 31 / 甲 29 / 乙 45 / 豁免 12）；arch 全 18 文件 141 例绿；
+     全套 2356 pass / 6 skip（108 文件全绿）；gate exit 0；biome 291 → 290 error、109 warning、
+     2 info 不变，逐条比【新增 0、修掉 1】（修掉的是我重排 import 后该文件自然合规的那条
+     organizeImports；中途一度新增过一条 useExponentiationOperator，改成 16 ** L 并实测 20/20 同值后消除）。
+   · 没修 / 别当成做到了：「提交引用全部可解析」验的是【解析得了】不是【当时确有所指】；悬空提交引用
+     5 处（对象还在但不在任何 ref 上）今天算通过而 git gc 之后会真的解析不了（脚本只警告不 FAIL）；
+     log --all 不等于 ref 可达，今天本仓恰好相等所以没误判，将来 amend 出 reflog-only 提交时会被当成
+     可达放过 —— 这是【留着的已知口子，我没改】（改了今天行为不变而承诺的收益不可测）；
+     乙放行口那 45 处【没有任何机械依据】（逐条看过是为真的记录，但「我看过」不是闸门）；
+     本脚本仍是 report-only、不进 CI、本轮没新增任何 arch 守卫 ⇒ 它恒红那天没有任何 CI 会拦
+     （前 70 来轮就是这么过去的）；§4/§5 两族的根因「历史证据里的声称没有机械复算」仍然没有防线；
+     内容摘要类在本脚本里永远不可证伪（HEAD 会变），脚本只报数不 FAIL，若被读成「这些摘要我都验过了」
+     正是 0056 要拦的事。pnpm verify 整条链仍未人亲跑。
+     证据:【round260-refscan-mutate.mjs】+ 0056 §2/§3/§4/§5/§6/§7/§8。
+
+P. round261（0061）审批去重键吞掉了「待批」两个字 —— 以及「CEO 说不」被实现成「这个问题永远不再被问」
+
+   · 起点不是 O4 的动作本体，是 O4 开工前的一次去重普查（设计文档 O4 动作 1 要我把
+     sameFamilyReviewBlock 与 dispatch.reviewGate 合成一处，动手前先读懂两处各判什么）。
+     顺手 grep card_key 怎么去重，三分钟后手上有了一条不是推演的读数。
+   · 真身：0004 文件头第 48 行那句被我一直当样板引用的话「同一个决定只有最多一张【待批】卡
+     是一条性质不是一条约定」—— 性质里有【待批】这一维，索引里没有（WHERE card_key IS NOT NULL，
+     不看 status）。差的这一维是一条活的死路，需要三个各自都对的模块交集才现形：
+     拦门看同族判定（不看收件箱有没有卡）、建卡撞唯一索引返回 skipped="duplicate" ⇒ 一张都不建、
+     HUMAN_EDGES 只有 approve 有出边 ⇒ 退回不推进。三者分开测都绿，交集那个状态
+     （门还拦着、键已用掉、收件箱空着）谁都不负责。
+   · ⚠ 它不是「某个界面少个按钮」：IN_REVIEW ∈ DRIVER_ELIGIBLE_STATES（该集合从 AGENT_EDGES
+     派生，seatOf("IN_REVIEW")==="agent"）⇒ 驱动器每个心跳自动重跑那一格，每轮起真子进程真烧钱，
+     上限只有一条 per-cell maxAttempts；而那一句 note 是无条件拼的 o.review.reason + "（已建卡）"，
+     取拦门那侧判定而不是建卡回执 ⇒ 审计写着「已建卡」而那张卡不存在。
+   · 修法：索引收窄成 AND status = 'pending'（恢复 0004 自己那句原话）。两条否掉的改法都量过：
+     甲（键拼 …:round-2）会把判据那一侧改坏 —— CEO_APPROVED_SQL 按 (task_id, card_key) 精确匹配，
+     键带轮次则第 1 轮的批准匹配不上第 2 轮；乙（退回即推进一格）是把规格没给的跃迁写进状态机。
+     DROP INDEX 不违反 0004 那条「不 DROP / RENAME / ALTER」：那条立场管数据与读法，而索引
+     既不是数据也不是读法、是写侧约束；且收窄唯一性其实是放宽 ⇒ 旧约束是新约束的子集，
+     存量不可能违反，连"会不会撞"的核对都不需要。索引名沿用 0004（全仓提到它的四处无一处是查询）。
+   · ⭐「收窄之后谁还在挡白花钱」是本轮最意外的一格：那道省 token 的筛原来是【三处】而不是
+     一处（读代码只看到一处），其中两处是逐字相同的 SQL 常量。分开量的后果不是同一类：
+     M3sql（改两处 SQL）→ 2 红，失效是花钱；M3ts（改那道 TS 前置检查）→ 补测试前【全套
+     2543 发红发 0】。那个 0 不是断言写松了：判放弃那一循环要走到那张卡上，需要一个
+     【非 pending 的卡在这一趟泵里冒出来】，而候选 SQL 已把「有任何卡」的任务滤掉 ⇒
+     两个条件在可达状态上恒同答（0057 M5 那条判据落在我自己刚写的代码上）。
+     补法是把那一格摆成静态状态（两条任务 + 一次插入；泵 for+await 顺序跑，无时序窗口），
+     真实场景就是 CEO 点了批准而泵那一趟还在处理下一条 ⇒ 只查 pending 会给一张【已被批准】的
+     章程写一行「泵不再试」。补完 M3ts 才红，红在承重那条而不是我写的三条前置断言上。
+     M4（整行删掉那道检查）另有 2 红 ⇒ M3ts/M4 现在从两个方向钉同一个条件。
+   · ⭐「红发 0」有两种，我先撞到假的那种：第一版探针报 M1 ⇒ 0 红，而 M1 是退回 0004 原状、
+     必须红 —— 真因是 execFileSync("npx")，本机 npx 是 .cmd，无 shell 直接 ENOENT，输出为空，
+     于是「探针死了」与「变异无害」输出完全一样。修法不是加日志而是加判据：没有汇总行就 exit 4；
+     同类第二条是变异落地必须按 sha256 核对（这条当场抓到我两处锚点写错）。
+   · ⭐ 一条迁移改的是库，同时改坏的是散在别处的理由：charter-pump.ts 文件头、
+     charter-pump.test.ts 那两发的标题与注释（标题直接写着「唯一索引不放行第二行」）、
+     0044 §2 与 §9.1、入口登记表那一行 —— 六处都断言了被这次迁移删掉的性质，而没有任何一发布会红。
+     注释承诺了实现没有的性质比没有注释更坏，这里更糟一层：它承诺的是【曾经有】的性质。
+     四处文档就地更正（原句划掉留在原地，后面盖【现状】），两处代码注释重写（期望一字未改）。
+   · ⭐ 我给 0006 那份迁移的注释写了「详见 0061」而那天 0061 不存在，全套 2543 发一发没红 ——
+     doc-ids 专判「正文提到的编号不许指空号」而取材只有 docs/，迁移文件从来不在射程内，
+     而迁移恰恰最爱引用决策记录（0004 里 7 个号、0005 里 11 个）⇒ 这条判据在迁移这一类上
+     从来没生效过。先扩取材、确认它真能红（实测点名 migrations/0006_….sql>0061）再写 0061 让它绿。
+     加的时候又踩一个自己的洞：第一版只补了 docs.size >= 7 那条规模自检，而 docs 有 60+ 个文件，
+     迁移那 6 个整个不见了 size 仍然远大于 7 ⇒ 判据可静默退回"只扫 docs"。补了三层各管一种退化
+     （key 在场 / 内容非空 / 拿空允许集要求从迁移里抽出 >=6 个编号 —— 最后一层防的是
+     "key 在场而取材是空的"，那一类整个不可判：0 个编号永远不违反任何规则）。
+   · ⭐ 而我自己那句「biome 290、零新增」在发表时也是假的（量它那一刻为真，之后补 doc-ids
+     三层断言时有一行超宽 ⇒ 291）。假的方式与 doc-refs 那七次坐标漂移同一件事：一个测完就没再
+     重测的数，而我把它写进了入口。复算时又造出两个假基线：① biome --stdin-file-path 在本机
+     一条诊断都不输出，我拿它当 HEAD 侧基线，对四个正在报的文件报「什么都没有」；拦住我的不是
+     那个数看着不对（它看着很干净），是我顺手拿一个已知有 6 条的文件跑同一条命令也报 0
+     ⇒ 那条命令测的是我的命令而不是文件。② 第二版正则写成 (errors|warnings) 只认复数，
+     而 biome 计数为 1 时打印单数 Found 1 error ⇒ 所有"只有 1 条"的文件被读成「没有」，
+     第一次用的 errors? 是对的、重写时反而写坏了（0055 同形：判据报「没有」时先问它有没有能力报「有」）。
+   · ⚠ C7（入口不许出现轮次相对指称）在我插入 0061 条目当场变红。词表把两种东西混在一串子串里：
+     「本轮最意外」是作者的时间锚点（正是 C7 要杀的），而「这一轮能冒出的卡」说的是【一趟泵】、
+     是本域词汇。四处都换了措辞（时间锚点改「这一批」，域词汇改成「这一趟泵」）而不是去放宽词表 ——
+     判据的宽严不能由我想让谁通过决定（pending-decisions 那条同一条立场）。
+   · 没修 / 别当成做到了：O4 四个动作【一个都没动】，验收那句「删掉表上第 3、4 行每个调用点 ⇒
+     各自必须一发红」今天照旧 0 发红；HUMAN_EDGES 无 reject 出边这条规格缺口没补（本篇让
+     "退回后能再问一次"成为可能，没有回答"退回后任务往哪走"）；note 与建卡结果仍不同源
+     （skipped="duplicate" 那一格读作「有卡等你批」成立所以没补断言，但出现第三种情形时它会
+     重新变成假话而没人发现）；CEO_APPROVED_SQL 只验 status，既不验批准人是不是 CEO 也不验理由，
+     而 policy/auto-approve.ts 写的 decided_by 是 "policy-engine" ⇒ 策略引擎写的一行今天能
+     满足这道活门 —— 这不是 0061 带来的，也不能顺手把身份判断搬到读侧（那样一张没写理由的批准
+     会烧掉键，正是本篇刚修的形状），必须在写侧收紧，登记在 O4 动作 1；review_gates 仍零 INSERT；
+     变异探针是手工脚本、不进 CI。
+   · 实跑：全量 116 文件 / 2544 通过 / 6 跳过（起点 115 / 2538）· test/arch 200 · tsc -b exit 0 ·
+     biome 290 / 109 / 2（改完后重测，与动工前同数）· check-gate 判不了或不符 0 ·
+     U+FFFD 对 12 个改动文件全 CLEAN（闸门只认坏字符不认句子被坏，那六处假注释是靠读回来发现的）。
+     证据:【round261-dedup-mutate.mjs】（M1 4 红 / M2 7 红 / M3sql 2 红 / M3ts 0→1 红 / M4 2 红 /
+     none+excise 对照 0 红，全部本轮重跑过）+ 0061 §2/§3/§4/§5/§5.1/§6/§7/§8/§9。
+
+Q. round262（0062）O4 动作 1：sameFamilyReviewBlock 按字面不可并 —— 把判据本身在写侧收紧，两维变异各 1 红
+
+   · 起点：P 结尾登记的那条【必须在写侧收紧】的活门（CEO_APPROVED_SQL 只验 status，不验批准人 / 理由，
+     而 policy/auto-approve.ts 写的 decided_by 是 policy-engine ⇒ 策略引擎一行今天能满足这道活门）。
+   · 先量前提：probe-row3（带阳性对照）在 src 里数那七个具名函数的调用点 —— 5 个是 0
+     （gateConfigBlock / selfReviewEdgeBlock / independentReviewerPath / forbiddenRemovalAttempt /
+     unauthorizedAttemptPayload），只有 sameFamilyReviewBlock 与 evaluateGate 各有一个调用方，
+     且都在 test/arch/dead-modules.ts 基线里（harness/verifier.ts 生产不可达）。
+     ⇒ 设计文档动作 1 那句「挪进 dispatch，不用改形状」的前提【实测不成立】：dispatch 的 reviewGate
+     收的是已经算好的 approvedByCeo: boolean，而 sameFamilyReviewBlock 判的是凭据本身，形状不匹配。
+   · 所以能落的是【判据本身收紧】，两维都落在写侧（0061 §8 第 4 条说清了搬读侧的代价：一张没写理由的
+     批准会烧掉键）——
+       甲、身份维：CEO_APPROVED_SQL 加 AND decided_by = 'ceo'。两个 decide 窗口都写 'ceo'
+         （real-deps 的 CEO_ACTOR / ORG_COMMIT_ACTOR；engine/approve 写死 'ceo' 两处）；
+         三处 UPDATE approvals 是全仓仅有的写方；policy/auto-approve 是唯一写 policy-engine 的。
+         于是这一维【今天零误伤】—— 策略引擎身份的那行本来就不该满足「CEO 已批」这道门。
+       乙、理由维：豁免卡批准必须带理由。approveCard 对 same-family-review: 前缀且空理由返回
+         waiver_note_required（新 outcome 判别）。为什么必须在写侧而非学 requiresNote 只在读侧要理由：
+         requiresNote 的按钮表只要求 reject_with_comment 带理由、approve 不要求 ⇒ 只改读侧的话，
+         空理由的豁免批准会一圈圈重开。前缀常量只有一个家（cards.ts 的 SAME_FAMILY_REVIEW_KEY_PREFIX），
+         dispatch 建键与 approve 拦它共用同一个。
+   · 变异两发，全部重跑过、字节 hash 核对还原：
+     round262-o4-mutate-identity.mjs：退回 SQL 那一维 ⇒ 1 红（runtime.test 的 ceoApproved 断言
+       「策略引擎写的 approved 不是 CEO 的批准: expected true to be false」）。
+     round262-o4-mutate-waiver-note.mjs：删掉空理由闸门 ⇒ 1 红（rejected-waiver-still-asks 第三发
+       「空理由的豁免批准必须被拦下: expected decided to be waiver_note_required」）。
+     两发都只红【承重的那一发】，且都带阳性对照（锚点必须命中、sha256 必须变、汇总行必须有）。
+   · 测试从【旧的宽松契约】搬去【新契约】：runtime.test 的卡夹具改成可带 decidedBy，加 k-policy
+     （policy-engine → false）与 k-no-identity（decided_by null → false）两个新夹具；rejected-waiver
+     第三发先验空理由被拦、再带理由批掉；idea-to-delivered 的点击循环只对豁免卡注入理由 note。
+     engine/approve 的 outcome 判别字面量随这次新增（原来那组没用它，contracts 里也没有）——
+     这是我的判断，不是规格给的。
+   · ⚠ 诚实边界：动作 1 的【验收句】（删表上第 3、4 行每个调用点 ⇒ 各自必须一发红）对这 5 个函数
+     今天【照旧 0 红可删】—— 这一批只是把判据本身在别处收紧，没有建这些调用点，也没有复测那句旧读数。
+     O4 剩余：动作 2（independentReviewerPath 的一跳未审透传 → 记 unresolved）、动作 3（黑名单删除尝试
+     接线或删除）、动作 4（review_gates 零 INSERT）都未动。
+   · ⭐ round261 §5.1 那个「假基线」在本批【又演了两遍】，而且两次都是我自己当场制造的：
+     要量「biome 对改动文件与 HEAD 同数」，方法是对比工作树与 stash 掉改动之后的计数。第一版把
+     九个路径一起交给 git stash push，其中 rejected-waiver-still-asks.test.ts 是【未跟踪】新文件 ⇒
+     pathspec 报错、stash 根本没建，而我用 && echo 链吞掉了失败 —— 于是「HEAD」量的还是工作树本身，
+     两边当然同数。拦住我的不是数字看着不对（它看着很好），是 && 链里那个 (stashed) 没打出来。
+     第二版改成 tracked-only 才真的 stash 成功，立刻量出【净 +1】—— doc-ids.test.ts 我新写的一行超宽。
+     修成命名局部变量后逐文件对账：tracked 八个与 HEAD 逐文件同数，新文件 0 条，全仓 290/109/2 与
+     基线同数。教训不是「下次记得检查退出码」——是【两向对比的三个前提：stash 建没建、还原没还原、
+     基线侧包不包含未跟踪文件】每一个都要有输出证据，少一个这条对比就是假的。
+   · ⚠ C7（入口不许轮次相对指称）在我往 INDEX 插 0062 条目当场又红了——与 round261 同形：
+     我写的是「在引用它的这一轮」，而【轮次】正是 C7 要杀的那类落不了地的指称。改措辞
+     （「这一批」）不放宽词表，与 round261 同一立场。doc-coords 当场拒了一处、【漏了一处】，漏的那处是我写台账时自己造出来的：
+     拒的是裸形 §5.9（被按【本篇小节】判，要指规格得写【规格 §5.9】）；漏的是我初稿在
+     runtime.ts 注释里写的【0062 §待办】—— SEC_RE 要求 § 后面是数字，非数字节号根本不匹配，
+     于是「指向一个不存在的小节名」这条判据在那种形状上【无从生效】。我拿注入探针量过：
+     把 §7 第 2 条换回 §待办，comment-citations 25 发全绿。改对了引用（§7 第 2 条，那条真存在），
+     但形状本身的漏判留着，登记在本篇 §7。⚠ 而台账初稿当时写的是【两处都拒了】——
+     那是我把【我改了两处】读成【守卫抓了两处】，一个动作被记成了两个证据（本篇 §8 同族）。
+   · 实跑：全量 116 文件 / 2544 通过 / 6 跳过 · tsc -b exit 0 · biome 全仓 290/109/2 与基线同数，
+     逐文件对账见上条 · check-gate 判不了或不符 0 · U+FFFD 对全部改动文件扫描全 CLEAN。
+     文档：设计文档 O4 落点表「动作 1」一行重写（结论：按字面不可行，已在写侧落地等价控制；验收句
+     仍标注未重测，并写明 0061/0062 的变异打的都不是调用点）。
+     证据:【round262-o4-mutate-identity.mjs】1 红 /【round262-o4-mutate-waiver-note.mjs】1 红
+     + probe-row3 + runtime.test 两个新夹具 + rejected-waiver 第三发 + idea-to-delivered 注入理由。
+
+R. round263（0064）O4 收尾：动作 3 删（无 removeForbidden 构造点）· 动作 2 登记前提不成立 · 动作 4 定格「预留非缺陷」，守卫在我改它的那一句里抓住了新造的假账
+
+   · 起点：Q 条目结尾登记的 O4 剩余三格（动作 2 independentReviewerPath 未接、动作 3 黑名单删除
+     接线或删除、动作 4 review_gates 零 INSERT）。三个动作的落点【不一样】，共同依据是一张调用点表。
+   · 动作 3 删：forbiddenRemovalAttempt / unauthorizedAttemptPayload + UnauthorizedAttemptPayload
+     + 随之失去读者的 Charter import；author-reviewer.test.ts 的越权 describe 6 发 + grab 夹具 +
+     Charter import。28 发 → 22 发全绿。依据：那条 unauthorized_attempt 审计要回答「谁的请求里有
+     removeForbidden」，而 CharterRunOverrides.removeForbidden 在 src 只有 loader 的定义一处命中、
+     【零生产构造点】——接线意味着先造一条越权输入面来喂两个函数；真闸门 mergeForbiddenForRun
+     （removeForbidden 非空 ⇒ 抛）一格没少，它的测试（charter.test.ts 三组）一发没动。
+   · 动作 2 登记为前提不成立：O4 那句「handoff 上判无门控边、记 unresolved」的存在假设是
+     「dispatch 会踩到一条存在但没门控的边」。三件实测拆掉它：① 无门控边在保存期就被
+     validateNewEdge（missing_review_gate）拒，而这条路生产活着（POST /org → commitOrgGraph →
+     revalidate）；② dispatch 读 .edges 的次数实测 0（组织信息全在 nodes.reports_to）；
+     ③ 运行期真判审阅独立的是活路径上的 reviewGate。"接上"的唯一接法是对 graph.edges 重建
+     第三份门控判据（保存期一份 + reviewGate 一份 + 它）⇒ independentReviewerPath 保留为
+     保存期判据的纯函数对偶，不新增消费点。
+   · 动作 4 先按「补 INSERT 方」走，在 gateEvidenceCheck 判据前停住：那张表的行要求
+     evidence_bundle_id 指向存在的证据包（NULL ⇒ violated，integrity.test.ts 那发 UPDATE-to-NULL
+     钉着），而 dispatch 的 ReviewDecided 没有证据可挂（证据包生产者 = O5）⇒ 补 INSERT = 把
+     not_observable 换成每轮审阅都 violated 的恒红（0056 在治的病）。改判第二个选项：只改
+     not_observable 的 detail 措辞（「在等它的写入方」→「【预留，非缺陷】…在等证据那一格接上」），
+     verdict / checked / ok / violated 四支一字没动，那两条真库用例照绿。
+   · ⭐ 守卫第一次以这种方式工作：新文案第一版写了「证据包在生产没有生产者」，ZERO_CLAIM_RE 的
+     「没有生产者」句式把它扫成【新的未登记零声明】，zero-producer 当场红。这不是误报（那句确实是
+     现在时零主张且没登记），正解也不是登记它（证据包写入方状态归 O5 管），是把句子改成不带判据
+     句式的说法（「生产里还没有东西往证据包里装内容」）。第一处只改了尾句没清掉红，真修是改
+     被扫到的那个短语本身。这个守卫是为「生产者长出来」设计的，结果先拦了「措辞漂移进句式」。
+   · ⭐ 删文档/删函数会让【别处的现在时句子】变假，这次触发者是我自己：how-to-write-a-charter.md
+     字段表写着 decision_scope.forbidden 有两个读者，删除落地的同一批里更正为「唯一读者是
+     mergeForbiddenForRun」。这是 0063 那一族（现在时句子会被代码变假）的现行案例。
+   · ⭐ 改 integrity.ts（+3 行）让【引用它的文档坐标】漂移：0037 引 integrity.ts:1216–1223（那段
+     「not_observable / could_not_run 都不算损坏」的注释），我那次编辑把它顶到 1219–1226，
+     doc-refs 快照当场红（红的是【内容不符】而不是【越界】—— 越界那条支路在 +3 这种小漂移上
+     永远不会响，全靠内容比对）。同批改三处：0037 正文坐标、快照键、快照注释记下这次漂移与
+     「sed 重读原文、不按 diff 行数推算」（0016 立的规矩）。修完文档守卫 6 文件 / 45 发全绿。
+   · 验收句终态说准（0064 §5）：动作 3 的对象被消灭（「要么删掉」的正常终态，不是达成）；
+     verifier 簇（gateConfigBlock / selfReviewEdgeBlock / independentReviewerPath / evaluateGate /
+     sameFamilyReviewBlock）src 生产调用点仍 0，「删调用点 ⇒ 红」对它们【结构上不可能达成】
+     （没有调用点可删）；「测试全绿而调用点是删的 ⇒ 只有变异能抓」那半句从本轮起只对 verifier
+     簇成立，归 O14/死模块清算。
+   · ⚠ 别当成做到了：review_gates 的 INSERT 方仍要等 O5；removeForbidden 输入面若真要开，要的是
+     入口鉴权 + 抛错 + 审计行的一次成型设计，不是复活被删函数（删掉的测试不是删掉的规格）；
+     存量脏图的「无门控边」自检扫描是一条没做的候选（属自检清单扩容，不属接上判据）。
+   · 实跑：全量 117 文件 / 2550 通过 / 6 跳过 · tsc -b exit 0 · 三个受影响套件 63 发全绿
+     （zero-producer 11 + integrity 30 + author-reviewer 22）· 文档守卫 6 文件 / 45 发全绿 ·
+     U+FFFD 对全部 9 个改动文件 + 本台账扫描全 CLEAN（0 字节）。
+     文档：0064 新建 · INDEX 加 0064 条目 · 设计文档 O4 现状表第 3 行 + 动作 3 正文 + 状态表
+     三行落到实测结论 · 0063 §9「动作 2/4 未动」更正 · how-to-write-a-charter.md 读者数更正。
+
+S. round264（0065）O5 动作 3：给【没人算的数】铺了落库的通道 —— 加列而不是删字段，而动作 2 的量塌顺带演示了【镜像夹具红的方式不该是红的样子】
+
+   · 起点：R 条目之后的「继续」。**而这一轮自己开了个必须先记的头**：恢复自压缩摘要的第一份
+     报告把 O5/O6 的【一整轮没做的事】写成了已落地（MetricsReader / 0007 迁移 / gateway 接线 /
+     决策 0065+0066 / 一批守卫文件），逐条 ls+grep 核实【全部不存在】才拆穿。与 §8 族
+     （把一个动作记成两个证据）同族的极端版：把零个动作记成一批。⇒ 新家规（已进记忆）：
+     说「做完了」之前，每个文件名/数字必须来自本轮实际读到的输出。
+   · 动作 3 落地（本轮真实做的部分）：迁移 0007 给 evidence_bundles 加 metrics TEXT 列 +
+     register() 序列化。【加列 vs 删字段】量过再选：删契约字段连带杀 metric: 判据族
+     （唯一可机械判定的验收标准形状，门控/指南整篇 §2 挂在上面）⇒ 方向反了。
+     三态钉死：缺省⇒NULL、{}⇒"{}"、不折叠；p0_defects:0 刻意留（测 0 不被 falsy 折叠）；
+     显式 ===undefined?null 而非裸 JSON.stringify(undefined)（返回 undefined 本身，
+     参数位行为是实现细节不是承诺）。变异实测：退回裸序列化 ⇒ 2 红，原样恢复。
+   · ⭐ 镜像夹具自己演示了自己该死：改列清单前三处手抄镜像，两向核对先改 src 让预测钉子
+     当场红（migrate 版本清单 + bundle 十字段夹具，全红【符合预测】）—— 但 bundle 那发的
+     红因是【夹具与 src 副本漂移】、红话读起来像【落库错了】，一次混两种故障。
+     ⇒ 修法不是把镜像改成十一列，是让夹具直接执行 store 自己那条 SQL：镜像 3⇒0。
+     自己的手滑一个：三态用例第一版按 created_at 排序读回，而夹具 now() 恒 1 ⇒ 排序退化成
+     主键序（实现细节）。写完自查发现，改按 bundle id 读。
+   · ⭐ 动作 2 前提量塌（同 O4 动作 2 的教训第二次遇到同族）：「dispatch 的 pass 分支算
+     integrityOk 传给门控」假设 pass 上有门控调用，grep -c evaluateGate dispatch.ts ⇒ 0
+     （src 唯一调用方仍是死基线里的 verifier）。单侧先算布尔 = 为到不了的输入造数据 ⇒
+     登记前提不成立，integrityOk 等的是【门控上线路】那一格。动作 1（形状）不脱离消费方
+     单独先行：先落形状 = 造【有形状没消费】的新第三态。
+   · ⭐ 撞出 O14 活样本（落在文档、代码抓不到）：指南两处「saveCharterVersion 零生产调用方 /
+     入库今天没有入口」已过期 —— charter/seed.ts 是 hub:charter 静态入口（探针实测可达，
+     :653 真调）。这句话过期时【没有任何东西变红】，靠无关改动撞见 ⇒ 正是 O14 动作 2
+     （主张登记表）要替换的机制。两处已按「有入口（seed），配置页通路仍未接」改准。
+   · ⭐ 写 0065 时对「src 生产 metrics 值的代码 0 处」先按推理写了「实测」，落地前回头
+     真量：grep 全量命中逐处归类（契约定义/落库序列化/门控读方/verifier 转发），
+     【没有一处计算或采集指标值】；塞过值的代码全在测试夹具（bundle 两发 + phase1-gates
+     的 p0_defect_count 族 + phase3 realBundle）⇒ 主张成立但口径改写为「grep 全量归类后」，
+     并把归类表写进 0065 §7。这正是本轮开头那条新家规的第一次自用。
+   · doc-ids 当场抓了 0065 引用未出生的 0065 号自己（迁移注释先写了决策号）—— 按它的
+     设计行为红，先补文档再绿；doc-refs 抓 evidence.ts:107 未登记 ⇒ 同轮登记（抄法照旧：
+     sed 读原文再抄，键的注释写明它是「删字段会杀 metric: 族」论证的唯一支点）。
+   · 实跑：全量 117 文件 / 2551 通过 / 6 跳过（起点 2550，+1 发 = 本轮新增的三态用例；
+     数字来自本轮 vitest 输出）· tsc -b exit 0 · test/arch 21 文件 211 发全绿 ·
+     U+FFFD 对全部改动文件 0 字节。
+     文档：0065 新建 · INDEX 加条目 · 设计文档 O5 落点段重写（动作 3 落地/动作 1+2 前提
+     不成立/动作 4 未动/验收句现在可读形态）· 指南 §3 反例② 与 §1 budget 行与 §6 第 6 条
+     三处过期句按本仓纪律「原文保留 + 划掉 + 标出处」改准。
+   · ⚠ 别当成做到了：metrics 的【生产者】仍 0 处（这列是存放处不是生产者）；动作 4
+     （卡片显示无证据包 + approvals 证据包列）未动，是 O5 下一格可独立落地的；指标词表
+     仍不存在；EvidenceStore 对外零 import 没变（register 今天仍只有测试调用方）。
+
+════════════════════════════════════════════════════════════════════
+round263 O14 动作 2 主张登记表落地（HEAD 61467b5，时间 2026-11-17T01:06Z）
+════════════════════════════════════════════════════════════════════
+  新增：test/arch/claims-registry.ts（八条登记：r1–r4 纯判据 + r5–r8 引用既有守卫
+  登记表/基线）+ claims-registry.test.ts（16 发，真仓库判断 + 合成输入变异 + 渲染一致）
+  docs/OPC-OS-功能优化设计.md §O14 末尾新增「O14 主张登记表」：只渲染判据方法 +
+  核对时刻（家规：入口文档不写会漂移的数，故无条数列）。
+  evidence：round263-claims-registry-mutation-evidence.txt（变异 r1 判据恒恶化 → 真红，
+  还原 → 16/16 绿）。
+  核对时刻口径：2026-11-17 是【登记写入日】，下次复算后应更新该列 —— 这就是
+  「上次核对时刻」列的活法。
+  ⚠ 别当成做到了：文档里其余「零 X」类句子（OPC-OS-功能优化设计.md 与两本指南的
+  §1/§7 那段，共约 60 处）还没有逐条登记 —— 本表第一批只收了 O14 点名的八条，
+  每新增一条「零 X」主张都应在此登记或在表里声明它挂哪个判据（zero-producer /
+  dead-modules / claims-registry 三族）。
+
+════════════════════════════════════════════════════════════════════
+round265 O10 超时执行者落地（HEAD 61467b5，时间 2026-11-17T01:46Z）
+════════════════════════════════════════════════════════════════════
+  新增：packages/hub/src/approvals/timeout.ts（runTimeoutPass：dueApprovals 读到期
+  卡 → auto_reject/auto_approve 走条件 UPDATE + appendAudit 同事务、actor=system；
+  escalate 直建升级卡 cardKey="timeout-escalate:<id>"，reason="timeout-escalation"
+  刻意不入六枚举（第七触发源的论证写在文件头）；behavior 非法 ⇒ skippedInvalid，
+  不吞不猜）+ packages/hub/test/approvals/timeout.test.ts（9 发：三种行为 +
+  未到期/已决定不动 + 拒建 + 缺任务/重复卡两条边界 + 非法行为）。
+  cards.ts 落 O10 动作 2 拒建判据：auto_approve ∧ irreversible=true ⇒ 建卡即抛。
+  evidence：round265-o10-mutate.mjs 三发变异全红后自还原（actor 改人 / 去掉
+  changes===0 短路 / 去掉拒建判据），还原校验绿。
+  守卫同步（都是本轮改动顶红的，逐条认账）：doc-refs 两个键 502→505、248→252
+  （行号漂移，内容逐字未动，sed 核对）· 0041:111 与 0049:460 坐标同步 ·
+  doc-ids 抓出 0008 迁移头引用未出生的 0066（上一轮遗留）⇒ 删引用 ·
+  dead-modules BASELINE 加 approvals/timeout.ts（TIMEOUT_ACTOR 特征串全仓唯一）·
+  phase3 两条名单 +timeout.ts（callersOf insertCard、UPDATE approvals）·
+  claims-registry r2 改登记：旧主张「timeout_at 无执行者」被本轮证伪，而【旧判据
+  不会红】（执行者 SELECT 读 timeout_at、UPDATE 不写它，字面仍绿）——这种「守卫在、
+  守的东西换了」的静默失效正是 O14 要抓的；r2 换成 deadModulesHas(timeout.ts)，
+  judge 归 dead-modules，MUTATION 测试同步换。设计文档 :137 行与 O14 表 r2 行
+  按「原文保留+划掉+标出处」改准。
+  ⚠ 别当成做到了：动作 1（心跳巡检接 runTimeoutPass）与动作 3（会议落点）未动，
+  超时执行者今天【零生产调用方】——到期对真跑的进程仍然什么都不发生，这一格由
+  dead-modules 基线 + r2 新登记钉着，接线日基线摘格会当场红。
+  ⚠ 台账缺口自首：round264（O5 动作 4）与 O13 动作 1（pnpm dev）两轮没记台账就
+  进了工作区（HEAD 仍是 61467b5，全部改动未提交）——本轮起每轮必记。
+  · 实跑：approvals 57 · arch 22 文件 227 · phase3 13 · timeout 9 · claims-registry
+    16 · hub tsc exit 0 · 全 hub 套件只剩【既有】dev-entry「收到停止信号」180s 挂死
+    （上一轮 O13 动作 1 遗留，非本轮引入，见下轮任务）。
+
+════════════════════════════════════════════════════════════════════
+round266 O13 动作 3 desktop 诚实标注（HEAD 61467b5，时间 2026-11-17T08:52Z）
+════════════════════════════════════════════════════════════════════
+  选路：O13 动作 3 两条里选【标诚实】——「补依赖变真」要 electron，而它本机装不上
+  是 wire.ts 文件头记过的既有决策（离线 ⇒ TS2307 会吃掉整包类型闸门），不在可控范围。
+  新增：packages/desktop/src/index.ts 文件头诚实标注「IPC 契约层，非可运行 App」
+  （为什么这包读起来像能跑而跑不起来：1557 行每块有分母、tsc 全绿、缺的只是依赖
+  与入口）+ test/arch/desktop-honest-label.ts（判据纯化，吃三串文本）+
+  desktop-honest-label.test.ts（7 发：真仓库自洽 + 取材非空 + 双向变异 + 反向对照
+  +「注释提 electron 不算变真」的噪声对照）。
+  双向口径：假包摘标注 ⇒ 红（第三态回归）；补 electron 依赖【或】根 scripts 加
+  指向本包的入口而标注还在 ⇒ 红（假谦虚 + 逼变真那天同步改 §O13）。「变真」取
+  两条并集，宁松勿紧 —— r2 那一格（round265）刚演示过判据漏一条的静默失效。
+  evidence：round265-o13-honest-label-mutate.mjs 三发变异全杀（标注判定恒真 /
+  electron 探测恒假 / 入口探测恒假），还原校验逐字一致，还原后 PASS。
+  文档：§O13 动作 1/3 各加 ⚡ 落地块（动作 1 补记前轮 dev-entry；动作 2 TERMINATED
+  明写留待 CEO）；验收句改口径为「dev 到看板可用，浏览器那一发仍要人眼」。
+  ⚠ 别当成做到了：动作 2（TERMINATED 态）没动也不该由我动——那是边表规格决定；
+  desktop 今天仍然跑不起来，标注改的是【说法】不是【事实】。
+  · 实跑：arch 23 文件 234 · desktop 4 文件 87 · tsc -b exit 0。
+
+════════════════════════════════════════════════════════════════════
+round267 O11 动作 2 不可逆⇒一次性令牌 arch 守卫（HEAD 61467b5，时间 2026-11-17T08:57Z）
+════════════════════════════════════════════════════════════════════
+  新增：test/arch/irreversible-token.ts（判据纯化，吃 Map<string,string>）+
+  irreversible-token.test.ts（8 发：真仓库自洽 + 取材非空 + 写卡文件恰为名单四条 +
+  验收句合成变异「[engine/evil.ts] await approveCard」+ 偷偷写 UPDATE approvals 变异 +
+  条目过期变异 + 拒建判据消失变异 + why 非空）。
+  形状对文档「缺 import 就红」有一处刻意偏离并记进 §O11：可绕开的不是一个 import，
+  是四族防线（real-deps 兑换烧票 / auto-approve R3 fail-closed / cards.ts 建卡拒建 /
+  CLI 物理在场）⇒ 判据取【双向名单】：写「卡片被决定」的文件名单（APPROVE_PATHS，
+  每条带非空 why=这一路的凭据）+ approveCard 调用方名单（APPROVE_CARD_CALLERS）+
+  cards.ts 拒建特征串在场；两侧条目特征串消失也红（单向名单会跟着代码烂，§7-57 族）。
+  今天四个写卡路径 = engine/approve.ts（人席本体，凭据在调用方名单）、
+  http/real-deps.ts（redeemToken）、policy/auto-approve.ts（R3）、
+  approvals/timeout.ts（兜底=建卡拒建）；approveCard 调用方 = real-deps + engine/work。
+  动作① 的诚实口径写进 §O11：远程路径已统一（decide 只有兑换成功才落库，不可逆
+  签发侧 403），CLI 不过票是登记在案的产品现状，不是本守卫的绿在替它背书。
+  evidence：round267-o11-token-mutate.mjs 四发变异全杀（写判据恒不命中 / 调用判据
+  恒不命中 / 过期检查失效 / 拒建检查失效），还原逐字一致，还原后 PASS。
+  坑一条：调用方反向核对第一版用 /await\s+approveCard\(/ 判 real-deps —— 它的调用
+  不带 await（`const r = approveCard(...)`），真仓库当场假红；改用 marker，
+  两套调用形状统一成正则会漏真调用这件事写在判据注释里。
+  ⚠ 别当成做到了：守卫守的是【现状不被绕开】，不是「所有路径都过票」——CLI 那一路
+  的凭据是物理在场；真要把 CLI 也收进票制，先改 §11.4 的口径再来动 APPROVE_CARD_CALLERS。
+  · 实跑：arch 24 文件 242 · tsc -b exit 0。
+
+════════════════════════════════════════════════════════════════════
+round268 dev-entry 挂死修复 + O11 落地后的坐标补账（HEAD 61467b5，时间 2026-11-17T08:59Z）
+════════════════════════════════════════════════════════════════════
+  修掉全套里最后一发不绿：dev-entry.test.ts「收到停止信号」180s 挂死（上一轮 O13
+  动作 1 遗留）。成因：测试给 harness() 传自定义 waitStop 抓 resolve，而 harness 的
+  opts 没有这个键 ⇒ 静默丢弃（test/ 不在 tsc 射程，0007 §5 ⇒ 字面量多余键不报
+  TS2353），信号丢进默认空函数。改用 harness 自带的 signal()（先立标记再落地，
+  与真 Ctrl-C 同序），顺手补一条 unregistered.v===1（收尾注销监听）。14 发 1 秒绿。
+  ⚠ 教训入档：注入式 harness 的 opts 形状与它内部接的 deps 形状【不是一套】；
+  给 harness 传 deps 层的键 = 传了个寂寞，而且测试目录类型闸门照不到。
+  坐标补账：round267 的 §O11 编辑把 O12 顶下 11 行 ⇒ claims-registry r3 的
+  source.line 974→990（sentence 逐字未动，grep 复核）。r1/r2/r4–r8 的出处行在
+  编辑点之上，复核未漂移。
+  · 实跑：【全量 122 文件 2609 通过 6 跳过 exit 0】——本会话起点以来第一次整套全绿 ·
+    arch 24 文件 242 · tsc -b exit 0。
+  · 补记（同轮）：irreversible-token.test.ts 首跑撞上游竞态 —— 并行跑的
+    dependency-boundary 往 hub/src 写 __boundary_probe.ts，walk 读到「清单里有、
+    读时已没」的 ENOENT。按 survivesStat 家规只宽容 ENOENT/ENOTDIR，其余照抛。
+    连跑三轮 arch 242 全绿。claims-registry r3 的 974→990 已随上条入账。
+
+  补记二（同轮）：O10 动作 1 心跳接线的【行为发 + 两层变异证据】收尾。
+  · 行为发：assemble.test.ts 新 describe「O10 动作 1：心跳那一跳真的执行到期审批」——
+    预置一张 timeout_at 已过、timeout_behavior=auto_reject 的 pending 卡，起真迁移库 +
+    假时钟 boot，判首轮心跳后 status=rejected、decided_by=timeout-executor、
+    events 一行 actor_type=system。它补的是 r2 形状判据照不到的那一格：r2 只判
+    「runTimeoutPass( 这段文本还在」，判不了「参数传对、真的跑」。
+  · 变异证据（.workbuddy/round268-o10-wire-mutate.mjs，自恢复）：nowMs 实参
+    (o.now ?? scheduler.now)() ⇒ 0 —— 接线文本在场而没有任何卡算到期。
+    r2 claims-registry 17 发【全绿】（正是它的盲区），行为发【红】（happens 等不到
+    「超时巡检」warn）。还原逐字节一致后两者复绿。两发一起说明为什么要两层：
+    形状守卫守「接线在」，行为守卫守「接线对」，缺后者则「参数传错 ⇒ 到期不执行」
+    静默复活。
+  · 上一会话的 sed 变异教训入档：sed 直接把 await 调用换成语句片段会造出非法 TS，
+    行为发 Transform failed ⇒ 变异证据不成立（红因是语法而非语义）。本轮起变异
+    一律走【自恢复 .mjs + 语法合法的最小改动】：锚点出现次数≠1 即拒绝施加。
+  · 台账轮次口径一处：本轮记账沿用 round268 —— 文档与 claims-registry 的落地标注
+    已写 round268（§O10 落地块、line 137、r2 注释），台账另起 round269 会自相矛盾。
+  · 实跑：【全量 122 文件 2611 通过 6 跳过 exit 0】（上轮 2609，本轮新增的行为发在
+    assemble.test.ts：53→54）· claims-registry 17 · tsc -b exit 0。
+    ⚠ 差额只按【文件内 it( 计数】对账，不逐条归因 —— 台账记的是能复核的那一半。
+
+════════════════════════════════════════════════════════════════════
+round269 O9 动作 1（阶段一：只报不批）+ 动作 3 落点（HEAD 61467b5，时间 2026-11-17T09:30Z）
+════════════════════════════════════════════════════════════════════
+  O9 的「691 行判据、0 个调用方」从今天起过期一半：approvals/query.ts 的
+  policyShadowOf 给每张卡算影子判定（contracts approvalViewSchema 新格 policy_shadow，
+  联合类型不是 string），GET /approvals 带出，控制台卡片并排显示「规则判：…」。
+  写路径（recordAutoApproval：改卡片 + 署 policy-engine）零调用 —— 阶段一的全部主张是
+  【测量】，「存在一条被自动批准的审批」今天必须红且它就是红的（O9 验收第 1 条）。
+  · 不可逆那一档【不经过估算】：卡片显式 irreversible=true ⇒ 短路在 summary 子串估算
+    之前直接 blocked_by="irreversible"。验收第 2 条「永远绿」的凭据是这条短路 + 变异
+    M2，不是「子串表恰好认得」。其余卡的 tier 是 summary 估算，界面与注释都明说。
+  · 主张链同步一套：r7 翻窄（「无生产调用方」→「无生产写者」，judge 从 dead-modules
+    换成 claims-registry 自己的 r7NoWriterCheck，O14 表逐字同改）；dead-modules 基线
+    摘 policy/auto-approve.ts 与 policy/engine.ts 两条 —— 方向 B 那条红【如约出现】
+    且自带可执行动作（摘条目 + 报过期主张行号），与 approvals/timeout.ts 同一剧本。
+    摘完剩下的 INDEX.md 命中全是宽口径误报（leaf「engine」+ 否定词），不再被报出。
+  · 0014 的接线断言（「接线那天它会红」）真的红了：更新成两半 —— 读者名单钉死
+    == [approvals/query.ts]、写者名单 == []，并按它在文里的约定给 0014 记了追加块。
+  · 坐标补账：auto-approve.ts 头注释加了过期标注 ⇒ 行号下移 7，doc-refs 快照键
+    0049>policy/auto-approve.ts:435→442（两侧同改，快照内容行 grep 复核）。
+  · 变异证据 round269-o9-shadow-mutate.mjs 三发全杀（M1 影子恒 null：行为 3 发红而 r7
+    绿 —— r7 守写路径不守文本；M2 短路失效：乙发红；M3 写路径越界：r7 + ⑧ + 丙三处红），
+    全部自恢复逐字节核对。
+  · 坑一条入档：给 missing 断言照抄「三格前置」那句正文会红 —— 历史是 R2 的前置，
+    R1（只读卡）只查 evidence+gate 两格；断言要按 autoApprove 的真实顺序写，不抄散文。
+  · 实跑：【全量 122 文件 2615 通过 6 跳过 exit 0】（+4：query ⑦ 三发 + auto-approve ⑧
+    改版仍是 1 发；claims-registry 17 发数不变、r7 判据换形）· tsc -b exit 0 ·
+    biome 对触达文件 0 错（auto-approve.test.ts 那条 noUnusedImports 是既有告警，非本轮引入）。
+  · 别当成做到了：动作 2（放开 R1）没动 —— 它等的是读数长出来，而读数今天第一条才有；
+    影子判定的 tier 对非显式不可逆卡是【summary 估算】，攒出来的 R1 通过率要连同这条
+    口径一起读。
+
+════════════════════════════════════════════════════════════════════
+round270 O5 动作 4【补账】：一条已兑现的主张被文档继续登记为「未动」· 落地轮欠的台账与变异证据一并补齐（HEAD 61467b5，时间 2026-11-17T09:41Z）
+════════════════════════════════════════════════════════════════════
+  本轮不改产品行为，补三样【账】：
+  · 过期主张 ×3（同一件已落地的事在三个地方仍被说成没做）：
+    ① 设计文档 O5 落点段「动作 4 未动 / 仍未动」两处 ⇒ 按家规「原文保留 + 划掉 +
+      标出处」改为已落地，并把落地内容与欠账写清；② 0065 §7 第 2 条「本轮没动」⇒
+      划掉 + 标 round270 核实；③ channels/abstraction.ts 文件头那段以
+      「approvals 一共 15 列，没有一列与证据相关」为实测起点的注释 —— 0008 之后
+      这句话【对库不成立】，而它挡的是「按 task_id 猜 bundle」，理由换轴后仍要挡：
+      列有了、生产者与【卡片→哪份包】的语义没有，猜依旧不许。三处都留原文划线。
+    ⚠ 这一族过期没有任何守卫会红（O14 登记的是另一批主张），靠的是本轮普查撞上 ——
+      这正是 O14 正文那句「这句话过期时没有任何东西变红」的现行样本，样本本身入档。
+  · 执行证据：app-pure.test.ts 新增 evidenceLine 三发（null/undefined/[] 说破「无证据包」·
+    非空报条数且不出现「无证据包」· 嵌进 approvalCard 后随三态切换）。装载器 EXPORTS
+    加 evidenceLine（它本就是 function 声明，纯函数，符合装载器入册判据）。
+  · 变异证据 .workbuddy/round270-o5-backfill-mutate.mjs（自恢复，锚点≠1 拒施加）：
+    M1 读侧视图写死 null ⇒ query.test「evidence_refs 随视图带出」1 红；
+    M2 写侧建卡落库写死 null ⇒ cards.test ⑥「逐字对得上」1 红；
+    M3 UI「无证据包」换空串 ⇒ app-pure 2 红（三态切换那发同红，说明嵌入链也真读它）。
+    三发全杀、revert 逐字节核对（M1 那次 revert 顺带把 M2/M3 的存档也核了）。
+  · 坐标补账：O5 落点段两处编辑给设计文档 +16 行 ⇒ claims-registry 四个 source.line
+    漂移（r3 990→1032 · r4 832→848 · r7 895→911 · r8 769→785），逐条 grep 句首核对后
+    perl 改数；r3 改前就偏 26 行（round267 的 §O11 编辑顶的，当时漏同步）——
+    source.line 不在任何守卫的判据里（判据走基线/扫描），偏了不红，所以【人肉对账】
+    是它唯一的维护方式；对账脚本 .workbuddy/round270-check-coords.mjs 留档可复跑
+    （已知局限：r2/r5 的 sentence 是剥掉 markdown 的转述，按字面 grep 恒 miss，
+    那两条的 line 本轮未动——r2=137、r5=641 都指在含划掉原文的行上，语义仍对）。
+  · 实跑：app-pure 47（+3）· query+cards 52 · 变异三发如上 · 全量与 tsc 见文末汇总。
+  · 别当成做到了：证据包的【生产者】仍 0 处（dispatch 交接带包 = O5 动作 1/2，
+    前提不成立的登记没变）；ChannelCardSnapshot 的 loadCard 生产调用方仍是 0，
+    IM 卡片的第三行今天仍到不了；本轮补的是【已兑现主张的账】，O5 的目标
+    （门控拿到真布尔）一格没动。
+
+════════════════════════════════════════════════════════════════════
+round271 O4 验收句复测：「今天删掉它们 0 发红」是一句从未复测的旧读数，实测五发变异各 1~9 红（HEAD 61467b5，时间 2026-11-17T09:48Z）
+════════════════════════════════════════════════════════════════════
+  本轮不改产品代码，把 O4 验收句从「未达成，且这一句没有重新量过」变成有证据的读数。
+  · 变异脚本 .workbuddy/round271-o4-acceptance-mutate.mjs：五个调用点各删成 canned 值
+    （M1 verifier→sameFamilyReviewBlock / M2 selfReviewEdgeBlock 内的
+     independentReviewerPath / M3·M4 gateConfigBlock 内两处 / M5 verifier→evaluateGate），
+    判卷 = verifier.test + author-reviewer.test（61 发基线全绿）。
+  · 读数（全绿基线 61/61 之上）：M1 ⇒ 4 红 · M2 ⇒ 2 红 · M3 ⇒ 2 红 · M4 ⇒ 1 红 · M5 ⇒ 9 红。
+    五处调用点【每一处】都过「各自必须有一发红」——旧读数「0 发红」对当下代码不成立
+    （0064 删掉动作 3 的孤儿函数、把 independentReviewerPath 定成有测试钉住的对偶之后，
+    这批调用点已经不是写下那句时的形状了；那句是【从未复测】而非【复测后失效】）。
+  · ⭐ 坑一条入档：第一版 canned 写成 `const fam: ReturnType<…> = { ok: true }`，
+    tsc 当场红（联合类型被字面量初始化收窄成 Allow 分支，后文 `!fam.ok` 支里 fam.code
+    报 never）——「删调用点」的变异若过不了 tsc，量的就不是「只有测试能抓」这一族了。
+    修法：带返回类型标注的 IIFE（`(()=>…): Union => ({ok:true}))()`）不收窄。
+    五发逐一 `tsc -b` exit 0 复跑过，这条形状是本轮真正的产出之一。
+  · ⭐ 判卷面的边界要说准：M2 那发同时让 dead-modules 的语义变空转
+    （author-reviewer 的可达性判据被 canned 成恒可达），但【基线名单没动 ⇒ 守卫不红】——
+    「变异杀测试」与「守卫杀接线变化」是两套判卷，本轮补的是前者。
+  · 坐标补账（本轮 O4 表格 +11 行）：claims-registry r3 1032→1043 · r4 859 · r7 922 · r8 796，
+    逐条 grep 句首核对；doc-coords / doc-ids / comment-citations / claims-registry 47 发全绿。
+  · 文档：设计文档 O4 验收行按「原文保留 + 划掉 + 标出处」改写，新读数五发逐条列出，
+    并写明【这达成的是判据不是目标】——调用点全在死模块基线里，防线仍未上活路径（等 O6）。
+  · 实跑：verifier+author-reviewer 61 基线 · 五发变异如上 · 4 个文档守卫 47 发 ·
+    全量与 tsc 见文末汇总。
+
+round272 O6 动作 2 复测：那句「把 onCost 三条 SQL 换成走 gateway」的前提不成立，可落地的内核（两份手抄 SQL）单独堵上（HEAD 61467b5，时间 2026-11-17T10:33Z）
+════════════════════════════════════════════════════════════════════
+  本轮动产品代码，但动的【不是】动作 2 的字面内容 —— 字面那句落不了地，落的是它底下
+  真实存在的那半个洞。两件事分开记，混在一起就是「文档说做了而做的不是那件」。
+  · 前提复核（先量再动）：`harness/gateway.ts` 的 `checkBudget` / `settle` 是【类型槽】，
+    本文件没有任何预算 SQL，`callHarness` 零生产调用方 ⇒ 「换成走 gateway」等于把一条
+    活的记账路线接进死模块，症状会是「测试全绿而生产没变」。同理「顺带解 O7-1」也不成立。
+  · 落地的内核：`engine/runtime.ts` 的 `onCost` 三条 SQL 与 `budget/tracker.ts` 两条
+    是同一件事的两份手抄（差别只是 `scope_type`/`period` 内联成字面量）。现在三条由
+    tracker `export`、引擎路线 import，内联换绑参 ⇒ 两份逐字节相同是结构保证。
+    绑参顺序写在 tracker 的块注释里（三条各自的顺序不同，抄注释比数问号便宜）。
+  · ⚠ 没发 `BudgetPaused`（O7-1 归 CEO），且本轮量到 O7 动作 2 的【第二个前提】也是错的：
+    `today.ts` 的 `blocked` 走 `BLOCKED_SQL` = `COUNT(*) FROM tasks WHERE status IN (...)`
+    ⇒ 读的是任务状态不是事件表 ⇒ 「事件发出来就能被 today 读到」不成立，
+    发完验收 (1) 绿、验收 (2) 恒 0 照旧。原句已按「原文保留 + 划掉 + 标出处」改。
+  · 机器判据（claims-registry.test.ts 新增那一发）：runtime 源码里出现三条 SQL 字面量
+    任何一条 ⇒ 红；同时必须 import 到三条语句名。边界写进断言消息：把 SQL 挪到
+    第三模块也红 —— 那不是误报，是「单源放哪」得由人重画基线，守卫只拒绝沉默。
+  · 变异实测（.workbuddy/round272-o62-sql-single-source-mutate.mjs，三发全自回滚、字节比对）：
+    M1 把 `INSERT INTO budgets …` 字面量抄回 onCost ⇒ 守卫 2 红 · runtime 执行测试 26 发【全绿】
+       （这一发是本轮的全部理由：「改一处不带另一处」执行测试看不见，只有字节守卫看得见）
+    M2 删掉扣减调用 ⇒ 守卫 1 红 + 执行 2 红（改行为的这类执行测试看得见）
+    M3 把 scope 绑参写成 "role" ⇒ 字节守卫【绿】+ 执行 2 红
+       ⇒ 本轮解的是「两份 SQL」，【不解】「绑参写错」，别把前者读成管住了后者。
+  · ⭐ 对账探针 round270-check-coords.mjs 自己有两个坑，都在本轮暴露：
+    ① 它按【精确子串】比 registry 的 sentence 与文档原文，而 registry 手写时不带反引号
+      ⇒ r2/r3/r4/r5/r6 每次打印成空白「now@」，与「坐标真的丢了」长得一样（否定式读数
+      的老病，本轮第 N 次）。改成两边剥反引号 + 剥 `**` 再比，并加 OK/STALE 显式判定。
+    ② 它的正则只认双引号与反引号 ⇒ r6（单引号那行）整条被跳过，而它的 id 和【下一条】的
+      line 拼在一起打印，于是打印出「r6 old=979」—— 那是 r7 的坐标，r6 真正的 97 那一行
+      【从未被核对过】却显示成 OK。第二版的输出让这件事自己现形（r6/r7 各占一行且都对）。
+    ⇒ 教训入档：探针打印「找不到」时，第一件要怀疑的是探针自己看没看见，不是坐标丢了。
+  · 坐标补账：claims-registry r3 1043→1101 · r4 859→906 · r7 922→979（本轮 O6 落地块
+    +37 行、O7 动作 2 +9 行把它们顶下去），r1/r2/r5/r6/r8 未动；探针 8/8 OK。
+    doc-refs 快照键本轮改了 6 处（tracker 233→244 / 238→249 / 两份 SQL 收敛成一个键
+    :81 与 :77 / runtime 112→117 / budget-sync 447→449），每条带「为什么动」的注释；
+    历史坐标一律写成「第 N 行」散文，避免被 FILE_REF 正则抓去要快照（0050 §6.5 的口径）。
+  · 过期名字清账：`charter-pump.ts` 两处注释 + `charter-pump.test.ts` 一处 +
+    `zero-producer.ts` 取证表一处 + `docs/INDEX.md` 一处（后两处按「当时的取证记录」保留
+    名字并标注它不再存在，不假装它还在）。`EvidenceStore` 对外零 import 本轮复核【仍成立】
+    —— 我一度顺手把它一起划掉，grep 之后收回：设计文档 §6.4 那条自我警告这轮命中了
+    我自己两次（hard_stop 读数过期、autoApprove 整条过期），也逮到我一次误划。
+  · 实跑：tsc -b exit 0 · 7 个文档/主张守卫 84 发绿 · 全量 122 files / 2619 passed / 6 skipped ·
+    三发变异如上全部自回滚（复跑前确认 runtime.ts 三条字面量 0 命中）。
+  · biome：本轮触碰的 10 个文件 findings 数与 HEAD 版本逐一相同（把 HEAD 内容复制成
+    同目录同扩展名文件比过；`organizeImports` + format 那两条是这两个文件在 HEAD 就有的）。
+
+round273 §2 轴二那两行「无读者」复测：证据那句到今天仍然对，结论错在把 `engine/` 当成了全仓；新立 r9 一条能红的判据（HEAD 61467b5，时间 2026-11-17T10:44Z）
+════════════════════════════════════════════════════════════════════
+  · 复测动机：§1 那张「有值 / 有读者」表里 133–135 三行从未复测，而 §6.4 自己写着
+    「被引用簇里的次要结论按待复核读」。本轮按 r1 那一条的先例（复测之后【结论仍在，
+    改的是措辞与住址】）逐条量：`hard_stop` 那行 round272 已改；`timeout_at` 已改；
+    `acceptance_criteria` 那行仍然对（`evaluateGate` 在 src 里【只有一个】调用点，
+    就是 `harness/verifier.ts:640`，而 harness 全目录零生产 importer）；
+    **`forbidden_actions`/`decision_scope`/`honesty_boundaries` 与 `escalation_triggers`
+    两行【结论错】**：它们写着「无读者」。
+  · 错在哪一格（这句是本块的全部）：证据是真的 —— `grep` 遍 `engine/` 对这些字段名
+    引用为 0，今天复跑还是 0（只有 `outside_decision_scope` 那个枚举字符串，它不读字段）。
+    跳错的是从「engine/ 里没有」到「没有读者」：读者在 `charter/prompt.ts`
+    （`c.forbiddenActions` / `c.decisionScope` / `c.honestyBoundaries` / `c.judgmentMode` /
+    `c.escalationTriggers` / `c.acceptanceCriteria` 逐字段渲染），渲染结果就是
+    `engine/claude.ts` 的 `--append-system-prompt` ⇒ **有读者，读者是提示词不是执行器**。
+    「影响模型写什么」与「拦模型已经写下的东西」是两格，原句用一个「无」把它们抹平。
+  · ⚠ 同一族错 O2 落地块第 2 条【早就写过】（「引用是 0」是真，但读者在 camelCase 的
+    字段访问里，「一个数不能替一次实验」）—— 那次只改了 O2 那一节，§2 这张表没跟着改。
+    ⇒ 记这条不是为了认错，是指出一个可复用的失效形状：**一条修正只落在发现它的那一节，
+    同一个错就能在同一份文档里活两个住址**。本轮把交叉引用双向写上了。
+  · 新立 r9（`test/arch/claims-registry.ts` + `.test.ts`）—— 这一条是登记表里第一条
+    【反向登记】：r1–r8 守的都是「别谎报有」，r9 守的是「别谎报没有」。两半各判一种故障：
+      ① `charter/prompt.ts` 不再出现 `c.<字段>` 的属性访问 ⇒ 红（那一格悄悄退回无读者）；
+      ② `engine/runtime.ts` 不再调 `renderCharterPrompt(` ⇒ 红（渲染函数还在、没人调，
+         六个字段【全体】失去读者，而 ① 一条都不红）。
+    判据只认【属性访问】不认字段名字符串：`charter/prompt.ts` 的块注释里就写着 `budget* →
+    真闸在 CLI`，判字符串名会让一条注释替一个已失效的读者作证（0063 那一族的反面）。
+  · 变异实测（`.workbuddy/round273-r9-charter-reader-mutate.mjs`，三发自回滚 + 字节比对）：
+    M1 `c.forbiddenActions` → `[]` ⇒ r9 红（字段那一半）· `prompt.test.ts` 2 红。
+    M2 摘掉 `renderCharterPrompt(` 调用 ⇒ r9 红（调用那一半）· `engine/runtime.test.ts` 3 红。
+       ⇒ M2 是两半分工的证据：字段级判据对它【全绿】，只看字段会漏掉整个岗位书。
+    M3【纯重构】`c.acceptanceCriteria` → 解构别名（行为逐字节不变）⇒
+       **r9 红而 `prompt.test.ts` 25 发【全绿】**。这条是刻意量的：判据判的是文本，
+       所以一次不改行为的重构会让它红 —— 边界写进判据的注释与红话，别留给下一个人猜
+       （同 r1 那条「SQL 挪到第三个模块也红」的处理方式：红是对的，红的时候改判据）。
+    ⚠ 三发的 arch 侧都是【2 红】而不是 1 红，原因值得记：合成夹具是拿
+      `realFiles.src("charter/prompt.ts")` 现抄的，所以往真文件施加变异会连带把
+      「变异 r9 之二」那发的反向对照样本一起弄红 —— 红因不是它自己判的那件事。
+      读数仍然可用（两发红因同源，且分开跑另一文件能分开），但**「一条判据的
+      反向对照借用了真文件」这件事本身是一个坑**：下次写合成夹具要么手写常量，
+      要么就接受「真文件被改时反向对照不具判别力」。本轮没改夹具，只把这句话留在现场。
+  · 文档：§2 轴二两行按「原文保留 + 划掉 + 标出处」改，写清「结论错、证据对、
+    差在哪一步」，并标 O14 表 r9；O14 渲染表加 r9 一行（渲染逐字一致那一发先红后绿，
+    是它该有的行为）。r9 的 source.line=134 由对账探针复核，9 条全 OK。
+    ⚠ 补账之后又漂了一次，而且是【本轮自己顶的】：把双向交叉引用写进 O2 第 2 条
+    （+6 行）把 r3 1101→1107 · r4 906→912 · r5 641→647 · r7 979→985 · r8 796→802 全顶下去，
+    探针立刻报 5 条 STALE。⇒ 这一段本身是那条老纪律的又一次命中：
+    **改文档 = 顶坐标，没有「我只加了一句注释」这种例外**（0050 §6.5 说正文加 import 会顶，
+    这里连【加一条指向别的节的注释】都会顶）。顺带 r9 现在有【两个】命中
+    （134 那一行 + 402 那条新注释引用了同一串字段名）：登记的仍是 134，
+    探针把两个都打出来 —— 这正是探针该做的（把歧义暴露出来，不替人挑一个）。
+  · 实跑：tsc -b exit 0 · 文档/主张守卫 87 发绿（claims-registry 21 发，含 r9 三发）·
+    全量 122 files / 2622 passed / 6 skipped（本轮 +3 发：r9 的字段半、调用半、
+    以及真仓库那一发 --append-system-prompt）· arch 目录 247 发全绿。
+  · ⚠ biome 那一格差点又写成【没核就写】：我先在台账里落了一句「触碰文件 findings
+    与改动前逐条相同」，回头真跑了一遍 —— 本轮自己引入了【两条 format 红】
+    （r9 的 sentence 换行、r1 反向对照那条长串没折行）。两句都已按格式化器改完，
+    改完复跑：test/arch 那两个文件 0 findings；`engine/runtime.ts` 等 6 个文件
+    的 findings 与 HEAD 版本逐条相同（HEAD 内容复制成同目录同扩展名文件比过）。
+    ⇒ 台账里【任何】"我核对过"的句子都要有一条能重跑的命令跟着，否则它和
+      本仓反复清理的那批「当年是真的、后来没人管」的散文是同一种东西。
+
+════════════════════════════════════════════════════════════════════════
+round274（2026-11-17）：计划文档第一次进视野 · 「verify 全绿」第一次被机器看见
+                              · 以及我造的探针差点对下一条守卫撒谎
+────────────────────────────────────────────────────────────────────────
+  · 起点：本轮第一次【通读 docs/】，量到 docs/superpowers/plans/
+    2026-11-06-opc-os-development-plan.md（839 行 / 58 个 `### Task X.Y`）
+    被优化设计文档【一字未提】，而它另有 6 道阶段出口门。逐条实测后落地：
+    新守卫 test/arch/lint-baseline.ts（判据）+ .test.ts（12 发）+ 主张 r10。
+  · 【核心读数】`verify = lint && typecheck && test`（根 package.json）。
+    typecheck exit 0、test 全绿、**lint 恒红** ⇒ 3 道写了 `pnpm verify` 的门
+    （0.11 / 1.8 / 3.8）一条都复核不了；2.9 / 4.7【没有 Run 行】，各要一个
+    Playwright E2E ⇒ `test/e2e/` 不存在、playwright 不在任何 package.json、
+    全仓 `*.spec.ts` 0 个。0055 治的是 test 段恒红，本轮量的是 lint 段。
+  · 【lint 的解剖】292 error = 162 format + 119 organizeImports + 11 lint；
+    另有 109 warning / 2 info（**不进退出码**，biome errorOnWarnings 默认关，
+    所以棘轮只判 error 是【跟着退出码口径】而不是自选口径）。
+    11 条 lint error 里 10 条在测试文件，是 `while ((m = re.exec(s)) !== null)`
+    那类刻意惯用法 ⇒ 「跑一遍 --write 就绿」是假的，两条都买不到。
+  · 【为什么不直接修绿】162+119 都自动可修，但那是一次 200+ 文件纯排版提交，
+    混进本轮这一大片未提交改动里之后没人能读出哪一行是真改动；判断依据与代价
+    一起写进优化设计文档 §7 第 10 条。⇒ **代价说清楚：verify 仍恒红，
+    本轮买的是方向（只许减不许增 + 新 error 种类当场红并点名），不是绿。**
+  · 变异三发（.workbuddy/round274-lint-ratchet-mutate.mjs，自恢复 + 锚点数≠1 拒施）
+    —— 三发全部命中【预测的那一发】，逐发记名：
+      M1 拔掉 isRuntimeFixture 排除 ⇒ 1/12 红，红在「探针不进基线」那一发；
+      M2 删掉「只数 error」⇒ 2/12 红（「只数 error」+ 真仓库那一发）；
+      **M3 `n > allowed` → `n > allowed + 1000`（棘轮拔掉齿、表面还在）
+         ⇒ 只有【合成变异】那一发红，真仓库那一发【仍然绿】。**
+      ⇒ M3 是本轮最值钱的一条：**真仓库那一发对「判据被改成不判」完全瞎**，
+        它今天必然绿，因为比的数就是照着今天写的。又一次只证到「守卫跑过了」，
+        而只有合成读数证到「守卫在判」。
+  · ⚠ 我自己造的探针差点让下一条守卫建立在假读数上（本轮第二严重的自伤）：
+    为了量 HEAD 的 lint 基线，我建了个临时 worktree 放在 `.workbuddy/wt-head/`。
+    它自带的 biome.json 让【父仓】那次扫描直接以「nested root configuration」
+    配置错误退出，stdout **只有配置错那几行，一条 finding 都没有**。我连着两次
+    grep 它的输出取不到数，而【两次都把空当成了「没找到」】—— 一次工具失败在
+    这里长得和「读数为 0」一模一样。第三条命令改成把输出落盘再读才发现。
+    ⇒ 两条规矩：worktree 用完必须删（已 `git worktree remove`，`git worktree list`
+      只剩主目录）；任何扫描器读数在当证据前必须先确认【它真的扫了】——
+      新守卫里 `filesChecked >= 200` 那一发下限就是为这件事立的，
+      出处 0006 §7 第 41 条「测试面被改窄，verify 会整绿地通过」。
+  · 【把「我核对过」这句话摆正】一度想在台账里写「0057/0059 手抄的 286 漂到 292，
+    没人发现 ⇒ 它们错了」。真去核了才知道【这个指控是假的】：
+      ① 两篇各自都跟着一条 ⚠「这三个数**不写终版**」⇒ 它们没撒谎；
+      ② 286→291 那 5 条漂在【本轮之前】的提交里（HEAD 干净树实测 291 / 256 文件），
+         本轮只加 1 条（292 / 282 文件）。
+    ⇒ 真正剩下的结论只有一条，而且比原指控窄：**散文里正确的话机器看不见**
+      （0057 同一篇自己立的 ⭐ 口径），所以新守卫【不存期望值、只存上限】——
+      上限随修复下调，期望值一定过期。三次读数全列在文档表里，含来源。
+  · 探针自己也被抓了一次（第三次同族）：.workbuddy/round270-check-coords.mjs 的
+    id 正则写的是 `(r\d)` —— **一位数**，登记 r10 那天它【静默跳过 r10】，
+    输出与「十条全对」逐字一样。修法不是只把 `\d` 改成 `\d+`，另补一条
+    【条数自证】：探针打印的 id 集合必须【正好等于】registry 声明的集合，否则
+    exit 1。补完当场就抓到 r10 自己的坐标是 STALE（记 1216，实际 1218）——
+    **没有那条自证，我会在一条从未被核对过的坐标上写下「10 条全 OK」。**
+    这三次（反引号读不到 / 单引号跳过一条 / 两位数跳过一条）是同一个病的三种形状：
+    **核对工具的「漏」永远长得像「对」。**
+  · 顺带清掉的过期计数：claims-registry.ts 文件头与分节标题写着「八条主张 /
+    八条判据」（早就是九条，现在十条）⇒ 改成不带数；r9 变异注释里的
+    「四条字段」实际列了六个 ⇒ 改六。registry 条数由 `REGISTRY.length >= 8`
+    那条下限钉，不靠注释。
+  · 文档：§7 新增第 10 条（计划文档进门 / 三道门 vs 两道 Playwright 门 /
+    三次 lint 读数表 / worktree 自伤 / 变异三发）；O14 渲染表加 r10 一行
+    （与 renderMarkdown 逐字一致那一发先红后绿，是它该有的行为）；
+    r10 的 source.line 指向 §7 第 10 条本体（1380），探针 10/10 OK + 条数自洽。
+  · 实跑：tsc -b exit 0 · 全量 123 files / 2637 passed / 6 skipped
+    （本轮 +1 文件 +15 发：lint-baseline 12 + r10 变异 3）· test/arch 25 files /
+    262 passed · claims-registry 24 发 · 坐标探针 10/10 且条数自洽 ·
+    `node .workbuddy/round274-lint-baseline.mjs` 现算 292/109/2 并现场证探针 292→293。
+  · 欠着的账（不是本轮漏做，是明确留给下一步的）：
+      ① **lint 修绿**：119 条 organizeImports 可单独一次纯 assist 提交（比 format
+         更机械、更易复核），162 format 另一次；11 条 lint error 需要逐条决定
+         「关规则 / 就地豁免」，其中 10 条在测试文件。**必须早于任何一次拿
+         `pnpm verify` 当出口门的复核。**
+      ② 计划文档 6 道门与本篇 14 项的关系没有一份对照表（谁解锁谁、谁已过）。
+      ③ 509 处 `Task X.Y` 引用零悬空是本轮现数的，探针在 .workbuddy 里，
+         【没进守卫】—— 引用面一旦再长，它又会变成一句只有我跑过的话。
+      ④ Playwright 两道门（2.9 / 4.7）依赖一个装不上的依赖，属 CEO 决策面。
+
+================================================================================
+round275（2026-11-17）：上一轮那条新守卫被【自己的变异】打回两次 · 台账债 ③ 落地
+HEAD 61467b5 · 时间 2026-11-17T11:32Z
+
+■ 这一轮做的（只一件，外加它欠的账）
+  round274 台账里明确记着一条债：「509 处引用零悬空是本轮现数的，探针在 .workbuddy
+  里，【没进守卫】」。本轮就是还这条债 —— 把它做成真守卫，并且在做的过程中
+  被自己的变异判据打回两次。落地物：
+    · `test/arch/plan-refs.ts`（判据：取材 = docs 全部 markdown + 全部 ts + 计划自己）
+    · `test/arch/plan-refs.test.ts`（10 发：6 合成变异 + 4 真仓库）
+    · `.workbuddy/round275-plan-refs-mutate.mjs`（P1–P4，自恢复、逐字节核对还原）
+    · `.workbuddy/round275-scope-probe.mjs`（分块现数取材，那张分块表的出处）
+    · claims-registry 新增 r11（三格判据）+ 三发变异；O14 渲染表加 r11 一行
+    · `docs/decisions/0001-sqlite-driver.md` 修掉【2 处真悬空】（计划把 Phase 0
+      第 4 号拆成 a/b 两支，旧引用留在原地；两处按各自所指分别改到对应的那一支，
+      并在原地写明「原稿引的是拆分前的编号」）
+
+■ 两条【预期落空】—— 这一轮真正买到的东西
+  1) **P1 第一版只红 2/10，漏掉的那一发是我刚写的。** P1 拔掉「标题集为空 ⇒ 一律红」
+     那句哨兵。我给它预测的是红 3 发，实测红 2：「计划标题被降级成二级」那一发绿了。
+     原因：那里我断的是 `toHaveLength(1)`，而哨兵被拔掉后「引用了一个不存在的编号」
+     也【恰好返回一条】。**数目相同、判据已死。**
+     ⇒ 改成比对红话本身（返回的那一条就是哨兵那条）之后，P1 才真的抓到它（3/10）。
+     ⇒ 沉淀：**「返回几条 / 是否非空」不是判据，「红话是谁」才是**。
+        凡是拿条数当判据的地方，都能被一个换了的死因顶替而保持绿色。
+  2) **P4 第一版 10/10 全绿。** P4 = 把取材改成「计划 + 全部 ts」，也就是
+     round274 那版探针【真实用过】的口径 —— 而它漏掉了本轮全部的 2 处真悬空
+     （两处都在 `docs/decisions/`）。当时守卫已经钉了「总引用数 ≥ 500」，
+     P4 下仍有 840 条，**撑住了**。
+     ⇒ **一个被撑大的总数会替一个空掉的分区作证。** 修法不是再加一条判据，
+       是把那个总数拆成【分块下限】：
+         | 取材分块 | 本轮实测 | 守卫下限 |
+         | docs/decisions 的 md | 65 文件 / 221 引用 / 49 编号 | ≥50 文件 且 ≥100 引用 |
+         | 计划文档自己 | 230 引用 | ≥1 |
+         | 全部 .ts | 610 引用 | ≥300 |
+         | 合计 | 1061 引用 / 58 编号 | ≥500 引用 / ≥50 编号 |
+       改完 P4 红在第 8 发：「docs/decisions 的 md 几乎没进语料 ⇒ 口径又窄了」。
+
+■ 另两发按预测命中
+  · P2（精确匹配 → 前缀匹配）红 2/10，真仓库那几发仍绿。它打的正是本轮那个真故障
+    的形状（编号拆两支后旧引用还在，前缀匹配对它全瞎）。
+  · P3（把计划一起删出语料）比预测更狠：**整个文件在取材阶段抛，一发测试都没跑**。
+    说明「计划找不到」这一族的响法是【文件级】的，不挂在某一发测试上 —— 抛比静默好。
+
+■ 同一条坑第二次踩：自匹配
+  `plan-refs.test.ts` 的合成夹具第一版直写了坏编号，而测试文件自己在语料里
+  ⇒ 判据把自己判红。解法与 §7 第 10 格同源：合成字符串一律拼出来（"Ta"+"sk"），
+  并额外加一发【专测本文件对语料的引用数为 0】的守卫。
+  ⚠ 顺带一条口径事实：取材里 `collect(root, "", ".ts")` 会连 `.workbuddy` 下的
+    `.ts` 一起收进来（本轮实测语料 md 73 / ts 399 个文件）—— 所以临时脚本里的
+    字面量同样在射程里，不只是 test/ 下的。
+
+■ 顺手清掉的两处
+  · r11 主张第一版手抄了「58 个标题 / 1061 处引用 / 0 悬空」—— 这正是 r10 那一格
+    刚立的规矩要防的形状（「上限会随修复下调，期望值一定会过期」）。
+    ⇒ 主张里改成【明写不抄数】并把读数交给 plan-refs.test.ts 的分块下限。
+      这条在写下的当轮就被我自己划掉，不是事后复测发现的。
+  · 坐标探针这轮又抓到 2 条 STALE（r10 / r11 的 source.line 各差 1，因为 §7 加了
+    第 11 条把行号顶下去了）。探针的「声明 N 条 / 打印 N 条」条数自洽这一发
+    第一次有了非 10 的样本（11/11）。
+
+■ 实跑（全部本轮现跑，非引用上一轮）
+  · `npx tsc -b` exit 0
+  · 全量 `npx vitest run`：**124 files / 2650 passed / 6 skipped**
+    （上一轮 123 / 2637 / 6 ⇒ 本轮 +1 文件 +13 发：plan-refs 10 + r11 变异 3）
+  · `test/arch`：**26 files / 275 passed**（上一轮 25 / 262）
+  · claims-registry：**27 passed**（含 O14 表与 renderMarkdown 逐字一致那一发）
+  · 坐标探针：**11/11 OK** + 条数自洽
+  · `node .workbuddy/plan-refs-measure.ts`：58 标题 / 1061 引用 / 悬空 [] / 零引用 0
+  · 碰过的 4 个文件 `biome check` 干净（整仓 lint 仍恒红，见 round274 账）
+
+■ 欠着的账（更新，③ 已还）
+      ① **lint 修绿**（round274 记的，未动）：119 organizeImports 一次纯 assist 提交，
+         162 format 另一次；11 条 lint error 逐条决定「关规则 / 就地豁免」。
+         **必须早于任何一次拿 `pnpm verify` 当出口门的复核。**
+      ② 计划文档 6 道门与本篇 14 项的对照表（谁解锁谁、谁已过）—— 仍未做。
+      ④ Playwright 两道门（2.9 / 4.7）依赖一个装不上的依赖，属 CEO 决策面。
+      ⑤（本轮新增）**分块下限是"半个 P4"**：它挡住「整块消失」，挡不住「整块被
+         换成另一块同样有料的目录」。真要钉死口径，得钉【文件名清单】而不是计数 ——
+         但那会是一条天天红的守卫，所以本轮停在分块，并把差距写在这里。
+
+================================================================================
+round276（2026-11-17）：验收命令指向【不存在的文件】而它今天全绿 · 工具的一个性质比 lint 更阴
+HEAD 61467b5 · 时间 2026-11-17T11:47Z
+
+■ 起点：上一轮那条「只有 3 条 Run 行写着 verify」—— 数对了，但停得太早
+  本轮把计划 6 道出口门禁的【每一条验收行】点名的工件路径逐字核了一遍
+  （`.workbuddy/round276-run-lines.ts`）。结果：验收行共点名 7 条路径，其中
+  **5 条逐字不存在**，而那 3 条 Run 命令今天【跑起来是绿的】。
+
+  | 门禁 | 验收行 | 路径逐字存在？ | 命令今天 |
+  | 0.3 决策门   | Run             | ❌ test/db/…            | 绿 16 发 |
+  | 1.8 Phase 1  | Run             | ❌ test/acceptance/…    | 绿 13 发 |
+  | 3.8 Phase 3  | Run             | ❌ test/acceptance/…    | 绿 13 发 |
+  | 2.9 Phase 2  | Playwright E2E  | ❌ test/e2e/ 目录不存在 | 跑不了（playwright 未装） |
+  | 4.7 Phase 4  | E2E             | ❌ 同上                 | 跑不了 |
+  | 5.8 Phase 5  | E2E（纯人工）    | —                     | 无人工工件 |
+
+■ ⭐ 本轮最该记住的一条【工具性质】
+  `vitest run <路径>` 把参数当**子串过滤器**，不是当路径。两条对照实测：
+    · `npx vitest run test/acceptance/phase1-gates.test.ts`
+        ⇒ 这条路径 `ls` 都说不存在，命令却报 **1 文件 / 13 发通过、exit 0**
+          （`packages/hub/` 下有个同名文件被匹配上了）；
+    · `npx vitest run test/definitely/not/here.test.ts`
+        ⇒ `No test files found`、**exit 1**。
+  ⇒ **一条指向不存在文件的验收命令，可以长期绿**，而它绿的那一格是「碰巧有个同名文件」。
+    再多一个同名测试，它就会【静默地】跑到别的文件上去。
+  ⇒ 与 0006 §7「测试面被改窄会整绿通过」同族，但【机制不同】：那一族改的是被测面，
+    这一条是**工具把一个拼错的地址解释成了一个存在的地址**。这类错没有任何人会被提醒。
+
+■ 落地的守卫
+  · `test/arch/plan-gate-paths.ts` + `.test.ts`（10 发）
+  · 口径（本轮第三次撞同一格）：**只判【验收行】点名的路径**，不判计划全文。
+    现数：计划全文点名 116 条带扩展名路径，逐字命中只有 **27**，另有 **65** 条是
+    「文件在、住址从 `src/…` 搬到 `packages/hub/src/…`」，24 条全仓查无此物。
+    ⇒ 拿全文口径做守卫 = **一条恒红的守卫**（0055/0056/0057 三连治的正是它）。
+      计划是【施工前】的文档，它的正文本来就该保留当时的布局。
+  · 豁免 = 一行显式标记 `<!-- gate-path-not-built -->`，且**条数只许减不许增**（上限 2）
+    ⇒ 豁免是一份可数的账，不是一句散文。贴到「所有路径都存在」的行上也红（凑数式豁免挡得住）。
+  · claims-registry 新增 r12（三格判据）+ 三发变异；O14 渲染表加 r12 一行。
+
+■ 四发变异【全部命中预测】（`.workbuddy/round276-gate-path-mutate.mjs`，自恢复）
+  与 round275 不同：这一轮**打在真文档上** —— 这一发的全部价值就是「文档今天写错了」，
+  只有把文档改回坏样子，才能证明守卫真的会响。
+    G1 Task 1.8 住址改回本轮修之前的旧写法 ⇒ 2 发红（真故障原样回放）
+    G2 删掉 Task 2.9 的豁免标记            ⇒ 1 发红，点名那个 spec
+    G3 把豁免标记多贴一行到本来就没病的行上  ⇒ 1 发红（豁免账超上限 + 那条没豁免掉任何东西）
+    **G4 把判据里的 exists(p) 换成恒真      ⇒ 合成 5 发红，真仓库 4 发【全绿】**
+  G4 又一次是本轮最值的一条，和 round274-M3 / round275 同一句话：
+  **真仓库那一发对「判据被改成不判」是瞎的** —— 它今天必然绿，因为期望照着今天写。
+
+■ 我自己撞的三条，全部记下来（都是「把猜测当成了事实」）
+  1. **正则连错两版。** 第一版把 `pnpm i -D vitest && pnpm test test/poc/resume.test.ts`
+     【整段】当一条路径去 existsSync ⇒ **报了一条假故障**（那条 Run 其实完全正常）；
+     第二版只认出 2 条（漏 4 条）。⇒ 改成先取反引号整段、再按空白切 token。
+     两个错误形状现在都钉在守卫测试里。
+  2. **我写的注解把判据毒了。** 第一次给 Task 0.3 写「原写 xxx」时，把那个【不存在的旧路径】
+     放进了反引号 ⇒ 我的注解自己成了语料里的新故障。**自匹配坑第三次撞**（前两次：
+     plan-refs.ts 的注释、plan-refs.test.ts 的夹具）。⇒ 描述坏路径时不许给它反引号。
+  3. **我写的测试自己没在测它声称的东西。**（两次）
+     · plan-gate-paths.test.ts 里那一发想测「验收行前缀被改名 ⇒ 判据取不到任何东西」，
+       但我用了 `replace`（只换第一处），夹具里有【两条】Run 行 ⇒ 判据照读第二条，
+       返回的是【另一条真故障】，而我断的是「空集合 ⇒ 哨兵」。**它红了，我就以为判据生效了**，
+       实际红的是不相干的那一条。
+     · r12 第三格第一版是【假的一发】：我改的是 NOT_BUILT_TAG 常量的【值】，而那个字面量
+       本来就写在常量定义里 ⇒ 判据「文件里还有这串字节」照样成立 ⇒ 判据返回空。
+       「改了个东西，而判据根本不看那个东西」的测试会在报告里【占一行绿】，比没测试更糟。
+     ⇒ 两条通用口径：**测试里"把 X 改掉"的意图，要先确认改的是【全部】X**；
+       **判据要比对【被使用的方式】，不是比对【定义里在不在】**（后者恒真）。
+
+■ 顺带修掉的三处过期主张（原文保留 + 划掉 + 标出处 + 配复算命令）
+  ① Task 0.3「当前仓库内没有 driver-preflight 这个测试」⇒ 测试存在，16 发全绿。
+  ② Task 0.5「`pnpm verify` = 10 文件 / 113 passed」⇒ 带日期所以当年为真、不算撒谎；
+     今天 125 文件 / 2663 发，且 verify 的 lint 段今天恒红 ⇒ 那个「= 全绿」的等式已不成立。
+  ③ 末尾「当前工作区只有 docs/，没有代码、没有 git 仓库」⇒ 这一句到今天**整句反了**。
+     留着并划掉：**这一篇就是施工前的规划**，删掉会让后来人以为它从一开始就描述了现状。
+  另外三条 Run 的住址全部改成逐字存在的完整路径，并在原地写明「原地址靠子串匹配才绿」。
+
+■ 实跑（全部本轮现跑）
+  · `npx tsc -b` exit 0
+  · 全量：**125 files / 2663 passed / 6 skipped**（上一轮 124 / 2650 ⇒ +1 文件 +13 发）
+  · 三条新守卫单跑：lint-baseline 12 + plan-refs 10 + plan-gate-paths 10 = 32 发全过
+  · claims-registry：**30 passed**（含 O14 表与 renderMarkdown 逐字一致）
+  · 坐标探针：**12/12 OK** + 条数自洽（本轮又抓到 3 条 STALE：加了一格正文，行号全被顶下去）
+  · lint 读数 **292 error / 109 warning 未变** ⇒ 本轮新增文件一条 lint error 都没加。
+  · ⚠ 坐标那次修正是【用 sed 连改三处】，第二条规则的输出被第三条又改了一遍 ⇒ 改错。
+    已改成按行号定值重写。**批量文本替换不能靠"匹配内容"串着改**，这条也记进账。
+
+■ 欠着的账（本轮新增两条）
+      ① lint 修绿（round274 记的，未动）—— 必须早于任何一次拿 `pnpm verify` 当出口门。
+      ② 计划 6 道门与本篇 14 项的对照表 —— 本轮那张门禁表算是补了一半（门禁侧有了现状），
+         与 O1–O14 的对应关系仍没有。
+      ④ Playwright 两道门：东西【压根没建】，且这轮进一步量到它连"未建"都是静默的。CEO 决策面。
+      ⑥（新）**Task 5.8 那道门没有任何可核对工件**（纯人工 E2E）。守卫碰不到它 ——
+         本轮的守卫判的是「点名的路径存不存在」，而它一个路径都没点名。
+         ⇒ 这是这套机制的【边界】，不是漏做：没有工件的门禁只能靠人，
+           而"靠人"这件事本身在本仓从没被登记成一个风险。
+      ⑦（新）**其余 65 条"住址搬家"**：计划正文里那 65 条 `src/…` 旧住址【故意不改】
+         （它是施工前文档）。但后来人拿它们当现行住址用的风险是真实的。
+         本轮选择只在文档里写明口径，不做守卫 —— 做了就是一条恒红守卫。
+
+
+════════════════════════════════════════════════════════════════════════════
+round277  唯一生效的安全边界 + 一条【随机红】的守卫补不完的那一半
+时间：2026-11-17
+════════════════════════════════════════════════════════════════════════════
+
+■ 起点：docs 里剩下什么没做
+  O3 的剩余项经核对已全部落地；O13-2（TERMINAL 态）与 O7-1（预算硬停）是 CEO 决策面，
+  按家规只报不做。⇒ 本轮挑的是【射程里最高价值的一条空白】，不是清单上的下一项。
+
+■ 主体：`--permission-mode plan` 此前【一条守卫都没有】
+  它是今天真的员工身上唯一生效的安全边界（真 CLI 不可安装 ⇒ 除它之外没有任何东西能挡
+  住一次写盘）。变异证据：把 `engine/claude.ts` 里的 plan 改成 bypassPermissions ⇒
+  **全仓零红**。一条"唯一的安全边界"改掉了而 2678 发全绿 —— 这就是本轮要还的债。
+
+  落两层（互为对照，各管对面那层管不到的）：
+   · 静态四判据 `test/arch/role-spawn-boundary.ts`（+11 发）：spawn 点的基线名单、
+     plan 与 FLAG 的【相邻性】、诚实标注必须在【第一行代码之前】、探针键必须仍被要求。
+   · 行为一发 `packages/hub/test/engine/claude.test.ts`（+2 发）：真起一个子进程，
+     验它【一次都没写工作区】；再配一条正向对照（桩拿不到 plan ⇒ 同一条路径真的写出文件）。
+     没有对照，"文件不在"有五种成因分不出来 —— 那一条的价值全在对照上。
+
+  变异（`.workbuddy/round277-boundary-mutate.mjs`，自回滚）：B1 改 plan / B2 拆相邻 /
+  B3 新增 spawn 点 / B4 掏空判据 / B5 改名 import。**B5 预期是绿的** —— 它钉的是
+  这条守卫量到的【盲区】（`import { spawn as run }` 静态扫不出来），不是它的失败。
+
+■ 本轮最大的一条：`tsc -b`【从来不检查测试】
+  根 tsconfig 只 reference packages/*，packages/hub/tsconfig.json 只 include src。
+  ⇒ 全部 **157** 个测试文件（test/ 65 + packages/*/test/ 92）在类型检查射程外。
+  证据：往 `test/arch/role-spawn-boundary.ts` 塞一条 `const 坏: number = "字符串"` ⇒
+  **`tsc -b` exit 0**。忠实探针（`.workbuddy/tsconfig.tests.json`，非门禁）读数：
+  全仓 **289** 条，其中 test/arch 11 条。
+  ⇒ 这 11 条里含 **3 条从 round274 就存在的真类型错**：claims-registry 的 judge 联合
+     类型没加 lint-baseline / plan-refs / plan-gate-paths，而 r10/r11/r12 已经写了它们。
+     它们活着的原因不是设计，是【没有类型检查经过它们】。
+  本轮把 test/arch 那 11 条清到 **0**（judge 补齐 + 三处 `cs[0]` 可选链 + gate-selfcheck
+  的 `[0].trim()` 裸下标 + test-inventory 的无扩展名 import）。
+  ⚠ 探针【刻意不接成门禁】：278 条射程外的错今天没人认领，接成门禁就是一条恒红门。
+
+■ 一条【随机红】的守卫，靠逐个消费者补是补不完的
+  现象：`npx vitest run test/arch/` 跑 5 次红 1 次，红的是 ENOENT 读那个短命探针 ——
+  失败的是【取材那一发本身】（Failed Suites），不是任何一条判据。
+  本轮数下来漏接排除名单的有 **4 个**：plan-refs / role-spawn-boundary（我自己上一轮写的）
+  / claims-registry / irreversible-token。每一个都是【单跑恒绿、全量偶发红】。
+  先把 4 个补上，再立两条守卫把【第 5 个】变成确定性问题：
+   · 「每一个 readdirSync 的使用者都在名单里过了一遍」—— 声明式清单 + 新增即红。
+   · 「接了名单的取材函数在【探针真的存在】时不列出它」—— 临时树当场造探针，
+     与那个短命文件【无关】，恒红或恒绿；正是随机红那条补不上来的位置。
+  变异（`.workbuddy/round277b-fixture-race-mutate.mjs`，自回滚）：M1 抹排除 / M2 新造
+  未登记使用者 / M3 拔掉 import ⇒ 三条各自【恰好红 1 发且点名句对】，底座先验全绿。
+
+■ 本轮我自己犯的、值得记的错（每一条都被仓库里既有的东西抓到）
+  ①【自我命中第 5 次】在 plan-refs 的注释里写出了那个探针的文件名 ⇒ 被 production-deps
+     那条「探针名只允许定义在 run-fixtures.ts」当场判红。那条守卫的注释本身就在警告这件事。
+  ②【自我命中第 6 次·变体】守卫第一版拿 `text.includes` 扫整份文件 ⇒ no-native-deps 与
+     test-inventory 因为【注释里举了那个路径】双双假红；换成 lexTs 只看代码区后，doc-refs
+     又因为【把一个 src 路径当测试数据字符串】假红。⇒ 承认「从文本猜这段代码会不会读 src」
+     做不到精确，改成声明式清单。**一条会假红的守卫比没有守卫更糟**（0055 家规），
+     三代假红本身就是这条结论的证据。
+  ③【同一个错连犯两次】给 plan-refs 和 harness-invariants 加了 `isRuntimeFixture(...)`
+     却忘了 import ⇒ 前者被我自己立刻发现，后者要靠【全量跑 6 发红】才发现。
+     ⇒ 这正是上面那条「tsc -b 不检查测试」的【代价现场】：一个拼错的标识符本应是
+        编译期一句话的事，在这里变成了 6 发红 + 一轮排查。
+  ④ 探针脚本自己统计行解析不出来（vitest 输出夹 ANSI 转义）⇒ failed 恒为 -1，
+     三条变异明明红了却被报成 ok:false。探针坏掉的样子恰好是它要抓的那种「静默不判」。
+  ⑤ 改完代码没先想【谁按行号引用了它】⇒ doc-refs 抓到 0006 与 0039 两条活坐标漂移。
+     这条守卫这次是【纯收益】：它不需要我记得，它自己红。
+
+■ 实跑（全部本轮现跑）
+  · 全量：**126 files / 2678 passed / 6 skipped**（上一轮 125 / 2663 ⇒ +1 文件 +15 发）
+  · `test/arch/`：**28 files / 301 发**连跑 3 次全绿（补名单前：5 次红 1 次）
+  · `npx tsc -b` exit 0；`tsc -p .workbuddy/tsconfig.tests.json` ⇒ test/arch **0** 条，全仓 278 条
+  · lint 读数 **292 error / 109 warning 未变** ⇒ 本轮新增/改动没加 lint 债
+  · 两条变异探针：round277-boundary（B1–B5 与预期逐条吻合，含 B5 预期绿）、
+    round277b-fixture-race（M1–M3 全红且点名，底座绿）⇒ 两个文件都自回滚，
+    跑完 `packages/*/src` 下无残留探针（ls 复核过）
+  · 顺带修正 2 条活坐标（0006→:273、0039→:157），原地留「漂过一次 + 漂的原因」
+
+■ 欠着的账（本轮新增一条）
+      ① lint 修绿（round274 记的，未动）—— 必须早于任何一次拿 `pnpm verify` 当出口门。
+      ② 计划 6 道门与本篇 14 项的对照表 —— 仍没有。
+      ④ Playwright 两道门：没建 + 依赖装不上 ⇒ CEO 决策面。
+      ⑤ 桶下限只有「半个 P4」。
+      ⑥ 没有可核对工件的门禁（Task 5.8）—— 机制边界，不是漏做。
+      ⑦ 计划正文里那 65 条旧住址：故意不改。
+      ⑧（新）**射程外的 278 条测试类型错无人认领**，而 `.workbuddy/tsconfig.tests.json`
+         没接进任何门禁。⇒ 本轮把 test/arch 清到 0 只是【把自家门口扫了】；
+         真正的账是「要不要给测试上类型检查」这个决定本身还没做。
+         它和 ① 是同一类问题：先有债，再谈门；反过来做只会得到一条恒红门。
+      ⑨（新）**role-spawn-boundary 的三条已知余量**：改名 import 扫不出（B5 已钉）、
+         换成 SDK 调用则整条失效、判据④只查「探针代码在」不重跑探针。
+         写在这条守卫的文件头里，没写进任何自动检查 —— 余量只能靠读它的人。
+
+■ round277 补账（r13 与实测红数；本节写于同一轮，紧接上面）
+  主张链已接上：claims-registry 新增 **r13**（judge: role-spawn-boundary）⇒ 登记表 12→**13** 条，
+  claims-registry.test.ts 30→**33** 发；O14 那张表用 `.workbuddy/append-r13-row.mjs` 【渲染后原样插入】，
+  没有手抄（r11/r12 那两行历史上漂过，而守卫判逐字一致）；本篇 §7 新增第 **13** 格。
+
+  round277-boundary 驱动的真实用法是【两步】：`apply B1` 再 `revert`，不是一次跑完五条。
+  上面正文写"自回滚"指的是 revert 子命令逐文件字节核对 + 新建文件删后验 ENOENT，这点没写错，
+  但【一条命令跑完 B1–B5】是错的描述 —— 记下来，因为这脚本下次还是要靠这段说明跑的。
+
+  实到红数（三条测试面：claims-registry + role-spawn-boundary + claude.test.ts，共 60 发）：
+    B1 plan→bypassPermissions … **3 红**：静态那一发 + 行为那一发 + 正向对照那一发
+      ⇒ 两层各自独立红，这正是"两层"的意义；对照那发也红是因为它断言 argv 里还有 plan。
+    B2 诚实标注去掉"生效" …   **1 红**（只有那一格，红因不串）
+    B3 新开一个字面 spawn 点 … **2 红**（四格全过 + 取材同源那发点名是谁）
+    B4 相邻判据换成 includes … **4 红**：合成 B2 那一发 + 真仓库四格 + ⭐登记表两条
+      ⇒ ⭐ 这一发是本轮【登记表层价值】最干净的一次演示：把判据改成对任何形状都返回真之后，
+        role-spawn-boundary 自己那 11 发里只红 1 发，而 claims-registry 从【判据还查不查】
+        这一侧另外红了 2 发（r13 之二、之三）。只看"那条守卫的测试红了几发"会低估这层。
+    B5 改名 import 的 spawn …  **0 红 = 预期绿**（已知余量被钉成一条断言，不是失败）
+  round277b-fixture-race：M1/M2/M3 各【恰好红 1 发且点名句对】，底座先验全绿 ⇒ ALL MATCH。
+
+  ⚠ 顺带量到一条【耦合】，不当缺陷处理但记下来：B4 期间「变异 r13 之三」也红了 ——
+    它用 realFiles.arch() 读真文件，而 B4 就改在那个文件上，于是判据②先命中、
+    ③那条拿不到自己预期的红话。这是【打在真文件上的变异】与【读真文件的合成测试】天然会撞，
+    干净仓库上两条各自独立通过（33/33 已验）。不改：把它改成不读真文件就要另造一份守卫全文，
+    而那份副本【会漂】—— 用一份会漂的副本换掉一次可解释的级联，是亏的。
+
+  坐标：加表行把 014 之后整体顶下去 1 行 ⇒ 坐标探针当场报 r10/r11/r12 **STALE**，
+  按它给的 now@ 值改回（1383 / 1468 / 1499），r13 自己的 line 也从 1562 追到 1563 一次。
+  ⇒ 复算 `node .workbuddy/round270-check-coords.mjs`：**13/13 OK**，声明与打印自洽。
+
+  最终读数（本轮收尾现跑）：全量 **126 files / 2681 passed / 6 skipped**；
+  `test/arch/` 28 files / **304 发**连跑 3 次全绿；lint **292 error / 109 warning 未变**；
+  `tsc -b` exit 0；tests 探针下 `test/arch` **0** 条类型错。
+
+■ round277 第二次更正（我自己写的那份清单里有一条【判据之外的错账】）
+  上面补账那节立的「声明式清单」把 no-null-bytes.test.ts 放进了 OUT_OF_SCOPE，
+  理由写的是「walk 的根不含 packages/hub/src」—— 【这句是假的】：它的 SCAN_ROOTS
+  第一条就是 packages/hub/src，它只是【间接】经 harness-invariants.walkFiles 排掉了夹具。
+  ⇒ 这条错的危险不在分类本身（两种分类今天都不红），在于它让【接法检查】出现一个洞：
+    OUT_OF_SCOPE 是【直接 continue 跳过检查】的，于是一个真的需要排夹具的文件被登记成
+    「不需要」，那格从此没人看。**清单式守卫的全部价值都在条目理由为真**，
+    而理由是我手写的一行注释 —— 这次它错了，就是这类守卫天生的软肋，记下来。
+  改法：挪进 NEEDS，并把接法谓词从「import 了名单」扩成【四种写法】（isRuntimeFixture /
+    listHubSrc / BOUNDARY_PROBE / `walkFiles(`，带括号是为了不让注释提一句就算接上）。
+
+  ⭐ 更值的一条：光扩谓词等于【认一个没验证过的名字】。所以补了两处，各证一面：
+   · 临时树那一发把 walkFiles 也加进取材清单，正向对照从 3 个文件改成 4 个 ——
+     于是【walkFiles 真的排了】这件事第一次有了行为证据，不再是注释。
+   · 变异加 M4：抹掉 walkFiles 里那一格 `if (isRuntimeFixture(e.name)) continue;`。
+     实到【恰好红 1 发，且红的是临时树那一发，不是接法那一发】。
+     ⇒ 这一发把两层的分工钉死了：抹掉排除之后 `isRuntimeFixture` 这个【名字还在文件里】
+       （import 行没动）⇒ 接法检查【照绿】，只有当场造探针的那一发看得见。
+       如果只立接法检查，M4 这一类退化是【永久静默】的。
+
+  顺带（同一轮的账，不掩盖）：那个活坐标在生产-deps 里【同一轮漂了两次】(:258→:273→:274)，
+  我在 0006 原地把"漂过一次"改成了"漂过两次"并写清选点错误 —— 把坐标钉在一处会被反复
+  编辑的测试体内部，本来就选错了；真正判「isRuntimeFixture 有没有被消费」的是临时树那一发，
+  坐标只是它恰好长在哪一行的记事。
+
+════════════════════════════════════════════════════════════════════════
+round278：那两条「依赖装不上」是过期的 —— 顺带把坐标核对从一次性脚本搬进守卫
+════════════════════════════════════════════════════════════════════════
+
+■ 本轮做的三件事（按价值排，不按做的顺序）
+  ① 复跑 §6 自己要求复跑的那个安装 ⇒ 「装不上」在三个层次上全部为假。
+  ② 补台账 debt ②：6 道阶段出口门 ↔ 本篇 14 项的对照表（新增 §5.1）。
+  ③ 顺手量到一条真洞并堵上：登记表坐标【没有任何测试在核】，只有一个人手跑的脚本。
+
+■ ① 复跑：不是"查了一下能装"，是三层各出一条读数
+  背景：docs/OPC-OS-功能优化设计.md §6「React / Electron / 移动端重写」那一行自己写着
+  「要先复跑安装再判」，而 O12 正文更直白：「不要沿用『装不上』这个旧结论」。
+  本轮之前，Task 2.9 / 4.7 两道门的登记写的是「依赖装不上，属 CEO 决策面」（debt ④）。
+  复跑（`.workbuddy/probe278/`，隔离目录，不碰本仓 lockfile）：
+   · registry 可达 … `npm view playwright` → 1.65.1；`npm view @larksuiteoapi/node-sdk` → 1.76.0
+   · 装得上 … `npm i --ignore-scripts` 两个包 ⇒ `added 54 packages`，exit 0
+   · 跑得起来 … `playwright install chromium` 之后 `chromium.launch()` 真起无头浏览器，
+     `locator("#x").textContent()` 读到 "ok" ⇒ `LAUNCH_OK version=159.0.8154.6`
+  ⚠ 只有第二层是不够的：npm 包能装 ≠ 浏览器能起（Playwright 的浏览器是另一条下载通道）。
+    反过来第三层单独也不够：本机 ms-playwright 里【本来就有】2.3G 浏览器仓，
+    那只能证明"这台机器上有"，不能证明"这个包能装"。三层各证一面，缺一条就不该下结论。
+  ⇒ 改的是【归因】不是【状态】：那两个 ❌ 今天仍然是 ❌（spec 没建、IM 适配器一个文件都没有），
+    变的只是"为什么 ❌"—— 从"技术阻断"降级成"没人决定 + 没人写"。决策面因此变窄。
+  ⚠ 刻意【不】把这条做成守卫：它依赖网络 ⇒ 一条会随机红的守卫比没有守卫更糟（0055 家规）。
+    正解是 §8 那张保质期表加一行「什么时候会变成错的」+ 复算命令，已加。
+
+■ ③ 顺手量到的洞：坐标核对从来没有门禁，只有脚本
+  今天 §5.1 插进去一段 ⇒ §7 全体下移 35 行 ⇒ r10/r11/r12/r13 【四条同时 STALE】。
+  抓住它的是 `.workbuddy/round270-check-coords.mjs` —— 一个【要靠人想起来跑】的脚本。
+  而 `renderMarkdown` 不渲染 `source.line`（只渲染 主张 / 方法 / 时刻），
+  ⇒ 登记表那条「表与渲染逐字一致」的守卫【对坐标是瞎的】：坐标整片漂走，304 发照绿。
+  ⇒ 这就是 O14 整篇在治的东西的【自指版本】：一条只有手动跑才生效的核对，就是过期陈述的制造机。
+  落地：`test/arch/claim-coords.ts`（判据）+ `.test.ts`（8 发）。
+   · 【import REGISTRY 而不是正则扫源码】。那个脚本自己文件头记着三代坑：反引号读不到 /
+     单引号整条跳过 / id 只认一位数于是 r10 被静默跳过而输出与「十条全对」逐字一样。
+     **用一条会静默漏读的正则去核对「漏读」，是拿问题本身当工具。** 对象化之后
+     「漏了一条」= 数组短一格，是结构性的；外加「REGISTRY ≥ 13 且每条都有 line 与锚点句」
+     那一发兜住"空数组恒绿"。
+   · 口径与脚本一致：比对前两边各剥 `code` 反引号与 **粗体**（不剥就是恒 0 命中，
+     而"读不到"与"坐标丢了"在输出上长得一样 —— 那是脚本踩过并写在自己文件头的坑）。
+   · 锚点为空 ⇒ 返回 []。空串 `includes` 恒真，不挡的话「把锚点句清空」会让整条守卫恒绿。
+  变异（`.workbuddy/round278-claim-coords-mutate.mjs`，自回滚，跑完逐字节核对 reverted:true）：
+   · C1【往 §5 插一行】= 今天真发生的形状 ⇒ 红 1 发，红的是真仓库那一发。
+     ⚠ 变异刻意打在【文档】上而不是打在 registry 上：改一个行号是人手动犯错，
+       插一段让整片下移是【日常编辑的副作用】，而后者才是没人会察觉的那一种。
+   · C2【把某条主张的锚点句在文档里改掉】住址没错而句子换了 ⇒ 红 1 发。
+   · C3【掏空判据：coordDrifts 循环体不 push】⇒ 红 4 发（四条合成变异各红一次）。
+     真仓库那一发【不红】—— 又一次 round274-M3 / round276-G4 同一句话：
+     **真仓库那一发对「判据被改成不判」是瞎的**，它今天必然绿，因为期望照着今天写。
+
+■ 本轮我自己撞的（两条，都被仓库里既有的东西抓到）
+  ① 新测试自己写错夹具：`withLine` 只改行号、留着 r1 的真锚点句，却配了一份合成文档
+     ⇒ 判出来的红是"这句话不在这份文档里"而不是要判的"登记行没命中"，一次混两种故障。
+  ② 新增两个文件让 lint 【各 +1】（format 162→163、organizeImports 119→120）
+     ⇒ 被 `lint-baseline.test.ts` 那条棘轮当场拦下，改法是对【这两个新文件】跑
+        `biome check --write`，**不是**抬基线上限。这条棘轮第一次以这种方式生效：
+        它此前一直红着提醒存量，这次拦的是【增量】，而那才是它设计的用处。
+
+■ 实跑（全部本轮现跑）
+  · `test/arch/`：**29 files / 312 发**全绿（上一轮 28 / 304 ⇒ +1 文件 +8 发）
+  · 坐标探针 `node .workbuddy/round270-check-coords.mjs`：**13/13 OK**，声明=打印自洽
+  · `tsc -p .workbuddy/tsconfig.tests.json` 下 `test/arch` 类型错 **0** 条（新两个文件在内）
+  · lint 读数回到 **292 error / 109 warning**（新文件的 2 条已就地修掉，基线未抬）
+  · 探针目录 `.workbuddy/probe278/` 隔离：`node_modules/` 被 .gitignore 命中、
+    `git check-ignore` 复核过；biome 与 vitest 取材口径不受影响（lint-baseline 的
+    filesChecked 保持 293 那一发为绿即是证据）
+
+■ 欠着的账（本轮销一条、改口一条）
+      ② 【已销】计划 6 道门 ↔ O1–O14 对照表 ⇒ 新增设计文档 §5.1（验收行逐条 sed 出来的）。
+      ④ 【改口】Playwright 两道门：原写「依赖装不上 ⇒ CEO 决策面」，实测装得上且浏览器起得来。
+         ⇒ 剩下的决策只有「要不要为它加这个依赖 + 谁来写 spec」，不再有「装不装得上」。
+      ① lint 修绿（未动）③ / ⑤ / ⑥ / ⑦ / ⑧ / ⑨ 同上一轮，一条没动。
+
+■ round278 补账（主张链 + 一次【自指】落地；本节写于同一轮，紧接上面）
+  上面 ③ 那件事登记成了 **r14**（judge: `claim-coords`）⇒ 登记表 13→**14** 条，
+  `claims-registry.test.ts` 33→**36** 发，`test/arch` 304→**315** 发。
+  O14 那张表用 `.workbuddy/append-registry-row.mjs` 【渲染后原样插入】，没手抄。
+
+  ⭐ 这条登记的独特之处：**它判的是本篇自己的账**，所以它一落地就立刻真抓到一次漂移。
+  插表行 ⇒ §7 全体 +1 ⇒ r10/r11/r12/r13/r14 **五条同时 STALE**，而这次不需要谁跑脚本：
+  `test/arch/claim-coords.test.ts` 自己红了，红话逐条给出「现在在哪」
+  （`r10 的坐标 1418 行上读不到它自己的主张 —— 现在在 [1419]` ×5）。
+  ⇒ 这是本仓第一次出现「守卫在写成的那一轮就抓住它所治的那个故障」，
+    以前每一轮都是【靠人跑脚本】抓到、然后【为下一次】立守卫。
+
+  r14 的三发合成变异（各打一种空壳化，红因互不重叠，逐条断言【不】含另外两条的红话）：
+   · 之一 摘掉 claim-coords.ts ⇒ 「重新变成一句散文」。
+   · 之二 把 `located.includes(e.source.line)` 换成永不成立的比较 ⇒ 命中「登记的行号命中了吗」。
+     这一发是本轮 C3 在登记表层的对应物：判据文件在、名字在、`claim-coords.test.ts`
+     那 5 发合成变异【照绿】（它们全在判 coordDrifts 的输出）—— 只有这一层问「你还比不比」。
+   · 之三 把「取材非空」那一发摘掉 ⇒ 命中「非空」。空数组与「全部核对通过」逐字一样。
+
+  ⚠ 刻意【不重跑】坐标核对：`claim-coords.test.ts` 自己就在跑它，登记表再跑一次就是
+    两处各测一遍然后互相漂（同 r13 不重跑子进程、r10 不重跑 biome）。
+
+■ 本轮我自己撞的（补上面那两条之外，还有三条值得记）
+  ①【删掉了一行声明】给 r14 加判据时，`old_string` 尾带上了 `export const REGISTRY …`
+     那一行而 `new_string` 没写回去 ⇒ 声明整行消失。靠【改完立刻 grep】发现，
+     没让它活到跑测试。这是本仓反复记的那一族，对象还是我自己。
+  ②【变异本身是个 no-op】「取材非空」那发第一版写成 `0 && REGISTRY.length`，
+     而判据查的是【字符串还在不在】⇒ 这个变异【什么都没改掉】却会"红得像是抓到了"。
+     换成一个真正抹掉那个标识符的替换。**判据查字符串，变异就必须抹字符串**，
+     否则测的是判据的耐心不是它的覆盖面（同 r12 那发「先确认改到了东西」）。
+  ③【文案里写了条数，而那条数当场就过期】r14 主张初稿写「本登记表自己那 13 条」，
+     而它自己就是第 14 条。这正是登记表家规禁的形状（`renderMarkdown` 不许出现条数）。
+     连同「十三条全对」那两处一起改成不含条数的说法。
+
+■ 插入器从小债里销掉一条
+  round277 那份 `append-r13-row.mjs` 把 r13/r12 写死在脚本里 ⇒ 写完即过期。
+  新的 `append-registry-row.mjs` 认「渲染表的倒数第二行=锚点、最后一行=要插的」，
+  加 `--sync` 处理【主张文案改了而表没跟着改】（覆盖前只认同一 id 那一行，覆盖后整块重核）。
+  ⚠ 本轮先用 `node` 跑它撞了两层错：`.mjs` 里不能带 TS 断言；`claims-registry.ts` 的
+     `./x.js` 后缀纯 node 解析不了 ⇒ 必须 `npx tsx`。这两条写在这里是因为下次还是要靠它。
+
+
+═══════════════════════════════════════════════════════════════════════════════
+round279 · O8 的验收句写出来了，而它红在【设计文档假设已经有了】那一格
+═══════════════════════════════════════════════════════════════════════════════
+
+■ 落地的东西
+  · packages/hub/test/acceptance/new-role-to-its-own-criteria.test.ts（7 发，全绿）
+  · test/arch/claims-registry.ts：新增 r15 + 判据 orgAddNodeGapCheck + Files 多两格
+  · test/arch/claims-registry.test.ts：33→41 发（r15 的四发变异 + 一发真仓库正向对照）
+  · docs/OPC-OS-功能优化设计.md：O8 正文与「验收」段各加 round279 注；§7 新增第 15 格；
+    O14 表用 `npx tsx .workbuddy/append-registry-row.mjs` 渲染插入（未手抄）
+  · .workbuddy/round279-o8-acceptance-mutate.mjs（六发变异，自回滚 + 逐字节核对）
+
+■ 本轮最该记住的一条：【文档把「写路径已经有了」当前提，而它不成立】
+  O8 原文「组织侧的写路径全在，缺的是新角色有名有姓有料那一段 —— 也就是 O2」。
+  逐字核过 ⇒ 缺的是【两段】，而更大的那一段正文一个字没提：
+   ① 契约：`orgChangeSchema` = `reparent` / `add_edge` 的判别式 union，`.strict()`
+      挡着第三种形状。连「一条 `add_edge` 捎带一个 `node`」都过不了 schema（实测）。
+   ② 提交路径 ⭐：`commitOrgGraph` 落库的是【请求体那张图】，而 `revalidate` 只按那
+      两个 kind 分派 ⇒ 一个新节点随一条与它【无关】的合法 `add_edge` 提交能拿 **200**，
+      全程没有任何判据过手它。实测那个节点连 `model_family` 缺着都进了 `graph_json`。
+      ⇒ 这不是"实现差一点"，是【一条缺判据的旁路】。它的危险在于"看起来已经通了"：
+      谁拿这条 200 当「O8 第一跳已完成」，就把 §18.3 三关整个绕过去了。
+      同一张图、两个入口、两种答案 —— 保存期 `violatesNoSelfReview` 明确说这节点不可用，
+      提交路径却照收（与 round272 那族「同一件事两处各判一次而口径不同」同形）。
+   ③ 出口：`packages/web/src` + `packages/desktop/src`（合 11 个 ts/tsx）里
+      `add_edge` / `reparent` 零出现 ⇒ 「CEO 在界面上加一个角色」今天连请求都没有出口。
+  ⇒ 修法不是补播种，是给契约加一个【带判据的】`add_node`（属改契约，O8 动作里没有这一格）。
+
+■ 后三跳是真走得通的，且断言抓在生产通道上
+  播种（真 `runSeedCli`、真库、退 0）→ 新任务钉在【提交后那一版】图上（实测 graph_version=1）
+  → 引擎把活 handoff 给一个不在 `NODE_TO_TEMPLATE` 里的角色 → 那一轮经 `dispatch → runTurn`
+  递出去的身份提示词里有它自己那条标准。
+  ⚠ 第四跳【刻意不写成】"我自己调一次 `rolePrompt` 然后断言"。断言抓在 runTurn 收到的
+    `i.rolePrompt` 上 —— 变异 M4（`deps.rolePrompt(task.role)` 写死成 `"intake"`）把它钉成
+    必须红，实测确实红 ⇒ 「提示词里出现」那句读的是引擎真的递给 harness 的那一份。
+
+■ 反空转做成【两个角色的对照】而不是加一句否定断言
+  §7 第 6 格警告的是「新角色名字恰好等于模板文件名 ⇒ 那条测试能过而绿在名字进了图」。
+   · `data` —— 名字进了图但没播种 ⇒ 提示词里是 `NO_CHARTER_LINE`、一条标准都没有；
+   · `translator` —— 同一条链播过 ⇒ 标准进来了。
+  外加一发【前提自证】：这两个名字不与任何模板文件名 / `NODE_TO_TEMPLATE` 的键相同。
+  变异 M6（往 `NODE_TO_TEMPLATE` 挤进 `translator`）实测红【两】发（前提 + 正题）
+  ⇒ 撞名那天有两个人红，不是一个都没有。
+
+■ 六发变异（node .workbuddy/round279-o8-acceptance-mutate.mjs，自回滚 + 逐字节核对）
+  M1 runtime：空壳那句 `NO_CHARTER_LINE` 换成空串      ⇒ 红 2（反空转 + 占位串）
+  M2 seed：占位串判据 `> 0` 改 `> 1`                    ⇒ 红 1（占位串那一发三重断言）
+  M3 commit：给提交路径【补上】新节点的 model_family 校验 ⇒ 红 1（那条 200 变 422）
+  M4 dispatch：身份提示词写死角色                        ⇒ 红 1（正题那一发）
+  M5 prompt：渲染器不渲染任何一条真标准                  ⇒ 红 1（正题那一发）
+  M6 preset：预设节点名挤进 `translator`                 ⇒ 红 2（前提 + 正题）
+  ⭐ **M3 是这一族里唯一「把生产代码改好，于是测试红」的一发** —— 它是这条主张的
+     反向保鲜：将来谁真给 `add_edge` 补上新节点校验，证据②那一发会红着提醒他
+     【同步更新 r15 与 O8 那两段】，而不是留着一句已经过期的 200 继续作证。
+     r15 的「已知余量」那一格登记的就是这件事（判据本身不判它）。
+
+■ r15 的判据为什么让 Files 多两格（`hubTest` / `countFiles`）
+  r15 判的是【某发验收测试在场且仍在判那两格】，而那个文件既不在 `packages/hub/src`
+  也不在 `test/arch` —— 没有 `hubTest` 就只有两种坏选择：读不到自己要读的文件（恒红），
+  或退回 grep 全仓（恒宽）。`countFiles` 只有一个用途：给「前端里 add_edge 零出现」
+  配一条【取材非空】下限。没有它，两个前端根改名或整个没 ⇒ 「零出现」自动成立，
+  而它的输出与「前端真的不发组织变更」逐字一样 —— 本仓最贵的那一族就是这种恒真的否定式。
+  ⚠ 下限第一次写成 `< 10` 当场把我自己的判据判红：`packages/web/src` 实测只有 4 个
+     ts/tsx。**下限要现数，不能凭感觉**（现数：web 4 / desktop 7 ⇒ 合 `< 5`）。
+
+■ 坐标：r14 那条守卫【第二次】在它照管的改动里当场抓住漂移
+  本轮两段文档编辑（O8 注 + §7 第 15 格）⇒ 七条坐标漂（r3/r7/r10–r14）；
+  表里插 r15 那一行 ⇒ §7 再 +1 ⇒ 六条又漂。两次都是 `claim-coords.test.ts` 自己红的，
+  红话逐条写着「现在在哪」，我按它报的数改，没有跑任何手动脚本。
+  ⇒ 上一轮写「这是第一次【下一次就是这一轮】」，本轮是它的第一次复现。
+
+■ 读数（改动后）
+  test/arch 29 文件 / 320 发全绿（r14 那轮是 315）
+  全仓 128 文件 / 2699 通过 / 6 跳过（r14 那轮 127 / 2692 / 6）
+  lint 棘轮：`format 162→164` 被 lint-baseline 当场拦下 ⇒ 只 `biome check --write`
+  我碰过的那三个文件把新增的两条抹掉，**没有抬基线**（本轮又一次「改新代码而不是改判据」）
+
+■ 本轮我自己撞的
+  ①【interface 加字段之前没数实现方】`Files` 多两格会打崩所有实现方，而我是
+     先写完 `realFiles` 才去 grep 还有谁实现它。这次只有 `fakeFiles` 一处，没造成损失，
+     但**顺序是错的**：先数实现方再加字段（同 round278「先确认改到了东西」那条纪律）。
+     ⚠ 这类漏在运行期【不一定红】：`fakeFiles` 少实现一个方法，vitest 只在【真调到】
+     那一格时才炸 ⇒ 一条没人调的坏实现能活到下一次有人用。TS 类型检查会抓，
+     而 `tsc -b` 从不检查 test/（round277 刚把这条登记成 r13 的副题）。
+  ②【下限拍脑袋】`< 10` 撞红自己的判据，实测 `packages/web/src` 只有 4 个 ts/tsx。
+     现数只要一条 `find | wc -l`，我没肯花那十秒。
+  ③【一次 Edit 打了个空，还留下一对分号】给 `Files` 补注释时，我把一条【本来就正确】的
+     行当成要改的行提交了一次，结果只多出一个 `;;`。靠 grep 发现。
+     它归进本仓那一族是因为：**它长得像一次成功的编辑**（工具回了 success），
+     而它实际只是把文件弄脏了一点 —— 与「注释不是机制」同一个立场：**回 success 不等于改对了**。
+  ④【主张文案里带了一个裸竖线】初稿写 `reparent | add_edge`，会在 O14 那张表里把单元格
+     切开。这一条是【插入之前读到渲染出来的那一行】时看见的，**没有红过任何一发** ——
+     要说清这一点，否则下一轮有人以为有一台机器在管表格形状：`renderMarkdown` 不校验形状，
+     那条守卫只判【渲染结果在文档里逐字存在】。表格形状靠人眼。
+
+═══════════════════════════════════════════════════════════════════════════════
+round280 · O12 动作 1：桥接装配落地，而它红在【我自己登记的出口少一道门】那一格
+═══════════════════════════════════════════════════════════════════════════════
+
+■ 落地的东西
+  · packages/hub/src/channels/approval-bridge.ts（新）：`makeApprovalBridge` 一次装配交出
+    运行时要的三格（actorFor / loadCard / act）。身份判据【一行都没重写】——
+    actorFor 直接就是 `makeChannelActorResolver` 的产物，角色读的是 `resolveBinding`。
+  · packages/hub/test/acceptance/im-reply-approves-card.test.ts（新，12 发全绿）
+  · test/arch/claims-registry.ts：r3 判据【翻向】（零调用方 ⇒ 读者必须在场）+ 新增 r16
+  · test/arch/claims-registry.test.ts：41→47 发（r3 三发 + r16 五发）
+  · test/arch/irreversible-token.ts：`APPROVE_CARD_CALLERS` 多一格（桥，带两格凭据说明）
+  · test/arch/dead-modules.ts：BASELINE 多一格（`makeApprovalBridge`，登记过的半成品）
+  · docs/OPC-OS-功能优化设计.md：O12 现状 + 动作 1 + 验收三段各加 ⚡ 注；O14 表 r3 改写、r16 新增
+  · docs/decisions/0030-...md：§0 那条「下游 0 消费入口」的【第三次】更正（原文留着）
+  · .workbuddy/round280-o12-bridge-mutate.mjs（四发变异，自回滚 + 逐字节核对）
+    + .workbuddy/sync-registry-row.mjs（按 id 同步表里【任意】一行；
+      `append-registry-row.mjs --sync` 只管最后一行，改 r3 时它接不上）
+
+■ 本轮最该记住的一条：【前门有道门，不等于导出函数有道门】
+  O11「不可逆不许在 IM 里批」今天只在 `abstraction.ts` 的 `handleOne` 前门判一遍。
+  我写完桥、正要把 r16 登记进去的时候回头读自己的 `makeChannelAct`：它是【导出函数】，
+  装配方可以绕开 runtime 直调它 —— 而它这一路上没有任何一道判可逆的门。
+  也就是说：我正准备登记的这条链，其落库点能批掉一张 `irreversible: true` 的卡，
+  前提只是【有人直调】。它今天从任何生产入口都走不到（全仓没有真 IM 适配器），
+  但「走不到」是【别人那一格还没做】换来的，不是这条链自己保证的。
+  ⇒ 修法不是给直调加警告，是让【落库点自己带凭据】：`act` 在落库前用同一个
+    `isIrreversibleApproval` 读【此刻库里那一行】再判一遍。引用别人路上的一道门
+    不叫有凭据 —— 那条路上有门这件事，随时会因为路上别处改动而消失。
+  ⚠ 这一格不是「防御性编程」。判据是现成的：`irreversible-token.ts` 那张
+    `APPROVE_CARD_CALLERS` 名单【本来就要求】每个调 `approveCard` 的文件登记两格凭据
+    （已验证绑定 + 判可逆）。是名单先于我的测试发现了这件事 —— 我把它当「补一行登记」
+    去做，读到「凭据两格」那一条才意识到第二格我确实没有。
+
+■ verified 那一格为什么【不在桥里】判，而撤权却【在桥里】生效
+  `im_bindings.ceo_role TEXT NOT NULL DEFAULT 'ceo'` + `verified INTEGER DEFAULT 0`：
+  不看 verified 的 actorFor 等于宣布「任何有人替他插过一行绑定的 IM 账号默认就是 CEO」。
+  这一格的答案在 `resolveBinding` 里，而且它【只有一个入口】、没有 `includeUnverified` 开关。
+  桥刻意不复制那条判据 —— 复制就是造第二个事实源，两处各判一次迟早漂（round272 那一族）。
+  但桥【重查了一次角色】（决策那一刻，不是 actorFor 那一刻），这不是复制判据，
+  是多问一次同一台机器。价值实测出来了：`rebindRole` 会把 verified 清回 0，
+  点击在路上走的时候被撤权 ⇒ 第二次查到 null ⇒ 批不掉。这是这条链唯一一处
+  「撤权当场生效」的位置，M4（摘掉重查）红 7 发钉着它。
+
+■ 反空转：M2 第一轮是【空变异】，那格因此被补出来
+  M2 = 把角色判据换成裸 `SELECT ceo_role`（完全不看 verified）。第一轮它只红【1】发。
+  没红的那一发本该是「pending 绑定批不掉」—— 它之所以照旧绿，是因为它【走运行时】，
+  而 runtime 先过 `actorFor`（真判据）再走到 `act`：M2 改的是后者，前门照样把人拦下。
+  ⇒ 那条断言测的是【前门】，不是被改的那一格。这是本仓最贵的一族假绿：
+    断言在场、真的红过、但红因不在这条路上。
+  补法不是加断言，是加一条【不走前门】的用例：直调 `h.bridge.act` + pending 绑定。
+  补完 M2 红 2 发。⚠ 记这一点是因为它【不是靠想出来的】，是靠变异跑出来的读数 ——
+  如果我只跑基线 12 发全绿就收工，那格坏判据会带着「有反空转发」的画像活下来。
+
+■ 五台守卫这一轮各自抓了什么（读数全部现跑）
+  · claim-coords：我 O12 文档段落 +4 行 ⇒ 六条坐标漂（r10–r15），它自己红，逐条写着「现在在哪」。
+    本轮【第二次】漂移（第一次是表里插 r16 那行）。按它报的数改，没跑手动脚本。
+  · doc-refs：我重写 `abstraction.ts` 文件头 ⇒ 该文件整体下移 5 行 ⇒
+    0030:36 那条 `abstraction.ts:593` 快照红。⚠ 这条红【与 r3 无关】：
+    它守的是【正文里那条坐标引用】，翻向后的 r3 判据看不见它。⇒ 改一个被文档引用行号的
+    文件，红的是另一台守卫。
+  · dead-modules：`makeApprovalBridge` 在 src 里零 import ⇒ 必须显式登记。
+    登记时写明它的【设计性死法】：O12 动作 2 落地那天它就该消失出名单。
+  · irreversible-token：见上面那条最该记住的。它这次不是抓格式，是抓了一道真缺的门。
+  · lint-baseline：我新增的文件把 format 顶到 164、organizeImports 顶到 121 ⇒ 当场拦下，
+    只 `--write` 我自己那几个文件抹回基线内，**没有抬基线**（连续第四轮同一条纪律）。
+
+■ 读数（改动后，全部现跑）
+  test/arch 29 文件 / 326 发全绿（round279 那轮 29 / 320）
+  全仓 129 文件 / 2722 通过 / 6 跳过（round279 那轮 128 / 2699 / 6）
+  验收 12 发 + 四发变异（台账写完前重跑过一遍，不是引用上一轮的读数）：
+    基线 12 绿 ⇒ M1 actorId 退回写死 ceo 红 4 / M2 裸 SELECT ceo_role 红 2 /
+    M3 摘掉落库前判可逆 红 1（走运行时那发照旧绿 ⇒ 证明第二道门独立在判）/ M4 摘掉角色重查 红 7
+
+■ 本轮我自己撞的
+  ①【变异落点没先确认就动手】M2 空变异。我先写了四发变异再想「哪发红算抓到」，
+     正确顺序是先问「这一格的输出被谁消费，那条路上还有谁先拦」。代价是一次
+     完全无信息量的证据跑 —— 而且它【看起来是成功的】（红了一发，脚本汇总照常打勾）。
+  ②【大范围重写删掉了循环体】用 python 整段重写 claims-registry 时，for 循环的 body 没了。
+     小范围 Edit 不会这样；大范围重写的代价是【删掉的東西不在 diff 里】。已恢复。
+  ③【.mjs 里写 TS 类型断言】`rendered.get(id) as string` ⇒ esbuild 解析失败。
+     ⚠ 这是 memory 里【已经记过一次】的那条坑，我又踩了一遍。记下来的规则如果不读就是没有。
+  ④【改文件之前没数谁引用了它的行号】②的同类，round278/279 各登记过一次同一个纪律
+     （改之前先数实现方 / 先数引用），本轮是【第三次】。前两次我写的是「下次先数」，
+     这轮证明写那句话不管用：真正的修法是把红的那台守卫当顺序依据 ——
+     改完立刻跑 `test/arch`，而不是改完接着写下一段。本轮后半程就是这么做的，
+     doc-refs 那条 5 行漂移就是它抓的。
+
+■ 没做的（债，逐条对得上文档）
+  ① O12 动作 2：真 IM 适配器。桥今天从任何生产入口走不到，这件事写在 r16 主张正文、
+     dead-modules 注释、O12 三段注、`abstraction.ts` 与桥的文件头里 —— 一共五处，
+     因为【一处】总会被读到而【另外四处】不会。
+  ② `ChannelActRequest.viaChannelId` 仍是【登记过的余量】：桥不消费它。
+     要让它进审计，得改 payload 契约与回放断言，那是另一件事，不该借接线顺手做。
+  ③ lint 基线（format 162 / organizeImports 119）要真降一次，得先 commit 那 189 个未提交文件
+     再全仓 `--write` ⇒ 属要问 CEO 的决定，本轮没动、也没抬。
+  ④ Playwright 门禁：依赖可装性 round278 已复跑（能装），剩下的问题只有一个 ——
+     谁写 spec。仍属要问的。
+  ⑤ O7-1 预算硬停状态机 / O13-2 TERMINATED：CEO 拍，只报不做（纪律，非拖延）。
+
+═══════════════════════════════════════════════════════════════════════════════
+round282 · O12 动作 2 的【分母】补上了：一张形状表没有读者，而轮询那一路一直在空转
+═══════════════════════════════════════════════════════════════════════════════
+
+■ 落地的东西
+  · packages/hub/test/channels/feishu.test.ts（新，40 发全绿）。这不是「补测试」：
+    `feishu.ts` 文件头与 `FEISHU_SHAPE_EVIDENCE` 上一轮就写着「字段变了红的是这个文件」，
+    而那个文件【从未存在过】—— 本轮做的事是把一句假主张变成真主张。
+  · packages/hub/src/channels/feishu.ts 一处真 bug：`messageToEnvelope` 把轮询读到的回传
+    标成 `kind:"text"` ⇒ 运行时第①步把每条批准判成 `ignored_not_action`，而 `summarize`
+    对那一档【刻意不说】⇒ 审批人从手机点了批准，Hub 一行日志都不打。改成 `card_action`，
+    并让发送侧与接收侧共用同一个 `parseCardAction` 闸门。
+  · 删掉两条零调用方的导出：`makeFeishuChannelFromEnv`（与 `assembleImChannels` 重复同一套
+    env 处理）、`pollChannelForRuntime`（注释指着它而函数已不在）。没有给它们造调用方凑活。
+  · test/arch/claims-registry.ts：r16 判据多两格（装配层测试仍提 `actorFor` / 适配器测试仍
+    正面断言轮询信封的 kind）。test/arch/irreversible-token.ts 那条 why 里
+    「今天它从任何生产入口都走不到」按 round281 翻面，登记内容仍是【凭据两格】。
+  · 过期主张清扫（本轮后半程，**10 处**，逐条 grep 数出来的）：设计文档 4 处（§1.2 那张表下的注 /
+    O12 现状那句「1001 行」/ O12 动作 2 的第二条边界 / 门禁对照表 Task 4.7 那一行）+
+    计划里 Task 4.7 那一格 + 0027 与 0028 各自的「别当成做到了」段 + 0031 两处（§0 与 §7）+
+    `irreversible-token` 那条 why。每处都是【留原文 + 挂 dated 路标】。
+    ⚠ 我第一次写的是「8 处」，那是【没数全也没手抄对】：单串 `grep -c "round282 更正"` 只数得出 6 条，
+    因为设计文档那 4 处用的措辞各不相同（「第三个坑」「round282 补的第二条边界」…）。
+    ⇒ 数东西要先把口径说清（按【我改的处】数还是按【同一个标记串】数），否则数出来的数自己就是假的。
+    ⚠ 唯一的例外是设计文档 Task 4.7 那一行：它是表格里的一格「今天状态」，
+    留原文等于让状态列继续说假话 ⇒ 那一行改写了 ❌ 后面那句，并把换掉的凶手写进去。
+    这个区别值得记：**「留原文」管的是叙述，不管状态读数** —— 状态读数错了就该改。
+
+■ 最该记住的一条：一张没人读的形状表，比没有表更危险
+  `FEISHU_SHAPE_EVIDENCE` 那十几行是上一轮照着飞书文档抄的，抄的时候逐条核过，内容是对的。
+  坏的是它【没有读者】：字段漂移不会让任何东西变红，而文件头写着「红的是这个文件」。
+  ⇒ 本轮那 40 发里真正值钱的不是断言数量，是它让那张表第一次有了消费者。
+  ⚠ 「形状表必须有测试引用它」这件事今天【没做成通用守卫】：只有 r16 那一格管住了 feishu
+  这一张。仓里别的证据表（`t6e_*`、`FEISHU_*` 之外的抄录段）照旧可以没读者而全绿。
+
+■ 六发变异（全部打在【生产代码】上；锚点必须逐字命中一次；跑完逐字节还原）
+  基线 67 绿（`feishu.test.ts` 40 + `im-channels.test.ts` 27 一起跑 —— 分开跑会得出
+  「另一份测试没用」这个错结论：M3/M4 只红在适配器那侧，M6 只红在装配那侧）。
+  M1 kind 退回 text ⇒ 红 8（1 发钉形状 + 7 发是后果。最沉的是「未绑定的账号点了 ⇒ warn
+     且不动库」跟着红：未授权点击从『说一声』退化成【完全静默】）
+  M2 摘掉入队闸门 ⇒ 红 3（红的是【不入队】那几发，不是「判决变成 ignored_not_action」——
+     后者根本不是这条判据的坏法：闲聊入队后每轮照样记一条 handled，不变式照成立，
+     只是不再说明任何事）
+  M3 水位无条件提交 ⇒ 红 1（翻页被截断那一轮不许把没读到的那些跳过去）
+  M4 水位只推进被收下的那条 ⇒ 红 1（⚠ 第一次跑【全绿】，见「我自己撞的」①）
+  M5 错误串带上凭据 ⇒ 红 2（适配器那句抛错 + 装配层那句人话各判一次；两条独立字符串，
+     改哪一条都可能单独把 `app_secret` 带出去）
+  M6 notes 不排空 ⇒ 红 4（去重表 `said` 与 `pending` 是两条队列。不排空 = 每轮重播
+     历史上说过的每一句 ⇒ 一次性提醒变成每 60 秒响一次的告警，本仓认定最贵的那类噪音）
+
+■ 本轮我自己撞的
+  ①【M4 第一次跑是全绿】夹具把闲聊排在可批那条之前 ⇒ 「水位只推进被收下的那条」与
+     「水位对每条都推进」给出【同一个读数】。判据要能区分，夹具就得让两种写法给出不同读数
+     ⇒ 把时间戳顺序调反（批准 SEC-7、闲聊 SEC-6）。⚠ 这一条是【写完变异才补对的】，
+     不是设计时想到的：M3 一次就红、M4 全绿，差别不在判据而在夹具的时间戳顺序。
+  ②【把 M3 和 M4 记反了】我一度把「逃掉的那发」写成 M3，重读现场才定准是 M4。
+     台账里的归因错了【没有任何东西会红】，只能靠重读 —— 这类错和假绿同族，只是更便宜。
+  ③【两发变异草稿是重读时改掉的，一次也没跑过】M5 初稿插了一个不存在的 `bodyOf(e)`，
+     M4 初稿在声明之前用了 `en`（TDZ）。vitest 只做转写不做类型检查，这种草稿【跑得起来】，
+     而它给的红色读数是 ReferenceError，与判据无关。⇒ 记清楚这两版【没跑过】，
+     别让它在下一次转述里变成「撞出来的经验」。
+  ④【测试里的 `as any` 会把断言变成装饰物】卡片渲染那几发初版写 `(x as any).actions`：
+     `as any` 对缺失的元素给 undefined ⇒ `expect(actions.every(...)).toBe(true)` 在空数组上
+     【恒真】。换成有类型的 `cardDoc()` 读取器，读不到那一栏就当场抛 ⇒ 结构漂移是红，不是绿。
+  ⑤【一次性脚本里的逐条自检挡下一次批量写错】我用脚本按 `claim-coords` 报的数改 16 条坐标，
+     第一版取 `d.line`（真字段叫 `recorded`）⇒ 取到 16 个 undefined。因为脚本里留了
+     「从本条 id 起往后第一条 line 必须等于登记值」这一道核对，它【一条都没改】，
+     只打印 16 行「未改」。改对字段之后才真正写入。
+     ⇒ 批量写坐标的脚本若无逐条核对，一个字段名拼错会放大成 16 条【绿的假坐标】，
+     而那正是这条守卫整篇在防的东西。手改也不行：手改等于用「我记得加了几行」去推，
+     0057 记的就是同一个坐标按推断错过两次。
+
+■ 读数（全部现跑，不引用上一轮）
+  `npx tsc -b` ⇒ exit 0
+  `npx vitest run test/arch` ⇒ 29 文件 / 326 发全绿（本轮中途红过一次：我在设计文档插了
+    7 行 ⇒ r5–r16 十六条坐标同向漂，claim-coords 自己红、逐条写着「现在在哪」，
+    按它报的数改完复跑绿。这是本轮【唯一】一次由守卫而不是由我发现漂移）
+  `npx vitest run`（全仓）⇒ 131 文件 / 2789 通过 / 6 跳过（上一轮台账 129 / 2722 / 6）
+  `.workbuddy/round282-o12-adapter-mutate.mjs` 在台账落笔前重跑一遍：基线 67 绿 ⇒
+    M1 红 8 / M2 红 3 / M3 红 1 / M4 红 1 / M5 红 2 / M6 红 4
+  `lint-baseline` 那一发在本轮 arch 跑里是绿的 ⇒ 本轮改动（一处 test/arch 代码 + 若干文档）
+    没把读数顶出基线，**没有抬基线**（连续第五轮同一条纪律）。
+
+■ 没做的（债，逐条对得上文档）
+  ① O12 动作 4：发卡那一路（`deliverCard`）仍零生产调用方，前置是一张【跨重启】的投递台账
+     （含迁移与幂等键）。库里今天没那张表，本轮没造 —— 没有台账就每轮重发，等于每 60 秒
+     给审批人推一张重复卡，那比不推更坏。
+  ② 真飞书接口在本机【一次也没打过】（要真凭据）。本轮全部绿都绿在注入的 fetch 上。
+     这一条不是工程债，是要人动的那一格 —— 手工沙箱验证现在能做的是「手机上回批」，
+     做不了「卡片推到手机上」。
+  ③ `pollOnce` 那发外网 HTTP【没有超时】：注入点在，缺的是默认超时与它的处置。
+  ④ 「形状表必须有读者」今天只有 r16 那一格管住 feishu 这一张，没做成通用守卫。
+     ⚠ 别把 r16 读成「所有证据表都被管着」。
+  ⑤ lint 基线（format 162 / organizeImports 119）要真降一次，得先 commit 那批未提交文件
+     （round281 量到 189 个）再全仓 `--write` ⇒ 属要问 CEO 的决定，本轮没动、也没抬。
+  ⑥ Playwright 门禁：依赖可装性 round278 已复跑（装得上），剩下的问题只有一个 ——
+     谁写 spec。仍属要问的。
+  ⑦ O7-1 预算硬停状态机 / O13-2 TERMINATED：CEO 拍，只报不做（纪律，非拖延）。
+
+═══════════════════════════════════════════════════════════════════════════════
+round283 · O12 动作 4 落地，而本轮大半花在【补证】：我在设计文档里先写下
+           「这一格现在【有】机器判据了：r17」，那句话当时是假的
+═══════════════════════════════════════════════════════════════════════════════
+
+■ 落地的东西（三块，顺序不是随手排的）
+  ① 迁移 `packages/hub/resources/migrations/0009_card_delivery_ledger.sql`。
+     幂等键是**主键** `(approval_id, channel_id)` 本身，不是「顺便建的一个索引」——
+     先查再插的判据不是判据（同 0024 卡片去重 / 0025 唯一写入者）。带外键
+     `REFERENCES approvals(id)` 且【故意不带】CASCADE：删一张送过的卡若顺手清掉台账，
+     抹掉的正是「这张卡推给过 CEO」那份唯一证据；代价是 `DELETE FROM approvals`
+     对送过的卡不再一句走通，而 src 里今天零处删 approvals ⇒ 代价落在手工改库的人身上。
+     `action_return` 存的是【推出去那一刻】可点不可点，因为 `supportsActionReturn`
+     是个读此刻健康位的 getter，不记得自己一小时前是什么。
+  ② `packages/hub/src/channels/deliver.ts`（292 行）：那张表的第一个写方，
+     也是 `deliverCard` 从写下那天起第一个生产调用方。
+  ③ `serve/im-channels.ts` 的 `pollRound()` 每轮心跳在**判完回传之后**扫一遍 pending
+     （`runtime.pollAll()` 的 index < `deliverRound()` 的 index）。反了会把审批人
+     刚在手机上批掉的那张卡在同一轮里再推一次。
+  ④ 对账迁移：`zero-producer` 那条 `other`（deliverCard 零调用方）随横幅改词一起删，
+     `OTHER_COUNT` 7 → 6。方向是从「人记得看」迁到「拆掉就红」。
+
+■ 本轮最该被反驳的决定：顺序是「先抢台账再发」，不是「先发再插」
+  两种都会失败，而**可修复性不对称**：
+   · 先发再插 ⇒ 发送成功而 INSERT 失败 ⇒ 下一轮【再推一张】。重复卡伤的是人对系统的
+     信任，改不回来 —— 它把人训练成忽略这张卡，而这张卡是 §11「移动端只做决定」的载体。
+   · 先插再发 ⇒ 有行而没送到 ⇒ 这张卡【永不自动重推】，要人显式 `clearDeliveriesFor`。
+  选后者是「宁可要一个看得见的漏推，不要一个看不见的轰炸」。
+  ⇒ 直接后果：**这张表读不出「到没到人手里」**。成功与发送失败在这一张表里是同一行
+    （失败不回滚，回滚就等于下一轮再推）。那一格只有日志答，而日志跨不过重启。
+    0009 文件头最早写的是相反的两句（「失败的尝试没有行」），那句是我定顺序【之前】写的，
+    本轮改写并把改写原因留在文件头里 —— 留着比删掉值钱。
+
+■ 本轮实测到的两条 SQLite 语义（我第一版写在代码里的是一句没测的推断）
+   · `INSERT OR IGNORE`：主键撞 ⇒ `changes` 为 0 且【不抛】；外键违例 ⇒ 抛
+     `FOREIGN KEY constraint failed`（IGNORE 不吞它）。差别有后果：一张在扫描之后
+     被人删掉的卡会让 claim 的 promise reject，接不住就带走整轮投递。
+   · **唯一能在测试里造出那一瞬的位置**是 `supportsActionReturn` 那个 getter ——
+     它每读一张卡被读两次，正好落在「卡已读到、台账还没落笔」之间。我第一版测的是
+     「发送期间删卡」，那一发【读起来像测到了】：删的时机在下一张卡的【读】之前，
+     `failed` 恒为 0。假绿不必是错的断言，一个晚一步的时机就够了。
+
+■ r17 是怎么从「文档里的一句话」变成判据的
+  我在设计文档写完「这一格现在有机器判据了：r17」时，r17 还【不存在】，而 im-channels
+  那 4 发装配测试也不存在，`method` 文字里还写着一发【不可能存在】的 `not_routed` 测试。
+  ⇒ 这是本仓最贵的一种错：**判据的文字先于判据本身落地**，而读者只能相信文档。
+  补证分三层：
+   · `cardDeliveryLedgerCheck` 七条生产代码判据：迁移在场 / 带外键 / 主键是那两列 /
+     `claimed = await claimDelivery(` 在 `= await deliverCard(` 之前 /
+     `INSERT OR IGNORE INTO card_deliveries` / `why.includes("FOREIGN KEY constraint failed")`
+     / 装配层 `await runDeliverPass({` 且 pollAll 在 deliverRound 之前 /
+     `deliver.test.ts` 在场且仍在断 `/FOREIGN KEY/`。
+   · `claims-registry.test.ts` 47 → 56 发：1 发真实仓库正对照 + 8 发合成变异。
+   · `im-channels.test.ts` 27 → 31 发（真的推出去 / 台账跨轮生效 / 发卡排在判决之后 /
+     平台拒收时那一行留着且只说一次）。
+  ⚠ 仍然没有机器判据的那一格要说出来：`not_routed`（多于一条通道时干脆不推）今天
+    【没有活的分母】—— 装配层只接了一条通道，那一档在结构上到不了。⇒ 不凑测试，
+    写在设计文档 + r17 射程 ② 里，别把它读成「有测试守着」。
+
+■ 六发变异打在投递内核（.workbuddy/round283-mutate-deliver.mjs，基线 17 绿，自还原逐字核对）
+  M1 顺序翻向（先发再插，正是文件头明说「不选」的那一条）⇒ 红 10 / 17
+  M2 外键违例不再接住（一张被删的卡带走整轮）⇒ 红 1
+  M3 摘掉 `OR IGNORE`（「送过没有」改由异常表达）⇒ 红 3
+  M4 没注册的通道 id 不再抛，读成「本轮没有要发的卡」⇒ 红 1
+  M5 发送失败就抹掉台账行（把看得见的漏投改回看不见）⇒ 红 2
+  M6 不可逆卡干脆不推（把「只读」错读成「不发」）⇒ 红 1
+
+■ 四发变异打在装配层（.workbuddy/round283-mutate-imch.mjs，基线 31 绿，自还原逐字核对）
+  A1 `deliverRound()` 挪到 `pollAll()` 之前 ⇒ 红 4   A2 装配层忘了接发卡 ⇒ 红 6
+  A3 摘掉 `not_started` 那道门 ⇒ 红 2   A4 失败那一句不再说怎么重推 ⇒ 红 1
+  ⚠ 刻意【没有】`not_routed` 那一发：不是忘了，是打不动 —— 见上面那一格。
+
+■ 本轮我自己撞的（每一条都改了守卫，不是只改了代码）
+  ① 变异锚点没命中，而红是【别的原因】给的：我给「变异 r17 之三」注入的是
+     `deliverCard(channel, {...})`，判据找的是 `= await deliverCard(` ⇒ 注入无效，
+     那发红是空心的。改法不是调断言，是改成真正的两行对调 + 先断锚点唯一。
+     【无效变异伪装成有效红】比空变异更难发现，因为它给的正是你想要的那个答案。
+  ② 针脚太宽：`"FOREIGN KEY constraint failed"` 这句裸串在注释里也有 ⇒ 我删掉整个
+     接外键的代码分支，判据仍然绿。收紧成 `why.includes(...)` 才有分母。
+  ③ `f.arch("migrations/0009...")` 解析到 `test/arch/` 下面 —— 我差点把一个命名空间
+     当两个用。改成专用 `migration()` 访问器，并注明它只为 r17 存在、不得拿去遍历目录。
+  ④ `fakeFiles` 少一个 `migration` 方法，而 `tsc -b`【查不到】（0047 量的就是这条：
+     tsc -b 从来看不到测试文件），判据自己的 try/catch 会把这件事读成「那份迁移不在了」
+     ⇒ 8 发合成变异会一起红在一个假原因上。补访问器时把这条失败路径写进注释。
+  ⑤ `skippedNotPending` 我断 1 实得 0：pending 扫描跑在判决【之后】，那张卡此刻已经
+     是 approved。断 0 并注明「把这一格和扫描-读取竞态那一格混起来，测试就再也分不出
+     顺序错了和并发窗口」—— 错的是我的模型，不是断言。
+  ⑥ A3 的锚点命中 2 次：`started.has(c.id)` 在 pollRound 的重试分支里也有一句。
+     那处重复是【合法的】，扩锚点而不是删重复。
+  ⑦ `doc-refs` 快照红（`abstraction.ts:602` → `:607`）：按 0044 的家规只挪 key、
+     内容串一字不动 —— 快照要证的仍是「0030 指的是同一段代码」。
+
+■ 读数（全部现跑，不引用上一轮）
+  `npx tsc -b` ⇒ exit 0
+  `npx vitest run test/arch` ⇒ 29 文件 / 335 发全绿（上一轮台账 29 / 326）
+  `npx vitest run packages/hub` ⇒ 91 文件 / 2201 通过 / 6 跳过
+  `npx vitest run`（全仓）⇒ 132 文件 / 2819 通过 / 6 跳过（上一轮 131 / 2789 / 6）
+  两台变异机在台账落笔前各重跑一遍：还原后与原文【逐字一致】（git status 里那两个
+  src 文件是本轮的真实改动，不是残留）。
+  `lint-baseline` 在 arch 跑里是绿的 ⇒ 本轮改动没把读数顶出基线，**没有抬基线**
+  （连续第六轮同一条纪律）。
+
+■ 没做的（债，逐条对得上文档）
+  ① 真飞书接口在本机【一次也没打过】（要真凭据）。本轮全部绿都绿在注入的 fetch 上；
+     「卡片推到手机上」这一格仍做不了，能做的仍是「手机上回批」。不是工程债，是要人动的那格。
+  ② `pollOnce` 与推送那发外网 HTTP【没有超时】：注入点（`fetchImpl`）在，缺默认超时
+     与它的处置。现在一个 watch 同时管读与推 ⇒ 补超时比原来更值，也更贵。
+  ③ 「形状表必须有读者」今天只有 r16 管住 feishu 这一张，没做成通用守卫。
+     ⚠ 别把 r16 读成「所有证据表都被管着」。
+  ④ `not_routed` 需要一张路由表 + 一个真装配点，然后才谈得上测试；本轮只登记了缺口。
+  ⑤ lint 基线（format 162 / organizeImports 119）要真降一次，得先 commit 未提交那批
+     再全仓 `--write` ⇒ 属要问 CEO 的决定，本轮没动、也没抬。
+  ⑥ Playwright 门禁：依赖装得上（round278 复跑过），剩下的问题只有「谁写 spec」⇒ 要问。
+  ⑦ O7-1 预算硬停状态机 / O13-2 TERMINATED：CEO 拍，只报不做（纪律，非拖延）。
+
+═══════════════════════════════════════════════════════════════════════════════
+round284 · O12 动作 2 补口：那发外网 HTTP 现在每发有自设截止，而本轮的代价是
+           「文档先于判据落地」这条我又撞了第二次
+═══════════════════════════════════════════════════════════════════════════════
+
+■ 落地的东西（四块）
+  ① packages/hub/src/channels/feishu.ts：`FEISHU_FETCH_TIMEOUT_MS = 10_000` +
+     `FeishuConfig.fetchTimeoutMs?` + `FeishuFetchInit.signal?`。两个调用点各自
+     `signal: AbortSignal.timeout(this.#fetchTimeoutMs)`（取 token 一处、#call 一处），
+     【不是】一轮共用一个信号 —— 一轮是 1 次取 token + N 页读 + 1 次发卡，共用一个
+     就等于第二页被第一页的时间杀掉（T3 专门打这一发）。
+     畸形值（0 / 负数 / NaN / Infinity）回落缺省值，【不】当成「关掉超时」：那正是
+     这一格存在的全部理由要防的事。10s 这个数是【拍的】，不是量出来的，注释里写明白。
+  ② packages/hub/test/channels/feishu-http.test.ts（新，9 发）。单开一个文件是因为
+     feishu.test.ts 文件头承诺「一发真网络请求都不打」，而这一格唯一的证据形态是
+     【真 socket】：createServer(() => {}) 接住连接但不回答。9 发里 3 发是时机/口径
+     对照（40ms 到点、0 不回落到关、缺省走 10s），不是重复断言。
+  ③ r18 登记（test/arch/claims-registry.ts 的 fetchDeadlineCheck）：五条判据 + 一条
+     绊线 —— hub/src 里任何文件出现 `fetch(` 而没有 `AbortSignal.timeout(` 就红。
+     这条绊线才是 r18 里唯一【通用】的部分，前五条只护 feishu 自己。
+  ④ 四处过期陈述更正（im-channels 头 ②③、assemble 的 in-flight skip 警告文案、
+     关机横幅文案）。后两处是给运维读的：一个卡在飞书请求上的人看到的就该是那句。
+
+■ 本轮最该被反驳的决定：把截止交给适配器，而不是塞进 defaultFetch
+  塞进 defaultFetch 更省事，但注入的 fetchImpl 就绕过了它 ⇒ 「每发都有截止」变成
+  「缺省实现有截止」。适配器交出 init.signal 后，注入实现读不读【管不住】。
+  ⇒ 这一格只有注释拦着，没有机器判据。r18 射程 ② 写明白，别读成「整条路被管着」。
+
+■ 实测到的 AbortSignal 语义（我第一版写在注释里的推断是错的）
+   · 不回答的 socket + AbortSignal.timeout(200) ⇒ 抛的是 DOMException，name 为
+     TimeoutError（203ms 观测）。断 String(e) 而不是断 instanceof 更有分母。
+   · 一个【没被消费】的 AbortSignal.timeout 定时器是 unref 的，不吊住事件循环。
+     这使「适配器造了信号但注入实现没读」在结构上测不出来 —— 不是难测，是没有可
+     观测差异。⇒ 那一档只能靠注释，这是诚实的边界不是偷懒。
+   · 「一发有上限 ≠ 一轮有上限」：一轮最多 1 + N + 1 发相加。今天可容忍的唯一理由是
+     入站走【派发】、不 await 在心跳 job 里。谁把派发改回 await，这条豁免立刻失效。
+
+■ 四发变异打在生产代码（.workbuddy/round284-mutate-timeout.mjs，基线 9 绿，自还原逐字核对）
+  T1 摘掉取 token 那一发的信号（一轮的第一发没截止）⇒ 红 7 / 9
+  T2 摘掉 #call（读消息 + 发卡）那一发的信号        ⇒ 红 3 / 9
+  T3 一轮共用一个信号（第二页被第一页的时间杀掉）   ⇒ 红 1 / 9
+  T4 把 0 当成「关掉超时」（畸形值不再回落）        ⇒ 红 2 / 9
+
+■ 本轮我自己撞的（前两条是同一件事的两次）
+  ① 【文档先于判据落地，第二次】。我又先在设计文档写了「⇒ 这一格现在【有】机器判据：
+     r18」，那时 r18 不存在。round283 记的就是这一条，间隔一轮复发，说明它不是疏忽而是
+     习惯：写「已做到」比做到更顺手。⇒ 改不了习惯就先加机械步骤：下次这句话只允许
+     出现在 REGISTRY 里那条 entry 已存在、且变异跑过之后（本轮最终做到了，但顺序仍靠人记）。
+  ② 变异锚点漂了，而且是【我自己上一发编辑】造成的：为了过 biome 格式，我把那个三元
+     条件提出来起名 usable，T4 的锚点还在指旧半句 ⇒ 命中 0 次，那发【没跑】就打印了
+     「锚点不符」。这条的价值在于脚本会自己喊出来；危险的是【锚点仍命中但命中的是别处】，
+     那种变异跑完了也不会喊（round283 的 ① 就是它）。
+  ③ 「交 0」那一发我第一版只断了一个布尔：`aborted === false`。而「回落到 10s」和
+     「根本没挂信号」读出来都是 false ⇒ 那发红或绿都不说明任何事。改成 probe() 返回
+     {signal, aborted}，同时断 signal instanceof AbortSignal 与 aborted === false。
+  ④ 畸形值那发我用一个 spy 收两个通道，断 inits.length === 3 —— 每通道 2 发，真值是 4/6。
+     改成每通道一个 spy 的顺序循环。断言写死之前先算一遍【预期条数】，而不是跑出来照着填。
+  ⑤ srv.address() 返回 AddressInfo | string | null。没用 as，写了一个会抛的 portOf()。
+     这里的分支不可能成立，但 `as` 会把「不可能」变成「不对我负责」。
+  ⑥ 从 packages/hub 目录跑 vitest ⇒ No test files found + global-setup 加载失败。
+     include 是根相对路径 ⇒ 必须从仓库根跑（本条已在多轮里出现过，仍值得钉在台账）。
+  ⑦ lint-baseline 红（format 162 → 164）。没抬基线、没全仓 --write、没整文件重排：
+     用 biome format --stdin-file-path 逐行判断哪几处是我引入的，手改那几处（feishu 的
+     三元、useOptionalChain、noUnusedFunctionParameters），新测试文件单独 --write。
+     doc-refs.test.ts 里预存的引号风格错误【没动】—— 我加的那一行不是违例。
+  ⑧ claim-coords 红两轮（8 条、9 条漂移）。一律用 .workbuddy/round282-fix-coords.mjs
+     取守卫自己报的命中行，不做「我记得加了几行」的算术。doc-refs 红两次：按家规只挪
+     key、内容串一字不动（那个坐标本轮漂过【两次】:1904 → :1911 → :1913，注释里记着）。
+
+■ 读数（全部现跑）
+  npx tsc -b ⇒ exit 0
+  npx vitest run test/arch ⇒ 29 文件 / 344 发全绿（上一轮台账 29 / 335）
+  npx vitest run packages/hub ⇒ 92 文件 / 2210 通过 / 6 跳过（上一轮 91 / 2201 / 6）
+  npx vitest run（全仓）⇒ 133 文件 / 2837 通过 / 6 跳过（上一轮 132 / 2819 / 6）
+  变异机在台账落笔前重跑：T1 7 / T2 3 / T3 1 / T4 2，还原后与原文逐字一致。
+  lint-baseline 在 arch 跑里绿 ⇒ 没抬基线（连续第七轮同一条纪律）。
+
+■ 没做的（债，逐条对得上文档；③ 本轮落地，改写而非抹掉）
+  ① 真飞书接口在本机【一次也没打过】（要真凭据）。本轮 9 发绿在【本地真 socket +
+     注入 fetch】上，「卡片推到手机上」那格仍做不了。不是工程债，是要人动的那格。
+  ② 「形状表必须有读者」今天只有 r16 管住 feishu 这一张。本轮评估过做成通用守卫：
+     全仓证据表只有一张（FEISHU_SHAPE_EVIDENCE）⇒ 1:1 规则等于复刻 r16，且守卫文件头
+     自己反对「一条恒假或恒空的假守卫」。⇒ 不做，登记为已知缺口。⚠ 别把 r16 读成
+     「所有证据表都被管着」。
+  ③ 【本轮落地】那发外网 HTTP 的自设截止：默认 10s、每发独立、畸形值回落、绊线在 r18。
+     剩余射程三条要一起读：一发有上限 ≠ 一轮有上限（一轮是几发相加，前提是入站走派发）；
+     适配器交出信号但管不住注入实现读不读它（注入那半边只有注释）；绊线数的是【文件】
+     不是【调用点】，且一句写着 fetch( 的注释也会绊住那个文件。
+  ④ not_routed 没有活的分母（要一张路由表 + 一个真装配点，然后才谈得上测试）。
+  ⑤ lint 基线（format 162 / organizeImports 119）要真降一次，得先 commit 未提交那批
+     再全仓 --write ⇒ 属要问 CEO 的决定，本轮没动、也没抬。
+  ⑥ Playwright 门禁：依赖装得上，剩下只有「谁写 spec」⇒ 要问。
+  ⑦ O7-1 预算硬停状态机 / O13-2 TERMINATED：CEO 拍，只报不做（纪律，非拖延）。
+
+═══════════════════════════════════════════════════════════════════════════════
+round285 · §7 第 13 格那扇「刻意不接成门禁」的门接成了，形状是按目录的棘轮（r19）
+           本轮最大的收获不是守卫本身，是它立的同一轮就抓到我说了一句过期话
+
+■ 落地的东西（五块）
+  ① `test/arch/test-type-baseline.ts` + `.test.ts`（20 发）：把 round277 立的那份
+     量测探针 `.workbuddy/tsconfig.tests.json` 接成门禁。判据形状 = **按目录的上限表**
+     （22 条，总和 291），只许减不许增；冒出新测试目录当场红并点名；某目录修到 0 条
+     ⇒ 报「请把这条豁免删掉」（豁免不许比现实活得久）。
+  ② 三条反假绿哨兵：`filesChecked ≥ 200`（实测 272）挡 include 被改窄；
+     `unparsed = 0` 挡「诊断行解析不出来 ⇒ 少报」；「有错 ⇔ 退出码非 0」挡
+     「我在读一份根本没跑起来的检查」。三条各管一件事，别读成一条（下面 ③ 就是证明）。
+  ③ 一发【射程实测】而不是散文：临时 project 里一个语法错 + 三个各带类型错的文件 ⇒
+     tsc 只报 1 条 TS1109、三条 TS2322 一条不出，而 `--listFilesOnly` 照样列出 4 个文件。
+     ⇒ 语法错会短路整个 program，那一刻这一发测的不是完整语料，而**语料下限那条哨兵
+     管不到这一族**。这一发钉的是「我知道自己什么时候测不到」。
+  ④ 登记为 r19（judge 一族新增 `test-type-baseline`），八发合成变异 + 文档表同步 +
+     坐标修复。顺带把两处【已经过期】的陈述改对：`.workbuddy/tsconfig.tests.json`
+     的 `$comment` 与 优化设计 §7 第 13 格那句「刻意不接成门禁」。
+  ⑤ lint 基线【真降了一次】：293 → 287 error，且 `noSelfCompare` / `noConstantCondition`
+     两类归零后按棘轮自己的规矩把那条豁免【删掉】（表 7 条 → 5 条）。
+     起头是 `driver-pump.test.ts` 里一条永真三元 —— 两条规则同时红在同一行。
+     细节与「方向是被守卫逼的」那句在下面「本轮我自己撞的」⑧⑨⑩⑪，这里只登记事实：
+     这一格的落地物是【删掉的两行豁免 + 一处摘掉的装饰 + 两次下调的上限】，不是新写的守卫。
+
+■ 最该被反驳的决定：为什么是棘轮，而不是把 291 条清零
+  清零要动 22 个目录、上百个文件，而其中绝大多数是 `Row | undefined` 那一族
+  （`noUncheckedIndexedAccess` 的正当产物，改法是加断言或收窄类型，不是修 bug）。
+  更重要的是：**清零不是这条守卫成立的前提**。round277 当年不接门禁，理由写的就是
+  「接成门就是一条恒红门」—— 那句在一个前提下才对：把【清零当前提】。换成上限表之后
+  0 条读数是绿的、291 条也在表内，于是「修」是随时可以做的、被鼓励的动作，
+  而不是入场券。这一族本仓治过四遍（0055/0056/0057/0060）：**恒红的验收命令会被学会跳过**。
+
+■ 按目录而不是一把总数（本轮最值钱的一发变异证明了它）
+  变异读数：总量 291 → 287（**少了 4 条**）而 `test/org` 从 15 涨到 16。
+  按总数判 ⇒ 绿；按目录判 ⇒ 红并点名 `test/org 15→16`。
+  round275 的 P4 量过同一件事（「一个被撑大的总数会替一个空掉的分区作证」），
+  这里连「撑大」都不需要 —— 一个下降的总数同样能掩护一处上涨。
+
+■ 六发变异（全部打在【判据自己】身上，.workbuddy/round285-mutate-type-ratchet.mjs）
+  为什么这一轮没有一发打在生产代码上：本仓量过三次（round274-M3 / round276-G4 /
+  round278-C3）**真仓库那一发对「判据被改成不判」是完全瞎的** —— 它的期望就是照着
+  今天的读数写的，今天必然绿。所以这六发改的全是守卫自己：
+    M1 超出判定加 10 条容差           ⇒ 红 2（棘轮还在，只是小涨不报）
+    M2 基线外目录不再点名             ⇒ 红 3（分支留着，动作摘掉 = 「改成不判」的本体）
+    M3 dirOf 不归一分隔符             ⇒ 红 5（Windows 上全塌进 `.`）
+    M4 解析不出的行静默丢             ⇒ 红 1（少报 = 棘轮上的绿方向，只能靠变异拿）
+    M5 语料下限把 node_modules 算进来 ⇒ 红 2（哨兵数的不再是本仓语料）
+    M6 空壳豁免永不报                 ⇒ 红 1
+  跑完逐字节还原核对：与原文逐字一致。
+
+■ 本轮我自己撞的（逐条，不美化）
+  ① 【过期主张第三次复发，这次是【我写的数】】r19 那条主张我一开始写的是
+     「**157 个文件**整体在类型检查射程外」。这个数是 round277 抄来的。本轮现数：**167**。
+     三个轮次之前刚立的规矩（「上限会随修复下调，期望值一定会过期」）我当场破了一次，
+     而破的人是写规矩的人。修法不是把 167 抄进去 —— 是把【文件数】从主张里删掉：
+     主张的主语是「在不在射程内」，不是「有多少个」。文档正文那处保留 157（它属于
+     round277 那一段的历史读数，那一段写明了是当场量的），但主张表里不留手抄数。
+  ② 【一次自我污染】守卫自己的 JSDoc 里写了 `sed 's/(.*//'` 那种管道片段 ——
+     里面那两个字符连起来会【提前关掉这段块注释】，于是新写的两份文件各自炸出约 55 条
+     TS 语法错。守卫存在的前提是「读得懂 tsc 的输出」，而它自己先语法不合法。
+     改法：那两段改写成散文，并把「为什么不抄原文」写在注释里。
+  ③ 【一条假绿差点成型】`parseTscOutput` 第一版的检测正则要求行首有文件名，
+     于是 TS18003 / TS5083 那一型【不带位置的全局诊断】被静默丢弃。静默丢在棘轮上是
+     【少报】= 绿的方向，而 TS18003 恰恰是「include 一个文件都没命中」那条最坏情形的
+     唯一信号。修法：`/^(?:\S.*?: )?error TS\d+:/u`，带位置与否都计数，解析不出的进 `unparsed`。
+  ④ 【一条恒 0 模仿了它要报的信号】`parseListFiles` 第一版用「必须以 test/ 或 packages/ 开头」
+     的前缀白名单。拿它去量临时 project 直接恒 0 —— 而恒 0 看起来正是「include 被改窄」
+     想报的形状。改成只排 `node_modules` 一条口径，并把「为什么不用前缀白名单」写进注释。
+  ⑤ 【夹具算错基线】那发「总量降而某目录涨」我第一版在 `atBaseline()` 之上又追加了
+     16 条，于是红话读成 `test/org 15→31` 而不是 `15→16`。同 round284 那条同族：
+     **先算一遍预期条数，而不是跑出来照着填**。
+  ⑥ 【正则字面量里一个裸 `}` 是语法错】r19 之四那发我用 `/export function staleTypeEntries[\s\S]*?\n}\n/u`
+     切函数体 —— `u` flag 下这是 SyntaxError，整份测试文件 0 发没跑。改成 indexOf 切片。
+     这条本身不值一记，值钱的是症状：**Failed Suites 而不是某发红**，一眼像「环境坏了」。
+  ⑦ 【readdirSync 名单：本轮该我自己红一次】新守卫调 `readdirSync` 找 tsc，
+     于是 production-deps 那条【声明式清单】当场红并要我做一次决定。诚实的归格是
+     OUT_OF_SCOPE（它只进 `node_modules/.pnpm`，一个 src 目录名都不碰），
+     不是 NEEDS —— 写成 NEEDS 会让「排夹具」这句话对一个不碰 src 的函数说谎。
+  ⑧ 【lint 基线：本轮真降了一次，且方向是被守卫逼的】开局 293 error，落笔 288：
+     organizeImports 119 → 117、`noSelfCompare` 与 `noConstantCondition` 两类【归零】。
+     归零那一处是 `driver-pump.test.ts` 里 `expect(note).toContain("spawn" === "spawn" ? "…" : "")`
+     —— 一条**永真三元**，else 那一支永远跑不到，也就是说那一发断言里有半句是装饰。
+     两条规则同时红在同一行，正是「断言写反/写空」的形状。摘掉之后行为一字不变（43 发照绿）。
+     ⚠ 我一度以为自己把 `claims-registry.ts` 的注释和函数签名【粘成一行】是既成事实没法改 ——
+     现跑一遍才看清那是我这轮的一次 Edit 造成的（old_string 末尾多带了一个换行）。
+     修回去之后 format 回到 162，正好在基线上。**「以为是自己改坏的」与
+     「确认是自己改坏的」之间隔的就是一次现跑。**
+  ⑨ 【棘轮的规则当场管到我头上，两次】(a) 我改完 `lint-baseline.test.ts` 那发派生名单时
+     多写了一行超长的链式调用 ⇒ format 162 → 163 ⇒ **守卫当场红，红话点名 `format 162→163`**。
+     我没有抬表，改的是自己那一行。(b) 归零那两类之后，按棘轮自己的规矩
+     「某类目修到 0 ⇒ 请把这条豁免删掉」⇒ 我从 `LINT_BASELINE` 里【删了那两条】。
+  ⑩ 【手抄名单第三次漂，这次漂在守卫的测试里】`lint-baseline.test.ts` 那发「修到 0 条 ⇒
+     报请把豁免删掉」把【基线表的全部类目】手抄了一遍在期望里。我按 ⑨(b) 删表里两条，
+     它立刻红 —— 红得对，但红因是「期望那份手抄过期了」而不是「判据坏了」。
+     修法不是把名单再手抄一遍，是【从 LINT_BASELINE 派生】+ 另加一条 `not.toContain("format")`
+     钉住「format 那一格是判据判出来的」。派生【不损失变异力】：摘掉 `staleBaselineEntries`
+     的判据 ⇒ 拿到空数组 ⇒ 红；而它不再跟着上游漂。
+  ⑪ 【两份探针坏掉的形状是「有输出」】我把 `.workbuddy/round285-{lint-lines,rule-sites}.mjs`
+     留着当复用探针，但它们在台账落笔前一直打印 `?`。原因：行号在 `d.location.start.line`，
+     我读的是 `d.location.source.span.start.line` —— 那是 biome【文本】报告里的形状。
+     读错不抛错，只打印 `?`，于是「探针没查到」与「这地方确实没行号」在输出上逐字一样。
+     修法除了改路径，还加了一条【读不到就抛】：宁可探针炸，不要它安静地打 `?`。
+     ⚠ 顺带量到一件约束这条棘轮授权范围的事：`format` / `organizeImports` 是
+     【一份文件一条】诊断，`start.line` 恒为 0（实测）。⇒ 这条基线的计数单位是【文件】不是【行】，
+     「降一条」= 「有一份文件整份变干净了」。由此得出一条以前没写下来的边界：
+     对一份【早已入库】的老文件做 `--write`， biome 会把别人这轮没碰过的行一起重排 ⇒ 越界；
+     所以本轮那次 format 下调只对【整份未入库】的 `claims-registry.test.ts` 动手
+     （`git ls-files` 现数：那份文件在 untracked 那一侧），
+     而 `production-deps.test.ts` 那一发我【没修】—— 它红的那一行
+     `git show HEAD:` 现数在第 102 行，属既有债，不属本轮的授权。
+
+■ 读数全部现跑（不抄上一轮）
+  npx vitest run test/arch/ ⇒ 30 文件 / 372 通过（上一轮 29 / 352）
+  npx vitest run（全仓）    ⇒ 134 文件 / 2865 通过 / 6 跳过（上一轮 133 / 2837 / 6）
+  npx tsc -b                ⇒ exit 0（src 侧，与本轮无关但每轮复核）
+  类型棘轮（round285-readings.mjs）⇒ filesChecked 272 / errors 291 / unparsed 0 / exit 2
+    配额表 22 个目录，今天有错的目录 22 个，基线总和 291 ⇒ **每个目录都正好压在自己的上限**
+    （这是【新立基线】的正常形状，不是「刚好都修完了」的巧合；往下修的人会把这一格改掉）
+  lint（round285-lint-own.mjs）⇒ error 287（format 161 / organizeImports 117 / lint 9）
+    ⚠ 这个 287 和上面「变异读数 291 → 287」那个 287【无关】，纯属撞数：
+    一个是测试语料的类型错总数，一个是 biome 的 error 总数。台账里两个都出现，读的人别串。
+    基线表现在只剩 5 条（原 7 条：noSelfCompare / noConstantCondition 归零后按规矩删除）
+    上限本轮下调两处：format 162 → 161（有归因：见 ⑪ 那次只动未入库文件的 `--write`）、
+    organizeImports 119 → 117（⚠ 【归因不可考】—— 表里的 119 早就落后于现实，
+    我在本轮中途就量到过 117，但那时没留「按文件」的名单，所以现在说不出这 2 条是谁消的。
+    棘轮只要求「上限 ≥ 现实」，不要求每条下调都有故事；把这一格写成「我修掉了 2 条」
+    就是拿一个我证不了的归因去换一次好看的下调，故此处如实写「不可考」。）
+    ⚠ 另：`format` / `organizeImports` 的 `start.line` 实测恒为 0（一份文件一条诊断），
+    所以这张表的计数单位是【文件】不是【行】—— 探针按行去定位它必然打印 `?`。
+  变异机在台账落笔前重跑：M1 2 / M2 3 / M3 5 / M4 1 / M5 2 / M6 1，还原后与原文逐字一致。
+
+■ 没做的（债，逐条对得上文档）
+  ① lint 基线：上限现在是 format 161 / organizeImports 117（本轮 293 → 287，见「落地的东西」⑤）。
+     剩下的那两大块要真降一次，绕不开一次全仓 `--write`，而它【一次动 169 份文件】——
+     这一刀多大、切在哪儿能切，本轮做成了可数的东西（`.workbuddy/round285-lint-blast.mjs`）：
+       169 份涉及文件里，【51 份】本来就在这轮被改过（diff 反正要重看 ⇒ 排版混进去不新增盲区），
+       【118 份】是干净的（动它们 = 整份重排别人没碰过的代码）。
+     ⇒ 所以要问 CEO 的那一句从此有了两个选项，而不是一句「要不要修绿」：
+       (a) 先 commit 这 97 改 + 133 未跟踪，再全仓 `--write`；
+       (b) 先只切那 51 份（一次砍掉 51 条上限、零新盲区、不需要先 commit）。
+     ⚠ 本轮【两个都没做】：两个都越过「不可逆地重排别人写的行」这条线，属要问不做。
+     ⚠ 另外把一条【我自己抄了好几轮的话】改对了：文档 / lint-baseline 注释 / 台账此前都写
+     「一次 200+ 文件的纯排版提交」—— 那是把【诊断条数 281】当【文件数】读，单位错（现数 169）。
+     「计数单位是文件」这件事本轮才第一次被钉在注释里，因为 ⑪ 那次探针打印 `?` 才逼我去看形状。
+     ⚠ 类型棘轮【不在这条账上】：它是 r19，`pnpm typecheck` 仍只查 src ⇒ 射程 ① 说清楚了。
+  ② 真飞书接口在本机【一次也没打过】（要真凭据）⇒ 要人动的那格。
+  ③ 「形状表必须有读者」今天只有 r16 管住 feishu 这一张。⚠ 别把 r16 读成「所有证据表都被管着」。
+  ④ not_routed 没有活的分母（要一张路由表 + 一个真装配点）。
+  ⑤ Playwright 门禁：依赖装得上，剩下只有「谁写 spec」⇒ 要问。
+  ⑥ O7-1 预算硬停状态机 / O13-2 TERMINATED：CEO 拍，只报不做（纪律，非拖延）。
+  ⑦ 组织图那条旁路（把新节点塞在 graph 里随一条无关 add_edge 提交 ⇒ 200 落库且无人校验）
+     本轮【评估后没做】：要补的是 `orgChangeSchema` 的 `add_node`（属改契约，O8 没有动作位），
+     且「提交前图必须等于库里的图」那一版挡不住空库引导，还会打红 test/org 十来发。
+  ⑧ 注入式 fetchImpl 读不读 signal 那条约定【仍】没有机器判据（r18 射程 ②）。
+     ⚠ round286 把这一条【改窄了】而不是消掉了它：原句把两半一起说成「没人管」，
+     而实测证明【默认实现自己不转发 signal】那一半【有】一发会红。
+     今天真正没读者的只剩【外部注入那份 fetchImpl】—— 给它加读者只能写一份契约测试，
+     而仓里今天只有一份默认实现 + 测试夹具，硬写的「契约测试」测的是我自己那份夹具，
+     不是装配方将来交的那份 ⇒ 那是一条【看起来有分母、分母是夹具】的守卫，比没有更坏。没做。
+     ⚠ 原句后半「绊线数文件不数调用点」本轮【量清了，从债里划掉】：见 round286 那段。
+
+═══════════════════════════════════════════════════════════════════════════════
+round286 · r18 射程 ② 那句「没有任何一发会红」被我自己写宽了，本轮把它打回来一半
+           顺带把「绊线数文件不数调用点」这格债【量成不是债】
+
+■ 一句话
+  台账 round284 立 r18 射程 ② 时我写的是：交一份忽略 `init.signal` 的实现
+  ⇒「这一格在结构上失效而【没有任何一发会红】」。本轮反过来打了一次：
+  默认实现自己不再转发 signal ⇒【有 1 发红】。⇒ 那句话把【外部注入】那一半的
+  「没人管」说成了【整条路】没人管，属**射程写宽**——本仓治过五次的那一族，这次是我自己写的。
+
+■ 落地的东西
+  ① 一发新变异 E1（`.workbuddy/round286-mutate-egress.mjs`，自回滚 + 逐字节核对）：
+     `defaultFetch` 从 `fetch(url, init)` 改成 `fetch(url, {method, headers, body})` ——
+     形状是「字段一个没少，只把 signal 漏在门外」，这是真接 SDK 那天最可能的写法。
+     读数：基线 136 全绿 ⇒ 变异后 1 红
+     （`feishu-http.test.ts` ⭐「挂住的服务器 ⇒ 抛，且抛的那句里没有 app_secret」）。
+  ② r18 的射程 ② 与 method 同步改窄（登记表 + 文档正文那一节同一轮改完，表经
+     `sync-registry-row.mjs r18` 同步，坐标 10 条经 `round282-fix-coords.mjs` 修复）。
+  ③ 那条「绊线数文件不数调用点」的债【量清了】：`hub/src` 里真·网络出口只有 **1 处**
+     （`fetch(` 不带接收者），另外两处 `fetch` 是 `this.#fetch(...)` = 调注入实现，
+     本就不该自己挂超时（信号由调用点造、由被调方转发，这是 feishu.ts:74 那条注释的口径）。
+     ⇒ 「按调用点判」今天既不会红、也没有第二个对象可判 ⇒ 这格不是债，是没有分母的空洞。
+     探针：`.workbuddy/round286-egress.mjs`（复算它，别抄这个 1）。
+
+■ 本轮我自己撞的（三条，都是【读数形状】）
+  ① 【spawnSync 不带 shell:true，Windows 上进程根本没起】第一版 `spawnSync("npx", [...])`
+     拿到 `status = null` + 输出 18 字节，脚本照常打印「红的文件：无 / 红的用例：无」。
+     那差一点就被读成「变异后全绿 ⇒ 这一格没人管」—— 恰好就是我要证的那句话，
+     而它是【一个进程都没起】造出来的。**一个假的「无」比一个真的红更危险**，
+     因为红会让人去读，「无」会让人去写结论。
+     修法两条：`shell: true`（前一轮的变异机就是这么写的，我没查它，先自己撞了一遍）
+     + 一条【status===null 就抛】：宁可脚本炸，不要它安静地交出「无」。
+  ② 【ANSI 没剥，FAIL 行一条正则都不命中】第二版进程起来了、读数行明明写着
+     `1 failed | 135 passed`，而「红的用例」打印成【无】。原因是 vitest 非 TTY 也带色，
+     `^\s*FAIL` 前面隔着 `[31m`。⇒ 同一条「无」第二次出现，第二次的原因在解析层。
+     两次都不是「探针没输出」，都是【有输出且输出是对的，是我读错了】。
+  ③ 【一个手抄的总条数当场过期，而且它一直和邻居不同口径】r18 method 末句原本写
+     「本条判据不重跑那 13 发」。13 = 9 发测试 + 4 发变异，我加一发 E1 它就变 14。
+     本轮没有改成 14，改成的是【把分母写出来】：「不重跑上面那些（9 发测试 + 5 发变异）」。
+     改的理由不是怕数错，是查邻居时量到一条【口径不一致】：
+     r14 的「那 7 发」= 7 发测试（变异另计「六发」）、r16 的「那 83 发」= 12+31+40 测试
+     （变异另计「十发」）、r17 的「那 21 发」= 17 测试 + 4 装配变异（另 6 发 deliver 变异没进那个数）。
+     ⇒ 四条主张里只有 r18 把【变异】也折进总数，另外三条只数测试。
+     「不重跑那 N 发」这句话在四张卡上指三种东西 —— 这一格比「13 过期」值钱，
+     因为它不是某一次改动造成的漂移，是【当初就没定义 N 数什么】。
+     本轮只把 r18 改对（它是我这轮动的），其余三处【本轮现数过、数字本身仍对】：
+     7 / 12+31+40 / 17+4 全部复算命中（`npx vitest run <file>` 逐个数）。
+     没顺手改它们的理由：口径要不要统一成「测试与变异分开数」是一个【四条一起】的决定，
+     而 r17 那一处真要统一还得先回答「6 发 deliver 变异算不算进 21」—— 那是决定，不是修。
+  ④ 【我第一版"按调用点"的探针交的是一个假阳性，已删】`.workbuddy/round286-fetch-sites.mjs`
+     第一版用 `body.split("fetch(").length - 1` 数调用点，报 `feishu.ts fetch=3 timeout=2 ⇒ SHORT 1`。
+     那 3 个里有【两个是 `this.#fetch(...)`】= 调注入实现，本就不该自己挂超时
+     （信号由调用点造、被调方转发）。⇒ 我差点据此登记一条「绊线今天漏了一处」的债，
+     而那一处是好代码。**一个数错的分母比没有分母更坏：它会让人去"修"一处没坏的东西。**
+     删掉它，改用带接收者判据的 `round286-egress.mjs`（`(?<![.#\w$])fetch\(`），
+     它数出的 1 处才是真·网络出口。
+     ⚠ 上面 ①② 加这一条，本轮同一条坑撞了【三次】：探针的输入是对的，错都在【我读它的方式】
+     （进程没起 / ANSI 没剥 / 子串把方法调用也算进去）。三条合起来是一条口径：
+     **探针打印出来的东西，要先证它【测的是我以为的那个对象】，再拿它当证据。**
+
+■ 读数全部现跑
+  npx vitest run test/arch/ ⇒ 30 文件 / 372 通过（与 round285 落笔时持平：本轮没加守卫，只改散文）
+  npx vitest run（全仓）    ⇒ 134 文件 / 2865 通过 / 6 跳过
+  npx tsc -b                ⇒ exit 0
+  lint（round285-lint-own.mjs）⇒ error 287（format 161 / organizeImports 117 / lint 9）
+    ⚠ 本轮【没有】新增 .ts 文件（三份都是 `.workbuddy/*.mjs`，而 `.workbuddy` 在 biome
+    `includes` 之外 —— round285 台账⑧量过），lint 读数与 round285 落笔时逐类目相同。
+  E1 变异机在台账落笔前重跑：基线 136 全绿 ⇒ 变异后 1 红 ⇒ 还原后与原文逐字一致。
+  真·网络出口处数（round286-egress.mjs）⇒ hub/src 里 1 处。
+
+■ 没做的
+  ① 给「外部注入那份 fetchImpl」加读者：见上面债 ⑧ 改写后那段 —— 今天写就是测夹具。
+  ② r14 / r16 / r17 那三处手抄条数【本轮核过、仍对、没动】。要不要把它们也改成
+     「不抄数、只指探针」是一个统一决定，不属本轮这一发顺手改的范围。
+
+═══════════════════════════════════════════════════════════════════════════════
+round287 · 那 7 份岗位书头注释承诺的报警器，方向是反的
+           「没签完 CI 就一直红」—— 实测：什么都不做【全绿】，签掉一份【红 2 发】
+
+■ 一句话
+  Task 0.7 模板头注释、0008 §7.1 引的同一句、以及 7 份 YAML 自己那两行，三处都写着
+  「charter.test.ts 断言它已从模板消失 ⇒ 没签完 CI 就一直红，不需要人工催办」。
+  本轮读了那条断言本体（`roles/charter.test.ts:411`）：它要的是
+  `texts.some(s => s.includes(CHARTER_PLACEHOLDER_ACCEPTANCE))` 为 **true** ——
+  断言的是【占位串还在】。⇒ 那句话把方向说反了：它是「有人动了模板 ⇒ 红，动的人必须
+  显式来更新这一发」的绊线，不是「没签就一直红」的催办器。
+  ⚠ 这一条【从仓库第一次有岗位书起就在】，不在我这轮改出来的任何 diff 里。
+  ⚠⚠ 【归因更正（落笔后自查补上，本轮最该记住的一条）】上面那句「本轮读了那条断言本体」
+  读起来像【本轮发现】，而它【不是发现】：这句假机制在**四处**早已各自撤回 ——
+  `INDEX.md` 第 269-275 行（原话「实测这条灯从来不亮，签字了才亮」+「七份模板自己的头注释、
+  以及计划里，写的都是那句不会亮的原话」）、`0006` 第 1651-1655 行（含两次变异，
+  `expected true to be false` / `expected false to be true`）、`0006` 第 3122 行、
+  `0020` 第 48 行、`guides/how-to-write-a-charter.md` §3 反例 ④ 第 278-282 行。
+  ⇒ 本轮真正做的只剩两件窄事：① 改口【唯一仍在主张它】的那处（0008 §7.1，
+     `git show HEAD:` 复核：改动前第 172-176 行照样按那句推论）；② 改掉 7 份 YAML 头注释
+     —— 模板是与 0008 并列的【主张现场】，不是【撤回现场】（guides 那一处连它都点名了）。
+     那条变异与那张表是【复跑确认】。
+  ⇒ 根因不是懒，是**顺序**：我先读到模板与 0008（它们说的是假话），后读到撤回，
+     于是把【我读到的顺序】写成了【发生的顺序】。可防的动作只有一条，而且极便宜：
+     **改口任何一句文档主张之前，先 grep 那句原话**（`grep -rl "不需要人工催办" docs`，
+     一秒）。本轮是改完才 grep ⇒ 于是撤回了自己刚写下的归因 —— 那一秒该花在前面。
+
+■ 方向是怎么证的（不靠读代码自证）
+  变异 `.workbuddy/round287-mutate-placeholder.mjs`（自回滚 + 逐字节核对）：
+  把 `ops.yaml` 那一格占位串换成一条真验收标准，跑 `roles/charter.test.ts` + `seed.test.ts`。
+  读数：基线 69 全绿 ⇒ 「CEO 签了那一份」之后 **2 红**
+    · 「模板的 acceptance_criteria 仍是【固定占位串】，等 Task 0.9 由 CEO 逐条替换」
+    · 「仓里那七份真模板 ⇒ 退 1、零写入（验收 b 的正题：用的是真模板）」
+  ⇒ 三种状态的真值：什么都不做 = 绿；签掉一份 = 红；全签 = 那两发都红（第二发只测了
+    「签掉一份」这一半，全签那格【本轮没测】，不外推）。
+
+■ 落地的东西
+  ① 7 份 `packages/hub/resources/charter-templates/*.yaml` 的头注释改写（7/7）：
+     原文那两行留了引子（「charter.test.ts 那一发断言的是…」），改完写的是实测的三件事
+     —— 绊线不是催办器、播种那条路另有拦阻（`hub charter seed` 见占位串整次拒绝、零写入、
+     退 1）、以及【开发者不得代笔】这条决定不变。
+  ② 0008 §7.1：Task 0.7 那句引文【原文保留】（它是历史），后面接一张「承诺 vs 实测」两列表。
+     改口的同时把决定的【承重墙】挪了地方：不代笔这件事仍然成立，但支撑它的不再是
+     「CI 会红」（那是假的），而是 ① `signed_by: ceo` / `signed_at` 是签字声明，写了就是
+     伪造审计记录（`events` 表上那对 `RAISE ABORT` 触发器讲的是同一件事）；② 真拦阻在播种那一步。
+  ③ 一条新的 doc-refs 快照（同轮登记，0006 §7-40 那条规矩）：
+     `0008-phase1-gate-semantics.md>roles/charter.test.ts:411`。
+     这一格与仓里大多数格【方向相反】：它守的是一条【已被证伪的承诺】还在不在原处 ——
+     哪天有人真把那一发变成立反（占位串不许在场），报警器才存在，而 0008 §7.1 的改正段
+     当场变假 ⇒ 快照必须红，逼他回来重写。键【必须带目录】：`charter.test.ts` 有两个命中
+     （`roles/` 与 `engine/`），裸基名会被 resolveTarget 判歧义 —— 0043 §5 那个坑第三次复发。
+
+■ 本轮我自己撞的
+  ① 【快照的值我按"读到的那一行"抄，守卫比的是 trim 后的】第一次登记把 411 行连缩进一起抄了，
+     verify() 里是 `(src[ln-1] ?? "").trim()` ⇒ 带缩进【必然不符】。
+     仓里那 60 多格快照全是【无前导空格】的形状，这个约定在文件里没写下来，只在数据里。
+     （没改守卫，改了抄法 —— 60 格已登记的都是无缩进形状，动比较逻辑会让它们全部重过一遍。）
+  ② 【`npx tsc -b | tail` 的退出码是 tail 的】上一条台账里 `npx tsc -b ⇒ exit 0` 这类读法，
+     管道后面那个程序的码会把 tsc 的顶掉。本轮重测：`npx tsc -b >log 2>&1; echo $?` ⇒ 真 0。
+     ⚠ 这条只影响【我这一条读数怎么来的】，历史读数没证据说错（tsc 真红了那一发会在 stdout
+     打错误行，而我抄的是「exit 0 + 无输出」两条一起，第二条不受管道影响）。
+
+■ 读数全部现跑
+  npx vitest run test/arch/ ⇒ 30 文件 / 372 通过（本轮没加守卫，只在 doc-refs 的 SNAP 里加一格）
+  npx vitest run（全仓）    ⇒ 134 文件 / 2865 通过 / 6 跳过（与 round286 落笔时同一读数）
+  npx tsc -b                ⇒ exit 0（本轮用重定向重测，见上面撞的 ②）
+  lint（round285-lint-own.mjs）⇒ error 287（format 161 / organizeImports 117 / lint 9）
+    本轮【没有】新增 .ts，lint 与 round286 逐类目相同。
+  round287 变异机在台账落笔前重跑：基线 69 全绿 ⇒ 变异后 2 红 ⇒ 还原与原文逐字一致。
+
+■ 没做的
+  ① 「等 CEO 逐条替换验收标准」这件事今天【没有任何机器报警器】，而这正是那句话原本想装的。
+     ⚠ 这条也【不是本轮报给 CEO 的新消息】：INDEX 第 269-275 行已经写着「没有一条 CI 在催这件事」。
+        本轮没有新增 CEO 待办，只是把最后两处还在【主张】旧机制的地方改口。
+     本轮只把它【说清楚】（8 处：7 份 YAML 头 + 0008 §7.1），没有装一个新的：
+     要装就是「库里 role_charters 最新一版仍含占位串 ⇒ 红/退出非 0」，而那条判据的输入
+     是**运行库**，CI 上没有库 ⇒ 它要么变成测夹具（分母是夹具），要么变成一条 nightly 命令。
+     ⇒ 这一格是**决定**不是修，交 CEO 或下一轮单独立项（与 O2 表恒空是同一件事的另一面）。
+  ② seed.test.ts 那发「七份确实带占位串」的前提钉子（round282 立的）方向是对的，本轮没动它。
+     它判的是「前提还在」，不判「有人签了」—— 两者不是一回事，别把它当催办器读。
+
+═══════════════════════════════════════════════════════════════════════════════
+round288 · §2 那句「ops.yaml 没有任何代码路径装载它」过期了 8 轮以上
+           顺带量到：探针把【我碰过的文件】标成【我写的行】
+
+■ 一句话
+  O2 动作 4 的修正块（round282 写的）明写了「O2-2 之后『没有任何代码路径装载它』已经不成立」，
+  而 §2 轴三第 3 条那句原话——连「一个永远读不到的 YAML 文件」这个加强版——【一直留在原位】。
+  同一件事的两处抄本，一处改了、另一处没改。本轮补 §2（原文保留 + 修正块）。
+
+■ 落地的东西
+  ① §2 轴三第 3 条：把「永远读不到」换成实测的现状 ——
+     `charter/seed.ts:485` 的 `templateFiles()` 按目录 glob 读 `*.yaml`，`ops.yaml` 在其中；
+     判据 A 让它整次拒绝、零写入，那是「读了并拒了」不是「读不到」。
+     ⇒ 准确说法：**它有一份没签的岗位书，而装配表里没有它的位置**。
+  ② 顺手量到一条【守卫为什么没抓到】：唯一的钉子 `roles/charter.test.ts:439` 判的是
+     **装配表维度的孤儿**（`NODE_TO_TEMPLATE` 反推集合 `== ["ops"]`），它对「播种读不读这个
+     目录」这件事【一条都不判】⇒ 那句过期主张被引用它的守卫全程判绿。
+     这不是守卫漏了 —— 它从来没承诺管散文。记下来是因为本仓已经第 N 次撞「散文里的现状过期」，
+     而这一发特别干净：**代码里已经有反证，且反证就在同一篇文档的另一个小节里。**
+  ③ doc-refs 的 SNAP 本轮没加格（§2 这段没写 `file:line` 完整形态的新引用）。
+     claim-coords 因 §2 插入 11 行而漂 15 条，全部经 `.workbuddy/round282-fix-coords.mjs` 修复
+     （r3/r4/r5/r7/r8/r10-r19，增量清一色 +11），没有一条手改。
+
+■ 本轮我自己撞的
+  ① 【我写了一个查不出来的时间量，落笔前删掉了】第一版修正块写「不同步了 8 轮」。
+     想核的时候量到：`seed.ts` 与本文档**今天都还是未跟踪文件**（`git status` 两格 `??`）
+     ⇒ 没有任何提交历史可查，「8 轮」是我按 round 号推算的，不是查出来的。
+     改成「播种落地之后这一格没跟着改」+ 明写「多久说不出」。
+     ⚠ 这与 round286 撞的「归因不可考」是同一条规矩的第二拍：**查不出来的量不写进文档**，
+     哪怕它只是一个修饰语。（推算这次还会算错：round 号不是提交序号，中间有大量不提交的轮。）
+  ② 【探针把「我这轮碰过的文件」打成「我写的错误」】`round285-lint-own.mjs` 打出一行
+     `我: 1 test/arch/production-deps.test.ts :: format`。核 `git diff -U0` 之后：
+     那条超宽行的 `+`/`-` 【一条都没有】⇒ 它是 HEAD 里就有的行，我只是在这文件别处加过注释。
+     ⇒ 「我:」这个标签的真实口径是【在我碰过的文件里】，而 format 是**按文件**一发的诊断
+     （round286 量过：`start.line === 0`）⇒ 一个文件里任何人任何一行没格式化，都会挂在
+     「我」名下。本轮【没修那一行】：它是已入库的行，动它属于「lint 修绿」那两项之一，
+     规矩是先问。（探针的标签要不要改成「我碰过的文件里的」—— 是个改口径的小决定，没顺手改。）
+
+■ round288 的下半：主设计文档接进 doc-refs 的扫描范围（这才是本轮真正的落地）
+  ① 发现路径不是「去找守卫的洞」，是上一小节改完 §2 之后顺手数了一下【这篇文档自己
+     有多少条完整形态引用】—— 5 条，而 `decisionDocs()` 只 readdirSync(docs/decisions)，
+     ⇒ 5 条【一条都没有读者】。接进来之后【当场红出两条坏的】：
+       · `prompt.test.ts:146`（讲「数那句出现几次」那句话）—— 基名歧义（`charter/` 与
+         `memory/` 各一份 prompt.test.ts），而且 146 行是【另一发】（has_more 那句的收尾）。
+         真落点是 `memory/prompt.test.ts:158`。
+       · `claude.ts:88` —— 这一条不是"漂了"，是【历史叙述借用了当前坐标的写法】：
+         那句话讲的是「它曾指向 88、后来改到 106」，而完整形态在守卫眼里说的是【现在】，
+         88 行今天是个 `];`。0044 §4 自己一直写裸 `:88`（不触发扫描）⇒ 改回裸写法。
+     ⇒ 「一个只覆盖一半文档的快照守卫」给出的那种全绿，是【范围】的绿、不是【结论】的绿，
+       而这两种绿在终端上长得一模一样。这是本轮最值钱的一格，且它不是任何变异逼出来的。
+  ② 接进来之后跑了【三发变异】证它有牙齿（`.workbuddy/round288-mutate-design-scan.mjs`，
+     自回滚 + 逐字节核对）：M1 漂一行 / M2 改成不存在的文件 / M3 整条删掉
+     ⇒ 基线 2 发全绿 ⇒ 三发各打中预测那一支 ⇒ 还原逐字一致。
+     ⚠ 为什么必须跑：「把文档加进语料 + 全绿」有两解（引用真的都对 / 我加的那行根本没生效），
+       两解在终端上不可区分。不跑这一发，本轮那句「接进来了」就只是一句主张。
+  ③ 四格快照同轮登记（分母 = 主文档现存 5 条里仍在场的 4 条，第五条是历史叙述已改裸写法）。
+     其中 `roles/charter.test.ts:439` 那一格是【反身】的：§2 那段修正块讲的正是
+     「这条钉子对『播种读不读这个目录』一条都不判」⇒ 有人把它改成按播种口径判，
+     §2 那句「全程是绿的」当场变假，快照必须红。
+  ④ 【我自己写的那条注释，被我自己刚接进来的判据判红】改 M3 之前先写的就是那条
+     「原本写成 `engine/claude.ts:88` 那种完整形态」的说明——它照抄了那个写法，
+     于是【讲历史的注释自己点亮了当前坐标扫描】。改成不带冒号数字的写法。
+     ⇒ 这不是小事：一条披露某条判据的注释，必须【避开】那条判据自己的语法。
+        仓里以前那几格「注释里引用注释」没撞上，只是因为它们引用的不是同一个扫描器。
+  ⑤ 【一条读数的名单是上一轮手抄的，所以它对本轮动手的文件一条都不报】
+     `round285-lint-own.mjs` 的「我:」是一份写死的 6 项名单。本轮改的是
+     `test/arch/doc-refs.test.ts`，不在名单里 ⇒ 它明明带着 1 发 format error，
+     探针却打「我只有 1 条（production-deps）」。那是【上一轮的我】的读数。
+     改成从 git 现算（已改 + 未跟踪），并把名字从「我」改成「未入库」+ 打出口径行数——
+     因为它现在说的是「这一片没提交的工作区」（几十份），叫「我」会冒充一个更窄的东西。
+     ⇒ 与本节 ① 是同一族的两个面：【手抄的名单】和【只覆盖一半的语料】都不会报错，
+       它们只是安静地描述过去。
+  ⑥ 主文档标题【没有】改名（`决策文档里的「文件:行号」引用不漂移` /
+     `全部完整形态引用与快照一致` 两条 it 名照旧）。核过 3 篇 decisions 按名字引用它们
+     （0026:372、0035:357、0042:306），其中 0035 那一处还把 test 数算成账（64−62）。
+     改名会连带 3 处历史叙述，而那 3 处讲的是当时的实测 ⇒ 宁可标题半过期，不动历史。
+
+■ round288 读数（落笔前重跑）
+  npx vitest run test/arch/ ⇒ 30 文件 / 372 通过
+  npx tsc -b                ⇒ exit 0（重定向测法，见 round287 撞的 ②）
+  npx tsx .workbuddy/round285-lint-own.mjs ⇒ 全仓 error 287（format 161 / organizeImports 117 /
+                              noUnsafeOptionalChaining 3 / noAssignInExpressions 4 /
+                              useIterableCallbackReturn 2）—— 与 round286、round287 逐类目相同
+    棘轮方向：本轮【没有】抬高任何上限；新增/改动的两份 .ts（doc-refs.test.ts 与探针）
+    给 format 那一格的【成员集合】换了一份文件（总数不变，单位是文件不是行）。
+    动过的行里没有一条新 error；那 1 发 format 落在我没碰的旧行上（biome 报的行号
+    717-751 全是 HEAD 里就有的 SNAP 条目）。没修它们 —— 属于「lint 修绿」那两项之一，先问。
+  变异读数（全部自回滚，落笔前重跑）：
+    round287-mutate-placeholder.mjs    基线 69 全绿 ⇒ 签掉 ops.yaml ⇒ 2 红
+    round288-mutate-design-scan.mjs    基线 2 全绿 ⇒ M1/M2/M3 命中 3 / 未命中 0
+  主文档引用健康探针：`.workbuddy/round288-design-refs.mjs`（复算，别抄上面那两个结论）
+
+■ round288 的尾巴：三条【读数之间的账】，落笔前对齐
+  ① 【同一条坑第三次撞，这次差点登记一条假进展】我随手写的一段字符串探针把
+     `mergeForbiddenForRun` / `gateCriteriaForRole` 判成「已经有生产调用方了」——
+     那两个"命中"（`author-reviewer.ts`、`engine/runtime.ts`）【全是注释】。
+     据此会登记的不是债，是【进展】：「O2 的门控那半已经接上了」——而它从来没接上。
+     ⇒ 换成带口径的 `.workbuddy/round288-callers.mjs`（剔注释行 + 定义处与测试分开数），
+       两句「零生产调用方」今天【都成立】。round286 的 `this.#fetch(` 是第一次，
+       本轮的 `round288-design-refs.mjs` 扩展名集合比守卫窄是第二次，这次是第三次。
+       三次合起来是一条可执行动作：**给一个符号数调用方，先剔注释、再分 src/test。**
+     ⚠ 该探针顺手量到一处【真】的窄：文档写「只有 phase3.test.ts 在调」，
+       实际是【两个】测试文件（phase3 七处 + `charter/store.test.ts` 四处）。
+       「零生产调用方」不变 ⇒ 结论不动，改的是【谁在测它】这一格可复算的事实（已就地补注）。
+  ② 【两条探针打同一个量，打出 51 与 50】没有把这两个数都抄进台账，而是写了
+     `.workbuddy/round288-reconcile-lint-counts.mjs` 把它们对齐：差的【那 1 份】是
+     `packages/web/public/app.js` —— `round285-lint-own.mjs` 过滤 `.ts/.tsx`，
+     blast 不限扩展名。⇒ 两个数都对，只是口径不同；**没对齐就抄，下一个读的人会以为是漂移。**
+  ③ 【own 那条探针的名字在撒谎，已经改掉】它原本从一份 round285 手抄名单算「我」，
+     本轮改成从 git 现算，口径是【未入库】（今天 128 份 .ts/.tsx / 244 份全部），
+     比「本轮改的」宽得多 ⇒ 标签从「我:」改成「未入库:」并把口径行数打出来。
+     它今天报 85 发 error 落在未入库文件里、跨 50 份文件；全仓 287、format+organizeImports
+     涉及 169 份（∩脏 51 / 干净 118）—— 这三个数与 §7 那条 CEO 问句里写的**逐字相同**，
+     本轮现跑复核过（`round285-lint-blast.mjs`），没有漂移。
+     ⚠ 那 85 发【一条都没修】：本轮动的行里没有一条新 error，全是我没碰的旧行
+     （format 一发的单位是文件，round286 量过）。修它属于「lint 修绿」那一项，先问。
+
+■ round288 收口读数（落笔后最终一遍，全部现跑）
+  npx vitest run test/arch/ ⇒ 30 文件 / 372 通过
+  npx vitest run（全仓）    ⇒ 134 文件 / 2865 通过 / 6 跳过
+  npx tsc -b                ⇒ exit 0（重定向测法）
+  lint                      ⇒ error 287 / filesChecked 304 / 类目读数与 round286、287 逐项相同
+  坐标：本轮 §2 与设计文档多处插入 ⇒ claim-coords 三次判红（15 条 / 15 条 / 15 条），
+        全部走 `.workbuddy/round282-fix-coords.mjs`，一条没手改。
+  变异（本轮两支，均自回滚 + 逐字节核对）：
+    round287-mutate-placeholder.mjs   69 全绿 ⇒ 签掉 ops.yaml ⇒ 2 红
+    round288-mutate-design-scan.mjs   2 全绿 ⇒ M1/M2/M3 命中 3、未命中 0
+
+═══════════════════════════════════════════════════════════════════════════════
+■ round288 的尾巴 2 · 把 docs/INDEX.md 也接进 doc-refs（同一族覆盖缺口的第三级）
+═══════════════════════════════════════════════════════════════════════════════
+■ 落了什么
+  test/arch/doc-refs.test.ts：decisionDocs() 再多一个键 `INDEX.md`，SNAP 多 20 格。
+  ⇒ 入口文档（唯一一份给 CEO 读的）里那 23 条完整形态坐标，从此每条都有读者。
+  值【不手抄】：`.workbuddy/round288-index-snap-gen.mjs` 从目标文件读整行、trim、JSON.stringify
+  后直接打印可粘贴的条目。守卫比的是 trim 后整行，20 条手抄 = 20 次打错机会，而打错的快照
+  比没快照更坏 —— 它会把「引用漂了」读成「代码变了」，诱使人去改代码。
+
+■ 分母（全部现跑，口径写死）
+  引用 23 条 ⇒ 唯一键 20 个。差 3 不是丢了：keyOf = doc>file:line，同一坐标在 INDEX 里
+  出现多次共享一格（M4 实测同一坐标在 received 里出现两次 ⇒ 重复报，但不重复存）。
+  HEAD 版 INDEX：引用 16 条、坏的 1 条。
+  目标行短于 12 字符的 1 条 = `harness-invariants.ts:156` 的 `");"`（见下）。
+
+■ 【归因更正 · 本轮第四次，同一族】
+  我先在 decisionDocs() 的注释里写「接进来当场量到 2 条已经坏的」，把三件事并成了一件。
+  `git show HEAD:docs/INDEX.md` 分开跑（`.workbuddy/round288-index-at-head.md`）：
+    · HEAD 里坏的只有 1 条：`driver.ts:30` 只写基名而仓里两份 driver.ts ⇒ 歧义；
+    · `cards.ts:237` 与 `real-deps.ts:807` 这两条【HEAD 整行都不存在】—— 它们是我本轮
+      先前写进 INDEX 的新句子 ⇒ 那两个错是【我的新错】，不是【守卫从仓库里挖出的旧错】。
+  合并成一句的效果是把一次自查的功劳记成了一次发现的功劳。三次了（0008 §7.1、0006、这次），
+  而且这次是【同一条命令就能分开】的 —— 差别在于我有没有先跑再写。注释已按 HEAD/新增分开重写。
+  ⚠ 这条守卫的真实价值不在本次抓到了什么，在【下一次漂移】。别把上面两格当业绩。
+
+■ 变异 4 发（round288-mutate-index-scan.mjs，自回滚 + 逐字节核对）：4 命中 / 0 未命中
+  M1 漂行 → 一对（`快照里没有` + `快照里有而文档没有`），因键里含行号；
+  M2 文件名改不存在 → 「找不到/歧义」；M3 整条删掉 → 孤儿；
+  M4【只改内容、行号不动】→ 「与快照不符」，打在 test/desktop/ipc-surface.test.ts:129
+     （打测试文件而非生产源码：追加注释字节级可回滚且不改行为，生产源码被硬杀会留真改动）。
+  ⇒ M4 的准确读法：「与快照不符」这一支第一次在【真语料 + 真快照】上红。
+    我第一版打成「这一支【首次】拿到机器证据」—— 那是假的，本轮第四次归因错：
+    doc-refs 自己的「扫描器本身有判别力」那一发就断言了 `与快照不符`，只不过打在合成夹具上。
+    夹具证据与真语料证据不是同一件事，但【有前者】与【没有】也不是同一件事。结论已就地改窄。
+
+■ 两个「探针自己坏了」的当场读数（同一族第五、第六次）
+  ① M4 第一版的读数被 `.slice(0, 200)` 截断，三条消息里只看得见 `0030-…md` 那条，
+     INDEX 那条正好切掉 ⇒ 屏幕上写着「命中」而屏幕上没有支持它的字。改成打全文，
+     并另写 `.workbuddy/round288-m4-attribution.mjs` 单检归因：INDEX.md> 与 0030> 两个键
+     【都】在 received 里（该坐标两篇文档都引用）⇒ 命中成立，但成立的理由之前没显示出来。
+  ② 同一发归因探针里 `(out.match(/\.md>[^\s]*与快照不符/g) ?? []).length` 打出 0，
+     是个【假的 0】：消息正文含空格，`[^\s]*` 必然断在半句。改成数子串出现次数。
+     —— 「探针有输出、输出也对，错在我读它的那一层」这条本轮已经写了三次，还是又长了两枝。
+
+■ 弱快照一条，登记并标注，不改
+  `INDEX.md>harness-invariants.ts:156` 的值就是 `");"`。它钉得住【那一发还在那个位置收尾】，
+  钉不住语义：漂到邻近另一个 `);` 它照样绿。保留的理由是 INDEX 那句话指的确实是那个收尾括号。
+  ⇒ 已在 SNAP 里就地写明它是弱快照，防下一个读的人把它当成有牙齿的断言。
+
+■ 一次「我修了个不存在的 bug」
+  生成器打印的键是 `INDEX.md>im.ts:164`（照文档原文），我"顺手"改成解析后的
+  `INDEX.md>bindings/im.ts:164` ⇒ 守卫立刻红成一对。键 = 【文档里怎么写】，不是【解析到哪】；
+  目录只在【基名歧义】时才进文档。手改生成输出 = 引入错，与手抄同族。
+
+■ 读数
+  npx vitest run test/arch/ ⇒ 30 文件 / 372 通过（与接进来之前【同数】，因为没新增用例，
+  只扩了语料；「数没变」这一条本轮是【跑过才知道】，不是推断的）
+  doc-refs 单跑 ⇒ 2 通过；两台变异机各自 4/4、3/3 命中，均自回滚。
+
+═══════════════════════════════════════════════════════════════════════════════
+■ round288 的尾巴 3 · 缺口补到第三级时，改的是【判定】不是【名单】
+═══════════════════════════════════════════════════════════════════════════════
+■ 触发点
+  同一族覆盖缺口连着补了三级：decisions/*.md（一直有）→ 主设计文档 → INDEX。
+  前两级的动作都是「发现漏了一份 ⇒ 手工往 decisionDocs() 加一个键」。
+  第三次我没再这么补：手工加的语料表【没有任何东西判「漏」这件事】，下一份文档一定再漏。
+  ⇒ decisionDocs() 从「手挑三份」改成 walk(docs/) 递归全量。
+
+■ 为什么这次改得起（先量再改，两条都是现跑）
+  ① `.workbuddy/round288-corpus-gap.mjs`：docs/ 下 73 份 .md，含完整形态坐标的 31 份，
+     【不在语料里的 0 份】⇒ 改成全量的当场代价是零新快照（除已登记的）。
+     全绿不是「改完碰巧没红」，是「改之前就数过其余 42 份一份坐标都没有」。
+  ② `find docs -name '*.md' | sed 's|.*/||' | uniq -d` 空 ⇒ 基名零重复。
+     这条必须先量：Map 的键是【基名】（SNAP 里 300 多条既有键的形状就是 `<基名>>文件:行号`，
+     换成相对路径会把全部历史键一次性判成孤儿 —— 那等于把守卫的证据全清）。
+     基名做键 + 目录递归 = 重名会让后读的【静默顶掉】先读的（Map.set 不报错），
+     语料少一份而没有任何一发会红 ⇒ 所以函数里加了 `expect(collisions).toEqual([])`，
+     把「基名唯一」从一个我用眼睛保证的前提，变成一条会红的断言。
+
+■ 变异 3 发（round288-mutate-corpus.mjs，建临时文件 + finally 删净 + 事后 git 复核）：3 命中 / 0 未命中
+  M5 decisions 下新增带坐标文档 → 红「快照里没有」        ⇒ glob 确实读到 decisions
+  M6 【新建】子目录下新增带坐标文档 → 红                   ⇒ 递归下得去（本次改动最核心那句：
+     旧实现只读 decisions 一层，一份放在 docs/guides/ 下的文档在旧实现里是【永久隐形】的）
+  M7 两份同基名 .md 落在不同目录 → `expected [ 'round288-collision.md' ] to deeply equal []`
+     ⇒ collisions 那一发有牙齿
+  改完仍然 30 文件 / 372 发 —— 没加用例，只把一条前提从「人保证」挪进「机器判」。
+
+■ M7 的预期串【第一版写错了】，错法与本轮前面几次不同族，值得单独记
+  我原本 expect(["collisions"])，指望失败消息里有这个变量名。真消息是
+  `expected [ 'round288-collision.md' ] to deeply equal []` —— vitest 打的是【值】不是变量名。
+  前一台机器（M1–M4）的预期串全部来自【真跑一遍再抄】，这一台我【先写了预期再跑】，
+  于是按变量的名字猜了消息的形状。⇒ 同一条规矩的两种破坏方式：不看输出猜输出，和看错输出。
+  ⚠ 它没有变成假绿：red 与 matched 是【与】关系，预期串不命中就报「未命中」。
+     判据里留 AND 而不是 OR，这一发救了我一次。
+
+■ 【撤回】上一条尾巴里我写「`与快照不符` 这一支【首次】拿到机器证据」
+  doc-refs 自己的「扫描器本身有判别力」那一发早就断言了它（`expect(why(...)).toContain("与快照不符")`），
+  打在合成夹具上。准确的读法是：这一支第一次在【真语料 + 真快照】上红。
+  「夹具证据」与「真语料证据」不是一件事；但「有前者」与「根本没有」也不是一件事。
+  —— 本轮第四次归因错，四次全是同一个形状：把【局部】写成【全部】而没先跑那句全称。
+
+■ 顺手量到、没动的一件事
+  `test/arch/doc-refs.test.ts` 在 lint 里挂着一条 format（一发的单位是文件，round286 量过）。
+  试着 `biome check --write` 这一份：它要改 8 处【转义引号 → 单引号】，其中 7 处在我本轮
+  改动之前的行上（`git show HEAD:` 那份里就有那条 `msg: \"这台 Hub…\"`，grep 命中 1 处）。
+  ⇒ 已回滚（cp 回备份再删备份，doc-refs 复跑 2 通过）。理由：这条 error 不是我引入的，
+     而 SNAP 的既有风格就是转义引号，我新加的 20 条跟着它写；单独把这份 reformat 成另一种风格
+     会让人以为「这份的 lint 归我修」。真修属于「lint 修绿」那一项，先问 CEO。
+     ⚠ 备份文件是一次性的，用完就删了 —— 没在仓库里留 .bak。
+
+================================================================================
+round289 · 第二条建任务的路径【从来没写 graph_version】，而用法文案早就说它写了
+================================================================================
+
+■ 一句话
+  `hub run` 走 `packages/hub/src/graph/company.ts` 的 intake 建 tasks 行，那条 INSERT
+  的列清单里【没有 graph_version】⇒ 每一行都吃列默认值 1。而 WORK_USAGE 与 0041:229
+  两处文字都在说「两条建任务路径都事务性盖上版图版本」。实测只有一条真的盖。
+
+■ 为什么 1 比 0 坏
+  空表上 MAX(version)+1 也是 1。所以「幽灵的 1」与「第一张真版图的 1」在库里【长得一模一样】。
+  今天没有任何版图 ⇒ 那个 1 只是难看；有人提交第一张 delegation_graphs 之后，
+  那批旧行会被恢复路径当成【属于那张图】—— 错的东西从「难看」变成「被相信」。
+  这一类缺陷的代价不在发现当天，在后来那次恢复。
+
+■ 修法（不是新决定，是把已经决定过的规则用到漏掉的那条路上）
+  0012 §2 早就定了「INSERT 必须显式带 graph_version，值由库算」。本轮只是让第二条路
+  也走那个唯一的取数口 `currentGraphVersion(db)`（与 http/real-deps.ts 的 INSERT_TASK_SQL 同一个）。
+  没有新增配置、没有新增默认值 —— 编一个默认值就是留一个没人决定过的数字。
+
+■ 实测（探针 .workbuddy/round288-hubrun-graph-version.mjs，真 CLI + 临时库）
+  修前：任务行 graph_version = 1  ← 列默认值
+  修后：任务行 graph_version = 0  ← 写了那一列，且诚实表达「还没有版图」
+  本轮收尾又跑了一次，仍然是 0（探针留在仓库里，不是一次性烧掉的）。
+
+■ 钉子：e2e-linear 新增配对两发（13 发，原来 11）
+  ①b 空图库 → 落 0，不是列默认值 1
+  ①c 库里摆一版 v7 → 落 7 ⇒ 那个数来自库，不是常量
+  ⭐ ①c 存在的【唯一理由】是杀掉一个看起来已经修好的错修法：把那一列写死成 0 也能让 ①b 全绿。
+     配对不是"多测一种情况"，是为了让【另一种错误修法过不了】。
+
+■ 变异（.workbuddy/round288-mutate-graph-version.mjs）：2 命中 / 0 未命中，改完与原文逐字一致
+  V1 那一列整个删掉（= 修之前的样子）      预期 ①b红/①c红   实得 ①b红/①c红
+  V2 取数换成常量 0（= 看着像修好的错修法） 预期 ①b绿/①c红   实得 ①b绿/①c红
+  V1 第一版会因「参数个数不符」而抛 ⇒ 那种红是【为错误的理由变红】，改成两处协同编辑。
+  本轮收尾复跑：仍然 2/2。
+
+■ 我把一句【假的机制话】写进了生产代码注释
+  第一版注释写着「这里只有连接、没有事务句柄 ⇒ 取数与 INSERT 不在同一事务」。假的。
+  探针 .workbuddy/round288-intake-tx-probe.mjs 在 intake 那次 prepare 上挂 Proxy 试 BEGIN，
+  得到 "cannot start a transaction within a transaction" ⇒ 那句话的当下【事务已经开着】，
+  取数与 INSERT 就在同一个超步事务里（与 company.ts:153 那条既有不变量一致）。
+  注释已改写，并把「我为什么会写错」留在原地：
+  错因是【从"没看到句柄"推出"不在事务里"】—— 缺证据被当成了反证。
+
+■ 两个门禁红是我自己踩的，以及其中一次的【归因又错了一次】
+  (a) doc-refs：`graph/company.ts:254` 那两发（INDEX.md 与 0050 各一条，同一个 from=254）
+      因为我插了注释行而漂到 281 ⇒ 用 .workbuddy/round289-fix-company-coord.mjs 机械搬运：
+      先从目标文件查出那句话【真实在哪一行】，再校验 SNAP 值【内容一字未变】，
+      才动文档与键。内容若真被改过，搬行号就是错的修法，脚本当场抛而不是悄悄抄新值。
+      复检：0 处过期。
+  (b) lint 基线：format 161→162。我第一反应是 company.ts —— `biome check company.ts` 干净，
+      真凶是我新写的 ①c 那一行超长的 `.run(...)`。修的是那一行的宽度（把 JSON 抽成 stubGraph），
+      LINT_BASELINE 一个字没抬。
+      ⚠ 记的点：「这一发是我这一轮改出来的」也需要【验】，不能靠"我改过哪些文件"推。
+
+■ 本轮探针自己的两个 bug（都是证据打印类，结论没被污染）
+  1) round289 脚本第一版末尾我写了一堆【纯绕路】的间接层（writeFileSyncSafe → require$fs →
+     writeImplReal …），没有任何一层做判断。已整段重写干净。
+  2) 同一个带 g 标志的正则实例复用：`.test()` 之后 lastIndex 不为 0，下一次 `.test()` 从中间
+     继续 ⇒ 「引用点」那一栏第一次只打了 2 条（真值 4 条）。改成每次新建实例后打印齐全。
+     ⇒ 与本轮前面那条同源：机器输出的【条数】本身就是证据，打印少了看不出来。
+
+■ 收尾复跑（本轮实测，不是推断）
+  npx vitest run test/arch/                          → 30 文件 / 372 发 全绿
+  e2e-linear                                         → 13 发 全绿
+  npx vitest run（全量）                             → 134 文件 / 2867 通过 + 6 跳过
+  round288-mutate-graph-version.mjs（复跑）           → 2/2 命中，逐字还原
+  round288-hubrun-graph-version.mjs（复跑）           → graph_version = 0
+
+■ 顺带把 0030 §8 那两条【读数】重算了一遍（不轻信文档现成的结论）
+  - 「role_charters.role_id 形状」那条阻塞读数：仍然成立 ⇒ §8 的 knownRoles 缺口照旧登记。
+  - 「没有生产写入方写 graph_version」那条：已经变成【历史】。两条路现在都有写入方
+    （delegation_graphs 由 POST /org，tasks.graph_version 由本轮这一条）。
+    过期话留着比没有话更坏 —— 它会让人以为还缺一块而不去看真正缺的那块。
+
+================================================================================
+round290 · 一条注释给【从未存在过的守卫】作证，而这正是 round282 记过的形状 —— 本轮把它接成了门禁
+================================================================================
+
+■ 一句话
+  `packages/hub/src/replay/search.ts` 的注释写着「`test/arch/package-deps.test.ts` 明令
+  web 禁止依赖 SQLite，那条守卫此刻是红的」。**那个文件在 git 全部历史里零命中**
+  （`git log --all -- '*package-deps*'` 什么都没返回），它从未存在过。
+  后半句「此刻是红的」也是假的 —— 它今天绿（arch 全绿）。一句话里两个假主张。
+  结论本身没错：web 禁止依赖 SQLite 这件事【确实有】守卫，是 `dependency-boundary.test.ts`
+  （往 desktop/web 塞越界 import 探针跑 biome check 断言失败，往 hub 塞同样的 import 断言通过）。
+  错的是它举的证人。
+
+■ 为什么这条比"注释写错了"更值得花时间
+  为一条不存在的守卫作证，后果是读的人以为【机器拦着】而实际没有 —— 这正是 round282
+  记过的形状：`feishu.ts` 与 `FEISHU_SHAPE_EVIDENCE` 都写着「字段变了红的是 feishu.test.ts」，
+  而那个文件【当时不存在】⇒ 那张形状表没有读者，漂移一路绿到真发请求那一刻。
+  round282 那次补了 40 发测试，把【那一张表】接上了读者。
+  但【那张表没有读者】这个判定本身没被搬进门禁 —— 本轮补的就是这一格（债务清单第 ③ 项）。
+
+■ 先量分母，再决定加不加门禁（不先写守卫再祈祷它绿）
+  探针 .workbuddy/round290-probe-test-named-in-comment.mjs：278 个 .ts，注释里点名 *.test.ts
+  共 474 处，其中查无此物 7 处。⇒ 7 处里 6 处是【故意不存在的探针名】
+  （ghost.test.ts / here.test.ts / x.test.ts 这类，全在 test/arch 讲夹具），
+  只有 1 处是真缺陷（就是上面那条）。
+  ⇒ 这个分母直接决定了范围的收窄：语料只取 `packages/**/src/**`。
+     把 test/arch 收进来 = 一条【恒红】守卫，而恒红的东西会被当环境噪音关掉，比不写更坏。
+
+■ 落地：第 31 道门禁 test/arch/comment-test-readers.ts(+.test.ts，12 发)
+  · 取材复用 comment-citations 的 commentLines（AST trivia，不扫全文）；
+    撤回豁免复用 doc-coords 的 isRetracted。判据【不复制一份】—— 复制的那份会漂移。
+  · 按【基名】判存在，不按整条路径：住址漂了不算缺陷，本守卫只答「有没有这个读者」。
+  · 反假绿两条哨兵：语料为 0 ⇒ 红；有文件但一条引用都取不出 ⇒ 红。
+    两个分开报，因为「扫不到文件」与「扫到了但取不出引用」的修法相反。
+  · retracted 钉死为【恰好那一条】而不是给下界：往上走 = 有人又写假证人然后贴标记，
+    往下走 = 撤回记录被人静默删了。两个方向都要人看一眼。
+
+■ 变异（.workbuddy/round290-mutate-comment-readers.mjs）：5 命中 / 0 未命中
+  M1 注释点名不存在的测试文件          ⇒ 红，且红话带 file:line
+  M2 把那个文件真的建出来（注释不动）  ⇒ 绿   ← 少了这一发，M1 的红可由
+                                            「注释里提到任何测试名都红」的废判据凑出来
+  M2 反面：再删掉文件                  ⇒ 又红（防上一发的绿是缓存假象）
+  M3 同一句改成【撤回】开头            ⇒ 主断言绿，但 retracted 那一发红（豁免是可数的账）
+  M4 正则改坏：语料有文件、引用取不出  ⇒ 红在「注释里一个测试文件名都没取到」
+  旁证：M4 同时被「语料与取材都真的在跑」那发的【数字下界】抓住 —— 两道防线独立响。
+
+■ M4 的【第一版是错的变异】，错法值得记
+  第一版把语料目录名改成不存在的路径，预期红在「一个源文件都没扫到」。实得 ENOENT 抛出、
+  整个测试文件 0 发收集 —— 外层 walk 的失败是【响亮】的，根本走不到哨兵。
+  ⇒ 「目录改名」证明不了我要证的事。真正的静默失效是：文件照常扫到（corpusSize>0）
+     而正则匹配不到任何东西 ⇒ refs 为空 ⇒ 没有哨兵的话输出就是一句干净的「一条都不缺」。
+  变异必须打在【正则】上。这是「测的不是我以为在测的那件事」的一个新变体。
+  （另：锚点串第一版写成 "\."，JS 里那就是 "." ⇒ includes 判不到 ⇒ 机器直接抛。
+    抛比静默好：一台改不动源码的变异机，它打印的命中/未命中都没有意义。）
+
+■ 我自己写的注释踩了本仓门禁两次，都不是代码错
+  (1) 给假证人贴【撤回】标记时，那行写成了 `* ⚠ 【撤回】…`。isRetracted 判的是
+      trimStart 之后【以标记开头】，`⚠ ` 挡在前面 ⇒ 判不到 ⇒ 我的新守卫当场红自己。
+      删掉那个 emoji 前缀即绿。规矩：标记必须是行的第一个字符。
+  (2) 注释里写了探针文件的【名字】。production-deps 有一发按【全文 includes】查探针名
+      硬编码的消费者 —— 只在注释里提一句就自我命中。
+      ⇒ 「只有代码算引用」在这条门禁【不成立】，它是纯文本包含。
+      这条门禁自己的文件头现在也写着「刻意不写探针的文件名」，并说明为什么。
+  (3) 新文件的 walk 没排运行期夹具 ⇒ production-deps 那条「每个 readdirSync 使用者都要
+      二选一登记」的清单当场红，把我拦住并让我去 NEEDS/OUT_OF_SCOPE 做决定。
+      正解是接 isRuntimeFixture（四种 sanctioned 接法之一）而不是把自己塞进 OUT_OF_SCOPE。
+      ⚠ 准确说法：本轮【已有门禁】替我抓到的是【同一个文件里的两发】——
+        上面 (2) 探针名硬编码那一发，与 (3) readdirSync 名单那一发，都在 production-deps.test.ts。
+        而 (1)【撤回】标记那一发是【我自己新写的那道门禁】红在自己头上（isRetracted 没判到）。
+        别写成「唯一一次」：那是把【同一个守卫的两发】和【两件事】混成一个数，
+        与本轮前面几次的「把局部写成全部」同族。
+
+■ 修掉的那条注释：证人换成 dependency-boundary.test.ts 并写出它到底判什么，
+  假主张「此刻是红的」按 0007 §4.1 保留原文 + 【撤回】标记，不静默删。
+
+■ 复跑
+  test/arch/                       → 31 文件 / 384 发 全绿（本轮 +1 文件 / +12 发）
+  lint 基线                        → 未抬：新写那两份已 biome --write；
+                                     search.ts 的 format error 是【本轮之前就有的】，
+                                     它本来就在 161 里，我那份注释没有新增 format 文件
+  test-type-baseline               → 未抬（新两份 0 条）
+  doc-refs                         → 绿（本次改动没有新的 file:line 坐标）
+  tsc --noEmit                     → 0
+
+================================================================================
+round291 · Task 2.9 那道 Playwright 门落地了，而它把验收句的最后一格证成了【不成立】
+================================================================================
+
+■ 一句话
+  建了 test/e2e/ceo-loop.spec.ts + 根 playwright.config.ts + pnpm test:e2e，
+  npx playwright test 实测 1 passed / 1.5 s。但计划那句验收原文的最后一格
+  「看板更新为 DELIVERED」【没有断言、也断不出来】：批准只走完人边那一跳
+  （packages/hub/src/engine/dispatch.ts 的 HUMAN_EDGES ⇒ CHARTER_PENDING →
+  CHARTER_APPROVED），其后 DECOMPOSING → … → DELIVERED 全在 AGENT_EDGES，
+  浏览器里没有任何一处点得动。⇒ 症状从【工件没建】变成【验收句要求一次真花费】，
+  那一格登记为 CEO 决策（优化设计文档 §7 第 16 格），不实现、不豁免、不写弱断言。
+
+■ 顺手抓到的真缺陷（比门禁本身值钱）：dev-server 的 zod 挂载点是【恒 404】
+  packages/web/src/dev-server.ts 把 zod 挂在 join(ROOT, "node_modules/zod")，
+  而 pnpm 的 isolated linker【从不创建根 node_modules/zod】
+  ⇒ /vendor/zod/* 恒 404 ⇒ 浏览器模块图第一跳就断 ⇒ 整页白屏。
+  ⚠ 它安静到什么程度：404 只写进响应，不写服务端日志，所以【日志一个字不多】；
+    spec 上表现为 locator.fill 超时（M3/M5 两发的红形都是超时，不是 404）。
+  修法是 createRequire 从 packages/contracts 解析 zod 真实目录，解析不到就抛。
+  ⇒ 教训：在 pnpm 仓里【照着 node_modules 描一条路径】是【错的】，不只是脆的。
+
+■ 0007 §9.2 预告过的那次演进【兑现了】（第 31 道门禁 test-inventory 改成多 runner）
+  · 当年写的判据是「collected 从 vitest include 扩成 vitest include ∪ Playwright
+    config 的 testDir/testMatch」，并明说 Task 2.9 落地那一刻会【假红】。
+  · 今天按判据落地，但【不照配置自己解析】：collected =
+      vitest list --files-only  ∪  playwright test --list --reporter=json
+    两个清单都【问 runner 要】。自己解析 config = 同一套误读同时作用于两侧 ⇒ 差集恒空
+    ⇒ 恒真判定（§4 那一族），所以宁可多 spawn 一次（实测 --list 约 1.0 s）。
+  · 实测口径（1.65.1）：config.rootDir 是 posix 绝对路径，suites[].file 是相对它的
+    裸文件名（Windows 上带反斜杠）⇒ 拼起来再对仓库根取相对才是同一口径。
+  · 读不出来一律【抛】，不许退化成空清单：空清单会把红因写成「没人认领这个文件」，
+    而真话是「清单读不出来」。
+  · 反向 canary 两枚：主断言里只喂 vitest 那份 ⇒ ceo-loop 必须立刻无人认领；
+    playwrightFiles 的正对照钉住真清单非空（防它退化成恒返回 []）。
+
+■ 变异矩阵 .workbuddy/round291-mutate-ceo-loop.mjs：命中 6 / 6
+  M0 一字不改 ⇒ 绿（控制组）
+  M1 不点批准 ⇒ 红（红在 toContainText，证明最后那一跳真的由点击造成）
+  M2 起草角色不在组织图上 ⇒ 红（红话是「起草回调一次都没被叫 ⇒ 卡片不是起草出来的」，
+     不是"没找到卡" —— 后者会绿在【起草根本没跑】上）
+  M3 代理与 Hub 的 token 不一致 ⇒ 红（证明这一圈真的经过签名代理）
+  M4 把最后那条断言掏成恒真 ⇒ 【必须绿】（反向 canary：红因若来自别处，这发也会红）
+  M5 zod 挂载退回硬编码 ⇒ 红（就是上面那个真缺陷，红形是超时）
+
+■ 本轮自己犯的三条，按形状记（不是按严重程度）
+  (1)【格式修绿时动了别人的文件】给 dev-server.ts 上 biome --write ⇒ 127 增 / 33 删的
+      纯排版 diff。它本来就在 161 那份 format 账里，属「先 commit 再全仓修」那一格。
+      ⇒ git checkout 回滚，改成最小手工编辑。规矩复述：--write 只对【整份未入库】的文件用。
+  (2)【变异脚本的锚点静默失配】M2 锚的是格式化【之前】的单行形状 ⇒ 跑到第三发才抛，
+      前两发的时间白烧；更要紧的是「锚点不在 ⇒ 那一发【没跑过】」这件事本身：
+      矩阵里既没有它也没有红，读的人会以为这一族都验过了。
+      ⇒ 改成【进场前把所有锚点逐一验存在】，任一失配就一发不发。
+      ⚠ 我第一版顺手加的"变异串本来就在文件里 ⇒ 判空操作"是【错的判据】：
+        M1 的变异串就是原文的前缀子串，那条会误报。真空操作只有 from === to。
+  (3)【在自己的正文里原样写出豁免标记】为了描述那个 HTML 注释，我把标记原串写进了
+      计划文档 ⇒ 判据读的是验收行原文，于是豁免【被我自己重新贴回去了】，
+      plan-gate-paths 当场以「死的豁免」拦下。⇒ 描述标记时用名字，不写原串。
+
+■ 顺带修掉的工具链撞名（登记为形状，不是数量）
+  装上 @playwright/test 之后 biome 2.6.5 报 4 发基线外 error
+  （lint/correctness/usePlaywrightValidDescribeCallback），位置在
+  test/arch/comment-citations.ts —— 一个【私有、未导出】的格式化函数 describe(citation)
+  被认成 test.describe。A/B 实测（同一二进制同一版本同一文件）：含该依赖 4 发 / 摘掉 0 发。
+  ⇒ 规则的开关是【依赖声明】，不是文件内容。修法选【改名】describeCitation，
+    不在 biome.json 关那一族：关了会连新 spec 里【真的】误用 test.describe 一起放过。
+  ⚠ 这次改名把两行顶过了行宽 ⇒ format 从 161 变 162（棘轮当场红）。
+    手工把【自己那两行】折行修回，没有上调上限。
+
+■ lint-baseline.ts 文件头那条「3 道」的 grep 口径【本来就会对不上】
+  原文写的复算命令 grep -cE 'Run.*pnpm verify' 今天给【4】不是 3：多出来那发是 Task 0.2
+  （它也有 verify 的 Run 行，但它不是出口门禁）。3 的真实口径是
+  「标题含『出口门禁』的 Task 里 Run 行写 verify 的」。
+  本轮实测：6 道出口门禁 ⇒ 0.11 / 1.8 / 3.8 有 verify 行，2.9 / 4.7 / 5.8 连 Run 行都没有。
+  ⚠ 我一度把「3 道」整句改成「若干道」—— 那是【用一个精确的真主张换成一句含糊话】，
+    复核后已恢复原句，只把【口径】补进去。改注释前先判「原话是不是真的」，
+    真的就别动它，缺的是口径不是数字。
+
+■ 复跑
+  npx vitest run                 → 135 文件 / 2884 发 全绿（+6 skipped）
+  test/arch/                     → 31 文件 / 389 发 全绿（本轮 +5 发：playwrightFiles 一族）
+  npx playwright test            → 1 passed（两次连跑复现；跑完 netstat 复核过
+                                    8899/9899 上没有残留监听 ⇒ 不是被探针进程代打）
+  lint 基线                      → 未抬：format 161/161、organizeImports 117/117、
+                                    noUnsafeOptionalChaining 3、noAssignInExpressions 4、
+                                    useIterableCallbackReturn 2（全类目在帽内，总 287）
+  pnpm typecheck (tsc -b)        → 0
+  test-type-baseline             → 未抬（291，test/e2e 那两份 0 条）
+  plan-gate-paths                → 绿：Task 2.9 的豁免已摘（成立条件消失），
+                                    期望缺项数组从 2 条收窄到 1 条（mobile-approval 保持豁免）
+
+================================================================================
+round292 · O8 动作 1：那条「新节点无判据旁路」有判据了，而我自己先写了一版恒真的
+================================================================================
+
+■ 一句话
+   contracts/src/org/validate.ts 新增 everyNodeDeclaresModelFamily，
+  packages/hub/src/org/commit.ts 在 commitOrgGraph 开事务【之前】把它打在 after 图上。
+  round279 那发「一个新节点随一条无关的 add_edge 提交能拿 200 进库、全程没有判据过手它」
+  从今天起是 422（code = unknown_model_family）、零新版本、库里零残留。
+  ⚠ 这一格修的是【旁路必须有判据】，不是【加一个 add_node】。
+    契约里仍然没有带判据的 add_node，两个前端仍然零出口 —— O8 第一跳【没做完】，
+    声明了 model_family 的新节点随一条无关 add_edge 照样进得了库（那发反向 canary 钉它）。
+
+■ 为什么判据放在 commit.ts 而不是 HTTP 层
+  commitOrgGraph 是 delegation_graphs 在生产里的【唯一写入方】（grep 过全仓）。
+  判据打在它内部的 after 图上 ⇒ 没有第二条写路径能绕过。放在 HTTP 层则任何
+  新入口（CLI、将来的一次性脚本）都不经过它。
+
+■ 我自己先写错的那一版（本轮最值钱的一格，登记为 §7 第 18 格）
+  第一版写成「只判 after 相对 before【新增】的那些节点」—— 听着比"整张图"更精准，
+  而它当场恒真：applyChangeToGraph 对 reparent 只改 reports_to、对 add_edge 只 append
+  一条边，两种 kind 都不往 nodes 里加东西 ⇒ 偷偷塞进来的节点在 before 里也在
+  ⇒ 差集为空 ⇒ 拦不到旁路，也对任何一次正常提交放行。它不会报错，只会安静地什么都不判。
+  证人不是我的推理而是变异 M6（把生产代码换成那一版"更精准"的写法）
+  ⇒ 端到端那一发与 commit 层那一发【同时红】。
+  ⇒ 泛用那条：把守卫的作用面【缩小到这次改动涉及的对象】是一次「看起来在收紧」的放松。
+
+■ 顺序不是风格问题：判据必须在 revalidate【之后】、w.node()【之前】
+  applyChangeToGraph 在 reparent 的子角色不在图里时是【抛错】的（那一格归 L1 的
+  unknown_role）。把新判据挪到 revalidate 之前 ⇒ 一次「图缺家族 + reparent 不存在的角色」
+  的提交会抛出 Error，HTTP 层从 422 变 500。
+  ⇒ test/org/versioning.test.ts ⑥ 第 2 发就是这一格的证人：同一张缺家族的图上做
+    reparent 不存在的子角色，断言 r.code === "unknown_role"。判据挪位置它立刻红。
+
+■ 变异矩阵 .workbuddy/round292-mutate-org-node-criterion.mjs：命中 7 / 7
+  M0 一字不改 ⇒ 绿（控制组，兼自证这台机器上计数读得出红与绿）
+  M1 提交路径不再采纳这条判据 ⇒ 红 2 发 / 2 文件
+  M2 判 before 而不是 after ⇒ 【该绿】—— 变异等价：applyChangeToGraph 不碰任何
+     model_family ⇒ 两种写法恒同解。⇒「判 after」不是这条守卫可靠的原因，
+     可靠的是它判【整张图】（M5/M6 才是证人）。留成 expectRed:false 是为了
+     哪天 applyChangeToGraph 开始改 model_family 时 M2 翻红，那时"判 after"才开始承重。
+  M3 空串/纯空格不再算缺 ⇒ 红 1；M4 理由里不点名角色 ⇒ 红 1
+  M5 退回只判这次变更涉及的节点（三层原来的射程）⇒ 红 2（ghost 不在那条边上 ⇒ 旁路复活）
+  M6 「只判新增节点」恒真版 ⇒ 红 2
+
+■ 本轮自己犯的三条，按形状记
+  (1)【在正文里原样写出豁免标记】的同类错误我又犯了一次，形状是【测试自己红在
+      与主题无关的地方】：证据② 第一版直接调 latestGraph() 断言"库里零新版本"，
+      而它假定表里至少有一行 ⇒ 空表恰好是我要断言的东西 ⇒ TypeError。
+      红因与被测判据无关，读的人会以为判据没生效。⇒ 改成 COUNT(*) 并把这条写进注释。
+  (2)【拿一个错的对照去证"这一维真的在判"】：我先用 violatesNoSelfReview("dev","dev")
+      想证缺家族 ⇒ 它返回的是 self_review 不是 unknown_model_family（自审那一维
+      短路在同家族之前）。⇒ 对照改成「同一张图只把 dev 的家族掏空」+ 一对非自审角色。
+  (3)【变异脚本的解析器会把红读成绿】：(\d+) failed 先撞上 per-file 行，把文件和
+      用例数混在一起；分开数之后又发现 ANSI 码夹在标签和数字之间，而 vitest 全绿时
+      【整段不输出 failed】⇒ 我的第一版正则会把「读不到」当成 0 发失败。
+      ⇒ readSummary() 剥 ANSI、读不到汇总行就【抛】。一个把红读成绿的解析器比没有解析器更坏。
+
+■ 落笔后的坐标账（这条是【现跑现红】抓到的，不是我算出来的）
+  §7 第 18 格插进 14 行 ⇒ O14 登记表里 12 条 source.line 全体下移 14
+  （1039→1053 / 1225→1239 / 1252→1266 / 1289→1303 / 1606→1620 / 1697→1711 /
+   1728→1742 / 1792→1806 / 1815→1829 / 1848→1862 / 1889→1903 / 1161→1175）。
+  claim-coords 当场拦下并逐条交出「现在在 [...]」。
+  ⇒ 这正是 r14 立它的理由：renderMarkdown 不渲染 line，那张表的「逐字一致」守卫对坐标是瞎的。
+  本轮另两处顶漂：commit.ts 的 INSERT_CHARTER_SQL 107→108、config 那行 304→323
+  （doc-refs 快照与 0015 的三处引用同批改指）。
+  ⚠ 写回坐标用的不是正则一把梭：12 条各判【恰好命中 1 次】，任一失配就拒绝写入并退出。
+
+■ 复跑
+  npx vitest run                   → 135 文件 / 2894 发 全绿（+6 skipped），退出码 0
+  npx vitest run test/arch         → 31 文件 / 389 发 全绿
+  test/org/ + 那发验收测试         → 90 发全绿（validate 43 / versioning 27 / 端到端 8 / 其余 12）
+  pnpm typecheck (tsc -b)          → 0
+  test-type-baseline               → 未抬（291；新加的 node() 助手与类型安全夹具
+                                      是为了【不加】新错，而不是往帽里塞）
+  lint-baseline                    → 未抬（format 161：本轮我自己那行超宽，手工折行，没上调帽）
+  变异矩阵                          → 7 / 7（含 M2 一发【该绿】）
+
+■ 这一轮的两条【读数污染】，比红本身更该记（都是我自己造的）
+  (a)【管道吃掉了退出码】第一遍全量跑写成 `npx vitest run | tail -8` ⇒ 退出码是 tail 的 0，
+      而汇总行写着 1 failed。⇒ 判"绿"只认退出码，而退出码【必须来自 vitest 本身】：
+      要留档就整份重定向到文件再看尾部，别接管道。
+  (b)【我把变异矩阵和全量测试同时跑了】那遍报 1 failed，而【它到底红在哪一发我查不回来了】
+      —— 红因被上一条那个 tail 一起扔掉了。能证明的只有三件事：那一遍与 round292 的变异
+      矩阵【时间上重叠】（矩阵在磁盘上真改 validate.ts 与 commit.ts，不是副本），
+      单独重跑是 135 / 2894 全绿，以及矩阵自己是 7 / 7。
+      ⇒ 重叠是【唯一可见的嫌疑，我没有证它】。但这条纪律不依赖那发红因归谁就成立：
+        自回滚变异【不可并发】任何东西 —— 它改的是生产字节；
+        并发跑两个矩阵 = 两份字节互相覆盖，两边的红因都不是自己的那一发。
+      ⚠ 记这一格是因为我差点把"嫌疑"写成"真因"：这一格如果写成前者，
+        下一个人就少了一次「自己去看红因」的动力，而账上多了一条【没有证人的因果句】。
+
+================================================================================
+round293 · O14 动作 3：那条「已配复算方法」的口径第一次真跑，四条数【全部】对不上
+================================================================================
+
+■ 一句话
+  §1.1 那张表教人「怎么复算」的那一栏，在 round293 之前是一段【对脚本形状的描述】，
+  而本篇 §8 末与 O14 动作 3 两处都自称「每个数都配了复算方法」。本轮把它落成
+  test/arch/census.ts（npx tsx 跑）+ census.test.ts（12 发），
+  第一次真去复算 ⇒ 四条【全部】对不上：83→92 / 35216→40871 / 108→135，
+  而第四条最坏 —— 「11」看着没变，其实是【另一批成员】（同一句话、另一堆模块）。
+  登记为 r20。旧数按「改数就等于伪造那次测量」保留原样，新读数写在 ⚡ 里。
+
+■ 为什么这一格值得单独落一条主张（而不只是加个脚本）
+  「写了口径」≠「给了方法」。一段描述【不可执行】，于是它错了也没人能发现它错了 ——
+  这正是本篇 O14 全文在治的形状，只不过这次栽在【最像元讨论、最像在自省的那一段】。
+  ⇒ 光有脚本还不够：那句「现在有了」本身也会漂，所以进登记表由判据看着
+    （核的是脚本在场 + 仍复用那张图 + 悬空说明符仍会抛 + 排除入口那一格还在 +
+    两枚反向 canary 还在；它【不跑】那个脚本，重跑一遍只会让两处口径互相漂）。
+
+■ 复用而不是另写一份解析器（本轮我差点就没复用）
+  §1.1 自己记着那条坑：按说明符子串匹配会漏掉 from "./timer.js" 那种同目录 import，
+  第一版因此数出 33 个假死模块。本轮我当场又犯了一次同族的：
+  grep 'store\.js' 找 charter/store 的调用方，匹到的全是 evidence/store 那一族【别的】store。
+  ⇒ census 从 dead-modules 拿 collectModules / buildGraph / entryPoints，
+    两处各解析一遍 = 同一套误读同时作用于两侧 ⇒ 差集恒空 = 恒真判定（§7 第 4 格那一族）。
+    为此把 resolveSpec 从 dead-modules 【导出】（唯一一份解析口径）。
+
+■ 本轮自己犯的【六条】，按能不能被机器抓住分开
+  (1)【自造了一条错的口径】我先立了「零 runtime importer」，读数 18 且含活模块 ——
+      因为 import type 与 await import 的说明符字符串一模一样，那条口径区分不了。
+      ⇒ 判据【删掉】，只留诊断。错口径比没口径贵：它会产出看着合理的假数。
+  (2)【typeof 收下了 "external"】resolveSpec 返回 string | null | "external"，
+      我第一版只滤 typeof === "string" ⇒ 字符串 "external" 当路径进了结果集。
+  (3)【两条测试断言本身是错的】① 把 a.ts 断成「不在零 importer 里」—— 那读的是
+      "它没 import 别人"，而这条守卫数的方向是"谁 import 它"；② 断「三行文本 split 得 3」——
+      "a\nb\nc\n".split("\n") 是 4，我连错的方向都没算对（实测 verifier.ts 这里 725 / wc 给 724）。
+      两条都在原地改成对的，并把错法留在注释里。
+  (4)【.mjs 里写 TS 类型】新写的 repoint-coords.mjs 里出现 (text: string): void ——
+      tsx 只转译 .ts，.mjs 走纯 JS 解析 ⇒ 那是 SyntaxError 不是风格问题。
+      这条教训 round283 记过一次（sync-registry-row.mjs 那句 as string），我又犯了一遍。
+  (5)【一台会读假的变异机】repoint 脚本第一版把【回读】写在 writeFileSync 【之前】，
+      读的是旧字节 ⇒ 「写入没生效」那条红永远不响，而我以为它响过。
+      改成 verify(内存串) → 落盘 → verify(盘上) 两遍。
+  (6)【一发什么都没测到的变异】r20 之二第一版抹掉 import 列表里的 collectModules 一行，
+      实得【绿】—— 判据读的是【文本在场】，函数体里还有 collectModules(root)，
+      少个说明符根本不红。真正的等价变异是换掉被 import 的【模块名】。
+      ⚠ 这一发如果不是我当场看见"应该红却绿了"，就会被当成判据通过记进台账。
+
+■ 坐标账：本轮漂【两次】，第二次让我把工具改了
+  第一次 19 条 +40（§1.1 / §7 第 19 格），第二次 7 条 +4（O14 那段 + 表里插 r20 那一行）。
+  第一版搬运脚本按【旧值→新值】查表，当场撞上【链式污染】：
+  r6 的新值 143 恰好等于 r2 的旧值 ⇒ 逐条替换时文件里同时有两处同一个数。
+  那一版靠「每个旧值恰好命中一次 + 回读全表比对」堵住了（能用，但是【事后核对】）。
+  ⇒ 本轮另写 .workbuddy/repoint-coords.mjs：按【id】定位那条登记、只替换它自己那一格 line，
+    结构上不需要任何全局唯一性假设；并加一条「除这些 line 格外其余字节一字未动」的差分核对。
+    这类"改坐标"的活以后走这个，别再用值查表。
+
+■ 一条家规守卫的【实际射程比它的注释宽】
+  claims-registry.test.ts 那条「渲染不放条数」写的是「表头没有计数列」，
+  但判的是【整张渲染表】的 includes ⇒ 我在 r20 主张正文里写「§1.1 那张表的四条数…」当场红，
+  红话只有一句 to not match，看不出被拦的是正文不是列名。
+  ⇒ 判据【没收窄】（收窄 = 少一道执行者），把射程与「什么时候该改文案、什么时候该改判据」
+    写进那条断言的注释。改的是文案：那四个读数本来就在 ⚡ 里，主张正文不该替它们作证。
+
+■ lint 棘轮：本轮抬了 1 格又自己降回去，过程值得记
+  claims-registry.ts 是【未入库】文件（test/arch 只 track 了 30 个，这一族还没进过 git）
+  ⇒ 家规允许对它 biome --write。三处改动全在我本轮新增的字节里（一处超宽 if 折行 +
+  两处引号风格），字符串【值】未变 ⇒ 不用重跑表同步（表逐字一致那条自己会证）。
+  核对方式：先 cp 一份、--write、再 diff 看每一行是不是我写的东西。
+  ⚠ 判"这格脏是不是我造的"不能靠记忆：本轮是靠 git ls-files 查到那两份【根本没入库】才敢下笔。
+
+■ 复跑（每条都是本轮现跑，不是抄上一轮）
+  npx vitest run test/arch         → 32 文件 / 409 发 全绿（本轮 +8 发：r20 七发变异 + 控制组）
+  npx vitest run                   → 136 文件 / 2914 发 全绿（+6 skipped），退出码 0
+                                      ⚠ 整份重定向到文件再看尾部，不接管道（round292 (a) 同形）
+  pnpm typecheck (tsc -b)          → 0
+  lint-baseline                    → 未抬（format 161）；test-type-baseline → 未抬（291）
+  变异矩阵 .workbuddy/round293-mutate-census.mjs → 命中 7 / 7
+    M0 控制 [绿] / M1 反向边不累积 [红 2] / M2 isEntry 恒 false [红 3] /
+    M3 underEntries 不过滤 [红 2] / M4 unresolved 写死 0 [红 1] / M5 行数按 wc 口径 [红 1] /
+    M6 摘掉 sort【该绿】（12 发无一判顺序 ⇒ 登记的射程余量，留着是让下一个人看见这一格没被判住）
+    ⚠ 本轮【单独跑】它，不与任何测试并发（round292 (b) 那条纪律）。
+  注册 census.ts 到 production-deps 的 readdirSync 名单：走【OUT_OF_SCOPE】并写明理由
+    —— 它自己那处 readdirSync（countTestFiles）从仓库根走、只收 .test.ts 结尾的名字，
+    探针的名字不像测试 ⇒ 与 test-inventory 那一格同形：【按名字天然免疫】而非【没走到】。
+    它读 hub/src 内容的那条 walk 在 collectModules 里，那边已排过夹具；
+    这里再排一遍就是第二套排除口径。注释里钉了作废条件：哪天 countTestFiles 收非测试文件，
+    这格立刻作废、得搬去 NEEDS。
+
+■ 落笔后又改了自己一处【写错的账】（不是代码错，是文案错）
+  r20 的 method 第一版写「外加打在【判据自己】上的六发（round293-mutate-census.mjs）」——
+  那六发打的其实是【census.ts 的生产字节】，证的是 census.test.ts 不空转；
+  本条判据自己的非空转由另外八发合成变异证。两份证据的分母被我并成一份了，
+  而 method 那一栏存在的意义就是「下一个人去哪找证据」——写错等于把人往错的文件支过去。
+  ⇒ 改成两组分开写（六发打生产字节 / 八发打判据输入），并把 (6) 那一发【看着通过实则空转】
+    的教训一并写进 method：它是这一栏里最该留着的一句，因为它是【反证】。
+  同步只走 .workbuddy/sync-registry-row.mjs r20（表是渲染的产物），不手抄。
+
+================================================================================
+round293 第二段 · 一句写着「今天」的读数，没有作者续约义务（登记为 r21）
+================================================================================
+
+■ 一句话
+  上一格落地后顺手复测【本篇自己的】"今天"，两处当场是假的：
+    ① §10 第 10 格表里三句（`test/e2e/` 目录不存在 / playwright 不在任何 package.json /
+       全仓 *.spec.ts 零条）—— round276 写的，round291 建工件时【只建了东西、没来改这句】
+       ⇒ 三句全假，实际有效期 15 轮；
+    ② §5.1 Task 4.7 那半句「发卡那一路零生产调用方」—— 假的，投递那一跳在 r17 就接进
+       心跳了（runDeliverPass 的调用点在 serve/im-channels.ts，本轮 grep 现数）
+       ⇒ 那一格的归因连改三次：无从接 → 接了推不出去 → 只差真凭据。
+  本轮把能钉的那一格（豁免那份账）钉成双向的，其余按 0007 §4.1 保留原文 + 撤回标记。
+
+■ 为什么这事值得一条主张（r21），而不只是改两处文案
+  plan-gate-paths 的判据读的是【计划正文】，不读守卫自己的文件头注释。
+  ⇒ 注释里那三句"当时没建"过期得【无声无息】：证人写在注释里，而注释没有读者
+    （与 round290 那条「为不存在的守卫作证」同形）。
+  ⇒ 能钉住的只有【账】：条数 + 身份 + 每条豁免必须真的豁免掉一条不存在的路径。
+    散文钉不住，本轮也不假装钉住了（写进 r21 的射程第①条）。
+
+■ 把「上下界」换成「钉死」的真实理由：原来那两个界是【单向】的
+  原写法 `>0 且 ≤2`：往上加一条会响，【往下被静默摘光反而不红】（0 满足 ≤2），
+  而摘光之后那条红的措辞指错地方（像"计划里有个路径写错了"，不像"有人动了豁免"）。
+  ⇒ 现在：计数恰好 1 + 活着的那一条必须点名 mobile-approval.spec.ts（身份钉）
+    + 每条豁免必须真的豁免掉一条不存在的路径（贴在"路径全都在"的位置上 = 死的豁免，红）。
+  ⭐ 配一发反向 canary：合成语料给两条标记 ⇒ 必须数出两条；给一条 ⇒ 数出 1。
+    没有它，一个恒返回"一条"的坏计数器（filter 写成 find / map 前多一个 slice(0,1)）
+    在 toBe(1) 那一发上【照样绿】。同 census 那两枚反 canary 一条立场：
+    钉住一个读数的唯一办法，是让同一个判据在另一份语料上给出另一个数。
+
+■ 三条自己犯的错（都在工具/判据身上，且都伪装成"被测对象没问题"）
+  (a) 剥 ANSI 写成 /\[[0-9;]*m/g —— 【少了 ESC】。它剥掉 [2m 却把 0x1b 留在行首，
+      于是 /^\s*Tests\s/ 对着一行真汇总判不中，报「读不到 vitest 汇总行 ⇒ 拒绝把这一发当绿」。
+      看着像 vitest 没跑，实际是【vitest 给汇总行上了色】而我的正则没剥干净。
+      ⇒ 凡是"用正则读别人的输出"的脚本，先拿一次真输出验那个正则，再谈变异结果。
+  (b) 变异机的 catch 无条件把 err.stdout 交给汇总解析器 ⇒「vitest 根本没起来」和
+      「起来了但读不到汇总行」长成同一个错，真诊断被吞。改成先问输出里有没有汇总行。
+      （同 round293 第一段 census 那台已经写对的形状，这一台抄漏了那一格。）
+  (c) ⭐ r21 判据第一版核的是 includes(NOT_BUILT_TAG) 这个【片段】，而它在守卫里有【两处】
+      （missingGatePaths 的 `if (…) continue` 与 exemptedBlocks 的 filter）
+      ⇒ 摘掉 filter 喂给判据，实得【绿】。改成核整条 filter 表达式才红。
+      与第一段 r20 之二【逐字同形】（那里抹的是 import 列表里的 collectModules,，
+      而函数体里还有 collectModules(root)）。
+      ⇒ 泛用那条：**"文本在场"从不等于"我要守的那一格还在"；核一个片段，
+        先数它在靶子里出现几次。** 同一族的坑第二轮复发 ⇒ 说明写进 method 不够，
+        它还得变成一发变异（本轮两处都做了：判据改窄会红 + 打了它并实得红）。
+
+■ 证据（落地四件套之"自回滚变异"，两组分母分开写，同第一段那条教训）
+  A. 打在【真文档 + 真守卫字节】上：.workbuddy/round293-mutate-gate-exemption.mjs → 命中 5 / 5
+     M0 控制组【该绿】/ M1 标记挪到路径存在的 ceo-loop 那格 [红 2] /
+     M2 静默删掉最后那条豁免 [红 2] / M3 filter 换恒真 [红 1] /
+     M4 只改那一格散文措辞【该绿】（判据对无关文案不敏感 —— 绿的这一发画的是边界）
+     自回滚 + 逐字节核对（finally 里对不上就抛）。【单独跑】，不与任何测试并发。
+  B. 打在【r21 判据输入】上：claims-registry.test.ts 七发合成变异（不碰盘）
+     控制组返回空 / 守卫不见 ⇒ 红 / ⭐ 摘 filter ⇒ 红（并带 not.toContain 排除"红在旁边那句"）/
+     测试不见 ⇒ 红 / 恰好 1 换回 toBeGreaterThan(0) ⇒ 红 / 摘身份钉 ⇒ 红 /
+     ⭐ 摘那发数得出 2 的反 canary ⇒ 红。三发各配一条 not.toContain 防红因串扰。
+
+■ 坐标账
+  表行 append 在 1484 行 ⇒ 其下全部主张坐标 +1，r10/r11/r12/r13/r14/r15/r19 集体漂一行
+  （claim-coords 一次报出 8 条，含新写的 r21 自己）。
+  全部走 .workbuddy/repoint-coords.mjs（按 id 认、条目内只允许一个 line、
+  除 line 字段外任何字节变了就抛、写完再对盘回读）。r21 落点两次漂（先 2159→2160，
+  本轮又给 §10 第 20 格加了那条判据坑 ⇒ 2160→2168），两次都由守卫报出、非人肉发现。
+  新增 doc-refs 快照一格：主文档 → serve/im-channels.ts:377（投递那一跳）。
+  它是【反向活坐标】：那一跳若被人从心跳里摘掉 ⇒ 快照红 ⇒ 逼他重读 §5.1，
+  那时"只差凭据"会重新变成假话。抄法照旧：node 读第 377 行 trim 原文，不从文档正文复制。
+
+■ lint 棘轮：又是【先查入库状态才敢下笔】
+  format 161→162，红因是我新写的两处（一条超长 includes 断言 + 一处嵌套引号串）。
+  claims-registry.ts 用 git ls-files --error-unmatch 查到【未入库】⇒ 才对它用 --write，
+  且 cp 到 /tmp 后 diff 逐行核对：只有我这两处变了，字符串值一字未动。
+  ⇒ 判"这格脏是不是我造的"不能靠记忆（同第一段那条）。改回 161，棘轮未上抬。
+
+■ 复跑
+  test/arch：32 文件 / 417 发全绿。分母是数出来的不是回忆的：起点 410（那枚 doc-refs
+  快照只加了一条表项，【不发】）+ r21 那七发合成变异 = 417。
+  ⚠ 这一格第一版我写的是「409 → +8」——两个数都错：409 是本轮【修 doc-refs 之前】那次
+  红跑的 passing 数（410 才是总数），而 +8 是把 r20 那一组的发数顺手抄过来了。
+  台账里的分母写错 = 下一个人按错的期望去核对，比不写更坏（同第一段那条 method 分母）。
+  plan-gate-paths.test.ts 单独：11 发全绿（本轮 10 → 11）
+  全仓：136 文件 / 2922 passed + 6 skipped，exit 0（上一段收口时是 2915 ⇒ +7，正是 r21 那七发）；
+  tsc -b 退出码 0；lint 棘轮 161、测试类型棘轮 291 均未上抬。
+
+■ 射程（读这段的人最先该看的）
+  ① 那两处过期读数是【人肉复测】抓出来的。没有任何守卫判"这句话过期了"——
+     能钉住的只有那份账，钉不住散文。本篇里还有多少句"今天"，本轮没有数过。
+  ② 新读数只证【盘上有 1 个 E2E】；git ls-files "*.spec.ts" 今天仍是 0
+     ⇒ "仓库里有一个 E2E" 与 "仓库里跟踪了一个 E2E" 是两条主张。
+  ③ Task 2.9 / 4.7 两道门【依然没过】：2.9 缺"更新为 DELIVERED"那一跳（CEO 决策面），
+     4.7 缺真飞书沙箱 + 真凭据。本轮只改了"为什么没过"的归因 ⇒ 别读成"门近了"。
+
+================================================================================
+round294 第二段 · 我写的两发"反向对照"是空转的（登记为 r22 的补强，不新开条）
+================================================================================
+
+■ 一句话
+  第一段收口后重读自己写的东西，抓到三件：① r22 那两发"注释里的字节不算代码"反向对照
+  【从没打到靶子】——注入落在函数头之前，而判据取的是函数体那一段；② 我给
+  withoutComments 的洞②登记的方向【是反的】；③ 三处我自己写下的分母是错的。
+  三条都不是测试能报的：前两发一直绿，后三条一直是字。
+
+■ ① 空转的反向对照（本轮最贵的一格，因为它伪装成"有守卫"）
+  判据读的是 sliceFrom(validate, "export function validateNewNode(", "export function")
+  ⇒ 从函数头【起】取。我把 model_family 那些字节注在函数头【之前】，实测核对：
+      注在函数头之前 ⇒ 那一段里 includes("model_family") === false
+  ⇒ 那两发对【任何】实现都返回绿。它们的存在还让我在函数头注释里写下了
+    "两个洞的方向各由一发合成用例钉住" —— 一句当时就没有证人的话。
+  ⇒ 泛用那条：**注入型反向对照必须自带"我确实打到了"的位置自证**
+    （本轮补成 indexOf(注入串) > indexOf(函数头)）。
+    少这一条，它的绿与"这个特性根本不存在"不可区分 —— 同 r20 之二、r21 之二
+    （文本在场 ≠ 那一格还在）是同一族的第三个方向：那次是"字节在但不在我要守的位置"，
+    这次是"我以为注进去了，其实注在了判据看不见的地方"。
+
+■ ② 洞②的方向量出来是【反的】，而且错向更坏的一边
+  原登记："块注释里含 // ⇒ 收尾被吃掉 ⇒ 块没被剥 ⇒ 注释字节留下 ⇒ 家族格【假红】"。
+  实测：那个懒匹配 ( [\s\S]*? ) 不停在原地，它一路吞到【下一个真 */】——
+  validateNewNode 的切片里就有下一个 */（heightBelow 的 JSDoc 收尾），于是连坐吞掉
+      role_exists / would_create_cycle / multiple_roots / depth_exceeded
+  四判的字节 ⇒ 整条判据隐身 ⇒ 【假绿，且比洞①宽得多】。
+  ⇒ 泛用那条：**登记一个洞之前先把它的方向量出来。** 写错方向的登记不只是没用的账，
+    它会让下一个人去防一支根本不存在的箭（而真正在漏的那一面没人看）。
+  两发登记用例（之九·乙 / 之十·乙）各配一发【单变量对照】：只把那两个斜杠拿掉、
+  真判据原样留着 ⇒ 那一发必须红。没有它，"绿"分不出【洞】与【注入没进切片】。
+
+■ ③ 三处我自己写下的分母（都不是测试，全是字）
+  a) "validateNewNode 判五条" —— 实际 reject 的 code 是【6】个（role_exists /
+     would_create_cycle / multiple_roots / unknown_role / parent_not_manager /
+     depth_exceeded）：把"上级不存在"与"上级不收汇报"并成了一格。测试标题
+     "证据④的五条拒绝" likewise —— 矩阵里 name 有 6 条、断的 code 有 6 个。
+     改：文档 §10 第 21 格、测试标题、测试内注释、验收文件头枚举，共 4 处。
+  b) r15 的 method 把"键 ≠ role_id"那一发算进"L1 validateNewNode 那 12 发"——
+     那一节实数【13】发，而那一发属【schema 那一节】（口径不同：形状层放行，不属 L1）。
+  c) r22 的 method 写"十三发"合成变异 —— 实数【16】：五·乙 是 M8 逼出来的（第一段补），
+     两发洞登记是第二段补的。第一段收口时分母没跟着走。
+  ⇒ 泛用那条：**改一批发作，登记里所有"几发"都是候选过期主张，它们不会自己红。**
+    本轮的机器办法是把分母写成"起点 + 逐项相加"并核对（见下面复跑那一节）。
+
+■ ④ ⭐ 一条新的并发纪律（本轮撞到，证人是一个【只读】子 agent）
+  我让一个 READ-ONLY 子 agent 去勘察"图必须等于 before 经 change 得到"那一格，
+  同时变异机正在后台跑。它的报告里出现了一句：
+      "commit.ts:208 现在读的是 else if (false && change.kind === "add_node")
+       ⇒ 工作树处于变异中，不是基线"
+  它自己发现了并被它当成一个发现报了回来 —— 但那份报告的其他结论是【在变异字节上】
+  读出来的。⇒ 原来的纪律写的是"自回滚变异不可与【测试】并发"，太窄：
+  **也不可 concurrent 任何读生产字节的调查（含只读子 agent）**，
+  否则会把变异当成基线登记下来。本轮之后：矩阵跑的时候只写台账（纯文本），不派读者。
+
+■ 没做的下一格（本轮把口径量清楚了，然后【不做】）
+  "提交的图必须等于 applyChangeToGraph(before, change)" 这一格今天仍然不存在。
+  本轮量到三件事，合起来说明它【不是实现层该单方面关的】：
+  ① 关掉它直接否定一条产品目标：docs:2070 写着"读成『不能通过请求体加角色』是误读，
+     那等于让实现层替 CEO 关掉『不改代码就能加角色』"；那发反向 canary（验收测试里
+     graphWith("ghost") + 一条无关 add_edge ⇒ 断 200 且 ghost 进库）存在的理由就是
+     让这条能力【保持开着】。关掉它 = 把那条 canary 翻向 = CEO 的决定。
+  ② 成本也不是"加一个比较"：test/org 十来发在空库上手写 graph 首提（round285 ⑦
+     当时就量过并写进台账：那一版挡不住空库引导，还会打红十来发）。
+  ③ 仓里没有图相等助手（graphEquals / deriveGraph / diffGraph 全无命中），
+     要么新写一份口径，要么用 JSON.stringify 比 —— 后者是个假证人（键序一变就红）。
+  ⇒ 记成【决策面】而不是【待办】：和 O7-1 / O13-2 同侧，报给 CEO，本轮不动。
+
+■ 证据（落地四件套之"自回滚变异"，本轮是【重跑】不是新增）
+  .workbuddy/round294-mutate-add-node.mjs → 命中 10 / 10，exit 0（证据文件已刷新为
+  这一跑的输出）。语料从 199 涨到 201（就是新加的那两发洞登记）：
+  M0 控制 0 红 / M1 摘采纳 / M2 不落库 / M3 摘重名 / M3b 换措辞【该绿】/
+  M4 摘自环 / M5 丢空图例外 / M6 照抄 heightBelow【该绿，变异等价】/
+  M7 两处口径 / M8 短路分派。跑完逐字节核对已还原（"else if (false" 命中 0、
+  那句调用命中 1）。【单独跑】，跑期间只写台账文本。
+
+■ 复跑（每个分母都是数出来的，且给了相加的来路）
+  test/arch：32 文件 / 435 发全绿。来路核对：round293 收口 417 + r22 那一块 18
+    = 1（真仓库取材）+ 1（控制组）+ 16（合成变异）⇒ 435，对得上。
+  claims-registry.test.ts 单独：106 发全绿。
+  test/org + 那发验收：3 文件 / 95 发（validate 57 + versioning 27 + acceptance 11）。
+    ⚠ 这三个数与上面 ③a/③b 修的是同一批口径，改的全是【字符串】，发数一字未动。
+  全仓：136 文件 / 2957 passed + 6 skipped，exit 0。来路：第一段收口 2955 + 2
+    （之九·乙、之十·乙）⇒ 2957。
+  tsc -b --force：exit 0。测试语料类型棘轮：291，未上抬。
+  lint：format 一度 161→162（红因是我新写的那条多行断言的换行形状）。
+    claims-registry.test.ts 未入库（新文件）⇒ 才对它用 biome format --write，
+    且 cp 到 /tmp 后 diff 逐行核对：只有我那一条断言的换行变了，字符串值一字未动。
+    改回 161，五档上限【一个都没抬】（161 / 117 / 4 / 3 / 2 全部按实测写）。
+
+■ 坐标账
+  r22 的 source.line 在这一段被 repoint【两次】：登记时 2237 →（第一段那次
+  「第三格」插入后）2271 →（本次「第四格」插入后）2303。两次都由 claim-coords 报出、
+  两次都走 .workbuddy/repoint-coords.mjs，没有一次人肉改。
+  ⚠ 其中第一次不是"漂"而是【我把锚点句的头吃掉了】：插入新块时我把
+  「**round294 落地并登记为 r22**（判据核的是：三种 kind 都还在判别式里、hub 那两处」
+  那一行的前半句当成了锚点留在原地，实际整句被替换掉了 ⇒ 守卫报的是
+  "现在在 [全文无命中]" 而不是 "现在在 [某一行]"。
+  ⇒ 这一格值得记是因为两种红的修法【完全不同】：「全文无命中」= 锚点句被删了，
+    去把句子找回来；「现在在 N 行」= 句子还在但位置变了，去 repoint。
+    守卫把这两种分开报，本轮各自救了一次；如果它只报"坐标不对"，
+    我会去 repoint 一个根本不存在的句子。
+
+════════════════════════════════════════════════════════════════════════════
+round295 · r15 的证据③ 是个【假证人】：它扫的面里根本没有那件能推翻它的事
+════════════════════════════════════════════════════════════════════════════
+  一句话：那条「两个前端零出口」的验收证据连着六轮【绿】，而真控制室
+  `packages/web/public/app.js` 从 2026-11-11（`git log -S` 追到 `2bcbdb0`）
+  就在真发 `kind: "reparent"`。它不是过期，是【从写下那天起就没被验过】。
+
+■ ① 最贵的不是那发假证据，是【它旁边那道守卫也过了】
+  登记 r15 的判据里有一道【非空下限】：`web/src` + `desktop/src` 的 ts/tsx 数 ≥ 5。
+  当天实测 4 + 7 = 11 ⇒ 通过。它确实量了、确实报了数、确实拦得住「目录整个被删」，
+  而对「量的面窄了一格」【全聋】。
+  ⇒ 泛用那条：**下限类判据只防"没有"，不防"看错地方"**。
+  修法不是把 5 改成 20（那还是同一个洞），是把【取材面本身】变成可核对的对象：
+    · 判据现在用 sliceFrom 取那发测试里 `FRONTEND_CORPUS` 那一段字节，
+      读不到 ⇒ 红在「取材面不可核对」（不是红在"文件少"）；
+    · 那一段里必须同时出现 "public" 与 ".js" ⇒ 红话直接点名 app.js；
+    · 非空下限留着但口径换成三个根（4 + 1 + 7），只当兜底。
+  ⚠ 为什么不直接在判据里 countFiles("packages/web/public", [".js"])：
+    那测的是【磁盘】，而这条主张的内容是【那发测试扫不扫它】。
+    磁盘上有而表里没列 = 主张假；表里列了而磁盘上没有 = 那发测试自己会抛（它拒拿
+    「零出现」冒充通过）。两种红各有各的修法，本判据只管前一种。
+
+■ ② 那发证据本身翻向：从「零出现」到【逐 kind 点名】
+  `FRONTEND_ROOTS`（两个 src 根）换成 `FRONTEND_CORPUS`（web/src · web/public · desktop/src，
+  各自带扩展名），根不在 ⇒ 【抛】而不是跳过（空集合与"没有"同形那一族）。
+  断言从 `toEqual([])` 翻成 `toEqual({reparent:[app.js], add_edge:[], add_node:[]})`，
+  另加三发：引号形状（`kind: reparent` 无引号是标识符，不该数）·
+  扫描器自身的反向 canary（拿真字节造一个不存在的 kind 必须数不出，换 reparent 必须数出）·
+  「构造了载荷」≠「发得出去」（`api("POST","/org"` 那一行被摘掉要红）。
+  本机没有浏览器也没有 Electron（0039）⇒ 那一发是【最接近那格】，不是浏览器证据，
+  真点一次属 Task 4.7 那一格。
+
+■ ③ 本轮两台"机器"各撞一个洞，都比本轮那个假证人更贵
+  (a) 变异矩阵第一版 0/5 命中、五发全读成「红发=0」。真因不是变异：
+      本轮新写的那发里 `const consoleText` 与上面重名 ⇒ 整份测试【装载期解析失败】，
+      vitest 的 `Tests` 行照报「红发 0」（一个用例都没跑到），只有 `Test Files`
+      那行写着 1 failed。⇒ 只读前一行的机器，可以在【一发都没测】的状态下
+      把整张矩阵报成命中。
+      ⇒ 本轮那台的 readSummary 改成把 `Test Files` 并进红，并加一条
+        「文件红而读不到 FAIL 文件名 ⇒ 抛」（归因失真会让「该红的文件没红」变假未命中）。
+        加之前【先量真输出】：一份故意红的探针跑完即删，普通「一个用例红」同样打
+        ` FAIL  <文件> > <suite> > <用例名>` ⇒ 那条抛不是只对本机装载失败成立。
+      ⚠⚠ **round292 / round293 / round294 那三台的 readSummary 是同一形状，
+        这个洞【仍在它们身上】**。本轮不顺手改：那三台的证据文件已交出去，
+        改了要重跑才敢说「修完仍然 7/7 / 10/10」，而那是另起一轮的账。
+      ⚠ 自证夹具自己也被这条抛拦过两次（第一版缺 `Test Files` 行、第二版缺 `FAIL` 行），
+        两次都【看着像判据坏了】。判据在该抛的输入上抛，错的是我给的语料不像真输出
+        ⇒ 夹具现在是那屏真输出的【逐行抄写】。自证分母【数出来】（checks 计数器），
+        不写死 5 —— 加了探针忘了改摘要行的话「5/5 通过」是一句永远为真的谎。
+  (b) **本轮我自己的主张被矩阵推翻了一次。** M4 第一版写「注释里提 add_edge 三个字 ⇒ 该红」，
+      跑出来 0 红。真口径：`emittersOf` 的正则是 `["'`]kind["'`]`，【两侧要引号】，
+      裸词不算「发这个变更」⇒ 那发是【空变异】（改了字节、谁都匹配不上），
+      而错的【预期】被我登记成了「射程边界」。
+      ⇒ M4 改真（补引号 ⇒ 真红），新增 M5 钉住【不匹配】那一侧（同位置、裸词 ⇒ 该绿）。
+      ⇒ 泛用那条：**矩阵里"该红/该绿"的预期也是主张，它没有自证，
+        只有跑出来的红绿分布能打它**；口径写宽了，下一个人会照着错的口径去改判据。
+      ⇒ 射程边界由「注释里提到 kind 就红」修正为「注释里出现【带引号的】kind 名才红」。
+
+■ ④ 又抓到一处【自己写下的分母】写错
+  新写的那段文档里我写了「第一版矩阵 0/6 命中、六发全读成红发=0」—— 错的。
+  第一版只有 M0–M4 五发（M5 是推翻 M4 之后才加的），真读数是 **0/5**。
+  ⇒ 同 round294 那条：改一批发作，登记里所有"几发"都是候选过期主张，它们不会自己变红。
+  本轮写进文档/登记里的三个分母（web/src=4 · web/public=1 · desktop/src=7）
+  【重新数过】（临时脚本走 readdirSync、跳 node_modules/dist，跑完即删），对得上。
+
+■ 证据（落地四件套之"自回滚变异"）
+  .workbuddy/round295-mutate-frontend-egress.mjs → 命中 6 / 6，exit 0，机器自证 5/5
+  （证据 .workbuddy/round295-frontend-egress-mutation-evidence.txt）。
+  M0 控制（app.js 行尾加空注释，该绿）/ M1 reparent→add_edge（红 1 发 1 文件）/
+  M2 摘掉那次 api("POST","/org")（红）/ M3 kind 改带尾空格 ⇒ 三种 kind 谁都不落（红，
+  唯一能证「空名单会红」的一发）/ M4 注释里写【带引号的】"add_edge"（红 = 射程边界）/
+  M5 同位置裸词 add_edge（该绿 = M4 的单变量对照）。
+  跑法【单独跑】，每发在 finally 里写回【进场读到的字节】、写回后逐字节比对。
+  跑完复核：`projection.ts` 工作区干净；`app.js` 的 M 是上一轮 O5 动作4 / O9 影子判定的
+  既有未提交行（diff 逐行看过，不含任何变异字节）。
+
+■ 复跑（每个分母都是数出来的，且给了相加的来路）
+  test/arch：32 文件 / 440 发全绿，exit 0。来路：round294 收口 435 + 本轮 r15 那一块新增 5
+    （之五 / 之五·乙 / 之五·丙 / 之六 / 控制组）= 440，对得上。
+  claims-registry.test.ts 单独：111 发（round294 是 106，同一批 5 发）。
+    r15 那一块从 5 发到 10 发 —— verbose 逐条核过，不是"数出来的差值"。
+  test/org + 全部 acceptance：9 文件 / 146 发。来路：validate 57 + versioning 27 +
+    本发验收 11 + phase1-gates 13 + phase3 13 + im-reply-approves-card 12 +
+    perf-thresholds 8 + rejected-waiver 3 + idea-to-delivered 2 = 146。
+    ⚠ 上一轮这一段只跑了 org + 【那一份】验收（3 文件 / 95 发），本轮跑的是
+    【整个 acceptance 目录】⇒ 两个数不可比，别把它们当同口径复跑。
+  全仓：136 文件 / 2962 passed + 6 skipped，exit 0。来路：round294 收口 2957 + 5 = 2962。
+  tsc -b --force：exit 0。测试语料类型棘轮：291，未上抬。
+  lint：format 一度 161→163（红因就是我新写的那两条多行拼接的换行/引号形状）。
+    两份涉事文件（acceptance 那份 + claims-registry.ts）经
+    `git ls-files --error-unmatch` 证明【都未入库】⇒ 才对它俩用 biome format --write，
+    且 cp 到 /tmp 后 diff 逐行核对：只有换行形状与「双引号串里有引号 ⇒ 换单引号」这一类，
+    字符串【值】一字未动。改回 161，五档上限【一个都没抬】。
+
+■ 坐标账（改 docs 顶漂 15 条，全部由守卫报出、全部走脚本，没有一次人肉改）
+  本轮在 docs/OPC-OS-功能优化设计.md 插了两段：§4 那条 blockquote 改口 +13 行、
+  §7 第 18 格内那段 round295 撤回 +17 行 ⇒ 前 13 条登记各 +13，
+  r21 2179→2209 与 r22 2303→2333 各 +30（两段都在它们之前）。
+  新增的第 22 格插在 r22 锚点【之后】⇒ 没有登记坐标落在它后面，故只有两种偏移。
+  ⇒ 15 条新值全部取自 claim-coords 红话自己交出的「现在在 [...]」，
+    一条没猜。r3 那一格红话给了两个数（1228 与 1480，同一句话在文档里被引用两次），
+    按 repoint 脚本头部那条纪律取【较小的那个】= 主张本体。
+
+■ 射程（读这段的人最先该看的）
+  本轮证的是【界面发得出 reparent】这一格，它【不】等于「O8 第一跳通了」：
+   · desktop 侧 channels.ts 明确不给那条 POST 通道（「self-escaping CEO 写」那句）；
+   · 浏览器/Electron 里真点一次在本机【做不到】（0039），新写的那发④ 钉的是
+     `api("POST", "/org"` 那一行还在 ⇒ 【最接近那格】，真点一次属 Task 4.7；
+   · 判据【不重跑】任何端到端请求，口径同 r12/r13。
+  未动的邻近主张：「契约里没有带判据的 add_node」属 r22（round294 已翻向），
+  本轮一个字没改它的口径。
+
+■ 没做的下一格（本轮量清楚了，然后【不做】）
+  ① 那三台机器（round292/293/294）的 readSummary 洞【仍在】，见 ③(a) 那条 ⚠⚠。
+     要修就得连证据一起重跑，那是另起一轮的账，本轮不顺手改。
+  ② M4 那条射程边界（注释里带引号的 kind 名会红）【留着】，不当缺陷删。
+     要减它的噪声得先剥注释，而剥注释在本仓有两个已登记的洞（r22 各有一发钉）。

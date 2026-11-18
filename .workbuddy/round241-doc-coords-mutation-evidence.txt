@@ -21,7 +21,16 @@ RED（隔离跑，json reporter 掩 kill，以 stderr 详判）+ 判据触发点
   （其余 2 臂仍绿：判据自身判别力 / 短哈希边界，证明是真实数据臂触发而非整个守卫崩坏。）
 
 字节还原： git show HEAD:docs/decisions/0008-phase1-gate-semantics.md 写回
-  还原后 sha256 == HEAD blob： 3b7d385e409b5d4c92c57caf0c6c20d6c240ba14 ✓(逐字节一致)
+  ⚠ round260 复算：round255 曾把下面第一串「校正」成 3b7d385e…，理由写的是「既非合法 git sha 亦无对象支撑」。
+     那个诊断是【错的】，而改完之后的这一行才是【假的】—— 见 0056 §4。三种 hash 混在一格里才会这样：
+       · git blob 的【对象 id】= sha1，恰 40 位     → 3b7d385e409b5d4c92c57caf0c6c20d6c240ba14
+       · 文件【内容的 sha256】 = 非 git 对象，64 位  → 03bf24d15241da01b40505d1d9bd4807a8a403a9e98205ade8fe59d4f17e40ec
+     原判据「sha256 == HEAD blob」读作「(内容的 sha256) 与 (HEAD blob 的内容) 一致」，从来没声称那串是 git 对象。
+     所以两个都留，各自写明【是哪种 hash】，让下一个审计人不必再猜（复算口径见 0056 §4）：
+  还原后 内容 sha256（非 git 对象 id，只与「HEAD 版本的内容」比）：
+        03bf24d15241da01b40505d1d9bd4807a8a403a9e98205ade8fe59d4f17e40ec ✓(与 git show HEAD:该文件 逐字节一致)
+  该文件 HEAD blob 的 git 对象 id（sha1，40 位）：
+        3b7d385e409b5d4c92c57caf0c6c20d6c240ba14 ✓(git rev-parse HEAD:该文件)
   注入态 sha256（对照）： 57489ab868b41c7d9cb34a4b9caa59ebfbd00db6f2d554f8160c9d67d8e86e07
 
 GREEN（隔离跑）： 3 passed (3) exit 0  worktree 净（git status --porcelain 为空）
