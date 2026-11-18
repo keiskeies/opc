@@ -442,7 +442,14 @@ export const BASELINE: Baseline = new Map([
   // round283 之后那句过期：0009 建了 `card_deliveries`，`channels/deliver.ts` 成为它的
   // 第一个写方，而 `serve/im-channels.ts` 每一轮心跳调一次 ⇒ 那一格现在由 r17 机器判，
   // 不在本表（本表只判【模块级】可达，看不见函数级缺口 —— 这正是当初那句话能漂这么久的原因）。
-  ["heartbeat/retry.ts", "MAX_BACKOFF_MS"],
+  // ⚠ heartbeat/retry.ts 一条【已摘除】（round305，Task 6.1 接线）：
+  // engine/turn-retry.ts import 了 withRetry，而它由 engine/runtime.ts 的 runTurn 调
+  // ⇒ 模块从「零生产调用方」变成「每轮角色执行都经过」。方向 B 那条红如约出现。
+  // ⚠ 模块活了 ≠ 重试真放过行：判据（claude.ts 的 retryableWithoutCost）在本机
+  // 一次都不会放行重试（可复现的 started:false 全是确定性的 ENOENT），
+  // 而白名单里那五个 errno 一个真样本都没有。模块级可达看不见这一格 ——
+  // 那一句由 packages/hub/test/engine/turn-retry.test.ts 逐条钉着（正是本表反复记的
+  // 「两层粒度各守各的」，别拿这一格的绿去宣布重试在真机上自愈过）。
   ["graph/branches.ts", "PARALLEL_MIN_BRANCHES"],
   ["events/batch.ts", "appendAuditBatch"],
   // 有意占位，非缺口。

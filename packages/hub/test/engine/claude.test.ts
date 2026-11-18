@@ -16,15 +16,17 @@
  *     ⇒ 「node --test 下 13/13 绿」这句话我当时是照抄 round187 的，没有自己复算过。
  * 搬过来之后 ② 那条变异必须红，这是本次改动唯一的验收（0054 §4 同一口径）。
  */
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
+import type { RoleRunResult } from "../../src/engine/claude.ts";
 import {
   DECISION_MARK,
   parseDecision,
+  retryableWithoutCost,
   runRole,
 } from "../../src/engine/claude.ts";
 
@@ -92,6 +94,16 @@ describe("runRole —— 真的起一个 agent 进程", () => {
     expect(r.text).toMatch(/"resumeFlag":false/);
   });
 
+  /**
+   * ⚠ 后三格（started / spawnErrno / retryableWithoutCost）是 round305 补的，
+   * 它们是 Task 6.1 那条判据在【真跨进程】这一侧唯一的凭据。
+   *
+   * turn-retry.test.ts 那一族用的是注入的假 runRole —— 它判的是「给定
+   * started:false + errno=X，放不放行」，而【真 spawn 到底给出哪个 errno】它一次都没判。
+   * 于是这条链断在中间：判据绿 + 装配绿，而「真机上 started 真的是 false 吗」
+   * 这件事只有这一发知道答案。少了它，哪天 node 改了行为（比如把 ENOENT 挪到
+   * close 之后发），`started` 恒真 ⇒ 重试层【静默】退化成不重试，而全仓不红。
+   */
   it("二进制不存在 ⇒ ok:false 并报出错，而不是挂在那里等一个永远不会来的 close", async () => {
     const r = await runRole({
       ...base,
@@ -101,6 +113,89 @@ describe("runRole —— 真的起一个 agent 进程", () => {
     expect(r.ok).toBe(false);
     expect(r.error).not.toBe(null);
     expect(r.error ?? "").toMatch(/ENOENT|no-such-claude/);
+    expect(
+      r.started,
+      "进程从未存在 ⇒ started 必须是 false，否则重试层永不介入",
+    ).toBe(false);
+    expect(r.spawnErrno).toBe("ENOENT");
+    // 这一句是本文件与 round305 那句「今天真机上一条重试都不放行」的接点：
+    // 本机【唯一造得出来】的 started:false 形状，判据必须把它挡在门外。
+    expect(retryableWithoutCost(r)).toBe(false);
+  });
+
+  /**
+   * bin 指着一个【目录】：实测（node v24 / win32）走的也是异步 ENOENT，不是 EISDIR。
+   *
+   * 断言里【不钉 errno 名】而钉「非空 + 不放行」：目录的 errno 是平台给的
+   * （Linux 上常见 EACCES），钉 ENOENT 会把一条本机实测抄成跨平台事实。
+   * 真正要守的是判据的结论，而它对这三型的答案都是「不重试」。
+   */
+  it("bin 指着一个目录 ⇒ started:false 且 retryableWithoutCost 为 false", async () => {
+    const r = await runRole({ ...base, bin: HERE, timeoutMs: 5000 });
+    expect(r.ok).toBe(false);
+    expect(r.started).toBe(false);
+    // 非空这一格是判据的输入本身：空串在瞬时表上取不到任何名字 ⇒ 恒不重试，
+    // 而「errno 没带出来」与「errno 是空」在假账里会长得一模一样。
+    expect(r.spawnErrno).not.toBe("");
+    expect(retryableWithoutCost(r)).toBe(false);
+  });
+
+  /**
+   * bin 指着一个【普通文件】：本机实测 node 从 spawn() 【同步】抛 EFTYPE，
+   * 被 Promise 构造器吞成 rejection ⇒ runRole 自己 reject，而不是返回 ok:false。
+   *
+   * 这一发钉的是台账 round305 §④ 登记的那个【残留】，方向是「别把它抹平」：
+   * turn-retry.test.ts 里那发 reject 用的是手搓的 Error，证明的是外壳原样抛回，
+   * 不是「真机器上真有这样的形状」。这里补上那半格。
+   *
+   * ⚠ 平台分支是【读数不同、结论相同】而不是「非 win32 就跳过」：
+   *   win32  ⇒ reject（同步抛 EFTYPE）
+   *   其他   ⇒ 大概率返回 started:false + EACCES/ENOEXEC 一类（都【不在】瞬时表上）
+   * 两支都必须走到「不放行重试」，所以这一发在任何平台上都判了东西；
+   * 哪天平台改了行为而走进第三支，它红在【两个都不成立】那一格，不会静默。
+   */
+  it("bin 指着一个普通文件 ⇒ 响亮的崩溃，或被记录的失败轮；两种读数都不放行重试", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "opc-notexec-"));
+    const file = join(dir, "not-an-executable.txt");
+    writeFileSync(file, "not an executable\n");
+    /** 两种可能的读数，各带自己要判的那一格（不用 `| null` + cast：那要写两处断言非空）。 */
+    type Outcome =
+      | { readonly via: "rejected"; readonly code: string }
+      | { readonly via: "returned"; readonly r: RoleRunResult };
+    try {
+      const outcome: Outcome = await runRole({
+        ...base,
+        bin: file,
+        timeoutMs: 5000,
+      })
+        .then((r): Outcome => ({ via: "returned", r }))
+        .catch(
+          (e: unknown): Outcome => ({
+            via: "rejected",
+            code: String((e as { code?: unknown })["code"]),
+          }),
+        );
+      if (outcome.via === "rejected") {
+        // 这一支【连 started 都拿不到】，所以判据结构上无法介入 ——
+        // 这正是「装配错 bin」今天仍然响亮崩溃的原因。
+        if (process.platform === "win32") {
+          expect(
+            outcome.code,
+            "本机实测是 EFTYPE；换了名字说明 node 的形状变了，要重读 round305 §④",
+          ).toBe("EFTYPE");
+        } else {
+          // 非 win32 没有实测过 ⇒ 只钉「带得出 errno 名」，不把本机读数抄成跨平台事实。
+          expect(outcome.code).not.toBe("undefined");
+        }
+        return;
+      }
+      expect(outcome.r.ok).toBe(false);
+      expect(outcome.r.started).toBe(false);
+      expect(outcome.r.spawnErrno).not.toBe("");
+      expect(retryableWithoutCost(outcome.r)).toBe(false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it("is_error + 非零退出 ⇒ ok:false，但账单与会话 id 仍然保留（钱已经花了）", async () => {

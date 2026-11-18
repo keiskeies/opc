@@ -62,6 +62,88 @@ export interface RoleRunResult {
   readonly costUsd: number;
   /** 失败时给人看的一句话。成功时 null。 */
   readonly error: string | null;
+  /**
+   * 子进程【真的起来过】吗 —— round305 为 Task 6.1 的接线加的判据字段。
+   *
+   * ⚠ 它【不是】`error` 的派生量，而这一句是整个设计的支点。
+   * 我本来打算用「这次失败没花钱」（costUsd === 0）当「重试不会多烧钱」的判据，
+   * 量完发现那条推不过去：`is_error:true` 那一支带【非零】 cost 而 JSON 解得出来
+   * （CLI 跑起来了、活了、报了业务错 ⇒ 钱真花了），但同一条分支在
+   * `total_cost_usd` 缺失时给的是 cost = 0 —— 「没记到钱」与「没花钱」在旧形状里
+   * 【同一个读数】。拿一个分不出这两者的数去决定「要不要再花一次」是拿猜测当判据。
+   * ⇒ 「有没有起过进程」必须由【走到哪条返回路径】结构性地知道，不能由钱反推。
+   * 只有 `started === false`（spawn 自己抛 ENOENT/EACCES 这类）才是
+   * 「进程没存在过 ⇒ 结构上不可能花过钱」，也才是重试唯一被允许介入的那一格。
+   */
+  readonly started: boolean;
+  /**
+   * `started === false` 时带 spawn 自己的 errno 名（ENOENT / EPERM / EMFILE …），
+   * 其余情况是空串。为什么要把【errno 名】带出来而不是只带「没起来」：
+   * 「进程没起来」这一族里既有【确定性】失败（ENOENT：二进制不存在，重试第 4 次
+   * 与第 1 次一模一样）也有【瞬时】失败（EMFILE：进程表满了，几百毫秒后就有了），
+   * 而 retry.ts 文件头那条立场明确写着确定性失败【不该】重试。只看布尔值就分不开
+   * 这两类，就只能要么全重试（污染审计 + 白等退避）要么全不重试（Task 6.1 白接）。
+   *
+   * 实测本机（node v24，round305）三种形状：
+   *   二进制不存在        ⇒ 异步 error 事件，code=ENOENT
+   *   bin 指着一个目录    ⇒ 异步 error 事件，code=ENOENT（同上，别以为是 EISDIR）
+   *   bin 指着普通文件    ⇒ 【同步】从 spawn() 抛出 EFTYPE，根本不走 error 事件
+   * 第三型这一格单独说：同步抛出会被 Promise 构造器吞成 rejection，
+   * 于是 runRole 本身 reject 而不是返回 ok:false —— 那是【本轮之前就有的】形状，
+   * 本轮没有改它（改动会把「装配传错 bin」这种响亮的崩溃换成一条记录的失败轮），
+   * 只把它登记在台账 round305 §④。
+   */
+  readonly spawnErrno: string;
+}
+
+/**
+ * 「进程没起来」这一族里【该】重试的那几个 errno。
+ *
+ * 判据只有一句：这个失败是【下一次可能就没了】的吗。写白名单而不是黑名单，
+ * 与 policy/engine.ts 的 fail-closed 同一个立场 —— 没听过的 errno 一律【不】重试，
+ * 因为认错的代价不对称：漏一个瞬时错 = 少重试一次（今天的行为，无损），
+ * 多放一个确定性错 = 每轮白等 1+2+4 秒并多三行日志。
+ *
+ * ⚠ 这张表今天【一个真样本都没有】：本轮在本机能造出来的 started:false 形状只有
+ * ENOENT（确定性，已被排除在这一族之外），EAGAIN/EMFILE 这类要真把系统资源打满
+ * 才出得来，本轮没有制造它。⇒ 表里这几个名字是【按 POSIX 语义列的候选】，
+ * 不是【测出来的可自愈集合】；接线本身由 turn-retry.test.ts 用注入的假 runRole
+ * 证明，那一族在真实机器上到底会不会自愈【仍未验】（台账 round305 §③）。
+ */
+export const SPAWN_TRANSIENT_ERRNOS: readonly string[] = Object.freeze([
+  "EAGAIN", // 资源暂时不可用（fork/spawn 太快的经典形状）
+  "EMFILE", // 本进程文件描述符用完
+  "ENFILE", // 全系统文件表满
+  "ECONNRESET",
+  "EPIPE",
+]);
+
+/**
+ * 这一轮失败【可以】重试吗 —— Task 6.1 的接线判据，round305。
+ *
+ * 两条都要成立，而且第一条【不是】「没花钱」：
+ *  ① `!started` ⇒ 子进程从未存在 ⇒ 【结构上】不可能产生过任何账单。
+ *     这条与机器快慢、CLI 版本、JSON 里有没有 total_cost_usd 全都无关，
+ *     因为它由「进程没起来」这个事实推出，不是由任何读数推出。
+ *  ② errno 在那张瞬时表上 ⇒ 这是一个【下一次可能就没了】的失败。
+ *
+ * ⚠ ① 反过来不成立，而这一句是本轮最要紧的一句：
+ *   「没记到钱」【不等于】「没花钱」。超时那一支（被 SIGKILL 的进程没机会报账）
+ *   和 `is_error:true` 而 cost 字段缺失那一支，costUsd 都是 0，钱都可能真花了。
+ *   拿 costUsd===0 当判据会把这两种都放进重试，而重试一次就是【再花一次钱】。
+ *   所以这里【不看钱】。
+ *
+ * 覆盖面因此【极小，这是量出来的而不是设计的】：本机可复现的 started:false 全是
+ * ENOENT（确定性 ⇒ 被 ② 挡掉）⇒ 今天这条判据在真机上【一次都不会放行重试】。
+ * 那为什么还要接：② 是那张瞬时 errno 表的执行者，而它的价值在装配错 bin 之外的
+ * 资源型故障上（那种故障今天会让 hub 直接崩在 spawn 上而不是留痕）。
+ * 剩下的那一大块（超时、CLI 业务错、网络抖动）等的是【每次尝试各自记一次账】，
+ * 那要动 harness_calls 的写入形状与 dispatch 的记账 —— 那是 O6 接线的账，不在本轮，
+ * 理由写在 .workbuddy/AUDIT-LEDGER.txt round305 段里。
+ */
+export function retryableWithoutCost(r: RoleRunResult): boolean {
+  if (r.ok || r.started) return false;
+  return (SPAWN_TRANSIENT_ERRNOS as readonly string[]).includes(r.spawnErrno);
 }
 
 /** claude -p --output-format json 的响应里我们读的字段。其余一律不猜。 */
@@ -94,38 +176,73 @@ export async function runRole(i: RoleRunInput): Promise<RoleRunResult> {
   const bin = i.bin ?? "claude";
   // Windows 下无法直接 exec 带 shebang 的 .js/.mjs 脚本（spawn 会报 EFTYPE/ENOENT）：
   // 当 bin 指向 JS 脚本时绕 process.execPath 跑，真的 claude 二进制仍直接跑。
-  const raw = await new Promise<{ code: number | null; stdout: string; stderr: string; timedOut: boolean }>(
-    (resolveP) => {
-      const argv = /\.[cm]?js$/.test(bin) ? [bin, ...args] : args;
-      const p = spawn(/\.[cm]?js$/.test(bin) ? process.execPath : bin, argv, { cwd: i.cwd, env: process.env });
-      // prompt 走 stdin 而不是 argv：想法文本由 CEO 输入，放进 argv 会出现在
-      // `ps` 里，也会被下一个写适配器的人顺手拼进 shell 字符串。
-      p.stdin.write(i.prompt);
-      p.stdin.end();
-      let stdout = "";
-      let stderr = "";
-      let timedOut = false;
-      const t = setTimeout(() => {
-        timedOut = true;
-        p.kill("SIGKILL");
-      }, i.timeoutMs ?? 180_000);
-      p.stdout.on("data", (d: Buffer) => (stdout += d.toString()));
-      p.stderr.on("data", (d: Buffer) => (stderr += d.toString()));
-      p.on("error", (e) => {
-        clearTimeout(t);
-        // timedOut 必须是显式的 false：漏掉这个字段在【运行时】看不出问题（下面只读
-        // raw.timedOut，undefined 一样是假），而类型上它救了一次「spawn 失败被当成超时」。
-        resolveP({ code: -1, stdout: "", stderr: String(e), timedOut: false });
+  const raw = await new Promise<{
+    code: number | null;
+    stdout: string;
+    stderr: string;
+    timedOut: boolean;
+    /** 见到过 close 吗 —— 也就是「那个进程存在过」。见 RoleRunResult.started。 */
+    spawned: boolean;
+    /** 只在 spawned=false 那一支有值：spawn 自己抛的 errno 名（ENOENT / EACCES / …）。 */
+    spawnErrno: string;
+  }>((resolveP) => {
+    const argv = /\.[cm]?js$/.test(bin) ? [bin, ...args] : args;
+    const p = spawn(/\.[cm]?js$/.test(bin) ? process.execPath : bin, argv, { cwd: i.cwd, env: process.env });
+    // prompt 走 stdin 而不是 argv：想法文本由 CEO 输入，放进 argv 会出现在
+    // `ps` 里，也会被下一个写适配器的人顺手拼进 shell 字符串。
+    p.stdin.write(i.prompt);
+    p.stdin.end();
+    let stdout = "";
+    let stderr = "";
+    let timedOut = false;
+    const t = setTimeout(() => {
+      timedOut = true;
+      p.kill("SIGKILL");
+    }, i.timeoutMs ?? 180_000);
+    p.stdout.on("data", (d: Buffer) => (stdout += d.toString()));
+    p.stderr.on("data", (d: Buffer) => (stderr += d.toString()));
+    p.on("error", (e) => {
+      clearTimeout(t);
+      // timedOut 必须是显式的 false：漏掉这个字段在【运行时】看不出问题（下面只读
+      // raw.timedOut，undefined 一样是假），而类型上它救了一次「spawn 失败被当成超时」。
+      // ⚠ spawned:false 走的是【这一支】而不是上面那个 setTimeout：node 对 ENOENT
+      //   是【异步】发 error 事件（spawn() 本身不抛），所以「没起来」在今天只会以
+      //   「stdout 空 + exit=-1」的形状出现 —— 而那个形状与「CLI 输出不是 JSON」
+      //   在旧返回值里【完全同形】。errno 名要在这里取，出了这一支就没了。
+      resolveP({
+        code: -1,
+        stdout: "",
+        stderr: String(e),
+        timedOut: false,
+        spawned: false,
+        // errno 名【只在这一支取得到】，出了这里就没了（下面的返回点全靠 Promise 带出来）。
+        spawnErrno: typeof (e as { code?: unknown })["code"] === "string"
+          ? String((e as { code?: unknown })["code"])
+          : "",
       });
-      p.on("close", (code) => {
-        clearTimeout(t);
-        resolveP({ code, stdout, stderr, timedOut });
-      });
-    },
-  );
+    });
+    p.on("close", (code) => {
+      clearTimeout(t);
+      resolveP({ code, stdout, stderr, timedOut, spawned: true, spawnErrno: "" });
+    });
+  });
 
   if (raw.timedOut) {
-    return { ok: false, text: "", sessionId: i.resumeSessionId ?? null, costUsd: 0, error: "执行超时，已杀死该角色进程" };
+    // started:true 而【不是】false，尽管这里 costUsd 写的是 0 —— 这一格是本轮
+    // 最容易写错的一格：超时那一支报 0 成本，看起来「没花钱、可以重试」，
+    // 真相是【被 SIGKILL 的那个进程没机会报账】。它可能已经跑了几十秒、
+    // 烧掉了几十万 token 才按下停止键，而那笔钱不会出现在任何一个字段里。
+    // ⇒ 「0 成本」在超时这一支的含义是【未知】，不是【零】。
+    //   能声称结构上没花过钱的只有 spawned=false（进程从未存在）。
+    return {
+      ok: false,
+      text: "",
+      sessionId: i.resumeSessionId ?? null,
+      costUsd: 0,
+      error: "执行超时，已杀死该角色进程",
+      started: true,
+      spawnErrno: "",
+    };
   }
   // 解析不猜形状：解不出来就是失败，并且把原文（截断）带回去。
   // 「stdout 半行 / 交错日志」正是 §12.1 列的 CLI 兜底路径故障模式，宁可报得难看。
@@ -141,6 +258,10 @@ export async function runRole(i: RoleRunInput): Promise<RoleRunResult> {
       error:
         "CLI 输出不是预期的 JSON（exit=" + String(raw.code) + "）：" +
         (raw.stderr || raw.stdout).replace(/\s+/g, " ").slice(0, 300),
+      // spawned=false 那一支（ENOENT 等）落在这里：stdout 是空串，JSON.parse 必然抛。
+      // 这就是「找不到二进制」今天的形状，而它以前与「CLI 真的起来而输出坏了」同形。
+      started: raw.spawned,
+      spawnErrno: raw.spawnErrno,
     };
   }
   const cost = typeof j.total_cost_usd === "number" ? j.total_cost_usd : 0;
@@ -152,6 +273,8 @@ export async function runRole(i: RoleRunInput): Promise<RoleRunResult> {
       sessionId,
       costUsd: cost,
       error: (typeof j.result === "string" ? j.result : "角色执行失败").slice(0, 400),
+      started: raw.spawned,
+      spawnErrno: raw.spawnErrno,
     };
   }
   return {
@@ -160,6 +283,13 @@ export async function runRole(i: RoleRunInput): Promise<RoleRunResult> {
     sessionId,
     costUsd: cost,
     error: null,
+    // 走到这里 JSON 解出来了 ⇒ 进程必然存在过。写【字面量 true】而不是 raw.spawned：
+    // 「成功蕴含起过进程」这一条如果由 raw.spawned 推，那么哪天有人给上面补一条
+    // 「spawned=false 也往下走」的捷径，这里会静默跟着变 true 而没人察觉；
+    // 写成常量则那条捷径会让这一支与那条捷径【互相矛盾地】红在测试里
+    // （turn-retry.test.ts 里那发「ENOENT ⇒ started=false」第一个响）。
+    started: true,
+    spawnErrno: "",
   };
 }
 

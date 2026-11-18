@@ -33,6 +33,9 @@ import { INSERT_DELEGATION_GRAPH_SQL } from "../../src/org/commit.js";
 import { InMemoryEventBus } from "../../src/events/bus.js";
 import { appendAudit } from "../../src/events/recorder.js";
 import { makeDispatch } from "../../src/engine/dispatch.js";
+import type { RunTurnInput, TurnOutcome } from "../../src/engine/dispatch.js";
+import type { RoleRunResult } from "../../src/engine/claude.js";
+import { runTurnWithRetry } from "../../src/engine/turn-retry.js";
 import {
   CEO_APPROVED_SQL,
   INSERT_HARNESS_CALL_SQL,
@@ -119,6 +122,14 @@ async function world(o: {
    * 不指定就等于宣布根叫 ceo）。
    */
   readonly ceoRoleId?: string | null;
+  /**
+   * 换 claude 二进制。给一个不存在的路径 ⇒ 造「进程从未起来」那一型
+   * （round305 的重试判据那一族要用）。不给 ⇒ 用真桩 CLI。
+   */
+  readonly bin?: string;
+  /** 重试退避的注入点。记录时长，不真等（见 turn-retry.test.ts 同一条理由）。 */
+  readonly sleep?: (ms: number) => Promise<void>;
+  readonly onRetryWarn?: (m: string) => void;
 }): Promise<World> {
   const { WriteQueue } = await import("../../src/db/write-queue.js");
   const q = new WriteQueue(TMP + "/r-" + process.pid + "-" + ++fileSeq + ".db") as unknown as Queue;
@@ -146,8 +157,10 @@ async function world(o: {
     maxBudgetUsd: 0.5,
     taskLimitCents: 1000,
     cwd: TMP,
-    bin: FAKE_CLI,
+    bin: o.bin ?? FAKE_CLI,
     ...(o.ceoRoleId === null ? {} : { ceoRoleId: o.ceoRoleId ?? "ceo" }),
+    ...(o.sleep === undefined ? {} : { sleep: o.sleep }),
+    ...(o.onRetryWarn === undefined ? {} : { onRetryWarn: o.onRetryWarn }),
   });
   return { db, q, rt, bus };
 }
@@ -788,5 +801,99 @@ describe("runtime 跑一轮：真 CLI 桩 + 真记账 + 真留痕", () => {
     // 提交之后，只读连接看得到
     const after = w.rt.deps.loadTask("t1");
     expect(after?.title).toBe("改了");
+  });
+
+  /**
+   * ── 重试外壳接在【真装配】上的两发（round305，Task 6.1 接线）────────────
+   *
+   * 判据本身在 turn-retry.test.ts 用注入的假执行器穷尽测了。这两发测的是
+   * 【只有真路线才有的东西】：dispatch 的返回形状、三处账、harness_calls 的行数。
+   *
+   * ⚠ 本机造得出的 started:false 只有 ENOENT 一型（确定性 ⇒ 不重试），
+   *   EMFILE / EAGAIN 那一族要把系统资源打满，本轮没有制造它。
+   *   ⇒ 下面那发「ENOENT ⇒ 一次都不重试」是今天真机上【唯一真跑得通】的那一支，
+   *     而「重试真的不记账」只能靠注入的假执行器构造（见第二发）。
+   *   白名单里那五个名字【一个真样本都没有】，登记在台账 round305 §③。
+   */
+  it("⭐ 二进制不存在 ⇒ 一次都不重试，且账与留痕的形状与接线前逐字相同", async () => {
+    const sleeps: number[] = [];
+    const warns: string[] = [];
+    const w = await world({
+      bin: TMP + "/no-such-claude-305",
+      sleep: async (ms) => {
+        sleeps.push(ms);
+      },
+      onRetryWarn: (m) => warns.push(m),
+    });
+    const dispatch = makeDispatch(w.rt.deps);
+    const res = await dispatch({ taskId: "t1", nowMs: NOW + 1000, maxBudgetUsd: 0.5 });
+    // 确定性失败：退避一次都不该开火。
+    expect(sleeps, "ENOENT 是确定性的 ⇒ 判据不该放行").toEqual([]);
+    expect(warns).toEqual([]);
+    // dispatch 看到的是【一个普通失败轮】—— 重试外壳对它完全透明。
+    expect(res.moved).toBe(false);
+    expect(res.costCents).toBe(0);
+    // 三处账【全空】：进程从未存在 ⇒ 没有钱可记（这是结构性结论，不是「没记到」）。
+    expect(w.db.prepare("SELECT * FROM budget_events").all().length).toBe(0);
+    expect(w.db.prepare("SELECT consumed_cents FROM tasks").get()?.["consumed_cents"]).toBe(0);
+    // 审计里【有】这一轮：任务停着必须能答出「哪一轮、为什么」。
+    const evts = w.db.prepare("SELECT payload FROM events").all();
+    expect(evts.length).toBeGreaterThan(0);
+    expect(String(evts[0]?.["payload"])).toContain("角色执行失败");
+  });
+
+  it("⭐ 瞬时 errno 放行重试时：多烧 4 次 spawn 而【一处账都不多记】（透明性判据）", async () => {
+    // 本机造不出 EMFILE，所以这一发注入【假 runTurn】走真 dispatch + 真表。
+    // 注入点是 deps 而不是 runtime：deps 就是 dispatch 吃的那排回调（装配形状），
+    // 换掉 runTurn 不影响记账与留痕那两条 —— 而那正是这一发要数的东西。
+    const w = await world({});
+    let misses = 0;
+    const warns: string[] = [];
+    /** 假执行器：每次都交出「瞬时 errno + 进程从未起来」，让外壳退避到额度用尽。 */
+    const alwaysMissed = async (): Promise<RoleRunResult> => {
+      misses += 1;
+      return {
+        ok: false,
+        text: "",
+        sessionId: null,
+        costUsd: 0,
+        error: "进程表满了",
+        started: false,
+        spawnErrno: "EMFILE",
+      };
+    };
+    const deps = {
+      ...w.rt.deps,
+      runTurn: async (i: RunTurnInput): Promise<TurnOutcome> => {
+        const r = await runTurnWithRetry(alwaysMissed, {
+          prompt: i.prompt,
+          rolePrompt: i.rolePrompt,
+          cwd: TMP,
+          maxBudgetUsd: i.maxBudgetUsd,
+        }, {
+          sleep: async () => {},
+          onRetryWarn: (m) => warns.push(m),
+        });
+        return { ok: r.ok, text: r.text, costCents: 0, sessionId: r.sessionId, error: r.error };
+      },
+    };
+    const res = await makeDispatch(deps)({ taskId: "t1", nowMs: NOW + 1000, maxBudgetUsd: 0.5 });
+    expect(misses, "1 次首跑 + 3 次重试").toBe(4);
+    expect(warns.length).toBe(3);
+    // ⭐ 这一发真正的断言：试了 4 次，而账面【只当发生过 0 次】（进程从未存在）。
+    expect(w.db.prepare("SELECT * FROM budget_events").all().length).toBe(0);
+    expect(w.db.prepare("SELECT * FROM harness_calls").all().length).toBe(0);
+    expect(res.costCents).toBe(0);
+    // 留痕那一侧同理：驱动方调一次 recordTurn，它记的是【这一轮】而不是每次尝试。
+    const rec = await w.rt.recordTurn({
+      taskId: "t1", role: res.role, sessionId: res.sessionId,
+      costCents: res.costCents, ok: false, nowMs: NOW + 1000,
+    });
+    expect(rec.recorded).toBe(true);
+    const hc = w.db.prepare("SELECT * FROM harness_calls").all();
+    expect(hc.length, "一轮一行，重试不额外加行").toBe(1);
+    expect(hc[0]?.["session_id"]).toBe(null);
+    expect(hc[0]?.["cost_cents"]).toBe(0);
+    expect(hc[0]?.["exit_code"]).toBe(1);
   });
 });

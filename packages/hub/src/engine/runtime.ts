@@ -38,6 +38,7 @@ import {
   type TurnOutcome,
 } from "./dispatch.js";
 import { runRole } from "./claude.js";
+import { runTurnWithRetry } from "./turn-retry.js";
 import {
   ADD_CONSUMED_SQL,
   ENSERT_BUDGET_SQL,
@@ -151,6 +152,23 @@ export interface RuntimeDeps {
   readonly cwd: string;
   /** claude 二进制名/路径。测试注入桩 CLI 走这一格（与 claude.ts 的 bin 同一个入口）。 */
   readonly bin?: string;
+  /**
+   * 重试之间的等待。默认真的 setTimeout（生产就要真等）。
+   * 注入这一格是为了让测试能【断言退避时长】而不是等 1+2+4 秒：
+   * heartbeat/retry.ts 的 backoffMs 把抖动做成必注入的同一条理由 —— 区间断言
+   * （「delay ≥ base」）对「退避根本没生效」没有鉴别力。
+   */
+  readonly sleep?: (ms: number) => Promise<void>;
+  /**
+   * 每次【重试前】的告警出口。默认 console.warn。
+   *
+   * 为什么只有一条 warn 而没有卡片：Task 6.1 的「绝不静默停滞」在这一格要求的是
+   * 【发生过的事看得见】。升级到卡片需要 escalation.ts，而那个文件【不存在】
+   * （GaveUp 今天没有任何通往卡片的路径，patrol 只调 onWarning = 一条日志）。
+   * 在这里假装发卡就是把「没人看见」换成「看见了一条假话」。
+   * 缺口登记在 .workbuddy/AUDIT-LEDGER.txt round305 段。
+   */
+  readonly onRetryWarn?: (message: string) => void;
   readonly ceoRoleId?: string;
   /** 简报里带几条最近汇报。 */
   readonly summaryWindow?: number;
@@ -359,7 +377,12 @@ export function makeRuntime(d: RuntimeDeps): EngineRuntime {
     },
 
     runTurn: async (i): Promise<TurnOutcome> => {
-      const r = await runRole({
+      // 重试外壳见 engine/turn-retry.ts 文件头（判据只有一处：claude.ts 的
+      // retryableWithoutCost）。这一层只负责两格【只有装配层知道】的事：
+      //  sleep 用真的 setTimeout（生产就要真等），warn 走 console.warn。
+      // 注入两格都是【可选】的：三个装配点（work.ts / driver-pump / charter-pump）
+      // 因此一行都不用改 —— 它们要的是默认行为，而默认值写在这里而不是散落三处。
+      const r = await runTurnWithRetry(runRole, {
         prompt: i.prompt,
         rolePrompt: i.rolePrompt,
         ...(i.resumeSessionId === null || i.resumeSessionId === ""
@@ -368,6 +391,9 @@ export function makeRuntime(d: RuntimeDeps): EngineRuntime {
         cwd: d.cwd,
         maxBudgetUsd: d.maxBudgetUsd,
         ...(d.bin === undefined ? {} : { bin: d.bin }),
+      }, {
+        sleep: d.sleep ?? ((ms) => new Promise<void>((res) => setTimeout(res, ms))),
+        onRetryWarn: d.onRetryWarn ?? ((m) => console.warn("[hub] " + m)),
       });
       return {
         ok: r.ok,

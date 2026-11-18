@@ -321,13 +321,19 @@ describe("死模块哨兵", () => {
      * 这一格是【防退化的下界】，不是棘轮：它只管"核对本身有没有东西可核对"，
      * 判据本体是下面那句 invalidBaselineMarks。
      *
-     * 14 = 16 − 2。round281（O12 动作 2）按【设计死法方向 B】摘掉了
-     * `channels/abstraction.ts` 与 `channels/approval-bridge.ts` 两条 ——
-     * 那不是把下界调低一点，是两条基线条目各自兑现了它们登记的死法。
+     * 13 = 16 − 3。摘掉的三条各自兑现了它登记的死法（方向 B 那条红如约出现，
+     * 然后才删行）：
+     *  · round281（O12 动作 2）：`channels/abstraction.ts`
+     *  · round281（O12 动作 2）：`channels/approval-bridge.ts`
+     *  · round305（Task 6.1 接线）：`heartbeat/retry.ts` —— engine/turn-retry.ts
+     *    import 了 withRetry，而它由 engine/runtime.ts 的 runTurn 每轮调一次。
+     *    ⚠ 模块级可达【不等于】重试在真机上放过行：判据今天一次都不放行
+     *    （可复现的 started:false 全是确定性的 ENOENT），那一格由
+     *    turn-retry.test.ts 钉，不在本表（本表只判模块可达）。
      * ⚠ 下一次动这个数字之前先问：这两条差额有没有一条登记过的死法对应？
      * 没有就是有人删了基线条目而没接线，那种删法正是这条下界存在的全部理由。
      */
-    expect(BASELINE.size).toBeGreaterThanOrEqual(14);
+    expect(BASELINE.size).toBeGreaterThanOrEqual(13);
     expect(invalidBaselineMarks(BASELINE, collectModules()).join("\n")).toBe(
       "",
     );
