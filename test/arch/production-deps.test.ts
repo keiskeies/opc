@@ -333,6 +333,11 @@ describe("运行期夹具名单本身", () => {
       "doc-coords.ts",
       "doc-ids.test.ts",
       "index-diff.ts",
+      // round301 新增（mutation-parser-screen 守卫）。它的 readdirSync 只有一处，根是
+      // 【.workbuddy】且只收 `round\d+-mutate-*.mjs` ⇒ 走不到 packages/hub/src，
+      // 而那几台变异机自己会写生产字节 —— 那是【它们】的并发纪律，与这里的夹具无关。
+      // ⚠ 这一格的成立条件是【那个 mjs 正则还在】：哪天改成收 .ts 并往仓库根走就作废。
+      "mutation-parser-screen.test.ts",
       "pending-decisions.test.ts",
       // 它调 readdirSync 只为在 node_modules/.pnpm 里找 typescript 的 tsc，
       // 一个目录名都不碰 packages/hub/src ⇒ 短命探针天然不在射程里。
