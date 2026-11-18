@@ -39,3 +39,16 @@ Thumbs.db
 *.log
 .pnpm-store/
 .turbo/
+
+# 变异机的临时读数（那几台把 vitest 的 json reporter 写到固定路径，跑完就是废读数）。
+# 只忽略【读数】，不忽略脚本本身：*.mjs 那些是要入库的证据。
+.workbuddy/.mut-*.json
+
+# 依赖可装性探针的 node_modules（实测 59MB，且那份 package.json 是隔离装的）。
+# ⚠ 这里【不】整目录忽略 .workbuddy/probe278/：优化设计文档 §8 那张表把
+#   「playwright / lark-sdk 装得上、chromium 起得来」那条数的复算方法指到这个目录，
+#   指到一个【克隆下来不存在】的目录等于给了一条跑不了的复算路。
+#   所以配方三件套（package.json / package-lock.json / launch.mjs）入库，
+#   只有装出来的 node_modules 挡掉 —— 根上那条 node_modules/ 本来就命中它，
+#   这一格写在这儿是为了让「为什么只挡依赖」这件事在文件里留得下来。
+.workbuddy/probe278/node_modules/
