@@ -1,0 +1,26 @@
+
+[1m[30m[46m RUN [49m[39m[22m [36mv4.1.12 [39m[90mD:/item/opc[39m
+
+(node:29464) [DEP0190] DeprecationWarning: Passing args to a child process with shell option true can lead to security vulnerabilities, as the arguments are not escaped, only concatenated.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+ [31m❯[39m test/arch/__probe301-empty.test.ts [2m([22m[2m0 test[22m[2m)[22m[32m 1[2mms[22m[39m
+ [32m✓[39m test/arch/test-type-baseline.test.ts [2m([22m[2m25 tests[22m[2m)[22m[33m 7405[2mms[22m[39m
+     [33m[2m✓[22m[39m 真跑一次：今天的数在表内，且读数本身可信 [33m 3559[2mms[22m[39m
+     [33m[2m✓[22m[39m test/arch 自己必须是 0 条（round277 清到 0，这一发钉住它不漂回去） [33m 3585[2mms[22m[39m
+
+[31m⎯⎯⎯⎯⎯⎯[39m[1m[41m Failed Suites 2 [49m[22m[31m⎯⎯⎯⎯⎯⎯⎯[39m
+
+[41m[1m FAIL [22m[49m test/arch/__probe301-empty.test.ts[2m [ test/arch/__probe301-empty.test.ts ][22m
+[31m[1mError[22m: No test found in suite test/arch/__probe301-empty.test.ts[39m
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m test/arch/__probe301-empty.test.ts[2m > [22mprobe301 空文件
+[31m[1mError[22m: No test found in suite probe301 空文件[39m
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯[22m[39m
+
+
+[2m Test Files [22m [1m[31m1 failed[39m[22m[2m | [22m[1m[32m1 passed[39m[22m[90m (2)[39m
+[2m      Tests [22m [1m[32m25 passed[39m[22m[90m (25)[39m
+[2m   Start at [22m 11:04:08
+[2m   Duration [22m 7.94s[2m (transform 29ms, setup 0ms, import 46ms, tests 7.41s, environment 0ms)[22m
+

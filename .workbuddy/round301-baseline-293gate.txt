@@ -1,0 +1,10 @@
+
+══════════ round293 豁免账变异矩阵 ══════════
+✓ M0 控制组：一字不改  [应绿] 红发=0 绿发=11 | 绿是后面每一发红的前提
+✓ M1 把豁免标记从 mobile 那一格挪到 ceo-loop 那一格（路径存在）  [应红] 红发=2 绿发=9 | 身份钉 + 死豁免钉都该响：标记贴在一行所有路径都存在的位置上
+✓ M2 静默删掉最后那条豁免（不建文件）  [应红] 红发=2 绿发=9 | 条数恰好 1 该红在 0 ⇒ 「豁免被人悄悄摘了」这一族有响
+✓ M3 豁免计数改成【恒真 filter】（收所有验收行）  [应红] 红发=1 绿发=10 | exemptedBlocks 不再问标记在不在 ⇒ 条数读数与标记脱钩，恰好 1 该红
+✓ M4 只改豁免那一格的散文措辞（标记与路径一字未动）  [应绿] 红发=0 绿发=11 | 【该绿】：判据不该对无关文案敏感 —— 绿的这一发画的是判据的边界
+命中 5 / 5
+(node:70452) [DEP0190] DeprecationWarning: Passing args to a child process with shell option true can lead to security vulnerabilities, as the arguments are not escaped, only concatenated.
+(Use `node --trace-deprecation ...` to show where the warning was created)

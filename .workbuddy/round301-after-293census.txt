@@ -1,0 +1,13 @@
+  读数自证  4 格全过（真绿/真红读对，装载失败两型都抛）
+
+══════════ round293 census 变异矩阵 ══════════
+✓ M0 控制组：一字不改  [应绿] 红发=0 绿发=12 红文件=0 | 绿是后面每一发红的前提；同时自证这台机器上计数读得出红与绿
+✓ M1 反向边不累积（解析器退化成零条边的同形）  [应红] 红发=2 绿发=10 红文件=1 | 全仓都成孤儿 ⇒ 「明知有调用方的模块不在名单里」那一发必须红，而且名单会【膨胀】
+✓ M2 入口标记恒 false（isEntry 不再问 entries）  [应红] 红发=3 绿发=9 红文件=1 | 「非入口」那一栏等于全量 ⇒ 子集/条数那一发该红
+✓ M3 underEntries 不过滤（原样返回全量）  [应红] 红发=2 绿发=10 红文件=1 | 入口排除这一整格失效 ⇒ 反向对照那一发（标成入口才消失）该红
+✓ M4 unresolved 写死 0  [应红] 红发=1 绿发=11 红文件=1 | 「坏图上的读数」不再可见 ⇒ 悬空说明符那一发（合成语料给 1）该红
+✓ M5 行数按换行符数（wc 口径）  [应红] 红发=1 绿发=11 红文件=1 | 行数口径钉住那一发该红；顺带证明「行数」不是只有一个定义
+✓ M6 不排序（改成原序）  [应绿] 红发=0 绿发=12 红文件=0 | 【该绿】：本文件那 12 发一条都没判顺序 ⇒ 这是已登记的射程余量，不是 bug。留着它是为了让下一个人看见这一格没被判住。
+命中 7 / 7
+(node:20776) [DEP0190] DeprecationWarning: Passing args to a child process with shell option true can lead to security vulnerabilities, as the arguments are not escaped, only concatenated.
+(Use `node --trace-deprecation ...` to show where the warning was created)
