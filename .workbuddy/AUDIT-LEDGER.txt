@@ -4790,3 +4790,16 @@ round305b · 我自己顶漂的坐标：一次 doc-refs 红，量出三种不同
   · SNAP 键数 155，无重复键（凭 node 解析扫了一遍；vitest 不会因为重复键而红，
     重复键是【静默覆盖】= 前一条主张消失）。
   · 证据：.workbuddy/round306-{docrefs,docguards,guards2,baselines}.txt
+
+■ ⑧ ⭐ 全量跑抓出的第四格坑：分步守卫集合里【没有 gate-selfcheck】
+  9bbb949 把漂移注记写进了 docs/INDEX.md:81，其中「本轮按语义重指」含「本轮」——
+  docs/review/check-gate.mjs 的 C7 禁【入口文档】出现轮次相对指称（轮次在仓库里数不出来
+  ⇒ 指称落不了地）。分步跑的五发 docs/claim 守卫全程绿：它们的射程里没有
+  「入口文档的轮次词」这一格，那发红直到留到最后的全量跑才现身。
+  ⇒ 两条口径：① 凡改 docs/INDEX.md，分步守卫集合必须含 gate-selfcheck
+    （或直接跑 node docs/review/check-gate.mjs，一秒级）；
+  ② 「全量留到最后」这条延迟纪律本轮真的兜住了一发红 —— 延迟不是省，是把兜底放进固定档。
+  修法本身：删「本轮」—— 注记自带 round305 这个【绝对】锚点，轮次相对词本来就是多余的。
+  ⚠ 本轮在这条上又踩了一次 §⑤b 的同族形状：`node check-gate.mjs | grep … ; echo $?`
+  拿到的是 grep/head 的退出码，不是门禁的 —— 那条绿全靠随后单独捕获的 gate-selfcheck 背书。
+  记下来，免得把自己写成「已经吸取了教训」。
