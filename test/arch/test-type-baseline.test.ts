@@ -68,14 +68,29 @@ describe("类型棘轮：计数与路径归一", () => {
   });
 
   it("⭐ 路径三种写法归一到同一个目录（不归一就会报一条假的『基线外新目录』）", () => {
-    const win = "D:\\item\\opc\\packages\\hub\\test\\db\\a.test.ts";
-    const abs = "D:/item/opc/packages/hub/test/db/b.test.ts";
-    const rel = "packages/hub/test/db/c.test.ts";
-    const upper = "d:/item/opc/packages/hub/test/db/d.test.ts";
+    // ⚠ 这一发原来把【这台机器的 checkout 路径】写死成夹具（"D:\\item\\opc\\..."）。
+    // 后果本轮实测过：把仓库换到别处 checkout（我用 git worktree 开在 %TEMP% 下），
+    // 那三条绝对路径没有一个能落进 ROOT 里，toRepoRelative 原样退回 ⇒ 计数从 4 掉到 1，
+    // 红的样子完全像「归一逻辑坏了」，而坏的是【夹具假设了自己站在哪】。
+    // ⇒ 夹具现在从 ROOT 现推：还是那四种写法（反斜杠 / 正斜杠 / 相对 / 小写盘符），
+    //   只是不再假定仓库住在 D 盘。这一族与本轮登记的「取材面看不见那件事」同形。
+    const relDir = "packages/hub/test/db";
+    const absRoot = ROOT.split("\\").join("/");
+    const lowerDrive = absRoot.replace(/^([A-Z])/u, (c) =>
+      (c as string).toLowerCase(),
+    );
+    const win = absRoot + "\\" + relDir.split("/").join("\\") + "\\a.test.ts";
+    const abs = `${absRoot}/${relDir}/b.test.ts`;
+    const rel = `${relDir}/c.test.ts`;
+    const upper = `${lowerDrive}/${relDir}/d.test.ts`;
+    // 前提自证：夹具【确实】是四种写法。少了这一发，ROOT 万一本身就是小写盘符，
+    // abs 与 upper 会是同一个串，那"归一"就退化成"两个一样的输入给了两次"。
+    expect(new Set([win, abs, rel, upper]).size).toBe(4);
+    expect(absRoot === lowerDrive).toBe(false);
     const counts = countTypeErrorsByDir(
       [win, abs, rel, upper].map((p) => err(toRepoRelative(p, ROOT))),
     );
-    expect(counts.get("packages/hub/test/db")).toBe(4);
+    expect(counts.get(relDir)).toBe(4);
     expect(counts.size).toBe(1);
   });
 
@@ -108,17 +123,72 @@ describe("类型棘轮：计数与路径归一", () => {
   });
 
   it("--listFilesOnly 只数本仓自己的 .ts：node_modules（含 lib 与 @types）不进下限", () => {
+    // ⚠ 这一发的夹具原来也写死了 `D:/item/opc/…`（同上面那一发的病）。
+    // 它【原来在别处 checkout 也是绿的】，而绿的原因是【假的】：那三条绝对路径
+    // 落不进 ROOT ⇒ 原样退回 ⇒ 没有前导斜杠 ⇒ 照样计进「本仓语料」。
+    // round296 把 windows 式仓外路径真正排掉之后，那一版夹具会在别处 checkout 红 ——
+    // 红得对，但红的仍是【夹具站在哪】而不是判据。所以这里一并改成从 ROOT 现推。
+    const r = ROOT.split("\\").join("/");
     const out = [
-      "D:/item/opc/test/arch/a.ts",
-      "D:/item/opc/packages/hub/test/b.ts",
-      "D:/item/opc/node_modules/typescript/lib/lib.dom.d.ts",
-      "D:/item/opc/node_modules/zod/index.d.ts",
-      "D:/item/opc/packages/hub/src/c.ts",
+      `${r}/test/arch/a.ts`,
+      `${r}/packages/hub/test/b.ts`,
+      `${r}/node_modules/typescript/lib/lib.dom.d.ts`,
+      `${r}/node_modules/zod/index.d.ts`,
+      `${r}/packages/hub/src/c.ts`,
       "/usr/lib/node_modules/typescript/lib/lib.d.ts",
     ].join("\n");
+    // 前提自证：那六条【确实】归一成了预期那几种形状，否则下面的 3 是在比运气。
+    expect(toRepoRelative(`${r}/test/arch/a.ts`, ROOT)).toBe("test/arch/a.ts");
+    expect(toRepoRelative(`${r}/node_modules/zod/index.d.ts`, ROOT)).toContain(
+      "node_modules",
+    );
     // 3 而不是 2：src 下的文件也算「这次检查吃进去的语料」，
     // 下限要挡的是【语料被改窄】，不是【只有测试被检查】。
     expect(parseListFiles(out, ROOT)).toBe(3);
+  });
+
+  it("⭐ 仓外路径不计进语料：unix 式【和 windows 式】都不计（round296 补的洞）", () => {
+    // `parseListFiles` 的注释一直写着「不在仓内的绝对路径也排除」，而实现只判了
+    // `rel.startsWith("/")`：unix 式落在仓外退回成 `/some/where/x.ts` ⇒ 抓得到；
+    // windows 式退回成 `E:/other/repo/x.ts`【没有前导斜杠】⇒ 抓不到，直接计进语料。
+    // 本机就是 windows 式 —— 漏的正是这里天天在用的那一型。
+    // 危害方向是【绿】：语料数被仓外文件灌水 ⇒ include 真被改窄时下限仍够 ⇒
+    // 与 r19 守的那一族同形（少报在棘轮上是绿的方向）。
+    const unix = "/some/other/repo/keep.ts";
+    const win = "E:/other/repo/keep.ts";
+    // 前提自证：归一【确实】没把 windows 式变成相对路径 —— 洞就在这儿。
+    // 少了这一发，将来有人改 toRepoRelative 让它抹盘符，这判会静默换含义。
+    expect(toRepoRelative(win, ROOT)).toMatch(/^[A-Za-z]:\//u);
+    expect(toRepoRelative(unix, ROOT)).toMatch(/^\//u);
+    expect(parseListFiles([win, unix].join("\n"), ROOT)).toBe(0);
+  });
+
+  it("单变量对照：同一个位置从仓外搬进仓内 ⇒ 立刻计数（证明判的是在不在仓内）", () => {
+    // 上面那发红在「0」，而「0」也是「什么都不计」的形状 —— 恒返回 0 的实现同样过。
+    // 这一发把两条仓外路径换成【以 ROOT 现推】的同名仓内路径，其余一字不动 ⇒ 该 2。
+    // 两发配起来才把口径钉成「在仓内 ⇒ 计，不在 ⇒ 不计」。
+    const rootPosix = ROOT.split("\\").join("/");
+    const inside = [
+      `${rootPosix}/synthetic/a.ts`,
+      `${rootPosix}/synthetic/b.ts`,
+    ];
+    const outside = ["/some/other/repo/a.ts", "E:/other/repo/b.ts"];
+    expect(parseListFiles(inside.join("\n"), ROOT)).toBe(2);
+    expect(parseListFiles(outside.join("\n"), ROOT)).toBe(0);
+    expect(parseListFiles([...inside, ...outside].join("\n"), ROOT)).toBe(2);
+  });
+
+  it("⭐ 另外三种形状：`../` 前缀、`./` 前缀、根本身（注释吹的「实测三种」在这儿）", () => {
+    // toRepoRelative 的注释写着「三种形状是实测出来的」，round296 之前【只有绝对路径
+    // 那一型有测试】—— 相对调用目录与相对根那两型没有任何一发覆盖，把 `while (p.startsWith("../"))`
+    // 整行删掉，本文件照绿。注释里的「实测」于是只是一个主张。
+    expect(toRepoRelative("../synthetic/a.ts", ROOT)).toBe("synthetic/a.ts");
+    expect(toRepoRelative("./synthetic/a.ts", ROOT)).toBe("synthetic/a.ts");
+    // 根自己（带尾斜杠）归一成 ""，parseListFiles 与 parseTscOutput 都按「不计/未解析」处理。
+    expect(toRepoRelative(`${ROOT}/`, ROOT)).toBe("");
+    expect(parseListFiles(`${ROOT}/`, ROOT)).toBe(0);
+    // 反斜杠的 `..\` 同一条路（tsc 在 Windows 上会给）。
+    expect(toRepoRelative("..\\synthetic\\a.ts", ROOT)).toBe("synthetic/a.ts");
   });
 });
 

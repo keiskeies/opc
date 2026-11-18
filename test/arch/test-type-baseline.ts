@@ -250,11 +250,27 @@ export function parseTscOutput(
 }
 
 /**
+ * 归一之后【仍然是绝对路径】吗 —— 也就是「这条不在仓内」。
+ *
+ * ⚠ 这一发是 round296 补的，起因是 `parseListFiles` 的注释一直写着
+ * 「不在仓内的绝对路径也排除」而实现【只排掉了一半】：`toRepoRelative` 落在仓外时
+ * 原样退回，unix 式退回成 `/some/where/x.ts`（有前导斜杠 ⇒ 旧判据抓得到），
+ * windows 式退回成 `E:/other/repo/x.ts`（【没有】前导斜杠 ⇒ 旧判据抓不到，直接计进
+ * 「本仓语料」）。本机就是 windows 式，所以漏的正是这里天天在用的那一型。
+ * 危害方向是【绿】：`filesChecked` 被仓外文件灌水 ⇒ include 真被改窄时下限仍够 ⇒
+ * 与 r19 守着的那一族（少报在棘轮上是绿的方向）同一个形状。
+ */
+function isStillAbsolute(rel: string): boolean {
+  return rel.startsWith("/") || /^[A-Za-z]:\//u.test(rel);
+}
+
+/**
  * 解析 `--listFilesOnly` 的输出，数出【本仓自己的】.ts 文件。
  *
  * 口径只有一条排除：`node_modules`。lib 的 `lib.dom.d.ts` 那一批就在
  * `node_modules/typescript/lib/` 下，所以这一条同时把它们挡掉了；剩下的就是
- * 这次检查真正吃进去的语料。不在仓内的绝对路径也排除（跨仓 project 引用不属本守卫）。
+ * 这次检查真正吃进去的语料。不在仓内的绝对路径也排除（跨仓 project 引用不属本守卫）
+ * —— 见 `isStillAbsolute`：那条注释在 round296 之前只对 unix 式成立，windows 式漏计。
  * 不用「必须以 test/ 或 packages/ 开头」那种前缀白名单：那种写法只对根 project 成立，
  * 拿它去量另一个 project 会恒 0，而恒 0 看起来正是「include 被改窄」想要报的形状。
  */
@@ -262,7 +278,7 @@ export function parseListFiles(output: string, root: string): number {
   let n = 0;
   for (const rawLine of output.split(/\r?\n/u)) {
     const rel = toRepoRelative(rawLine.trim(), root);
-    if (rel === "" || rel.startsWith("/") || !rel.endsWith(".ts")) continue;
+    if (rel === "" || isStillAbsolute(rel) || !rel.endsWith(".ts")) continue;
     if (rel.split("/").includes("node_modules")) continue;
     n++;
   }
