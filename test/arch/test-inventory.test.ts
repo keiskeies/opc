@@ -15,11 +15,22 @@
 // 我一度把这件事当成计划内在不一致、还提议往 include 里加一条 .spec.ts —— 那个修法会
 // 让 vitest 去收集 Playwright 的规格文件，反而引入新缺陷。判断与更正都记在 0007 §9。
 //
-// 所以本守卫此刻判红的根据是【Playwright 尚未安装】：根与四个子包的 package.json 里
-// 测试类依赖只有 vitest，仓库里没有 playwright.config.*（本轮实测）。于是 test/e2e 下的
-// .spec.ts 当下【谁都不认】。等到 Task 2.9 真的引入 Playwright，同一条断言会变成假红 ——
-// 那时正确的做法是把「认领者」从 vitest 的 include 扩成「vitest include ∪ Playwright
-// config 的 testDir」，而不是把这条守卫关掉。改它的人请先读 0007 §9.2。
+// 【撤回】所以本守卫此刻判红的根据是【Playwright 尚未安装】：根与四个子包的 package.json 里
+// 【撤回】测试类依赖只有 vitest，仓库里没有 playwright.config.*（本轮实测）。于是 test/e2e 下的
+// 【撤回】.spec.ts 当下【谁都不认】。等到 Task 2.9 真的引入 Playwright，同一条断言会变成假红 ——
+// 【撤回】那时正确的做法是把「认领者」从 vitest 的 include 扩成「vitest include ∪ Playwright
+// 【撤回】config 的 testDir」，而不是把这条守卫关掉。改它的人请先读 0007 §9.2。
+//   ↑ 这五行标【撤回】而不是删掉：它是 0007 §9.2 预告过的那次【预期演进】的现场证据，
+//     删掉就等于把「当年为什么判红」一起抹了（同一处理见 §9.4 拒绝 amend 的理由）。
+//
+// 今天的实情（上面那段作废，这一段才是现在成立的）：Playwright 1.65.1 已装进根
+// devDependencies，根 playwright.config.ts 存在，test/e2e/ceo-loop.spec.ts 真的存在。
+// 所以「谁都不认领」这一族在 .spec.ts 上【已经不再成立】，守卫按 0007 §9.2 那句话改成了
+// 【多 runner 认领】：collected = vitest 自己报的清单 ∪ Playwright 自己报的清单。
+// 两个清单都是【问 runner 要的】，不是照配置自己解析的 —— 理由与 vitest 那一发完全相同
+// （自己解析 ⇒ 同一套误读同时作用于两侧 ⇒ 差集恒空 ⇒ 恒真判定），实测口径写在
+// test-inventory.ts 的 playwrightFiles 文件头。守卫本身【没有关掉、没有放宽枚举】：
+// 宽枚举仍然比任何一条 include 宽，往 test/e2e 放一个【config 射程外】的 spec 依然红。
 //
 // 探针实测（三个文件名各不相同，避免 0006 第 7 节第 11 条那种 basename 恒真）：
 //   test/e2e/probeA_specname.spec.ts 被静默忽略
@@ -62,7 +73,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 // vitest.config.ts 是【被检查对象】而非安全依赖，故意 import 它，理由见文件头。
-import config from "../../vitest.config";
+import config from "../../vitest.config.js";
 import { checkConfigMatch } from "./config-match.js";
 import {
   diffInventory,
@@ -70,6 +81,7 @@ import {
   IGNORED_DIRS,
   looksLikeTest,
   parseFilesOnly,
+  playwrightFiles,
   survivesStat,
 } from "./test-inventory.js";
 
@@ -216,6 +228,73 @@ describe("测试文件的执行清单覆盖", () => {
     expect(found).toEqual([]);
   });
 
+  describe("playwrightFiles（第二个 runner 的清单解读）", () => {
+    const ROOT_WIN = "D:\\item\\opc";
+    // 真形状（1.65.1 实测）：rootDir 是 posix 斜杠绝对路径，suites[].file 是相对它的裸名。
+    const real = JSON.stringify({
+      config: { rootDir: "D:/item/opc/test/e2e" },
+      suites: [{ title: "ceo-loop.spec.ts", file: "ceo-loop.spec.ts" }],
+    });
+
+    it("真 JSON ⇒ 与 expected 同口径的仓库相对路径（正对照，防恒返回 []）", () => {
+      expect(playwrightFiles(real, ROOT_WIN)).toEqual([
+        "test/e2e/ceo-loop.spec.ts",
+      ]);
+    });
+
+    it("反斜杠与子目录也归一（Playwright 在 Windows 上会给反斜杠）", () => {
+      const j = JSON.stringify({
+        config: { rootDir: "D:/item/opc/test/e2e" },
+        suites: [{ file: "sub\\nested.spec.ts" }],
+      });
+      expect(playwrightFiles(j, "D:/item/opc")).toEqual([
+        "test/e2e/sub/nested.spec.ts",
+      ]);
+    });
+
+    it("仓库外的 spec 原样绝对路径出去 ⇒ 进 phantom 并报出来，不静默剪掉", () => {
+      const j = JSON.stringify({
+        config: { rootDir: "C:/elsewhere/e2e" },
+        suites: [{ file: "outside.spec.ts" }],
+      });
+      expect(playwrightFiles(j, ROOT_WIN)).toEqual([
+        "C:/elsewhere/e2e/outside.spec.ts",
+      ]);
+    });
+
+    // 三种「读不出来」必须【抛】，不许退化成空清单：空清单会把 spec 报成「没人认领」，
+    // 那是假话（真话是「清单读不出来」）。这类假红因本仓归档过一整族（0007 §4.1）。
+    it("非 JSON / 缺 rootDir / suites 形状变了 ⇒ 抛，不返回空数组", () => {
+      for (const bad of [
+        "not json at all",
+        JSON.stringify({ suites: [] }),
+        JSON.stringify({ config: { rootDir: "D:/item/opc/test/e2e" } }),
+        JSON.stringify({
+          config: { rootDir: "D:/item/opc/test/e2e" },
+          suites: "oops",
+        }),
+      ]) {
+        expect(() => playwrightFiles(bad, ROOT_WIN)).toThrow();
+      }
+    });
+
+    // 主判定的反向 canary，纯函数版：只给 vitest 那份清单 ⇒ ceo-loop 必须无人认领。
+    // 它证明这条守卫今天能绿【确实】来自并集，不是来自某个被放宽的判定。
+    it("少了一个 runner ⇒ 同一份 expected 立刻变红", () => {
+      const pw = playwrightFiles(real, ROOT_WIN);
+      const spec = "test/e2e/ceo-loop.spec.ts";
+      expect(
+        diffInventory({ expected: [spec], collected: pw }).uncollected,
+      ).toEqual([]);
+      expect(
+        diffInventory({
+          expected: [spec],
+          collected: ["test/a.test.ts"],
+        }).uncollected,
+      ).toEqual([spec]);
+    });
+  });
+
   describe("survivesStat（扫描容错）", () => {
     it("stat 成功时原样返回", () => {
       expect(survivesStat(() => true)).toBe(true);
@@ -263,12 +342,31 @@ describe("测试文件的执行清单覆盖", () => {
     }
     const collected = parseFilesOnly(String(r.stdout));
     expect(collected.length).toBeGreaterThanOrEqual(21);
-    const diff = diffInventory({ expected, collected });
+    // 第二个 runner：Playwright 自己认领的那份（0007 §9.2 预告的演进，本轮落地）。
+    // 失败【不吞】：吞掉等于把「spec 没人认」与「Playwright 起不来」混成同一个红。
+    const pw = spawnSync(
+      process.execPath,
+      ["node_modules/playwright/cli.js", "test", "--list", "--reporter=json"],
+      { cwd: ROOT, encoding: "utf8", timeout: 180000 },
+    );
+    if (pw.status !== 0) {
+      throw new Error(
+        "playwright test --list 退出码 " +
+          pw.status +
+          "（spec 文件 import 崩了也会导致非 0 —— 那是红，不是「没有 spec」）",
+      );
+    }
+    // 两个 runner 的并集才是「有人认领」。名字避开上面那个 collected（那只是 vitest 一份）。
+    const claimed = [
+      ...collected,
+      ...playwrightFiles(String(pw.stdout), ROOT),
+    ].sort();
+    const diff = diffInventory({ expected, collected: claimed });
     for (const u of diff.uncollected) {
-      console.log("[未被 vitest 收集] " + u + " —— " + explain(u));
+      console.log("[没有任何 runner 认领] " + u + " —— " + explain(u));
     }
     for (const p of diff.phantom) {
-      console.log("[vitest 收集了但宽枚举剪掉了] " + p);
+      console.log("[runner 收集了但宽枚举剪掉了] " + p);
     }
     // 我对两条 include 的【解读】必须与 vitest 自己给的清单一致。上面那条逐字比对只保证模式
     // 字符串相同，保证不了我把 glob 读对了 —— 读错时两边照样逐字一致。
@@ -279,5 +377,18 @@ describe("测试文件的执行清单覆盖", () => {
     expect(expected.length).toBeGreaterThanOrEqual(21);
     expect(diff.uncollected).toEqual([]);
     expect(diff.phantom).toEqual([]);
+    // 正对照：Playwright 那份清单【真的东西】—— 空清单也算「跑通了」。
+    // 没有这一发，playwrightFiles 退化成恒返回 [] 时主断言照样绿（ceo-loop 就落回无人认领，
+    // 但那时会红 —— 所以真正的风险是【将来某个 spec 靠恒空蒙过去】：这条把它钉住）。
+    expect(claimed).toContain("test/e2e/ceo-loop.spec.ts");
+    // 反向 canary：这条守卫现在能绿，靠的是【两个 runner 的并集】，不是靠把判定放宽。
+    // 把 Playwright 那一侧单独抹掉，ceo-loop.spec.ts 必须立刻变成「无人认领」。
+    // 这条用例不 spawn、不碰磁盘，纯函数，所以它比主断言更不会因为环境问题而假绿。
+    expect(
+      diffInventory({
+        expected: ["test/e2e/ceo-loop.spec.ts"],
+        collected,
+      }).uncollected,
+    ).toEqual(["test/e2e/ceo-loop.spec.ts"]);
   });
 });

@@ -36,6 +36,7 @@ const EXPORTS = [
   "blockedTitle",
   "taskCard",
   "approvalCard",
+  "evidenceLine",
   "budgetHtml",
   "stat",
   "eventRow",

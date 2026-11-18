@@ -168,7 +168,9 @@ export const approvalDecisionRequestSchema = z
       });
     }
   });
-export type ApprovalDecisionRequest = z.infer<typeof approvalDecisionRequestSchema>;
+export type ApprovalDecisionRequest = z.infer<
+  typeof approvalDecisionRequestSchema
+>;
 
 /* ────────────────────────── 响应形状 ────────────────────────── */
 
@@ -242,6 +244,42 @@ export const approvalViewSchema = z
      *  这一格存的是【当时写下的那个字符串】，库里出现一个契约不知道的取值时，
      *  视图应当把它**原样带出去**让人看见，而不是在解析层整体 500。 */
     escalation_reason: z.string().nullable(),
+    /**
+     * 卡片背面的证据引用（O5 动作 4，0008）。
+     *
+     * **可空**，且 null 与 [] 含义不同：
+     *  - null  —— 建卡时没给证据引用（含 0008 之前的存量行，今天 0 张）；
+     *  - []    —— 给了空引用（契约 .strict() 本不允许，读侧照原样带出）；
+     *  - 数组  —— 每项是一个证据引用（文件路径 / sha256 / 外部链接）。
+     * 这一格让「这张卡有没有证据包」成为【可核对的状态】：UI 对 null/[] 明说
+     * 「无证据包」，而不是把缺证据的卡伪装成有证据的卡。
+     */
+    evidence_refs: z.array(z.string()).nullable(),
+    /**
+     * 策略引擎对这张卡的**影子判定**（O9 动作 1 阶段一：只报不批）。
+     *
+     * 形状与 hub 侧 `AutoApproveOutcome` 的判定字段同构（TS 联合，值域不放开成 string）。
+     * 这一格存在的唯一理由是【测量】：规则今天零生产调用方，接上之前「规则会怎么判」
+     * 永远只有代码没有读数；而阶段一【不改任何决定】——写路径一次 `autoApprove`
+     * 都不调，卡片状态、审计、`decided_by` 全与这一格无关。
+     * 界面对它的正确读法是「规则判 / 人判」并排，而不是任何自动动作。
+     */
+    policy_shadow: z
+      .union([
+        z.object({
+          decision: z.literal("auto_approved"),
+          rule: z.string().min(1),
+          tier: z.string().min(1),
+        }),
+        z.object({
+          decision: z.literal("require_approval"),
+          tier: z.string().min(1),
+          blocked_by: z.string().min(1),
+          missing: z.array(z.string()),
+          note: z.string(),
+        }),
+      ])
+      .nullable(),
   })
   .strict();
 export type ApprovalView = z.infer<typeof approvalViewSchema>;
@@ -300,7 +338,8 @@ export const APPROVAL_STATUS_PENDING: ApprovalStatusValue = "pending";
  *    就是不在契约层把那个缝留回来。
  */
 export const IM_BINDING_PLATFORM_VALUES = ["feishu", "wecom", "qq"] as const;
-export type ImBindingPlatformValue = (typeof IM_BINDING_PLATFORM_VALUES)[number];
+export type ImBindingPlatformValue =
+  (typeof IM_BINDING_PLATFORM_VALUES)[number];
 
 export const imBindingViewSchema = z
   .object({
@@ -378,8 +417,10 @@ export type FeedItemView = z.infer<typeof feedItemSchema>;
  *    `org` 或 `graph`（那会读成「提交【之后】想长成的那张图」）：commitOrgGraph
  *    收的是 before，`applyChangeToGraph` 在里面算出 after，审计里的 before/after
  *    快照都用同一个值 —— 调用方【不要】自己算 after，否则审计说 A 而库里是 B。
- *  - `change`：一次 `reparent` 或 `add_edge`。判别式（orgChangeSchema）在契约层
- *    就保证「既没有 child 也没有 edge」的变更写不出来。
+ *  - `change`：一次 `reparent` / `add_edge` / `add_node`（round294 起三种）。
+ *    判别式（orgChangeSchema）在契约层就保证「既没有 child 也没有 edge 也没有
+ *    node」的变更写不出来 —— 每一类只带它自己那一个载荷，所以「加节点顺带画一条
+ *    边」这种捎带形状在这一层就不存在，边必须单独过一次 L2。
  *  - `change_summary`：写进 `delegation_graphs.change_summary` 的那句人话。
  *    必填、非空：版本历史里每一版都该答得出「这一版改了什么」，欠这个答案的
  *    版本号在回放里读不出意图。
@@ -398,7 +439,9 @@ export const commitOrgChangeRequestSchema = z
     change_summary: z.string().trim().min(1).max(2000),
   })
   .strict();
-export type CommitOrgChangeRequest = z.infer<typeof commitOrgChangeRequestSchema>;
+export type CommitOrgChangeRequest = z.infer<
+  typeof commitOrgChangeRequestSchema
+>;
 
 /* ────────────────────────── 状态码口径 ────────────────────────── */
 
@@ -558,7 +601,9 @@ export const RECONNECT_MAX_MS = 15_000;
  */
 export function reconnectDelayMs(attempt: number): number {
   if (!Number.isInteger(attempt) || attempt < 0) {
-    throw new Error("attempt 是非负整数（第 0 次重连传 0），实到 " + String(attempt));
+    throw new Error(
+      "attempt 是非负整数（第 0 次重连传 0），实到 " + String(attempt),
+    );
   }
   // 2**attempt 在 attempt 很大时会溢出成 Infinity，与上限取 min 之前先夹一次指数，
   // 免得「上限」这件事要靠 Infinity 参与运算才成立（能算对，但读不出意图）。

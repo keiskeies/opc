@@ -29,12 +29,24 @@ import { Command } from "@langchain/langgraph";
 import { SqliteWALSaver } from "./checkpoint/saver.js";
 import { openDb } from "./db/driver.js";
 import { migrate } from "./db/migrate.js";
+import {
+  markStubDb,
+  openReadonlyDb,
+  readUserVersion,
+  STUB_DB_MARKER,
+} from "./db/pragmas.js";
+import { humanEdge } from "./engine/dispatch.js";
 import { InMemoryEventBus } from "./events/bus.js";
 import { KIND_TO_ACTION } from "./events/recorder.js";
 import { SuperStepAuditor } from "./graph/audit-middleware.js";
 import { buildCompanyGraph, type CompanyNode } from "./graph/company.js";
+import type { TaskState } from "./graph/status.js";
 import { StubRegistry } from "./graph/stub-model.js";
-import { chooseResumeInput, hasPendingInterrupt, threadConfig } from "./graph/thread.js";
+import {
+  chooseResumeInput,
+  hasPendingInterrupt,
+  threadConfig,
+} from "./graph/thread.js";
 import { isDirectRun } from "./internal/direct-run.js";
 import { loadPresetRoles } from "./roles/preset.js";
 
@@ -212,6 +224,88 @@ function requireExistingDb(
   return { code: 2 };
 }
 
+/**
+ * 桩路线的【写权限守卫】：`hub run` / `hub resume` 只许写**桩自己建的库**。
+ *
+ * ── 要挡的是什么 ────────────────────────────────────────────────────
+ * `hub run` 用的是 `StubRegistry`（`graph/stub-model.ts`，返回 `"stub:" + tier`），
+ * 而它写的是一张【真的状态机】：`graph/company.ts` 的 `report` 节点把任务一路推到
+ * 终态，中间**没有任何人类席位判定**。拿它打在生产库上，结果是
+ * 「一批看起来跑完了、还带完整审计轨迹的任务」—— 而那条轨迹里没有一次是人批的。
+ * 这条迁移的理由（依赖装不上）已经消失（docs/OPC-OS-功能优化设计.md §1.3），
+ * 所以桩路线现在的唯一风险就是**被误指到一个真库上**。
+ *
+ * ── 为什么判【这个库是谁的】，不判【库里有没有内容】──────────────────
+ * 设计文档 O1-1 原本写的是「库里已有 tasks 行 ⇒ 拒绝」。**它不成立，而且是静默不成立**：
+ * 一条全新的真库被误指给桩时 `count(tasks) === 0` ⇒ 放行 ⇒ 桩把生产库当演示库收养，
+ * 正是这条守卫要防的那件事，在最有价值的那一发上绿。
+ * 所以判据换成【归属】：只有库文件头上带着 `STUB_DB_MARKER` 的，才是桩可以自己写的库；
+ * 标记在**新建的那一刻**打上（见 `claimDbForStub`）。
+ *
+ * ── 失败方向 ────────────────────────────────────────────────────────
+ * 认不出来 ⇒ **拒绝**（退出 2），不是「警告后继续」。假红在这里是可接受的代价：
+ * 一个先前存在的演示库（本次改动之前建的）会被拒一次，换一个临时目录就好；
+ * 反过来一次假绿会往真库里写一整条假流程。
+ *
+ * ⚠ 已知边界：`existsSync` 与 `openDb` 之间有窗口，理论上另一个进程恰好在此刻建库。
+ * 本仓是单写者模型（规格 §6.2），没有为此加锁；真要说清楚的是**它坏起来的形状**：
+ * 那需要一个恰好卡在几毫秒窗口里的建库方，而不是「用户手滑打错路径」。
+ */
+function refuseStubOnForeignDb(
+  dbPath: string,
+  verb: string,
+  io: CliIo,
+): CliResult | null {
+  if (!existsSync(dbPath)) return null; // 还没有 ⇒ 这一次运行就是它的创建者
+  let version = -1;
+  let ro: ReturnType<typeof openReadonlyDb> | undefined;
+  try {
+    ro = openReadonlyDb(dbPath);
+    version = readUserVersion(ro);
+  } catch (e) {
+    // 打不开 ≠ 可以写。这里必须拒绝：一个读不出标记的库，凭什么让桩往里写一整条
+    // 状态机？（`openReadonlyDb` 对【不是 SQLite 文件】的东西会抛，那正是想挡的形状。）
+    io.error(
+      "错误：无法确认这个库的归属，桩路线拒绝写入 —— " +
+        dbPath +
+        "\n读它的时候失败：" +
+        String((e as Error)?.message ?? e) +
+        "\n",
+    );
+    return { code: 2 };
+  } finally {
+    ro?.close();
+  }
+  if (version === STUB_DB_MARKER) return null;
+  io.error(
+    "错误：" +
+      verb +
+      " 走的是【桩模型】（`StubRegistry`，不联网不计费），" +
+      "拒绝写进一个不是桩建的库。\n" +
+      "  库文件：" +
+      dbPath +
+      "\n  user_version = " +
+      version +
+      "，桩的标记 = " +
+      STUB_DB_MARKER +
+      "\n" +
+      "为什么不是加个开关：开关会被顺手加上，而拒绝是当场可见的。\n" +
+      "怎么办：① 这是个演示库 ⇒ 换一个不存在的 --db 路径，桩会自己建并认领；" +
+      "② 这是真库 ⇒ 桩路线本来就不该碰它，要跑真的请用生产入口。\n",
+  );
+  return { code: 2 };
+}
+
+/**
+ * 把【本次新建的】库认领为桩的演示库。
+ *
+ * 只在 `refuseStubOnForeignDb` 放行之后调用，所以这里只会遇到两种情况：
+ * 文件不存在（马上被 openDb 建出来），或已经是桩的库（重复打标记是幂等的）。
+ */
+function claimDbForStub(db: ReturnType<typeof openDb>): void {
+  markStubDb(db);
+}
+
 /** 共享装配：openDb → migrate → bus → auditor → instrumentSaver(saver) → graph。 */
 async function withHub<T>(
   dbPath: string,
@@ -279,7 +373,16 @@ async function cmdRun(
   idea: string,
   io: CliIo,
 ): Promise<CliResult> {
+  // 守卫必须在 withHub 之前：withHub 里的 openDb 会【创建】文件，
+  // 一旦创建成功，"这个库先前存不存在"这个问题就没有答案了（同 requireExistingDb
+  // 那条纪律：拼错路径留下的不是一个空文件，是一个此后恒真的存在性判断）。
+  const refused = refuseStubOnForeignDb(dbPath, "hub run", io);
+  if (refused !== null) return refused;
   return withHub(dbPath, taskId, async ({ db, auditor, graph, models }) => {
+    // 认领这个库。放在 cmdRun 而不是 withHub 里：withHub 也被 status / resume 用，
+    // 在那儿打标记会把一条【真库】洗成桩的演示库 —— 那正好是这条守卫要防的事，
+    // 而它的形状是「只是读了一下库」。
+    claimDbForStub(db);
     // 幂等守卫【先查库】，不能靠图里 intake 的 INSERT OR IGNORE：那条语句是为崩溃
     // 续跑准备的（tasks 行已存在时必须忽略），拿它当幂等机制的话，重复 run 会把
     // 整条状态机再走一遍，而它一声不响（0006 §3）。
@@ -328,13 +431,38 @@ async function cmdRun(
       io.error("  ⚠ 未跑到 END，待执行节点：" + next.join(", ") + "\n");
       return { code: 1 };
     }
-    // 状态从库里读，不写死 "ARCHIVED"：图一改，硬编码就开始说谎。
+    // 状态从库里读，不写死状态名：图一改，硬编码就开始说谎。
     const row = findTask(db, taskId);
-    io.write(
-      "  结果：已跑到 END，状态 = " +
-        (row?.status ?? "（tasks 行缺失）") +
-        "\n",
-    );
+    const status = row?.status ?? "";
+    // 「图跑到 END」与「这件事办完了」不是一回事，而现在它们真的分开了：
+    // report 节点停在 ESCALATED_TO_CEO（等人批准），图那条边照旧通向 END，
+    // 于是 next 为空而任务并没走完它的一生。只打印「已跑到 END」会把
+    // 「桩跑完了」读成「交付完了」—— 那正是 O1-2 要消掉的那类误读。
+    //
+    // 判据从 HUMAN_EDGES 推（humanEdge 查得到 = 这一格等人点批准），不写状态名单：
+    // 表里加一格人坐的格子，这句话自动跟着变；写名单就是下一处漂移。
+    const awaiting =
+      status === "" ? null : humanEdge(status as TaskState, "approve");
+    if (awaiting !== null) {
+      io.write(
+        "  结果：桩图跑到 END，任务停在 " +
+          status +
+          " —— 等人批准（批准后进入 " +
+          awaiting.to +
+          "：" +
+          awaiting.why +
+          "）\n",
+      );
+      io.write(
+        "  提示：本 CLI 没有批准命令；批准走审批收件箱（HTTP/桌面端）。\n",
+      );
+    } else {
+      io.write(
+        "  结果：已跑到 END，状态 = " +
+          (row?.status ?? "（tasks 行缺失）") +
+          "\n",
+      );
+    }
     return { code: 0 };
   });
 }
@@ -367,11 +495,22 @@ async function cmdStatus(
 
     const state = await graph.getState(config(taskId));
     const next = (state as { next?: string[] }).next ?? [];
-    io.write(
-      "  图进度：" +
-        (next.length === 0 ? "已到 END" : "待执行 " + next.join(", ")) +
-        "\n",
-    );
+    // 与 cmdRun 同一句话的分叉，同一个理由：next 为空说的是【图】跑完了，
+    // 而任务可能正停在等人批准的那一格。两件事分开说，读的人不必自己推。
+    const waiting = humanEdge(task.status as TaskState, "approve");
+    if (next.length > 0) {
+      io.write("  图进度：待执行 " + next.join(", ") + "\n");
+    } else if (waiting !== null) {
+      io.write(
+        "  图进度：桩图已到 END，任务等人批准 —— 批准后进入 " +
+          waiting.to +
+          "：" +
+          waiting.why +
+          "\n",
+      );
+    } else {
+      io.write("  图进度：已到 END\n");
+    }
 
     // 轨迹读 payload（事件本体），不读 target（派生摘要）—— 与 Task 0.8 同一条理由。
     // action 的值【从 KIND_TO_ACTION 取】：events.action 存的是 §22.1 的小写枚举
@@ -398,6 +537,11 @@ async function cmdResume(
 ): Promise<CliResult> {
   const missing = requireExistingDb(dbPath, taskId, io);
   if (missing !== null) return missing;
+  // resume 同样要挡：它【会写】—— chooseResumeInput 选出的输入会推进节点，
+  // 而推进用的还是 StubRegistry。只挡 run 不挡 resume 的话，守卫等于一个
+  // 「第一次不许、第二次随便」的门槛，那种门槛比没有更容易让人以为安全。
+  const refused = refuseStubOnForeignDb(dbPath, "hub resume", io);
+  if (refused !== null) return refused;
   return withHub(dbPath, taskId, async ({ db, auditor, graph }) => {
     if (findTask(db, taskId) === undefined) {
       io.error("错误：任务不存在 —— task_id = " + taskId + "\n");
@@ -416,7 +560,8 @@ async function cmdResume(
     // 卡片之后走的是【同一对函数】，不是抄一份。抄一份的漂移方式是
     // 「CLI 能恢复、点批准不恢复」，而两边各自都看着有理由。
     const choice = chooseResumeInput(hasPendingInterrupt(before));
-    const input: Command | null = choice === "command" ? new Command({ resume: null }) : null;
+    const input: Command | null =
+      choice === "command" ? new Command({ resume: null }) : null;
 
     io.write(
       choice === "command"

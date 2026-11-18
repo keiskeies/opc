@@ -18,8 +18,19 @@
  *       之后再消费 100 ⇒ applied=true、**breached=false**、over=true，仍 1 条
  *     成因在 tracker.ts:233 那行：`breached = before <= limit && after > limit`
  *     （「跨过才算突破」，它自己的注释说明是为了不让收件箱被同一条超限刷满）。
- *     而 `consumed_cents` 在整个 src 里**只有 `+ ?` 一处写入**（实测：除
- *     ADD_CONSUMED_SQL 之外零写入方，没有任何归零/重算路径）⇒ consumed 单调不减。
+ *     而 `budgets.consumed_cents` 的写入方**全是 `+ ?` 那种自增**（0063 §2 改过这句：原文写
+ *     「只有一处写入 / 除 ADD_CONSUMED_SQL 之外零写入方」，那是引擎路线之前测的；
+ *     引擎路线接上之后有【两处】—— `budget/tracker.ts` 的 ADD_CONSUMED_SQL 与
+ *     `engine/runtime.ts` 的 ADD_TASK_BUDGET_SQL（那时是手抄副本）。
+ *     【round272 再改一次】runtime 那份副本删了：引擎路线现在 import 的就是
+ *     tracker 的 ADD_CONSUMED_SQL，所以**语句只有一条**而【调用点两处】。
+ *     没有别处，也没有任何归零/重算路径）⇒ consumed 单调不减。
+ *     （另一张表上还有一个同名列：`tasks.consumed_cents` 由 dispatch 的 WRITE_EDGE_SQL
+ *     与 LEDGER_SQL 写，两处都是 `COALESCE(consumed_cents,0)+?` ⇒ 同样单调不减。
+ *     原文那句「整个 src 里」把两列混在一起数了，所以它【既少算了列、又少算了写入方】。）
+ *     ⚠ 撑住「单调不减」的是【每处都是加号】这件事，不是【只有一处】。计数过期了而
+ *     结论还成立，这种句子最危险：把它读成「数一数就知道」的人会在下一处 `+ ?` 出现时
+ *     以为判据塌了，而真正要盯的是【有没有出现非自增的写法】。
  *     于是 `before <= limit` 一旦为假就**永不为真**：那个作用域的突破警报
  *     **永久关闭**，而关闭它的是一次看起来无害的「把预算从 $10 调到 $5」。
  *     ⇒ 本模块必须自己把这件事说出来（`silence_alarm` / `now_over`），

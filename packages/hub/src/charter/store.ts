@@ -15,6 +15,12 @@
  *     ⇒ 「保存一版新岗位书」在 src 里**没有任何入口**，只能从 YAML 文件加载
  *     （roles/preset.ts，CLI 启动时读 `resources/charter-templates/*.yaml`）。
  *     也就是说「CEO 改了验收标准」这句话，今天落到代码上是**无处可存**。
+ *     【本条已被后续推翻一半，原文保留】O2 动作 2 加了 `charter/seed.ts`
+ *     （`pnpm hub:charter seed`），它经 `saveCharterVersion` 写这张表 ⇒
+ *     「没有任何入口」不再成立。**但 0 行那个读数仍然成立**：播种对 shipped 模板
+ *     恒拒（七份 0 份签过字，Task 0.9），所以这张表今天仍然是 0 行。
+ *     缺的那一环从「没有写入口」变成「没有人签字」—— 执行方是人，不是代码。
+ *     钉这一格的断言是 store.test.ts ④（期望值 `["charter/seed.ts"]`）。
  *  ② 存进去的 config 是 camelCase（charterSchema 的 transform 输出），
  *     而 `charterSchema` 的输入是 snake_case（`.strict()`）—— 实测把 preset 的
  *     dev 岗位书按 commit.ts 的写法存进库、再取出来喂给 charterSchema：
@@ -420,23 +426,105 @@ export function readLatestCharter(db: DatabaseSync, roleId: string): Charter | u
 
 /**
  * 读侧自检：把读回来的对象当 Charter 用时**至少**要有的那几格。
- * 缺任何一格就抛，并点名是哪一格。
+ * 缺任何一格就抛，并点名是哪一格（**点名的粒度是那条路径**，见下面那张表）。
  *
  * 存在理由见 readCharterConfig 那段末尾：本模块的校验只在写入时发生，
  * 所以读侧需要一个**显式**的兜底，而不是一个假装在校验的 parse。
  * 只查「有没有」不查「形状对不对」—— 再往下查就是第二条 schema，
  * 而那正是我刚才拒绝引入的第二份抄本。
+ *
+ * ── 下面那张表的口径：它不是「Charter 有哪些必填字段」，是【读者会拆什么】──────
+ * 这份名单一开始只有四格（roleId / version / acceptanceCriteria / modelTier），
+ * 那是**门控那一个读者**的形状：`criteriaFromCharter` 只 map `acceptanceCriteria`，
+ * 而 `evaluateGate` 的档位判定要 `modelTier`（所以 modelTier 一直在名单里，
+ * 而它跟"读得出验收标准"根本无关 —— 它是**读者驱动**的，不是 schema 驱动的）。
+ *
+ * ⚠ O2 加了第二个读者（`charter/prompt.ts` 渲染提示词），我就地撞到这条名单**不够**：
+ * 实测一份【过了本函数】的历史行（只有那四格）喂进渲染器 ⇒
+ * `TypeError: Cannot read properties of undefined (reading 'length')`。
+ * 那条报错没有角色名、没有字段名、也没有「这是一份旧版岗位书」这句话，
+ * 而它会从 `engine/runtime.ts` 的 rolePrompt 一路冒到 CLI ⇒
+ * 一个人看到的最多是一句 exit 1 加一句**关于 undefined 的**内部错，
+ * 而真相是「这个角色第 N 版缺 decisionScope」。
+ * ⇒ **名单按读者的解引用取并集**，而不是按类型的必填集：类型的必填集只说明
+ *   「写进来时要求过什么」，不说明「现在拿它的人会碰什么」，
+ *   而这一层的全部职责就是后者。
+ *
+ * 代价明写：门控那条路（`gateCriteriaForRole`）现在对同一份缺格的历史行**也抛**了，
+ * 以前它能跑（因为门控不碰那些格）。这是选它而不是「只在提示词那条路抛」的理由：
+ * 后者会让「这一版读坏了」有两种答案，而两种后果不同的事该有两种事实源，
+ * 一种事实不该有两个答案（同 runtime.ts 的 rolePrompt ③ 那一支：坏数据两种后果 ⇒ 让它抛）。
+ * 今天真库里这种行**一条都没有**（saveCharterVersion 强制过完整 charterSchema，
+ * org/commit 的 bump 抄的是上一版的完整 config），所以这是一个【向前】的收紧。
  */
+/**
+ * 读侧要有的那几格，以及每一格【为什么】在名单里。
+ *
+ * 三档 kind 各自对应断言里一条真判据，没有第四档：
+ *  · `present` —— 只判有没有（缺 ⇒ 点名）。标这档的是「拆了不会崩、但拿它说话会说错」的格。
+ *  · `array`   —— 判有没有 **+** 是不是数组（读者的用法是 `.map` / `.length`）。
+ *  · `object`  —— 判有没有 **+** 是不是对象（读者的用法是拆它的子格）。
+ * ⚠ 刻意**没有** `string` / `number` 那一档：判了就是第二条 schema（文件头那句
+ *   「只查有没有不查形状」的边界），而这一层的读者对字符串只做插值，插错了不会崩。
+ *   名单里若出现一个 kind 而断言里不消费它，那它就是 0057 §6 那种装饰 ——
+ *   这张表第一版就有：四个格子标了 `string` 而循环里没有任何一句读它。
+ */
+const CHARTER_READ_PATHS: readonly (readonly [
+  path: string,
+  kind: "present" | "array" | "object",
+])[] = [
+  // ── 门控读者（criteriaFromCharter / evaluateGate）───────────────────────
+  ["roleId", "present"],
+  ["version", "present"],
+  ["acceptanceCriteria", "array"],
+  ["modelTier", "present"],
+  // ── 提示词读者（charter/prompt.ts 的 renderCharterPrompt）────────────────
+  // 每一条都对应渲染器里一次真解引用，不是"顺手补全 Charter 的必填字段"：
+  // displayName 拼进第一句；三个 decisionScope 子格各自进 bullets()，
+  // 而 bullets() 第一句就是 items.length ⇒ 子格缺了同样崩，所以子格单独列。
+  ["displayName", "present"],
+  ["honestyBoundaries", "array"],
+  ["forbiddenActions", "array"],
+  ["decisionScope", "object"],
+  ["decisionScope.autonomous", "array"],
+  ["decisionScope.requiresConsultation", "array"],
+  ["decisionScope.forbidden", "array"],
+  ["judgmentMode", "object"],
+  ["judgmentMode.type", "present"],
+  ["judgmentMode.strictRules", "array"],
+  ["judgmentMode.boundedJudgment", "array"],
+  ["judgmentMode.fullDiscretion", "array"],
+  ["escalationTriggers", "array"],
+  // untrustedInputs 是契约里的**可选**格（undefined 与 [] 是两件事，见 prompt.ts），
+  // 渲染器判 undefined 而不是当数组用 ⇒ 它不在名单里，收了就是替 CEO 填那一格。
+];
+
+/** 按点号路径取值。中途不是对象 ⇒ undefined（当成"缺这格"，不单独造一种错）。 */
+function pick(o: unknown, path: string): unknown {
+  let cur: unknown = o;
+  for (const seg of path.split(".")) {
+    if (cur === null || typeof cur !== "object") return undefined;
+    cur = (cur as Record<string, unknown>)[seg];
+  }
+  return cur;
+}
+
 export function assertCharterShape(roleId: string, c: unknown): Charter {
   if (c === null || typeof c !== "object" || Array.isArray(c)) {
     throw new Error("岗位书 " + roleId + " 不是对象，实到 " + typeof c + "。");
   }
-  const o = c as Record<string, unknown>;
   const missing: string[] = [];
-  for (const k of ["roleId", "version", "acceptanceCriteria", "modelTier"] as const) {
-    if (o[k] === undefined || o[k] === null) missing.push(k);
+  for (const [path, kind] of CHARTER_READ_PATHS) {
+    const v = pick(c, path);
+    if (v === undefined || v === null) {
+      missing.push(path);
+      continue;
+    }
+    // 只有 array / object 两档多判一层，判的是【会不会一拆就崩】。
+    // present 走到这里就结束了 —— 见上面那张表：它刻意不查类型。
+    if (kind === "array" && !Array.isArray(v)) missing.push(path + "(必须是数组)");
+    if (kind === "object" && typeof v !== "object") missing.push(path + "(必须是对象)");
   }
-  if (!Array.isArray(o["acceptanceCriteria"])) missing.push("acceptanceCriteria(必须是数组)");
   if (missing.length > 0) {
     throw new Error(
       "岗位书 " +

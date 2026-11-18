@@ -63,8 +63,10 @@
 而按天的消耗额今天**没有记录方**：`budgets` 只有累计的 `consumed_cents`，全仓唯一写入是 `+ ?`
 （单调不减 ⇒ 它就是「至今总共」），表上**没有** `updated_at`；唯一带时刻的是 `budget_events.created_at`。
 于是「窗口内花了多少」能给准数，「日上限是多少」给不出 ——
-角色级 `daily` 那一格**没有任何生产者**：`packages/hub/src/engine/runtime.ts:135` 与
-`packages/hub/src/budget/tracker.ts:70` 两处 INSERT 都只声明 `task|<id>|per_task` 一种作用域。
+角色级 `daily` 那一格**没有任何生产者**：`packages/hub/src/budget/tracker.ts:81`
+（【round272】这里原是 runtime 第 156 行 与 tracker 第 70 行 **两处**手抄 INSERT；runtime 那份已删，
+引擎路线现在 import 的就是这一条语句、把 scope/period 当绑参喂 ⇒ 收敛成【一语句两调用点】。
+「只声明一种作用域」这句结论【不变】—— 两处调用点的绑参都写死 `task|<id>|per_task`)。
 
 取舍：**给有判据的那两半，并明写缺的是哪一半**。
 画一根「今日消耗 / 未知上限」的条形比不画更坏 —— 那根条形的长度本身在说谎。
@@ -82,7 +84,7 @@
 
 ## 3. 等 CEO 之一：「需要我注意」= 升级 ∪ 阻塞 ∪ 触及预算（我加了一维）
 
-§16.4 原文是「过滤后只显示**被升级或触及预算**的任务」。`packages/hub/src/overview/today.ts:108` 的
+§16.4 原文是「过滤后只显示**被升级或触及预算**的任务」。`packages/hub/src/overview/today.ts:111` 的
 `ATTENTION_STATUSES` 是「`ESCALATED_TO_CEO` ∪ `BLOCKED_STATUSES`」—— **多加了阻塞**。
 
 理由是这一格的读者问题：CEO 打开这一列问的是「哪几件在等我或卡着」，
@@ -181,7 +183,7 @@
 
 ## 4. `silent_over_scopes` —— 一个只在今天这一页能看见的数
 
-`packages/hub/src/charter/budget-sync.ts:438` 的 `silentOverBudgets` 数的是
+`packages/hub/src/charter/budget-sync.ts:449` 的 `silentOverBudgets` 数的是
 「已超限而**突破警报已哑**」的预算格子（把上限调到已消费量之下会永久关闭警报，0015 文件头 ②）。
 数还在、警报没了 —— 除了这一格，全仓没有任何地方报它。这一发也是本篇与 charter 模块的**唯一**新边，
 它把一条写了很久的守卫判红，见 §6。
@@ -260,7 +262,7 @@ channelFor(GET /today)    : null      ← 真的没通道
 **一处已埋的假红**（记下来，因为它迟早会响而没人知道为什么）：`callersOf` 是裸 `includes`，
 **不滤注释**（`srcFilesMatching` 滤）。实测往 `real-deps.ts` 追加一行**纯注释**的
 `// insertCard( …` ⇒ 新判据红，报的正是「实到三项」。方向是误报（可接受），
-但 `http/real-deps.ts:586` 那句注释写着「与 insertCard 同事务」，**只差没跟一对括号**才没命中。
+但 `http/real-deps.ts:587` 那句注释写着「与 insertCard 同事务」，**只差没跟一对括号**才没命中。
 
 ## 8. 前端那份签名抄件：边界逼出来的手抄，配了一发逐字节对账
 

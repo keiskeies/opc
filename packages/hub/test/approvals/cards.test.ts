@@ -10,7 +10,9 @@
  *   ② 去重：同一个决定不会长出第二张卡，而【不同决定】不能被误合成一张；
  *   ③ 契约拦得住：少一行 / 多一个按钮 / 一个错误的 approval_type 都建不出来；
  *   ④ 下游立刻能用：两处此前恒空/恒 UNKNOWN 的读法当场拿到真值；
- *   ⑤ 一处【写下来的缺席】：timeout_at 有值而没有任何执行者。
+ *   ⑤ 超时行为：timeout_at 落库（建卡就把到时写进那一列），以及
+ *      **超时执行不是 patrol 的活**（完成 O10 之后，到期处理归
+ *      `approvals/timeout.ts` 的 `runTimeoutPass`，patrol 跑过不应碰那张卡）。
  *
  * ── 为什么全用真库真迁移 ────────────────────────────────────────────
  * 这一篇的核心断言里有三条是【schema 的行为】而不是 JS 逻辑：
@@ -56,6 +58,7 @@ import {
   countSimilarApprovals,
 } from "../../src/policy/auto-approve.js";
 import { CLAIM_APPROVAL_SQL, CEO_ACTOR } from "../../src/http/real-deps.js";
+import { evidenceRefsOf } from "../../src/approvals/query.js";
 import { APPROVAL_STATUS_PENDING } from "@opc/contracts";
 
 const TMP = fixtureTmp("approvals", import.meta.url);
@@ -333,6 +336,60 @@ describe("② 去重：同一个决定一张卡，而不同决定不能被合成
       /UNIQUE constraint failed/u,
     );
   });
+
+  it("⭐ 同一个键上【已决策的卡】不挡新的待批卡（0006 收窄的那一维）", async () => {
+    /*
+     * 0004 的索引原本不带 status 条件，于是"CEO 把这张卡退回了"会让那个键【永久作废】：
+     * 门控下一轮仍然判该拦 ⇒ 去建同一张键 ⇒ 撞索引 ⇒ 一张卡都不建 ⇒ 收件箱空着而
+     * 任务停在原地，且那条门控的 note 还写着「已建卡」。0004 文件头把性质写成
+     * 「同一个决定只有最多一张【待批】卡」，索引里却没有那一维 —— 本发钉的是补上的那一维。
+     * 把 0006 那条索引改回不带 status 条件，这一发红（第二次的 created 会变成 false）。
+     */
+    const { db, q } = fresh();
+    addTask(db, "t-1");
+    const first = await createCard(q, draft({ cardKey: "gate-once" }), { nowMs: T0 });
+    expect(first.result.created).toBe(true);
+    db.prepare("UPDATE approvals SET status = 'rejected' WHERE id = ?").run(
+      first.result.approvalId,
+    );
+    const again = await createCard(q, draft({ cardKey: "gate-once" }), { nowMs: T0 + HOUR });
+    expect(again.result.created, "退回之后同一个决定必须能再问一次").toBe(true);
+    expect(Number(db.prepare("SELECT COUNT(*) AS n FROM approvals").get()["n"])).toBe(2);
+  });
+
+  it("⭐ 但收窄只收窄【已决策】那一半：两张 pending 仍然挡得住", () => {
+    /*
+     * 上一发的反向对照。少了这一发，"把索引整个删掉"也能让上一发绿 ——
+     * 而 0004 那条索引存在的理由（一个决定最多一张待批卡）恰恰被删掉了。
+     */
+    const { db } = fresh();
+    addTask(db, "t-1");
+    const params = (id: string, status: string): unknown[] => [
+      id,
+      "t-1",
+      "escalation",
+      "s",
+      "{}",
+      null,
+      null,
+      "escalate",
+      T0 + DEFAULT_TIMEOUT_HOURS * HOUR,
+      status,
+      null,
+      null,
+      null,
+      "one-gate",
+      T0,
+    ];
+    expect(() => db.prepare(INSERT_CARD_SQL).run(...(params("p1", "pending") as never[]))).not.toThrow();
+    expect(() => db.prepare(INSERT_CARD_SQL).run(...(params("p2", "pending") as never[]))).toThrow(
+      /UNIQUE constraint failed/u,
+    );
+    // 已批掉的那一张不占用这个键：与上一发同一件事，只是从裸 SQL 那一侧看。
+    expect(() =>
+      db.prepare(INSERT_CARD_SQL).run(...(params("d1", "approved") as never[])),
+    ).not.toThrow();
+  });
 });
 
 describe("③ 契约拦得住：§9.2 那三条硬约束不是注释", () => {
@@ -489,7 +546,7 @@ describe("④ 下游立刻能用：两处此前恒空/恒 UNKNOWN 的读法拿�
   });
 });
 
-describe("⑤ 一处【写下来的缺席】：timeout_at 有值，而没有任何执行者", () => {
+describe("⑤ 超时行为：timeout_at 落库，而巡检【不】替他做超时（那是 timeout.ts 的活）", () => {
   it("⭐ 到期时刻落库了（它是将来任何超时策略的事实依据，写了不可改）", async () => {
     const { db, q } = fresh();
     addTask(db, "t-1");
@@ -501,14 +558,15 @@ describe("⑤ 一处【写下来的缺席】：timeout_at 有值，而没有任�
     expect(at["timeout_behavior"]).toBe("auto_reject");
   });
 
-  it("⭐ 到期之后【什么都不发生】：巡检跑过、时间推过，卡片还是 pending", async () => {
+  it("⭐ 巡检不处理超时：push 时钟跑一轮 patrol，卡片仍 pending（超时归 timeout.ts）", async () => {
     /*
-     * 这一发是一个【断言缺席】，它的价值在方向：将来有人接上超时执行者时它会红，
-     * 逼他先去回答 0026 §2 那三问（自动批？自动拒？只提醒？）。
-     * 所以它不是「测了个空」，是把「没有执行者」这件事变成一条会过期的性质。
+     * 这一发是一个【分工断言】：到期处理归 approvals/timeout.ts 的 runTimeoutPass，
+     * patrol 不该碰那张卡 —— 谁该做什么要在审计里分得开（O10 验收的思路）。
+     * 完成 O10 之前这一发是「什么都没发生的诚实答案」；之后它钉的是
+     * 「patrol 不越权做超时」。
      *
      * 巡检这一发是【必要的排除】：只推时钟不跑巡检，红的可能只是「没人醒过」，
-     * 而那与「没有超时逻辑」是两件事。跑一轮 patrolTasks 证的是
+     * 而那与「patrol 有没有超时逻辑」是两件事。跑一轮 patrolTasks 证的是
      * 「整条心跳链在到期卡片存在时照常跑完，且没碰那张卡」。
      */
     const { db, q } = fresh();
@@ -539,5 +597,46 @@ describe("⑤ 一处【写下来的缺席】：timeout_at 有值，而没有任�
     expect(isUniqueCardKeyViolation(new Error("FOREIGN KEY constraint failed"))).toBe(false);
     expect(isUniqueCardKeyViolation({ errcode: SQLITE_CONSTRAINT_UNIQUE })).toBe(true);
     expect(isUniqueCardKeyViolation(new Error("no such table: approvals"))).toBe(false);
+  });
+});
+
+describe("⑥ evidence_refs：卡片背面的证据包可见（O5 动作 4，迁移 0008）", () => {
+  it("⭐ 建卡带证据引用 ⇒ evidence_refs 落库，读回与写入逐字对得上", async () => {
+    const { db, q } = fresh();
+    addTask(db, "t-1");
+    const refs = ["task:t-1/evidence/prd.md", "task:t-1/evidence/tech-plan.md"];
+    const r = await createCard(q, draft({ evidence_refs: refs }), { nowMs: T0 });
+    const row = db
+      .prepare("SELECT evidence_refs FROM approvals WHERE id = ?")
+      .get(r.result.approvalId) as Record<string, unknown>;
+    expect(JSON.parse(String(row["evidence_refs"]))).toEqual(refs);
+  });
+
+  it("⭐ 契约强制 evidence_refs 非空：不带它建卡被 .strict() 拒（不是静默落 NULL）", async () => {
+    /*
+     * 008 列存在的意义是「这张卡背后有没有证据包」要可核对。但契约
+     * （gates.ts approvalCardDraftSchema）把 evidence_refs 写成 z.array().min(1)，
+     * 所以正常建卡路径【恒非空】——「无证据包」只可能来自 schema 之外的旁路
+     * （手工 INSERT / 0008 之前的存量行）。这一发钉的是契约那半边：谁想绕开
+     * 强制非空，改成 optional，这一发红，逼他回来重审 §9.2 第三行「证据链接」。
+     */
+    const { db, q } = fresh();
+    addTask(db, "t-1");
+    const val = undefined as never;
+    await expect(createCard(q, draft({ evidence_refs: val }), { nowMs: T0 })).rejects.toThrow(
+      /evidence_refs/u,
+    );
+  });
+
+  it("读侧 evidence_refsOf：坏 JSON / 非数组 ⇒ null（不 500），空数组保留", () => {
+    expect(evidenceRefsOf(null)).toBeNull();
+    expect(evidenceRefsOf(undefined)).toBeNull();
+    expect(evidenceRefsOf("")).toBeNull();
+    expect(evidenceRefsOf('["a","b"]')).toEqual(["a", "b"]);
+    expect(evidenceRefsOf("[]")).toEqual([]);
+    expect(evidenceRefsOf("not json")).toBeNull();
+    expect(evidenceRefsOf('"str"')).toBeNull();
+    expect(evidenceRefsOf('{"a":1}')).toBeNull();
+    expect(evidenceRefsOf('[1,2]')).toBeNull();
   });
 });

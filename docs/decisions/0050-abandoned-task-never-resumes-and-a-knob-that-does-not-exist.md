@@ -78,7 +78,7 @@
 （屏幕上长什么样）。这两件事之间隔着一次渲染，而这一次渲染**只要 grep 一行就能看见**。
 与 §4 那两次无效探针、0049 §4/§11 那几次同源：**结论的射程超出了证据的射程**。
 
-顺带一条我自己抓到的口径混乱：`today.ts:55` 那段注释解释为什么 `MEETING_REQUIRED`
+顺带一条我自己抓到的口径混乱：`today.ts:58` 那段注释解释为什么 `MEETING_REQUIRED`
 **刻意不并进** `blocked_statuses`（「规格里它的名字属于会议而不是阻塞」）——
 那是一格**规格层**的判断，而它和"看不见"完全无关。我在 INDEX 里差点把两件事写成一件。
 
@@ -131,7 +131,7 @@
 而 `kindOf`（`heartbeat/patrol.ts:139`）取的是 **`payload` 里的 `$.kind`**，
 我手写的行把 `TaskStateChanged` 写进了 **`action` 列**、payload 里**没有 `kind`**
 ⇒ marker 恒 0 ⇒ 那一发测的根本不是 marker。
-回去照 `dispatch.ts:1207` 那个真实写入点抄了形状（`action='state_change'`、
+回去照 `dispatch.ts:1385` 那个真实写入点抄了形状（`action='state_change'`、
 `target=落点状态`、`payload.kind` 在 payload 里）**同一条探针**：
 
 ```
@@ -166,8 +166,8 @@
 ```
 
 **没有 `--max-attempts`**。`driverMaxAttempts` 只能由装配层注入
-（`assemble.ts:274` 的 `HubOptions`，注释自己写着「没有 CLI 入口，只能由装配注入
-（BootOverrides.driverMaxAttempts，**测试用的**）」，`assemble.ts:1646`）。
+（`assemble.ts:290` 的 `HubOptions`，注释自己写着「没有 CLI 入口，只能由装配注入
+（BootOverrides.driverMaxAttempts，**测试用的**）」，`assemble.ts:1913`）。
 而尝试次数**住在 append-only 的 `events` 里**：改它 = 篡改审计，删它 = 同一个。
 
 所以那一档此刻**没有任何"放开"的动作**，只有【查为什么这一轮没推进】。
@@ -255,7 +255,7 @@
 
 `docs/OPC-OS-设计文档.md:798`（§7.2 打回路径说明）写着「任务沿边回退到上游重新处理」，
 `status.ts:59` 的合法表**一直**有 `REJECTED_DOWNWARD → IN_PROGRESS` 那条补边，
-旧的 langgraph 路线（`graph/company.ts:254`）也真的走它。
+旧的 langgraph 路线（`graph/company.ts:281`）也真的走它。
 **而引擎换路线时它没搬过来** —— `dispatch.ts` 的 `AGENT_EDGES` 与 `HUMAN_EDGES`
 两张可执行边表**都查不到 `REJECTED_DOWNWARD` 这个键**。五处实测（探针 52，`/tmp/probe52.mts`）：
 
@@ -440,15 +440,15 @@ task.status === "IN_REVIEW" && decision?.action === "handoff" ? deps.rejectionCo
 两侧刻意相反：装配侧忘了接线 = 上限永不生效（"配置写了而没生效"那族），要 TS 响；
 纯函数侧三十来个调用点大多没有"打回"这一维，强制写 0 只会让每一处都得解释那个 0 是什么。
 
-`runtime.ts:108` 那个 `REJECTION_COUNT_SQL` 数的是 `json_extract(payload,'$.to') = 'REJECTED_DOWNWARD'`
+`runtime.ts:117` 那个 `REJECTION_COUNT_SQL`（【round272 坐标 +5：runtime.ts 头部加了一条 import，判据本体没动】）数的是 `json_extract(payload,'$.to') = 'REJECTED_DOWNWARD'`
 而**不是 `action`** —— 一次打回写**两条** `state_change` 边（那一跳 + 自动补的 `IN_PROGRESS` 那一跳），
 数 `action` ⇒ 恒翻倍 ⇒ 上限**提前一倍**咬，而屏幕上没有任何一处会说"这次升级是计数算重了"。
 数 tasks.status 也不行：任务早被自动那一跳落到 `IN_PROGRESS` 重做了，那个数**恒 0**。
 
-> ⚠ 这个坐标**在本篇提交的那一版里是错的**（原文写的是 `runtime.ts:108` 的
+> ⚠ 这个坐标**在本篇提交的那一版里是错的**（原文写的是 runtime.ts **第 108 行**的
 > `ENSERT_TASK_BUDGET_SQL`，在 §6.2 那段），而**守卫没红** —— 它核的是
 > 「快照里那一行的**文本**等不等于**那一行现在的内容**」，
-> `doc-refs.test.ts` 里那条记的正是 `:108` 现在写着 `export const REJECTION_COUNT_SQL =`，
+> `doc-refs.test.ts` 里那条记的正是那一行现在写着 `export const REJECTION_COUNT_SQL =`，
 > **一模一样**。**我把符号名贴到了隔壁那一行的行号上**，而快照把这句话钉得更牢了：
 > 它证明的是"那一行写着那句话"，**不证明**"正文提到的那个符号就在那一行"。
 > ⇒ 一条关于**文本**的守卫，对**符号↔行号**这类错**结构上失明**。
@@ -457,6 +457,20 @@ task.status === "IN_REVIEW" && decision?.action === "handoff" ? deps.rejectionCo
 > 它本来就是 §6.5 这一节的主角，配得上一个活坐标；`ENSERT_TASK_BUDGET_SQL`
 > 那一侧改用**符号名**指（`§6.2` 现在就是这么写的），因为它在本篇不承重，
 > 而**"这一列第一次写完再也不改"这件事的证据是 0045 §1 那张表**，不是行号。
+>
+> ⚠⚠ **上面这段引述里的「第 108 行」后来被刻意改成了不带冒号的写法**（本篇后续编辑时改的，
+> 因为「文件名 + 冒号 + 行号」那个 token 形态会被 `doc-refs` 抓成【活坐标】）。这不是躲守卫，是因为
+> **那个 token 形态在这里表达的是假话**：守卫对每个 `文件:行号` 要求的快照语义是
+> 「**那一行现在**写着这句话」，而这一句讲的是【当时那一版写错了什么】—— 给配上的话，
+> 快照会把「第 108 行现在的内容」当成本篇的主张来钉，钉住的是一个**从未被主张过**的配对。
+> 一条历史引述能负责的是【当时是多少】，不能负责【现在那一行是什么】。
+> ⇒ **两类坐标必须用两种形态写**：断言今天的位置 ⇒ `文件:行号`（进快照）；
+> 陈述当时写的是什么 ⇒ 汉字「第 N 行」（不进快照，也不该进）。
+> 本仓此前没有把这条区分写下来过，所以每次文件一动，历史引述就会跟着"漂"，
+> 而把它"修绿"的那一步恰好就是在改历史。上面 §6.5 顶部那个 `runtime.ts:117` 是**今天的位置**
+> （【round272 又 +5：runtime.ts 头部加了一条 import；原为 108，再往前是 112】，
+> 因为 `runtime.ts` 头部不断加行而整体下移），它与这句历史不冲突：
+> 一个说今天，一个说当时。
 
 ### 6.6 变异逐条（脚本 `/tmp/mut50.py` / `mut50c.py`，锚点命中当场断言恰好 1）
 
@@ -502,7 +516,7 @@ IN_PROGRESS/dev → IN_REVIEW/director → IN_PROGRESS/dev → … → ESCALATED
 
 - **放弃之后没有任何屏幕内动作能让它继续走**（§3.2/§3.4）。唯一的复活路径是
   【重新来到这一格】，而 `IN_PROGRESS` 在边表里只有**一条入边**
-  （`DECOMPOSING → IN_PROGRESS`，`dispatch.ts:101`），且**没有任何一条边的落点是
+  （`DECOMPOSING → IN_PROGRESS`，`dispatch.ts:102`），且**没有任何一条边的落点是
   `CHARTER_PENDING` / `DECOMPOSING`** —— 也就是说停在 `IN_PROGRESS` 而已被放弃的任务，
   **没有合法的边可以走回那条链**。本篇只把措辞改诚实，**没有**造那条边：
   那条边是 `0044 §9.1`（打回无处可去）与 `0041 §7`（跨限没有合法停法）同一族的事，

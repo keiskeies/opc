@@ -794,6 +794,47 @@ async function renderInbox() {
  * 而 §19.2 承诺的是「琥珀出现处就是需要你动手的地方」—— 两处都琥珀，
  * 等于取消了那一格「这是运营事件、优先级低于战略决策」的信息。
  */
+/**
+ * 卡片背面的证据行（O5 动作 4）。
+ *
+ * 服务端给 `evidence_refs`（数组或 null）。三态：
+ *  - null / [] ⇒ **「无证据包」**。这是这一行的主角：一张要求证据的卡没有证据，
+ *    要在界面上【说破】，而不是假装有证据或干脆不提 —— 缺证据的卡看起来
+ *    和带证据的卡一样可批，那正是 §8.2 第 2 条想拦的静默。
+ *  - 非空数组 ⇒ 列出引用条数。逐条全文太长（可能是文件路径/sha256），
+ *    「N 条引用」让 CEO 知道证据在、可点开复核，而不把卡片 meta 撑爆。
+ * ⚠ 这里【不】自己判断要不要显示：服务端给什么就显示什么（投影纪律 ——
+ *    前端不代替服务端决定「这张卡算不算有证据」）。
+ */
+function evidenceLine(a) {
+  const refs = a.evidence_refs;
+  if (refs === null || refs === undefined || refs.length === 0) {
+    return ' · <b class="ev-none">无证据包</b>';
+  }
+  return ` · 证据 ${refs.length} 条引用`;
+}
+
+/**
+ * 影子判定那一行（O9 动作 1 阶段一：只报不批）。
+ *
+ * 服务端给 `policy_shadow`（策略引擎「如果放我判我会怎么判」，读路径算的，
+ * 没有任何自动动作跟在后面）。这一行的全部纪律是【不越权】：
+ *  - 文案永远是「规则判：…」，绝不出现「已自动…」——阶段一不改任何决定；
+ *  - 缺失（null / 老服务端没这一格）⇒ 整行消失，不显示「规则判：无」。
+ *    「没有判定」与「判定是不批」是两件事，前端不替服务端把前者说成后者。
+ * 并排的那一侧「人判」就是这张卡本身的 pending 状态与下面的按钮，
+ * 不需要额外一行——那正是「并排」的含义：规则的话和人的按钮在同一张卡上。
+ */
+function policyShadowLine(a) {
+  const s = a.policy_shadow;
+  if (s === null || s === undefined) return "";
+  const label =
+    s.decision === "auto_approved"
+      ? `规则判：${esc(s.rule)} 会通过（阶段一不执行）`
+      : `规则判：转人工（${esc(s.blocked_by)}${s.missing.length > 0 ? " · 缺 " + esc(s.missing.join("、")) : ""}）`;
+  return `<div class="meta" style="margin-top:4px"><b>${label}</b></div>`;
+}
+
 function approvalCard(a, nowMs, compact, isDecision = true) {
   const decided = a.status !== "pending";
   const amber = !decided && isDecision;
@@ -806,7 +847,9 @@ function approvalCard(a, nowMs, compact, isDecision = true) {
       ${esc(a.approval_type)} · 任务 <span class="mono">${esc(a.task_id ?? "—")}</span> · 等了 ${esc(fmtAgo(a.created_at, nowMs))}
       ${!decided && !isDecision ? ' · <b>运营事件</b>（非战略决策，§7.4）' : ""}
       ${a.timeout_at ? ` · 超时点 ${esc(fmtDate(a.timeout_at))}（${esc(a.timeout_behavior ?? "未声明")}）` : ""}
+      ${evidenceLine(a)}
     </div>
+    ${decided ? "" : policyShadowLine(a)}
     ${!compact && (a.recommendation || a.escalation_reason)
       ? `<details style="margin-top:8px"><summary>推荐理由 / 升级原因</summary>
            <div class="meta" style="margin-top:6px">${esc(a.recommendation ?? "（无建议）")}</div>

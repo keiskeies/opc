@@ -269,6 +269,82 @@ afterAll(() => {
     expect(fixedTmpDirNames(src)).toEqual(["quoted-in-doc", "in-line"]);
     expect(fixedTmpDirNames(code)).toEqual([]);
   });
+
+  it("⭐ 剥注释【不许吃掉真代码】：行注释里的块注释起始串不是注释", () => {
+    /*
+     * 这一发是本轮【我自己造出来】的那个缺陷的回归位，不是装饰：
+     * 我在 store.test.ts 写了一句普通行注释，内容里带一个 glob（test 后面两个星号）。
+     * 上一版 stripComments 先 replace 块注释、再 replace 行注释，于是那个
+     * 块注释起始串被当成注释开头，从注释那一行一路删到文件里【下一个块注释的收尾串】
+     * 为止 —— 被删掉的那一段里住着 afterAll 与 rmSync(TMP)。
+     * 症状是普查红着报「这个测试文件没有清理」，而清理好好地在那儿。
+     *
+     * ⚠⚠ 下面那颗夹具第一版【杀不掉这个变异】，而它自己绿着 —— 这个失败比修好了
+     *   什么更值得记：我写的样例里那句行注释确实带块注释起始串，可是**它后面没有
+     *   任何收尾串**，于是老的那条 replace 匹配不上任何东西，新旧两版给出同样的输出。
+     *   判别力为零，而标题看着完全对症（0057 §6 那条判据的又一实例）。
+     *   ⇒ 复现型夹具必须包含**成因链条的每一环**，少一环就只是"长得像"。
+     *     这一条与本轮 EXCLUDED 表那三行空针是同一个错，两处都是【我给的输入
+     *     供不上我断言的那个前提】。所以这里第一组断言判的是【夹具自己】。
+     *
+     * ⚠ 它的方向与 0007 §4 那条规矩相反，也正因为这样才值得单独立一发：
+     * §4 管的是【假绿】（守卫静默不判），这一发防的是【误红】——
+     * 判据把干净的文件报成违规。0007 §4.1 那句「误红比假绿更贵」说的是同一件事，
+     * 而这次的机制更具体：被吃掉的是【真代码】，所以它不是"少看一眼"，
+     * 是"看见的那一眼里没有那块东西"。人对着这种红的第一反应是去补一句
+     * 真正的 rmSync（重复一份清理），或者去放宽判据 —— 两条都是往错的方向修。
+     */
+    const OPEN = "/" + "*"; // 拼出来：本文件也在普查射程里，别给自己造一个"注释里的注释"
+    const CLOSE = "*" + "/";
+    const src = [
+      `const TMP = fixtureTmp("demo", import.meta.url);`,
+      `// 注释里带 glob 形如 test/${OPEN}** ，它后面还得有个别的块注释才会出事`,
+      `afterAll(() => {`,
+      `  rmSync(TMP, { recursive: true, force: true });`,
+      `});`,
+      `const tail = 1; ${CLOSE} 后面这个收尾串是整条成因的另一半`,
+    ].join("\n");
+    /* 夹具自证：三个前提缺一不可，少任何一个，下面那几发就退化成"两个实现都对"。 */
+    expect("行注释里确有块注释起始串: " + src.includes("test/" + OPEN)).toBe(
+      "行注释里确有块注释起始串: true",
+    );
+    // 注意 .toBeGreaterThan 接的是【数字】：上一版我把拼好的字符串直接链上去，
+    // 红在「actual value must be number」上而不是红在判据上 —— 那种红不表达任何
+    // 关于代码的事实，写测试时容易被当成"手滑"而改掉断言写法、把前提那一发删掉。
+    expect(src.indexOf(CLOSE, src.indexOf(OPEN) + 2)).toBeGreaterThan(-1);
+    // 【老实现会红而新实现要绿】这条判别式直接写在测试里：老那两条 replace 的等价式。
+    const legacy = src.replace(/\/\*[\s\S]*?\*\//gu, "").replace(/^\s*\/\/.*$/gmu, "");
+    expect("老实现确实吞掉 afterAll: " + legacy.includes("afterAll(")).toBe(
+      "老实现确实吞掉 afterAll: false",
+    );
+    // 新实现：真代码一条不少。
+    const code = stripComments(src);
+    expect(code).toContain("afterAll(");
+    expect(code).toContain("rmSync(TMP");
+    expect(code).toContain("const tail = 1;");
+    expect(fixtureDirHits(new Map([["packages/hub/test/a/clean.test.ts", src]]))).toEqual([]);
+    // 行注释的内容仍然要剥干净（否则本文件那条 glob 会命中 fixed-name 那一支）。
+    expect(code).not.toContain("块注释起始串");
+    // 反向：块注释本身照旧剥掉，这一发不能把老功能换掉。
+    expect(stripComments(`/* rmSync(TMP, 1) */\nconst y = 2;`)).not.toContain("rmSync");
+    // 字符串里的两种定界符都不是注释（URL 里的双斜杠是这一条的日常形状）。
+    const u = `const url = "https://example.com/a";\nconst after = 1;`;
+    expect(stripComments(u)).toContain("https://example.com/a");
+    expect(stripComments(u)).toContain("const after = 1;");
+  });
+
+  it("⭐ 剥注释后【行号不变】：报错坐标靠这一条才有意义", () => {
+    /*
+     * 上一版是 replace 掉整段，行会塌掉；新版把块注释换成等量空格并保留内部换行。
+     * 为什么要在乎行号：no-native-deps 那一族守卫的失败信息点名「文件:行号」，
+     * 而 0007 §4.1.1 记过一次——报错指错位置比不报错更费时间。
+     * 判据本身不读行号，所以这一发防的是【将来的读者】，不是今天的断言。
+     */
+    const src = `const a = 1;\n/* 两行\n   块注释 */\nconst b = 2;\n`;
+    const code = stripComments(src);
+    expect(code.split("\n").length).toBe(src.split("\n").length);
+    expect(code.split("\n")[3] ?? "").toContain("const b = 2;");
+  });
 });
 
 describe("④ 真仓库普查：一棵树上不许再有两个进程共用一份夹具目录", () => {

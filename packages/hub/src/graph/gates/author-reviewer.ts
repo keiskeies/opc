@@ -17,8 +17,6 @@
  * 写 review_gates 那一行的动作在调用方，它必须把本模块的拒绝当硬错误处理。
  */
 
-import type { Charter } from "@opc/contracts";
-
 export interface Party {
   readonly roleId: string;
   readonly modelFamily: string;
@@ -227,45 +225,15 @@ export function gateConfigBlock(o: {
 
 /**
  * 运行时越权尝试的判定（计划 Task 1.3 Test 最后一条：试图用运行时参数覆盖 forbidden
- * → 抛错，并写一条 unauthorized_attempt 审计事件）。
+ * → 抛错）。这一条【由 roles/loader.ts 的 mergeForbiddenForRun 承担】—— 它把
+ * `removeForbidden` 直接抛成错误，措辞指到规格 §20.2 / §4（两份判据必然漂移，
+ * 0006 §7 第 55、56 条记的就是这个形状）。
  *
- * 这里【不重新实现】那份单调性逻辑 —— 它已经存在于 roles/loader.ts 的
- * mergeForbiddenForRun（两份判据必然漂移，0006 §7 第 55、56 条记的就是这个形状）。
- * 本函数的职责是另一件事：把「哪些条目会被这次请求删掉」算出来，供调用方写进审计。
- * loader 抛错时给出的是拒绝结论；审计要的是【具体想删哪几条】，否则那条
- * unauthorized_attempt 事后读起来只知道「有人试过」而不知道「试的是什么」。
- *
- * 入参 requestedForbidden 是运行时请求的【有效】黑名单（不是「要追加的条目」——
- * 那种语义下永远删不掉东西，也就无从判定）。
+ * ⚠ 0064：这里【曾经】有两个导出 —— `forbiddenRemovalAttempt` / `unauthorizedAttemptPayload`，
+ * 作用是把「被删的条目」算出来供调用方写审计。它们被删掉，因为那个调用方不存在：
+ * `removeForbidden` 没有任何生产构造点（全仓只有 loader 的定义与测试），
+ * 于是那条 `unauthorized_attempt` 审计【无处可接】。两个零调用方的函数 + 一段
+ * 它们要喂的生产路径 = 为一条不存在的输入造审计，比没有更坏（造出来的行事后
+ * 无法回答「谁的请求里有 removeForbidden」）。防护本身没少：删除尝试仍被
+ * `mergeForbiddenForRun` 抛错挡住，那才是唯一的闸门。
  */
-export function forbiddenRemovalAttempt(
-  charter: Charter,
-  requestedForbidden: readonly string[],
-): string[] {
-  const wanted = new Set(requestedForbidden);
-  // 只报【原有条目被拿掉】的那些。运行时新增的条目不算越权（那是收紧，合法）。
-  return charter.decisionScope.forbidden.filter((f) => !wanted.has(f));
-}
-
-/**
- * 越权尝试的审计载荷。action 固定 unauthorized_attempt（AUDIT_ACTIONS 里的既有枚举，
- * 见 events/recorder.ts —— 不自造新 action，审计枚举一经写入就是永久的）。
- */
-export interface UnauthorizedAttemptPayload {
-  readonly action: "unauthorized_attempt";
-  readonly kind: "forbidden_removal";
-  readonly role_id: string;
-  readonly removed_entries: readonly string[];
-}
-
-export function unauthorizedAttemptPayload(
-  charter: Charter,
-  removed: readonly string[],
-): UnauthorizedAttemptPayload {
-  return {
-    action: "unauthorized_attempt",
-    kind: "forbidden_removal",
-    role_id: charter.roleId,
-    removed_entries: removed,
-  };
-}

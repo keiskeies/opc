@@ -2,7 +2,9 @@
  * 组织图三层确定性校验（规格 §18.3，计划 Task 3.1）。
  *
  * ── 「三层」是哪三层，以及为什么分开 ──────────────────────────────────
- *  L1 单节点能否被这样挂（validateReparenting）—— 环、管理角色、深度、CEO 根
+ *  L1 单节点能否被这样挂（validateReparenting / validateNewNode）—— 环、管理角色、深度、CEO 根
+ *      （round294 起 L1 有【两个】函数：改一条汇报关系，与加一个新节点。
+ *       两者判的是同一种东西 —— 一个节点在树里的位置 —— 所以同层，不另开一层。）
  *  L2 单条边能否存在（validateNewEdge）—— 门控、自审、升级可达、深度
  *  L3 这次变更由谁发起、影响什么（validateOrgChange）—— 鉴权 + 运行中任务确认
  * 分开不是为了好看：前端在拖拽过程中只能拿到【一次增量操作】，它必须能在
@@ -24,6 +26,10 @@
  *     「缺这一维时不放行：否则【不声明家族】就成了绕过同家族拦截的通路」）。
  *     规格 §18.3 那句原文只写「审阅者不能是产出者的直接执行者」，
  *     同家族那一维是 §5.9 第 1 条 + §24 风险 1 的，我按 hub 已有的口径合并进来。
+ *     【round292 把它从"边端点"扩到"提交时整张图"】：同一条判据此前只在
+ *     `violatesNoSelfReview` 里对【那条边的两端】调用，于是图上其他节点缺不缺家族
+ *     从未被问过 —— 那正是 O8 那条旁路（见 everyNodeDeclaresModelFamily 的函数头）。
+ *     扩的仍然【是】这条口径而不是第四条，所以标题那"三条"没变。
  *
  * ── 一处规格自相矛盾，以及我按哪一半实现 ──────────────────────────────
  * §18.3 第三个函数的示例代码里写着 `const running = getRunningTasks()` —— 一次取数。
@@ -46,6 +52,7 @@ import {
   ORG_MAX_DEPTH,
   type OrgActor,
   type OrgChange,
+  type OrgGraphNode,
   type OrgGraph,
   reportsToCycle,
 } from "./graph.js";
@@ -83,7 +90,10 @@ export type RejectCode =
   | "escalation_unreachable"
   | "report_cycle_present"
   | "dangling_report"
-  | "not_ceo";
+  | "not_ceo"
+  // round294（add_node 那两格新故障）：
+  | "role_exists"
+  | "multiple_roots";
 
 function reject(code: RejectCode, reason: string): Verdict {
   return { ok: false, reason, code };
@@ -189,6 +199,125 @@ export function validateReparenting(
       `组织层级超过 ${ORG_MAX_DEPTH} 层上限：挂上去之后最深处到第 ` +
         `${parentDepth + movedHeight} 层（${newParent} 在第 ${parentDepth} 层，` +
         `[${childRole}] 那一支本身有 ${movedHeight} 层深）。`,
+    );
+  }
+  return { ok: true };
+}
+
+/**
+ * L1：往图里【加一个新节点】，合法吗（round294，O8 §7 第 18 格点名的修法）。
+ *
+ * ── 这一格补的是哪一种真实故障 ───────────────────────────────────────
+ * 规格 §18.3 的三个函数（validateReparenting / validateNewEdge / validateOrgChange）
+ * 判的全是【已有节点之间的关系】：`reparent` 改一条 reports_to，`add_edge` 加一条委派边。
+ * 契约里从来没有「加一个角色」这一类变更（`orgChangeSchema` 只有两种 kind），
+ * 而 `commitOrgGraph` 落库的是【请求体那张图】经 applyChangeToGraph 的结果 ⇒
+ * 「在请求体的图里多塞一个节点 + 挑一条与它无关的合法 add_edge」一路 200，
+ * 那个节点没被任何一关问过。§7 第 15 格的原话是「同一张图，两个入口，两种答案，
+ * 而 200 那一侧才是真的那条路」，第 18 格给的修法就是「给契约加一个【带判据的】add_node」。
+ *
+ * ⚠ 本函数与 round292 那条 `everyNodeDeclaresModelFamily` 的分工，别读反：
+ *  · 那条判【整张 after 图】每一个节点都声明了 model_family —— 它对【任何来源】的
+ *    缺家族节点都拦，包括旁路塞进来的。它是"旁路不再有免检"那一格。
+ *  · 本函数判【走正经路进来的那个新节点】的挂法对不对（重名 / 上级 / 深度 / 森林）。
+ *  ⇒ 两者不重叠：`model_family` 那一格【本函数故意不判】，判了就是同一件事两处口径，
+ *    而两处会漂（本仓治过的那一族）。add_node 交一个缺家族的节点 ⇒ 由那条拦，
+ *    code 同为 unknown_model_family —— 测试钉的是【继承】，不是这里重写一遍。
+ *
+ * ── 五条判据，各对应一种「加出来就坏」的形状 ──────────────────────────
+ *  ① 重名（role_exists）：加号不是改号。改一个已有角色走 reparent 或直接交新图，
+ *     走这条路会变成「静默覆盖一个已在接活的角色」，而它的任务还钉在旧形状上。
+ *  ② 自环（would_create_cycle）：`reports_to === role_id`。放在③之前是必须的，
+ *     与 validateReparenting 那条同一条理由（不先看它，它会被「上级不存在」吃掉，
+ *     给用户一句「上级 [x] 不在图里」而 x 就是他自己 —— 一句无法行动的话）。
+ *  ③ 上级不存在（unknown_role）/ 上级不能接收汇报（parent_not_manager）：与 reparent
+ *     【同一两条判据、同两个 code】，故意复用不另立。
+ *  ④ 深度（depth_exceeded）：新节点是叶子，所以那一支的高度恒为 1 —— 不像 reparent
+ *     要加 heightBelow（它搬的是一整支）。这里如果照抄那句 heightBelow，
+ *     得到的是同一个数，但读起来像"作者忘了新节点没有下级"。
+ *  ⑤ 森林（multiple_roots）：reports_to = null 是【根】的写法，而一张图只能有一个根。
+ *     这一条是本函数里唯一【新造 code】的一条，理由是它此前只在运行时判：
+ *     `engine/dispatch.ts` 的 `resolveCeoRoleId` 明写「多个根 = 一片森林，
+ *     谁是 CEO 在这里真的没有答案，随便挑一个 = 让某一条不存在的汇报关系决定
+ *     谁的任务能交付」—— 那是【跑一轮之前】的兜底，而一轮就是钱。
+ *     把它同时挪到保存期，是因为这件事在 CEO 点保存那一刻就能算出来。
+ *     ⚠ 空图例外：往空图里加第一个节点，reports_to=null 是【唯一】合法的写法
+ *     （否则第一格永远加不进去）。判据是「加完之后根多于一个」，不是「它是根」。
+ *
+ * ── 射程（比上面全部加起来重要）─────────────────────────────────────
+ *  · 它只判【走 add_node 这一条路】的新节点。旁路（在请求体图里塞节点 + 无关 add_edge）
+ *    今天仍然【只被 model_family 那一格拦】—— 一个声明了家族的旁路节点照样进库，
+ *    多根的旁路图也照样进库。本轮没有关掉那条路，关掉它需要的是"图必须等于
+ *    before 经 change 得到"那条判据，那是另一格（见本轮台账「没做的下一格」）。
+ *  · 它不判新节点能不能干活（有没有岗位书、名字对不对得上模板名）。那两格
+ *    分别卡在 CEO 的代笔边界（0008 §7）与计划 §10.2 D11 的命名拍板上。
+ */
+export function validateNewNode(
+  node: OrgGraphNode,
+  org: OrgGraph,
+): Verdict {
+  const malformed = rejectMalformed(org);
+  if (malformed !== null) return malformed;
+  const roleId = node.role_id;
+  // 键与 node.role_id 是否一致，不归本函数判：orgGraphSchema 的 nodes 是
+  // record(role_id → node)，而 zod 的 record 不比对「键 === 值里那个 id」。
+  // 这条缝本轮实测【没有判据】，已登记（见本轮台账「没做的下一格」）。
+  // 这里不顺手判它有两个理由：① 本函数只收到一个 node，没有那个键；
+  // ② 加一条「键必须等于 role_id」是 zod schema 那一层的修法，不是这里。
+  if (nodeOf(org, roleId) !== undefined) {
+    return reject(
+      "role_exists",
+      `角色 [${roleId}] 已经在组织图里。add_node 是【加】不是【改】：` +
+        "同名提交会静默覆盖一个可能正在接活的角色，而钉在它身上的任务用的还是旧形状。" +
+        "要改它的汇报关系走 reparent，要改别的就直接提交新图。",
+    );
+  }
+  if (node.reports_to === roleId) {
+    return reject(
+      "would_create_cycle",
+      `角色 [${roleId}] 不能以自己的 id 作为上级：那是一条自环，` +
+        "而自环节点的 pathToRoot 永不终止，深度与升级可达都无从计算。",
+    );
+  }
+  if (node.reports_to === null) {
+    const existingRoots = Object.entries(org.nodes).filter(
+      ([, n]) => n.reports_to === null,
+    ).length;
+    if (existingRoots > 0) {
+      return reject(
+        "multiple_roots",
+        `角色 [${roleId}] 的上级是 null，而图上已经有 ${existingRoots} 个根了 ⇒ ` +
+          "加完这张图是一片【森林】。「谁是 CEO」在这张图上没有答案：" +
+          "运行时的 resolveCeoRoleId 遇到森林会拒绝跑（一轮就是钱，" +
+          "而随便挑一个根等于让一条不存在的汇报关系决定谁能交付）。" +
+          "要挂进去就给一个真上级。",
+      );
+    }
+    return { ok: true };
+  }
+  const parent = nodeOf(org, node.reports_to);
+  if (parent === undefined) {
+    return reject(
+      "unknown_role",
+      `上级角色 [${node.reports_to}] 不在组织图里，所以 [${roleId}] 无处可挂。`,
+    );
+  }
+  if (!parent.can_manage) {
+    return reject(
+      "parent_not_manager",
+      `${node.reports_to} 不是管理角色，不能接收汇报（规格 §18.3 判据 2）。`,
+    );
+  }
+  // 新节点必然是叶子 ⇒ 它那一支的高度恒为 1，所以这里是 depthOf(parent) + 1
+  // 而不是 reparent 那句 depthOf(parent) + heightBelow(child)。
+  // 照抄 heightBelow 今天会得到同一个数（新 id 在 org.nodes 里还没有下级），
+  // 但那条判据的语义是「搬一整支」，写在这里会让下一个人以为新节点可能带着一支。
+  const newDepth = depthOf(org, node.reports_to) + 1;
+  if (newDepth > ORG_MAX_DEPTH) {
+    return reject(
+      "depth_exceeded",
+      `组织层级超过 ${ORG_MAX_DEPTH} 层上限：[${roleId}] 挂在 ` +
+        `[${node.reports_to}]（第 ${newDepth - 1} 层）之下会到第 ${newDepth} 层。`,
     );
   }
   return { ok: true };
@@ -320,6 +449,66 @@ export function violatesNoSelfReview(
         "需要 CEO 的显式批准（写在 review_gates 的 explicit_approval 里）才能保存 —— " +
         "而那份批准不在组织图内，本函数看不到，所以这里一律拒，由保存路径带凭据重判。",
     );
+  }
+  return { ok: true };
+}
+
+/**
+ * 提交后那张图上的【每一个】节点都声明了 `model_family` 吗（round292，O8 动作 1）。
+ *
+ * ── 这一发补的是哪一种真实故障 ─────────────────────────────────────────
+ * `POST /org` 收的请求体里带着【调用方自己那张 before 图】（`commitOrgChangeRequestSchema.graph`），
+ * 而 `commitOrgGraph` 落库的是那张图经 `applyChangeToGraph` 得到的 after。于是
+ * 「在请求体的图里多塞一个节点、变更本身是一条与它无关的合法 `add_edge`」
+ * 能一路拿 200 进库，全程没有任何判据问过那个节点 —— 这条旁路与它的登记处：
+ * `packages/hub/test/acceptance/new-role-to-its-own-criteria.test.ts` 的证据②，
+ * 与主张 r15（`test/arch/claims-registry.ts`）。r15 的 method 末段早就写了
+ * 「M3 给提交路径补上新节点的 model_family 校验 ⇒ 那条 200 变 422」，
+ * 那一发红就是【该同步更新这条主张】的预定信号，不是意外回归。
+ *
+ * ── 为什么判【整张 after 图】而不是「相对 before 新增的那些节点」────────
+ * 后者是我先写的那一版，它【当场是恒真的】，形状值得留下：
+ * `applyChangeToGraph` 当时只有两种 kind，`reparent` 与 `add_edge` 都把 `before.nodes`
+ * 原样展开（`const nodes = { ...graph.nodes }`），两种都【不往 nodes 里加东西】。
+ * 所以一个偷偷塞进来的节点在 before 和 after 里【都在】 ⇒ 「after 比 before 多出的节点」
+ * 这个集合对旁路【恒为空】 ⇒ 按它判的守卫对旁路永远放行，而它对任何一次正常提交
+ * 也永远放行 —— 一条双向恒真的断言。它看起来比"整张图"更精准，精准到什么都不判。
+ *
+ * ⚠ round294 起这句的【前提】变了，而结论【不变】，两者都别说反：
+ * `add_node` 是第一个真的往 `nodes` 里加东西的 kind，所以「新增集合」现在非空了，
+ * 那个旧理由里「恒为空」那半句【已经过期】。仍然判整张图的理由只剩下面那条代价，
+ * 它本身就够：一张历史上缺家族的旧图，会让此后每一次提交都红，而那【正是】要的
+ * —— 缺这一维是绕过同家族拦截的通路，不是「只在新增时才要管」的形状问题。
+ * 换句话说：今天把「只判新增」再试一次，会得到一条【不是恒真、但仍然不够】的判据。
+ * 这一格是「修好一处，让另一处的旧理由过期」那一族的实例 —— 读到过期理由请连结论一起重推，
+ * 不要连结论一起丢掉。
+ *
+ * ── 代价，说清它挡住什么、挡不住什么 ──────────────────────────────────
+ *  · 挡住：任何一次提交【把这张图作为新版本交出去】的机会，无论那个缺家族的节点
+ *    是怎么来的。这条判据落在 `commitOrgGraph` 的 revalidate 上，而
+ *    `grep -rn "INSERT INTO delegation_graphs" packages/hub/src` 只有那一处
+ *    ⇒ 生产侧【没有第二条写图的路】，所以它不是可绕过的守卫。
+ *  · 挡不住：库里【已经存在】的旧版本图。它扫的是 after 整图，所以一张
+ *    历史上缺家族的图会让【此后每一次】提交都红，直到那次提交补上家族声明。
+ *    这是"不新增数据形状约束"（`orgNodeSchema.model_family` 仍是 optional）
+ *    与"提交时必须有判据"之间我选的取舍：宁可让老图在提交时看得见地红，
+ *    也不让"缺这一维"成为绕过同家族拦截的通路（与文件头口径 ③ 同方向）。
+ *  · 不判：`model_family` 之外节点还能欠什么（比如 can_manage 该不该给管理者配家族）。
+ *    本模块只补【已有判据从未被调用】的那一格，不发明新的字段要求。
+ */
+export function everyNodeDeclaresModelFamily(org: OrgGraph): Verdict {
+  for (const [id, node] of Object.entries(org.nodes)) {
+    const fam = node.model_family;
+    if (fam === undefined || fam.trim() === "") {
+      return reject(
+        "unknown_model_family",
+        `角色 [${id}] 未声明 model_family，这次组织变更不予提交。` +
+          "缺这一维时【拦】而不是跳过：同家族拦截（violatesNoSelfReview）与运行时门控" +
+          "（hub 的 author-reviewer.ts）都靠它，缺了就等于给这两处留一条绕行路。" +
+          "且注意它【不是】一个只影响保存的形状问题——旁路进来的角色会在运行时" +
+          "卡在 unknown_model_family，那时它已经在图上、已经有任务钉在它身上了。",
+      );
+    }
   }
   return { ok: true };
 }

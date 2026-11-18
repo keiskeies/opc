@@ -228,11 +228,77 @@ export function fixedTmpDirNames(source: string): string[] {
   return out;
 }
 
-/** 剥注释。两步走的那份与 `bindings/im.test.ts` 同源。 */
+/**
+ * 剥注释。**顺序有因**，先记下来再改代码：
+ *
+ * 上一版是两条 replace：先剥块注释，再剥行注释。那个顺序在【行注释的内容里
+ * 出现块注释的起始串】时把【真代码】一起吃掉 —— 第一条 replace 从那个起始串
+ * 一路删到下一个块注释收尾串为止，而这一段里住着 afterAll、rmSync、import。
+ * 触发它的是本轮我自己写的一句普通注释（内容里有个 glob 形如 test 星号星号），
+ * 症状是普查报「这个测试文件没有清理」，而文件里的清理一字未动。
+ *
+ * ⇒ 这类"先粗删一遍再细删一遍"的剥法【没有顺序能写对】：块注释里的双斜杠、
+ *   行注释里的块注释起始串、字符串里的两种，任何一种都可能被另一条规则的
+ *   定界符骗到。唯一的形状是【一次扫描同时定上下文】—— 全仓那一份是
+ *   `test/arch/ts-lex.ts` 的 `lexTs`。这里不 import 它有两个实测障碍：
+ *   ① 它住在仓库根的 test/ 下，本文件在 packages/hub/test/ 下，那条相对 import
+ *     会撞上 0007 §5.2 记的 NodeNext 解析问题（那个 TS2307 至今在仓）；
+ *   ② 本文件在 vitest 的 include 与 `test/arch` 的守卫射程里是两个不同的集合，
+ *     跨过去要新立一条边界口径。
+ *   所以这里放【同一条算法的第二份】，并把它必须守住的不变式写成断言（见
+ *   `fixture-dir.test.ts` 那条「剥注释不许吃掉真代码」）。
+ *   ⚠ 这是【重复】，不是【收敛】。第三处需要同一算法时，正确做法是把 ts-lex
+ *   提到两个目录都够得着的位置，而不是再抄一份 —— 抄到第三份的时候，
+ *   漂移的表现就是本函数刚刚犯的那个错（一份悄悄把代码当注释删了）。
+ */
 export function stripComments(text: string): string {
-  return text
-    .replace(/\/\*[\s\S]*?\*\//gu, "")
-    .replace(/^\s*\/\/.*$/gmu, "");
+  let out = "";
+  let i = 0;
+  /** 三态一次扫过：代码 / 行注释 / 块注释。字符串里的两种定界符都不当定界符。 */
+  while (i < text.length) {
+    const c = text[i] as string;
+    const n = text[i + 1];
+    if (c === "/" && n === "/") {
+      // 行注释：整行丢掉，只保留换行（保住行号，报错坐标才有意义）。
+      while (i < text.length && text[i] !== "\n") i++;
+      continue;
+    }
+    if (c === "/" && n === "*") {
+      const end = text.indexOf("*/", i + 2);
+      const stop = end < 0 ? text.length : end + 2;
+      // 块注释按【长度】换成等量空格加保留内部换行，同样不移动行号。
+      for (const ch of text.slice(i, stop)) out += ch === "\n" ? "\n" : " ";
+      i = stop;
+      continue;
+    }
+    if (c === '"' || c === "'" || c === "`") {
+      // 字符串整体原样保留：里面的 `//`（URL）与 `/*`（glob）都不是注释。
+      const quote = c;
+      out += c;
+      i++;
+      while (i < text.length) {
+        const d = text[i] as string;
+        out += d;
+        if (d === "\\") {
+          if (i + 1 < text.length) {
+            out += text[i + 1] as string;
+            i += 2;
+            continue;
+          }
+          i++;
+          break;
+        }
+        i++;
+        if (d === quote) break;
+        // 单双引号不跨行：未闭合就在换行处收尾，否则一整篇会被当成字符串。
+        if (d === "\n" && quote !== "`") break;
+      }
+      continue;
+    }
+    out += c;
+    i++;
+  }
+  return out;
 }
 
 /**

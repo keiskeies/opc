@@ -88,22 +88,22 @@
 它单独构成第二个缺陷，另见 **0038**：
 
 `runIntegrityScan` 里那一行 `verdict: page.ok ? "ok" : "violated"`
-（`integrity.ts:282`）把「检查没跑成」和「查出损坏」压成同一个 `violated`，
+（`integrity.ts:291`）把「检查没跑成」和「查出损坏」压成同一个 `violated`，
 于是 `pageIntegrityBroken` 在**一次 instrument 故障**上返回 `true`，
 `pnpm hub:serve` **拒绝启动**并指路 `scripts/restore.md` —— 而第 3 步是
 **把现网库改名再从备份覆盖**。一台库完全健康的机器会因为
 「worker 起不来 / 120 秒没回话 / 路径打错」被引导去**覆盖自己的库**。
 
 ⚠ **「库路径打错」这一发我起初也算进去了，那是错的**：`dbPath` 不存在时
-`boot` 在 `assemble.ts:398`（`maintenance.ts:529` 同一条）就退回 `EXIT_USAGE` 了，
+`boot` 在 `assemble.ts:460`（`maintenance.ts:529` 同一条）就退回 `EXIT_USAGE` 了，
 **根本走不到这个闸门**。所以真实启动路径上能撞上这个闸门的仪器故障**只有三种**
-（`INTEGRITY_FAILURES`，`integrity.ts:102`）：`worker_unavailable` /
+（`INTEGRITY_FAILURES`，`integrity.ts:111`）：`worker_unavailable` /
 `worker_timeout`（默认 **120 秒**）/ `worker_error` —— 本篇那个缺陷就是第三种。
 （直接当 API 调 `runIntegrityScan` 时，路径不存在会得到 `violated` 而 `unavailable`
 是 `undefined`：worker 自己跑起来了、是它开库开不了，那确实更像「库的事」而不是
 「尺子坏了」。这一格我第一版也一并算成误报，复算后**不算**。）
 
-而 `pageIntegrityBroken` 自己的注释（`integrity.ts:1200`–`1202`）写的正是相反的话：
+而 `pageIntegrityBroken` 自己的注释（`integrity.ts:1219`–`1226`，0064 改 not_observable 文案后 +3 行）写的正是相反的话：
 「`not_observable` / `could_not_run` 都【不算】损坏：那两格说的是『这条判据没跑成』。
 据此拒绝启动，等于让一次 worker 起不来变成整台机器不可用；
 **而它该做的（响一声、指路）由调用方在别处做**」——

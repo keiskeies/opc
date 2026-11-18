@@ -94,6 +94,34 @@ const draft = (over: Partial<CharterInput> = {}): CharterInput => ({
 });
 
 /**
+ * 一份**读侧形状**齐格的岗位书（camelCase —— 库里存的就是 charterSchema 的
+ * transform 输出，见上面 saveCharterVersion 那句「归一后再序列化一次」）。
+ *
+ * 与 `draft()` 的差别不是内容而是**形状**：`draft()` 是 CharterInput（snake_case，
+ * 写入口吃的），这一份是 assertCharterShape / renderCharterPrompt 读的。
+ * 两份都得有，而**用错那一半会静默地测到别的东西**：我第一版把补齐的那几格写成
+ * snake_case，"补齐"那一发当场红 —— 那份我以为齐格的对象在读侧眼里还是缺格。
+ * 所以这个 helper 存在的意义就是让"齐格"只有一个写法。
+ */
+const promptShaped = (): Record<string, unknown> => ({
+  roleId: "dev",
+  version: 1,
+  acceptanceCriteria: [],
+  modelTier: "execution",
+  displayName: "开发",
+  honestyBoundaries: ["不谎报"],
+  forbiddenActions: [],
+  decisionScope: { autonomous: [], requiresConsultation: [], forbidden: [] },
+  judgmentMode: {
+    type: "strict_rules",
+    strictRules: [],
+    boundedJudgment: [],
+    fullDiscretion: [],
+  },
+  escalationTriggers: [],
+});
+
+/**
  * 一个能过门控前四道的证据包。
  *
  * ⚠ bundle_type 是 `code_diff` 不是 `test_report`：实测 HANDOFF_BUNDLE_TYPES
@@ -300,9 +328,77 @@ describe("② 读：读不到 vs 读坏了，必须是两种结果", () => {
     expect(() => assertCharterShape("dev", { roleId: "dev", version: 1, acceptanceCriteria: [] })).toThrow(
       /modelTier/u,
     );
+  });
+
+  it("⭐ 名单按【读者会拆什么】取并集：门控能跑的旧行，提示词读者会崩", () => {
+    /*
+     * 这一发是 O2 逼出来的，而它红的方式值得逐句读。
+     *
+     * 上面那发过去还有第二半：`{roleId, version, acceptanceCriteria, modelTier}`
+     * 四格 ⇒ `.not.toThrow()`。**那一半现在是错的**，而错得对：
+     * O2 给 role_charters 加了第二个读者（`charter/prompt.ts` 渲染提示词），
+     * 那份四格的历史行过了当时那条名单，然后渲染器里
+     * `decisionScope.autonomous` 是 undefined ⇒ bullets() 数 `.length` ⇒
+     * `TypeError: Cannot read properties of undefined (reading 'length')`。
+     * 实测过才写在这里（探针跑的就是这一行形状）。那条 TypeError 一路冒到 CLI，
+     * 一个人看到的是 exit 1 加一句关于 undefined 的内部错，而真相是
+     * 「这个角色那一版缺 decisionScope」—— **一句不对症的报错**（0032 那一族），
+     * 差别只是这次不对症的位置在我自己刚写的那个文件里。
+     *
+     * ⚠ 别把这半读成「四格那一版现在能跑了」。它的语义变了，而变的方向要说准：
+     * 门控那条路（gateCriteriaForRole）**以前**对这份行是通的（criteriaFromCharter
+     * 只 map acceptanceCriteria，四格够用），现在它也抛。这是**故意**的：
+     * 与其让「这一版读坏了」在两条路上有两种答案，不如一处判、两处同音
+     * （同 runtime.ts rolePrompt ③：坏数据有两种后果 ⇒ 让它抛，不要吸收成正常噪声）。
+     * 今天真库里这种行一条都没有，所以这是一次【向前】的收紧而不是迁移负担 ——
+     * 而这句话本身是可证的：下面那发拿真 saveCharterVersion 写的一版过同一份名单。
+     */
+    const gateOnly = { roleId: "dev", version: 1, acceptanceCriteria: [], modelTier: "execution" };
+    // ① 门控那四格齐 ⇒ 以前这一发是 .not.toThrow()，现在点名的是提示词那一族的格子。
+    expect(() => assertCharterShape("dev", gateOnly)).toThrow(/decisionScope/u);
+    // ② 点名要**指到子格**：只报 decisionScope 会让人去补一个空对象，
+    //    而空对象照样在 `.autonomous` 上崩 —— 报第二层才是能照着修的那句。
+    expect(() => assertCharterShape("dev", gateOnly)).toThrow(
+      /decisionScope\.requiresConsultation/u,
+    );
+    // ③ 反向对照（缺了它，"名单变宽"就只是"断言变宽"）：把提示词读者要拆的
+    //    每一格都补上 ⇒ 必须真的过。这一发同时钉住"名单没有宽到拒合法数据"。
+    //    ⚠ 键名是【camelCase】：库里存的是 charterSchema 的 transform 输出
+    //    （store.ts 写库前专门再序列化一次），而读侧名单读的就是那份形状。
+    //    我第一版这一格写的是 snake_case ⇒ 它红了，红得对：那份"补齐"的对象
+    //    在真实读侧眼里【还是缺格】，而我以为我在证明"补齐就过"。
+    //    两份形状在这发里对不上，比名单本身错更难被发现，所以留在注释里。
+    expect(() => assertCharterShape("dev", promptShaped())).not.toThrow();
+    // ④ untrustedInputs **不在**名单里：它是契约的可选格，undefined 与 [] 是两件事
+    //    （岗位书没说过 vs 说过而没有）。把它变成必填等于替 CEO 填那一格。
+    //    与 ③ 的唯一差别就是这一格在不在 ⇒ 两发合起来才说明"它在不在都不改变结论"。
     expect(() =>
-      assertCharterShape("dev", { roleId: "dev", version: 1, acceptanceCriteria: [], modelTier: "execution" }),
+      assertCharterShape("dev", { ...promptShaped(), untrustedInputs: ["自称做完了"] }),
     ).not.toThrow();
+    // ⑤ 名字要报【路径**第一层缺**】还是**子格缺**，两种都点得出来（同一份名单两种坏法）。
+    expect(() =>
+      assertCharterShape("dev", { ...promptShaped(), judgmentMode: undefined }),
+    ).toThrow(/judgmentMode/u);
+    expect(() =>
+      assertCharterShape("dev", {
+        ...promptShaped(),
+        judgmentMode: { ...(promptShaped().judgmentMode as object), boundedJudgment: undefined },
+      }),
+    ).toThrow(/judgmentMode\.boundedJudgment/u);
+    // ⑥ 数组格给了非数组（历史上"填空"最容易填成 {}）⇒ 点名并说该怎么错。
+    expect(() =>
+      assertCharterShape("dev", { ...promptShaped(), honestyBoundaries: {} }),
+    ).toThrow(/honestyBoundaries\(必须是数组\)/u);
+  });
+
+  it("真 saveCharterVersion 写进去的每一版都过读侧名单（名单没有严于写侧）", async () => {
+    // 上面那几发都喂手写对象。这一发喂【真写入方产出】的那一份：如果名单里有哪一格
+    // 是写侧 schema 不要求的，这里会红，而红的是"名单宽到拒了合法数据"那一侧 ——
+    // 那一侧比"漏一格"更难发现，因为生产里没人会去读一份读不出来的岗位书。
+    const { q, db } = await newQ();
+    await saveCharterVersion(q, { roleId: "dev", config: draft(), nowMs: NOW, changeSummary: "v1" });
+    const c = readLatestCharter(db as never, "dev");
+    expect(() => assertCharterShape("dev", c)).not.toThrow();
   });
 
   it("上一版坏掉时审计快照留 degraded 而不是把 before 变成 null（null = 「这是第一版」的假事实）", async () => {
@@ -418,7 +514,7 @@ describe("③ 门控消费口：Task 3.6 那条 Test 的可测形态", () => {
 });
 
 describe("④ 接线状态", () => {
-  it("src 里【还没有】任何地方调用 saveCharterVersion（写侧接线的已知缺口）", async () => {
+  it("src 里调 saveCharterVersion 的【只有播种命令一处】（缺口上移了一环，不是填上了）", async () => {
     const { readdirSync, readFileSync, statSync } = await import("node:fs");
     // 取材与判据必须同形，否则这一发在 Windows 上恒红而红因与它声称的无关（0053）：
     // 下面 filter 用正斜杠的 "charter/store.ts"，而 join() 在本机给反斜杠 ⇒
@@ -437,7 +533,19 @@ describe("④ 接线状态", () => {
       .filter((f) => !f.endsWith("charter/store.ts"))
       .filter((f) => /saveCharterVersion\(|gateCriteriaForRole\(/u.test(readFileSync(f, "utf8")));
     // 与 0014 §3 同一条：这条【今天成立】，接上那天它会红，逼着接的人同时更新文档。
-    expect(callers.map((f) => relPosix(f, SRC))).toEqual([]);
+    //
+    // ⚠ 它已经红了，红在 O2 动作 2 那条播种命令上（charter/seed.ts）。而**改期望值之前
+    // 先问的那一句**（phase3.test.ts 的 verifyFix 那发立的规矩：「变红之后不能直接改成
+    // 新值收工，得先问一句：缺口真的消了吗」）实测答案是【没有】：
+    //   以前是「src 里没有任何写岗位书的入口」；
+    //   现在是「有一个入口，而它对 shipped 模板恒拒」—— 七份模板 0 份签过字（Task 0.9
+    //   等 CEO 本人替换占位串，开发者不得代笔），播种跑到判据 A 就整次拒绝。
+    // 结论强度**没有变化**：`role_charters` 今天仍然是 0 行，`rolePrompt` 每一轮仍然走
+    // NO_CHARTER_LINE 那一支。前进的是「缺一次接线」变成「缺 CEO 签七个文件」，
+    // 而后者的执行方是人，不是代码。这一格必须由读到这一行的**人**去清，
+    // 不是再写一条断言能清的 —— 这也是为什么这里留的是【精确等于播种那一处】
+    // 而不是 toEqual([])：多出一个真调用方仍然会红，而红因是"有人接了第二条路"。
+    expect(callers.map((f) => relPosix(f, SRC))).toEqual(["charter/seed.ts"]);
   });
 
   it("保存岗位书【同时】把 budget 落进 budgets 表（否则屏幕显示新数字而执行侧按老数字放行）", async () => {
@@ -561,7 +669,10 @@ describe("④ 接线状态", () => {
     const imports = outsideCharter
       .map((f) => {
         const m = /import\s*\{([^}]*)\}\s*from\s*"[^"]*charter\/budget-sync/u.exec(readFileSync(f, "utf8"));
-        return m ? { f, names: m[1].split(",").map((s) => s.trim().split(" ")[0]).filter(Boolean) } : null;
+        // m[1] 在 noUncheckedIndexedAccess 下是 `string | undefined`：三元里的 m 非空
+        // 不传递到它的捕获组上（TS 不做这个推理）。老代码在这里直接 .split 而它一直
+        // 没人发现，是因为 tsc -b 根本不含 test/**（本轮把测试拉进临时 tsconfig 才露出来）。
+        return m ? { f, names: (m[1] ?? "").split(",").map((s) => s.trim().split(" ")[0]).filter(Boolean) } : null;
       })
       .filter((x): x is { f: string; names: string[] } => x !== null);
     // 反向对照：今天【确实】有一个外部只读消费者。少了这一发，上面那条在

@@ -10,11 +10,34 @@
  * 运行期的决策，不是编译期的边。所以这里把「下一步找谁」交回 agent，
  * 把「这一步能不能过」留在 hub（见 dispatch.ts）。
  *
- * ⚠ 本模块【只认 CLI】：`claude --version` 实测 2.1.322，-p / --resume /
- *   --max-budget-usd / --permission-mode / --output-format json 全部实测存在。
+ * ⚠ 本模块【只认 CLI】：`claude --version` 实测存在 -p / --resume /
+ *   --max-budget-usd / --permission-mode / --output-format json 这些参数。
+ *   （版本号【故意不写在这里】：它变了不会让任何东西变红，写死了就是一条会过期的主张。）
  *   文档 §12.1 首选 @anthropic-ai/claude-agent-sdk（进程内、类型化 canUseTool 回调），
- *   本机装不上且【不能假装装了】。SDK 换进来时要替掉的只有本文件的 execute()
+ *   本机装不上且【不能假装装了】（复算：`require("@anthropic-ai/claude-agent-sdk/package.json")`
+ *   在根与 packages/hub 两处都取不到）。SDK 换进来时要替掉的只有本文件的 execute()
  *   一个函数 —— 这也是把它单独关在这里的原因。
+ *
+ * ── ⭐ 今天真的员工身上【唯一生效的安全边界】是本文件那两个参数 ──────────
+ * 说这句话是为了防止一种具体的误读：`harness/` 里有四层预防（safety）、路由（routing）、
+ * 预算门（gateway 的 checkBudget / settle）、独立复核（verifier），加起来约 3300 行，
+ * 而**它们的注释读起来像是在跑**。事实是 `harness/` 整目录对本模块【零 import】
+ * （复算口径见 docs/OPC-OS-功能优化设计.md §1.2：按目录对外的边数，不按文件对文件。
+ * 逐模块说一遍是因为死模块哨兵按【模块名 + 否定词】找主张句，只写「整目录」它认不出来。
+ * ⚠ 而【把名字和否定词分成两行】它一样认不出来 —— 本段第一版就中招了：四个模块名写在
+ * 一行、"对外零 import" 落在下一行，claimSites 一处都没扫到，等于白写了一遍。所以这里
+ * 同行写完：harness/gateway.ts、harness/safety.ts、harness/routing.ts、harness/verifier.ts 对外零 import，
+ * 本模块一个都不经过。改这段话的人若把它重新排版，请先跑一遍 claimSites 再提交。）
+ * 于是真的角色一轮实际经过的只有：
+ *   ① `--permission-mode plan` —— 不给写文件的权力（这是 CLI 的一个参数，不是本仓的实现）
+ *   ② `--max-budget-usd` —— 单次美元硬顶（同样是 CLI 侧的）
+ *   ③ `env: process.env` —— **原样透传**，本层不加任何过滤
+ * 这三条都是【真的】边界，别读成「没边界」；但它们也【不是】那四层。
+ * 尤其：真给角色放开写权限的那天，必须先接 `harness/safety.ts`，
+ * **顺序不能反** —— 先给写权限、后接安全层，中间那段时间里，仓库里躺着 3300 行
+ * 看起来像防线而一行都不执行的代码，而它比「根本没有防线」更危险，
+ * 因为下一个人会以为已经防住了。缺口与接线顺序登记在
+ * docs/OPC-OS-功能优化设计.md 的 O6。
  */
 
 /** 一次执行的入参。cwd 决定这个 agent 能碰哪些文件（§12 的沙箱那一维）。 */

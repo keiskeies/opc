@@ -3,7 +3,12 @@ import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join, posix } from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, it } from "vitest";
-import { isExemptPosix, readdirSurvives } from "./no-native-deps.js";
+import {
+  forbiddenSpecs,
+  isExemptPosix,
+  isForbiddenSpec,
+  readdirSurvives,
+} from "./no-native-deps.js";
 import { BOUNDARY_PROBE } from "./run-fixtures.js";
 
 /**
@@ -27,9 +32,6 @@ const FORBIDDEN = [
   "@langchain/langgraph-checkpoint-sqlite",
   "sql.js",
 ];
-
-const DQ = String.fromCharCode(34);
-const SQ = String.fromCharCode(39);
 
 /**
  * 刻意豁免：PoC 与 Phase 0 证据。
@@ -176,26 +178,102 @@ it("生产源码不依赖任何原生 SQLite 模块（D6-a）", () => {
     } catch {
       continue;
     }
-    text.split("\n").forEach((line, i) => {
-      for (const mod of FORBIDDEN) {
-        const quoted =
-          line.includes(DQ + mod + DQ) || line.includes(SQ + mod + SQ);
-        if (quoted) {
-          hits.push({
-            file: file.slice(ROOT.length + 1),
-            line: i + 1,
-            text: line.trim().slice(0, 90),
-          });
-        }
-      }
-    });
+    const lines = text.split("\n");
+    for (const h of forbiddenSpecs(text, FORBIDDEN)) {
+      hits.push({
+        file: file.slice(ROOT.length + 1),
+        line: h.line,
+        text: (lines[h.line - 1] ?? "").trim().slice(0, 90),
+      });
+    }
   }
 
   expect(
     hits,
-    "原生 SQLite 依赖会毁掉 D6（零原生模块）。若确属 PoC 用途，请把所在目录加入 EXEMPT_DIRS 并写明理由：\n" +
+    "原生 SQLite 依赖会毁掉 D6（零原生模块）。命中只可能来自【代码区的字符串字面量】" +
+      "（注释里的包名不算，理由见 no-native-deps.ts 的 forbiddenSpecs）。\n" +
+      "若确属 PoC 用途，请把所在目录加入 EXEMPT_DIRS 并写明理由 —— 但别为了消掉一条" +
+      "【看起来不像依赖】的命中就加名单：先去看它到底是不是代码里的导入。\n" +
       hits.map((h) => h.file + ":" + h.line + " " + h.text).join("\n"),
   ).toEqual([]);
+});
+
+/*
+ * 命中口径的单元测试。为什么必须有：上面那发真扫描今天的命中数是【零】，
+ * 而「零」既能由「扫描正常且确实干净」得到，也能由「扫描根本不判了」得到 ——
+ * 两者在这一发里长得一模一样。所以下面用合成输入把每个方向各钉一条。
+ */
+it("命中口径：子路径要算（老口径在这里是漏判），注释里的包名不算", () => {
+  // ① 老口径的那个静默漏判：要求名字右边紧贴引号 ⇒ 子路径看不见。
+  //    子路径【不是假想的】：本机 node_modules 里就有 better-sqlite3@12.11.1，它的
+  //    package.json【没有 exports 字段】（实测），于是 lib/database.js 这类内部路径
+  //    全都可以直接 import —— 老口径对 `"better-sqlite3/lib/database"` 是【绿的】。
+  expect(
+    forbiddenSpecs('import D from "better-sqlite3/lib/utils";', FORBIDDEN),
+  ).toEqual([{ spec: "better-sqlite3/lib/utils", line: 1 }]);
+  expect(isForbiddenSpec("sql.js/dist/sql-wasm.js", FORBIDDEN)).toBe(true);
+
+  // ② 正主与子路径都算，且【不限于 import 位置】：require / 动态 import 也抓得到，
+  //    这一条是老口径本来就有的能力，不许在修漏判时顺手收窄掉。
+  expect(
+    forbiddenSpecs(
+      'const m = require("sql.js");\nawait import("@langchain/langgraph-checkpoint-sqlite");',
+      FORBIDDEN,
+    ),
+  ).toEqual([
+    { spec: "sql.js", line: 1 },
+    { spec: "@langchain/langgraph-checkpoint-sqlite", line: 2 },
+  ]);
+
+  // ③ 触发这次改动的那一发：注释里出现包名不是依赖。
+  //    老口径在这里【红】，而它给的补救指引是「加 EXEMPT_DIRS」—— 照做就等于把整片
+  //    目录划出 D6 的射程。一条会把人引向削弱防线的假阳性，比它防的事更坏。
+  expect(
+    forbiddenSpecs(
+      '// 探针内容是 import Database from "better-sqlite3"\nconst ok = 1;',
+      FORBIDDEN,
+    ),
+  ).toEqual([]);
+  expect(
+    forbiddenSpecs(
+      '/* 与官方 "sql.js" 同构 */\nexport const a = 1;',
+      FORBIDDEN,
+    ),
+  ).toEqual([]);
+
+  // ④ 但注释里【混着的真代码】不能整块放过扫描器：定界符之外的部分照常扫。
+  //    这条是③的负向对照 —— 把「注释整段跳过」写错成「注释所在的文件跳过」，这里红。
+  expect(
+    forbiddenSpecs(
+      '/* 说明 */\nimport D from "better-sqlite3";\n// 尾巴',
+      FORBIDDEN,
+    ),
+  ).toEqual([{ spec: "better-sqlite3", line: 2 }]);
+
+  // ⑤ 口径【没有】收窄到「只有 import 才判」：代码里的普通字符串仍然算命中。
+  //    这一条与老口径一致，写下来是因为它看着像假阳性（一句报错文案而已），
+  //    而它是【刻意留的】：想收窄的人必须先回答「require 怎么办」。
+  expect(
+    forbiddenSpecs('throw new Error("改用 " + "better-sqlite3");', FORBIDDEN),
+  ).toEqual([{ spec: "better-sqlite3", line: 1 }]);
+  // 反面：名字只是【长字符串里的一段】时不算 —— 仓里 driver-preflight.test.ts
+  // 就有这样一句话，老口径和新口径对它【都是绿】（一致的绿，不是一处侥幸）。
+  expect(
+    forbiddenSpecs('throw new Error("改用 better-sqlite3 吧");', FORBIDDEN),
+  ).toEqual([]);
+
+  // ⑥ node:sqlite 是我们【要用】的那个，别因为带了 sqlite 字样就被扫出来。
+  expect(
+    forbiddenSpecs('import { DatabaseSync } from "node:sqlite";', FORBIDDEN),
+  ).toEqual([]);
+
+  // ⑦ 行号得对得上，否则失败信息指不到人：第三条才该报 3。
+  expect(
+    forbiddenSpecs(
+      'const a = 1;\nconst b = 2;\nimport D from "sql.js";',
+      FORBIDDEN,
+    ).map((h) => h.line),
+  ).toEqual([3]);
 });
 
 /*

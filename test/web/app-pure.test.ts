@@ -204,6 +204,44 @@ describe("approvalCard —— 待批 ≠ 琥珀（本轮真实违反过的那一
   });
 });
 
+/* ═════════ O5 动作 4：卡片背面的证据行（补账轮，round264 落地时缺的执行证据）═════════
+ * 服务端那一半（落库/读回/视图）在 hub 侧已有 cards.test ⑥ 与 query.test 钉住，
+ * 但 UI 这一半【一行执行证据都没有】—— 而这一格的全部价值恰好在屏幕上那句话：
+ * 「无证据包」不显示，缺证据的卡就和带证据的卡一样可批（§8.2 第 2 条的静默）。
+ */
+describe("evidenceLine —— 缺证据要在界面上【说破】，不是沉默", () => {
+  const line = (a: Record<string, unknown>) =>
+    (fns.evidenceLine as (x: unknown) => string)(a);
+
+  it("⭐ null / undefined / [] ⇒ 「无证据包」加粗可见", () => {
+    for (const refs of [null, undefined, []]) {
+      const got = line({ evidence_refs: refs });
+      expect(got).toContain("无证据包");
+      expect(got).toContain("ev-none");
+    }
+  });
+
+  it("⭐ 非空数组 ⇒ 报条数，且【不许】出现「无证据包」", () => {
+    const got = line({ evidence_refs: ["a.md", "b.md"] });
+    expect(got).toContain("2 条引用");
+    expect(got).not.toContain("无证据包");
+  });
+
+  it("⭐ 一行都不许凭空造：证据行嵌进卡片时随 evidence_refs 三态切换", () => {
+    const card = (over: Record<string, unknown>) =>
+      (fns.approvalCard as (a: unknown, n: number, c: boolean, d: boolean) => string)(
+        {
+          id: "a1", status: "pending", approval_type: "escalation",
+          summary: "s", task_id: "t1", created_at: 1, ...over,
+        },
+        2, false, true,
+      );
+    expect(card({ evidence_refs: null })).toContain("无证据包");
+    expect(card({ evidence_refs: ["x"] })).toContain("1 条引用");
+    expect(card({ evidence_refs: ["x"] })).not.toContain("无证据包");
+  });
+});
+
 describe("budgetHtml —— 那根条与那句近似声明", () => {
   const html = (over: Record<string, unknown>) =>
     (fns.budgetHtml as (x: unknown) => string)({ budget: b(over), window_ms: 86_400_000, as_of_ms: 1 });

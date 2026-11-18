@@ -23,13 +23,22 @@
  * 安全审计表，而它看起来是装好了的。所以：**应用层捕获被拒的异常，再写审计**。
  *
  * ── ④ 的三种结论，不是两种 ─────────────────────────────────────────
- * §22.4 那三句的宾语在 src 里的写入方数量是实测过的（复算 0018 §9）：
+ * §22.4 那三句的宾语在 src 里的写入方数量是实测过的（复算 0018 §9）。0063 重数过一遍，
+ * 因为 0018 那句话在写出的那天之后**过期了**：
  * `events` / `tasks` / `evidence_bundles` / `budgets` 有写入方；
- * `review_gates` / `harness_calls` 的 INSERT 是【零】。
- * 所以每条规则有 `violated`（查出对不上）/ `ok`（查过且对得上）/
+ * `harness_calls` 【今天也有】—— `engine/runtime.ts` 的 `INSERT_HARNESS_CALL_SQL`，
+ * 由 `engine/driver.ts` 与 `serve/charter-pump.ts` 在生产路径上调（0018 §9 当年量的
+ * 「零 INSERT」是那张表【还没被复用为会话存储】时的读数，`engine/runtime.ts` 文件头
+ * 写的正是"复用顺带把这条自检从恒 not_observable 变成有对象可查"）；
+ * 只有 `review_gates` 的 INSERT 仍是【零】（0016 §1 第 1 条那半句照旧成立）。
+ * ⇒ 所以每条规则有 `violated`（查出对不上）/ `ok`（查过且对得上）/
  * `not_observable`（库里这一类是空的，【没有东西可查】）三种。
  * 把 not_observable 混进 ok，会得到一张「全部通过」的报告而它证的是一句零断言 ——
  * 同 0016 §4b「读不到的断言在数据没写进库时照样绿」。空不是通过，是单独一栏。
+ * ⚠ 而这句话本身也是一条会被写过的断言：`not_observable` 的**文案**当年写着
+ * 「harness_calls 在 src 里零 INSERT」，它在表已经有写入方之后【一直还是绿的】，因为没有任何
+ * 测试判"这句话今天还对不对"（`integrity.test.ts` 那条只 `toContain("INSERT")`，
+ * 真句子和假句子都含这个词）。判据见 `test/arch/zero-producer.ts`（0063）。
  */
 
 import { createHash } from "node:crypto";
@@ -747,7 +756,9 @@ export type CoherenceInput = {
 
 /**
  * ④ 的全部规则。三条 not_observable 不是兜底文案，是实测的写入方状态
- * （review_gates / harness_calls 在 src 里零 INSERT，0016 §1 第 1 条 + 0018 §9）。
+ * （0063 重数：`review_gates` 的 INSERT 在 src 里仍是零 —— 0016 §1 第 1 条那半句；
+ * `harness_calls` 【不再是】—— 见本文件头 ④ 那一节。两条的 not_observable 因此
+ * 是两种不同的事：那张表【没有生产者】，vs 生产者在而这一份库还没跑过。）
  */
 export function auditCoherenceReport(o: CoherenceInput): readonly CheckResult[] {
   const sample = o.ftsSample ?? DEFAULT_FTS_SAMPLE;
@@ -932,8 +943,14 @@ function gateEvidenceCheck(db: DatabaseSync): CheckResult {
       verdict: "not_observable",
       detail:
         "review_gates 是空的。src 里【没有任何 INSERT INTO review_gates】" +
-        "（0016 §1 第 1 条复算过），所以「每个门控决定都有证据包引用」在生产运行期" +
-        "【无从校验】。不是通过。",
+        "（0016 §1 第 1 条复算过，0063 再复算一遍仍是零），所以「每个门控决定都有证据包引用」" +
+        "在生产运行期【无从校验】。不是通过。" +
+        "⚠ 这一条与 harness_call_recorded 的空【不是一回事】：那条的 SQL 已存在、只是这份库没跑过；" +
+        "这一条是【全仓没有写它的代码】—— 审阅判定今天写在 events 里（dispatch 那条 " +
+        "ReviewDecided）。而这张表是【预留，非缺陷】（0064 / O4 动作 4）：它的行要求 " +
+        "evidence_bundle_id 指向存在的证据包，而生产里还没有东西往证据包里装内容（O5），" +
+        "先喂一行 NULL 只会把这一条从 not_observable 换成恒 violated —— evidence_bundles 那张表" +
+        "自己也要等 O5 接上才有东西可指。",
       checked: 0,
     };
   }
@@ -990,8 +1007,10 @@ function harnessCallCheck(db: DatabaseSync): CheckResult {
       name,
       verdict: "not_observable",
       detail:
-        "harness_calls 是空的（src 里零 INSERT，0018 §9 复算）。" +
-        "「每条 harness 调用都有对应消耗记录」这一条【没有对象】。不是通过。",
+        "harness_calls 是空的。src 里【有】写入方（engine/runtime.ts 的 INSERT_HARNESS_CALL_SQL，" +
+        "生产路径经 engine/driver.ts 与 serve/charter-pump.ts），所以空表说的不是「没人写过这条 SQL」，" +
+        "而是【这一份库里还没跑过任何一轮 agent】。" +
+        "「每条 harness 调用都有对应消耗记录」这一条在这一份库上【没有对象】。不是通过。",
       checked: 0,
     };
   }

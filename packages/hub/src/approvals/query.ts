@@ -42,6 +42,7 @@ import {
   approvalViewSchema,
 } from "@opc/contracts";
 import { assertSingleStatement } from "../db/write-queue.js";
+import { autoApprove } from "../policy/auto-approve.js";
 
 /**
  * 具名列，理由与 app.ts 的 `TASK_COLUMNS` 同一条：`SELECT *` 会让以后加的任何一个
@@ -51,7 +52,7 @@ import { assertSingleStatement } from "../db/write-queue.js";
  */
 export const APPROVAL_COLUMNS =
   "id, task_id, approval_type, summary, recommendation, recommendation_source, " +
-  "timeout_behavior, timeout_at, status, created_at, parameters";
+  "timeout_behavior, timeout_at, status, created_at, parameters, evidence_refs";
 
 /**
  * 排序：**等得最久的在最上面**，NULL 年龄落最后。
@@ -123,7 +124,9 @@ export type ListApprovalsResult = {
  *  ③ `escalation` 不是对象或是数组。
  * 抛错的代价是整个收件箱 500，而代价的成因是一行**读不出原因**的旧数据。
  */
-export function escalationReasonOf(parametersJson: string | null): string | null {
+export function escalationReasonOf(
+  parametersJson: string | null,
+): string | null {
   if (parametersJson === null) return null;
   let parsed: unknown;
   try {
@@ -135,9 +138,105 @@ export function escalationReasonOf(parametersJson: string | null): string | null
     return null;
   }
   const esc: unknown = (parsed as Record<string, unknown>)["escalation"];
-  if (esc === null || typeof esc !== "object" || Array.isArray(esc)) return null;
+  if (esc === null || typeof esc !== "object" || Array.isArray(esc))
+    return null;
   const reason: unknown = (esc as Record<string, unknown>)["reason"];
   return typeof reason === "string" && reason !== "" ? reason : null;
+}
+
+/**
+ * 从 `evidence_refs` 那列（0008，JSON 文本）取证据引用数组。
+ *
+ * 三层防御与 `escalationReasonOf` 同族：坏 JSON、非数组顶层、数组里混非字符串，
+ * 任何一层都不该让整个收件箱 500 —— 读侧要把坏值【原样带出去】让人看见，
+ * 而不是在解析层把「这行数据坏了」伪装成「这行很健康」。
+ * 合法取值只有三种：null（没给）、字符串数组、[]。数组逐项必须是字符串；
+ * 混入非字符串时也以 null 兜底（那是坏行，读侧不猜它的内容）。
+ */
+export function evidenceRefsOf(raw: unknown): string[] | null {
+  if (raw === null || raw === undefined || raw === "") return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(String(raw));
+  } catch {
+    return null;
+  }
+  if (!Array.isArray(parsed)) return null;
+  if (parsed.length === 0) return [];
+  if (!parsed.every((x): boolean => typeof x === "string")) return null;
+  return parsed;
+}
+
+/** parameters JSON 里的显式 irreversible 标记（建卡契约那一格，cards.ts 拒建判据读的同一格）。 */
+function explicitIrreversible(parametersJson: string | null): boolean {
+  if (parametersJson === null) return false;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(parametersJson);
+  } catch {
+    return false;
+  }
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed))
+    return false;
+  return (parsed as Record<string, unknown>)["irreversible"] === true;
+}
+
+/** 影子判定的对外形状（contracts `approvalViewSchema.policy_shadow` 的同构窄化）。 */
+export type PolicyShadowView = NonNullable<ApprovalView["policy_shadow"]>;
+
+/**
+ * 策略引擎对这张卡的**影子判定**（O9 动作 1 阶段一：只报不批）。
+ *
+ * ── 这一格存在的理由与它的边界 ─────────────────────────────────────
+ * 「691 行判据、0 个调用方」的那 0，从这里开始不再是 0：`autoApprove` 第一次
+ * 被生产代码调用。但它调用的是【读路径】—— 判定结果只进视图给界面并排显示，
+ * 写路径（`recordAutoApproval` / `CLAIM_APPROVAL_FOR_AUTO_SQL`）一次都没碰。
+ * 阶段一的全部主张是【测量】：先攒「规则会怎么判」的读数，再谈放开 R1。
+ *
+ * ── 三格前置为什么全部【不给】而不是猜 ─────────────────────────────
+ * evidence.ok / gate.passed / history 今天都没有可靠的每卡出处：
+ * 证据包完整性要 EvidenceStore.verify（dispatch 今天不产出真包，O5 的缺口），
+ * 门控结论在 gate 事件里而卡片没带（O5 动作 1+2 的缺口），
+ * 同类历史 countSimilarApprovals 在真库恒 0（O9 正文自己声明的数据未长出）。
+ * `autoApprove` 对缺格的处置本来就是 fail-closed 的 missing 枚举
+ * （evidence_missing / gate_missing / history_missing）—— 影子判定就如实报缺，
+ * 这正是阶段一要攒的读数：「差哪一格」比「差多少格」可操作。
+ *
+ * ── 显式 irreversible 短路：不拿 summary 当动作文本 ─────────────────
+ * `autoApprove` 的动作形状是 ActionDraft{kind, detail}，卡片上只有
+ * approval_type 与 summary 可映射；拿 summary 当 detail 走子串表是【估算】，
+ * 对不可逆那一档估算方向错了就是假阴性（验收第 2 条「不可逆被自动批准必须永远绿」
+ * 不能建在子串表上）。而卡片带着显式 irreversible=true（建卡契约，
+ * 与 cards.ts 的拒建判据同一格数据）⇒ 它【根本不进】autoApprove，
+ * 直接短路成 blocked_by="irreversible"。R3 那一句照样是判据文件的原话。
+ * 其余卡的 tier 由子串表从 summary 判 —— 读数页要写明它是估算。
+ */
+export function policyShadowOf(r: Record<string, unknown>): PolicyShadowView {
+  const summary = String(r["summary"] ?? "");
+  const kind = String(r["approval_type"] ?? "");
+  if (
+    explicitIrreversible(
+      r["parameters"] == null ? null : String(r["parameters"]),
+    )
+  ) {
+    return {
+      decision: "require_approval",
+      tier: "irreversible",
+      blocked_by: "irreversible",
+      missing: [],
+      note: "卡片显式标记 irreversible=true：不可逆永不自动通过（R3，短路于动作文本估算之前）。",
+    };
+  }
+  const o = autoApprove({ action: { kind, detail: summary } });
+  return o.decision === "auto_approved"
+    ? { decision: "auto_approved", rule: o.rule, tier: o.tier }
+    : {
+        decision: "require_approval",
+        tier: o.tier,
+        blocked_by: o.blocked_by,
+        missing: [...o.missing],
+        note: o.note,
+      };
 }
 
 /**
@@ -150,9 +249,7 @@ export function escalationReasonOf(parametersJson: string | null): string | null
  * 所以宁可原样报成 `"unknown"`：宁可显示一个看着不对的值让人来查，
  * 也不要一个看着对而实际错的值（0007 §4.1 同一条立场）。
  */
-export function approvalViewOf(
-  r: Record<string, unknown>,
-): ApprovalView {
+export function approvalViewOf(r: Record<string, unknown>): ApprovalView {
   const statusRaw = r["status"];
   const status =
     typeof statusRaw === "string" && statusRaw !== "" ? statusRaw : "unknown";
@@ -162,7 +259,8 @@ export function approvalViewOf(
     approval_type: String(r["approval_type"] ?? ""),
     summary: String(r["summary"] ?? ""),
     recommendation: (r["recommendation"] as string | null) ?? null,
-    recommendation_source: (r["recommendation_source"] as string | null) ?? null,
+    recommendation_source:
+      (r["recommendation_source"] as string | null) ?? null,
     timeout_behavior: (r["timeout_behavior"] as string | null) ?? null,
     timeout_at: r["timeout_at"] == null ? null : Number(r["timeout_at"]),
     status,
@@ -170,6 +268,12 @@ export function approvalViewOf(
     escalation_reason: escalationReasonOf(
       r["parameters"] == null ? null : String(r["parameters"]),
     ),
+    // 证据引用（0008）。JSON 文本 → 数组；解析失败的脏值【原样报成 null】
+    // 而不是 500 —— 与 escalation_reason 同一条立场：读侧要让坏值可见，
+    // 不能把「这行数据坏了」伪装成「这行很健康」。null 与 [] 都读作无证据包。
+    evidence_refs: evidenceRefsOf(r["evidence_refs"]),
+    // 影子判定（O9 动作 1 阶段一）。只读不批：见 policyShadowOf 文件头那段。
+    policy_shadow: policyShadowOf(r),
   };
   // 出参也过一次 schema，与 taskViewSchema 在 app.ts 里那次同一用途：
   // 加列必须同时改视图 schema，否则这里编译不过或校验不过，而不是静默发出去。
@@ -198,13 +302,17 @@ export function listApprovals(
   const limit = clampLimit(o.limit);
 
   const sql =
-    "SELECT " + APPROVAL_COLUMNS + " FROM approvals WHERE status = ?" +
-    APPROVAL_ORDER + " LIMIT ?";
+    "SELECT " +
+    APPROVAL_COLUMNS +
+    " FROM approvals WHERE status = ?" +
+    APPROVAL_ORDER +
+    " LIMIT ?";
   const params: unknown[] = [status, limit];
   assertSingleStatement(sql);
-  const rows = db
-    .prepare(sql)
-    .all(...(params as never[])) as Record<string, unknown>[];
+  const rows = db.prepare(sql).all(...(params as never[])) as Record<
+    string,
+    unknown
+  >[];
 
   return {
     approvals: rows.map(approvalViewOf),

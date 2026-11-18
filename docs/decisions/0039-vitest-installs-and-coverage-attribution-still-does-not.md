@@ -81,8 +81,9 @@ runner**。之前所有绿都是 `node:test` + 自制 harness 给的、`pnpm ver
 
 - gate 套件在 vitest 4.1.5 下：**59/59**（`author-reviewer.test.ts` 27 + `determinism.test.ts`
   32；都与它们自身的 `it` 数一致，且与 harness 全量里这两文件的绿一致）。
-- `requireAssertions: true` 仍 **19 行**真值（`harness-invariants.ts:156` 那条守卫要求它，
-  改的是注释、没动开关，回归绿）。
+- `requireAssertions: true` 仍 **19 行**真值（`harness-invariants.ts:157` 那条守卫要求它，
+  改的是注释、没动开关，回归绿。行号从 `:156` 漂到 `:157`：round277 在它上面加了一行 import，
+  让 `walkFiles` 也排除运行期夹具 —— 与 0006 那条同一个症）。
 - 可复算的「空壳」断言（§1）：vite / esbuild 两套 `find ... -type f` = 0；vitest 4.1.5 有实体。
 - 覆盖归因可复算失败：v8 报 0/0，istanbul `ERR_PNPM_NO_OFFLINE_META`。
 - `git diff` 只动 `vitest.config.ts` 的头注释一处（`thresholds` 值、`provider`、`include`、

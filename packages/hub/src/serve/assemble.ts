@@ -44,20 +44,28 @@
  */
 import { existsSync, writeFileSync } from "node:fs";
 import { basename } from "node:path";
-import type { HubDeps } from "../http/app.js";
-import type { HubServer } from "../http/server.js";
+import { runTimeoutPass } from "../approvals/timeout.js";
 // createBackup（同步版）在这里【不再被 import】：心跳那一段改走 worker（0036）。
 // 同步版仍然活着并且有真消费方 —— maintenance.ts 那条 CLI 路径（那里没有别的东西
 // 会被它冻住，见 0036 §6 第 1 条）。这一行少一个 import 就是那次改动的形状本身。
 import {
-  backupNameToMs,
-  BackupWorkerThrewError,
-  createBackupOffLoop,
-  listBackups,
   type BackupOffLoopOutcome,
   type BackupOffLoopRequest,
+  BackupWorkerThrewError,
+  backupNameToMs,
+  createBackupOffLoop,
+  listBackups,
 } from "../db/backup.js";
-import type { WriteQueue } from "../db/write-queue.js";
+import type { HubWriter, WriteQueue } from "../db/write-queue.js";
+import type { EngineRuntime } from "../engine/runtime.js";
+import type { EventBus } from "../events/bus.js";
+import { EXIT_OK, EXIT_PROBLEM, EXIT_USAGE } from "../heartbeat/maintenance.js";
+import {
+  DEFAULT_STALL_THRESHOLD_MS,
+  HEARTBEAT_INTERVAL_MS,
+  runPatrol,
+} from "../heartbeat/patrol.js";
+import type { HubDeps } from "../http/app.js";
 import { newLocalToken } from "../http/auth.js";
 // bind.ts 是【纯字符串逻辑】：不 import http、不开 socket、不读库（import 方向定死为
 // bind ← server，理由写在它文件头）。所以装配层可以在【顶层】用它，
@@ -65,47 +73,45 @@ import { newLocalToken } from "../http/auth.js";
 // 那一次动态 import 是为了不把 node:http 拖进离线测试，这里没有那个约束。
 import {
   BindDecision,
+  type BindOutcome,
   bindFailureIsFatal,
   defaultBindDecision,
-  type BindOutcome,
 } from "../http/bind.js";
-import { EXIT_OK, EXIT_PROBLEM, EXIT_USAGE } from "../heartbeat/maintenance.js";
+import type { TaskGraph } from "../http/real-deps.js";
+import type { HubServer } from "../http/server.js";
 import {
-  DEFAULT_STALL_THRESHOLD_MS,
-  HEARTBEAT_INTERVAL_MS,
-  runPatrol,
-} from "../heartbeat/patrol.js";
-import type { EventBus } from "../events/bus.js";
-import type { HubWriter } from "../db/write-queue.js";
-import type { EngineRuntime } from "../engine/runtime.js";
-import {
-  pumpCharterCards,
   type CharterCardDeps,
   type PumpOptions,
   type PumpRoundResult,
+  pumpCharterCards,
 } from "./charter-pump.js";
-import {
-  DEFAULT_DRIVER_MAX_TURNS,
-  DEFAULT_DRIVER_TASK_LIMIT,
-  driveTasks,
-  worstDriveWaitMs,
-  type DriveOptions,
-  type DriveRoundResult,
-  type DriveTaskFn,
-} from "./driver-pump.js";
-import type { TaskGraph } from "../http/real-deps.js";
 import {
   DEFAULT_SERVE_USAGE,
   HEARTBEAT_FLOOR_MS,
   parseServeArgs,
-  shouldBackUp,
   type ServeArgs,
+  shouldBackUp,
 } from "./config.js";
+import {
+  DEFAULT_DRIVER_MAX_TURNS,
+  DEFAULT_DRIVER_TASK_LIMIT,
+  type DriveOptions,
+  type DriveRoundResult,
+  type DriveTaskFn,
+  driveTasks,
+  worstDriveWaitMs,
+} from "./driver-pump.js";
+import {
+  type AssembleImOptions,
+  assembleImChannels,
+  type ImBundle,
+  imBannerOf,
+} from "./im-channels.js";
 import {
   acquireLock,
   describeLockFailure,
-  releaseLock,
   type LockAcquire,
+  releaseLock,
 } from "./lock.js";
 import {
   createInFlightWatch,
@@ -171,7 +177,11 @@ export interface BootOverrides {
    * 一字不改仍然编译过（它们只是【看不到】bind，而看不到 bind 的假 server
    * 本来也不该被用来断言绑定 —— 新加的那条用例自带一个记录第三参的替身）。
    */
-  readonly serve?: (deps: HubDeps, port: number, bind: BindDecision) => Promise<HubServer>;
+  readonly serve?: (
+    deps: HubDeps,
+    port: number,
+    bind: BindDecision,
+  ) => Promise<HubServer>;
   /**
    * 备份的执行点（0036）。默认 `createBackupOffLoop` —— 生产走的就是默认值，
    * 这一格【不是】给生产留的第二条路，是给测试留的可控窗口。
@@ -185,7 +195,9 @@ export interface BootOverrides {
    * ⚠ 注入的代价要如实说：走注入的用例【不证明】真 worker 能跑通 ——
    * 那一条由 backup.test.ts 里那些走真 worker 的用例负责（含上面那条「主循环仍在推进」）。
    */
-  readonly backupVia?: (req: BackupOffLoopRequest) => Promise<BackupOffLoopOutcome>;
+  readonly backupVia?: (
+    req: BackupOffLoopRequest,
+  ) => Promise<BackupOffLoopOutcome>;
   /** 备份 worker 的超时上限覆盖。不传用 BACKUP_WORKER_TIMEOUT_MS。 */
   readonly backupTimeoutMs?: number;
   /**
@@ -261,7 +273,11 @@ export interface BootOverrides {
    * ⚠ 装配层那三条主张（「开了才跑」「一轮只派一份」「关机等到落地」）
    * 全在【泵自己内部】的外面，所以它们只能靠换掉整趟来数 —— 与章程泵同一条理由。
    */
-  readonly driverPumpVia?: (w: HubWriter, bus: EventBus, o: DriveOptions) => Promise<DriveRoundResult>;
+  readonly driverPumpVia?: (
+    w: HubWriter,
+    bus: EventBus,
+    o: DriveOptions,
+  ) => Promise<DriveRoundResult>;
   /**
    * 推一条任务那一发（透传给 DriveOptions.driveTask）。与上一条的关系同
    * charterPumpVia / pumpCardDeps 那一对：via 换整趟，这一格只换【最里面那一发】，
@@ -273,6 +289,35 @@ export interface BootOverrides {
   /** 透传，测试用它把「三次」变成「一次」。 */
   readonly driverMaxAttempts?: number;
   readonly driverTaskLimit?: number;
+  /**
+   * IM 通道那一套读取的环境变量（O12 动作 2）。缺省 `process.env`。
+   *
+   * ⚠ 这一格【只给 IM 用】，而 boot 的其余输入仍然全部来自 `args` / 其它 override，
+   * 那不是不一致，是两条不同的立场：
+   *  · 其余那些是「人会在这条命令行上要求什么」—— 它们从 argv 解析，
+   *    而 `--bind` / `--charter-pump` / `--ceo` 三个【刻意没有 env 缺省源】
+   *    （config.ts 里各写了一份理由：暴露与花钱必须是这一次命令里看得见的决定）；
+   *  · IM 那三项装的是【第三方应用的凭据】。把 app_secret 写成命令行参数会进
+   *    `ps` 与 shell history，而它是一份能签发 tenant_access_token、
+   *    以应用身份读私信的长期密钥。那一族的密钥只能从环境里来。
+   * 所以这里是「读 env 的入口」而不是「又一个绕过 args 的开关」：
+   * 命令行上没有任何一个参数能打开 IM，env 缺了就是 `absent`。
+   *
+   * 测试传这一格而不是 `process.env.X = ...`：同一进程里的并发用例互踩，
+   * 而且真 env 里今天可能真的有一位 OPC_FEISHU_APP_ID（那样「没配 ⇒ 不接」
+   * 那一发就永远测不到）。
+   */
+  readonly env?: Readonly<NodeJS.ProcessEnv>;
+  /**
+   * IM 那一发外网 HTTP 的实现（透传给 `assembleImChannels`）。
+   *
+   * 为什么必须能注入而不让生产用默认值：装配点自己在 im-channels.ts 文件头第三条
+   * 立了「入站只能从 runtime.pollAll 进」，而要把这条主张跑出分母，需要一个
+   * 【停在半路】与一个【直接抛】的远端 —— 真 fetch 两样都不给。
+   * 与 `backupVia` 同一条口径：注入的是【时机】不是【结论】，
+   * 而走注入的用例【不证】真飞书接口能打通（那一格只能由真机验收）。
+   */
+  readonly imFetchImpl?: AssembleImOptions["fetchImpl"];
 }
 
 export type BootResult =
@@ -291,6 +336,21 @@ export type BootResult =
       /** loopback / lan。给 CLI 决定那句「只绑回环」该不该说。 */
       readonly exposure: "loopback" | "lan";
       readonly lockPath: string;
+      /**
+       * 这台 Hub 有没有装 IM 审批通道（O12 动作 2）。
+       *
+       * 值由装配那一刻给出，【不让 CLI 再判一次 env】：boot 读的是 `o.env ?? process.env`，
+       * 而 runServeCli 手上那份是它自己的 `env` 形参。让「停止顺序」那句去读另一份 env，
+       * 就是给「这台到底接没接 IM」造第二个来源 —— 而"boot 读 A 那份、横幅读 B 那份"
+       * 这种漂移没有任何东西会红。与上面 `exposure` 同一类：装配的事实由装配报出来。
+       *
+       * ⚠ 【必填】而不是可选：可选的 boolean 会被每个新调用点安静地漏掉，
+       * 而漏掉的后果是那句「停止顺序」少说一步【真的会发生】的等待 ——
+       * 那句话存在的唯一理由是「别让人以为进程卡死而去 kill -9」。
+       * 代价实测只有一处（测试里那个假 boot 补一格 false），登记在这里是为了
+       * 别让下一个人把它当成"又一个可选字段"改回去。
+       */
+      readonly imWired: boolean;
       readonly heartbeat: Ticker;
       shutdown(): Promise<void>;
     }
@@ -351,7 +411,8 @@ export function bindForAssembly(o: {
   readonly deps: ApprovalChannelDeps;
 }): { readonly outcome: BindOutcome; readonly remoteApprovalsWired: boolean } {
   const remoteApprovalsWired =
-    o.deps.redeemApprovalToken !== undefined && o.deps.issueApprovalToken !== undefined;
+    o.deps.redeemApprovalToken !== undefined &&
+    o.deps.issueApprovalToken !== undefined;
   return {
     remoteApprovalsWired,
     outcome: BindDecision.resolve({
@@ -383,7 +444,8 @@ export async function boot(
   }
 
   const acquire =
-    o.acquire ?? ((p: string): LockAcquire => acquireLock(p, { who: "hub-serve" }));
+    o.acquire ??
+    ((p: string): LockAcquire => acquireLock(p, { who: "hub-serve" }));
 
   /**
    * 不创建库。照抄 maintenance.ts 那条：openDb 会【建】文件，而空库的完整性检查
@@ -466,6 +528,14 @@ export async function boot(
   let queue: WriteQueue | null = null;
   let server: HubServer | null = null;
   let heartbeat: Ticker | null = null;
+  /**
+   * 装配出来的 IM 审批通道那一套（O12 动作 2）。`null` = 这台没配 env，或还没装配。
+   *
+   * 声明在这里而不是 try 里面，和上面三个一样是【清理路径必须读得到】：
+   * `giveUpInner` 可能在装配之前的任何一条 return / 抛错上被 finally 触发，
+   * 那时它读到 null 就是「没有通道要关」，而那正是真话。
+   */
+  let imBundle: ImBundle | null = null;
   let succeeded = false;
   /**
    * 在飞的备份（0036 §3）。两个字段各自是一条性质：
@@ -508,6 +578,20 @@ export async function boot(
    * 不退进程 —— 完全静默（0044 量的那一发）。派发 + 关机时 settle 是同一条路。
    */
   const driverWatch = createInFlightWatch<void>();
+  /**
+   * 在飞的那一轮 IM 入站（O12 动作 2）。与前三个 watch 分开，理由同"备份与起草不合成一个"：
+   * 一条慢的飞书请求不该挡住起草，反之起草也不该让审批回传停摆。
+   *
+   * ⚠ 同样【不 await】，而这里最容易被"它只是一发 HTTP 而已"改回去：
+   * `pollOnce` 里那发 fetch 有自设截止（`FEISHU_FETCH_TIMEOUT_MS`，round284 补的），
+   * 但【一发有上限 ≠ 一轮有上限】：一轮最多是 1 次取 token + N 页读 + 1 次发卡，
+   * 而且注入实现可以不读 `init.signal`（那份上限就一个都不生效）。
+   * await 在 job 里 ⇒ 一次挂在半路的外网请求把心跳 job 卡住 ⇒ timer.ts:335 那条
+   * 「上一轮心跳还没结束，本轮【跳过】」⇒ **停滞检测与每日备份被一次飞书请求停掉**，
+   * 且不计 consecutiveFailures、不触发 onFatal、不退进程 —— 0044 量的那个静默形状换了凶手。
+   * 派发之后由 settle 在关机时等它落地（否则一次入站会写进一个已经关掉的队列）。
+   */
+  const imWatch = createInFlightWatch<void>();
   /**
    * 关机那句「最坏等多久」的两个乘数（0048）。真设置算出来之后被覆盖。
    *
@@ -582,16 +666,17 @@ export async function boot(
    */
   let cleaning: Promise<void> | null = null;
   const giveUpInner = async (): Promise<void> => {
-    // ⭐ beginCancel 【全在任何 await 之前】，而且是【三个 watch 各一次】：
+    // ⭐ beginCancel 【全在任何 await 之前】，而且是【四个 watch 各一次】：
     // 0025 §3 第 ④ 条那一族管的是"关机已经开始而下面又派了新活"，
-    // 而备份 / 章程泵 / 驱动器是【三条会派新活的路】—— 只关其中两条，
+    // 而备份 / 章程泵 / 驱动器 / IM 入站是【四条会派新活的路】—— 只关其中三条，
     // 剩下那条在 settle 那段时间里仍然能被【最后一轮心跳】叫到
     // （heartbeat.stop() 只挡【新】的一轮，已经在跑的那一轮走到派发那一行时挡不住）。
-    // ⚠ 这一处从两条变三条时，注释里那句「两个 watch 各一次」也跟着改了 ——
+    // ⚠ 这一处从两条变三条、再变四条时，注释里那句计数【每次都跟着改了】——
     //   一句写着"两个"的注释配三行代码，是下一个删掉一行的人的许可证。
     backupWatch.beginCancel();
     pumpWatch.beginCancel();
     driverWatch.beginCancel();
+    imWatch.beginCancel();
     heartbeat?.stop();
     // 等一份在飞的备份。settle() 永不 reject（rejection 在 watch.start 里面被吞掉，
     // 而那句「备份没得出结论」由派发处自己 catch 之后说 —— 见 job 那里），
@@ -652,6 +737,33 @@ export async function boot(
       );
     }
     await driverWatch.settle();
+    /**
+     * 等一轮在飞的 IM 入站，然后【关通道】，两步都在 `queue.close()` 之前。
+     *
+     * 等的理由与备份 / 起草那两条同一条：入站判决的落库走 `q.node(...)`（桥里的 `act`），
+     * 不等 ⇒ 一次审批决定会写进一个已经关掉的队列，而那期间另一个 Hub 可以起开并写同一个库。
+     * 关通道排在其后的理由不同：`close()` 之后适配器不再收新消息，也就不会在队列关掉之后
+     * 再触发一次落库；反过来先关队列会让那一轮里的判决拿到一个"库已关"的假失败，
+     * 而抽象层那条纪律是【失败必须撤销幂等键】—— 键撤了而队列没了，
+     * 那条决定既没落库也不会重来。
+     *
+     * ⚠ 这一发【不等外网】：settle 等的是已经派出去的那一轮。它现在的上限是
+     * 【那一轮最多几发 × `FEISHU_FETCH_TIMEOUT_MS`】—— 一发有了截止，不等于一轮有了截止。
+     * ⚠ 而且那个上限建立在「`fetchImpl` 读了 `init.signal`」这条【没有机器判据】的约定上：
+     * 注入一份忽略 signal 的实现，关机就可能一直等下去。默认实现读了，也真测过
+     * （`feishu-http.test.ts`）；注入那半边只有注释拦着。
+     */
+    await imWatch.settle();
+    if (imBundle !== null) {
+      const failedClose = await imBundle.closeAll();
+      if (failedClose.length > 0) {
+        io.warn(
+          "IM 通道关停失败：" +
+            failedClose.join("、") +
+            " ⇒ 可能还有一条连接在收消息，而那些消息会落到一个已经不存在的 Hub 上。",
+        );
+      }
+    }
     if (server !== null) {
       try {
         await server.close();
@@ -840,7 +952,8 @@ export async function boot(
       driverState: () => ({
         enabled: driverOn,
         pumping: heartbeat !== null && !heartbeat.stopped,
-        taskLimitCents: bounds.ok === true ? bounds.bounds.taskLimitCents : null,
+        taskLimitCents:
+          bounds.ok === true ? bounds.bounds.taskLimitCents : null,
       }),
       // 组织提交（0040）：只有配了 --backup-dir 才接 commitOrgChange ——
       // §6.5 要求「改组织之前留一份能回到起点的快照」，没备份目录就不给改。
@@ -1016,7 +1129,8 @@ export async function boot(
           "所以这一条路线要求图真的能跑。补救命令：" +
           resumeCommand("<id>", dbPath) +
           "。原因见 " +
-          GRAPH_NOT_WIRED + " 那条报错原文。",
+          GRAPH_NOT_WIRED +
+          " 那条报错原文。",
       );
     }
 
@@ -1044,21 +1158,17 @@ export async function boot(
           // 或者去掉一个参数 —— 退出码是这条报错里唯一一定被读到的部分。
           code: EXIT_USAGE,
           message: bindOutcome.message,
-          hint:
-            remoteApprovalsWired
-              ? "装配上【有】token 通道而仍被拒：这是 bind.ts 的判据本身出了问题，不是配置问题。"
-              : "装配上没有 token 通道。今天 buildHubDeps 会装它，所以真走到这一格" +
-                "说明装配被改过 —— 先确认那次改动是否有意。",
+          hint: remoteApprovalsWired
+            ? "装配上【有】token 通道而仍被拒：这是 bind.ts 的判据本身出了问题，不是配置问题。"
+            : "装配上没有 token 通道。今天 buildHubDeps 会装它，所以真走到这一格" +
+              "说明装配被改过 —— 先确认那次改动是否有意。",
         };
       }
       // 非致命（打错成主机名 / 垃圾串）⇒ 退回默认回环，但【必须响一声】。
       // 这里不退成「安静用默认」：那个人以为自己指定过监听地址，
       // 而两句话的差别是他今晚会不会以为远程已经能连（不能）。
       io.warn(
-        "忽略 --bind（" +
-          bindOutcome.reason +
-          "）：\n" +
-          bindOutcome.message,
+        "忽略 --bind（" + bindOutcome.reason + "）：\n" + bindOutcome.message,
       );
     }
     // 上面那一支不 return，所以这里要自己再取一次默认。
@@ -1176,18 +1286,29 @@ export async function boot(
      */
     const pumpVia =
       o.charterPumpVia ??
-      ((w: HubWriter, bus2: EventBus, po: PumpOptions): Promise<PumpRoundResult> =>
-        pumpCharterCards(w, bus2, po));
+      ((
+        w: HubWriter,
+        bus2: EventBus,
+        po: PumpOptions,
+      ): Promise<PumpRoundResult> => pumpCharterCards(w, bus2, po));
     const pumpSettings: Omit<PumpOptions, "nowMs"> | null =
       bounds.ok === true
         ? {
             maxBudgetUsd: bounds.bounds.maxBudgetUsd,
             taskLimitCents: bounds.bounds.taskLimitCents,
             cwd: bounds.bounds.cwd,
-            ...(o.pumpCardDeps === undefined ? {} : { cardDeps: o.pumpCardDeps }),
-            ...(o.pumpRecordTurn === undefined ? {} : { recordTurn: o.pumpRecordTurn }),
-            ...(o.pumpMaxAttempts === undefined ? {} : { maxAttempts: o.pumpMaxAttempts }),
-            ...(o.pumpTaskLimit === undefined ? {} : { taskLimit: o.pumpTaskLimit }),
+            ...(o.pumpCardDeps === undefined
+              ? {}
+              : { cardDeps: o.pumpCardDeps }),
+            ...(o.pumpRecordTurn === undefined
+              ? {}
+              : { recordTurn: o.pumpRecordTurn }),
+            ...(o.pumpMaxAttempts === undefined
+              ? {}
+              : { maxAttempts: o.pumpMaxAttempts }),
+            ...(o.pumpTaskLimit === undefined
+              ? {}
+              : { taskLimit: o.pumpTaskLimit }),
           }
         : null;
 
@@ -1203,8 +1324,11 @@ export async function boot(
      */
     const driverVia =
       o.driverPumpVia ??
-      ((w: HubWriter, bus2: EventBus, dopt: DriveOptions): Promise<DriveRoundResult> =>
-        driveTasks(w, bus2, dopt));
+      ((
+        w: HubWriter,
+        bus2: EventBus,
+        dopt: DriveOptions,
+      ): Promise<DriveRoundResult> => driveTasks(w, bus2, dopt));
     const driverSettings: Omit<DriveOptions, "nowMs"> | null =
       driverOn && bounds.ok === true
         ? {
@@ -1212,8 +1336,12 @@ export async function boot(
             taskLimitCents: bounds.bounds.taskLimitCents,
             cwd: bounds.bounds.cwd,
             ...(o.driveTask === undefined ? {} : { driveTask: o.driveTask }),
-            ...(o.driverMaxAttempts === undefined ? {} : { maxAttempts: o.driverMaxAttempts }),
-            ...(o.driverTaskLimit === undefined ? {} : { taskLimit: o.driverTaskLimit }),
+            ...(o.driverMaxAttempts === undefined
+              ? {}
+              : { maxAttempts: o.driverMaxAttempts }),
+            ...(o.driverTaskLimit === undefined
+              ? {}
+              : { taskLimit: o.driverTaskLimit }),
             ...(args.ceo === undefined ? {} : { ceoRoleId: args.ceo }),
           }
         : null;
@@ -1223,6 +1351,41 @@ export async function boot(
         taskLimit: driverSettings.taskLimit ?? DEFAULT_DRIVER_TASK_LIMIT,
         maxTurns: driverSettings.maxTurns ?? DEFAULT_DRIVER_MAX_TURNS,
       };
+    }
+
+    /**
+     * ── IM 审批通道（O12 动作 2）：此刻装配，判据全在 serve/im-channels.ts ──
+     *
+     * 为什么在这里而不是更早：桥的 `loadCard` / `act` 要一个 `HubWriter`，
+     * 而那一刻就是队列开完 + 迁移跑完（上面）；`publish` 要 `bus`（上面那个实例，
+     * 与 SSE / 巡检同一个 —— 两个 bus 会让"手机上批掉了而看板不动"）。
+     *
+     * 为什么【不 fail boot】：`assembleImChannels` 缺 env 只返回 `absent`，
+     * 而通道起不来这件事在 bundle 那一侧翻成 note 不抛（im-channels.ts 文件头第①条）。
+     * 一台没配 IM 的 Hub 是常态；让「手机上批不了」把看板、心跳、任务全带走，
+     * 是把一个动作的故障升级成整机的故障。
+     *
+     * 装配【只此一次】，在 ticker 之前：每一轮心跳都重新装配会让桥的 `readConnection`
+     * 每轮拿一次新连接，而那条连接的用途正是"这一台 Hub 的读侧"，不是"这一轮的读侧"。
+     */
+    const imAssembly = assembleImChannels({
+      w: queue,
+      publish: (e, seq) => bus.publishPersisted(e, seq),
+      env: o.env ?? process.env,
+      ...(o.now === undefined ? {} : { now: o.now }),
+      ...(o.imFetchImpl === undefined ? {} : { fetchImpl: o.imFetchImpl }),
+    });
+    if (imAssembly.kind === "present") imBundle = imAssembly.bundle;
+    /**
+     * 那一句横幅在【这里】打，不在 runServeCli 里。
+     * 理由与上面「决策写路径是哪一条」那句同一条：判据读的是装配那一刻的值
+     * （`imAssembly` / `canPoll`），搬到 CLI 就得让 BootResult 多带一个字段，
+     * 而那个字段一旦是"CLI 自己再算一遍"就成了第二个来源。
+     */
+    {
+      const b = imBannerOf(imAssembly);
+      if (b.warn) io.warn(b.line);
+      else io.log(b.line);
     }
 
     /**
@@ -1254,6 +1417,30 @@ export async function boot(
       });
       if (r.stalled > 0) {
         io.warn("巡检：本轮新增停滞 " + r.stalled + " 个任务");
+      }
+      /**
+       * 超时执行者（O10 动作 1）：到期卡按 timeout_behavior 落地，actor=system。
+       * 与巡检同一发心跳、同一条【纯 SQL、无模型调用】的量级 ⇒ await 在这里安全，
+       * 上面章程泵那条「别 await 180s 起草」的禁令对它不适用。
+       * 失败让它照抛（与 runPatrol 同一处置）：这里没有任何一条「跳过本轮超时」
+       * 的降级路径可走 —— 超时卡带着 timeout_at 躺着，下一跳心跳还会再撞同一发，
+       * 静默吞掉只会把「到期没执行」变回接线之前的形状，而那正是本轮修掉的东西。
+       */
+      const to = await runTimeoutPass(
+        q,
+        q.readConnection(),
+        (o.now ?? scheduler.now)(),
+        (e, seq) => bus.publishPersisted(e, seq),
+      );
+      if (to.handled > 0 || to.skippedInvalid > 0) {
+        io.warn(
+          "超时巡检：本轮处理到期审批 " +
+            to.handled +
+            " 张" +
+            (to.skippedInvalid > 0
+              ? "，另有 " + to.skippedInvalid + " 张行为取值非法被跳过"
+              : ""),
+        );
       }
       /**
        * ── 章程泵（0044）：这一发【必须】在 `if (backupDir === undefined) return` 之前 ──
@@ -1338,7 +1525,10 @@ export async function boot(
             );
           }
         });
-        if (!dispatchedDrive.started && dispatchedDrive.reason === "in_flight") {
+        if (
+          !dispatchedDrive.started &&
+          dispatchedDrive.reason === "in_flight"
+        ) {
           io.warn(
             "本轮跳过推任务：上一轮驱动还在飞。" +
               "一轮驱动【设计上就能跑到】" +
@@ -1349,6 +1539,53 @@ export async function boot(
               driverWait.maxTurns +
               " 格），所以这【可能只是慢】；" +
               "但它【每轮都】出现时，说明有一格卡在子进程里出不来 —— 那要去看审计，不是看这里。",
+          );
+        }
+      }
+      /**
+       * ── IM 入站（O12 动作 2）：与两个泵同一侧、同一条派发纪律 ──
+       *
+       * 位置在那句 `if (backupDir === undefined) return` 【之前】，理由与两个泵同一条：
+       * 没配备份目录是本机唯一在跑的形状，挂在那句之后就是「env 配了而永远不生效」，
+       * 症状与"从没打算接 IM"逐字相同（手机上点了而这边什么都不动）。
+       *
+       * ⚠ 这一段【不 await】。它是三格里唯一【不花钱】的那个，因而最容易被
+       * "它只是一发 HTTP 而已"顺手改成 await —— 那发 fetch 现在【有】自设截止
+       * （`FEISHU_FETCH_TIMEOUT_MS`），但【一发有上限 ≠ 一轮有上限】：一轮最多
+       * 1 次取 token + N 页读 + 1 次发卡，翻页多起来就能越过心跳下界（60s）。
+       * 更要紧的是那份截止依赖注入实现读 `init.signal`，那条约定【没有机器判据】。
+       * 一次卡住的外网请求把心跳 job 拖长 ⇒ timer.ts:335 那条「上一轮心跳还没结束，
+       * 本轮【跳过】」⇒
+       * 停滞检测与每日备份被一次飞书请求停掉，且不计 consecutiveFailures、
+       * 不触发 onFatal、不退进程（0044 量过的那个静默形状换了凶手）。
+       */
+      if (imBundle !== null) {
+        const bundle = imBundle;
+        const dispatchedIm = imWatch.start(async (): Promise<void> => {
+          try {
+            const rep = await bundle.pollRound();
+            for (const n of rep.notes) {
+              if (n.level === "warn") io.warn(n.text);
+              else io.log(n.text);
+            }
+          } catch (e) {
+            // 与两个泵 / 备份那三处同一条理由：watch.start() 为了让 settle() 永不 reject
+            // 会【吞掉 rejection】。pollRound 自己承诺不抛，所以这一支今天没有活的分母；
+            // 它留着是因为"承诺不抛"这件事由 im-channels.ts 维护，而装配层不该依赖它。
+            io.warn(
+              "IM 入站【本轮没有结论】（一整轮抛错，原文如下）—— " +
+                "手机上点了的按钮【这一轮没有读】，水位没推进所以恢复之后会补读：\n" +
+                (e instanceof Error ? e.message : String(e)),
+            );
+          }
+        });
+        if (!dispatchedIm.started && dispatchedIm.reason === "in_flight") {
+          io.warn(
+            "本轮跳过 IM 入站：上一轮还没结束。这一轮只做一次读远端 + 判决，慢到跨过心跳" +
+              "只可能是外网那边答得慢。⚠ 那一发【每发】都有自设截止，但一轮最多是" +
+              "「取 token + 翻页读 + 发卡」几发相加 —— 它【每轮都】出现时先看网络与 origin，" +
+              "再看是不是注入的那份 fetch 没读 init.signal（那样截止一个都不生效），" +
+              "不要 kill -9。",
           );
         }
       }
@@ -1382,25 +1619,29 @@ export async function boot(
        * 取值一样；差别只在【注入存在的时候】—— 而那正是测试与回放的那一侧。
        */
       const atMs = (o.now ?? scheduler.now)();
-      const dispatched: StartOutcome = backupWatch.start(async (): Promise<void> => {
-        try {
-          const out = await backupVia({
-            dbPath,
-            backupDir,
-            nowMs: atMs,
-            ...(o.backupTimeoutMs === undefined ? {} : { timeoutMs: o.backupTimeoutMs }),
-          });
-          reportBackupOutcome(out, io);
-        } catch (e) {
-          // ⚠ 这一发 catch【必须在这里】而不是交给 watch：
-          // watch.start() 为了让 settle() 永不 reject 会【吞掉 rejection】（那是它的职责），
-          // 于是如果这里不接，「worker 里抛了」这件事就真的静默了 ——
-          // 而静默的备份失败正是 Task 6.3 明令禁止的那一条。
-          // 包成 { rejected } 而不是就地写一句 warn，是为了让【四种 + reject】这五种
-          // 结论的文案住在同一个函数里（reportBackupOutcome），不分散在两个 catch 里各写一半。
-          reportBackupOutcome({ rejected: e }, io);
-        }
-      });
+      const dispatched: StartOutcome = backupWatch.start(
+        async (): Promise<void> => {
+          try {
+            const out = await backupVia({
+              dbPath,
+              backupDir,
+              nowMs: atMs,
+              ...(o.backupTimeoutMs === undefined
+                ? {}
+                : { timeoutMs: o.backupTimeoutMs }),
+            });
+            reportBackupOutcome(out, io);
+          } catch (e) {
+            // ⚠ 这一发 catch【必须在这里】而不是交给 watch：
+            // watch.start() 为了让 settle() 永不 reject 会【吞掉 rejection】（那是它的职责），
+            // 于是如果这里不接，「worker 里抛了」这件事就真的静默了 ——
+            // 而静默的备份失败正是 Task 6.3 明令禁止的那一条。
+            // 包成 { rejected } 而不是就地写一句 warn，是为了让【四种 + reject】这五种
+            // 结论的文案住在同一个函数里（reportBackupOutcome），不分散在两个 catch 里各写一半。
+            reportBackupOutcome({ rejected: e }, io);
+          }
+        },
+      );
       if (!dispatched.started) {
         // 两个拒因【分开处置】，而且这个分开本身是判据（把两支合成一句 warn，
         // 「关机中被拒」与「上一份还在飞」就分不开了 —— 后者要人看，前者不用）。
@@ -1463,6 +1704,7 @@ export async function boot(
       bindHost: bind.host,
       exposure: bind.exposure,
       lockPath: lock.path,
+      imWired: imAssembly.kind === "present",
       heartbeat,
       ...(args.portFile === undefined ? {} : { portFile: args.portFile }),
       shutdown,
@@ -1565,10 +1807,20 @@ function warnSuffix(warnings: readonly string[]): string {
 
 /** pumpBoundsOf 的结论。三种而不是 boolean + 可选值 —— 见下面那条理由。 */
 export type PumpBounds =
-  | { readonly ok: true; readonly bounds: Pick<PumpOptions, "maxBudgetUsd" | "taskLimitCents" | "cwd"> }
+  | {
+      readonly ok: true;
+      readonly bounds: Pick<
+        PumpOptions,
+        "maxBudgetUsd" | "taskLimitCents" | "cwd"
+      >;
+    }
   /** 开关没开。与下面那一种是【两件事】，合成一种就没法决定该不该退 2。 */
   | { readonly ok: false; readonly reason: "not_pumped" }
-  | { readonly ok: false; readonly reason: "invalid"; readonly bad: readonly string[] };
+  | {
+      readonly ok: false;
+      readonly reason: "invalid";
+      readonly bad: readonly string[];
+    };
 
 /**
  * 「泵开着 ⇒ 三格上限必须成立」这条判据的本体（纯函数，不碰 fs、不起库）。
@@ -1600,20 +1852,35 @@ export type PumpBounds =
  * 存在性由 boot 那一句 warn 负责，判致命与否的理由写在那一处。
  */
 export function pumpBoundsOf(args: ServeArgs): PumpBounds {
-  if (args.charterPump !== true && args.driverPump !== true) return { ok: false, reason: "not_pumped" };
+  if (args.charterPump !== true && args.driverPump !== true)
+    return { ok: false, reason: "not_pumped" };
   const bad: string[] = [];
-  if (typeof args.maxBudgetUsd !== "number" || !Number.isFinite(args.maxBudgetUsd) || args.maxBudgetUsd < 0) {
-    bad.push("--max-budget-usd（一轮的美元硬顶，实到 " + String(args.maxBudgetUsd) + "）");
+  if (
+    typeof args.maxBudgetUsd !== "number" ||
+    !Number.isFinite(args.maxBudgetUsd) ||
+    args.maxBudgetUsd < 0
+  ) {
+    bad.push(
+      "--max-budget-usd（一轮的美元硬顶，实到 " +
+        String(args.maxBudgetUsd) +
+        "）",
+    );
   }
   if (
     typeof args.taskLimitCents !== "number" ||
     !Number.isInteger(args.taskLimitCents) ||
     args.taskLimitCents < 0
   ) {
-    bad.push("--task-limit-cents（单条任务的预算上限，实到 " + String(args.taskLimitCents) + "）");
+    bad.push(
+      "--task-limit-cents（单条任务的预算上限，实到 " +
+        String(args.taskLimitCents) +
+        "）",
+    );
   }
   if (typeof args.agentCwd !== "string" || args.agentCwd.trim() === "") {
-    bad.push("--agent-cwd（角色能读到哪些文件，实到 " + String(args.agentCwd) + "）");
+    bad.push(
+      "--agent-cwd（角色能读到哪些文件，实到 " + String(args.agentCwd) + "）",
+    );
   }
   if (bad.length > 0) return { ok: false, reason: "invalid", bad };
   // 上面三发【每一发都往 bad 里推】，所以走到这里三格必然都在。
@@ -1681,7 +1948,11 @@ function boundsLine(bounds: PumpBoundsOk): string {
  * 判定在 pumpCharterCards 里已经做完了，咽掉一条结论的代价是那一格变成静默，
  * 而静默是本仓反复定义的最贵那类失效（0016 §1）。
  */
-function reportPumpRound(r: PumpRoundResult, io: ServeIo, budgetWarned: Set<string>): void {
+function reportPumpRound(
+  r: PumpRoundResult,
+  io: ServeIo,
+  budgetWarned: Set<string>,
+): void {
   // ⚠ 这一段【必须在下面那句 cards.length === 0 早退之前】：
   // 一条被门挡住的想法【按定义就不在 cards 里】（它是被候选 SQL 筛掉的，没被看过），
   // 所以"本轮一条卡都没动 ⇒ 什么都不说"那句一旦先跑，被挡住的这批就永远报不出来 ——
@@ -1720,7 +1991,9 @@ function reportPumpRound(r: PumpRoundResult, io: ServeIo, budgetWarned: Set<stri
   }
   for (const c of drafted) io.log("  · " + c.taskId + "：" + c.note);
   for (const c of attempted) {
-    io.warn("章程泵：一条任务的起草没成（下一轮还会试）" + c.taskId + "：" + c.note);
+    io.warn(
+      "章程泵：一条任务的起草没成（下一轮还会试）" + c.taskId + "：" + c.note,
+    );
   }
   for (const c of gaveUp) {
     io.warn(
@@ -1736,11 +2009,21 @@ function reportPumpRound(r: PumpRoundResult, io: ServeIo, budgetWarned: Set<stri
   // 单独说一句是因为它容易被当成失败：recordTurn 返回 recorded:false 是一种结论，
   // 而这条结论的内容通常是"这套装配没提供写入方"（测试注入），不是库坏了。
   for (const t of r.turns) {
-    if (!t.recorded) io.warn("章程泵：这一轮没记进执行日志 " + t.taskId + "：" + t.why);
+    if (!t.recorded)
+      io.warn("章程泵：这一轮没记进执行日志 " + t.taskId + "：" + t.why);
   }
-  if (skipped > 0 && attempted.length === 0 && gaveUp.length === 0 && drafted.length === 0) {
+  if (
+    skipped > 0 &&
+    attempted.length === 0 &&
+    gaveUp.length === 0 &&
+    drafted.length === 0
+  ) {
     // 整轮全是 skipped ⇒ 一条都不说会读成"泵没跑"；说一句总数而不逐条列。
-    io.log("章程泵：本轮 " + skipped + " 条候选都没起子进程（已有卡 / 状态不对 / 组织图挡着）。");
+    io.log(
+      "章程泵：本轮 " +
+        skipped +
+        " 条候选都没起子进程（已有卡 / 状态不对 / 组织图挡着）。",
+    );
   }
 }
 
@@ -1767,7 +2050,11 @@ function reportPumpRound(r: PumpRoundResult, io: ServeIo, budgetWarned: Set<stri
  *
  * ⚠ 一条都不 return、一条都不抛：判定在 driveTasks 里已经做完，这里只是【报告】。
  */
-function reportDriveRound(r: DriveRoundResult, io: ServeIo, budgetWarned: Set<string>): void {
+function reportDriveRound(
+  r: DriveRoundResult,
+  io: ServeIo,
+  budgetWarned: Set<string>,
+): void {
   for (const b of r.blocked) {
     if (budgetWarned.has(b.taskId)) continue;
     budgetWarned.add(b.taskId);
@@ -1813,7 +2100,12 @@ function reportDriveRound(r: DriveRoundResult, io: ServeIo, budgetWarned: Set<st
     }
   }
   for (const d of threw) {
-    io.warn("驱动器：一条任务推不动（下一轮还会试，直到试到上限）" + d.taskId + "：" + d.note);
+    io.warn(
+      "驱动器：一条任务推不动（下一轮还会试，直到试到上限）" +
+        d.taskId +
+        "：" +
+        d.note,
+    );
   }
   for (const d of gaveUp) {
     io.warn(
@@ -1868,16 +2160,36 @@ export function lastBackupAtMs(backupDir: string): number | null {
  * ⚠ 这里读的是 args 上的【开关】而不是装配层的 driverOn —— 后者还要 bounds 成立，
  * 而 bounds 不成立时进程根本起不来（退 2），走不到这一行。
  */
-export function shutdownOrderLine(a: ServeArgs): string {
+export function shutdownOrderLine(
+  a: ServeArgs,
+  /**
+   * 这台 Hub 有没有接 IM 通道。
+   *
+   * 读的是 **BootResult.imWired**（装配那一刻的结论），【不是】在这里再判一次 env。
+   * 理由与上面「驱动开着时不给具体秒数，指回横幅」同一条：这一句承诺的是
+   * 「这一次真的会等 IM 那一轮」，而唯一知道答案的是装配点（它读的是
+   * `o.env ?? process.env`）。CLI 拿自己那份 env 再算一遍，就成了第二个来源 ——
+   * 而"boot 读 A 那份 env、横幅读 B 那份"这种漂移没有任何东西会红。
+   * 参数保持【必填】：默认值 false 会让将来每一个新调用点安静地少说一步等待。
+   */
+  imWired: boolean,
+): string {
   return (
     "Ctrl-C 停止。停止顺序：停心跳 → 等备份 → 等在飞的章程起草" +
     (a.driverPump === true ? " / 在飞的驱动轮" : "") +
+    (imWired ? " / 在飞的 IM 入站 → 关 IM 通道" : "") +
     " → 关服务 → 关队列 → 还锁。\n" +
     (a.driverPump === true
       ? "  · 泵都没开时这几步【什么都不等】。章程起草在飞最坏等 180 秒；" +
         "驱动轮在飞的最坏等待时间【上面那条驱动器横幅里写着】（它按实际配置算，这里不重算一份）。\n" +
         "  · 【不要 kill -9】：等只是慢，kill -9 会留下没关的连接与没提交的事务。"
-      : "  （泵没开时第三步【什么都不等】。开着而真有一轮在起草时最坏等 180 秒，见上面那句提醒。）")
+      : "  （泵没开时第三步【什么都不等】。开着而真有一轮在起草时最坏等 180 秒，见上面那句提醒。）") +
+    (imWired
+      ? "\n  · IM 入站那一轮在飞时：那一发 HTTP【每发】都有自设截止（默认 10 秒），" +
+        "但一轮是【几发相加】（取 token + 翻页读 + 发卡），所以最坏等待不是 10 秒。" +
+        "挂着不动时先查网络与 origin，不要先 kill -9（那条队列还没关，决定可能正在落库）。" +
+        "⚠ 那个截止建立在「注入的 fetch 读 init.signal」之上，而那条约定没有机器判据。"
+      : "")
   );
 }
 
@@ -1937,12 +2249,18 @@ export function resumeCommand(taskId: string, dbPath?: string): string {
 
 export function graphNotWiredMessage(taskId: string, dbPath?: string): string {
   return (
-    "这个 Hub 入口【没有】接上图运行时（" + GRAPH_NOT_WIRED + "），task_id = " + taskId + "。\n" +
+    "这个 Hub 入口【没有】接上图运行时（" +
+    GRAPH_NOT_WIRED +
+    "），task_id = " +
+    taskId +
+    "。\n" +
     "为什么没接：图与 HTTP 决策两条写路径要落在【同一条】SQLite 连接的【两个】提交点上，" +
     "而同一连接上的两次事务会互斥（实测见 0010 §3 的 P1/P2/P4）。" +
     "修法属超步事务的持锁范围（0003），已挂 0010 等 CEO，不在本入口绕。\n" +
     "现在能做什么：这条任务的【决策已经落库】（卡片是批准的），" +
-    "跑 `" + resumeCommand(taskId, dbPath) + "` 就接着往下走。"
+    "跑 `" +
+    resumeCommand(taskId, dbPath) +
+    "` 就接着往下走。"
   );
 }
 
@@ -1958,7 +2276,9 @@ export function graphNotWiredMessage(taskId: string, dbPath?: string): string {
  * 必填会让每一发调用方都被迫编一个库路径出来 —— 而编出来的路径会出现在
  * 那句报错里，读的人以为那是真的库。
  */
-export function unavailableGraphFor(dbPath?: string): (taskId: string) => TaskGraph {
+export function unavailableGraphFor(
+  dbPath?: string,
+): (taskId: string) => TaskGraph {
   return (taskId: string): TaskGraph => {
     const boom = async (): Promise<never> => {
       throw new Error(graphNotWiredMessage(taskId, dbPath));
@@ -2030,7 +2350,9 @@ export async function runServeCli(
    * 这一行的判据与它的来历在 serveBannerOf（下面）—— 抽出去之前它是内联在这里的，
    * 而内联的那一版是写死的 "Hub 已在 127.0.0.1:" + port。
    */
-  io.log(serveBannerOf({ bindHost: r.bindHost, port: r.port, exposure: r.exposure }));
+  io.log(
+    serveBannerOf({ bindHost: r.bindHost, port: r.port, exposure: r.exposure }),
+  );
   io.log(
     "本机 token【只打印这一次】，不落库也不落盘（理由见 http/auth.ts 文件头）：\n  " +
       r.token,
@@ -2047,7 +2369,7 @@ export async function runServeCli(
    * 所以驱动开着时这里【不给具体秒数】，只指回上面那条横幅（那条是从真实配置算的，
    * 两处各算一遍就会有两个答案，而漂移的时候没有任何东西会红）。
    */
-  io.log(shutdownOrderLine(a));
+  io.log(shutdownOrderLine(a, r.imWired));
 
   const code = await waitForShutdown(r, io, (stop) => {
     requestStop = stop;
@@ -2118,7 +2440,9 @@ export async function waitForShutdown(
     const onSignal = (sig: string): void => {
       if (second) {
         io.warn(
-          "第二次收到 " + sig + " ⇒ 立即退出（不等清理；锁将由下一次启动判为陈旧）",
+          "第二次收到 " +
+            sig +
+            " ⇒ 立即退出（不等清理；锁将由下一次启动判为陈旧）",
         );
         resolve(EXIT_OK);
         return;

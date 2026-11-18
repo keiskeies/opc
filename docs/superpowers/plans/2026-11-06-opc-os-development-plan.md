@@ -173,10 +173,10 @@ opc-os/
 ### Task 0.3　SQLite 驱动定案（§25-D6 决策门，0.5 天）　—— 决策已作出，剩固化
 - **状态**：**D6-a 已定案（2026-11-06）**，决策记录见 `docs/decisions/0001-sqlite-driver.md`。依据为归档探针 `docs/superpowers/evidence/phase0-poc/`（`d6a.mjs`、`als-and-bind-limits.mjs`、`POC-OUTPUT.txt`、`LIMITS.txt`）。**禁止重新调研或重复决策。**
 - **本任务剩余的实际工作（三件，都是把探针变成仓库资产）**：
-  1. 建 `packages/hub/test/db/driver-preflight.test.ts`，把决策文档 §2.1 / §2.2 的断言固化进仓库 —— **当前仓库内没有这个测试，只有临时探针**；
+  1. 建 `packages/hub/test/db/driver-preflight.test.ts`，把决策文档 §2.1 / §2.2 的断言固化进仓库 —— ~~**当前仓库内没有这个测试，只有临时探针**~~ 【2026-11-17 复测：此句已过期，测试存在且 16 发全绿；复算 `npx vitest run packages/hub/test/db/driver-preflight.test.ts`】；
   2. `src/db/driver.ts` 暴露 `openDb(path): DatabaseSync`（统一 PRAGMA）与 `BATCH_ROWS = 1000` 常量，注释指向决策文档 §2.2（绑定参数上限实测 ≥ 8192，但未穷尽）；
   3. 测试必须针对**目标运行时**执行：若运行时无 `node:sqlite`，**必须显式失败**并提示「改判 D6-b」，**不得 skip**（skip 会让驱动不可用在 CI 里静默通过）。
-- **Run**：`pnpm test test/db/driver-preflight.test.ts`
+- **Run**：`pnpm test packages/hub/test/db/driver-preflight.test.ts`　【2026-11-17 住址修正：原写 test/db/driver-preflight.test.ts（不带 packages/hub 前缀那条）。那条路径【不存在】，而 vitest 把它当**子串过滤器**，正好命中 `packages/hub/` 下的同名文件 ⇒ 命令今天照样绿。绿的原因不是住址对，是匹配太宽：再来一个同名文件，它就会静默跑到别的文件上去。】
 - **验收**：测试存在且通过；`driver.ts` 有分片常量；决策文档 §6 的三个待办全部勾选。
 - **Commit**：`test(db): pin D6 preflight assertions into the repo`
 
@@ -241,8 +241,8 @@ export declare class SqliteWALSaver implements BaseCheckpointSaver {
 - **Commit**：`feat(checkpoint): sqlite checkpoint saver with contract tests`
 
 ### Task 0.5　迁移框架 + schema + 写队列（3 天）
-> **当前状态（2026-11-07）**：已完成（提交 `7bd8f0e`，14 文件 +2504）。`pnpm verify` = 10 文件 / 
-> 113 passed | 6 skipped。19 项变异：**15 项断言级杀死、1 项异常杀死（△，见 `decisions/0004` §11.2）、
+> **当前状态（2026-11-07）**：已完成（提交 `7bd8f0e`，14 文件 +2504）。`pnpm verify` = 10 文件 /
+> 113 passed | 6 skipped。【2026-11-17 注：这一句**带着日期**，所以它当年为真、不算撒谎 —— 但「当前」两个字会在每次被人跳过日期时变成一句假话。今天的读数只给命令不给数：`npx vitest run` —— 这一项每加一发测试就过期一次，我上一版在这里手抄的两个数在同一次会话里就漂了一回。而**不要**照抄任何读数去理解 `pnpm verify`：verify 的第一段 lint 今天恒红（0055 之后新增的那一格，见优化设计文档 §7 第 10 格），⇒ 当年那个「verify = 全绿」的等式今天不成立。】19 项变异：**15 项断言级杀死、1 项异常杀死（△，见 `decisions/0004` §11.2）、
 > 3 项存活** —— 存活的 P1/P3/R1 是「构造选项 + 显式 PRAGMA」的冗余双保险，已各补一条**复合变异**
 > （X1/X2：同时拆掉两处）证明冗余本身在保险，而不是测试没测到。
 >
@@ -443,7 +443,7 @@ export function policyDecide(a: ActionDraft, ctx: PolicyContext):
 - **Commit**：`test(acceptance): phase 1 gate behaviors pinned by tests`
 
 ### Task 1.8　Phase 1 出口门禁（0.5 天）
-- **Run**：`pnpm verify`；门控判定分支覆盖率 ≥ 95%；`test/acceptance/phase1-gates.test.ts` 三条通过。
+- **Run**：`pnpm verify`；门控判定分支覆盖率 ≥ 95%；`packages/hub/test/acceptance/phase1-gates.test.ts` 三条通过。　【2026-11-17 住址修正 + 一处读数纠正：① 原写 test/acceptance/phase1-gates.test.ts，同上 Task 0.3 那条，是靠 vitest 的子串匹配才绿的；② 原文说「三条通过」，实测该文件 **13 发**（`npx vitest run packages/hub/test/acceptance/phase1-gates.test.ts`）—— 当年是真三条，之后加过发，而这句话从没回头改。⚠ 本行的 `pnpm verify` 今天【跑不绿】：lint 那一段恒红，见 0055 / 优化设计文档 §7 第 10 格。】
 - **Gate**：通过后进入 Phase 2。
 - **Commit**：`chore(phase1): mark phase 1 exit gate passed`
 
@@ -505,6 +505,26 @@ export function policyDecide(a: ActionDraft, ctx: PolicyContext):
 
 ### Task 2.9　Phase 2 出口门禁（2 天）
 - **Playwright E2E**：`test/e2e/ceo-loop.spec.ts` —— 起 Hub + Web，端到端执行：输入想法 → 看板出现卡片并流转 → 收件箱出现审批 → 点击批准 → 看板更新为 DELIVERED。**全程无命令行**。
+  【2026-11-17 实测登记：该文件与 test/e2e/ 目录【不存在】，playwright 不在任何一个 package.json 里，全仓 `*.spec.ts` 0 个。⇒ 这道门【从未可复核】，而它和上面三道不一样：那三道是住址漂了，这一道是**东西压根没建**。已登记为待决策项，见优化设计文档 §7 第 10 格与台账 round274 账 ④。
+  【2026-11-17 round278 复跑：括号里那句「依赖装不上」**是过期的**——`.workbuddy/probe278` 里
+  隔离安装 `playwright@1.65.1` + `@larksuiteoapi/node-sdk@1.76.0` 共 54 包 exit 0（`--ignore-scripts`），
+  且 `playwright install chromium` 之后**真的启动了无头浏览器并断言成功**
+  （`LAUNCH_OK version=159.0.8154.6`）。⇒ 这道门今天不可复核的原因是**东西没建**，不是装不上；
+  决策面因此变窄了：剩下的只是「要不要花这个依赖 + 谁来写 spec」，不再有「装不装得上」这一项。
+  复算：`cd .workbuddy/probe278 && npm i --ignore-scripts playwright @larksuiteoapi/node-sdk && npx playwright install chromium && node launch.mjs`。】
+  【2026-11-17 round291 落地：`test/e2e/ceo-loop.spec.ts` + 根 `playwright.config.ts` **已存在**，
+  playwright/@playwright/test@1.65.1 进了根 devDependencies，`npx playwright test --list` 数得出这一发。
+  ⇒ 上面那句「文件与 test/e2e/ 目录【不存在】」【已过期】，那一行的豁免标记（HTML 注释形态，
+  名字是 gate-path-not-built）随之摘掉。摘它不是「宣布门过了」，是那条豁免的成立条件消失了 ——
+  留在原地会变成 `plan-gate-paths` 判据里的「死的豁免」。
+  ⚠ 注意别在正文里【原样写出】那个标记串来描述它：判据读的是这块验收行的原文，
+  写了就等于把豁免又贴回去了（本轮实测：写了 ⇒ 「死的豁免」当场红）。
+  ⚠ 但【不要把它读成这道门可复核】：spec 逐字走完的是「输入想法 → 看板出现卡片 → 卡片流转到
+  CHARTER_APPROVED → 收件箱出现章程提案 → 点批准 → 看板更新」，**最后那句「更新为 DELIVERED」没有走通**。
+  原因是批准只走完人边那一跳（`packages/hub/src/engine/dispatch.ts` 的 HUMAN_EDGES），CHARTER_APPROVED 之后的
+  DECOMPOSING → … → DELIVERED 全是 AGENT_EDGES，只有真 Claude 子进程或驱动器推得动，浏览器里没有任何一处置得动它。
+  ⇒ 「批准即 DELIVERED」在今天的代码里不成立，这一格是【产品决策】不是规格缺陷，登记在优化设计文档 §7。
+  另：spec 里唯一被替换的一步是章程起草那一次 runTurn（门禁不能花钱），代价与影响面写在文件头。】
 - **人工核对**：用键盘完成一次完整审批，记录耗时（应 ≤ 20 秒，规格 §19.1）。
 - **Gate**：通过后进入 Phase 3。
 - **Commit**：`test(e2e): ceo loop without command line`
@@ -561,7 +581,7 @@ export function policyDecide(a: ActionDraft, ctx: PolicyContext):
 - **Commit**：`feat(graph): parallel branches and per-role memory isolation`
 
 ### Task 3.8　Phase 3 出口门禁（1 天）
-- **Run**：`pnpm verify`；`test/acceptance/phase3.test.ts`：改验收标准 → 门控结果变化；自动审批可追溯。
+- **Run**：`pnpm verify`；`packages/hub/test/acceptance/phase3.test.ts`：改验收标准 → 门控结果变化；自动审批可追溯。　【2026-11-17 住址修正：原写 test/acceptance/phase3.test.ts（不带 packages/hub 前缀），同 Task 0.3 那条一样是靠子串匹配才绿的；实测该文件 13 发全绿。⚠ `pnpm verify` 同样今天跑不绿，见 Task 1.8 那条注解。】
 - **Gate**：通过后进入 Phase 4。
 - **Commit**：`chore(phase3): mark phase 3 exit gate passed`
 
@@ -603,6 +623,16 @@ export function policyDecide(a: ActionDraft, ctx: PolicyContext):
 
 ### Task 4.7　Phase 4 出口门禁（1.5 天）
 - **E2E**：`test/e2e/mobile-approval.spec.ts` + 飞书沙箱手工验证记录。
+  【2026-11-17 实测登记：同 Task 2.9 那一格 —— 该文件与 test/e2e/ 目录不存在，playwright 未装。这道门从未可复核。
+  同 round278 那条更正：「未装」是【今天没装进本仓】，不是【装不上】，实测见 Task 2.9 那格。
+  ⚠ 「飞书沙箱手工验证记录」那一半还多一层：`@larksuiteoapi/node-sdk` 同样装得上，而仓里
+  【没有任何一个真的 IM 适配器文件】（优化设计文档 O12 现状），所以手工验证今天也无从做起。
+  【round282 更正，原文留着】上面那句「没有任何一个真的 IM 适配器文件」已过期 ——
+  `packages/hub/src/channels/feishu.ts` 在（round281），装配点在
+  `packages/hub/src/serve/im-channels.ts`，
+  boot 每轮心跳派发一次入站。**但这一格照旧不合规**，卡的东西换了：真飞书接口在本机
+  一次也没打通过（要真凭据，全部绿都绿在注入的 fetch 上），且发卡那一路（`deliverCard`）
+  零生产调用方 ⇒ 手工验证现在能做的是「手机上回批」，做不了「卡片推到手机上」。<!-- gate-path-not-built -->】
 - **Gate**：通过后进入 Phase 5。
 - **Commit**：`chore(phase4): mark phase 4 exit gate passed`
 
@@ -836,4 +866,4 @@ Phase 6 出口门禁通过后，系统进入**自持运营**状态，工程侧�
 | **A. 子代理逐任务驱动**（推荐） | 任务边界清晰、想让每个任务独立可验证、主线上下文保持干净 | 用 `subagent-driven-development`：按 §10.1 依赖顺序逐个派发任务，每完成一个任务回收「测试输出 + 验收核对结果」再派下一个 |
 | B. 分块顺序执行 | 想在当前会话里连续推进、便于随时插手改方向 | 用 `executing-plans`：从 Task 0.1 起顺序执行，每完成一个 Phase 的出口门禁停下复核 |
 
-两种方式都从 **Task 0.1（`git init` + 把 PoC 固化成仓库测试）** 开始 —— 当前工作区 `D:\item\opc` 下只有 `docs/`，没有代码、没有 git 仓库。
+两种方式都从 **Task 0.1（`git init` + 把 PoC 固化成仓库测试）** 开始 —— ~~当前工作区 `D:\item\opc` 下只有 `docs/`，没有代码、没有 git 仓库。~~ 【2026-11-17 复测：此句写于本篇落笔那天，到今天**整句反了** —— 工作区有 packages/、test/、biome.json、vitest.config.ts，且是一个 git 仓库。原句保留划线不删：**这一篇是施工前的规划**，删掉它会让后来人以为这份计划从一开始就描述了现状**；读全篇时请把每一句"当前"都按 2026-11-06/07 那个日期理解。复算：`ls` + `git rev-parse --short HEAD`。】

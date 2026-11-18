@@ -476,21 +476,21 @@ export interface ChannelPollRound {
  * 且零报错。让文本穿过边界，那条判据才有物理载体。
  *
  * ⚠ `evidenceRefs` **可空，而原因是缺陷不是设计**：【规格】§9.2 那个「三行固定」的
- * 第三行是证据链接，而**一张卡片指不回它是靠哪份证据建的**（实测，别信我这段话，
- * 自己跑一遍 `PRAGMA table_info(approvals)`）：
- *   · `approvals` 一共 15 列，**没有一列与证据相关**，也没有指向证据包的外键；
+ * 第三行是证据链接，而~~一张卡片指不回它是靠哪份证据建的~~ **0008 之后【有列可指】了**
+ * （`approvals.evidence_refs`，O5 动作 4；本轮下面是那段旧读数的原文，保留以自证）：
+ *   · ~~`approvals` 一共 15 列，**没有一列与证据相关**，也没有指向证据包的外键~~
+ *     —— 这句在 0008 之前是对的，当时实测过；现在那一列存在，写侧在建卡时落 JSON；
  *   · 证据本身**在库里** —— `evidence_bundles.artifacts`（路径 / sha256 / 外链）与
  *     0002 补的 `claims`（逐条主张的 `evidence_refs`）。`review_gates` 还有一条
- *     `evidence_bundle_id` 指向它。**缺的不是数据，是【卡片 → 哪份证据】那条边**；
- *   · 所以想给卡片补上第三行，只能按 `task_id` 猜「大概是那个 bundle」，
- *     而一个任务上 bundle 是按 (bundle_type × 轮次) 多份的 —— 猜出来的那一份
- *     可能不是当初升级决策依据的那一份。
+ *     `evidence_bundle_id` 指向它。~~缺的不是数据，是【卡片 → 哪份证据】那条边~~
+ *     —— 边有了【存在哪里】，还缺【谁来填】与【哪份包算这张卡的依据】的语义
+ *     （生产者 = dispatch 交接带包，O5 动作 1 / 2；今天建卡方仍无人传引用）；
+ *   · 所以「按 task_id 猜 bundle」仍然不许做：一个任务上 bundle 是按
+ *     (bundle_type × 轮次) 多份的，猜出来的那一份可能不是升级决策依据那一份。
  *
- * 这件事**本模块补不了**：加那条边是一次迁移 + 一个「谁在建卡时负责写下它」的
- * 决定（建卡方 `createCard` 的调用点今天是零，0026 §1），都超出「通道抽象层」这一篇。
- * 本篇只做一件在范围内的事：**把它留成类型上可见的形状**（`| null`），
+ * 本篇（通道抽象层）做的事不变：**把它留成类型上可见的形状**（`| null`），
  * 而不是塞一个 `[]` 把它抹平 —— `[]` 会让适配器渲染出「证据：无」，
- * 那是把【我们没存这条边】说成【这张卡没有证据】，对 CEO 是两个完全不同的结论：
+ * 那是把【建卡方没写这条边】说成【这张卡没有证据】，对 CEO 是两个完全不同的结论：
  * 前者是系统的缺口，后者是那个任务的产出方没交东西，**后者会被当成一次追责依据**。
  */
 export interface ChannelCardSnapshot {
@@ -512,22 +512,45 @@ export interface ChannelCardSnapshot {
  * 我原本在这里写的是「那张绑定表**今天不存在**，`roles/` 里没有 IM 账号这一列」。
  * **那句是错的**，而且错的方向很坏：它把一个「表在、读写方为 0」的缺口
  * 说成了「表都不在」，后者听起来像「这事要从头设计」，前者才是真相 ——
- * 一张 0001 就建好的表在等它的读写方（同 0027 §0 那张 `im_tokens` 零写入方）。
- * 实测（`grep -rn im_bindings`，src 与 test 全仓）：
+ * 一张 0001 就建好的表在等它的读写方。
+ * ⚠ 「在等它的读写方」这句在 0028 之后**也过期了**（0063 §2 抓到）：
+ *   · `im_bindings` 的读写方现在是 `bindings/im.ts`（实测数过：一条 `INSERT INTO im_bindings`
+ *     + 两条 UPDATE + 三条 SELECT），HTTP 侧在 `http/bindings.ts`，app.ts 里三条路由已接
+ *     （requestBindingRoute / verifyBindingRoute / rebindBindingRoute 那三个 case）；
+ *   · 类比里那张 `im_tokens` 也早有写入方（`http/tokens.ts`）。
+ *   两句当年的读数都对，只是【写成现在时留在了原地】。原话按口径留着，改成下面这样。
+ * 当时实测（`grep -rn im_bindings`，src 与 test 全仓）：
  *   · 表**在** `resources/migrations/0001_init.sql:249`，列是
  *     `id / platform / external_user_id / ceo_role / verified / created_at`；
- *   · 读写方 **0 处** —— 全仓没有任何一条 SQL 碰过它。
+ *   · 读写方 **0 处**（当年）—— 全仓没有任何一条 SQL 碰过它。【0028 之后不为 0】
  *
- * ⚠ 而这张表的默认值本身是一个陷阱，所以判据仍然写在这里：
+ * ⚠ 而这张表的默认值本身是一个陷阱，所以判据仍然写在这里。
+ * 当年那句「有 SQL 不等于这一层接上了 —— 全仓没有任何地方往 `createChannelRuntime`
+ * 传 `actorFor`，实测 `serve/` 与 `http/` 里 0 处，所以下面那句「接这张表的那个人」
+ * 还没出现」在 0063 之后**过期了一半**（round280 实测）：`channels/approval-bridge.ts`
+ * 就是那个装配方，`actorFor` 现在有人传了。但**判据这一半照旧成立，而且必须继续写**：
  * `ceo_role TEXT NOT NULL DEFAULT 'ceo'` —— **每一行绑定默认就指向 CEO 角色**，
  * 而 `verified INTEGER DEFAULT 0` 默认是「没验过」。
- * 于是「把 `actorFor` 直接接到这张表上」这一行代码今天会造出：
+ * 于是「把 `actorFor` 直接接到这张表上」这一行代码会造出：
  * 任何一个在这个平台上发过消息、且有人替他插过一行绑定的账号，
  * **默认就是 CEO**，而那行绑定有没有被验证过完全不看。
- * 这不是待补的缺口，是**一条能批准的冒充通道**，而且它今天全部测试都会绿。
+ * 这不是待补的缺口，是**一条能批准的冒充通道**，而且它全部测试都会绿。
  * 所以本层的判据写成：`actorFor` 返回 null ⇒ 未授权 ⇒ 拒，**默认就是 null**；
- * 接这张表的那个人必须自己回答「`verified = 0` 的行算不算数」。
- * 缺的是生产者与那次校验，不是判据，更不是那张表。
+ * 接这张表的那个人必须自己回答「`verified = 0` 的行算不算数」——
+ * `bindings/im.ts` 的 `makeChannelActorResolver` 答的是「问不到平台就是 null」，
+ * 而 `channels/approval-bridge.ts` 是它的第一位读者（未验证那一行走 `pending_verification`
+ * 那一支 ⇒ 拿不到角色 ⇒ 上面那发 `unauthorized` 红在那儿）。
+ * ⚠ 但【射程】要说清：~~那座桥今天从任何生产入口走不到 —— 本层在 src 侧仍零 import
+ * （没有真的 IM 适配器，O12 动作 2 未做）。所以这一层今天仍然是「接好了但没通电」。~~
+ * 这半句在 round281 过期：`channels/feishu.ts` 是真适配器，`serve/im-channels.ts` 是装配点，
+ * `serve/assemble.ts` 的 `boot()` 每一轮心跳派发一次入站 ⇒ 电已经通到这一层。
+ * ~~⚠ 而"通电"只到【入站】那一半：`deliverCard`（发卡）在 src 里仍然零生产调用方，
+ * 那是 O12 动作 4，前置是一张跨重启的投递台账（库里今天没有那张表）。~~
+ * 这半句在 round283 过期：`resources/migrations/0009_card_delivery_ledger.sql` 建了
+ * `card_deliveries`，`channels/deliver.ts` 是它的第一个写方，而 `serve/im-channels.ts`
+ * 每一轮心跳在判完回传【之后】调一次 ⇒ 出站那一半也通电了，幂等靠库而不是靠内存。
+ * 仍然真的那条：台账答不出「到没到人手里」（抢台账与发送失败在库里是同一行），
+ * 而多于一条通道时装配层【干脆不推】—— 库里没有一列说这张卡走哪条通道。见 r17。
  */
 export interface ChannelActor {
   readonly senderId: string;

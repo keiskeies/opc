@@ -206,7 +206,7 @@ export function citationsFromMarkdown(
       for (const c of refsFromLine(r.doc, i + 1, l)) {
         // 豁免与决策文档同一份判据；被豁免的引用【可数】，不静默吞掉。
         if (isRetracted(l)) {
-          retracted.push(describe(c));
+          retracted.push(describeCitation(c));
           continue;
         }
         out.push(c);
@@ -216,7 +216,16 @@ export function citationsFromMarkdown(
   return out;
 }
 
-function describe(c: Citation): string {
+/**
+ * 这个名字以前叫 `describe`。改名的唯一理由是【工具链撞名】，不是风格：
+ * 根 package.json 一旦装上 `@playwright/test`，biome 2.6.5 就在全仓启用 Playwright 那一族
+ * 规则（实测同一个二进制同一个文件：装上 ⇒ comment-citations.ts 报 4 发
+ * `lint/correctness/usePlaywrightValidDescribeCallback`，摘掉 ⇒ 0 发），而它把这发【私有
+ * 的格式化函数】认成了 `test.describe`。规则本身没问题，是名字撞了；
+ * 所以【改名】而不是在 biome.json 里关掉整族规则 —— 关掉会连 test/e2e 那两个真 spec
+ * 的合法误用一起放过。
+ */
+function describeCitation(c: Citation): string {
   return (
     c.file +
     ":" +
@@ -245,19 +254,22 @@ export function checkCitations(
     if (c.negated) {
       if (exists) {
         problems.push({
-          why: describe(c) + " 这句说不存在，可它现在存在了 —— 描述已过期",
+          why:
+            describeCitation(c) + " 这句说不存在，可它现在存在了 —— 描述已过期",
         });
       }
       continue;
     }
     if (t === undefined) {
-      problems.push({ why: describe(c) + " 目标决策文档不存在（写错篇号？）" });
+      problems.push({
+        why: describeCitation(c) + " 目标决策文档不存在（写错篇号？）",
+      });
       continue;
     }
     if (!exists) {
       problems.push({
         why:
-          describe(c) +
+          describeCitation(c) +
           " 在目标篇里不存在（引用写错，或那一节【那一条】已被改名或删掉）",
       });
     }

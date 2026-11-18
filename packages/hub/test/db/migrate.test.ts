@@ -1,8 +1,8 @@
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, beforeAll, expect, it } from "vitest";
-import { fixtureTmp } from "../fixtures/fixture-dir.js";
 import { MIGRATIONS_DIR, migrate } from "../../src/db/migrate.js";
+import { fixtureTmp } from "../fixtures/fixture-dir.js";
 
 /**
  * Task 0.5　迁移框架。
@@ -160,6 +160,10 @@ it("schema_migrations 记录版本与 Unix 毫秒时间戳", async () => {
     "0003_patrol_event_index",
     "0004_approval_card_identity",
     "0005_im_binding_identity",
+    "0006_approval_dedup_pending_only",
+    "0007_evidence_metrics",
+    "0008_approval_evidence_refs",
+    "0009_card_delivery_ledger",
   ]);
   // applied_at 必须是 Unix 毫秒整数：审计要能还原「这张表什么时候建的」
   for (const r of rows) {

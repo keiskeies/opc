@@ -166,8 +166,11 @@ describe("跳过写法扫描", () => {
     /* 先确认 findCounters 真看见了这个候选，否则【没数到】会被误当成【数到了零】 */
     const cs = findCounters(text);
     expect(cs.length).toBe(1);
-    expect(cs[0].incremented).toBe(0);
-    expect(cs[0].assertedInAfterAll).toBe(true);
+    // 可选链而不是 cs[0].x：上一发已经断过长度为 1，所以运行期取得到值；
+    // 而写成下标直取在类型上是「可能 undefined」，写成 `!` 就是拿断言糊掉它。
+    // 可选链在这里两全 —— 真取不到时读出的是 undefined，expect(undefined).toBe(0) 一样红。
+    expect(cs[0]?.incremented).toBe(0);
+    expect(cs[0]?.assertedInAfterAll).toBe(true);
     const got = reasons([one(path, text)], [path]);
     expect(got.length).toBe(1);
     expect(got[0]).toContain("运行计数");

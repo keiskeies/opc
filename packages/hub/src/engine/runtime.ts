@@ -38,7 +38,16 @@ import {
   type TurnOutcome,
 } from "./dispatch.js";
 import { runRole } from "./claude.js";
+import {
+  ADD_CONSUMED_SQL,
+  ENSERT_BUDGET_SQL,
+  IDEMPOTENT_INSERT_SQL,
+} from "../budget/tracker.js";
+import { assertCharterShape, readLatestCharter } from "../charter/store.js";
+import { NO_CHARTER_LINE, renderCharterPrompt } from "../charter/prompt.js";
 import { readGraphByVersion } from "../org/commit.js";
+import { isTaskOwnerOf, readRoleMemory } from "../memory/role-memory.js";
+import { memoryPromptSections, PROMPT_MEMORY_LIMIT } from "../memory/prompt.js";
 import { requireScopeDb } from "../checkpoint/tx-scope.js";
 import type { HubWriter } from "../db/write-queue.js";
 import type { DomainEvent, EventBus } from "../events/bus.js";
@@ -109,34 +118,26 @@ export const REJECTION_COUNT_SQL =
   "SELECT COUNT(*) AS n FROM events WHERE task_id = ? AND action = 'state_change' " +
   "AND json_extract(payload, '$.to') = 'REJECTED_DOWNWARD'";
 
-/** 同一件事是否已被 CEO 批过（同源审阅的放行凭据）。 */
-export const CEO_APPROVED_SQL =
-  "SELECT 1 AS hit FROM approvals WHERE task_id = ? AND card_key = ? AND status = 'approved' LIMIT 1";
-
 /**
- * 记账三句：声明任务级上限 → 幂等插一笔 budget_events → 扣减。
+ * 同一件事是否已被 CEO 批过（同源审阅的放行凭据）。
  *
- * ⚠ 这里【不用】BudgetTracker.consume，尽管它写的就是这两句：那个方法开头要求
- * recorder.inStepTx()（超步事务的责任方是 recorder.run，tracker.ts:174），
- * 而 engine/ 这条路线上【没有超步】—— 事务责任方是 WriteQueue.node()。
- * 硬套的结局是每次记账都抛「必须在超步事务内调用」：一次对的报错配一个错的场景。
- * 于是它的三条不变量在这里逐条照抄：① 金额必须是安全整数且非负（负数 = 凭空加额度）；
- * ② 先确认 budgets 里有行、再烧幂等键（否则插入成功而扣减失败，此后每次重试都被
- *    ON CONFLICT 判成「已记过」，那笔钱永远记不上）；③ source_event = events.id 当幂等键。
+ * ⚠ `decided_by = 'ceo'` 这一维是 0062 补的，缺它的时候这个名字【只验了状态没验身份】：
+ * 全仓三条 `UPDATE approvals` 里，http/real-deps.ts 与 engine/approve.ts 写的是 `'ceo'`，
+ * 而 policy/auto-approve.ts 写的是 `'policy-engine'`（那个模块自己登记在死模块基线里、
+ * 今天零生产调用方）。也就是说今天没有任何一条**真实**的批准会被这一维挡住 ——
+ * 补它买的是【那条路被接上的一天】：策略引擎一旦真的能批卡，它写的一行就会
+ * 直接满足这道活门，而 §5.9 那个批准口存在的理由恰好是「人来承担同源审阅的风险」。
+ * 机器自己批自己审，是那一格里最不该出现的一种"批过了"。
  *
- * 没抄的是第 4 条：它跨过上限时发 BudgetPaused。发不了 —— §7.1 只有
- * IN_REVIEW → BUDGET_PAUSED 一条入边，从 IN_PROGRESS / DECOMPOSING 硬停【没有合法落点】，
- * 而为记账现造一条状态边就是把状态机改成规格没有的样子。缺口登记在 0041 §7。
+ * ⚠ 而**没有**顺手加 `decision_note` 非空。同一个函数里两维的收紧代价不同，不能一起做：
+ * 身份那一维今天恒真（加它零成本），理由那一维今天【恒假】—— `requiresNote` 只要求
+ * 【打回】带理由，批准可以空着点。读侧一旦要求理由，CEO 在手机上点的那发
+ * 【状态是 approved、理由为空】的批准就不再算凭据 ⇒ 门继续拦 ⇒ 建【新的】pending 卡 ⇒
+ * 收件箱每轮多一张卡而【永远批不掉】。那比原来那格坏得多，且它要改的是【写侧】
+ * （批准时也强制理由）而不是这里。登记在 0062 §7 第 2 条，不在这篇偷偷做。
  */
-export const ENSERT_TASK_BUDGET_SQL =
-  "INSERT INTO budgets (id, scope_type, scope_id, period, limit_cents, consumed_cents, hard_stop) " +
-  "VALUES (?, 'task', ?, 'per_task', ?, 0, 1) ON CONFLICT(scope_type, scope_id, period) DO NOTHING";
-export const BUDGET_EVENT_SQL =
-  "INSERT INTO budget_events (source_event, scope_type, scope_id, period, amount_cents, task_id, created_at) " +
-  "VALUES (?, 'task', ?, 'per_task', ?, ?, ?) ON CONFLICT(source_event) DO NOTHING";
-export const ADD_TASK_BUDGET_SQL =
-  "UPDATE budgets SET consumed_cents = consumed_cents + ? " +
-  "WHERE scope_type = 'task' AND scope_id = ? AND period = 'per_task'";
+export const CEO_APPROVED_SQL =
+  "SELECT 1 AS hit FROM approvals WHERE task_id = ? AND card_key = ? AND status = 'approved' AND decided_by = 'ceo' LIMIT 1";
 
 export interface RuntimeDeps {
   /** 写入方。要的是 HubWriter：写走 node()，读走那个物理只读的连接。 */
@@ -276,11 +277,30 @@ export function makeRuntime(d: RuntimeDeps): EngineRuntime {
     },
 
     rolePrompt: (roleId) => {
-      // ⚠ 岗位书今天【没有生产来源】：role_charters 是空表，而 packages/hub/resources
-      // 那几份模板里带着 CEO-PLACEHOLDER-ACCEPTANCE 占位验收标准（我不能替 CEO 填）。
-      // 所以这里只给一句最小身份描述，而不是编一份岗位书 —— 编出来的「你的职责是…」
-      // 会让 agent 按一份【没有人在纸上认过】的授权干活，那比信息少更糟。
-      // 接上真岗位书的口子就是这一格，缺的东西登记在 0041 §6。
+      // ── 岗位书（O2 动作 1）──────────────────────────────────────────────
+      // 读的是 role_charters 的最新版（`readLatestCharter`），刻意【不】回退到
+      // resources/charter-templates/*.yaml：那是 O2 的病根本身（两份来源，哪份生效
+      // 看谁后写）。charter/store.ts 里 gateCriteriaForRole 早就写了同一条立场并给了
+      // 理由，这里是它的第二个读者，不复述。
+      //
+      // 三种读结果，三种【不同】的话，不许合并：
+      //  ① 有岗位书 ⇒ 渲染那一份（渲染口径见 charter/prompt.ts 的文件头，逐格给了
+      //     「进不进提示词」的理由）。
+      //  ② 表里这个角色一个版本都没有 ⇒ 明说「hub 没有你的岗位书」。
+      //     不编一份通用的：编出来的「你的职责是…」会让 agent 按一份【没有人在纸上
+      //     认过】的授权干活，那比信息少更糟（这句是这个位置原本的立场，保留）。
+      //  ③ 有行但读坏了（config 不是合法 JSON / 缺必需格）⇒ 【让它抛】。
+      //     这一格是本轮唯一需要拍的：抛会让这一轮整个不跑（CLI 那边 catch 成
+      //     退出码 1 并打出原因）。在这里 catch 住、改渲染一句「你的岗位书读坏了」
+      //     看着更温和，而后果是 agent【照常跑完这一轮、真的花钱】，只是没有岗位书，
+      //     而症状只是「这一轮输出质量差」。数据坏了却继续花钱 = 把坏数据吸收成
+      //     正常噪声。与 readCharterConfig 那句「这与『那一版不存在』是两件事」同一立场：
+      //     两件事就该有两种后果。
+      const charter = readLatestCharter(read(), roleId);
+      const charterBlock =
+        charter === undefined
+          ? NO_CHARTER_LINE
+          : renderCharterPrompt(assertCharterShape(roleId, charter)).sections.join("\n");
       //
       // CEO 那一格【从图里读】而不再写 `?? "ceo"`（0047）：那句回退是本轮修复的一半 ——
       // 它把「顶层是谁」这件【结构事实】降级成了一个字面量，而组织图的根完全可以叫 boss。
@@ -298,9 +318,36 @@ export function makeRuntime(d: RuntimeDeps): EngineRuntime {
           ? "CEO 是唯一的决策者（这一版组织图里 hub 认不出汇报根，所以【说不出】它的角色名 —— " +
             "这不改变你的动作：下一跳由 hub 按组织图判，不由你判。）"
           : "CEO（角色 " + ceo + "）是唯一的决策者";
+      // ── 角色记忆（O3 动作 1）────────────────────────────────────────────
+      // 口径全部在 memory/prompt.ts（四种读结果要说四种话，那些【话】是判据），
+      // 这里只负责三件只有这一层知道的事：读谁、怎么读、读坏了怎么办。
+      //
+      // order: "newest" —— 见 MemoryOrder。默认那个 ASC 是为分页选的，对"过去怎么判的"
+      // 是反的：库里越长，ASC 取到的越老。
+      //
+      // ⚠ 读失败 ⇒ 【这一轮不跑】（不 catch）。这与上面岗位书那第 ③ 支同一个立场，
+      //   而它在这里比岗位书更要紧：记忆读失败时catch 的话，agent 会拿到一段
+      //   【没有历史】的提示词、真的花钱跑完一轮，而症状只是"这次输出不像往常"。
+      //   更要紧的是 memory/prompt.ts 会说那句「库里确实没有，不是读取失败」——
+      //   catch 之后那句话就成了【谎】：明明是读取失败，却说"没有"。
+      //   抛出去由 CLI 收成退出码 1 并打出原因，那是这件事唯一的诚实读数。
+      const memory = readRoleMemory(read(), {
+        owner: roleId,
+        // requester 必填而不是"缺省 = owner"：见 MemoryRequest。这里确实是自读，
+        // 但把它写成 roleId 一遍比写成缺省多花的零成本换来的是【漏传不会变成全量权限】。
+        requester: roleId,
+        order: "newest",
+        // 归属判断走模块里那个唯一实现（它必须与 MEMORY_ROWS_SQL 的 OR 第二支同义）。
+        isTaskOwner: (taskId, owner) => isTaskOwnerOf(read(), taskId, owner),
+        limit: PROMPT_MEMORY_LIMIT,
+      });
+      const memoryBlock = memoryPromptSections(memory).join("\n");
       return (
         "你在一人公司里担任角色 [" + roleId + "]。" + ceoLine + "，" +
-        "你的汇报对象由 hub 按组织图决定，不由你决定。"
+        "你的汇报对象由 hub 按组织图决定，不由你决定。\n" +
+        charterBlock +
+        "\n" +
+        memoryBlock
       );
     },
 
@@ -367,21 +414,48 @@ export function makeRuntime(d: RuntimeDeps): EngineRuntime {
       read().prepare(CEO_APPROVED_SQL).get(taskId, cardKey) !== undefined,
 
     onCost: ((o: Parameters<CostHook>[0]): void => {
+      // 记账三句（声明任务级上限 → 幂等插一笔 budget_events → 扣减）。SQL 本体在
+      // `budget/tracker.ts`，这里只喂【任务级那一组绑参】。round272 之前这里是三条
+      // 手抄的 SQL，与 tracker 那两条只差把 `scope_type`/`period` 内联成字面量
+      // ⇒ 同一个作用域两份写法，改一处不带着另一处（O6 动作 2 / O7 那本账的根）。
+      // 收敛不靠约定：把那两个内联改成【绑参】之后，两条路线用的是同一条语句的
+      // 同一段字节，没有第二份可漂。
+      //
+      // ⚠ 这里【不用】BudgetTracker.consume，尽管它写的就是这三句：那个方法开头要求
+      // recorder.inStepTx()（超步事务的责任方是 recorder.run），而 engine/ 这条路线上
+      // 【没有超步】—— 事务责任方是 WriteQueue.node()。硬套的结局是每次记账都抛
+      // 「必须在超步事务内调用」：一次对的报错配一个错的场景。
+      // 于是它的三条不变量在这里逐条照抄：① 金额必须是安全整数且非负（负数 = 凭空加额度）；
+      // ② 先确认 budgets 里有行、再烧幂等键（否则插入成功而扣减失败，此后每次重试都被
+      //    ON CONFLICT 判成「已记过」，那笔钱永远记不上）；③ source_event = events.id 当幂等键。
+      // 没抄的是第 4 条：它跨过上限时发 BudgetPaused。发不了 —— §7.1 只有
+      // IN_REVIEW → BUDGET_PAUSED 一条入边，从 IN_PROGRESS / DECOMPOSING 硬停【没有合法落点】，
+      // 而为记账现造一条状态边就是把状态机改成规格没有的样子。缺口登记在 0041 §7。
       // 金额校验排在最前，跟 tracker.ts 一样：负数 / 小数 / 超大整数一律不记。
       // 「不记」在这里是安全的方向 —— 少记一笔钱会让账面偏乐观，而写坏一行预算账
       // 会让整轮跟着回滚；两者都比不上「拒绝这一笔」清楚。
       if (!Number.isSafeInteger(o.costCents) || o.costCents < 0) return;
       const db = o.db;
-      db.prepare(ENSERT_TASK_BUDGET_SQL).run(
+      db.prepare(ENSERT_BUDGET_SQL).run(
         "task|" + o.taskId + "|per_task",
+        "task",
         o.taskId,
+        "per_task",
         d.taskLimitCents,
       );
       const ins = db
-        .prepare(BUDGET_EVENT_SQL)
-        .run(o.seq, o.taskId, o.costCents, o.taskId, o.nowMs) as { changes: number | bigint };
+        .prepare(IDEMPOTENT_INSERT_SQL)
+        .run(
+          o.seq,
+          "task",
+          o.taskId,
+          "per_task",
+          o.costCents,
+          o.taskId,
+          o.nowMs,
+        ) as { changes: number | bigint };
       if (Number(ins.changes) === 0) return; // 幂等命中：这一笔已经记过，绝不重复扣
-      db.prepare(ADD_TASK_BUDGET_SQL).run(o.costCents, o.taskId);
+      db.prepare(ADD_CONSUMED_SQL).run(o.costCents, "task", o.taskId, "per_task");
     }) satisfies CostHook,
 
     publish: (e: DomainEvent, seq: number): void => {

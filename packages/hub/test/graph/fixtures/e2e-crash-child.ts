@@ -162,7 +162,8 @@ const input = resumed ? null : { idea, current: "CHARTER_PENDING" };
  * 崩溃时机（实测）：超步 N 的事件在【超步 N+1 的 put】里才提交。所以杀在 test 超步内
  * 任意一条边之后，库里只剩到 dev 为止的 4 条边，tasks.status 停在 EVIDENCE_SUBMITTED；
  * current / reworkUsed 通道也一起回滚 ⇒ 续跑重放 test 时走的是同一条回退分支，
- * 边序列才会恰好补齐到 14 条。这就是 §6.3「checkpoint 与 events 同事务」的兑现点。
+ * 边序列才会恰好补齐到完整期望轨迹（条数见 fixtures/company-fixtures.ts 的
+ * EXPECTED_STUB_TRACE，这里不写死）。这就是 §6.3「checkpoint 与 events 同事务」的兑现点。
  */
 auditor
   .invoke(() => graph.invoke(input, cfg))

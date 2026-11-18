@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { writeFileSync } from "node:fs";
 /**
  * 假 claude：一个真的可执行文件，按 argv/stdin 返回 claude -p --output-format json
  * 的那份形状。它不是 mock —— runRole 起的是真子进程，走的真是 spawn/stdin/stdout，
@@ -38,6 +39,45 @@ process.stdin.on("end", () => {
     // 永久挂着，让 runRole 的超时那一发能真的开火
     setInterval(() => {}, 1000);
     return;
+  }
+  /**
+   * mode=write：模拟「这个 CLI 在没有 plan 模式时真的会往工作区写文件」。
+   *
+   * 这一档存在的唯一理由：`--permission-mode plan` 是生产路线上今天【唯一】生效的安全
+   * 边界，而边界本身不可测 —— 本机装不上真的 CLI，离线拿不到「plan 模式会不会真的
+   * 挡住写」。于是先前那一发守卫只能断「argv 上有这两个 token」，那是一句参数回显，
+   * 不是边界在起作用。这一档把话说清楚：
+   *   · 桩读 argv 里的 `--permission-mode`，值不是 plan（或压根没有）⇒ 【真的写盘】；
+   *   · 值是 plan ⇒ 不写。
+   * ⚠ 这是【桩在模拟 CLI 的语义】，不是「实测真 CLI 如此」。所以测试里那一发的标题写的是
+   * 「适配器没把 plan 交出去 ⇒ 对面就会写」，而不是「plan 模式挡住了写文件」。
+   * FAKE_CLAUDE_NO_PLAN=1 让桩【无视 argv 里的 plan】当作没给：那一发是【正向对照】，
+   * 它证明这个写探针真的会写 —— 否则「文件不在」可能是路径写错、权限不够、桩根本没实现，
+   * 而那种红永远等不到。
+   */
+  if (mode === "write") {
+    const target = process.env["FAKE_CLAUDE_WRITE_TO"] ?? "";
+    const granted =
+      process.env["FAKE_CLAUDE_NO_PLAN"] === "1" ||
+      argv[argv.indexOf("--permission-mode") + 1] !== "plan";
+    if (target !== "" && granted) {
+      writeFileSync(target, "写出去了：这一发没有 plan 模式挡着\n");
+    }
+    process.stdout.write(
+      JSON.stringify({
+        is_error: false,
+        result: JSON.stringify({
+          wrote: target !== "" && granted ? "yes" : "no",
+          permissionMode: argv.includes("--permission-mode")
+            ? (argv[argv.indexOf("--permission-mode") + 1] ?? "")
+            : "(缺)",
+          permissionFlag: argv.includes("--permission-mode"),
+        }),
+        session_id: sessionId,
+        total_cost_usd: 0,
+      }),
+    );
+    process.exit(0);
   }
   if (mode === "silentfail") {
     // ⚠ 这一档是为 round259 的变异 N1 加的：原先 nonzero 档【同时】给 is_error:true 与

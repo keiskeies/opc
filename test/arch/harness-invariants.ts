@@ -1,5 +1,6 @@
 import { readdirSync } from "node:fs";
 import { join } from "node:path";
+import { isRuntimeFixture } from "./run-fixtures.js";
 
 // 测试装置自身的不变量：测试有没有被发现、测试代码有没有被 lint。
 //
@@ -250,8 +251,10 @@ const SKIP_DIRS: ReadonlySet<string> = new Set<string>([
 
 /**
  * 遍历一棵目录树，按谓词收文件，返回【相对 rootDir、用 / 分隔】的路径。
- * 只有一份跳过语义：SKIP_DIRS。本仓出现过好几个文件各写一份目录遍历的情况，
- * 跳过清单从此只在这里长，别处复用。
+ * 只有一份跳过语义：SKIP_DIRS + 运行期夹具名单。本仓出现过好几个文件各写一份目录
+ * 遍历的情况，跳过清单从此只在这里长，别处复用。
+ * ⚠ 夹具那一格是 round277 补的：写夹具的那个测试跑完就删文件，于是列了它再去读
+ * 就是随机 ENOENT —— 而红的是【取材失败那一发】，不是任何一条判据，最难查的就是这种。
  */
 export function walkFiles(
   rootDir: string,
@@ -265,6 +268,7 @@ export function walkFiles(
         walk(join(dir, e.name));
         continue;
       }
+      if (isRuntimeFixture(e.name)) continue;
       if (accept(e.name)) {
         const rel: string = dir.slice(rootDir.length);
         out.push(

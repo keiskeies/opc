@@ -40,6 +40,9 @@ import { silentOverBudgets } from "../charter/budget-sync.js";
 // 名单：收件箱那张卡的颜色看的是 approval_type，而那份判据不能落在渲染进程里
 // —— 同 `blocked_statuses` 那条「判据随响应发出」的立场。
 import { OPERATIONAL_APPROVAL_TYPES } from "../approvals/cards.js";
+// 记忆那一格（O3 动作 3）。只 import 这一对：判据面 `memoryCoverage` 刻意【不】进来 ——
+// 它要逐行解析 payload，是这一页付不起的那一发（成本实测见 role-memory 的探针注释）。
+import { readMemoryTodayProbe } from "../memory/role-memory.js";
 // 只是【类型】。TodayResponse 里那个 driver 的形状归 overview/driver-status.ts 定义，
 // 那边写了它为什么必须与驱动器同源；这里不重复那套论证，也不 import 它的函数
 // （查询由 http/app.ts 直接调，见那边 today() 那一段）。
@@ -196,6 +199,48 @@ export type TodayView = {
     readonly to_human_in_window: number;
     /** 窗口内人已点掉的（批准/打回/转深度审阅都算，判据是 actor_type 而不是 payload.kind）。 */
     readonly human_decided_in_window: number;
+  };
+  /**
+   * 角色记忆那一格：「这一档是空的」在【数据里】可见，不靠读代码的人自己 grep
+   * （O3 动作 3 的目标）。
+   *
+   * ── 为什么报的是【行数】而不是【决定数】──────────────────────────
+   * 判据面 `memoryCoverage` 能给精确的「未署名的决定数」，而它读的是 `payload.kind`，
+   * 一条 json_extract 都用不上索引。本机实测（50 万行 events）：
+   *  · `memoryCoverage` 全表 ⇒ **680 ms**；精确未署名决定数 ⇒ **186 ms**，
+   *    新加 `(action, actor_type)` 索引后仍然 **180 ms**（证明瓶颈是逐行解析 JSON，
+   *    不是缺索引）；
+   *  · 下面这一发（纯 action/actor_type 扫描，不碰 JSON）⇒ **3.6 ms**。
+   * events 是 append-only 且没有归档路径 ⇒ 带 JSON 的那一发**随行数无界变慢**，
+   * 而这一页是 CEO 每天必开的。所以这一格【刻意只报过得去的两半】：
+   * 「那一档有没有数据」是 index-only 的准数，「未署名的决定有几条」不在这里给。
+   * 判据本身一处没少 —— 精确数仍在 `memoryCoverage`，那是门禁与诊断跑的那一面。
+   *
+   * ── 三格里【哪些是精确数】，边界在哪 ────────────────────────────
+   *  · `scope_rows` —— 精确的行数，但口径含【请求】（`action='approval'` 底下混着
+   *    「有人被要求批准」与「有人做了决定」），所以它【不是】决定数，只能读成
+   *    「记忆有 N 行素材」。
+   *  · `gate_rows` / `gate_unattributed_rows` —— 只数 `action='review_decision'`，
+   *    而那个 action 今天只有一个生产者（`engine/dispatch.ts` 的 `ReviewDecided`），
+   *    它【不是】请求。⇒ 对这一档，"是不是决定"这个判据恒真，
+   *    不碰 JSON 也能给出与 `memoryCoverage` 【同一个数】。
+   *    ⚠ 边界就这一条：哪天有人写出一条 `action='review_decision'` 而
+   *    `payload.kind` 落在 `NON_DECISION_EVENT_KINDS` 里的行，这一格会比
+   *    `memoryCoverage` 多算。那条行是自相矛盾的（action 说是判定、kind 说不是判定），
+   *    而 `packages/hub/test/memory/role-memory.test.ts` 里有一发拿真库同时读这两面 ——
+   *    真出现那种行时是它先红，不是界面先说谎。
+   *
+   * 精确的【全部口径】未署名决定数（含 approval 那一半）仍然只在 `memoryCoverage`：
+   * 那一发要逐行 json_extract，而它今天唯一命中的生产者
+   * （`policy/auto-approve.ts` 署的 `system/policy-engine`）在 src 里零生产调用方。
+   */
+  readonly memory: {
+    /** 记忆口径内的审计行数（含「要求批准」那种请求）。0 ⇒ 整个记忆面没有数据可读。 */
+    readonly scope_rows: number;
+    /** `review_decision` 行数。0 = 规格 §24 风险 2 那个对象【无数据】，不是"该角色没做过决定"。 */
+    readonly gate_rows: number;
+    /** `review_decision` 里 `actor_type='system'` 的条数：角色 id 没落到 actor_id 上的行数。 */
+    readonly gate_unattributed_rows: number;
   };
   /**
    * 口径与缺口，原样发给界面。
@@ -428,6 +473,17 @@ export function readToday(
     human_decided: Number(raw["human_decided"] ?? 0),
   };
 
+  /**
+   * 角色记忆那一格（O3 动作 3）。
+   *
+   * 走 `readMemoryTodayProbe` 而不是 `memoryCoverage`，唯一理由是成本：后者要逐行
+   * `json_extract`，实测在 50 万行 events 上是 680 ms 且【加索引救不回来】，
+   * 而 events 只增不删。完整的实测表与那条"为什么不带 JSON"的推理写在
+   * `memory/role-memory.ts` 的 `MEMORY_TODAY_PROBE_SQL` 上，这里不重抄一份
+   * （两张表两个答案是本仓抓过最多次的那一族）。
+   */
+  const memory = readMemoryTodayProbe(db);
+
   // 三条「今天别按字面读」的话，只在条件真的成立时说（每次都念一遍的东西会被忽略）。
   if (decided.auto_approved === 0) {
     notes.push(
@@ -450,6 +506,27 @@ export function readToday(
     notes.push(
       "有 " + silentOver + " 格预算已超限而【突破警报已经哑】（把上限调到已消费量之下会永久关闭警报，" +
         "0015 文件头 ②）。数还在，警报没了 —— 这一格只能在这里看见。",
+    );
+  }
+  /**
+   * 记忆那一格的话。分成两种空，因为这两句话要说的东西【相反】
+   * （与 `memory/prompt.ts` 那四条路径同一条立场：「没有」与「有而没给出来」
+   * 压成一句，就是拿一句谎盖住另一件）。
+   */
+  if (memory.gate_rows === 0) {
+    notes.push(
+      memory.scope_rows === 0
+        ? "角色记忆那一格是【无数据】：库里连一条记忆口径的审计都没有（不是读取失败）。" +
+          "所以各角色提示词里那句「你还没有可读的历史决定」是真的没有，不是没接上。"
+        : "角色记忆里的【审阅判定】那一档是空的（库里另有 " + memory.scope_rows +
+          " 条其它记忆口径的审计，它们不是审阅判定）。规格 §24 风险 2 要的是「历史审阅决定与理由」" +
+          "⇒ 这一档在等它的生产者，不是「角色还没做过决定」。",
+    );
+  } else if (memory.gate_unattributed_rows > 0) {
+    notes.push(
+      "有 " + memory.gate_unattributed_rows + " 条审阅判定的署名是【系统】而不是某个角色" +
+        " —— 记忆按 actor_id 分桶，所以这些判定【不会】进任何角色的提示词。" +
+        "这不是「没人做过判定」，是做过而没署上名。",
     );
   }
 
@@ -476,6 +553,11 @@ export function readToday(
       auto_approved_in_window: decided.auto_approved,
       to_human_in_window: decided.to_human,
       human_decided_in_window: decided.human_decided,
+    },
+    memory: {
+      scope_rows: memory.scope_rows,
+      gate_rows: memory.gate_rows,
+      gate_unattributed_rows: memory.gate_unattributed_rows,
     },
     notes,
   };

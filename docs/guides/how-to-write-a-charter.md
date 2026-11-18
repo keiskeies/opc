@@ -21,8 +21,8 @@
 | `acceptance_criteria` | 门控 `packages/hub/src/graph/gates/evaluate.ts`（经 `gateCriteriaForRole` 取当前角色最新一版） | **唯一会拦下产出的一条**，也是本篇 §2–§4 的全部内容 |
 | `role_id` / `reports_to` | 委派图与组织图校验（`packages/contracts/src/org/`） | 委派边指向不存在的节点 ⇒ `unknown_role` 拒绝保存 |
 | `model_tier` | `graph/company.ts` 用它选节点模型；`roles/preset.ts` 从模板取 | 节点跑错档位 |
-| `budget` | `charter/budget-sync.ts` 把它同步进 `budgets` 表（`saveCharterVersion` 内的一步），执行侧 `BudgetTracker` **只读 `budgets`、从不读岗位书** | 屏幕上是新数字、判超限还是老数字。所以这条同步是那条通道的全部要点（0015）。⚠ `saveCharterVersion` 本身**今天零生产调用方**，见 §6 第 6 条 |
-| `forbidden_actions` / `tool_permissions` | **运行时零读者**。`decision_scope.forbidden` 有两个读者（`roles/loader.ts` 的 `mergeForbiddenForRun`、`gates/author-reviewer.ts` 的 `forbiddenRemovalAttempt`），但**这两个函数自己也零生产调用方** —— 所以准确说法是「判据写好了、等着接」 | 今天写了不生效，但**必须写**：它声明的是意图，权限单调性（规格 §20.2）要求黑名单只能变长，那份合并逻辑读的就是这份声明 |
+| `budget` | `charter/budget-sync.ts` 把它同步进 `budgets` 表（`saveCharterVersion` 内的一步），执行侧 `BudgetTracker` **只读 `budgets`、从不读岗位书** | 屏幕上是新数字、判超限还是老数字。所以这条同步是那条通道的全部要点（0015）。⚠ 入口今天是 `hub charter seed`（`charter/seed.ts`，0065 §6 更正过本行旧口径），配置页那条通路仍未接，见 §6 第 6 条 |
+| `forbidden_actions` / `tool_permissions` | **运行时零读者**。`decision_scope.forbidden` 的唯一读者是 `roles/loader.ts` 的 `mergeForbiddenForRun`，而它自己也零生产调用方（0064 删掉了 author-reviewer 里那个曾经想读它的 `forbiddenRemovalAttempt`——黑名单删除的生产输入路径不存在，那条 `unauthorized_attempt` 审计无处可接）—— 所以准确说法是「判据写好了、等着接」 | 今天写了不生效，但**必须写**：它声明的是意图，权限单调性（规格 §20.2）要求黑名单只能变长，那份合并逻辑读的就是这份声明 |
 | `escalation_triggers` | **运行时零读者**：升级路由 `packages/hub/src/routing/escalation.ts` 用的是它自己那组触发条件，不读岗位书 | 写在这里今天等于注释；别指望它触发任何东西 |
 | `honesty_boundaries` / `decision_scope.autonomous` / `judgment_mode` / `untrusted_inputs` | **零机器判定点**，而且比我原先想的更空：`honestyBoundaries` / `judgmentMode` / `untrustedInputs` 三个 camelCase 字段在 `packages/*/src` 里除了 transform 那一行**再无任何命中** —— 没有哪个 prompt 拼装处读它们 | 主观约束只能靠这里表达 —— 这是它该待的地方，见 §3 那条「承认只能人判」的修法。但要知道它此刻**连进 prompt 都没做到**，所以它是一句**写给人看的声明**，不是一条约束 |
 
@@ -107,27 +107,31 @@ acceptance_criteria:
 
 1. `packages/hub/src` 里没有任何生产代码往 `metrics` 写值 —— 唯一的写入方是测试夹具
    （`packages/hub/test/charter/store.test.ts` 那种手搓 bundle）。
-2. **`metrics` 根本没有落库的位置。** `evidence_bundles` 那张表的列是
-   `id / task_id / producer_role / bundle_type / artifacts / self_check / created_at`
-   （`0001_init.sql`），`0002_phase1_evidence_and_budget.sql` 又补了 `model_family / claims /
-   honesty_boundaries` 三列 —— **没有 `metrics` 列**（实测 `grep -n metrics packages/hub/resources/migrations/*.sql`
-   零命中）。`EvidenceStore.register()` 的 INSERT 列清单里也没有它。
-   也就是说契约允许一个内存对象带着 `metrics` 去过门控，而这个数**从未被写过一次磁盘**，
-   因此回放时看不到、审阅时无法二次核对、也不在 §5.10 那套 sha256 对账的覆盖范围内。
+2. ~~**`metrics` 根本没有落库的位置。**~~ ⚠ **本条已被 0065 / 迁移 0007 修掉一半，原文保留**：
+   当时 `evidence_bundles` 的列（0001 + 0002）里确实没有 `metrics`，契约允许一个内存对象
+   带着 `metrics` 去过门控而这个数**从未被写过一次磁盘**。**现在列有了**
+   （`0007_evidence_metrics.sql`，`register()` 序列化落库，NULL = 没带这个概念、
+   `"{}"` = 带了但没声明），第三态（契约有而库没有）已终结 ——
+   **但第 1 条没动：还是没有人算这个数**。回放能看到「当时存了什么指标」，
+   而「当时」的那个包今天仍来自测试夹具。
 
 所以「标准写对了但指标没人填」不是理论风险，**是今天唯一能走通的路径**；
 而即使有人接上了填充，接的方式如果是「手搓一个带 metrics 的对象传给 evaluateGate」，
-那比不填更危险：门控看起来在判一个数，而那个数没有任何一处留痕。
+那比不填更危险：门控看起来在判一个数，而那个数没有任何一处留痕
+（⚠ 0065 之后这句要读准：数**存得下了**，手搓对象不落 register() 就照样无痕 ——
+留痕的不是列，是走不走那条 INSERT）。
 
 由此得到本篇最实用的一条：
 
 > **写一条 `metric:x` 之前，先回答「x 这个数由谁、在哪一步算出来、存在哪里」。**
-> 三问里第三问今天的答案是「不存在」—— 所以这条标准今天判不了（要么 escalate 到 CEO 面前，
+> 三问里第三问的答案 0065 之前是「不存在」、今天是「存在（`evidence_bundles.metrics`），
+> 但没有东西往里算」—— 所以这条标准今天照旧判不了（要么 escalate 到 CEO 面前，
 > 要么在指标补齐后突然开始生效，而那时候没有一个人记得它当初是按什么口径写的）。
 >
 > 指标词表此前全仓不存在（实测 `docs/` 与 `packages/*/src` 零登记处，见 `docs/INDEX.md` 的 0008 §7 入口条目）。
 > 所以第一次有人填 `metrics` 时，要一起立起来的是**两件**：那份词表，以及一个真正存下它的地方
-> （加一列，或者把它塞进 `artifacts` 里某个受 sha256 对账的文件）。只加第一个不加第二个，
+> （加一列，或者把它塞进 `artifacts` 里某个受 sha256 对账的文件。⚠ 0065：第一个已经加完了，
+> 剩下的是词表和「谁算」—— 只加列不算立起第二件）。只加第一个不加第二个，
 > 得到的是一条**能判而不留痕**的标准。
 
 ### 反例 ③：比较符方向反了（本仓错过两次的那一条）
@@ -253,15 +257,20 @@ acceptance_criteria:
    模板用短名（`dev` / `test` / `tech`），规格附录 B 用语义名（`test_engineer` / `tech_director`）。
    改任何一份而不同时改委派图，委派边就会指向不存在的节点（`unknown_role`）。
    详见 `delegation-rules.md` §5。
-6. **`saveCharterVersion` 零生产调用方。** 也就是说 §5 说的「改完 YAML 要存进 `role_charters` 才生效」
-   这件事**今天没有入口**（配置页存版本的那条通路还没接上）。
-   现在真正被读到的只有一条：CLI 的 `hub run` / `hub resume` 在装配时调 `loadPresetRoles()`
+6. ~~**`saveCharterVersion` 零生产调用方。**~~ ⚠ **本条已被 O2 动作 2 修掉一半，原文保留**（0065 §6 更正）：
+   入口是 `hub charter seed`（`charter/seed.ts`，根 package.json 的 `hub:charter` script），
+   它逐份把模板经 `saveCharterVersion` 装进 `role_charters`。
+   **但「配置页存版本」那条通路仍未接上**，而且 seed 装的是【模板原文】——
+   七份模板的 `acceptance_criteria` 今天仍是占位串，所以「入库」≠「入库了能判的标准」。
+   §5 说的「改完 YAML 要存进 `role_charters` 才生效」今天成立的形态是【跑一次 seed】，
+   不是【在页面上编辑】。
+   另一半旧账要留着：CLI 的 `hub run` / `hub resume` 在装配时仍调 `loadPresetRoles()`
    直接把 YAML 读成内存里的预设表（`cli.ts` 的 `withHub`），供 `buildCompanyGraph` 选节点模型 ——
-   **而它读的是仓库里的 YAML，不是库**。于是今天存在两个源、按用途分裂：
-   跑图用的档位来自 YAML，门控（如果它被接上）要读的标准来自 `role_charters`，而那张表实测 0 行。
-   连带地，「标准本身不跟随任务版本、放宽标准立刻作用于所有在跑的任务」这句在今天是
-   **关于读路径的陈述**（`gateCriteriaForRole` 确实读最新版、且库里没版本时**抛错而不退回 YAML**），
-   而不是关于一次真实改版的陈述 —— 因为还没有过一次真实改版。
+   **跑图用的档位来自 YAML，门控（如果它被接上）要读的标准来自 `role_charters`**。
+   两个源仍按用途分裂，只是「库里永远 0 行」过期了：seed 跑过的库有行，
+   而有行之后「标准不跟随任务版本、放宽标准立刻作用于所有在跑的任务」这句
+   就从**关于读路径的陈述**升格成**关于真实改版的陈述**（`gateCriteriaForRole` 读最新版、
+   库里没版本时**抛错而不退回 YAML** —— 这半句没变）。
 
 ## 7. 本仓在这一块犯过的错（避免你以为它们已被修掉）
 

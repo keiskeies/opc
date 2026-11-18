@@ -25,29 +25,39 @@
  * 所以本文件测的是判定、落库、聚合三段**零件**，不是「一次真任务里规则批了 X 项」。
  * 最后一节把那件事钉成断言，接线那天它会红。
  */
-import { mkdirSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
+import {
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+} from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { openDb } from "../../src/db/driver.js";
+import { migrate } from "../../src/db/migrate.js";
 import {
-  actionFingerprint,
   AUTO_APPROVED_BY,
   type AutoApproveInput,
   type AutoApproveOutcome,
+  actionFingerprint,
   autoApprove,
   CLAIM_APPROVAL_FOR_AUTO_SQL,
   countSimilarApprovals,
   MAX_REPORT_ITEMS,
   MISSING_REASONS,
   PATTERN_MIN_APPROVALS,
-  recordAutoApproval,
   readAutoApprovalReport,
+  recordAutoApproval,
 } from "../../src/policy/auto-approve.js";
+import {
+  type ActionDraft,
+  matchForbidden,
+  policyDecide,
+} from "../../src/policy/engine.js";
 import { fixtureTmp } from "../fixtures/fixture-dir.js";
 import { relPosix, toPosix } from "../fixtures/paths.js";
-import { type ActionDraft, matchForbidden, policyDecide } from "../../src/policy/engine.js";
-import { migrate } from "../../src/db/migrate.js";
-import { openDb } from "../../src/db/driver.js";
 
 const HUB = join(dirname(fileURLToPath(import.meta.url)), "..");
 const TMP = fixtureTmp("auto-approve", import.meta.url);
@@ -104,7 +114,12 @@ function newDb(): Db {
   return db;
 }
 
-function approval(db: Db, id: string, type = "strategic", status?: string): void {
+function approval(
+  db: Db,
+  id: string,
+  type = "strategic",
+  status?: string,
+): void {
   if (status === undefined) {
     db.prepare(
       "INSERT INTO approvals (id, task_id, approval_type, summary, parameters) " +
@@ -173,7 +188,9 @@ describe("① R1：只读 + 证据包完整 + 门控通过", () => {
   });
 
   it("门控 passed=false ⇒ 拦，且点名 gate_not_passed", () => {
-    const r = autoApprove(r1Ready({ gate: { passed: false, gate: "dev_to_test" } }));
+    const r = autoApprove(
+      r1Ready({ gate: { passed: false, gate: "dev_to_test" } }),
+    );
     expect(r.decision).toBe("require_approval");
     if (r.decision === "require_approval") {
       expect(new Set(r.missing)).toEqual(new Set(["gate_not_passed"]));
@@ -184,7 +201,9 @@ describe("① R1：只读 + 证据包完整 + 门控通过", () => {
     const r = autoApprove({ action: act() });
     expect(r.decision).toBe("require_approval");
     if (r.decision === "require_approval") {
-      expect(new Set(r.missing)).toEqual(new Set(["evidence_missing", "gate_missing"]));
+      expect(new Set(r.missing)).toEqual(
+        new Set(["evidence_missing", "gate_missing"]),
+      );
     }
   });
 
@@ -218,12 +237,15 @@ describe("② R2：可逆 + 过去 N 次同类决策均批准", () => {
       }),
     );
     expect(r.decision).toBe("auto_approved");
-    if (r.decision === "auto_approved") expect(r.rule).toBe("pattern_reversible");
+    if (r.decision === "auto_approved")
+      expect(r.rule).toBe("pattern_reversible");
   });
 
   it("差一次 ⇒ 拦，且点名 history_below_threshold（不是 history_missing）", () => {
     const r = autoApprove(
-      rev({ history: { approvals: PATTERN_MIN_APPROVALS - 1, nonApprovals: 0 } }),
+      rev({
+        history: { approvals: PATTERN_MIN_APPROVALS - 1, nonApprovals: 0 },
+      }),
     );
     expect(r.decision).toBe("require_approval");
     if (r.decision === "require_approval") {
@@ -274,7 +296,11 @@ describe("③ R3：不可逆永不自动通过", () => {
   });
 
   it("证据齐 + 门控过 + 历史 999 次全批 ⇒ 仍然 require_approval", () => {
-    for (const detail of ["git push origin main", "发布 v1.2 到生产", "付款 3000 美元"]) {
+    for (const detail of [
+      "git push origin main",
+      "发布 v1.2 到生产",
+      "付款 3000 美元",
+    ]) {
       const r = autoApprove(everything(detail));
       expect(r.decision, detail).toBe("require_approval");
       if (r.decision === "require_approval") {
@@ -320,7 +346,9 @@ describe("④ 黑名单优先于自动通过", () => {
     // （中间隔了 " src/"）。第一版我写的就是 src/secrets.ts，那条用例其实
     // 什么都没测（黑名单没命中，走的是 R1 正常放行）—— 同一个夹具病第五次。
     const r = autoApprove({
-      ...r1Ready({ action: act({ kind: "read_repo", detail: "读取 secrets 目录" }) }),
+      ...r1Ready({
+        action: act({ kind: "read_repo", detail: "读取 secrets 目录" }),
+      }),
       forbidden: ["读取 secrets"],
     });
     expect(r.decision).toBe("require_approval");
@@ -334,14 +362,20 @@ describe("④ 黑名单优先于自动通过", () => {
   it("反向对照：把黑名单清空，同一条动作应当自动通过（否则上一条可能是恒真）", () => {
     expect(
       decisionOf(
-        r1Ready({ action: act({ kind: "read_repo", detail: "读取 secrets 目录" }) }),
+        r1Ready({
+          action: act({ kind: "read_repo", detail: "读取 secrets 目录" }),
+        }),
       ),
     ).toBe("auto_approved");
   });
 
   it("黑名单优先于【模式】那一档：可逆 + 历史全批照样拦", () => {
     const r = autoApprove({
-      action: act({ kind: "edit_file", detail: "编辑 src/a.ts", role_id: "dev" }),
+      action: act({
+        kind: "edit_file",
+        detail: "编辑 src/a.ts",
+        role_id: "dev",
+      }),
       forbidden: ["dev 改 src"],
       history: { approvals: 999, nonApprovals: 0 },
     });
@@ -442,7 +476,9 @@ describe("⑤ 落库那一行：计划 Test 项『含 auto_approved_by』的逐�
       nowMs: NOW,
     });
     expect(rec.card_claimed).toBe(false);
-    const a = db.prepare("SELECT * FROM approvals WHERE id = 'ap-3'").get() as Row;
+    const a = db
+      .prepare("SELECT * FROM approvals WHERE id = 'ap-3'")
+      .get() as Row;
     // decided_by 仍是原来那个人：条件写带 status='pending'，抢不到就一行都不动。
     expect(String(a["decided_by"])).not.toBe(AUTO_APPROVED_BY);
   });
@@ -555,18 +591,32 @@ describe("⑥ 日报聚合（§9.1 末句『可见且可追溯』的数据那一
     expect(rep.total).toBe(1);
     // 这条是对【判据本身】的元断言：上面那两条干扰如果换成 LIKE 写法就会进结果集
     // （实测 LIKE 给 3、json_extract 给 1）。没有这一格，选择条件写错也照样全绿。
-    expect(db.prepare("SELECT COUNT(*) AS c FROM events WHERE payload LIKE '%auto_approved_by%'").get())
-      .toMatchObject({ c: 2 });
+    expect(
+      db
+        .prepare(
+          "SELECT COUNT(*) AS c FROM events WHERE payload LIKE '%auto_approved_by%'",
+        )
+        .get(),
+    ).toMatchObject({ c: 2 });
   });
 
   it("别的日子不进这一页；total 不受 limit 影响", () => {
     const db = newDb();
-    recordAutoApproval(db, { taskId: "task-1", outcome: autoApprove(r1Ready()), approvalId: "e1", nowMs: NOW });
+    recordAutoApproval(db, {
+      taskId: "task-1",
+      outcome: autoApprove(r1Ready()),
+      approvalId: "e1",
+      nowMs: NOW,
+    });
     db.prepare(
       "INSERT INTO events (task_id, actor_type, actor_id, action, target, payload, created_at) " +
         "VALUES ('task-1','system','policy-engine','approval','e2',?,?)",
     ).run(
-      JSON.stringify({ auto_approved_by: AUTO_APPROVED_BY, rule: "read_only_evidence_gate", card: { present: true, claimed: true } }),
+      JSON.stringify({
+        auto_approved_by: AUTO_APPROVED_BY,
+        rule: "read_only_evidence_gate",
+        card: { present: true, claimed: true },
+      }),
       NOW + 86_400_000,
     );
     expect(readAutoApprovalReport(db, { day: DAY }).total).toBe(1);
@@ -582,7 +632,9 @@ describe("⑥ 日报聚合（§9.1 末句『可见且可追溯』的数据那一
     for (let i = 0; i < 5; i++) {
       recordAutoApproval(db, {
         taskId: "task-1",
-        outcome: autoApprove(r1Ready({ action: act({ detail: "read src/" + i + ".ts" }) })),
+        outcome: autoApprove(
+          r1Ready({ action: act({ detail: "read src/" + i + ".ts" }) }),
+        ),
         approvalId: "p" + i,
         nowMs: NOW,
       });
@@ -597,8 +649,18 @@ describe("⑥ 日报聚合（§9.1 末句『可见且可追溯』的数据那一
 
   it("card_unclaimed 把「审计说批了而卡片还在 pending」那几次数出来", () => {
     const db = newDb();
-    recordAutoApproval(db, { taskId: "task-1", outcome: autoApprove(r1Ready()), approvalId: "ghost", nowMs: NOW });
-    recordAutoApproval(db, { taskId: "task-1", outcome: autoApprove(r1Ready()), approvalId: "real", nowMs: NOW });
+    recordAutoApproval(db, {
+      taskId: "task-1",
+      outcome: autoApprove(r1Ready()),
+      approvalId: "ghost",
+      nowMs: NOW,
+    });
+    recordAutoApproval(db, {
+      taskId: "task-1",
+      outcome: autoApprove(r1Ready()),
+      approvalId: "real",
+      nowMs: NOW,
+    });
     approval(db, "real2");
     const rep = readAutoApprovalReport(db, { day: DAY });
     expect(rep.total).toBe(2);
@@ -615,7 +677,12 @@ describe("⑥ 日报聚合（§9.1 末句『可见且可追溯』的数据那一
 
   it("当天有【毫不相干的】畸形 payload ⇒ 拒绝出数并点名那一行（不让整页故障无出处）", () => {
     const db = newDb();
-    recordAutoApproval(db, { taskId: "task-1", outcome: autoApprove(r1Ready()), approvalId: "g-1", nowMs: NOW });
+    recordAutoApproval(db, {
+      taskId: "task-1",
+      outcome: autoApprove(r1Ready()),
+      approvalId: "g-1",
+      nowMs: NOW,
+    });
     // 一条 action='state_change' 的坏行：它根本不会进日报结果集，
     // 但 SQL 里 WHERE 上的 json_extract 照样会对它求值并抛 malformed JSON。
     db.prepare(
@@ -634,7 +701,10 @@ describe("⑥ 日报聚合（§9.1 末句『可见且可追溯』的数据那一
 
   it("limit 被夹到 MAX_REPORT_ITEMS（日报不能成为一次无界全表读）", () => {
     const db = newDb();
-    const rep = readAutoApprovalReport(db, { day: DAY, limit: MAX_REPORT_ITEMS * 5 });
+    const rep = readAutoApprovalReport(db, {
+      day: DAY,
+      limit: MAX_REPORT_ITEMS * 5,
+    });
     expect(rep.items.length).toBeLessThanOrEqual(MAX_REPORT_ITEMS);
   });
 });
@@ -648,7 +718,9 @@ describe("⑦ countSimilarApprovals：R2 的唯一可计算来源", () => {
     approval(db, "s4", "budget_override", "deferred");
     approval(db, "s5", "strategic", "approved");
     approval(db, "s6", "budget_override"); // pending：两边都不算
-    expect(countSimilarApprovals(db, { approvalType: "budget_override" })).toEqual({
+    expect(
+      countSimilarApprovals(db, { approvalType: "budget_override" }),
+    ).toEqual({
       approvals: 2,
       nonApprovals: 2,
     });
@@ -660,7 +732,9 @@ describe("⑦ countSimilarApprovals：R2 的唯一可计算来源", () => {
 
   it("空表 ⇒ 两个 0（查出来的 0，不是缺省值）", () => {
     const db = newDb();
-    expect(countSimilarApprovals(db, { approvalType: "budget_override" })).toEqual({
+    expect(
+      countSimilarApprovals(db, { approvalType: "budget_override" }),
+    ).toEqual({
       approvals: 0,
       nonApprovals: 0,
     });
@@ -695,7 +769,9 @@ describe("⑧ 接线状态（接线那天这条会红，逼着同时更新 0014�
     const writers = files.filter((f) =>
       /["']INSERT INTO approvals[ (]/u.test(readFileSync(f, "utf8")),
     );
-    expect(writers.map((f) => relPosix(f, SRC))).toEqual(["approvals/cards.ts"]);
+    expect(writers.map((f) => relPosix(f, SRC))).toEqual([
+      "approvals/cards.ts",
+    ]);
     // 而它【没有调用方】：createCard 在 src 里零命中（cards.ts 自己不算）。
     const callers = files.filter(
       (f) =>
@@ -705,14 +781,32 @@ describe("⑧ 接线状态（接线那天这条会红，逼着同时更新 0014�
     expect(callers.map((f) => relPosix(f, SRC))).toEqual([]);
   });
 
-  it("policy 模块的自动批准在生产 src 里【还没有调用方】（已知缺口，不是实现遗漏）", async () => {
+  it("⭐ 接线日已过（round269）：读路径有读者，写路径 recordAutoApproval 仍零调用方", async () => {
+    /*
+     * 这一发在 0014 写下那天就是【等着今天红】的：接线那天逼接线的人来更新口径。
+     * 今天真的红了，红因是【只接了读路径】——O9 动作 1 阶段一【只报不批】，
+     * approvals/query.ts 的影子判定调 autoApprove（纯函数，不落库），
+     * 而会改卡片、署 policy-engine 的 recordAutoApproval 依然无人调。
+     * 所以断言不是删掉也不是改成 []，而是翻成【两半】：
+     *  ① 读者名单 == [approvals/query.ts]（多一个读者 = 有人把规则接去了别处，要问）；
+     *  ② 写者名单 == []（「存在一条被自动批准的审批」今天必须红 = O9 验收第 1 条；
+     *     它转绿的合法路径只有 CEO 拍板放开 R1，见 O9 动作 2）。
+     */
     const files = tsFiles(SRC);
-    const callers = files.filter(
+    const readers = files.filter(
       (f) =>
         !f.endsWith("policy/auto-approve.ts") &&
-        /autoApprove\(|recordAutoApproval\(/u.test(readFileSync(f, "utf8")),
+        readFileSync(f, "utf8").includes("autoApprove("),
     );
-    expect(callers.map((f) => relPosix(f, SRC))).toEqual([]);
+    expect(readers.map((f) => relPosix(f, SRC))).toEqual([
+      "approvals/query.ts",
+    ]);
+    const writers = files.filter(
+      (f) =>
+        !f.endsWith("policy/auto-approve.ts") &&
+        /recordAutoApproval\(/u.test(readFileSync(f, "utf8")),
+    );
+    expect(writers.map((f) => relPosix(f, SRC))).toEqual([]);
   });
 
   it("消费侧【已经】接上：回放视图会带上这条标注（生产者到位那天立刻有数据）", () => {
@@ -804,8 +898,14 @@ describe("⑩ blocked_by 的四个值【实际】到得了几个（dead branch �
      */
     const matrix = [
       { a: act({ detail: "读取 secrets 目录" }), forbidden: ["读取 secrets"] },
-      { a: act({ kind: "publish", detail: "发布" }), forbidden: ["对外发布需 CEO 批准"] },
-      { a: act({ role_id: "dev", detail: "自行合并到主干" }), forbidden: ["自行合并到主干"] },
+      {
+        a: act({ kind: "publish", detail: "发布" }),
+        forbidden: ["对外发布需 CEO 批准"],
+      },
+      {
+        a: act({ role_id: "dev", detail: "自行合并到主干" }),
+        forbidden: ["自行合并到主干"],
+      },
       { a: act({ detail: "付款 500 元" }), forbidden: ["付款"] },
     ];
     for (const c of matrix) {

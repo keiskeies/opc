@@ -16,6 +16,8 @@
  *     ⇒ 「node --test 下 13/13 绿」这句话我当时是照抄 round187 的，没有自己复算过。
  * 搬过来之后 ② 那条变异必须红，这是本次改动唯一的验收（0054 §4 同一口径）。
  */
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
@@ -155,6 +157,76 @@ describe("runRole —— 真的起一个 agent 进程", () => {
       expect(r.error ?? "").toMatch(/超时/);
     } finally {
       delete process.env["FAKE_CLAUDE_MODE"];
+    }
+  });
+
+  /**
+   * ── 下面两发是【今天唯一那条安全边界】的行为探针 ──────────────────────
+   *
+   * `--permission-mode plan` 是生产路线上今天【唯一】生效的安全边界
+   * （本文件头与 engine/claude.ts 文件头都这么写）。round277 之前，守着这句话的
+   * 只有「argv 里有这两个 token」那类回显断言 —— 而**回显证明的是参数传到了，
+   * 不是边界挡住了什么**。这一格补的是那另一半：让桩在拿不到 plan 时【真的写盘】，
+   * 于是「没写」这个读数第一次有了内容。
+   *
+   * ⚠ 边界本身仍然不可测：本机装不上真的 CLI（复算：
+   * `require("@anthropic-ai/claude-agent-sdk/package.json")` 在根与 packages/hub 两处都取不到），
+   * 离线拿不到「真 CLI 的 plan 模式到底会不会挡住写」。桩这里模拟的是【CLI 的语义】，
+   * 所以这两发的标题写的是「适配器有没有把 plan 交出去」，不是「plan 挡住了写文件」。
+   * 把这句话写在测试里而不是省掉，是因为下一读到这里的人会以为它验的是后者。
+   */
+  it("把 plan 交出去 ⇒ 对面那一个进程一次都没有写工作区", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "opc-plan-probe-"));
+    const target = join(dir, "wrote.txt");
+    process.env["FAKE_CLAUDE_MODE"] = "write";
+    process.env["FAKE_CLAUDE_WRITE_TO"] = target;
+    try {
+      const r = await runRole({ ...base, bin: BIN, cwd: dir });
+      expect(r.ok, "error=" + String(r.error)).toBe(true);
+      // 先钉「plan 真的到了 argv」，再钉「因此没写」。只钉后者的话，
+      // 桩那侧任何一处坏掉（路径写错、权限不够、mode 没生效）都会让它【绿得毫无意义】。
+      expect(r.text).toMatch(/"permissionMode":"plan"/);
+      expect(r.text).toMatch(/"wrote":"no"/);
+      expect(
+        existsSync(target),
+        "员工的一轮真的写出了文件 —— 那条被叫做安全边界的参数没起作用",
+      ).toBe(false);
+    } finally {
+      delete process.env["FAKE_CLAUDE_MODE"];
+      delete process.env["FAKE_CLAUDE_WRITE_TO"];
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  /**
+   * 正向对照，也是这一组里【唯一证明写探针会写】的一发。
+   *
+   * 上面那发「文件不在」有五种成因：边界起作用 / 路径写错 / 权限不够 / 桩没实现 /
+   * 写到了别处。前四种里只有第一种是我想验的，而**不配对照就分不出这五种**。
+   * 所以这一发让桩【无视 argv 里那个 plan】、当作没给 ⇒ 必须真的写出文件。
+   * 它红了不是生产路线坏了，是探针坏了 —— 那也是一种必须当场知道的事。
+   */
+  it("正向对照：桩拿不到 plan ⇒ 同一条路径真的写出了文件", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "opc-plan-probe-"));
+    const target = join(dir, "wrote.txt");
+    process.env["FAKE_CLAUDE_MODE"] = "write";
+    process.env["FAKE_CLAUDE_WRITE_TO"] = target;
+    process.env["FAKE_CLAUDE_NO_PLAN"] = "1";
+    try {
+      const r = await runRole({ ...base, bin: BIN, cwd: dir });
+      expect(r.ok).toBe(true);
+      // 这一发的 argv 上【照样有】plan —— 被绕过的是桩，不是适配器。
+      // 所以「文件写出了」的原因只能是没有 plan 模式挡着，而不是「没传参数」。
+      expect(r.text).toMatch(/"permissionMode":"plan"/);
+      expect(r.text).toMatch(/"wrote":"yes"/);
+      expect(existsSync(target), "写探针不写了 ⇒ 上一发变成一句空话").toBe(
+        true,
+      );
+    } finally {
+      delete process.env["FAKE_CLAUDE_MODE"];
+      delete process.env["FAKE_CLAUDE_WRITE_TO"];
+      delete process.env["FAKE_CLAUDE_NO_PLAN"];
+      rmSync(dir, { recursive: true, force: true });
     }
   });
 });

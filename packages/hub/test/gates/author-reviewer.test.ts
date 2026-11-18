@@ -9,18 +9,15 @@
  * 一条防线的强度由最便宜的绕过方式决定。找到的每条绕路（不填 model_family、
  * 自己填 approved_by、绕三个节点回到自己）都必须有用例，否则它就是没被堵住。
  */
-import type { Charter } from "@opc/contracts";
 import { describe, expect, it } from "vitest";
 import {
   type Block,
   CEO_ROLE_ID,
   type DelegationEdge,
-  forbiddenRemovalAttempt,
   gateConfigBlock,
   independentReviewerPath,
   sameFamilyReviewBlock,
   selfReviewEdgeBlock,
-  unauthorizedAttemptPayload,
 } from "../../src/graph/gates/author-reviewer.js";
 
 const DEV = { roleId: "dev", modelFamily: "claude" };
@@ -31,15 +28,6 @@ const OK_EDGES: DelegationEdge[] = [
   { from: "dev", to: "test", gate: true },
   { from: "test", to: "cto", gate: true },
 ];
-
-function grab(fn: () => unknown): unknown {
-  try {
-    fn();
-  } catch (e) {
-    return e;
-  }
-  throw new Error("期望抛错，但函数正常返回了");
-}
 
 describe("判据 1：同一角色不能审自己", () => {
   it("审阅者与产出者同角色 → 拒绝，code=self_review", () => {
@@ -268,61 +256,5 @@ describe("保存门控配置时的总入口（拒绝必须发生在保存时）"
     expect(r.ok).toBe(false);
     expect(typeof r.code).toBe("string");
     expect(typeof r.reason).toBe("string");
-  });
-});
-
-describe("运行时覆盖 forbidden 的越权尝试（§20.2 权限单调性）", () => {
-  const charter = {
-    roleId: "dev",
-    decisionScope: {
-      autonomous: ["实现已通过评审的方案"],
-      requiresConsultation: [],
-      forbidden: ["修改源代码以外的生产配置", "自行合并到主干", "对外发布"],
-    },
-  } as unknown as Charter;
-
-  it("请求的黑名单少了原有条目 → 报出被拿掉的那几条", () => {
-    const removed = forbiddenRemovalAttempt(charter, [
-      "修改源代码以外的生产配置",
-      "自行合并到主干",
-    ]);
-    expect(removed).toEqual(["对外发布"]);
-  });
-
-  it("只追加新条目（收紧）→ 不算越权", () => {
-    const removed = forbiddenRemovalAttempt(charter, [
-      "修改源代码以外的生产配置",
-      "自行合并到主干",
-      "对外发布",
-      "禁止直连生产库",
-    ]);
-    expect(removed).toEqual([]);
-  });
-
-  it("请求空黑名单 ⇒ 原有全部条目都算被删（最危险的一种：整体清空）", () => {
-    expect(forbiddenRemovalAttempt(charter, [])).toHaveLength(3);
-  });
-
-  it("审计载荷的 action 固定 unauthorized_attempt，且带上想删的具体条目", () => {
-    const removed = forbiddenRemovalAttempt(charter, []);
-    const p = unauthorizedAttemptPayload(charter, removed);
-    expect(p.action).toBe("unauthorized_attempt");
-    expect(p.kind).toBe("forbidden_removal");
-    expect(p.role_id).toBe("dev");
-    expect(p.removed_entries).toEqual(removed);
-    // 只写「有人试过」而写不出「试的是什么」的审计事后无法用
-    expect(p.removed_entries.length).toBeGreaterThan(0);
-  });
-
-  it("抛错这件事由 loader 负责；本模块的结论必须与 loader 的守卫同向", () => {
-    // 这一条不重复实现单调性判据（两份判据必然漂移，0006 §7 第 55、56 条记的
-    // 就是这个形状）。它只钉住一件事：这里【不抛错】而是返回差集，
-    // 因为抛错的职责在 mergeForbiddenForRun —— 两处都抛会双重报错，
-    // 两处都不抛则无人拦。方向由下面这条断言把守：
-    const e = grab(() => {
-      const removed = forbiddenRemovalAttempt(charter, []);
-      if (removed.length > 0) throw new Error("FORBIDDEN-REMOVED");
-    });
-    expect(String(e)).toContain("FORBIDDEN-REMOVED");
   });
 });

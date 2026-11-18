@@ -43,7 +43,9 @@ import { randomUUID } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 import {
   CEO_ROLE_ID,
+  everyNodeDeclaresModelFamily,
   validateNewEdge,
+  validateNewNode,
   validateOrgChange,
   validateReparenting,
   type OrgActor,
@@ -180,8 +182,12 @@ export const SELECT_LATEST_GRAPH_SQL =
  * 为什么【不】把 change 直接丢给 validateOrgChange 就完事：那样只判了 L3。
  * L1/L2 在前端跑过，而「前端跑过」不是这里的依据 —— 计划 Task 3.1 的验收
  * 说的正是「Hub 保存时二次校验」。所以这里按 change 的 kind 分派回对应的判据。
- * 三种 kind 都覆盖到是刻意的（add_edge 与 reparent 走不同判据；
- * 漏一个 kind 就是「那种变更不校验」，而它看起来和其他 kind 一模一样）。
+ *
+ * ⚠ 这一格的原话是「三种 kind 都覆盖到是刻意的」，而它写下的时候 union 里只有
+ *   【两种】kind（reparent / add_edge）—— round292 那句话数错了，到 round294
+ *   才真的有三种。数错没造成故障，但它说明【"都覆盖到"这件事当时只由注释保证】。
+ *   所以现在改成由类型保证：见下面那句 `noUntouchedKind`，加第四种 kind 而不在这里
+ *   加分派 ⇒ `tsc` 红（参数位上 `never` 不接受任何值），而不是"那种变更静默不校验"。
  */
 function revalidate(
   change: OrgChange,
@@ -192,16 +198,38 @@ function revalidate(
   let one: Verdict;
   if (change.kind === "reparent") {
     one = validateReparenting(change.child_role, change.new_parent_role, graph);
-  } else {
+  } else if (change.kind === "add_edge") {
     one = validateNewEdge(
       change.edge.from,
       change.edge.to,
       graph,
       change.edge.review_gate,
     );
+  } else if (change.kind === "add_node") {
+    // 新节点走 L1（它和 reparent 判的是同一种东西：一个节点在树里的位置），
+    // 不走 L2 —— 本 kind 故意不带边（理由见 orgChangeSchema 那条注释②）。
+    one = validateNewNode(change.node, graph);
+  } else {
+    noUntouchedKind(change);
   }
   if (!one.ok) return one;
   return validateOrgChange(change, actor, runningTasks);
+}
+
+/**
+ * 判别式分派的兜底：**编译期**要求上面把每一种 kind 都接走。
+ *
+ * 为什么单独一个函数而不是就地 `const _never: never = change`：那样写能被"顺手删掉
+ * 一行没用的变量"清掉，而这一格的存在意义恰恰是【下一个人加 kind 时会被拦】。
+ * 具名 + 函数头 + 一条 throw（运行时也要有：schema 可以被绕过，比如一份手写 JSON
+ * 直接进内部调用方）比一个下划线变量活得久。
+ */
+function noUntouchedKind(change: never): never {
+  throw new Error(
+    "revalidate：出现了一种没有分派的组织变更 kind ⇒ 那种变更【不校验】就能进库。" +
+      "OrgChange 加了新 kind 而这里没跟上 —— 补判据，不要补 else 分支的默认放行。" +
+      "实到 = " + JSON.stringify(change),
+  );
 }
 
 /**
@@ -211,6 +239,12 @@ function revalidate(
  * 不能是「前端传来的那张它以为会变成什么样的图」。两者分开的失效方式是
  * 审计说组织成了 A 而库里是 B —— 这是本仓认定最贵那一类静默。
  * 所以调用方（HTTP/IPC 层）不需要自己算 after，这里算，且审计与 INSERT 用同一个值。
+ *
+ * ⚠ round294 起这里有三种 kind，而其中只有 `add_node` 会往 `nodes` 里加东西。
+ * 前两种只动边或动一条 `reports_to`，所以「after 图 = before 图 + 一条边」那种旧说法
+ * 在 `add_node` 上不再成立：它是本仓第一个【改变节点集合】的组织变更，
+ * 也正因为它改节点集合，`everyNodeDeclaresModelFamily` 判【整图】而不是判【增量】
+ * 这件事第一次有了实际意义（原来它只在防旁路）。
  */
 export function applyChangeToGraph(
   graph: OrgGraph,
@@ -229,7 +263,18 @@ export function applyChangeToGraph(
     nodes[change.child_role] = { ...child, reports_to: change.new_parent_role };
     return { nodes, edges: graph.edges };
   }
-  return { nodes, edges: [...graph.edges, change.edge] };
+  if (change.kind === "add_edge") {
+    return { nodes, edges: [...graph.edges, change.edge] };
+  }
+  if (change.kind === "add_node") {
+    // 节点集合第一次真的变大。键取 role_id 而不是让调用方另给一个 id ——
+    // 身份只有一个来源，否则「change.node.role_id 是 A 但写在键 B 上」这种图能进库。
+    nodes[change.node.role_id] = change.node;
+    return { nodes, edges: graph.edges };
+  }
+  // 运行时的第二道：schema 能被绕过（手写 JSON 直连内部调用方），那时这里必须炸，
+  // 不能悄悄走进最后一个分支、拿一个 undefined 的 node 往 nodes 里塞。
+  return noUntouchedKind(change);
 }
 
 /**
@@ -262,6 +307,25 @@ export async function commitOrgGraph(
   const needsConfirmation = "needsConfirmation" in check ? check.needsConfirmation : undefined;
 
   const after = applyChangeToGraph(o.graph, o.change);
+
+  // 【节点级】判据，打在 after 上而不是 before 上（round292，O8 动作 1）。
+  //
+  // 为什么必须在 revalidate【之后】：applyChangeToGraph 在 reparent 的子角色不在图里时
+  // 是【抛错】的（它自己的注释：走到那里说明调用顺序反了），而"子角色不在图里"
+  // 正是 validateReparenting 的 unknown_role 那一条负责的东西。
+  // 把这一发挪到 revalidate 前面，等于让一次「child 写错名字」的请求从
+  // 干净的 422 变成一个抛出的 Error（HTTP 层会变 500）—— 那不是收紧，是把
+  // 一条已有的清晰报错换成一条指向别处的错。
+  //
+  // 为什么必须在【开事务之前】：过了这一格就要写三张表了。
+  //
+  // 为什么判 after 而不是判"这次新增的节点"：见 everyNodeDeclaresModelFamily 的函数头
+  // —— 那里 round292 给的理由（「两种 kind 都不往 nodes 里加东西 ⇒ 新增集合恒空」）
+  // 到 round294 已经过期，add_node 会加节点。仍然判整张图的理由是那条函数头里
+  // 改写后的那半句：缺家族是绕过同家族拦截的通路，与「是不是这次新增的」无关。
+  const families = everyNodeDeclaresModelFamily(after);
+  if (!families.ok) return { ok: false, reason: families.reason, code: families.code };
+
   const graphJson = JSON.stringify(after);
   const beforeJson = JSON.stringify(o.graph);
 

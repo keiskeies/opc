@@ -43,8 +43,11 @@
 第二次跑，taskLimitCents = 1     ⇒ budgets.limit_cents 仍是 1000
 ```
 
-因为 `packages/hub/src/engine/runtime.ts:132` 那条 `ENSERT_TASK_BUDGET_SQL` 是
-`ON CONFLICT(scope_type, scope_id, period) DO NOTHING` —— 那一列**第一次写进去就再也不改**。
+因为 `packages/hub/src/budget/tracker.ts:77` 那条 `ENSERT_BUDGET_SQL` 是
+`ON CONFLICT(scope_type, scope_id, period) DO NOTHING`（【round272】这里原标的是
+engine/runtime 第 153 行的手抄副本 `ENSERT_TASK_BUDGET_SQL`；那份已删，引擎路线 import
+的就是这一条 —— DO NOTHING 这件事【没变】，变的只是它只有一份）
+—— 那一列**第一次写进去就再也不改**。
 **拿它当门 = 门永远按这台机器第一次启动时的那个数字关着**，
 而那个数字可能来自半年前另一条命令行。
 
@@ -92,7 +95,7 @@ export function underTaskBudgetSql(t: string): string { … COALESCE((SELECT b.c
 仓库里有**两个**花费累加器：`LEDGER_SQL` 写前者那条路径上的 `tasks.consumed_cents`，
 `ADD_TASK_BUDGET_SQL` 写 `budgets.consumed_cents`；实测一轮真起草**两列都加，都等于 4**。
 所以读哪一列**在功能上今天看不出差别**，而正因如此现在必须选对：
-**今日视图那条预算条读的就是 `budgets`**（`packages/hub/src/overview/today.ts:293` 求和它），
+**今日视图那条预算条读的就是 `budgets`**（`packages/hub/src/overview/today.ts:338` 求和它），
 而【规格】§7.4 那张预算卡要显示的正是「已消耗 / 上限」。
 门与界面**读同一个累加器**，"门说它超了而条还空着"才不可表达；
 读另一列就是再造一个两源分叉（0041 §2 那一族）。
@@ -158,7 +161,7 @@ if (r.cards.length === 0) return;   // ← 这句在后面的话，被挡住的�
 本篇的门**绕开**了那一列（读参数），所以"门失效"这一格已经堵上。
 但绕开不等于它没问题 —— 它今天**仍然在被界面读**：
 
-`packages/hub/src/overview/today.ts:293` 那条 SQL 求和 `limit_cents` 当作 `declared`，
+`packages/hub/src/overview/today.ts:338` 那条 SQL 求和 `limit_cents` 当作 `declared`，
 也就是**今日视图那条预算条的右半边**。而 §1 第二发探针量到的是
 **那一列第一次写完再也不改**。两件事拼起来的可复现后果：
 

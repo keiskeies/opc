@@ -2,12 +2,13 @@
  * Task 0.8 —— 最小可运行公司图端到端（计划 §Task 0.8 / 规格 §23.3、§7.1、§5.9）。
  *
  * 四条验收各自钉住一件事：
- *  ① 一句想法能跑到 END，events 里出现完整状态机轨迹；
+ *  ① 一句想法能把桩图跑到 END，events 里出现完整状态机轨迹，任务停在等人批准的那一格；
  *  ② test 桩失败一次 → 回退 dev 一次（单分支、且【有界】）；
  *  ③ 进程 SIGKILL 后新进程续跑，已完成节点不重复执行（V3）；
  *  ④ TaskStateChanged 的 from/to 序列与 §7.1 一致，无非法跃迁。
  *
- * 为什么期望轨迹是【逐条列举 14 条边】而不是"每条合法就行"：
+ * 为什么期望轨迹是【逐条列举那 11 条边】（条数从 EXPECTED_STUB_TRACE 算，不写死）
+ * 而不是"每条合法就行"：
  * "每条合法"容忍轨迹断裂（A→B 之后凭空冒出 C→D）、缺跳、多跳。所以这里先钉死序列，
  * 再**另外**用 status.ts 的边表逐条复核 —— 两份独立真相互相牵制：期望序列写错了，
  * 边表复核会抓住；边表被改坏了，期望序列会抓住。
@@ -35,33 +36,35 @@ import {
 } from "../../src/graph/status.js";
 import { StubRegistry, stringifyContent } from "../../src/graph/stub-model.js";
 import { loadPresetRoles, tierOfNode } from "../../src/roles/preset.js";
-import { runsOfNode, traceFromRows } from "./fixtures/company-fixtures.js";
+import {
+  EXPECTED_STUB_TRACE,
+  runsOfNode,
+  STUB_STOP_STATE,
+  traceFromRows,
+} from "./fixtures/company-fixtures.js";
 import { runChild } from "./fixtures/run-child.js";
 
-/** §7.1 主链 + §7.2 走查走到的那 14 条边，顺序即图应当产生的顺序。 */
-const EXPECTED_TRACE: readonly [TaskState, TaskState][] = [
-  ["CHARTER_PENDING", "CHARTER_APPROVED"], // charter：章程提案获批（0.8 无门控，见下）
-  ["CHARTER_APPROVED", "DECOMPOSING"], // product：接手拆解
-  ["DECOMPOSING", "IN_PROGRESS"], // tech：进入执行
-  ["IN_PROGRESS", "EVIDENCE_SUBMITTED"], // dev#1：交证据
-  ["EVIDENCE_SUBMITTED", "IN_REVIEW"], // test#1：入审
-  ["IN_REVIEW", "REJECTED_DOWNWARD"], // test#1：桩判不通过 → 打回
-  ["REJECTED_DOWNWARD", "IN_PROGRESS"], // 【§7.2 补边】沿边交回开发
-  ["IN_PROGRESS", "EVIDENCE_SUBMITTED"], // dev#2：再交证据
-  ["EVIDENCE_SUBMITTED", "IN_REVIEW"], // test#2：入审
-  ["IN_REVIEW", "APPROVED_UPWARD"], // test#2：通过
-  ["APPROVED_UPWARD", "ESCALATED_TO_CEO"], // 【§7.2 补边】上报
-  ["ESCALATED_TO_CEO", "FINAL_REVIEW"], // 【§7.2 补边】CEO 终审
-  ["FINAL_REVIEW", "DELIVERED"], // report：交付
-  ["DELIVERED", "ARCHIVED"], // report：归档
-];
+/**
+ * 期望路线住在 ./fixtures/company-fixtures.ts，与 cli/smoke.ts 共用一份。
+ * 原先它住在这里、长度又被手抄到 smoke 的四处计数里，改一次路线要动六处。
+ *
+ * ⚠ 这份期望【不该】再长回 14 条。report 现在停在 ESCALATED_TO_CEO：再往后那三条边
+ * （→FINAL_REVIEW→DELIVERED→ARCHIVED）里前两条的语义是「CEO 批准上线」与
+ * 「终审通过，交付」，桩写它们等于替 CEO 批两次，而 events 是 append-only 的。
+ * 谁把这里加长，test/arch/stub-terminal-write.ts 会红 —— 那是刻意的耦合。
+ */
+const EXPECTED_TRACE = EXPECTED_STUB_TRACE;
 
 /**
  * 诚实标注（不是 TODO，是已知边界，Phase 1 必须回头改这里）：
- * ESCALATED_TO_CEO → FINAL_REVIEW → DELIVERED 在真实系统里由 CEO 在审批收件箱
- * 点击触发（§7.2 步骤 8 的"CEO 操作"列）。0.8 的最小图【没有】门控，report 用桩
- * 直通这 4 条边。审阅门控落地后这条链必须改成 interrupt 驱动 —— 届时连同这段注释
- * 和下面那条"无门控"用例一起改，不是悄悄改期望值。
+ * CHARTER_PENDING → CHARTER_APPROVED 在真实系统里由 CEO 在审批收件箱点击触发
+ * （§7.2 步骤 2 的"CEO 操作"列）。0.8 的最小图【没有】门控，charter 用桩直通这一条。
+ * 审阅门控落地后这条边必须改成 interrupt 驱动 —— 届时连同这段注释、下面那条
+ * "无门控"用例、以及守卫 test/arch/stub-terminal-write.ts 的 BASELINE 一起改，
+ * 不是悄悄改期望值。
+ *
+ * 另一半原先的标注（ESCALATED_TO_CEO→FINAL_REVIEW→DELIVERED 那三条桩直通）已经
+ * 【不再是事实】，所以删掉了：report 现在停在 ESCALATED_TO_CEO。见 fixtures 那份注释。
  */
 
 /** 档位多重集：从【真岗位书】算出，不在测试里硬编码。
@@ -222,11 +225,86 @@ describe("Task 0.8 —— 最小可运行公司图", () => {
       expect(r.task_id).toBe("T-E2E");
     }
 
-    // 任务行跟着推进到终态（状态机不只在事件流里，也在 tasks 行上）
+    // 任务行跟着推进到【桩该停的那一格】。原先这里断言 ARCHIVED，而那个 ARCHIVED
+    // 是桩替 CEO 批出来的两条边换到的 —— 现在状态机停在 ESCALATED_TO_CEO，
+    // 与生产路线停在同一格。常量从 fixtures 取，别处再写一个状态名就是第二份事实。
     const tasks = readTasks(dbPath);
     expect(tasks.length).toBe(1);
-    expect(tasks[0]?.status).toBe("ARCHIVED");
+    expect(tasks[0]?.status).toBe(STUB_STOP_STATE);
     expect(tasks[0]?.title).toBe("做一个 AI 笔记应用");
+  }, 180_000);
+
+  // ── intake 那一发必须把 graph_version 写对 ────────────────────────────────
+  // 这条测的是【第二条建任务路径】。0012 §2 那次补法只补了 real-deps.insertTask，
+  // 而 hub run 走的是本文件这个图，它的 INSERT 列清单里当时【没有那一列】，
+  // 于是每条 hub run 的任务都躺在 0001_init.sql:49 的 DEFAULT 1 上 —— 而 WORK_USAGE
+  // 那句「建任务走 hub run / POST /tasks（那条路会把 graph_version 与任务行放在同一事务里取）」
+  // 一直把两条路一起说。实测见 .workbuddy/round288-hubrun-graph-version.mjs。
+  //
+  // 为什么下面两发【必须成对】存在：
+  //   只测「空库 ⇒ 0」⇒ 有人把它【写成常量 0】也照样全绿。0012 §5 那句「断言不能打在终值上」
+  //   在这里是同一件事 —— 第二发（库里有 v7 ⇒ 落 7）才是"这个数来自库"的证据。
+  // 为什么 0 是对的而 1 是错的：currentGraphVersion 在空表上给 0 = 【还没有任何版图】；
+  //   1 会在将来有人提交第一版图（MAX+1，空库上正好是 1）那一刻变成一张真存在的图，
+  //   于是这些老任务【静默地】指着那张它们创建时并不存在的图，一句报错都没有。
+  it("①b 空图库：hub run 建的任务落 0，不是列默认值 1", async () => {
+    const dbPath = tmpDb();
+    const h = makeHub(dbPath);
+    const graph = buildCompanyGraph({
+      db: h.db,
+      recorder: h.auditor.recorder,
+      saver: h.saver,
+      roles: loadPresetRoles(),
+      models: new StubRegistry(),
+      taskId: "T-GV-EMPTY",
+    });
+    await h.auditor.invoke(() =>
+      graph.invoke(
+        { idea: "量graph_version", current: "CHARTER_PENDING" },
+        { configurable: { thread_id: "th-gv-empty" } },
+      ),
+    );
+    // 第二条只读连接读（readRows 上面那段理由：写连接看不见自己没提交的东西，反过来它
+    // 也不会替我把"这一列根本没写"这件事掩盖成默认值之外的数）。
+    const rows = readRows(
+      dbPath,
+      "SELECT graph_version FROM tasks WHERE id = 'T-GV-EMPTY'",
+    );
+    expect(rows.length).toBe(1);
+    expect(Number(rows[0]?.["graph_version"])).toBe(0);
+  }, 180_000);
+
+  it("①c 库里有 v7：hub run 建的任务落 7 ⇒ 那个数来自库，不是常量", async () => {
+    const dbPath = tmpDb();
+    const h = makeHub(dbPath);
+    // 直接摆一个 v7：本发要判的是"取数口有没有接上"，不是"提交逻辑会不会算出 7"
+    // （后者由 test/org/versioning.test.ts 那批发判，那边测的是真 commitOrgGraph）。
+    const stubGraph = JSON.stringify({ nodes: {}, edges: {} });
+    h.db
+      .prepare(
+        "INSERT INTO delegation_graphs (id, version, graph_json, effective_from, created_by, change_summary) " +
+          "VALUES (?,?,?,?,?,?)",
+      )
+      .run("g7", 7, stubGraph, 1700000000000, "test", "v7");
+    const graph = buildCompanyGraph({
+      db: h.db,
+      recorder: h.auditor.recorder,
+      saver: h.saver,
+      roles: loadPresetRoles(),
+      models: new StubRegistry(),
+      taskId: "T-GV-V7",
+    });
+    await h.auditor.invoke(() =>
+      graph.invoke(
+        { idea: "量graph_version", current: "CHARTER_PENDING" },
+        { configurable: { thread_id: "th-gv-v7" } },
+      ),
+    );
+    const rows = readRows(
+      dbPath,
+      "SELECT graph_version FROM tasks WHERE id = 'T-GV-V7'",
+    );
+    expect(Number(rows[0]?.["graph_version"])).toBe(7);
   }, 180_000);
 
   it("② test 桩失败一次 → 回退 dev 一次，且回退单分支、有界", async () => {
@@ -323,7 +401,9 @@ describe("Task 0.8 —— 最小可运行公司图", () => {
       expect(legalTransitionsFrom(from as TaskState)).toContain(to);
     }
     expect(trace[0]?.[0]).toBe("CHARTER_PENDING");
-    expect(trace.at(-1)?.[1]).toBe("ARCHIVED");
+    // 尾格 = 桩该停的那一格。断言它而不是断言「轨迹长度」：长度会随图改动一起变，
+    // 而「桩绝不自己跨过 CEO 那一格」是这次修改要钉的性质。
+    expect(trace.at(-1)?.[1]).toBe(STUB_STOP_STATE);
   }, 180_000);
 
   it("节点级模型由岗位书的 model_tier 驱动（§5.9），且不联网不计费", async () => {
@@ -450,7 +530,7 @@ describe("Task 0.8 —— 最小可运行公司图", () => {
       expect(readTasks(dbPath)[0]?.status).toBe("EVIDENCE_SUBMITTED");
     }, 180_000);
 
-    it("新进程续跑：补齐 14 条边，已完成节点不产生重复事件（V3）", async () => {
+    it("新进程续跑：补齐剩下所有边，已完成节点不产生重复事件（V3）", async () => {
       const dbPath = tmpDb();
       seedCrashDb(dbPath, "T-CRASH2");
 
@@ -479,7 +559,7 @@ describe("Task 0.8 —— 最小可运行公司图", () => {
       expect(second.stdout).toContain("CHILD-DONE resumed=true");
 
       const trace = traceFromRows(readEvents(dbPath));
-      // 恰好 14 条、顺序完全一致 ⇒ 没有任何已完成节点被重跑（重跑必然多写事件）。
+      // 条数与顺序完全一致 ⇒ 没有任何已完成节点被重跑（重跑必然多写边）。
       // 这条因此兼作 V3 的守卫：断言"多出来的东西不存在"，而不是断言"某个计数等于几"。
       expect(trace).toEqual(EXPECTED_TRACE.map(([a, b]) => [a, b]));
 
@@ -511,7 +591,7 @@ describe("Task 0.8 —— 最小可运行公司图", () => {
       /*
        * trail 是【跨超步累加】的 reducer 通道，所以恢复后它带的是从头到尾的完整轨迹，
        * 不是恢复进程自己那 4 项。这条因此测的是另一件事：checkpoint 里的通道状态
-       * 既没丢也没重复累积 —— 与上面 14 条边的期望序列互为佐证。
+       * 既没丢也没重复累积 —— 与上面那条期望轨迹序列互为佐证。
        */
       const trailOut = second.stdout.match(
         /CHILD-DONE resumed=true trail=(\[[^\]]*\])/,
@@ -530,7 +610,7 @@ describe("Task 0.8 —— 最小可运行公司图", () => {
         ]),
       );
 
-      expect(readTasks(dbPath)[0]?.status).toBe("ARCHIVED");
+      expect(readTasks(dbPath)[0]?.status).toBe(STUB_STOP_STATE);
     }, 180_000);
   });
 });

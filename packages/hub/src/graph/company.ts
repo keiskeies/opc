@@ -25,6 +25,7 @@ import { Annotation, END, START, StateGraph } from "@langchain/langgraph";
 import type { BaseCheckpointSaver } from "@langchain/langgraph-checkpoint";
 import type { ModelTier } from "@opc/contracts";
 import type { AuditRecorder } from "../events/recorder.js";
+import { currentGraphVersion } from "../org/commit.js";
 import { assertTaskTransition, type TaskState } from "./status.js";
 
 export const COMPANY_NODES = [
@@ -114,8 +115,24 @@ const CompanyState = Annotation.Root({
 type CompanyStateType = typeof CompanyState.State;
 type CompanyUpdate = Partial<CompanyStateType>;
 
+/**
+ * 建任务必须带上 `graph_version`，与 `http/real-deps.ts` 那条 INSERT 同一条规则（0012 §2）。
+ *
+ * 这条 SQL 原先不带那一列，于是每条 `hub run` 建的任务都躺在 `0001_init.sql:49` 的
+ * `DEFAULT 1` 上 —— 而 0012 §1 量的正是「所有任务的『创建时版本』是同一个假的 1」。
+ * 那次只补了 HTTP 那半边，这条【第二条建任务路径】漏了，而 WORK_USAGE 与 0041 那句
+ * 「建任务走 hub run / POST /tasks（那条路会把 graph_version 与任务行放在同一事务里取）」
+ * 一直把两条路一起说。实测（.workbuddy/round288-hubrun-graph-version.mjs，真 CLI + 空图库）：
+ * 补之前落 1，补之后落 0。
+ *
+ * 为什么 0 与 1 的差不是凑数字：`currentGraphVersion` 在空表上给 0，含义是【还没有任何版图】；
+ * 而 1 会在【将来有人提交第一版图】那一刻变成一张真存在的图（提交逻辑是 MAX+1，空库上是 1），
+ * 于是这些老任务从此静默地指着那张它们创建时并不存在的图 —— 一句报错都没有。
+ * 0 则永远读不出来并抛错，这正是 §18.4 要的「版本缺失看得见」。
+ */
 const INSERT_TASK_SQL =
-  "INSERT OR IGNORE INTO tasks (id,title,status,assigned_role,current_node,created_at,updated_at) VALUES (?,?,?,?,?,?,?)";
+  "INSERT OR IGNORE INTO tasks (id,title,status,assigned_role,current_node,created_at,updated_at,graph_version) " +
+  "VALUES (?,?,?,?,?,?,?,?)";
 const UPDATE_TASK_SQL =
   "UPDATE tasks SET status=?, current_node=?, updated_at=? WHERE id=?";
 
@@ -203,6 +220,15 @@ export function buildCompanyGraph(o: CompanyGraphOptions) {
       "intake",
       node("intake", async (state) => {
         const t0 = Date.now();
+        // 版本由库算，不接受调用方传值（与 real-deps.insertTask 同一个取数口）。
+        // 取数与那条 INSERT 在【同一个超步事务】里：本节点的写跑在
+        // audit-middleware.ts 的 `BEGIN IMMEDIATE` 之内（同文件 edge() 上面那条既有事实：
+        // 「超步事务就是这条连接上的 BEGIN」），实测见
+        // .workbuddy/round288-intake-tx-probe.mjs —— 在 intake 那次 prepare 的同一时刻
+        // 试 `BEGIN` 得到 "cannot start a transaction within a transaction"。
+        // ⚠ 我在这格第一版写的是「这里只有连接、没有事务句柄 ⇒ 不是同一事务」，那句是假的：
+        //   它是从「这里没有 w.node()」推出来的，而 BEGIN 是别人（recorder）替我开好的，
+        //   不需要我持有句柄。⇒ 又是一条【机制注释写反】，与本轮 0008 §7.1 那条同族。
         db.prepare(INSERT_TASK_SQL).run(
           taskId,
           state.idea,
@@ -211,6 +237,7 @@ export function buildCompanyGraph(o: CompanyGraphOptions) {
           "intake",
           t0,
           t0,
+          currentGraphVersion(db),
         );
         return {};
       }),
@@ -274,18 +301,35 @@ export function buildCompanyGraph(o: CompanyGraphOptions) {
       }),
     )
     /**
-     * report：上报 → 终审 → 交付 → 归档，四条边一次超步。
+     * report：上报到 CEO 手上，【停在那里】。
      *
-     * 同 charter：真实系统的 ESCALATED_TO_CEO→FINAL_REVIEW→DELIVERED 由 CEO 在
-     * 审批收件箱操作触发（§7.2 步骤 8），0.8 无门控，桩直通。
+     * ── 改了什么、为什么 ────────────────────────────────────────
+     * 原本这一发一次超步写四条边：ESCALATED_TO_CEO → FINAL_REVIEW → DELIVERED →
+     * ARCHIVED。后两条不是「图跑完了」，是【桩替 CEO 批了两次】：
+     * ESCALATED_TO_CEO→FINAL_REVIEW 在 HUMAN_EDGES 里的那句 why 是
+     * 「CEO 批准上线（§7.2 步骤 8→9）」，FINAL_REVIEW→DELIVERED 是「终审通过，交付」。
+     * 两条都会进 append-only 的 events 表 —— 也就是说桩路线在审计日志里【留下了
+     * 两条没有发生过的 CEO 决定】，而演示看不出差别。
+     *
+     * ── 为什么停在 ESCALATED_TO_CEO 而不是设计文档说的 FINAL_REVIEW ────
+     * docs/OPC-OS-功能优化设计.md §O1 动作 2 的原话是「落到 FINAL_REVIEW 并停住」。
+     * 那个落点仍然替 CEO 走了【一步】：要落到 FINAL_REVIEW 就必须写
+     * ESCALATED_TO_CEO→FINAL_REVIEW 那条边，而那条边的语义就是「CEO 批准上线」。
+     * 停一格没省下最贵的那件事 —— 假的那两条审计行照样写下去了。
+     * 现在的落点是从席位表推的，不是挑的：ESCALATED_TO_CEO 是 AGENT_EDGES 的落点
+     * （IN_REVIEW.blocked 与 APPROVED_UPWARD 的补边都到它），所以「升上去」这个动作
+     * 本来就是 agent 能做的；而 FINAL_REVIEW 是 HUMAN_EDGES 的落点，只有点一次批准
+     * 才进得去。守卫 test/arch/stub-terminal-write.ts 判的就是这个差别，
+     * 它现在红在 report→FINAL_REVIEW 与 report→DELIVERED 两发上。
+     *
+     * 副作用（是想要的副作用）：桩路线与生产路线停在【同一格】，演示不再比生产更绿。
+     * 设计文档 §2 那张对照表「审批门：无」那一行仍然成立 —— charter 节点还是桩直通，
+     * 那条由 O4/O5 的门控收，已登记在守卫的 BASELINE 里。
      */
     .addNode(
       "report",
       node("report", async (_state, write) => {
         await write("ESCALATED_TO_CEO");
-        await write("FINAL_REVIEW");
-        await write("DELIVERED");
-        await write("ARCHIVED");
         return {};
       }),
     )

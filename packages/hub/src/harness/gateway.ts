@@ -1,4 +1,25 @@
 /**
+ * ⚠⚠ 今天【一行都不执行】：harness/gateway.ts 对外零 import，生产路线不经过这里 ⚠⚠
+ *
+ * 那句「唯一的对外调用入口」是本模块的【设计目标】，不是现状，写在这里是因为它太像现状了。
+ * 真的员工走的是 `engine/claude.ts` 起的 `claude -p`，一次调用都不进这个 Gateway；
+ * 下面那对注入函数（`checkBudget` / `settle`）也没有调用方 —— 预算侧今天走的是
+ * `engine/runtime.ts` 里 `onCost` 那三句：~~它们是手抄的 SQL，与 `budget/tracker.ts`
+ * 只差把 `scope_type` / `period` 内联成字面量 `'task'` / `'per_task'` ⇒ 同一件事两份 SQL，
+ * 改一处不会带着另一处（O7 的账）~~【round272 已解：那三份副本删了，`onCost` 现在
+ * import tracker 导出的 `ENSERT_BUDGET_SQL` / `IDEMPOTENT_INSERT_SQL` / `ADD_CONSUMED_SQL`，
+ * scope/period 走绑参 ⇒ 语句只剩一份，由 `claims-registry.test.ts` 那条「不许再抄」钉住】。
+ * ⚠ 但**这一格没有兑现「接进 gateway」**：字面那句「把 `onCost` 换成走 gateway」的前提
+ * 是 gateway 里有一条调用路径，而它那两个注入函数只是【类型槽】、本文件没有任何预算 SQL，
+ * 且 `callHarness` 今天零生产调用方 ⇒ 换过去等于把记账接到一条没人走的路上。
+ * 本轮解掉的是那两份 SQL（真实存在的那个洞），不是接线；接线仍归 O6 动作 2/3 的本体。
+ * 主张的措辞是照着 `test/arch/dead-modules.ts` 的 claimSites 写的（提模块名 + 否定词），
+ * 接线那天 `checkBaseline` 方向 B 会红并点名这一行 ⇒ 这句横幅【自删】，不等谁记得改文档。
+ * 缺口、接线点（`onCost` 旁边）、顺序约束都登记在 docs/OPC-OS-功能优化设计.md 的 O6 / O7。
+ *
+ * ─────────────────────────────────────────────────────────────────────
+ * 以下是本模块【接上之后】的判据。
+ *
  * Harness Gateway：唯一的对外调用入口（计划 Task 5.1，规格 §12.1 / §12.5 / §12.7）。
  *
  * ── 这个模块存在的唯一理由：把「能不能调」与「怎么调」分给两个人 ──────────

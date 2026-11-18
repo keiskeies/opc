@@ -26,12 +26,18 @@
  * 同 cards.test.ts 文件头两条理由（0025 §7 末条那次 63-fail 假警报；
  * 排序里那个 NULL-last 的 CASE 只有真 SQLite 能验）。
  */
-import { mkdirSync, readFileSync, rmSync } from "node:fs";
+import {
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+} from "node:fs";
 import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
-import { afterAll, describe, expect, it } from "vitest";
 import type { DatabaseSync } from "node:sqlite";
+import { fileURLToPath } from "node:url";
 import { APPROVAL_STATUS_PENDING } from "@opc/contracts";
+import { afterAll, describe, expect, it } from "vitest";
 import {
   APPROVAL_ORDER,
   approvalViewOf,
@@ -41,9 +47,9 @@ import {
   listApprovals,
   MAX_APPROVAL_LIMIT,
 } from "../../src/approvals/query.js";
-import { fixtureTmp } from "../fixtures/fixture-dir.js";
 import { openDb } from "../../src/db/driver.js";
 import { migrate } from "../../src/db/migrate.js";
+import { fixtureTmp } from "../fixtures/fixture-dir.js";
 
 const HUB = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const TMP = fixtureTmp("approvals-query", import.meta.url);
@@ -56,7 +62,9 @@ function codeLines(src: string): string[] {
   return src
     .split("\n")
     .map((l) => l.trim())
-    .filter((l) => !l.startsWith("//") && !l.startsWith("*") && !l.startsWith("/*"));
+    .filter(
+      (l) => !l.startsWith("//") && !l.startsWith("*") && !l.startsWith("/*"),
+    );
 }
 
 const opened: DatabaseSync[] = [];
@@ -80,24 +88,24 @@ interface CardOpts {
   readonly createdAt?: number | null;
   readonly parameters?: string | null;
   readonly note?: string | null;
+  /** 证据引用（0008）。undefined = 不写这一列（NULL）；传字符串数组 JSON。 */
+  readonly evidence_refs?: string | null;
+  /** 影子判定读的就是这一格；缺省仍是「摘要 <id>」。 */
+  readonly summary?: string;
 }
 
 /** 直插而不是走 createCard：这一篇要能造出 createCard 【造不出来】的脏行。 */
-function card(
-  db: DatabaseSync,
-  id: string,
-  o: CardOpts = {},
-): void {
+function card(db: DatabaseSync, id: string, o: CardOpts = {}): void {
   db.prepare(
     "INSERT INTO approvals (id, task_id, approval_type, summary, parameters, " +
       "recommendation, recommendation_source, timeout_behavior, timeout_at, status, " +
-      "decided_by, decided_at, decision_note, card_key, created_at) " +
-      "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      "decided_by, decided_at, decision_note, card_key, created_at, evidence_refs) " +
+      "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
   ).run(
     id,
     "t-1",
     o.type ?? "escalation",
-    "摘要 " + id,
+    o.summary ?? "摘要 " + id,
     o.parameters ?? "{}",
     null,
     null,
@@ -109,6 +117,8 @@ function card(
     o.note ?? null,
     null,
     o.createdAt === undefined ? T0 : o.createdAt,
+    // undefined（没传这一格）⇒ 不写 evidence_refs ⇒ 落 NULL。
+    o.evidence_refs ?? null,
   );
 }
 
@@ -163,7 +173,11 @@ describe("① pendingTotal：那个角标唯一能对账的数", () => {
   it("空库 ⇒ 0 / [] / false，而不是 undefined", () => {
     const db = fresh();
     const r = listApprovals(db);
-    expect(r).toMatchObject({ approvals: [], pendingTotal: 0, truncated: false });
+    expect(r).toMatchObject({
+      approvals: [],
+      pendingTotal: 0,
+      truncated: false,
+    });
   });
 });
 
@@ -188,7 +202,10 @@ describe("② 默认与回落：拼错的过滤参数不能把收件箱换成全
     card(db, "a1", { status: "approved" });
     for (const bad of ["all", "PENDING", "", "pending ", "任意"]) {
       const r = listApprovals(db, { status: bad });
-      expect(r.approvals.map((a) => a.id), "status=" + JSON.stringify(bad)).toEqual(["p1"]);
+      expect(
+        r.approvals.map((a) => a.id),
+        "status=" + JSON.stringify(bad),
+      ).toEqual(["p1"]);
       expect(r.statusFilter).toBe("pending");
     }
   });
@@ -205,7 +222,9 @@ describe("② 默认与回落：拼错的过滤参数不能把收件箱换成全
       ["rejected", ["r1"]],
       ["deferred", ["f1"]],
     ] as const) {
-      expect(listApprovals(db, { status: s }).approvals.map((a) => a.id)).toEqual([...ids]);
+      expect(
+        listApprovals(db, { status: s }).approvals.map((a) => a.id),
+      ).toEqual([...ids]);
     }
   });
 });
@@ -251,17 +270,17 @@ describe("③ 排序：等得最久的在最上面，而 NULL 年龄不能靠方
     expect(r.statusFilter).toBe("pending");
     expect(APPROVAL_ORDER).not.toMatch(/status/u);
     // 「等得最久」这一档在已批那一档里同样成立（同一份 ORDER BY，换的是 WHERE）。
-    expect(listApprovals(db, { status: "approved" }).approvals.map((a) => a.id)).toEqual([
-      "a-old",
-    ]);
+    expect(
+      listApprovals(db, { status: "approved" }).approvals.map((a) => a.id),
+    ).toEqual(["a-old"]);
   });
 });
 
 describe("④ 脏数据不能让收件箱整体 500", () => {
   it("⭐ escalationReasonOf：合法 / 四种脏形状 / 空串，全都给得出答案", () => {
-    expect(escalationReasonOf('{"escalation":{"reason":"irreversible_action"}}')).toBe(
-      "irreversible_action",
-    );
+    expect(
+      escalationReasonOf('{"escalation":{"reason":"irreversible_action"}}'),
+    ).toBe("irreversible_action");
     for (const bad of [
       null,
       "{不是 JSON",
@@ -282,7 +301,9 @@ describe("④ 脏数据不能让收件箱整体 500", () => {
 
   it("⭐ 一行脏 parameters 混在列表里：那一行原因给 null，整页照常返回", () => {
     const db = fresh();
-    card(db, "good", { parameters: '{"escalation":{"reason":"budget_threshold"}}' });
+    card(db, "good", {
+      parameters: '{"escalation":{"reason":"budget_threshold"}}',
+    });
     card(db, "broken", { parameters: "{坏了一半" });
     card(db, "arrayish", { parameters: "[1,2]" });
     const r = listApprovals(db);
@@ -323,12 +344,31 @@ describe("④ 脏数据不能让收件箱整体 500", () => {
       summary: "s",
       status: "pending",
     });
-    expect([v.created_at, v.timeout_at, v.task_id, v.escalation_reason]).toEqual([
-      null,
-      null,
-      null,
-      null,
+    expect([
+      v.created_at,
+      v.timeout_at,
+      v.task_id,
+      v.escalation_reason,
+    ]).toEqual([null, null, null, null]);
+  });
+
+  it("⭐ evidence_refs 随视图带出：有证据的卡是数组，没给的是 null（O5 动作 4）", () => {
+    /*
+     * 0008 那列的读侧出口。契约强制非空，所以正常建卡恒有数组；但视图必须能表达
+     * 「这张卡没有证据包」（null / []）—— 否则 UI 会把缺证据的旁路/存量卡
+     * 伪装成有证据的卡。变异：把 evidenceRefsOf 改成恒返回 [] ⇒ 有证据的卡
+     * 数量信息消失，这一发红。
+     */
+    const db = fresh();
+    card(db, "p1", {
+      evidence_refs: JSON.stringify(["task:t-1/evidence/prd.md"]),
+    });
+    card(db, "p2", { evidence_refs: null });
+    const rows = listApprovals(db).approvals;
+    expect(rows.find((a) => a.id === "p1")?.evidence_refs).toEqual([
+      "task:t-1/evidence/prd.md",
     ]);
+    expect(rows.find((a) => a.id === "p2")?.evidence_refs).toBeNull();
   });
 });
 
@@ -336,7 +376,10 @@ describe("⑤ 出参形状：列表不是「顺手把整行发出去」", () => 
   it("⭐ 不带 parameters 全文，也不带 decision_note", () => {
     const db = fresh();
     card(db, "p1", {
-      parameters: JSON.stringify({ impact_scope: "整个生产库", diff: "……几千字……" }),
+      parameters: JSON.stringify({
+        impact_scope: "整个生产库",
+        diff: "……几千字……",
+      }),
       note: "CEO 的内部备注",
     });
     const raw = JSON.stringify(listApprovals(db));
@@ -345,7 +388,9 @@ describe("⑤ 出参形状：列表不是「顺手把整行发出去」", () => 
     // decision_note 压根不在 APPROVAL_COLUMNS 里（它是决策附件，不属于列表）。
     expect(raw).not.toContain("decision_note");
     // 而从那一格里提出来的东西必须在：按原因分组是【规格】§8.3 那条北极星的口径。
-    card(db, "p2", { parameters: '{"escalation":{"reason":"irreversible_action"}}' });
+    card(db, "p2", {
+      parameters: '{"escalation":{"reason":"irreversible_action"}}',
+    });
     expect(
       listApprovals(db)
         .approvals.map((a) => [a.id, a.escalation_reason])
@@ -379,18 +424,27 @@ describe("⑤ 出参形状：列表不是「顺手把整行发出去」", () => 
      * changes===0 ⇒ 报「没抢到」，不抛错。挡住它的是 real-deps.test.ts 那条
      * 【第一次决策返回 true】的正向用例（那里也写了这条警告）。
      */
-    const claim = readFileSync(join(HUB, "src", "http", "real-deps.ts"), "utf8");
-    const auto = readFileSync(join(HUB, "src", "policy", "auto-approve.ts"), "utf8");
+    const claim = readFileSync(
+      join(HUB, "src", "http", "real-deps.ts"),
+      "utf8",
+    );
+    const auto = readFileSync(
+      join(HUB, "src", "policy", "auto-approve.ts"),
+      "utf8",
+    );
     for (const [name, src] of [
       ["real-deps.ts", claim],
       ["auto-approve.ts", auto],
     ] as const) {
-      const sqlLine = codeLines(src).filter((l) => /WHERE id = \? AND status/.test(l));
+      const sqlLine = codeLines(src).filter((l) =>
+        /WHERE id = \? AND status/.test(l),
+      );
       expect(sqlLine.length, name + " 应当有一条认领 SQL").toBe(1);
       // ① 不许回退成字面量拼接。
-      expect(sqlLine[0], name + " 的认领 SQL 回退成了 status 字面量").not.toMatch(
-        /status\s*=\s*'/u,
-      );
+      expect(
+        sqlLine[0],
+        name + " 的认领 SQL 回退成了 status 字面量",
+      ).not.toMatch(/status\s*=\s*'/u);
       expect(sqlLine[0]).toMatch(/status = \?/u);
       // ② 绑的必须是 contracts 那个常量。
       expect(src, name + " 没有 import APPROVAL_STATUS_PENDING").toMatch(
@@ -403,8 +457,14 @@ describe("⑤ 出参形状：列表不是「顺手把整行发出去」", () => 
     // 变成一个安静的「库里 status 变了而 SQL 也一起变了」的一致性变更。
     expect(APPROVAL_STATUS_PENDING).toBe("pending");
     // 认领条件与建卡初值必须是【同一个引用】，不是「碰巧都是 pending」。
-    const cards = readFileSync(join(HUB, "src", "approvals", "cards.ts"), "utf8");
-    const query = readFileSync(join(HUB, "src", "approvals", "query.ts"), "utf8");
+    const cards = readFileSync(
+      join(HUB, "src", "approvals", "cards.ts"),
+      "utf8",
+    );
+    const query = readFileSync(
+      join(HUB, "src", "approvals", "query.ts"),
+      "utf8",
+    );
     expect(cards).toMatch(/APPROVAL_STATUS_PENDING/u);
     expect(cards).not.toMatch(/=\s*"pending"/u);
     expect(query).toMatch(/PENDING_LITERAL: string = APPROVAL_STATUS_PENDING/u);
@@ -430,8 +490,16 @@ describe("⑥ limit 的钳制", () => {
   });
 
   it("undefined / NaN / 0 / 负数 ⇒ 回落默认值，而不是抛", () => {
-    for (const bad of [undefined, Number.NaN, Number.POSITIVE_INFINITY, 0, -5]) {
-      expect(clampLimit(bad), "实到 " + String(bad)).toBe(DEFAULT_APPROVAL_LIMIT);
+    for (const bad of [
+      undefined,
+      Number.NaN,
+      Number.POSITIVE_INFINITY,
+      0,
+      -5,
+    ]) {
+      expect(clampLimit(bad), "实到 " + String(bad)).toBe(
+        DEFAULT_APPROVAL_LIMIT,
+      );
     }
     expect(clampLimit(12.9)).toBe(12);
   });
@@ -442,5 +510,96 @@ describe("⑥ limit 的钳制", () => {
     const r = listApprovals(db, { limit: 0 });
     expect(r.limit).toBe(DEFAULT_APPROVAL_LIMIT);
     expect(r.approvals).toHaveLength(1);
+  });
+});
+
+/**
+ * ⑦ 影子判定（O9 动作 1 阶段一：只报不批）。
+ *
+ * 三条主张，方向各不相同：
+ *  (甲) 读路径真的调到了规则 —— 有读数。缺了它，这一格是永远 null 的死字段。
+ *  (乙) 不可逆那张**根本不进** autoApprove：短路成立 ⇒ 阴性样本不建在子串表上。
+ *       这是验收第 2 条「不可逆被自动批准 ⇒ 必须永远绿」的落点，它的身份是
+ *       **阴性样本不是成绩**（O9 正文原话），所以它绿的凭据是那条短路 + 变异证据，
+ *       不是「今天恰好没有不可逆卡被批」。
+ *  (丙) 阶段一**不改任何决定**：写路径零调用。这一发是源码级判据（不是行为），
+ *       理由与它要防的坏法同形 —— 担心的正是「将来有人顺手在写路径调它」。
+ */
+describe("⑦ policy_shadow：规则判而不下手", () => {
+  it("⭐ 普通待批卡带着读数：R1 的缺格如实报出而不是假装什么都没发生", () => {
+    const db = fresh();
+    card(db, "p1", { summary: "读取配置并汇报现状", type: "strategic" });
+    const v = listApprovals(db).approvals[0];
+    const s = v?.policy_shadow;
+    if (s === null || s === undefined || s.decision !== "require_approval") {
+      throw new Error("期望 require_approval，实到 " + JSON.stringify(s));
+    }
+    // tier 由 summary 子串估算而来（"读取" ⇒ read_only）—— 读数页要写明它是估算。
+    expect(s.tier).toBe("read_only");
+    expect(s.blocked_by).toBe("conditions_unmet");
+    // 只有 R1 的两格：§9.1 里【历史是 R2 的前置】，只读卡不问历史 ——
+    // 断言按 autoApprove 的真实顺序写，不照抄「三格前置」那句话。
+    expect([...(s.missing as string[])].sort()).toEqual([
+      "evidence_missing",
+      "gate_missing",
+    ]);
+  });
+
+  it("⭐ 显式 irreversible=true 的卡短路在估算之前：blocked_by=irreversible、missing 空", () => {
+    const db = fresh();
+    // summary 刻意写成一个「只读形状」的句子：如果没短路，它会判成 read_only +
+    // conditions_unmet。这一发因此判的是【短路】而不是【子串表认得不可逆】。
+    card(db, "ir1", {
+      summary: "读取一次生产库的用量",
+      type: "irreversible_action",
+      parameters: JSON.stringify({
+        irreversible: true,
+        impact_scope: "生产库",
+      }),
+    });
+    const s = listApprovals(db).approvals[0]?.policy_shadow;
+    if (s === null || s === undefined || s.decision !== "require_approval") {
+      throw new Error("期望 require_approval，实到 " + JSON.stringify(s));
+    }
+    expect([s.tier, s.blocked_by, s.missing]).toEqual([
+      "irreversible",
+      "irreversible",
+      [],
+    ]);
+    expect(s.note).toContain("irreversible=true");
+  });
+
+  it("parameters 是坏 JSON ⇒ 影子判定照算（不短路、不 500）：坏值不能吞掉整张卡", () => {
+    const db = fresh();
+    card(db, "bad1", { parameters: "{不是JSON", summary: "grep 一遍日志" });
+    const r = listApprovals(db);
+    expect(r.approvals).toHaveLength(1);
+    expect(r.approvals[0]?.policy_shadow).not.toBeNull();
+  });
+
+  it("⭐ 阶段一的边界：src 里 autoApprove 的调用方【只有读路径】，recordAutoApproval 零调用方", () => {
+    // 判据是源码级：担心的坏法是「将来在写路径顺手调它」，而那次改动在行为上
+    // 完全可能不红（没有卡 ⇒ 没有可观察差异），只有扫源码报得出。
+    const root = join(HUB, "src");
+    const callers: string[] = [];
+    const recordCallers: string[] = [];
+    const walk = (dir: string): void => {
+      for (const name of readdirSync(dir)) {
+        const p = join(dir, name);
+        if (statSync(p).isDirectory()) walk(p);
+        else if (name.endsWith(".ts")) {
+          const src = readFileSync(p, "utf8");
+          const rel = p.slice(root.length + 1).replaceAll("\\", "/");
+          if (rel === "policy/auto-approve.ts") continue;
+          if (/autoApprove\s*\(/u.test(src)) callers.push(rel);
+          if (/recordAutoApproval\s*\(/u.test(src)) recordCallers.push(rel);
+        }
+      }
+    };
+    walk(root);
+    expect(callers.sort()).toEqual(["approvals/query.ts"]);
+    // 认领卡片 + 署 policy-engine 的那条写路径【今天无人调】：
+    // 「存在一条被自动批准的审批」这一发今天必须红（O9 验收第 1 条）。
+    expect(recordCallers).toEqual([]);
   });
 });

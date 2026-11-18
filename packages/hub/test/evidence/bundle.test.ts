@@ -501,7 +501,7 @@ describe("store.verify：完整性对账", () => {
 });
 
 describe("store.register：写 evidence_bundles 那一行", () => {
-  it("十个字段全部落库，JSON 列读回来与写入逐字对得上", async () => {
+  it("十一个字段全部落库，JSON 列读回来与写入逐字对得上", async () => {
     const db = await migrated();
     const captured: { sql: string; params: readonly unknown[] }[] = [];
     const store = new EvidenceStore({
@@ -518,15 +518,15 @@ describe("store.register：写 evidence_bundles 那一行", () => {
             "VALUES ('T-R', 't', 'IN_PROGRESS', 'dev', 'implement', " +
             "1700000000000, 1700000000000)",
         );
-        db.prepare(
-          "INSERT INTO evidence_bundles (id, task_id, producer_role, bundle_type, artifacts, " +
-            "self_check, created_at, model_family, claims, honesty_boundaries) " +
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        ).run(...(params as never[]));
+        // ⚠ 这里【执行 store 自己那条 SQL】而不是手抄一份列清单。0006→0007 加 metrics
+        // 列当场演示了手抄的代价：镜像那份没跟着改，红是红了，但红因是【夹具与 src
+        // 的副本漂移】而不是【落库错了】—— 一次把两种故障混在一个红里。
+        // 跑真 SQL 之后：src 改列 ⇒ 直接打在真 schema 上，列错了红在 SQL 本身。
+        db.prepare(sql).run(...(params as never[]));
       },
       now: () => 1700000000123,
     });
-    const b = valid({ task_id: "T-R" });
+    const b = valid({ task_id: "T-R", metrics: { coverage: 81.5, p0_defects: 0 } });
     store.register(b, { passed: true, note: "自检，非独立验证" });
 
     expect(captured.length).toBe(1);
@@ -547,6 +547,44 @@ describe("store.register：写 evidence_bundles 那一行", () => {
       passed: true,
       note: "自检，非独立验证",
     });
+    // 0065 / 迁移 0007：门控判过的那份数必须落盘（第三态「契约有而库没有」的钉子）。
+    // 0 这个值刻意留在断言里：它测的是「0 不会被 falsy 折叠成缺省」。
+    expect(JSON.parse(row["metrics"] as string)).toEqual({
+      coverage: 81.5,
+      p0_defects: 0,
+    });
+  });
+
+  it("metrics 的三态落库：缺省 → NULL；空 record → \"{}\"；两者不折叠", async () => {
+    const db = await migrated();
+    db.exec(
+      "INSERT INTO tasks (id, title, status, assigned_role, current_node, " +
+        "created_at, updated_at) VALUES ('T-3', 't', 'IN_PROGRESS', 'dev', " +
+        "'implement', 1, 1)",
+    );
+    const store = new EvidenceStore({
+      root,
+      exec: (sql, params) => {
+        db.prepare(sql).run(...(params as never[]));
+      },
+      now: () => 1,
+    });
+    const metricsCol = (id: string): unknown =>
+      (
+        db.prepare("SELECT metrics FROM evidence_bundles WHERE id = ?").get(id) as {
+          metrics: unknown;
+        }
+      ).metrics;
+    // 包一（缺省）：契约里 metrics 是 optional，「没带这个概念」要存成 NULL
+    store.register(valid({ bundle_id: ID_A, task_id: "T-3" }));
+    // 包二（空 record）：「带了但没声明具体指标」要存成 "{}"，不能也折成 NULL
+    store.register(valid({ bundle_id: ID_B, task_id: "T-3", metrics: {} }));
+    const a = metricsCol(ID_A);
+    expect(a, "缺省必须是 NULL —— 不是字符串 \"undefined\"，也不是 \"{}\"").toBeNull();
+    expect(JSON.parse(metricsCol(ID_B) as string)).toEqual({});
+    // 按 id 读而不是按 created_at 读：两包的 now() 同为 1，按时间读回是【不确定的】——
+    // 第一版就是这么写的，写完自己看到才改（时间戳相同 ⇒ 排序退化为主键序，属实现细节）。
+    expect(a, "NULL 与 {} 是两种说法，落库后仍要分得开").not.toEqual({});
   });
 
   it("不传 selfCheck → 存 NULL，而不是字符串 \"undefined\"", async () => {

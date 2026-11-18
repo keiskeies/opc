@@ -1,4 +1,22 @@
 /**
+ * ⚠⚠ 今天【一行都不执行】：harness/safety.ts 对外零 import，生产路线不经过这里 ⚠⚠
+ *
+ * 这不是谦虚，是一条会被机器核对的主张，措辞是照着判据写的（要提模块名 + 否定词，
+ * 只写「本文件」「harness/ 整目录」那些 `test/arch/dead-modules.ts` 的 claimSites
+ * 认不出来 —— 实测过，见本轮记录）。接线那天 `checkBaseline` 方向 B 会红并点名这一行，
+ * 于是这句横幅【自删】，不需要谁记得来改文档。
+ *
+ * 为什么值得单独放在文件头第一句：本文件那四层预防（白名单 / 沙箱档位 / 高风险暂停 /
+ * 绝对禁止项）下面每一段都写得像「已经在跑」，而真的员工（`engine/claude.ts` 起的
+ * `claude -p`）今天实际经过的只有 CLI 那两个参数（`--permission-mode plan` +
+ * `--max-budget-usd`）加一句 `env: process.env` 原样透传。
+ * ⇒ 「3300 行看起来像防线的死代码」比「根本没有防线」更危险：下一个人会以为已经防住了。
+ * ⇒ **顺序硬约束**：真要放开写权限，必须先接本文件，不能反过来。
+ * 缺口与接线顺序登记在 docs/OPC-OS-功能优化设计.md 的 O6。
+ *
+ * ─────────────────────────────────────────────────────────────────────
+ * 以下是本模块【接上之后】的判据。
+ *
  * Harness 的四层安全防护（计划 Task 5.2，规格 §12.7 + §4.1.3 + §20.2）。
  *
  * ── 这个文件的立场只有一句 ─────────────────────────────────────────
@@ -615,9 +633,17 @@ export function redactArgs(args: readonly string[]): string[] {
  *    classifyAction 的不可逆子串表，不是这一条。
  * 3. **harness 侧的自主行为**：§12.7 表头写了「叠加」，不是「替代」。
  *    沙箱档位本身由 harness 执行；如果 harness 的档位实现有 bug，本层看不见。
- * 4. **绕过 Gateway 的调用**：本层只在 Gateway 上生效。今天 `harness_call` 审计
- *    在生产里零写入方（因为没有任何生产代码调用 Gateway，见 0020 §2 甲档），
+ * 4. **绕过 Gateway 的调用**：本层只在 Gateway 上生效。今天 `harness_call` 这个
+ *    **events 里的 action 值**只在 Gateway（本模块的调用方）与 `harness/verifier.ts` 里写，
+ *    而 Gateway 没有任何生产代码调用（见 0020 §2 甲档），所以「走 Gateway 的 harness 审计」
+ *    在生产里零写入方。
+ *    ⚠ 这**不等于** `harness_calls`【那张表】是空的 —— 它由 `engine/runtime.ts` 的
+ *    `INSERT_HARNESS_CALL_SQL` 在每轮真实执行后写（0063 §2）。两者名字只差一个 `s`，
+ *    说的是两套东西：一个是 events 表里 action='harness_call' 的审计行（走 Gateway 才有），
+ *    一个是 §12.7 第 4 层那张执行日志表（走 engine 就有）。别把这两句混成一句。
  *    所以「所有 harness 调用都过了这四层」这句话当前的强度是
- *    **「凡是走 Gateway 的都过了」+「今天没人走 Gateway，因为还没有 harness 调用」**。
- *    接线那天，第 4 条必须靠「不写审计就调不动」来保证，而不是靠约定。
+ *    **「凡是走 Gateway 的都过了」+「今天没人走 Gateway」** ——
+ *    而【engine 那条路根本没经过 Gateway】，它花的钱与留的痕在 harness_calls 与
+ *    budget_events 里，四层安全判定【一次都没跑过】。接线那天，第 4 条必须靠
+ *    「不写审计就调不动」来保证，而不是靠约定。
  */

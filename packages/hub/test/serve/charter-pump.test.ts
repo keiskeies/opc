@@ -176,11 +176,25 @@ function addTasks(db: Db, ids: readonly string[], status: string | undefined, ba
  * （CLI 装不上 ⇒ spawn ENOENT ⇒ 一分钱没花），而它也是【最危险】的那一支 ——
  * 留痕一旦坏掉，重试计数就永远是 0，上限就永远不生效（0043 §10）。
  */
-function fakeCardDeps(w: World, o: { readonly ok?: boolean; readonly costCents?: number } = {}): () => CharterCardDeps {
+function fakeCardDeps(
+  w: World,
+  o: {
+    readonly ok?: boolean;
+    readonly costCents?: number;
+    /**
+     * 在【起草那一轮里】插入一个动作，参数是这一次正在起草的任务。
+     * 它存在的唯一理由：有一类状态【只能在两轮之间由别人造成】，而从测试外部
+     * 摆不出来 —— 详见用它的那一发（「CEO 在这一趟泵跑着的时候点了卡」）。
+     */
+    readonly during?: (taskId: string) => void;
+  } = {},
+): () => CharterCardDeps {
   const ok = o.ok !== false;
   return () => ({
     runTurn: async (i) => {
-      w.turns.push(taskIdOfPrompt(i.prompt));
+      const id = taskIdOfPrompt(i.prompt);
+      w.turns.push(id);
+      o.during?.(id);
       return {
         ok,
         text: ok ? draftText() : "",
@@ -206,11 +220,13 @@ async function pump(
     readonly costCents?: number;
     /** 那道花钱的门。默认给很大 ⇒ A–H 那 28 发的语义【不被这道门掺和】（I 组才判门）。 */
     readonly taskLimitCents?: number;
+    /** 透传给 fakeCardDeps：在起草那一轮里插一个动作。 */
+    readonly during?: (taskId: string) => void;
   } & Pick<PumpOptions, "maxAttempts" | "taskLimit"> = {},
 ): Promise<PumpRoundResult> {
   return pumpCharterCards(w.q, w.bus, {
     nowMs: NOW + 1000,
-    cardDeps: fakeCardDeps(w, o),
+    cardDeps: fakeCardDeps(w, { ok: o.ok, costCents: o.costCents, during: o.during }),
     maxBudgetUsd: 0.5,
     taskLimitCents: o.taskLimitCents ?? 2 ** 40,
     cwd: TMP,
@@ -387,13 +403,20 @@ describe("B. 不去碰已经有卡的任务", () => {
     expect(w.turns).toHaveLength(1);
   });
 
-  it("⭐ 卡被批掉而任务【没推进】⇒ 泵【不再起草】：唯一索引不放行第二行", async () => {
-    // 这一发写的期望与初版【相反】，而相反的那一版才是对的 —— 记下来防它被改回去：
-    // idx_approvals_card_identity 是 (task_id, card_key) 上的唯一索引，【不带 status 条件】
-    // （0004），所以一个任务在 charter:proposal 这个 key 上【一辈子只能有一行】。
+  it("⭐ 卡被批掉而任务【没推进】⇒ 泵【不再起草】：候选那道筛子挡的，不是索引", async () => {
+    // 这一发写的期望与初版【相反】，而相反的那一版才是对的 —— 记下来防它被改回去。
+    // ⚠ 标题与理由在 0006 之后【改过一次】，改的是【谁承重】而不是【期望】：
+    //   · 原文写的是「idx_approvals_card_identity 不带 status 条件 ⇒ 一辈子只能有一行」，
+    //     那是 0004 的形状；0006 把那条索引收窄成 `AND status = 'pending'` 之后，
+    //     已批掉的这一行【不再占用这个键】，第二张卡【插得进去】。
+    //   · 现在挡它的是候选 SQL 里那道 NOT EXISTS（【任何状态】的卡，不看 pending）。
+    //     这不是我重写一段理由去迁就结果 —— 这一发变异量出来的：把那处与同形状的
+    //     另一处改成 `AND a.status = 'pending'` ⇒ 本发与下面那发【都红】
+    //     （cards 长度 1 而不是 0）。收窄前后【期望一字未改】而红因换了地方。
     // 初版按 status='pending' 筛候选，于是这种任务会进候选 ⇒ 那道前置检查也只查
-    // pending ⇒ 起子进程、烧一轮 token ⇒ insertCard 撞索引 ⇒ already_pending。
-    // 【烧掉的钱换回一句"已经有了"】。判据必须与 DDL 的约束同一个形状。
+    // pending ⇒ 起子进程、烧一轮 token ⇒ 又建出一张卡。
+    // 【烧掉的钱换回一句"已经有了"】。判据要问的是【这件事有没有人回答过】，
+    // 比"有没有一张待批卡"宽一格 —— 0006 之后这两者【不再是同一件事】。
     const w = await world({});
     await pump(w);
     w.db.prepare("UPDATE approvals SET status = 'approved' WHERE task_id = 't1'").run();
@@ -403,10 +426,16 @@ describe("B. 不去碰已经有卡的任务", () => {
     expect(candidates(w, 3, 5)).toEqual([]);
   });
 
-  it("⭐ 卡被【退回】也一样不起子进程（这条链的缺口登记在源码里，不在这里假装补上）", async () => {
-    // CEO 退回一份章程之后，任务仍停在 CHARTER_PENDING 而泵不可能再建第二张卡。
-    // 这一发【钉的是这个现状】而不是"退回后能重新起草"—— 后者要 card_key 带轮次
-    // 且 [规格] §7.1 补一条 reject 出边，那是边与 key 一起改的一件事。
+  it("⭐ 卡被【退回】也一样不起子进程（缺口还在，只是搬到了泵这一侧）", async () => {
+    // CEO 退回一份章程之后，任务仍停在 CHARTER_PENDING 而泵不会再起草。
+    // 这一发【钉的是这个现状】而不是"退回后能重新起草"。
+    // ⚠ 理由在 0006 之后换了：原文说"要 card_key 带轮次 + §7.1 补一条 reject 出边"，
+    //   而 0006 已经把键那一半【解决了】—— 已退回的那一行不再占用键，
+    //   第二张卡在 DDL 层面【建得出来】（reject 之后能再问一次，见
+    //   test/acceptance/rejected-waiver-still-asks.test.ts 那三发）。
+    //   今天仍然不重起草，靠的是泵这道【任何状态】的筛子【有意】比 DDL 宽。
+    //   ⇒ 于是这一格剩下的缺口只剩【[规格] §7.1 没有 reject 出边】那一条，
+    //     外加"章程这一格要不要允许重起草"这条没拍板的产品决定。
     // 写成断言而不是注释，是因为将来真补那一格时，这一发会红并要求改的人
     // 【看见】自己改的是一条被钉住的行为，而不是顺手放宽一个筛选条件。
     const w = await world({});
@@ -505,6 +534,57 @@ describe("C. 「不再试了」这件事留得下痕", () => {
     expect(r.abandoned).toEqual([]);
     expect(gaveUpRows(w)).toHaveLength(0);
     expect(pendingCards(w, "t1")).toBe(1);
+  });
+
+  it("⭐ 泵跑着的时候 CEO 把卡批了 ⇒ 那一轮仍不给它写「不再试了」", async () => {
+    /*
+     * 「放弃」那一循环里那道 hasCard 检查【不看 status】（任何状态的卡都算）。
+     * 上一发【测不到这一维】：它那张卡在那一刻是 pending，
+     * 于是「查任何状态」与「只查 pending」给出同一个答案 —— 两个条件同答
+     * 就意味着其中一个没在判任何东西（0057 M5 那条判据，这一发是它在我自己
+     * 新写的代码上的应用：变异 M3ts 把那道检查改成只认 pending，全套【零红】）。
+     *
+     * 要让它分岔，需要一个【非 pending 的卡在这一轮里冒出来】，而那从测试外部
+     * 摆不出来：候选 SQL 已经把「有任何卡」的任务滤掉了 ⇒ 本轮能冒出的卡
+     * 只有刚起草出来的那张 pending。所以这里用【两条任务 + 一次插入】把那一格
+     * 摆成静态状态，而不是去赌真并发（泵是 for + await 顺序跑的，
+     * t1 的卡在 t2 那一发起草【之前】就已落库 ⇒ 完全确定，没有时序窗口）：
+     *   t1 起草成功 → 建出 pending 卡，attempts(t1) 用完；
+     *   轮到 t2 起草时，模拟 CEO 在这中间点了批准（卡变 approved）；
+     *   判放弃那一循环扫到 t1：它本轮是候选、attempts 已到上限、而它的卡【存在但不是 pending】。
+     * 真实场景就是这一格：CEO 在界面上点了卡，而泵那一趟还在处理队列里下一条。
+     * 只查 pending 的话，会给一张【已被 CEO 批准】的章程写一行
+     * 「试到第 1 次仍没有可批的章程卡，泵不再试」—— 那是审计里一条【反着说】的记录。
+     *
+     * ⚠ 三条前置断言（下面那几行）不是啰嗦，它们防的是【这一发假绿】：
+     *   插入动作没触发 / t1 根本没进候选 / attempts 没到上限 ⇒ 判放弃那一循环
+     *   压根不看 t1 ⇒ 那道检查改坏了也照样绿（与 0055「标题写着而断言没写」同族，
+     *   只是这一发的"标题"是我自己刚写的注释）。
+     */
+    const w = await world({});
+    addTasks(w.db, ["t2"], undefined, 10); // t1 更老 ⇒ 先起草，t2 那一发才有地方插
+    let fired = false;
+    const r = await pump(w, {
+      ok: true,
+      maxAttempts: 1,
+      during: (id) => {
+        if (id !== "t2") return;
+        fired = true;
+        w.db
+          .prepare("UPDATE approvals SET status = 'approved' WHERE task_id = 't1'")
+          .run();
+      },
+    });
+    // ── 前置：这一发必须真的走到了那一格 ────────────────────────────
+    expect(fired, "起草 t2 的插入动作没触发 ⇒ 下面全是假绿").toBe(true);
+    expect(
+      (w.db.prepare("SELECT status FROM approvals WHERE task_id = 't1'").get() as Row)["status"],
+      "t1 的卡在泵跑完时必须是【approved】—— 它不是 pending 才是这一发要的那一格",
+    ).toBe("approved");
+    expect(attempts(w, "t1"), "attempts 没到上限 ⇒ 判放弃那一循环根本没看 t1").toBe(1);
+    // ── 承重的那一条 ───────────────────────────────────────────────
+    expect(r.abandoned, "CEO 已批的任务【不是】「试到上限」—— 别给它写放弃行").toEqual([]);
+    expect(gaveUpRows(w)).toHaveLength(0);
   });
 
   it("⭐【花过钱的失败】也算尝试：上限管的是次数，不是「有没有花出钱」", async () => {
@@ -977,7 +1057,7 @@ describe("I. 花钱的门：到上限就不再为这条任务起子进程", () =
 
   it("⭐ 门读的是【界面那条预算条读的同一列】，不是另一份花费", async () => {
     // 仓库里有【两个】花费列：LEDGER_SQL 写 tasks.consumed_cents，
-    // ADD_TASK_BUDGET_SQL 写 budgets.consumed_cents（真跑一轮两处都加，实测都等于 4）。
+    // ADD_CONSUMED_SQL 写 budgets.consumed_cents（真跑一轮两处都加，实测都等于 4）。
     // 门读哪一列不是风格问题：overview/today.ts 那条预算条求和的是 budgets，
     // 而 §7.4 那张卡要显示「已消耗 / 上限」—— 门与界面读不同列，就会出现
     // "条说它超了而门不挡"（或反过来），而这两句都是【真话】。

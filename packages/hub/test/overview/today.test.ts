@@ -118,6 +118,7 @@ function audit(
     readonly action: string;
     readonly payload: string;
     readonly actorType?: string;
+    readonly actorId?: string;
     readonly taskId?: string;
     readonly at?: number;
     readonly target?: string;
@@ -129,7 +130,9 @@ function audit(
   ).run(
     o.taskId ?? null,
     o.actorType ?? "system",
-    o.actorType === "human" ? "ceo" : "hub",
+    // 默认沿用旧口径（human→ceo，其余→hub）。记忆那一格的用例要造
+    // 【agent 署名的审阅判定】，那个形状默认值给不出，所以多一个显式入口。
+    o.actorId ?? (o.actorType === "human" ? "ceo" : "hub"),
     o.action,
     o.target ?? "t",
     o.payload,
@@ -558,6 +561,9 @@ describe("⑤ 窗口与 GET /today 这个入口", () => {
         "operational_approval_types",
         "budget",
         "decisions",
+        // 角色记忆那一格（O3 动作 3）。加它的时候这一发【当场红】，报的就是这一格 ——
+        // 这一发存在的理由就是这一刻：逐个字段点名的写法永远追不上字段的增长。
+        "memory",
         // 0048 §7 那一站：驱动器那一格。加它的时候【这一发当场红】，报的就是这一格 ——
         // 这正是这一发存在的理由：逐个字段点名的写法永远追不上字段的增长，
         // 而"少发一个字段"（或者"多发了一个没人 review 过的字段"）都在这里响。
@@ -589,6 +595,12 @@ describe("⑤ 窗口与 GET /today 这个入口", () => {
     );
     expect(Object.keys(body["decisions"] as Record<string, unknown>).sort()).toEqual(
       ["auto_approved_in_window", "to_human_in_window", "human_decided_in_window"].sort(),
+    );
+    // memory 那一格同样钉【键名集合】。理由与上面两格相同，而这一格多一条：
+    // 它的三个字段名字里带的口径不一样（两个是"行数"、一个是"未署名的行数"），
+    // 改名或改名而不改 notes 里那句话，都会让界面把「素材行数」念成「决定数」。
+    expect(Object.keys(body["memory"] as Record<string, unknown>).sort()).toEqual(
+      ["scope_rows", "gate_rows", "gate_unattributed_rows"].sort(),
     );
   });
 
@@ -637,5 +649,145 @@ describe("⑤ 窗口与 GET /today 这个入口", () => {
     const w = await world();
     const r = await handleRequest(w.deps, w.req({ method: "GET", path: "/todya" }));
     expect(r.status).toBe(404);
+  });
+});
+
+/* ═══════════════ ⑥ 角色记忆那一格（O3 动作 3）═══════════════ */
+
+describe("⑥ 记忆那一格：「这一档是空的」要【说出来】，而报的是【行数】不是【决定数】", () => {
+  it("【空库】三格都是 0 而不是 null，notes 说的是「无数据」而不是「没做过决定」", async () => {
+    /*
+     * 这一发同时钉两件相反的事，而今天没有分母就两件都看不见：
+     *  ① 零行时 SUM 给 NULL —— 这一格是直接进响应的，一片 null 在 JSON 里读起来
+     *    像「取不到」，那是伪造出来的（与上面预算那三格撞的同一件事）；
+     *  ② 那句话必须说「库里确实没有」，不能说成「这个角色没做过决定」——
+     *    后者把「没数据」与「没发生」压成一句，而 O3 要治的正是这一压。
+     */
+    const w = await world();
+    const v = readToday(w.db, { nowMs: T0 });
+    expect(v.memory).toEqual({ scope_rows: 0, gate_rows: 0, gate_unattributed_rows: 0 });
+    expect(JSON.stringify(v.memory)).not.toContain("null");
+    const n = v.notes.join("\n");
+    expect(n).toContain("角色记忆那一格是【无数据】");
+    // 反向对照：另一支话（「在等它的生产者」）此时【不能】出现。
+    // 两支话说的是一件库的两件相反的事，同时出现就是有一支在说谎。
+    expect(n).not.toContain("在等它的生产者");
+  });
+
+  it("⭐ 有 approval 行而 review_decision 为 0 ⇒ 说「在等生产者」，并报出那些行【不是】审阅判定", async () => {
+    /*
+     * 这是 O3 动作 3 的目标本身：「这一格是空的」要在数据里可见。
+     * 而只看 gate_rows=0 会被读成「这台公司没人做过决定」—— 那是一句假话，
+     * 库里明明有 3 条记忆口径的审计（只是它们是【请求】不是【审阅判定】）。
+     * ⇒ 那句话必须把「另有 N 条别的」一起说出来，N 就是 scope_rows。
+     *
+     * 反向对照（这一发真正的承重处）：补上一条 review_decision ⇒ 那句话【消失】、
+     * gate_rows 变 1。少了对照，把那句 note 写成无条件推送也能全绿，
+     * 而那样一来「这一档有数据了」在界面上永远读不出来。
+     */
+    const w = await world();
+    audit(w.db, { action: "approval", payload: card() });
+    audit(w.db, { action: "approval", payload: card(), actorType: "human" });
+    audit(w.db, { action: "approval", payload: card(), at: T0 - 30 * 24 * HOUR });
+
+    const before = readToday(w.db, { nowMs: T0 });
+    expect(before.memory).toEqual({ scope_rows: 3, gate_rows: 0, gate_unattributed_rows: 0 });
+    const n = before.notes.join("\n");
+    expect(n).toContain("在等它的生产者");
+    expect(n).toContain("另有 3 条");
+    expect(n).not.toContain("【无数据】");
+
+    audit(w.db, {
+      action: "review_decision",
+      payload: JSON.stringify({ kind: "ReviewDecided", gate: "in_review:dev->test", decision: "pass" }),
+      actorType: "agent",
+      actorId: "dev",
+    });
+    const after = readToday(w.db, { nowMs: T0 });
+    expect(after.memory.gate_rows).toBe(1);
+    expect(after.notes.join("\n")).not.toContain("在等它的生产者");
+  });
+
+  it("审阅判定署名为【系统】时被说出来，换成角色署名就不说（这一格是探测器不是台账）", async () => {
+    /*
+     * gate_unattributed_rows 说的是一件很窄而真实的事：有审阅判定没把角色 id
+     * 落到 actor_id 上，而记忆按 actor_id 分桶 ⇒ 那条判定永远进不了任何角色的提示词。
+     * 这是 0013 §10「数据在判定现场存在、落库那一刻消失」那一族的探测器。
+     *
+     * ⚠ 这一格刻意【不过】is_decision 那道判据（过它要逐行 json_extract，见
+     * MEMORY_TODAY_PROBE_SQL 那张实测表）。它能这么做的理由是：review_decision
+     * 这个 action 今天只有一个生产者（dispatch 的 ReviewDecided），它不是请求，
+     * 所以"是不是决定"在这一档恒真。role-memory.test.ts 里有一发拿真库同时读
+     * 这一格与 memoryCoverage 的精确数 —— 那个前提一旦被破坏，是那一发先红。
+     */
+    const w = await world();
+    audit(w.db, {
+      action: "review_decision",
+      payload: JSON.stringify({ kind: "ReviewDecided", gate: "in_review:dev->test", decision: "pass" }),
+    });
+    const sys = readToday(w.db, { nowMs: T0 });
+    expect(sys.memory).toEqual({ scope_rows: 1, gate_rows: 1, gate_unattributed_rows: 1 });
+    expect(sys.notes.join("\n")).toContain("署名是【系统】而不是某个角色");
+    // 「在等生产者」此时【不能】出现：这一档有数据，缺的是署名不是生产者。
+    expect(sys.notes.join("\n")).not.toContain("在等它的生产者");
+
+    const w2 = await world();
+    audit(w2.db, {
+      action: "review_decision",
+      payload: JSON.stringify({ kind: "ReviewDecided", gate: "in_review:dev->test", decision: "pass" }),
+      actorType: "agent",
+      actorId: "dev",
+    });
+    const agent = readToday(w2.db, { nowMs: T0 });
+    expect(agent.memory).toEqual({ scope_rows: 1, gate_rows: 1, gate_unattributed_rows: 0 });
+    expect(agent.notes.join("\n")).not.toContain("署名是【系统】");
+  });
+
+  it("⭐ 这一格【不带窗口】是刻意的：一个月前判过的事，今天仍然是这个角色的历史", async () => {
+    /*
+     * 这一页其余每个数都在窗口里，所以"这一格不看窗口"看起来像漏了一行 WHERE。
+     * 它是有意为之，而理由值得钉住而不是只写在注释里：
+     * 记忆是【累计】的 —— rolePrompt 读的是这个角色的全部可读历史（`readRoleMemory`
+     * 没有窗口这个参数）。给这一格加上窗口会得到一句谎：
+     * 「过去 24 小时没有审阅判定」⇒ 界面念成「这个角色没有历史」，
+     * 而库里其实有 500 条，且那 500 条今天正贴在提示词里。
+     * 与文件头那条「阻塞数用当前状态而不是事件窗口」是同一条轴混淆的第三次现形。
+     *
+     * 第二条断言钉的是这一发【不碰 payload】：塞一条非法 JSON 进去，
+     * 这一格照常出数（其余几格靠 MALFORMED_PROBE_SQL 那道预检保命，这里不需要）。
+     */
+    const w = await world();
+    audit(w.db, {
+      action: "review_decision",
+      payload: JSON.stringify({ kind: "ReviewDecided", decision: "pass" }),
+      actorType: "agent",
+      actorId: "dev",
+      at: T0 - 400 * 24 * HOUR,
+    });
+    const wide = readToday(w.db, { nowMs: T0, windowMs: HOUR });
+    expect(wide.window_ms).toBe(HOUR);
+    expect(wide.memory.gate_rows).toBe(1);
+
+    audit(w.db, { action: "approval", payload: "{这不是 JSON" });
+    const withBad = readToday(w.db, { nowMs: T0, windowMs: HOUR });
+    expect(withBad.memory.scope_rows).toBe(2);
+    expect(withBad.memory.gate_rows).toBe(1);
+  });
+
+  it("三格一路走到 GET /today 的响应里（HTTP 那一层不改数）", async () => {
+    // 上面几发都走 readToday。这一发走真请求：响应里的 memory 必须【逐字等于】
+    // 同一次 readToday 的那三格 —— 少了这一发，"HTTP 层忘了带这个字段"没人看得见
+    // （键名集合那一发只钉"有没有"，钉不出"值对不对"）。
+    const w = await world();
+    audit(w.db, {
+      action: "review_decision",
+      payload: JSON.stringify({ kind: "ReviewDecided", decision: "pass" }),
+    });
+    audit(w.db, { action: "approval", payload: card(), actorType: "human" });
+    const r = await handleRequest(w.deps, w.req({ method: "GET", path: "/today" }));
+    expect(r.status).toBe(200);
+    const body = r.body as Record<string, unknown>;
+    expect(body["memory"]).toEqual({ scope_rows: 2, gate_rows: 1, gate_unattributed_rows: 1 });
+    expect(body["memory"]).toEqual(readToday(w.db, { nowMs: T0 }).memory);
   });
 });

@@ -39,6 +39,7 @@ import type { DomainEvent } from "../events/bus.js";
 import {
   approvalRequiredEvent,
   insertCard,
+  SAME_FAMILY_REVIEW_KEY_PREFIX,
   type ApprovalRequiredEvent,
   type NewCardDraft,
 } from "../approvals/cards.js";
@@ -469,6 +470,19 @@ function rootsOf(graph: OrgGraph): string[] {
 export type EdgePlan =
   | { readonly move: true; readonly to: TaskState; readonly role: string; readonly note: string; readonly producerRole?: string;
       /**
+       * 「这一轮【做成了一次审阅判定】」⇒ 该写那条 `ReviewDecided`（§5.8 六个 kind 之一）。
+       * 不在场就是"这一轮没有审阅决定"：一轮 wait、一轮执行失败、一轮被机器拦下、
+       * 一轮打回超限改升 CEO —— 都不该有这一行（为什么，逐条写在 `IN_REVIEW_VERDICT_BY_TO` 上面）。
+       *
+       * 为什么这个判据住在【planEdge】而不是 dispatch 的写入处：那条事件说的是
+       * 「这一轮真的判了」，而"判没判"与【走了哪条边】是同一件事。写在 dispatch 里就得
+       * 在那里重抄一遍 `action === "pass" && status === "IN_REVIEW" && review.ok` ——
+       * 那正是本文件在 `rejectionCount` 那条上反复消灭的形状（分子与判据分处两处、
+       * 各自收窄一次就永久失真：将来给 IN_REVIEW 加一条边，边表会认，
+       * 那句手抄的条件不会跟着认，症状是【审计里少一条审阅决定而全绿】）。
+       */
+      readonly review?: ReviewVerdict;
+      /**
        * 「这一轮的落点之后还要再走一格，因为【该接手的下一位是人类】」——
        * 见下面 `upstream` 那一支。写成一个【标志】而不是直接把 to 写成最终落点，
        * 是因为中间那两格（EVIDENCE_SUBMITTED / IN_REVIEW）本身是真的发生过的：
@@ -477,6 +491,64 @@ export type EdgePlan =
        */
       readonly thenEscalateToCeo?: true }
   | { readonly move: false; readonly to: TaskState; readonly role: string; readonly note: string };
+
+/**
+ * 一次审阅判定的【内容】。不含「哪一次审阅」那个身份 —— 那个要 `lastProducer`，
+ * 而 planEdge 是纯函数、不碰库，所以身份由写入侧拼（见 `reviewGateId`）。
+ *
+ * `decision` 的值域与 `events/bus.ts` 那条 `ReviewDecided` 【同一个联合】
+ * （`pass | reject`），不折成第三套词表 —— 两套词表迟早要一张映射表，而那张表就是
+ * RoleMemory.decision 那条注释里记过的漂移点。
+ */
+export type ReviewVerdict = {
+  readonly decision: "pass" | "reject";
+  /**
+   * 审阅者自己写的那句 summary —— §24 风险 2 要的「理由」就是它。
+   * 它【只进 payload】：线上那个 `ReviewDecided` 形状是契约（被 web 投影吃死），
+   * 而角色记忆读的正是落库那一份。
+   */
+  readonly note: string;
+};
+
+/**
+ * 「落到这一格的那些边，意味着这一轮做成了一个什么样的审阅判定」。
+ *
+ * 键是【落点的状态名】而不是动作名 —— 这两格 literally 叫"审过了往上走"与"打回往下"，
+ * 它们比动作名稳定：`pass` / `handoff` 是 agent 报上来的词，落点是状态机定的地名，
+ * 而这条事件要记的是【状态机上发生了一次审阅判定】。
+ *
+ * ⚠ 只有【ESCALATED_TO_CEO 那一格】故意不在表里，而这不是漏写：走到它的那条边
+ * （`blocked`）说的是"我判不了，升给 CEO"，而 `ReviewDecided.decision` 的值域
+ * 只有 `pass | reject`。为一个表达不了的事实硬塞一个取值，等于把「CEO 还没判」
+ * 写成「有人判过了」。
+ *
+ * ⚠ 表里没有的落点 ⇒ 这一轮【不发】那条事件，而"没人归类过一个新落点"这件事本身
+ * 是静默的。所以 dispatch.test.ts 那条「每一个 agent 边的落点都被审阅判定表
+ * 归类过，或被显式豁免」拿 AGENT_EDGES 反着穷尽这张表：给 IN_REVIEW 加一条出边
+ * 而不来说清它算不算一次判定，那一发红并点名那个落点。
+ * （为什么不只写手抄的 `d.action === "pass"`：那正是本文件在 `rejectionCount` 那条上
+ * 反复消灭的形状 —— 分子与判据分处两处，各自收窄一次就永久失真。）
+ */
+const VERDICT_BY_LANDING: Readonly<Partial<Record<TaskState, "pass" | "reject">>> = {
+  APPROVED_UPWARD: "pass",
+  REJECTED_DOWNWARD: "reject",
+};
+
+/**
+ * 「哪一次审阅」在审计里的身份。
+ *
+ * ⚠ 这【不是】`review_gates.gate_type` 那套 `product_to_tech` 词表：那是规格附录按
+ * 【固定阶段名】给的，而引擎路线上没有阶段，只有组织图上的角色（0041 换路线的连带
+ * 后果，与 `tasks.current_node` 那次语义变更同一族）。
+ * 形状 `in_review:<产出方>-><审阅方>` 能指认出「审的是谁的产出」—— 那正是 §24 风险 1
+ * （审阅共谋）事后要查的那一格。`?` 是【真的查不到产出方】（`lastProducer` 给 null）：
+ * 宁可让它出现在审计里，也不为它编一个名字 —— 一条指不到产出方的审阅决定仍然比
+ * 没有那条决定有用，而一个编出来的产出方会在 append-only 库里指认一个没做过事的人。
+ */
+export function reviewGateId(producer: string | null, reviewer: string): string {
+  return "in_review:" + (producer ?? "?") + "->" + reviewer;
+}
+
 
 /**
  * 「这一轮该不该改状态」——本文件唯一可穷尽测试的那一块。
@@ -548,6 +620,24 @@ export function planEdge(o: {
     );
   }
 
+  /**
+   * 这一轮【是否构成一次审阅判定】。算在边表查中之后、任何改写落点的分支之前。
+   *
+   * ⚠ 键是 `edge.to`（那条边在边表里声明的落点）而【不是】最终写下去的 `to`。
+   * 差别在下面两支：打回超限与"审过了但已到顶层"都会把落点改成 ESCALATED_TO_CEO，
+   * 而那两个场合【审阅判定都已经做出了】。按最终的 to 判，会让"连打三次没过"
+   * 那条路径一条判定都不留 —— 而那恰恰是最该进角色记忆的一串（§24 风险 2）。
+   *
+   * 被机器拦下的那些路径【走不到这一行】：越权交接与同源审阅都在上面 `return stay(...)`。
+   * 所以"hub 拦下就不算做成了一个判定"由控制流保证，不需要在这里再判一遍
+   * `review !== null && review.ok` —— 那份重复就是上面说的"分子与判据分处两处"，
+   * 它会随上面分支的增删而失真，而失真的方向是【审计里多出一条没发生过的判定】。
+   */
+  const verdict = VERDICT_BY_LANDING[edge.to];
+  /** 下面每一个 `move: true` 的返回值都摊上这一份 —— 逐个手写会漏，而漏的那支正是新加的那支。 */
+  const reviewField =
+    verdict === undefined ? {} : { review: { decision: verdict, note: d.summary } };
+
   // ⭐ 打回超限 ⇒ 不派回下游，改升给 CEO（§4.2.1 `max_rejections` + `escalation_on_exceed`）。
   //
   // 排在【上面那些 stay 之后、边表查中之后、nextRole/to 算出之前】，两个位置都是判出来的：
@@ -574,6 +664,9 @@ export function planEdge(o: {
       to: assertTaskTransition(o.status, cap.to),
       role: o.role,
       note: rejectionCapNote(o.rejections ?? 0, o.role, d.summary),
+      // 落点被改成升 CEO，而【打回这个判定是已经做出的事实】—— 上面 `verdict` 那段
+      // 就是为这一支留的：按最终的 to 判会让"连打三次没过"一条判定都不留。
+      ...reviewField,
     };
   }
 
@@ -654,7 +747,17 @@ export function planEdge(o: {
     const up = upstreamOf(o.graph, o.role);
     if (up === null || up === o.ceoRoleId) {
       to = "ESCALATED_TO_CEO";
-      return { move: true, to, role: o.role, note: "审阅通过且已到组织顶层，升到 CEO：" + d.summary };
+      return {
+        move: true,
+        to,
+        role: o.role,
+        note: "审阅通过且已到组织顶层，升到 CEO：" + d.summary,
+        // 落点是 ESCALATED_TO_CEO 而【仍然记这一次判定】：审阅者是判了"通过"的，
+        // 升到 CEO 是【没有更高一级可走】这件事的后果，不是"没判"。
+        // 与上面 `verdict` 那条同一条理由 —— 按最终的 to 判，这一支就会成为
+        // 「一条正常通过的终审在审计里没有任何审阅决定」那一格。
+        ...reviewField,
+      };
     }
     to = "IN_PROGRESS";
     nextRole = up;
@@ -664,8 +767,8 @@ export function planEdge(o: {
   // 产出方那一格要留在审计里：IN_REVIEW 上判独立性时要知道【审的是谁的产出】。
   // 存 payload 而不是新增列 —— 这一列没有别的读方，而加一列要过一次迁移。
   return edge.to === "EVIDENCE_SUBMITTED"
-    ? { move: true, to, role: nextRole, note, producerRole: o.role }
-    : { move: true, to, role: nextRole, note };
+    ? { move: true, to, role: nextRole, note, producerRole: o.role, ...reviewField }
+    : { move: true, to, role: nextRole, note, ...reviewField };
 }
 
 /* ───────────────────────── 任务简报 ───────────────────────── */
@@ -1037,17 +1140,30 @@ export function makeDispatch(deps: DispatchDeps): (o: DispatchOptions) => Promis
       else blockedHandoff = gate.reason;
     }
 
+    /**
+     * 被审的那份产出【是谁交的】。【无条件】读，与下面 `rejectionCount` 同一条立场。
+     *
+     * 今天它有两个读者：门 3 的同源判定、以及那条 `ReviewDecided` 的 `gate`。
+     * 各自读一次（旧写法就是门 3 在自己的 `if` 里读）等于给"审的是谁的产出"开出
+     * 两个来源，而两者不一致时的表现是【审计里那条审阅指向一个门 3 没判过的产出方】
+     * —— 那正是 §24 风险 1 事后要查的那一格。一次 SELECT 走只读连接，比这个风险便宜
+     * （一轮要起一个子进程、真烧 token，这里连它的万分之一都不到）。
+     *
+     * ⚠ 不加 `task.status === "IN_REVIEW"` 那层筛选：加了就是把【手抄的状态名】
+     *   重新请回来当判据，而下面 `rejectionCount` 那条通篇讲的就是它为什么不行。
+     */
+    const reviewSubject = deps.lastProducer(task.id);
+
     // ── 门 3：审阅独立性（只在 IN_REVIEW 的 pass 上判）─────────────────
     let review: ReviewGate | null = null;
     let sameFamilyKey: string | null = null;
     if (failure === null && decision?.action === "pass" && task.status === "IN_REVIEW") {
-      const producer = deps.lastProducer(task.id);
-      const key = "same-family-review:" + (producer ?? "?") + "->" + task.role;
+      const key = SAME_FAMILY_REVIEW_KEY_PREFIX + (reviewSubject ?? "?") + "->" + task.role;
       sameFamilyKey = key;
       review = reviewGate({
-        producerRole: producer,
+        producerRole: reviewSubject,
         reviewerRole: task.role,
-        producerFamily: deps.modelFamily(producer ?? ""),
+        producerFamily: deps.modelFamily(reviewSubject ?? ""),
         reviewerFamily: deps.modelFamily(task.role),
         approvedByCeo: deps.ceoApproved(task.id, key),
       });
@@ -1128,16 +1244,78 @@ export function makeDispatch(deps: DispatchDeps): (o: DispatchOptions) => Promis
       });
     }
 
-    // 本轮写下的每一条 (事件, seq)，提交成功之后逐条广播。
-    // 【收集而不是边写边发】是必须的：回滚的那些行从来没存在过，广播出去就是让前端
-    // 显示一条数据库里不存在的状态变化（recorder 文件头同一条 §5.8 纪律：events 是
-    // 事实源，事件流只是投影）。
+    /**
+     * ── 这一轮做成的那次审阅判定（`ReviewDecided` 唯一的生产者）─────────────
+     *
+     * 规格 §5.8 那张表把 `ReviewDecided` 列为六个 kind 之一、`KIND_TO_ACTION` 把它映到
+     * `review_decision`、`recorder.targetOf` 认它的 `gate`、`memory/role-memory.ts` 里
+     * 那一整支 `gate` 档分类器在等它 —— **五环里四环十年前就写好了，缺的只是"没人发"**
+     * （0016 §1 第 1 条量的就是这件事；`integrity.ts` 的 `gate_evidence_reference`
+     * 至今报 `not_observable`）。
+     *
+     * ⚠ `gate` 这一格【不是】`review_gates.gate_type` 那套 `product_to_tech` 词表：
+     * 那是规格附录按【固定阶段名】给的，而引擎路线上没有阶段，只有组织图上的角色
+     * （0041 换路线的连带后果，与 `tasks.current_node` 那次语义变更同一族）。
+     * 这里给的是「哪一次审阅」的可指认证据：`in_review:<产出方>-><审阅方>`。
+     * ⚠ `review_gates` 那张表【仍然零写入方】—— 本条写的是 `events`，不是那张表，
+     *   所以 §22.4 那句「每个门控决定都有证据包引用」今天【依旧无从校验】。
+     */
     const outgoing: { event: DomainEvent; seq: number }[] = [];
     const wrote = await deps.writer.node(() => {
       const db = requireScopeDb("dispatch.write");
       let stateEventSeq: number | null = null;
       // 落库后的最终状态：不跃迁时就是原状态，跃迁时由链的最后一格决定（含自动那一格）。
       let finalStatus: TaskState = task.status;
+
+      /**
+       * 审阅判定那条审计排在状态边【之前】，两件事都为真才排在这儿：
+       *  · 因果上就是这个顺序 —— 先有「审过、通过」，状态才被推进；回放里倒过来读
+       *    会让人以为状态是自己动的。
+       *  · 下面记账钩子那句「seq 取本轮最后写下的那条 events.id」必须继续为真。
+       *    写在状态边之后就得改那个 seq（幂等键换值 = `budgets.source_event` 上
+       *    换一批新键），那是【顺手改掉一处与本篇无关的东西】。
+       *
+       * ⚠ 「这一轮算不算做成了一个判定」这个判据【在 planEdge 里】（`plan.review`），
+       *   这里只是它的一个读者 —— 理由写在 EdgePlan.review 那条上。
+       *   这一层只补【身份】：`gate` 要 `lastProducer`，而 planEdge 是纯函数、不碰库。
+       *
+       * `plan.move &&` 那一半【只是】判别式联合需要的收窄 —— 别把它读成一条判据：
+       * 「不跃迁的那一轮不记审阅决定」这件事【不是】由它保证的，planEdge 里所有
+       * `stay(...)` 分支都不带 `review`，所以那条判据在【算出 plan 的那一刻】就已经定了。
+       * 真正被这个类型挡住的是另一句话：有人想把 `review` 挪到 `EdgePlan` 两个分支
+       * 公共的那一格（那等于允许"停下的轮次也记一次审阅决定"），tsc 会响。
+       */
+      if (plan.move && plan.review !== undefined) {
+        const gateId = reviewGateId(reviewSubject, task.role);
+        const evt: DomainEvent = {
+          kind: "ReviewDecided",
+          taskId: task.id,
+          gate: gateId,
+          decision: plan.review.decision,
+        };
+        const seq = appendAudit(
+          db,
+          {
+            taskId: task.id,
+            // agent + 审阅者本人的角色名：这一行【就是】"某个角色做了一个决定"，
+            // 署 system/hub 会把 §24 风险 2 要的那个信息（谁判的）在落库那一刻丢掉。
+            actorType: "agent",
+            actorId: task.role,
+            // 同源取 KIND_TO_ACTION 而不是手写 "review_decision"（上面那条同源理由）。
+            action: KIND_TO_ACTION.ReviewDecided,
+            // target = gate：`recorder.targetOf` 对 ReviewDecided 就是这个取值，
+            // 在这里重抄一遍会造出第二份"哪一格是这条事件的定位键"。
+            target: gateId,
+            // payload 是线上形状的超集（多一条 note = 审阅者自己写的那句 summary）。
+            // 线上那份刻意不加 note：SSE 契约被 web 投影吃死了（上面 TaskStateChanged
+            // 那条同一个理由）；而角色记忆要的【恰好就是那句理由】。
+            payload: { ...evt, note: plan.review.note },
+          },
+          () => o.nowMs,
+        );
+        outgoing.push({ event: evt, seq });
+      }
+
 
       if (plan.move) {
         // 落点之后可能还要自动走一格（AUTO_AFTER_EDGE）。先算出来，两条边一起判：

@@ -26,6 +26,9 @@ backups/
 
 # 测试临时产物
 .tmp/
+# Playwright 的失败产物（trace/截图/视频）。--list 也会把这个空目录建出来，实测。
+test-results/
+playwright-report/
 
 # 编辑器与系统
 .DS_Store

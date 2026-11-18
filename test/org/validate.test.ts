@@ -27,15 +27,19 @@
 import { describe, expect, it } from "vitest";
 import {
   CEO_ROLE_ID,
+  everyNodeDeclaresModelFamily,
   ORG_MAX_DEPTH,
   orgActorSchema,
   orgChangeSchema,
   orgGraphSchema,
+  rejectMalformed,
   type OrgActor,
+  type OrgGraphNode,
   type OrgGraph,
   pathToRoot,
   reportsToCycle,
   validateNewEdge,
+  validateNewNode,
   validateOrgChange,
   validateReparenting,
   type Verdict,
@@ -73,6 +77,22 @@ function base(): OrgGraph {
 function bad(v: Verdict): { code: string; reason: string } {
   if (v.ok) throw new Error("期望被拒绝，实际通过了");
   return { code: v.code, reason: v.reason };
+}
+
+/**
+ * 取图上某个节点并保证类型收窄。
+ *
+ * 本文件既有那几发写的是 `org.nodes.dev.model_family = ...`，在
+ * `noUncheckedIndexedAccess` 下每条都是一发 TS18048，而那 5 发【已经登记在
+ * `test/arch/test-type-baseline.ts` 的 291 里】。我这里不改它们（改一批已登记的
+ * 语料属另一件事），但【新写的这几发不再往棘轮里添】：用抛错而不是 `!`，
+ * 因为夹具缺节点时我要的是一句「夹具里没有节点 dev」，不是 undefined 上的一条
+ * 属性访问 —— `!` 在那种时候只会让失败的形状变成 TypeError。
+ */
+function node(org: OrgGraph, id: string): OrgGraph["nodes"][string] {
+  const n = org.nodes[id];
+  if (n === undefined) throw new Error("夹具里没有节点 [" + id + "]");
+  return n;
 }
 
 const CEO_ACTOR: OrgActor = { type: "human", id: CEO };
@@ -182,6 +202,139 @@ describe("L1 validateReparenting：改汇报关系", () => {
   it("未知角色 ⇒ unknown_role，两种（child 不存在 / parent 不存在）", () => {
     expect(bad(validateReparenting("ghost", "tech", base())).code).toBe("unknown_role");
     expect(bad(validateReparenting("dev", "ghost", base())).code).toBe("unknown_role");
+  });
+});
+
+describe("L1 validateNewNode：加一个新节点（round294，O8 §7 第 18 格的修法）", () => {
+  /** 一个新节点的默认形状：挂在 tech 之下、不可管理、声明了家族。 */
+  const newNode = (
+    over: Partial<OrgGraphNode> = {},
+  ): OrgGraphNode => ({
+    role_id: "junior",
+    can_manage: false,
+    reports_to: "tech",
+    model_family: "kimi",
+    ...over,
+  });
+
+  it("合法：挂在一个能收汇报的节点之下 ⇒ 通过", () => {
+    expect(validateNewNode(newNode(), base())).toEqual({ ok: true });
+  });
+
+  it("重名 ⇒ role_exists（add_node 是加不是改）", () => {
+    const v = bad(validateNewNode(newNode({ role_id: "dev" }), base()));
+    expect(v.code).toBe("role_exists");
+    // reason 要指路，不能只说「不行」：这条判据最常被误当成 bug 而绕去走旁路。
+    expect(v.reason).toContain("reparent");
+  });
+
+  it("⭐ 重名【抢在】自环之前：同一条既有故障不许被换成一句指向别处的话", () => {
+    // dev 已存在，而它的 reports_to 恰好又是自己。两条判据都能命中。
+    // 若自环那条先命中，用户看到的是「不能以自己的 id 作为上级」—— 而他真正
+    // 做错的是「这个角色已经在图上了」。（与 reparent 那条「CEO 不可拖不许被
+    // 环判据抢先」是同一族：判据顺序 = 用户拿到那句能不能行动的话。）
+    const v = bad(validateNewNode(newNode({ role_id: "dev", reports_to: "dev" }), base()));
+    expect(v.code).toBe("role_exists");
+  });
+
+  it("自环 ⇒ would_create_cycle，且不被「上级不存在」吃掉", () => {
+    // junior 不在图里，所以「上级 [junior] 不在图里」这句话【也】是真的。
+    // 按 spec 示例的顺序（先查上级存在）就会命中它 —— 那是一句无法行动的话：
+    // 用户会去图里找 junior，而 junior 正是他自己要加的那个节点。
+    const v = bad(validateNewNode(newNode({ reports_to: "junior" }), base()));
+    expect(v.code).toBe("would_create_cycle");
+    expect(v.reason).not.toContain("不在图里");
+  });
+
+  it("上级不存在 ⇒ unknown_role", () => {
+    expect(bad(validateNewNode(newNode({ reports_to: "ghost" }), base())).code).toBe(
+      "unknown_role",
+    );
+  });
+
+  it("上级不是管理角色 ⇒ parent_not_manager（与 reparent 同一条判据、同一个 code）", () => {
+    // dev 在夹具里 can_manage=false。这一发同时钉住了【复用】：新节点那条路
+    // 没有另立一个"上一级不能管人"的新 code。
+    expect(base().nodes["dev"]?.can_manage).toBe(false);
+    expect(bad(validateNewNode(newNode({ reports_to: "dev" }), base())).code).toBe(
+      "parent_not_manager",
+    );
+  });
+
+  it(`深度：挂上去会到第 ${ORG_MAX_DEPTH + 1} 层 ⇒ 拒`, () => {
+    const org = base();
+    // 夹具：ceo(1) → tech(2) → dev(3)。垫到第 5 层，再往下面加就是第 6 层。
+    org.nodes.l4 = { role_id: "l4", can_manage: true, reports_to: "dev" };
+    org.nodes.l5 = { role_id: "l5", can_manage: true, reports_to: "l4" };
+    const v = bad(validateNewNode(newNode({ reports_to: "l5" }), org));
+    expect(v.code).toBe("depth_exceeded");
+    expect(v.reason).toContain(String(ORG_MAX_DEPTH + 1));
+  });
+
+  it(`深度【恰好】到第 ${ORG_MAX_DEPTH} 层 ⇒ 通过（边界成对，不收紧到 N-1）`, () => {
+    // 与上一发只差一层。单写超的那条挡不住「把上限写成 >=」那种改法，
+    // 而单写通过的又挡不住「忘了判深度」—— 必须成对（本文件那两发 reparent
+    // 深度用例同理，那不是巧合）。
+    const org = base();
+    org.nodes.l4 = { role_id: "l4", can_manage: true, reports_to: "dev" };
+    expect(validateNewNode(newNode({ reports_to: "l4" }), org)).toEqual({ ok: true });
+    const after: OrgGraph = { ...org, nodes: { ...org.nodes, junior: newNode({ reports_to: "l4" }) } };
+    expect(pathToRoot(after, "junior").length).toBe(ORG_MAX_DEPTH);
+  });
+
+  it("⭐ 森林：reports_to=null 而图上已有根 ⇒ multiple_roots", () => {
+    // 这一格是本轮唯一【新造 code】的一条，所以它得有一条"为什么不是运行时判完就行"的
+    // 证据 —— 见 validate.ts 函数头 ⑤：dispatch 的 resolveCeoRoleId 遇到森林拒绝跑，
+    // 而一轮就是钱。保存期能算出来的事不留到花钱的时候算。
+    const v = bad(validateNewNode(newNode({ reports_to: null }), base()));
+    expect(v.code).toBe("multiple_roots");
+    expect(v.reason).toContain("森林");
+  });
+
+  it("⭐ multiple_roots 的反向 canary：空图加第一个节点，reports_to=null 是唯一合法写法", () => {
+    // 没有这一发，上面那条会被读成「凡是根都拒」，而那种实现会让【第一格永远加不进去】。
+    // 判据是「加完之后根多于一个」，不是「它是根」。
+    expect(
+      validateNewNode(
+        { role_id: CEO, can_manage: true, reports_to: null, model_family: "o3" },
+        { nodes: {}, edges: [] },
+      ),
+    ).toEqual({ ok: true });
+    // 反向配对：空图之后已经有根了，第二个根就该拒（上面那条通过不是"永远通过"）。
+    expect(
+      bad(
+        validateNewNode(
+          { role_id: "another_root", can_manage: true, reports_to: null },
+          { nodes: { ceo: { role_id: CEO, can_manage: true, reports_to: null } }, edges: [] },
+        ),
+      ).code,
+    ).toBe("multiple_roots");
+  });
+
+  it("⭐ 与 model_family 那条判据【不重叠】：本函数放行，由整图那条拦", () => {
+    // 这一发钉的是【分工】而不是"也能拦"。如果有人在 validateNewNode 里也判一遍
+    // model_family，这一发照样绿 —— 所以 r22 的判据读的是 validate.ts 的字节：
+    // 那里【不得】出现家族那两条 code。两处口径迟早会漂（本仓治过的那一族）。
+    const org = base();
+    const noFamily = newNode({ model_family: undefined });
+    expect(validateNewNode(noFamily, org)).toEqual({ ok: true });
+    const after: OrgGraph = { ...org, nodes: { ...org.nodes, junior: noFamily } };
+    expect(bad(everyNodeDeclaresModelFamily(after)).code).toBe("unknown_model_family");
+  });
+
+  it("图本身有环 ⇒ rejectMalformed 先命中，不在坏图上给一个 ok", () => {
+    const org = base();
+    node(org, "tech").reports_to = "dev";
+    expect(bad(validateNewNode(newNode(), org)).code).toBe("report_cycle_present");
+  });
+
+  it("本函数不改图（纯函数：判据跑完，图上没有多出那个节点）", () => {
+    // 看起来多余，但它挡住的是"顺手在里面写图"那种改法 —— 一处校验器把节点写进
+    // 入参对象，audit 的 before 快照就会跟着变，而 before 快照的语义是【提交前】。
+    const org = base();
+    const before = JSON.stringify(org);
+    expect(validateNewNode(newNode(), org)).toEqual({ ok: true });
+    expect(JSON.stringify(org)).toBe(before);
   });
 });
 
@@ -361,6 +514,69 @@ describe("L3 validateOrgChange：谁发起、影响什么", () => {
   });
 });
 
+/**
+ * 提交时的【节点级】判据（round292，O8 动作 1）。
+ *
+ * 它住在 L1/L2/L3 之外，因为三层判据的输入都是【一次增量操作】（一个 child、一条边），
+ * 而这一条的输入是【提交后那张图整体】—— 正是这个差别让它能拦住
+ * 「随一条无关的 add_edge 塞进图里的节点」（三层各自都只看那条边/那个 child）。
+ */
+describe("everyNodeDeclaresModelFamily：提交时逐节点判（不看这次改了什么）", () => {
+  it("夹具那张完整图 ⇒ 通过（否则下面每一发红都可能来自夹具）", () => {
+    expect(everyNodeDeclaresModelFamily(base()).ok).toBe(true);
+  });
+
+  it("缺 model_family ⇒ 拦，且 code 与 violatesNoSelfReview 同一词", () => {
+    const org = base();
+    delete node(org, "dev").model_family;
+    const v = bad(everyNodeDeclaresModelFamily(org));
+    expect(v.code).toBe("unknown_model_family");
+    // 同一个 code 值不是省事：调用方（HTTP 的 422 body.code）只需要认一个词，
+    // 而「缺家族」在保存期与提交期本来就是同一件事的两次问法。
+    // ⚠ 这里【不能】用 validateNewEdge("dev","dev") 来对照 —— dev 对自己
+    //    先命中 self_review（那条判据在家族那一维之前短路），拿到的 code 是
+    //    self_review 而不是 unknown_model_family。第一版就是这么写的，
+    //    于是这一发红在一个与被测对象无关的方向上。
+    node(org, "dev").model_family = "";
+    expect(bad(violatesNoSelfReview("dev", "tech", org)).code).toBe(
+      "unknown_model_family",
+    );
+  });
+
+  it("reason 里点名【是哪一个角色】缺 —— 否则 CEO 拿到一句无法行动的话", () => {
+    const org = base();
+    org.nodes.junior = { role_id: "junior", can_manage: false, reports_to: "dev" };
+    const v = bad(everyNodeDeclaresModelFamily(org));
+    expect(v.reason).toContain("junior");
+  });
+
+  it("空串与纯空格同判（yaml 里 `model_family:` 留空读进来就是这两种）", () => {
+    for (const badFamily of ["", "   ", "\t"]) {
+      const org = base();
+      node(org, "dev").model_family = badFamily;
+      expect(bad(everyNodeDeclaresModelFamily(org)).code).toBe("unknown_model_family");
+    }
+  });
+
+  it("⭐ 反向 canary：非边端点的节点也判 —— 这正是三层判据漏掉的那一格", () => {
+    // ghost 不在任何一条边上。拿它去问 L2 的边判据，得到的答案是「这两端都没问题」，
+    // 因为那条边根本不认识它。这一发证明的不是"我的函数能红"，而是
+    // 「它比三层判据多看了东西」—— 少了这一发，前面几发只证了"也能拦边端点"。
+    const org = base();
+    org.nodes.ghost = { role_id: "ghost", can_manage: false, reports_to: "product" };
+    expect(validateNewEdge("dev", "tech", org, true).ok).toBe(true);
+    expect(everyNodeDeclaresModelFamily(org).ok).toBe(false);
+  });
+
+  it("已知边界（登记，不修）：空图 ⇒ 通过", () => {
+    // `orgGraphSchema.nodes` 是 `.default({})`，所以空图是一个合法值；
+    // 「每个节点都声明了」在全称量词下对空集为真。
+    // 记这一条是因为别把它读成防线：空图上这条判据【什么都没拦】，
+    // 拦「一张空图进库」不属于本函数的射程（也没有别的判据在拦它）。
+    expect(everyNodeDeclaresModelFamily({ nodes: {}, edges: [] }).ok).toBe(true);
+  });
+});
+
 describe("schema：形状上的收紧", () => {
   it("can_manage 是【必填】：漏填不是「不是管理角色」，是加载期就报错", () => {
     expect(
@@ -387,6 +603,36 @@ describe("schema：形状上的收紧", () => {
     ).toBe(true);
     // 多余的 kind 取值：
     expect(orgChangeSchema.safeParse({ kind: "delete" }).success).toBe(false);
+  });
+
+  it("⭐ 登记一条【没判的】：nodes 的键不等于 node.role_id 时，schema 与判据都不拦", () => {
+    // 本轮写 applyChangeToGraph 时我以为「键取 role_id」挡住了「键 A / 值里 id B」
+    // 那种形状 —— 实测【没有】：那条写法只是不新建条目，它【覆盖】了键上那个已有
+    // 角色，而 B 作为孤儿节点进了库（B 的 reports_to 可能指向不存在的东西）。
+    // 这一发是【期望红的登记】改成【期望绿的登记】之前，先把它钉成一条能重跑的证据：
+    // 现在三条判据（schema / rejectMalformed / validateNewNode）对此全部放行。
+    // 修法在 zod 那一层（节点自带 role_id 时要求键 === role_id），本轮【没做】——
+    // 它改的是既有形状的约束，会让一张已有不一致的库图在读取期就红，那是另一件事，
+    // 已登记进本轮台账「没做的下一格」。
+    const ok = orgGraphSchema.safeParse({
+      nodes: {
+        ceo: { role_id: "ceo", can_manage: true, reports_to: null },
+        // 键是 a，值里的 id 是 b。
+        a: { role_id: "b", can_manage: false, reports_to: "ceo" },
+      },
+      edges: [],
+    });
+    expect(ok.success).toBe(true);
+    // rejectMalformed 也不管：它只看 reports_to 指向存不存在（ceo 存在）。
+    const graph = ok.data as OrgGraph;
+    expect(rejectMalformed(graph)).toBeNull();
+    // validateNewNode 也不管：它拿到的是 node（role_id = b），而 b 不在图里 ⇒ 通过。
+    expect(
+      validateNewNode(
+        { role_id: "b", can_manage: false, reports_to: "ceo" },
+        { nodes: { ceo: { role_id: "ceo", can_manage: true, reports_to: null } }, edges: [] },
+      ),
+    ).toEqual({ ok: true });
   });
 
   it("actor.type 只有两值，编不出第三种", () => {

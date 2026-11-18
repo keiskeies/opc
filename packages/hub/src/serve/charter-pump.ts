@@ -40,14 +40,23 @@
  * 所以 `--charter-pump` 不写 ⇒ 这一整块不存在，`hub:serve` 今天照样一分钱不花。
  *
  * ── 本文件【没有】补上的一格（读代码的人最容易以为它补了）─────────────
- * CEO 用 reject_with_comment 退回一份章程之后：任务仍停在 CHARTER_PENDING，
- * 而那张卡所在的 card_key 上【永远不能再有第二行】（0004 那条唯一索引不看 status），
- * 所以泵不可能重新起草第二份；而 [规格] §7.1 那边也【没有】reject 的出边
- * （0043 §6：HUMAN_EDGES 里只有 approve）。
- * 一条退回的意见从此【没有去处】。正确的解法是【card_key 带轮次 + 补一条回到起草的边】
- * 两件事一起做，不是这里能顺手补的一格 —— 详见 CHARTER_CANDIDATES_SQL 那段。
- * 这条缺口有一条断言钉着现状（charter-pump.test.ts B 组「卡被退回也一样不起子进程」），
- * 补它的那天那一发会红，逼改的人看见自己在改什么。
+ * CEO 用 reject_with_comment 退回一份章程之后：任务仍停在 CHARTER_PENDING 而泵不重起草，
+ * 一条退回的意见从此【没有去处】。
+ * ⚠ 这一格的【原因】在 0006 之后换了一次，而换掉的正好是原来写在这里的那半句：
+ *   · 原文说「那张卡所在的 card_key 上永远不能再有第二行（0004 那条索引不看 status）」
+ *     —— 0006 把索引收窄成 `AND status = 'pending'` 之后这句【不再成立】，
+ *     已退回的那一行不再占用键，第二张卡在 DDL 层面【建得出来】
+ *     （同族审阅豁免那一格退回后能再问一次，见 test/acceptance/rejected-waiver-still-asks.test.ts）。
+ *   · 章程这一格今天仍然不重起草，剩两个原因，而它们【都不是】索引：
+ *       ① 泵自己那道筛【有意】比 DDL 宽 —— 它查【任何状态】的卡（见下面
+ *          CHARTER_CANDIDATES_SQL 那段，那里写着它为什么必须这么宽、以及删掉它花什么钱）；
+ *       ② [规格] §7.1【没有】reject 的出边（0043 §6：HUMAN_EDGES 里只有 approve）
+ *          ⇒ 就算起了子进程、拟出第二份章程，任务也没有一条合法边走出去。
+ *   ⇒ 于是这一格剩下的缺口是【补一条回到起草的边】＋「章程这一格允不允许重起草」
+ *     这条没拍板的产品决定，不再是"键的形状不对"。
+ * 这条缺口有一条断言钉着现状（charter-pump.test.ts B 组「卡被【退回】也一样不起子进程
+ * （这条链的缺口登记在源码里，不在这里假装补上）」），补它的那天那一发会红，
+ * 逼改的人看见自己在改什么。
  */
 import type { DomainEvent, EventBus } from "../events/bus.js";
 import type { HubWriter } from "../db/write-queue.js";
@@ -91,17 +100,35 @@ export const CHARTER_ATTEMPTS_SQL =
  * 三个条件各挡一种浪费：
  *  · status —— 别的格子有 dispatch 那条路，不归这个泵管。
  *  · NOT EXISTS 章程卡 —— ⚠ 判据是【这张卡存不存在】，不是【这张卡是不是待批】。
- *    这一条是本文件最容易被"改严"改坏的一处，理由在 DDL 上：
+ *    这一条是本文件最容易被"改严"改坏的一处。⚠ **它的理由在 0006 之后换了一次**，
+ *    换得比看起来更必要 —— 原来那一句是「判据必须与 DDL 的约束同一个形状」，
+ *    而那个形状是 0004 那条索引：
  *      CREATE UNIQUE INDEX idx_approvals_card_identity ON approvals(task_id, card_key)
  *        WHERE card_key IS NOT NULL            -- 0004，【不带 status 条件】
- *    也就是说一个任务在同一个 card_key 上【一辈子只能有一行】，批掉、退回、defer
- *    都不放行第二行。于是「卡已决定而任务仍在 CHARTER_PENDING」这种状态下：
- *      · 按 status='pending' 筛 ⇒ 它进候选 ⇒ ensureCharterCard 那道前置检查
- *        （也只查 pending）放行 ⇒ 【起子进程、烧一轮 token】⇒ insertCard 撞唯一索引
- *        ⇒ already_pending。烧掉的钱换回一句"已经有了"。
- *      · 按【任何状态】筛 ⇒ 根本不进候选，一分钱不烧。
+ *    0006 把它收窄成了 `AND status = 'pending'`（收窄的理由与那条死路的实测读数在
+ *    resources/migrations/0006_approval_dedup_pending_only.sql 与 0061，不在这里重说）。
+ *    ⇒ 于是"一个任务在同一个 card_key 上一辈子只能有一行"这句话【今天不再成立】：
+ *    已批掉/已退回的那一行不再占用这个键，第二张待批卡【插得进去】。
+ *    ⭐ 而下面那段省 token 的结论【一字未改】，因为它的承重方从来就不是那条索引，
+ *    而是这道筛子自己。⚠ 而「这道筛子」是【三个地方】而不是一个 —— 这一点是
+ *    0061 那一轮分开量出来的，不是读代码读出来的（读的时候我以为只有一处）：
+ *      ①② 候选 SQL 与 CHARTER_BLOCKED_SQL 里那两个【逐字相同】的字符串常量；
+ *      ③ 下面起草循环之前那道 TS 侧的 hasCard 前置检查。
+ *    分开变异（把 `status = 'pending'` 加进去）的读数不同，而且【分工不同】：
+ *      · 只改 ①② ⇒ charter-pump.test.ts 两发红（"卡被批掉而任务没推进" /
+ *        "卡被【退回】也一样不起子进程"）。这一族的失效是【花钱】：
+ *        按 pending 筛 ⇒ 它进候选 ⇒ ensureCharterCard 那道前置检查（也只查 pending）
+ *        放行 ⇒ 【起子进程、烧一轮 token】⇒ 又建出一张卡；按【任何状态】筛 ⇒
+ *        根本不进候选，一分钱不烧。
+ *      · 只改 ③ ⇒ 全套【零红】（0061 里唯一存活的变异）。它的失效不是花钱而是
+ *        【审计说谎】：CEO 在泵这一趟跑着的时候点了批准 ⇒ 判放弃那一循环只查
+ *        pending 就把这张【已被批准】的章程当成"试到上限也没卡"，写一行
+ *        「泵不再试」。⇒ 于是一边补了一发测试把它钉住（"泵跑着的时候 CEO 把卡批了"），
+ *        补完 M3ts 才红。③【不能删】：删掉它（M4）另有一发红。
  *    两种写法在【第一次建卡之前】行为完全相同，只在退回/批准之后分岔 ——
- *    而那正是唯一会花钱的那一段。判据必须与 DDL 的约束【同一个形状】。
+ *    而那正是唯一会花钱的那一段。⚠ 0006 之前这里"与 DDL 同形状"是免费的，
+ *    现在是【有意比 DDL 更宽】：DDL 只管待批，这里管"有没有人回答过"。
+ *    别再拿"与索引同形状"当理由去改它 —— 那个理由已经被一次迁移换掉了。
  *    （由此带出的一条产品缺口 —— 退回的意见没有去处 —— 写在文件头那节，
  *      不在这里重说一遍：同一个理由写在两处，改的时候只会改到一处。）
  *  · attempts < 上限 —— 见文件头那条「有界」。
@@ -118,13 +145,13 @@ export const CHARTER_ATTEMPTS_SQL =
  *    而我把那句话读成了"以后再接"，接的时候【没有回去看它】。
  *    ⚠ 两侧各有一个坑，所以各写一段：
  *      【已花的那一侧读 budgets，不读 tasks.consumed_cents】—— 仓库里有【两个】花费列
- *      （LEDGER_SQL 写 tasks.consumed_cents，ADD_TASK_BUDGET_SQL 写 budgets.consumed_cents，
+ *      （LEDGER_SQL 写 tasks.consumed_cents，ADD_CONSUMED_SQL 写 budgets.consumed_cents，
  *       同一轮两处都加、实测都等于 4）。门读哪一列不是风格问题：
  *      【今日视图那条预算条读的就是 budgets】（overview/today.ts:263 求和它），
  *      而【规格】§7.4 那张卡要显示的正是「已消耗 / 上限」。门与界面读【同一个累加器】，
  *      "门说它超了而条还空着"才不可表达；读另一列就是再造一个两源分叉（0041 §2 那一族）。
  *      【上限的那一侧读参数，不读 budgets.limit_cents】—— 实测：runtime 那条
- *      ENSERT_TASK_BUDGET_SQL 是 ON CONFLICT DO NOTHING，所以那一列【第一次写进去就再也不改】；
+ *      ENSERT_BUDGET_SQL（round272 之前是 runtime 自己手抄的 `ENSERT_TASK_BUDGET_SQL`）是 ON CONFLICT DO NOTHING，所以那一列【第一次写进去就再也不改】；
  *      跑第二次而把上限改成 1，库里仍是第一次那个 1000（0045 §1 那张表）。
  *      拿它当门 = 门永远按【这台机器第一次启动时】的那个数字关着。
  *    放行条件是 `consumed < limit`，也就是【花到上限那一格就挡】（等价于挡在 `>=` 上），

@@ -1416,6 +1416,85 @@ describe("心跳：首轮立刻跑；坏到底要出声并交出退出权", () =
   });
 });
 
+describe("O10 动作 1：心跳那一跳真的执行到期审批（接线行为发，不止源码形状发）", () => {
+  /**
+   * claims-registry r2 钉的是【源码里还有这句调用】；这一发钉的是【真跑了】。
+   * 两发各防各的：r2 防「有人把线拔了而没人知道」，这一发防「线还挂着而调用
+   * 参数错了 / 被挪进一条永不执行的分支」。形状绿而行为假，正是本仓反复量过的
+   * 「判定写完、运行时没人走到」那一族。
+   *
+   * 到期卡用【直插 SQL】造（照 approvals/timeout.test.ts 的同款夹具）：
+   * timeout_at 在 fake scheduler 的起始时刻之前 1ms ⇒ boot 后的【首轮】心跳就该吃掉它。
+   * 库、迁移、WriteQueue、事件总线全真；换掉的只有那四件惯犯（锁/图/时钟/监听）。
+   */
+  it("⭐ 首轮心跳把到期卡打成 rejected：status 变、actor 是 system、events 有行", async () => {
+    const T0 = Date.parse("2026-03-10T08:00:00Z");
+    const path = db();
+    const s = createFakeScheduler(T0);
+    const { io, warn } = ioOf();
+    // 先播种再 boot：任务行 + 一张到期 pending 卡（auto_reject）。
+    const seed = openDb(path);
+    try {
+      seed
+        .prepare(
+          "INSERT INTO tasks (id, title, status, assigned_role, current_node, created_at, updated_at) " +
+            "VALUES ('T-TO', '超时接线夹具', 'IN_PROGRESS', 'dev', 'implement', ?, ?)",
+        )
+        .run(T0, T0);
+      seed
+        .prepare(
+          "INSERT INTO approvals (id, task_id, approval_type, summary, parameters, recommendation, " +
+            "recommendation_source, timeout_behavior, timeout_at, status, created_at, evidence_refs) " +
+            "VALUES ('A-TO', 'T-TO', 'strategic', '到期该被自动打回的卡', ?, ?, ?, 'auto_reject', ?, 'pending', ?, ?)",
+        )
+        .run(
+          JSON.stringify({
+            impact_scope: "夹具",
+            irreversible: false,
+            recommendation: "r（推荐，非决定）",
+            recommendation_is_not_decision: true,
+            timeout_behavior: "auto_reject",
+          }),
+          "r（推荐，非决定）",
+          null,
+          T0 - 1,
+          T0 - 60_000,
+          JSON.stringify(["task:T-TO/evidence"]),
+        );
+    } finally {
+      seed.close();
+    }
+    const r = needOk(
+      await boot(args({ dbPath: path, port: 8791, heartbeatMs: 60_000 }), io, {
+        serve: fakeServer().serve,
+        scheduler: s,
+        now: () => s.now(),
+      }),
+    );
+    // 等的是 warn 那句「超时巡检」——它与写库在【同一轮 job 里先后落地】，
+    // 等到它就等于等到那一轮跑完（备份那一发「等日志不等文件」的同源理由）。
+    expect(await happens(() => warn.join(" ").includes("超时巡检"))).toBe(true);
+    const check = openDb(path);
+    try {
+      const row = check
+        .prepare("SELECT status, decided_by FROM approvals WHERE id = 'A-TO'")
+        .get() as Record<string, unknown>;
+      expect(["rejected", "timeout-executor"]).toEqual([row["status"], row["decided_by"]]);
+      const ev = check
+        .prepare(
+          "SELECT actor_type, action FROM events WHERE target = 'A-TO' AND action = 'approval'",
+        )
+        .all() as Array<Record<string, unknown>>;
+      expect(ev).toHaveLength(1);
+      // O10 验收第 3 条在【真心跳】上再钉一遍：机器决定不署人名（0026 §2）。
+      expect(ev[0]?.["actor_type"]).toBe("system");
+    } finally {
+      check.close();
+    }
+    await r.shutdown();
+  });
+});
+
 describe("决策写路径是哪一条，启动时就要说出来（两条路线各一句，0043）", () => {
   it("⭐ 默认装配 = 引擎那一条：说出任务真的会动，且【不教一条本机跑不通的补救】", async () => {
     const path = db();

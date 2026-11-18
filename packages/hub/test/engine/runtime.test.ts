@@ -301,26 +301,38 @@ describe("runtime 的读回调（真 schema 上的真 SQL）", () => {
     expect(s).toEqual(["登录模块写完"]);
   });
 
-  it("ceoApproved 只认 status='approved'：pending / rejected 都不算放行凭据", async () => {
+  it("ceoApproved 要 status='approved'【且】decided_by='ceo'：状态那一半单独为真不算凭据", async () => {
     const w = await world({});
-    const card = (status: string, key: string): void => {
+    // decided_by 成了判据的一维，夹具就必须能填它 —— 第一版这个 helper 把它写死成 NULL，
+    // 于是「approved + 非 ceo」那一格【摆不出来】，测出来会是假绿（看起来测了身份，
+    // 实际所有样本的身份都一样）。
+    const card = (status: string, key: string, decidedBy: string | null = null): void => {
       w.db
         .prepare(
           "INSERT INTO approvals (id, task_id, approval_type, summary, parameters, recommendation, " +
             "recommendation_source, timeout_behavior, timeout_at, status, decided_by, decided_at, " +
             "decision_note, card_key, created_at) " +
-            "VALUES (?, 't1', 'escalation', 's', '{}', 'r', NULL, 'escalate', ?, ?, NULL, NULL, NULL, ?, ?)",
+            "VALUES (?, 't1', 'escalation', 's', '{}', 'r', NULL, 'escalate', ?, ?, ?, NULL, NULL, ?, ?)",
         )
-        .run("a-" + status, NOW + 1, status, key, NOW);
+        .run("a-" + key, NOW + 1, status, decidedBy, key, NOW);
     };
-    card("pending", "k-pending");
-    card("rejected", "k-rejected");
-    card("approved", "k-approved");
+    card("pending", "k-pending", "ceo");
+    card("rejected", "k-rejected", "ceo");
+    // ⭐ 承重那一发：状态对而身份不对 ⇒ 不算。这一格对应的就是
+    // policy/auto-approve.ts 那条 UPDATE 写进库的形状（decided_by='policy-engine'）。
+    card("approved", "k-policy", "policy-engine");
+    // 历史形状：那条 SQL 补上身份那一维【之前】，任何一行 approved 都算凭据。
+    card("approved", "k-no-identity", null);
+    card("approved", "k-approved", "ceo");
     expect(w.rt.deps.ceoApproved("t1", "k-approved")).toBe(true);
-    expect(w.rt.deps.ceoApproved("t1", "k-pending")).toBe(false);
-    expect(w.rt.deps.ceoApproved("t1", "k-rejected")).toBe(false);
+    expect(w.rt.deps.ceoApproved("t1", "k-pending"), "pending 不是凭据").toBe(false);
+    expect(w.rt.deps.ceoApproved("t1", "k-rejected"), "rejected 不是凭据").toBe(false);
+    expect(w.rt.deps.ceoApproved("t1", "k-policy"), "策略引擎写的 approved 不是 CEO 的批准").toBe(false);
+    expect(w.rt.deps.ceoApproved("t1", "k-no-identity"), "没署名的 approved 不是凭据").toBe(false);
     expect(w.rt.deps.ceoApproved("t1", "没有这张卡")).toBe(false);
+    // SQL 文本也钉一条：有人把 WHERE 里那一维删掉时，上面那发会红，而这一发说出【为什么】红。
     expect(CEO_APPROVED_SQL).toContain("status = 'approved'");
+    expect(CEO_APPROVED_SQL).toContain("decided_by = 'ceo'");
   });
 });
 
@@ -367,6 +379,270 @@ describe("rolePrompt 里那句「谁是 CEO」（0047 的装配那一半）", ()
   it("图还没钉（没 loadTask）⇒ 同样是「说不出」那一支，而不是拿最新图顶上", async () => {
     const w = await world({});
     expect(w.rt.deps.rolePrompt("dev")).toContain("说不出");
+  });
+});
+
+/**
+ * ── 岗位书真的进了提示词（O2 动作 1）────────────────────────────────────
+ *
+ * ⚠ **这一节是 O2 验收 (a) 那条变异的靶子**：把 `runtime.ts` 的 rolePrompt 里
+ * 读岗位书那一句（`const charter = readLatestCharter(read(), roleId)`）注释掉，
+ * 本节必须至少有一发红。优化设计文档 O2 记着改前实测「这个变异全绿」，
+ * 而全绿的成因很具体：`engine/` 里那些字段名的引用是 0 —— 没有任何一发的
+ * 断言落在那段提示词的**内容**上，所以删掉整个岗位书只会让提示词变短。
+ *
+ * 反向也要有：下面每一条「有岗位书」的用例都配一条同世界的「没有岗位书」。
+ * 少了反向，"内容出现"与"内容恒出现"不可区分（0045 §9 那个分母同族）。
+ *
+ * ── 变异实测（本轮跑的，不是推断的）────────────────────────────────────
+ * 变异 = 把 `const charter = readLatestCharter(read(), roleId);` 整行换成
+ * `const charter: undefined = undefined;`。
+ * ⚠ 换而不是**删**，为的是保住 `charter` 这个名字：删掉它会让下面那三处读它的
+ * 表达式编译不过，于是一片红报的是"编译器在不在工作"而不是"有没有人判这件事"
+ * （0045 §9 那发 G1 与 G1′ 的区别，同一条教训的第三次落地）。
+ * 结果 4 发红，逐条记下**红在哪一句**，因为其中一发的红不在主断言上：
+ *   · 「逐格出现」红在主断言：`这些格没进提示词: [开发负责人, metric:coverage…]`。
+ *   · 「没有岗位书 ⇒ 不编通用的」**主断言是绿的** —— 恒 undefined 的变异
+ *     恰好让"没有岗位书"这句话【说得对】，红的是末尾那条反向对照
+ *     （`not to contain 没有你的岗位书`）。⇒ **只写主断言的那一发挡不住这个变异**，
+ *     这是上面那句"反向也要有"的实测价格，不是风格偏好。
+ *   · 「读坏了要抛」红在 `expected [Function] to throw an error`（变异让坏数据根本不被读）。
+ *   · 「角色名跟着走」红在 dev 那一行（`to contain 开发负责人`）。
+ * 跑完逐字节还原并 sha256 对账（改动只在 runtime.ts，还原后 git diff 只剩本轮该留的行）。
+ * 变异脚本在系统临时目录，**不是仓库资产**。
+ */
+describe("rolePrompt 里的岗位书那一半（O2）", () => {
+  /** 往这个真库里写一版 dev 的岗位书（走真写入方，不手搓 config JSON）。 */
+  async function seedCharter(w: World, over: Record<string, unknown> = {}): Promise<void> {
+    const { saveCharterVersion } = await import("../../src/charter/store.js");
+    const r = await saveCharterVersion(w.q as unknown as Parameters<typeof saveCharterVersion>[0], {
+      roleId: "dev",
+      nowMs: NOW,
+      changeSummary: "测试用第一版",
+      config: {
+        role_id: "dev",
+        display_name: "开发负责人",
+        version: 1,
+        honesty_boundaries: ["不声称未跑过的测试已通过"],
+        acceptance_criteria: [
+          { condition: "metric:coverage < 80", action: "reject", message: "覆盖率不足 80" },
+        ],
+        forbidden_actions: ["不许直接改生产库"],
+        tool_permissions: ["Read"],
+        model_tier: "execution",
+        budget: { daily_usd: 15, per_task_usd: 5 },
+        decision_scope: {
+          autonomous: ["选实现方案"],
+          requires_consultation: ["改公共接口"],
+          forbidden: ["定公司方向"],
+        },
+        judgment_mode: {
+          type: "bounded_judgment",
+          strict_rules: ["不许跳过测试"],
+          bounded_judgment: [],
+          full_discretion: [],
+        },
+        escalation_triggers: ["碰到不可逆动作就升"],
+        ...over,
+      },
+    } as never);
+    if (!r.ok) throw new Error("夹具写岗位书被拒：" + r.reason);
+  }
+
+  it("⭐ 有岗位书 ⇒ 标准/禁止项/决策范围【逐格】出现在提示词里", async () => {
+    const w = await world({});
+    await seedCharter(w);
+    const p = w.rt.deps.rolePrompt("dev");
+    // 拼成一条断言：数组只报 Array(n)，而这一发红的时候要点名的是"哪一格没进"。
+    const missing = [
+      "开发负责人",
+      "metric:coverage < 80",
+      "不许直接改生产库",
+      "选实现方案",
+      "不声称未跑过的测试已通过",
+      "碰到不可逆动作就升",
+    ].filter((s) => !p.includes(s));
+    expect("这些格没进提示词: [" + missing.join(", ") + "]").toBe(
+      "这些格没进提示词: []",
+    );
+  });
+
+  it("⭐ 库里这个角色一个版本都没有 ⇒ 明说「没有岗位书」，且不编一份通用的", async () => {
+    const w = await world({});
+    const p = w.rt.deps.rolePrompt("dev");
+    expect(p).toContain("没有你的岗位书");
+    expect(p).toContain("如实写进你的汇报");
+    // 反向对照（这一句才是上面那发的分母）：同一张世界写一版之后就【不再】是这句话。
+    await seedCharter(w);
+    expect(w.rt.deps.rolePrompt("dev")).not.toContain("没有你的岗位书");
+  });
+
+  it("⭐ 那一版读坏了 ⇒ 【抛】，而不是渲染一句「读坏了」让 agent 照常花钱跑完", async () => {
+    /*
+     * 这一发钉的是 runtime 里那个刻意不 catch 的选择，所以它必须写明代价与理由：
+     * 抛 ⇒ 这一轮整个不跑（CLI 那边 catch 成退出码 1 并打出原因）。
+     * 在这里 catch 住、改渲染一句「你的岗位书读坏了」看着更温和，而后果是
+     * agent **照常跑完这一轮、真的花钱**，只是没有岗位书，症状只是「这轮质量差」——
+     * 把坏数据吸收成正常噪声。两种后果不同的事该有两种结果（readCharterConfig
+     * 那句「这与『那一版不存在』是两件事」是同一立场的第一次落地）。
+     *
+     * 三种读结果在**同一发**里对照，因为它们最容易被人顺手合并成一格：
+     *   ① 有 ⇒ 渲染（上面那发）  ② 没有 ⇒ NO_CHARTER_LINE（上面第二发）
+     *   ③ 有行但坏 ⇒ 抛（这一发）
+     */
+    const w = await world({});
+    await seedCharter(w);
+    // 把 config 改坏成非法 JSON —— 这是「有行而读不出来」，不是「那一版不存在」。
+    w.db
+      .prepare("UPDATE role_charters SET config = '{broken' WHERE role_id = 'dev'")
+      .run();
+    expect(() => w.rt.deps.rolePrompt("dev")).toThrow(/不是合法 JSON/u);
+    // 而它**不是** NO_CHARTER_LINE 那一支：把"读坏了"说成"没有"会引导人去播种，
+    // 而播种会撞上同一行坏数据，或者更糟 —— 盖掉那一版，把证据洗掉。
+    expect(() => w.rt.deps.rolePrompt("dev")).not.toThrow(/没有你的岗位书/u);
+  });
+
+  it("角色名跟着走：dev 的岗位书不会拼到 director 的提示词上", async () => {
+    // 两角色同一张库，只有 dev 有岗位书 ⇒ director 必须还是「没有岗位书」那一支。
+    // 这一发防的是 readLatestCharter 的 roleId 绑参写错（写成常量、或读了上一轮的缓存）。
+    const w = await world({});
+    await seedCharter(w);
+    expect(w.rt.deps.rolePrompt("dev")).toContain("开发负责人");
+    expect(w.rt.deps.rolePrompt("director")).toContain("没有你的岗位书");
+  });
+});
+
+/* ═══════════════════════════════════════════════════════════════════
+   ⭐ 角色记忆真的进了提示词（O3 动作 1）
+
+   ⚠ **这一节是 O3 验收那条变异的靶子**：把 `renderMemoryBlock` 的返回值写死成空串
+   ⇒ 必须红。优化设计文档 O3 记着改前实测「这个变异**全绿**」，而全绿的成因很具体：
+   `renderMemoryBlock` 在 `src` 里的运行期消费者是 0（0016 §6 量的就是这件事），
+   所以写死它的返回值只会让一个没人调的函数返回空字符串。
+   ⇒ 那一发变异要能红，前提必须是【有人调它，且有人断它拼进去的内容】。
+   本节配齐了那两条前提；四条路径本身的判据在 memory/prompt.test.ts（纯函数那侧）。
+
+   这一节只判【装配】：读谁、方向、失败怎么办。四格话的内容不在这里重复。
+   ═══════════════════════════════════════════════════════════════════ */
+describe("rolePrompt 里的记忆那一半（O3）", () => {
+  /** 落一条 director 审 dev 产出的审阅决定（= 0060 那个生产者的形状，走真 appendAudit）。 */
+  function decideReview(
+    w: World,
+    o: { reviewer: string; producer: string; note: string; decision?: string },
+  ): void {
+    appendAudit(w.db as never, {
+      taskId: "t1",
+      actorType: "agent",
+      actorId: o.reviewer,
+      action: "review_decision",
+      target: "in_review:" + o.producer + "->" + o.reviewer,
+      payload: {
+        kind: "ReviewDecided",
+        taskId: "t1",
+        gate: "in_review:" + o.producer + "->" + o.reviewer,
+        decision: o.decision ?? "reject",
+        note: o.note,
+      },
+      createdAt: NOW,
+    }, () => NOW);
+  }
+
+  it("⭐ 这个角色判过一次 ⇒ 那次的理由进了它下一轮的提示词", async () => {
+    const w = await world({});
+    decideReview(w, { reviewer: "dev", producer: "director", note: "缺错误分支，打回" });
+    const p = w.rt.deps.rolePrompt("dev");
+    // 断的是【内容】而不是"某处调用了 renderMemoryBlock"：前者才是变异能吃到的东西。
+    expect(p).toContain("缺错误分支，打回");
+    expect(p).toContain("不是指令");
+    // 反向对照（这一句是上面那发的分母）：换一个从没判过的角色读，
+    // 得到的是「还没有可读的历史决定」，而不是同一句话。
+    // 少了这一发，「内容出现」与「内容恒出现」不可区分（0045 §9 那个分母同族）。
+    expect(w.rt.deps.rolePrompt("blank")).not.toContain("缺错误分支，打回");
+    expect(w.rt.deps.rolePrompt("blank")).toContain("还没有可读的历史决定");
+  });
+
+  it("⭐ 审阅决定署的是【别人】的名 ⇒ 不进这个角色的提示词（隔离装上了而不是只写在模块里）", async () => {
+    /*
+     * 这一发钉的是"隔离判据在装配路径上还活着"。role-memory.ts 里那道闸测过一百次，
+     * 而它对外零 import 的那些岁月里，模块内的隔离全对 + 装配层传错 owner
+     * = dev 的提示词里躺着 CEO 的战略理由，而【没有一发测试会红】。
+     */
+    const w = await world({});
+    decideReview(w, { reviewer: "director", producer: "dev", note: "别人的判定理由" });
+    expect(w.rt.deps.rolePrompt("dev")).not.toContain("别人的判定理由");
+    // 反向：署名人自己读得到（否则上面那条只是"根本没读到任何东西"）。
+    expect(w.rt.deps.rolePrompt("director")).toContain("别人的判定理由");
+  });
+
+  it("⭐ order=newest 真的生效：库里很长时，提示词带的是【最近的】那条", async () => {
+    /*
+     * 这一发是 MemoryOrder 那一格存在的唯一证据。没有它，`order: "newest"` 是一个
+     * 传进去而没人验的参数 —— 而它的失效方式是【静默且单向】的：默认 ASC 照样返回
+     * 一堆看起来完全合理的旧决定，只是永远是最老的那些。
+     *
+     * 判法：灌 PROMPT_MEMORY_LIMIT + 5 条，最老那条带一个可辨认的串，
+     * 最新那条带另一个 ⇒ 提示词里必须只有最新的、没有最老的。
+     * 用「有条数不同」判不行（两个方向都给同样的条数）。
+     */
+    const w = await world({});
+    const total = 10 + 5;
+    for (let i = 0; i < total; i += 1) {
+      decideReview(w, {
+        reviewer: "dev",
+        producer: "director",
+        note: (i === 0 ? "最老那条理由" : i === total - 1 ? "最新那条理由" : "中间第" + i + "条"),
+      });
+    }
+    const p = w.rt.deps.rolePrompt("dev");
+    expect(p).toContain("最新那条理由");
+    expect(p).not.toContain("最老那条理由");
+  });
+
+  it("⭐ 记忆读失败 ⇒ 【抛】，不 catch 成一句「没有历史」", async () => {    /*
+     * 与上面岗位书那一发同一个立场，而这里多一条更硬的理由：
+     * memory/prompt.ts 那句"库里确实没有，不是读取失败"是【无条件】说的 ——
+     * catch 之后那句话就成了谎。抛出去由 CLI 收成退出码 1，那是唯一的诚实读数。
+     *
+     * 造失败的办法：把 events 表改名。readRoleMemory 里那句 prepare 会当场抛，
+     * 而它是这一支唯一会碰的东西（岗位书读的是 role_charters，不受影响 ⇒
+     * 报错里【不该】有岗位书那句，否则这一发红的是别的东西）。
+     */
+    const w = await world({});
+    w.db.exec("ALTER TABLE events RENAME TO events_gone");
+    expect(() => w.rt.deps.rolePrompt("dev")).toThrow();
+    expect(() => w.rt.deps.rolePrompt("dev")).not.toThrow(/没有你的岗位书/u);
+  });
+
+  it("CEO 那一格：战略记忆走的是【自己读自己】，所以它进得了 CEO 的提示词", async () => {
+    /*
+     * 这一发不是凑数。rolePrompt 现在被【所有】角色共用，而 CEO 那一格有两处特殊：
+     *  ① dispatch 对 CEO 席位根本不调 rolePrompt（人类席位，不起子进程）——
+     *     所以这条路径今天【在生产里不被走】，它活着是因为 charter-pump / work.ts
+     *     那两个调用方按角色名调它。这一格必须说出来，否则会被读成"CEO 每轮都拿到"。
+     *  ② strategic 档只在 owner=requester=ceo 时可见。装配层两处都传 roleId，
+     *     所以它是【对】的 —— 而这件事只有真跑一遍才知道（写成注释就是许愿）。
+     */
+    const w = await world({});
+    w.db
+      .prepare(
+        "INSERT INTO approvals (id, task_id, approval_type, summary, parameters, status) " +
+          "VALUES ('A-1', 't1', 'strategic', '摘要', '{}', 'pending')",
+      )
+      .run();
+    appendAudit(w.db as never, {
+      taskId: "t1",
+      actorType: "human",
+      actorId: "ceo",
+      action: "approval",
+      target: "A-1",
+      payload: { kind: "ApprovalDecided", approvalId: "A-1", resume: "approve" },
+      stateSnapshot: { note: "这条线整个砍掉，明年不做" },
+      createdAt: NOW,
+    }, () => NOW);
+    const p = w.rt.deps.rolePrompt("ceo");
+    expect(p).toContain("这条线整个砍掉，明年不做");
+    // 反向：同一条，dev 读不到（CEO 的战略理由进 agent 的 prompt 是本模块的第一红线）。
+    expect(w.rt.deps.rolePrompt("dev")).not.toContain("这条线整个砍掉");
   });
 });
 
@@ -437,7 +713,11 @@ describe("runtime 跑一轮：真 CLI 桩 + 真记账 + 真留痕", () => {
       // 走的是 runtime 里那条 onCost，不是重抄一遍 SQL
       const hook = w.rt.deps.onCost;
       if (hook === undefined) throw new Error("onCost 没装配");
-      hook({ db, taskId: "t1", role: "dev", seq, costCents: 4, nowMs: NOW + 2000 });
+      // `as never` 抄的是本文件 appendAudit 那几行的同一写法：CostHook 的 db 形参是
+      // node:sqlite 的 DatabaseSync，而这里的 World.db 是【刻意收窄】的桩类型
+      // （只声明 prepare/exec，见文件头第 49 行）。收窄是对的 —— 测试不该能顺手用
+      // 到 14 个它不该碰的方法；代价就是喂给真签名时要过一次强转。
+      hook({ db: db as never, taskId: "t1", role: "dev", seq, costCents: 4, nowMs: NOW + 2000 });
       return null;
     });
     expect(w.db.prepare("SELECT * FROM budget_events").all().length).toBe(1);

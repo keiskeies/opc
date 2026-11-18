@@ -62,18 +62,29 @@ export interface ConsumeResult {
   readonly duplicateOf?: number;
 }
 
-const ENSERT_BUDGET_SQL =
+/**
+ * ⚠ 这三条 SQL 是【全仓唯一的一份】，`engine/runtime.ts` 的 `onCost` 直接 import 它们
+ * （round272 之前那里手抄过三条，字面量只把 `scope_type`/`period` 内联成
+ * `'task'`/`'per_task'` ⇒ 同一件事两份，改一处不带着另一处 —— 那是 O6 动作 2 与
+ * O7 那本账的共同根）。收敛没有靠【约定】，靠的是把那两个内联换成【绑参】：
+ * 两份 SQL 从此在字节上就是同一条，没有第二份可漂。
+ * 所以它们带 `export`，而调用方必须按下面的参数顺序绑：
+ *   ENSERT_BUDGET_SQL    (id, scope, scopeId, period, limitCents)
+ *   IDEMPOTENT_INSERT_SQL(sourceEvent, scope, scopeId, period, amountCents, taskId, nowMs)
+ *   ADD_CONSUMED_SQL     (amountCents, scope, scopeId, period)
+ */
+export const ENSERT_BUDGET_SQL =
   "INSERT INTO budgets (id, scope_type, scope_id, period, limit_cents, consumed_cents, hard_stop) " +
   "VALUES (?, ?, ?, ?, ?, 0, 1) ON CONFLICT(scope_type, scope_id, period) DO NOTHING";
 
-const IDEMPOTENT_INSERT_SQL =
+export const IDEMPOTENT_INSERT_SQL =
   "INSERT INTO budget_events (source_event, scope_type, scope_id, period, amount_cents, task_id, created_at) " +
   "VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(source_event) DO NOTHING";
 
 const SELECT_CONSUMED_SQL =
   "SELECT consumed_cents FROM budgets WHERE scope_type = ? AND scope_id = ? AND period = ?";
 
-const ADD_CONSUMED_SQL =
+export const ADD_CONSUMED_SQL =
   "UPDATE budgets SET consumed_cents = consumed_cents + ? " +
   "WHERE scope_type = ? AND scope_id = ? AND period = ?";
 

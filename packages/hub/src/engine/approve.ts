@@ -37,7 +37,10 @@ import type { DatabaseSync } from "node:sqlite";
 import { requireScopeDb } from "../checkpoint/tx-scope.js";
 import { appendAudit, KIND_TO_ACTION } from "../events/recorder.js";
 import type { DomainEvent } from "../events/bus.js";
-import { APPROVAL_STATUS_PENDING } from "../approvals/cards.js";
+import {
+  APPROVAL_STATUS_PENDING,
+  SAME_FAMILY_REVIEW_KEY_PREFIX,
+} from "../approvals/cards.js";
 import type { TaskState } from "../graph/status.js";
 import { humanEdge, seatOf, WRITE_EDGE_SQL } from "./dispatch.js";
 import {
@@ -158,6 +161,17 @@ export interface ApproveOptions {
   readonly nowMs: number;
   /** 决策的附言（打回时那句理由）。落 decision_note 与 state_snapshot。 */
   readonly note?: string;
+  /**
+   * 审计行的署名。**默认 `"ceo"`**（HTTP 与 CLI 那条路逐字不变）。
+   *
+   * 为什么开这一格：`im_bindings` 存在的理由是回答「这个外部账号是哪个角色」，
+   * 而 O12 的验收句要的就是「审计行 actor 是绑定的那个角色」。写死 `ceo` 的
+   * 那条路一旦被人照抄去接 IM，「手机上谁点的」从落库那一刻起就消失了。
+   * ⚠ 只换 actorId，不换 actorType（仍是 `human`）：这一格换的是【谁】，
+   *   不是【是不是人】。传空串/空白按默认处理 —— 空署名比错署名更糟，
+   *   它在 append-only 的审计里读起来像一次合法的匿名决策。
+   */
+  readonly actorId?: string;
 }
 
 export interface ApproveResult {
@@ -185,7 +199,18 @@ export interface ApproveResult {
      * 返回而不是抛：CLI 要打的是人话，不是一句 stack；而 HTTP 那一侧本来就有
      * 422 那条路（contracts 的 superRefine），这条只服务 CLI/桌面这两个直连入口。
      */
-    | "note_required";
+    | "note_required"
+    /**
+     * 批准【同源审阅豁免卡】而没给理由。为什么这一张【批准】也必须带理由，而其它
+     * 批准不用：同源审阅的风险（§24）是【被 CEO 显式承担】才放行的，那张豁免的存在
+     * 理由就是 CEO 的这句话 —— 「接受同源风险 ×××」。`sameFamilyReviewBlock` 把它写成
+     * 「空理由的批准等于没有批准」，那是读侧判据；这一发是【写侧】：在决策落下之前
+     * 就拦住，让 CEO 当场补上理由（decision_note 是 append-only，事后补不进去）。
+     * 为什么只在豁免卡上收：普通审批（预算、岗位书）批准时不强制理由，那张豁免
+     * 是唯一「理由即凭据」的一种 —— 把整条批准都改成必填理由是另一个产品决定，
+     * 不该顺手做。
+     */
+    | "waiver_note_required";
   /** 落库后的卡片状态。 */
   readonly cardStatus: CardDecidedStatus;
   /** 决策前的任务状态。 */
@@ -237,6 +262,9 @@ export async function approveCard(
 ): Promise<ApproveResult> {
   const now = o.nowMs;
   const status = STATUS_BY_BUTTON[o.button];
+  // 署名单点解析：两条审计行（决策 + 状态边）必须署同一个名，
+  // 所以这里算一次，两处各读同一个值，绝不在调用点各传各的。
+  const actorId = o.actorId === undefined ? "ceo" : o.actorId.trim() || "ceo";
 
   // 【开事务之前】判。这一条与事务里那几条不是一类：那几条是「库里此刻不允许」，
   // 这一条是「这次请求本身不成立」，它不该碰到写连接（碰了就白拿一次
@@ -278,6 +306,24 @@ export async function approveCard(
     // 的历史里说「这个人又决定了一次」，而没发生（同 applyDecision 第 ① 条不变量）。
     if (String(card["status"] ?? "") !== APPROVAL_STATUS_PENDING) {
       return { kind: "already_decided" as const, status };
+    }
+
+    /**
+     * 豁免卡批准必须带理由（outcome: waiver_note_required）。
+     *
+     * 判据：【批准】+ 这张卡的键是 `same-family-review:`。判在事务里、认领【之前】，
+     * 与 requiresNote 那条不同 —— 那条在事务外，因为「打回必须带理由」与卡的类型
+     * 无关、是个恒定规则；这条要【读卡】才知道是豁免卡，card_key 只在库里的那一行上。
+     * 认领之前判 = 拦下时一条审计都不写（nothing written 的分支返回即可，事务回滚免费）
+     * —— 那张卡保持 pending，CEO 补个理由重发一次就好。
+     *
+     * 为什么批准豁免也要理由：同源审阅放行是 §24 风险的显式承担，那张卡的【凭据】
+     * 就是 CEO 的一句话。`sameFamilyReviewBlock` 明说「空理由的批准等于没有批准」；
+     * 这里不让它在读侧空判，而是让空理由【到不了 approval 这一行】。
+     */
+    const cardKey = String(card["card_key"] ?? "");
+    if (o.button === "approve" && cardKey.startsWith(SAME_FAMILY_REVIEW_KEY_PREFIX) && trimmed === "") {
+      return { kind: "waiver_note_required" as const, status };
     }
 
     const taskRow = db.prepare(LOAD_TASK_STATE_SQL).get(o.taskId) as
@@ -356,7 +402,7 @@ export async function approveCard(
       {
         taskId: o.taskId,
         actorType: "human",
-        actorId: "ceo",
+        actorId,
         // 'approval'：CEO 点按钮是审批决策，不是门控判定（review_decision）。
         // 从 KIND_TO_ACTION 同源取值而不是手写字面量（dispatch 里那条同源理由）。
         action: KIND_TO_ACTION.ApprovalDecided,
@@ -397,10 +443,11 @@ export async function approveCard(
       db,
       {
         taskId: o.taskId,
-        // actor 是 human/ceo 而不是 agent：这条边是人走的。写 agent 的话，
+        // actor 是 human 而不是 agent：这条边是人走的。写 agent 的话，
         // 「回放里这一步是谁推的」会答错，而那是 §12.7 第 2 层（审计链）问的问题。
+        // actorId 与上面那条决策行同源（同一个解析结果），两行不同名 = 审计自相矛盾。
         actorType: "human",
-        actorId: "ceo",
+        actorId,
         action: "state_change",
         target: edge.to,
         payload: { ...edgeEvent, summary: edge.why },
@@ -514,6 +561,22 @@ export async function approveCard(
       orgVersionUnchecked: true,
       published: [],
       note: "那张卡片此前已被决策（或这次是重复点击），什么都没写。",
+    };
+  }
+  if (wrote.kind === "waiver_note_required") {
+    return {
+      outcome: "waiver_note_required",
+      cardStatus: wrote.status,
+      from: "",
+      to: "",
+      edgeExists: false,
+      orgVersionUnchecked: true,
+      published: [],
+      note:
+        "批准【同源审阅豁免卡】必须带理由。这不是「你没写对字面量」，是那次放行的凭据" +
+        "就是这句话 —— 同源审阅的风险（§24）由 CEO 显式承担才放行，空理由的批准等于" +
+        "没有批准（sameFamilyReviewBlock 那条原话）。decision_note 是 append-only 的，" +
+        "补不进去，所以先拦下。什么都没写。",
     };
   }
   if (wrote.kind === "card_belongs_to_other_task") {

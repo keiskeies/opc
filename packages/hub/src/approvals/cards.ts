@@ -160,12 +160,27 @@ export const OPERATIONAL_APPROVAL_TYPES: readonly string[] = ["budget_override"]
 export { APPROVAL_STATUS_PENDING };
 
 /**
+ * 同源审阅豁免卡的 `card_key` 前缀。
+ *
+ * 建在【卡片这一层】而不是 dispatch 或 approve 里：两个方向都要认它 ——
+ * `dispatch.ts:1160` 用它拼键（生产者），`engine/approve.ts` 要按它识别
+ * 「这张卡批准必须带理由」（写下理由 = 承担同源审阅风险的凭据，§8.2 第 1 条）。
+ * 前缀只写这里一份，两侧 import 它；谁再手拼一份就会漂移
+ * （一个键两端拼法失配时，卡片建出来而批准侧认不出来）。
+ */
+export const SAME_FAMILY_REVIEW_KEY_PREFIX = "same-family-review:";
+
+/**
  * ⚠⭐ **本篇唯一一处我替 CEO 拍的产品决定：`timeout_at` 有值，而没有任何执行者。**
+ * ~~这里会**因为到期做任何事**……整仓仍然没有一处 `approvals` 的超时扫描。~~
  *
- * 这里**会**把到期时刻写进那一列（以前连值都没有），而**不会**因为到期做任何事：
- * 不自动批准、不自动打回、不升级、不提醒。整仓仍然没有一处 `approvals` 的超时扫描。
+ * ⚡ **【round265 过期声明】** 执行者已补上 —— `approvals/timeout.ts` 的
+ * `runTimeoutPass` 现在扫 `timeout_at` 并按 `timeout_behavior` 三档处理
+ * （auto_reject / auto_approve / escalate）。下面的论证记录的是「当时为什么
+ * 什么都不做」，现在留下的是半截历史：接线那天这一天先要回答的告警疲劳判断
+ * （patrol.ts 那条）仍然有效，见 timeout.ts 文件头。
  *
- * 为什么这是我能拍的：0025 §8.3 把「超时之后该做什么」列为需要 CEO 决定的产品行为，
+ * 为什么那时这是我能拍的：0025 §8.3 把「超时之后该做什么」列为需要 CEO 决定的产品行为，
  * 而 CEO 已授权我按产品逻辑自行判断。**拍下来的答案是「什么都不做」**，理由：
  *  - `auto_approve` 意味着机器替人点头。规格 §9.3 把它限定在「仅限可逆事项」，
  *    而「可逆」的判定来自 policy/engine 的风险分级，那份分级今天**没有生产写入方**
@@ -236,8 +251,8 @@ export function parametersFor(
 export const INSERT_CARD_SQL =
   "INSERT INTO approvals (id, task_id, approval_type, summary, parameters, " +
   "recommendation, recommendation_source, timeout_behavior, timeout_at, status, " +
-  "decided_by, decided_at, decision_note, card_key, created_at) " +
-  "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+  "decided_by, decided_at, decision_note, card_key, created_at, evidence_refs) " +
+  "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
 
 /** 建卡结果。`created: false` 的两种成因见 insertCard 的注释。 */
 export type InsertCardResult = {
@@ -300,6 +315,18 @@ export function insertCard(
           .join("；"),
     );
   }
+  // O10 动作 2 拒建判据：`auto_approve` + 不可逆 ⇒ 拒建。
+  // 自动放行一张不可逆动作 = 一段没有人承担后果的决定（O9-3 的姐妹判据，OPC-OS 第 3 章）。
+  // 要求：一旦接执行者（src/approvals/timeout.ts），`auto_approve` 到期真的会通过。
+  if (
+    parsed.data.parameters.timeout_behavior === "auto_approve" &&
+    parsed.data.parameters.irreversible === true
+  ) {
+    throw new Error(
+      "审批卡片拒建：timeout_behavior=auto_approve 与 irreversible=true 不能共存" +
+        "（O10 动作 2 拒建判据 —— 自动放行不可逆动作 = 无后果的决定）。",
+    );
+  }
   // 取值检查跑在【raw 值】上，不是跑在收窄后的类型上：TS 的 ApprovalType 在运行时不存在，
   // 而这张表是 append-only 审计库的下游读法（role-memory 的战略档判据、
   // countSimilarApprovals 的同类口径）唯一的依据。让一个错值写进去，
@@ -337,6 +364,12 @@ export function insertCard(
     // 于是「这张卡等了多久」问不出答案 —— 补这一列的理由与「为什么不回填存量」
     // 写在 0004 第二列那一段。
     o.nowMs,
+    // 证据引用（O5 动作 4，迁移 0008）。契约强制 push 至少一条，但【历史路径】
+    // 仍可能不带：escalation 草稿（draftFromEscalation）的 evidence_refs 来自
+    // 升级判定结果，而那条路径历史上可以给空。这一列是「卡片背后有没有证据包」
+    // 在库里的唯一答案 —— NULL / [] 读作「无证据包」，UI 明说而不是假装有证据。
+    // 序列化口径与 parameters 同一条：undefined 显式折 NULL（不落 "undefined" 字面量）。
+    draft.evidence_refs.length === 0 ? null : JSON.stringify(draft.evidence_refs),
   ];
   assertSingleStatement(INSERT_CARD_SQL);
   assertParamCount(INSERT_CARD_SQL, params);

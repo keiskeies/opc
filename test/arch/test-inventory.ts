@@ -82,6 +82,79 @@ export function diffInventory(inv: Inventory): InventoryDiff {
 }
 
 /**
+ * 第二个 runner：Playwright 自己认领的那份清单。
+ *
+ * ── 为什么必须有这一发 ───────────────────────────────────────────
+ * 0007 §9.2 早就把改法写死了（原文：「认领者从『vitest 的 include』扩到
+ * 『vitest include ∪ Playwright config 的 testDir/testMatch』」），并明说
+ * Task 2.9 落地那一刻这条守卫会【假红】、必须同步演进。本轮 `test/e2e/ceo-loop.spec.ts`
+ * 真的存在了，于是那句话从「将来时」变成「今天必须做」，而【关掉守卫】不在选项里。
+ *
+ * ── 为什么问 Playwright 要清单，而不是自己解析 playwright.config.ts ─────
+ * 和上面 vitest 那一发同一个理由：自己解析 config 就是把【我对配置的理解】同时
+ * 放到 expected 和 collected 两侧，规则读窄了两侧一起窄，差集恒空 ⇒ 恒真判定
+ * （0006 §7 第 58 条 / 0007 §4）。`--list` 是 Playwright 自己算出来的清单，
+ * 与磁盘宽枚举没有任何共享代码。
+ *
+ * 实测（1.65.1，`npx playwright test --list --reporter=json`，约 1.0 s）：
+ *   · `suites[].file` 给的是【相对 rootDir】的裸文件名（"ceo-loop.spec.ts"，带反斜杠）
+ *   · `config.rootDir` 是【posix 斜杠的绝对路径】("D:/item/opc/test/e2e")
+ *   ⇒ 两者拼起来再对仓库根取相对，才是与 expected 同一口径的相对路径。
+ *
+ * `--list` 会【import】spec 文件（不 import 就数不出用例标题），所以它比 list 一个
+ * 配置贵，也意味着 spec 里的 hub import 一旦崩，这里会拿到非 0 退出码 —— 那是红，
+ * 不是绿，方向对。
+ *
+ * @param out      `--list --reporter=json` 的 stdout
+ * @param repoRoot 仓库根绝对路径（与 expected 的相对口径同源）
+ */
+export function playwrightFiles(out: string, repoRoot: string): string[] {
+  let j: unknown;
+  try {
+    j = JSON.parse(out);
+  } catch (e) {
+    // 解析不成 ⇒ 抛。这里【不许】退化成空清单：空清单会让 ceo-loop.spec.ts 落回
+    // 「无人认领」，红因写的是「没人认领这个文件」，而真原因是「清单读不出来」。
+    throw new Error(
+      "playwright --reporter=json 的输出不是 JSON（版本变了还是被别的输出污染了）：" +
+        (e instanceof Error ? e.message : String(e)),
+    );
+  }
+  const cfg = (j as { config?: { rootDir?: unknown } }).config ?? {};
+  const rootDir = cfg.rootDir;
+  if (typeof rootDir !== "string" || rootDir === "") {
+    throw new Error("playwright JSON 里没有 config.rootDir（字段名变了？）");
+  }
+  const suites = (j as { suites?: unknown }).suites;
+  if (!Array.isArray(suites)) {
+    throw new Error("playwright JSON 里 suites 不是数组（字段形状变了）");
+  }
+  const root = toPosix(repoRoot);
+  const base = toPosix(rootDir);
+  const out2: string[] = [];
+  for (const s of suites) {
+    const f = (s as { file?: unknown }).file;
+    if (typeof f !== "string" || f === "") {
+      continue;
+    }
+    const abs = base + "/" + toPosix(f);
+    // 大小写不敏感：Windows 盘符大小写在两处并不保证一致。这一条【不是本轮实测到的】，
+    // 是按 Windows 路径惯例做的保守处理 —— 写清是为了将来读到这句的人不去找那条实测。
+    if (abs.toLowerCase().startsWith(root.toLowerCase() + "/")) {
+      out2.push(abs.slice(root.length + 1));
+    } else {
+      // 仓库外的 spec：留着让它进 phantom，红话会把它原样打出来。
+      out2.push(abs);
+    }
+  }
+  return [...new Set(out2)].sort();
+}
+
+function toPosix(p: string): string {
+  return p.split("\\").join("/");
+}
+
+/**
  * 为什么没被收集：只给诊断文案，不参与判定（判定只看差集）。三个形状都是本轮实测过的，
  * 不是推测。文案不准也不会让守卫给出错误结论。
  */

@@ -41,6 +41,7 @@ import {
   readFileSync,
   rmSync,
   statSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { dirname, join } from "node:path";
@@ -664,22 +665,102 @@ describe("③ 岗位书里的 escalate 标准到不了升级路由（本轮实�
  *     反斜杠是 0x5C、正斜杠是 0x2F，混排时排序结果与纯正斜杠**不同**，
  *     于是同一份源码在两台机器上能排出两种名单 —— 那是比"比不中"更坏的形状：
  *     它偶尔会对，而错的时候看不出原因。
+ *
+ * ⚠ `statSync` 只对【刚刚消失】宽容（ENOENT / ENOTDIR），其余错误照抛。
+ * 这条不是防御性编程，是实测到的：`test/arch/dependency-boundary.test.ts` 会往
+ * `packages/hub/src/` 现场写一个越界 import 探针再删掉（名字的唯一真相在
+ * `test/arch/run-fixtures.ts`，本文件那三发扫描都是它的【并行受害者】）。
+ * `readdirSync` 与 `statSync` 之间那一瞬探针被删 ⇒ 整发 ENOENT。
+ * 实测复现率约【八分之一全量跑】，单跑恒绿 —— 正是 0007 §4.1 说的
+ * 「只在并行时出现的红会被关掉」那一族；同族的第三次碰撞记在 run-fixtures.ts 文件头。
+ * 窗口本身是确定性的：把删除插进那两次 syscall 之间，2000/2000 必现。
+ *
+ * 为什么【不】改成先 `isRuntimeFixture(名字)` 再跳过：那条路要求本文件 import
+ * 根 test/ 的那份名单（实测全仓零先例：包内测试 import 根 test/ 是 0 处，
+ * 反向的根 test/ import 包内倒有 3 处），而排除名单只认确切文件名（run-fixtures.ts
+ * 明说它挡不住「将来有人新造一个探针」）。宽容 ENOENT 管的是【任何并行删除】，
+ * 不是一张会过期的名字表。
+ *
+ * ⚠ 那份名单还挡着另一件事，本文件【不】具备，说清楚比藏着好：
+ * 探针【活着的时候】越界 import 的那个原生 SQLite 包，按名字排除的守卫连这一格都不让它
+ * 进判据；这里只宽容「消失」，所以活的探针会被扫到。
+ * 实测今天不出事：把那份内容真放进 src 里跑本文件，13 发全绿 —— 因为本文件那三发
+ * 扫的是 `evaluateGate` / `INSERT INTO approvals` / `UPDATE approvals`，
+ * 与探针内容【一个都不匹配】。**这是【当下的事实】，不是结构保证**：
+ * 谁往这三发里加一条扫 `sqlite` / `Database` 的判据，就会得出一条随并发出现的假生产者。
+ * 加之前先去看 run-fixtures.ts，别在这儿加名单。
+ * ⚠ 那个包名【不能在本文件里带引号写】（本行只许这么绕着说）：D6 那条 no-native-deps
+ * 扫的是 packages/**，而且【连注释一起扫】，本文件正在射程之内；实测这个包名在本文件
+ * 出现一次带引号的写法，那条守卫就红。test/arch 下的文件反而能直接写它 —— 那里【不在】
+ * 它的射程内。同射程的先例见 driver-preflight.test.ts：它提这个包名时名字【不单独成串】
+ * （两侧是中文与括号），老口径与新口径对它都是绿的 —— 一致的绿，不是侥幸。
+ * 权限类错误仍然抛：吞掉它等于让这三发扫描静默少扫一整片目录，
+ * 而它们的全部价值就在「扫到的每一条都算数」（与 no-native-deps.ts 里 readdirSurvives
+ * 同一条口径 —— 故意【不写行号】：本仓一天里漂过三次坐标，其中一次的成因是格式化工具）。
+ *
+ * ⚠ 宽容【只在递归内部】，顶层不宽容 —— 这条区分不是洁癖，是一个真实的假绿：
+ * 顶层也宽容的话，`SRC` 指错（改名、换机器、拼错）会让 `tsFiles` 静默返回空表，
+ * 而下面有 `expect(callersOf("verifyFix", …)).toEqual([])` 这种【期望为空】的断言，
+ * 它们会【因为什么都没扫到】而通过。根目录必须存在，中途消失才是竞态。
  */
 function tsFiles(dir: string): string[] {
+  const out = walkTs(dir, true);
+  out.sort();
+  return out;
+}
+
+function walkTs(dir: string, isRoot: boolean): string[] {
   const out: string[] = [];
-  for (const n of readdirSync(dir)) {
+  let names: string[];
+  try {
+    names = readdirSync(dir);
+  } catch (e) {
+    if (!isRoot && vanished(e)) return out;
+    throw e;
+  }
+  for (const n of names) {
     const p = join(dir, n);
-    if (statSync(p).isDirectory()) out.push(...tsFiles(p));
+    let isDir = false;
+    try {
+      isDir = statSync(p).isDirectory();
+    } catch (e) {
+      if (vanished(e)) continue;
+      throw e;
+    }
+    if (isDir) out.push(...walkTs(p, false));
     else if (n.endsWith(".ts")) out.push(toPosix(p));
   }
-  return out.sort();
+  return out;
+}
+
+/** 只有「不存在 / 不是目录」算并行删除的正常路径，别的一律是真错误。 */
+function vanished(e: unknown): boolean {
+  const code = (e as { code?: string }).code;
+  return code === "ENOENT" || code === "ENOTDIR";
+}
+
+/**
+ * 读一个【刚刚消失】的文件返回 null，其余错误照抛。
+ * 与 tsFiles 里那两处同一个并行来源（见那里的 ⚠），只是窗口换了位置：
+ * 这一次是「列名单时还在，读正文时没了」。消失的文件【不算调用方】——
+ * 它本来就不是源码，是别的守卫的夹具。
+ */
+function readIfPresent(f: string): string | null {
+  try {
+    return readFileSync(f, "utf8");
+  } catch (e) {
+    if (vanished(e)) return null;
+    throw e;
+  }
 }
 
 /** src 里除 ownFiles（各自定义处）之外、正文出现 `name(` 的文件。 */
 function callersOf(name: string, ...ownFiles: string[]): string[] {
-  return tsFiles(SRC).filter(
-    (f) => !ownFiles.some((o) => f.endsWith(o)) && readFileSync(f, "utf8").includes(name + "("),
-  );
+  return tsFiles(SRC).filter((f) => {
+    if (ownFiles.some((o) => f.endsWith(o))) return false;
+    const text = readIfPresent(f);
+    return text?.includes(name + "(") ?? false;
+  });
 }
 
 /**
@@ -697,15 +778,17 @@ function callersOf(name: string, ...ownFiles: string[]): string[] {
  * 而漏报（少算 → 把真生产者判成零）才是这条断言不能承受的。
  */
 function srcFilesMatching(re: RegExp): string[] {
-  return tsFiles(SRC).filter((f) =>
-    readFileSync(f, "utf8")
+  return tsFiles(SRC).filter((f) => {
+    const text = readIfPresent(f);
+    if (text === null) return false;
+    return text
       .split("\n")
       .some((l) => {
         const t = l.trim();
         if (t.startsWith("//") || t.startsWith("*") || t.startsWith("/*")) return false;
         return re.test(l);
-      }),
-  );
+      });
+  });
 }
 
 describe("④ 两条验收各自【不可测的那一半】（登记，不写成已通过）", () => {
@@ -746,7 +829,10 @@ describe("④ 两条验收各自【不可测的那一半】（登记，不写成
     // 下面这一发把「词确实存在」钉住 —— 否则「整个 src 里根本没有这个词」也会让
     // 第一条断言绿（改成 toEqual 之后它会以另一种方式红），而那是一个**完全不同**的原因
     // （模块被删了 vs 没人调）。
-    const mentions = tsFiles(SRC).filter((f) => readFileSync(f, "utf8").includes("evaluateGate"));
+    const mentions = tsFiles(SRC).filter((f) => {
+      const text = readIfPresent(f);
+      return text?.includes("evaluateGate") ?? false;
+    });
     expect(mentions.length).toBeGreaterThan(0);
   });
 
@@ -915,6 +1001,7 @@ describe("④ 两条验收各自【不可测的那一半】（登记，不写成
      *   而第 6 条问的是"默认配置下有没有卡流进来"——默认仍不开泵，那一格结论不变。
      */
     expect(callersOf("insertCard", "approvals/cards.ts")).toEqual([
+      SRC + "/approvals/timeout.ts",
       SRC + "/engine/charter.ts",
       SRC + "/engine/dispatch.ts",
       SRC + "/engine/seat-card.ts",
@@ -988,9 +1075,75 @@ describe("④ 两条验收各自【不可测的那一半】（登记，不写成
      * 漂移代价写在 engine/approve.ts 文件头，由 approve.test.ts 那条逐字比对守着。
      */
     expect(srcFilesMatching(/UPDATE\s+approvals\b/iu)).toEqual([
+      // O10（round265）：超时执行者的条件 UPDATE（CLAIM_TIMEOUT_SQL）。
+      // 它从任何入口都走不到（动作 1 心跳接线未动），要接线那天这一格会先红。
+      SRC + "/approvals/timeout.ts",
       SRC + "/engine/approve.ts",
       SRC + "/http/real-deps.ts",
       SRC + "/policy/auto-approve.ts",
     ]);
+  });
+});
+
+/* ═══════════ ⑤ 扫描器自己的失效形状（④ 那 13 发的前提）═══════════ */
+
+describe("⑤ tsFiles 对「遍历途中消失」的容错，与它不容错的那一半", () => {
+  /**
+   * 为什么单独立一段：④ 那 13 发全部建立在「tsFiles 扫到了 src 的全部 .ts」上，
+   * 而它今天有一条【随并发出现的红】—— 见 tsFiles 那段 ⚠。修它的容错如果没人测，
+   * 下一次重构就会把 try 拿掉，届时又以同样的方式红一次。
+   *
+   * ⚠ 这一段【刻意不靠真并发】。撞得上是偶然，撞不响的那一次不是通过，只是没撞
+   * （no-native-deps.ts 文件头原话）。这里用【悬空符号链接】把那个窗口做成静态事实：
+   * readdirSync 列得出它，statSync 对它抛 ENOENT —— 与「并行守卫恰好在这两步之间
+   * 删掉探针」在系统调用层面完全同形，且每次必现。
+   */
+  const scan = join(TMP, "scan-window");
+
+  it("遍历途中消失：跳过它，兄弟文件与子目录照扫（老代码在这一条上必红）", () => {
+    rmSync(scan, { recursive: true, force: true });
+    mkdirSync(join(scan, "sub"), { recursive: true });
+    writeFileSync(join(scan, "keep.ts"), "export const a = 1;\n");
+    writeFileSync(join(scan, "sub", "deep.ts"), "export const b = 2;\n");
+    // 窗口本身：一个 readdirSync 列得出、statSync 必抛 ENOENT 的名字。
+    try {
+      symlinkSync(join(scan, "target-does-not-exist.ts"), join(scan, "gone.ts"));
+    } catch (e) {
+      // 建不出来就【明确红】，不静默跳过 —— 静默跳过的守卫等于没有守卫，
+      // 0053 记的正是「8 发故意红在 Windows 上从来没生效过」那一族。
+      throw new Error(
+        "本发需要能建符号链接（Windows 上要开发者模式或管理员权限），实得 " +
+          ((e as Error & { code?: string }).code ?? "?"),
+        { cause: e },
+      );
+    }
+    const root = toPosix(scan);
+    const got = tsFiles(scan)
+      .map((f) => f.slice(root.length + 1))
+      .sort();
+    // 消失的那格被跳过，而【其余一个不少】。只断言「不抛」是不够的：
+    // 把整轮 catch 掉也「不抛」，那种写法下下面这条会红。
+    expect(got).toEqual(["keep.ts", toPosix(join("sub", "deep.ts"))].sort());
+    // 反向对照：同一个扫描器对真存在的文件必须扫到，否则「跳过了 gone」
+    // 也许只是「什么都没扫到」。
+    expect(tsFiles(SRC).length).toBeGreaterThan(50);
+    rmSync(scan, { recursive: true, force: true });
+  });
+
+  it("顶层目录不存在 ⇒ 照抛（这一半不能宽容，否则期望为空的断言会假绿）", () => {
+    // SRC 拼错 / 换机器 / 改名 ⇒ tsFiles 必须炸。若顶层也宽容 ENOENT，
+    // 它会静默返回空表，而 `callersOf("verifyFix", …)` 期望的正是【空表】——
+    // 那种绿是「什么都没扫」换来的。
+    expect(() => tsFiles(join(TMP, "no-such-root-dir"))).toThrow(/ENOENT/u);
+  });
+
+  it("宽容的判据只认 ENOENT / ENOTDIR，权限类错误不在内", () => {
+    // 判据是张表，表要逐格钉：吞掉 EACCES 等于让这三发扫描静默少扫一整片目录，
+    // 而它们的全部价值就在「扫到的每一条都算数」。
+    expect(vanished({ code: "ENOENT" })).toBe(true);
+    expect(vanished({ code: "ENOTDIR" })).toBe(true);
+    expect(vanished({ code: "EACCES" })).toBe(false);
+    expect(vanished({ code: "EPERM" })).toBe(false);
+    expect(vanished(new Error("没有 code"))).toBe(false);
   });
 });

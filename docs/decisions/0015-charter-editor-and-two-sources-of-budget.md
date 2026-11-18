@@ -17,7 +17,7 @@
 
 | # | 实测 | 决定了什么 |
 |---|---|---|
-| ① | 跑完全部迁移之后 `SELECT COUNT(*) FROM role_charters` = **0 行**。src 里唯一那条 INSERT 在 `org/commit.ts:107`，而它带 `if (prev === undefined) continue`（没有上一版就跳过）⇒ 0 行会**永远是 0 行**。「保存一版新岗位书」在 src 里没有任何入口，只能从 `resources/charter-templates/*.yaml` 加载 | 「CEO 改了验收标准」这句话落到代码上是**无处可存**。所以 store.ts 的**第一条用例**就是断言这张表迁移后为空 —— 哪天有人加了这个入口，那条会红，逼他同时改写本篇 |
+| ① | 跑完全部迁移之后 `SELECT COUNT(*) FROM role_charters` = **0 行**。src 里唯一那条 INSERT 在 `org/commit.ts:109`（round294 起；round292 登记的是 `:108`、更早是 `:107`，两次都是该文件上面插了字节而顶漂），而它带 `if (prev === undefined) continue`（没有上一版就跳过）⇒ 0 行会**永远是 0 行**。「保存一版新岗位书」在 src 里没有任何入口，只能从 `resources/charter-templates/*.yaml` 加载 | 「CEO 改了验收标准」这句话落到代码上是**无处可存**。所以 store.ts 的**第一条用例**就是断言这张表迁移后为空 —— 哪天有人加了这个入口，那条会红，逼他同时改写本篇 |
 | ② | `charterSchema` 是 `charterInput.transform(...)`：输入 **snake_case**、输出 **camelCase**。把 preset 的 dev 岗位书按 `org/commit.ts` 的写法存进库、再取出来喂给 `charterSchema`：**14 条 issue**，第一条 `role_id: invalid_type` | 「读回来重跑一次校验」这件事**做不到**（会产出一个恒返回 undefined 的读取函数，而调用方把 undefined 读成「这个角色没岗位书」）。取舍见 §2 |
 | ③ | `role_charters` **没有** `updated_at`/`created_at`，只有 `effective_from`（`0001_init.sql:144-152`） | 审计时间戳与 `effective_from` 共用同一个 `nowMs`，不假装表里有时间线 |
 | ④ | `criteriaFromCharter`（岗位书→门控标准）在 src 里的**生产调用方是 0**；`BudgetTracker` 判超限时**只读 `budgets`、从不看岗位书** | 光把岗位书存起来不满足那条 Test。所以本轮**先把消费口做出来再交付**：`gateCriteriaForRole()` 与「保存即落限额」（§3） |
@@ -68,7 +68,7 @@ $ grep -rn "consumed_cents" --include='*.ts' packages/hub/src
 
 - **不另开一条审计。** 岗位书那条审计的 `state_snapshot` 已经带了整份 before/after（含 budget）。再补一条就是同一次变更两条记录，回放里显示成「CEO 做了两件事」。代价如实说：单看 events 看不出「这次岗位书变更顺带改了限流表」，所以把唯一需要主动喊的那一维（`alarm_silenced`，见 §4）放进**同一条**审计的 payload。
 - **换算提前到事务外**（`saveCharterVersion` 里 `try { budgetRowsFromCharter(...) }`）。同一个失败如果发生在事务里，调用方拿到的是一个 `throw`；发生在外面，拿到的是与其它校验同一条通道的 `{ok:false, reason}`。**同一个失败有两种形状，是这一族最容易让上层写漏的地方**（它只会 catch 一种）。
-- **留了 `applyBudgets?: boolean` 这个开关，而它【今天没有 false 的调用方】。** 我本来要在注释里写「org/commit.ts 那条组织变更路径要传 false」，实测否证了：那条路径自己直接 `INSERT INTO role_charters`（`org/commit.ts:107`），**根本不经过 `saveCharterVersion`**。所以这是一个**推测出来的**可扩展点，不是已验证的需求。注释里已经改成按 §7 那族账读，别按「已支持的场景」读。
+- **留了 `applyBudgets?: boolean` 这个开关，而它【今天没有 false 的调用方】。** 我本来要在注释里写「org/commit.ts 那条组织变更路径要传 false」，实测否证了：那条路径自己直接 `INSERT INTO role_charters`（`org/commit.ts:109`，round294 顶漂自 round292 登记的 `:108`），**根本不经过 `saveCharterVersion`**。所以这是一个**推测出来的**可扩展点，不是已验证的需求。注释里已经改成按 §7 那族账读，别按「已支持的场景」读。
 
 ## 4. 两个静默失效：`declareLimit` 的 no-op，和「调低预算会把突破警报永久关掉」
 
@@ -86,11 +86,11 @@ $ grep -rn "consumed_cents" --include='*.ts' packages/hub/src
 | `UPDATE limit_cents = 500` | **不发任何事件**（仍 1 条） |
 | 之后再消费 100 | `applied=true`、**`breached=false`**、`over=true`，仍 1 条 |
 
-成因是 `tracker.ts:233` 那行 `breached = before <= limit && after > limit`（「跨过才算突破」，注释写明是为了不让收件箱被同一条超限刷满 —— 那是对的需求）。而 `consumed_cents` 在整个 src 里**只有 `+ ?` 一处写入**（实测，见 §3），**没有任何归零/重算路径** ⇒ consumed 单调不减 ⇒ `before <= limit` 一旦为假就**永不为真**。
+成因是 `tracker.ts:244` 那行 `breached = before <= limit && after > limit`（【round272 坐标 +11：tracker.ts 头部给三条 SQL 的导出加了说明块，判据本体没动】；「跨过才算突破」，注释写明是为了不让收件箱被同一条超限刷满 —— 那是对的需求）。而 `consumed_cents` 在整个 src 里**只有 `+ ?` 一处写入**（实测，见 §3），**没有任何归零/重算路径** ⇒ consumed 单调不减 ⇒ `before <= limit` 一旦为假就**永不为真**。
 
 于是那个作用域的突破警报**永久关闭**，而关掉它的是一次看起来无害的「把预算从 $10 调到 $5」。屏幕上写着「预算已收紧」，`over` 也确实是 true，而**没有任何东西会为它发声**。
 
-我的处置：`syncCharterBudgets` / `saveCharterVersion` 自己算并报 `alarm_silenced`（进审计 payload），另给一条读侧补救 `silentOverBudgets()`。**没有替它补发 `BudgetPaused`**：那个事件要求 `taskId`（`bus.ts:58`，`tracker.ts:238` 传的是消费方的任务），而一次限额变更不属于任何任务 —— 编一个 taskId 就是伪造一条 CEO 点得进去的卡片（同 0014 §3：少一个事件是可以补的缺口，脏了的审计库删不掉）。
+我的处置：`syncCharterBudgets` / `saveCharterVersion` 自己算并报 `alarm_silenced`（进审计 payload），另给一条读侧补救 `silentOverBudgets()`。**没有替它补发 `BudgetPaused`**：那个事件要求 `taskId`（`bus.ts:58`，`tracker.ts:249` 传的是消费方的任务；【round272 坐标 +11，同上一段】），而一次限额变更不属于任何任务 —— 编一个 taskId 就是伪造一条 CEO 点得进去的卡片（同 0014 §3：少一个事件是可以补的缺口，脏了的审计库删不掉）。
 
 **「一次超限该发几条 BudgetPaused」是产品问题**（收件箱刷屏 vs 警报永久哑），归 CEO，见 §9 第二项。
 
@@ -126,7 +126,7 @@ $ grep -rn "consumed_cents" --include='*.ts' packages/hub/src
 - **没有编辑器界面**。计划写的是 `feat(web)`，本轮交付的是它下面那一层。原因还是 0009 §2 那三条通路（装不上 `@xyflow/react` 那一组）。表单页本身不需要 React Flow，但需要 React + 路由 + IPC 那一套，而 `test/desktop/ipc-surface.test.ts` 用 `toEqual` 钉住 IPC 面、本机没有 Electron 可验（0009 §7 已经报过这本账）。
 - **没有 HTTP 端点**。加一个端点要同时动 `contracts/api.ts` / `http/app.ts` / `desktop/main/channels.ts` / `preload/api.ts` 四处并被那条 IPC 守卫钉住。所以 `saveCharterVersion` / `syncCharterBudgets` / `readBudgetTiers` 今天的运行时消费者是 **0**（同族缺陷**第六次**：0011 §8 / 0012 §7 / 0013 §7 / 0013 §10.1 / 0014 §3 / 本轮）。发现方式仍然是**写文档时顺数据源往下摸**，不是「想到去查调用方」—— 第六次了，说明那个习惯还是没建立。
   这一族我在 0014 学到的处置沿用了：把缺口本身**钉成断言**（两个测试文件各有一节扫 `src` 目录，断言 `charter/` 之外零调用方），接线那天它会红。
-- **`org/commit.ts` 那条 bump 路径不落预算**，也不经过 `saveCharterVersion`（§3）。准确的状态是：它**逐字复制** `prev.config` 再改一个 `reportsTo`（`org/commit.ts:304-310`），所以它写出的形状**取决于上一版存的是什么**，本身不会丢字段；而且**它今天根本不触发** —— 表是 0 行（事实 ①），`if (prev === undefined) continue` 每次都跳过。【撤回】我在此处原写「它写的还是旧 config 形状（缺 `modelTier`）」：那是我没实测就写下的具体断言，实测 org/commit 并不硬编码任何形状，缺 `modelTier` 的是 `test/org/versioning.test.ts` 的**测试夹具**（那是 assertCharterShape 用例举的例子，不是生产会写出的东西）。这条**不在本轮范围内修**，因为改它要同时决定「组织变更要不要改限流」（那是 §9 第三项）。
+- **`org/commit.ts` 那条 bump 路径不落预算**，也不经过 `saveCharterVersion`（§3）。准确的状态是：它**逐字复制** `prev.config` 再改一个 `reportsTo`（`org/commit.ts:368-374`，round294 顶漂自 round292 登记的 `:323-329`、更早 `:304-310`），所以它写出的形状**取决于上一版存的是什么**，本身不会丢字段；而且**它今天根本不触发** —— 表是 0 行（事实 ①），`if (prev === undefined) continue` 每次都跳过。【撤回】我在此处原写「它写的还是旧 config 形状（缺 `modelTier`）」：那是我没实测就写下的具体断言，实测 org/commit 并不硬编码任何形状，缺 `modelTier` 的是 `test/org/versioning.test.ts` 的**测试夹具**（那是 assertCharterShape 用例举的例子，不是生产会写出的东西）。这条**不在本轮范围内修**，因为改它要同时决定「组织变更要不要改限流」（那是 §9 第三项）。
 - **预算的「已消费」永远单调不减**：`daily` 这个 period 名字暗示每天归零，而 src 里**没有归零路径**（实测）。所以「今天的日预算」实际是「自首条消费以来的总额」。这是 `BudgetTracker` 的既有行为、Task 1.6 的验收范围之外，但**它让 §21.3 那句「日消耗 vs 预算」的条形从一开始就是错的**。登记在此，不在本轮改（改归零时机是新的运行期行为）。
 - 未跑 `pnpm verify`（本机装不上依赖，沿 0009 §2）。本轮跑的是：
   - 全量 **786 例 / 741 pass / 37 fail**（上一轮基线 743/698/37：用例数 +43，失败数不变）。

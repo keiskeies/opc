@@ -787,3 +787,84 @@ describe("⑤ 组织变更留下的 seq 空洞：必须被【检出】而不是�
     expect(out.projection.link).not.toBe("stale");
   });
 });
+
+/* ─────────────────────────────────────────────────────────────────────────
+   ⑥ 提交时的【节点级】判据（round292，O8 动作 1）。
+   放在本文件而不是 validate.test.ts，因为它判的是【提交】这一格：
+   拒绝之外还得钉「版本号没涨、库里没有半提交行」—— 那是 describe ② 的射程，
+   而那件事只有真库 + 真 WriteQueue 才证得了（纯函数那边没有库可查）。
+
+   判据本身（everyNodeDeclaresModelFamily）的六发住在 test/org/validate.test.ts，
+   这里只补它在【提交路径】上的三条：拒绝的形状、拒绝的残留、以及【顺序】。
+   ───────────────────────────────────────────────────────────────────────── */
+describe("⑥ 提交时的节点级判据：拒绝的形状、零残留、与 L1/L2 的顺序", () => {
+  /** 一张【缺 model_family】的图：把夹具里 dev 那一格删掉。 */
+  function graphMissingFamily(): OrgGraph {
+    const g = graph();
+    // 取一次再删，而不是 `delete g.nodes.dev.model_family` —— 后者在
+    // `noUncheckedIndexedAccess` 下是一发 TS18048，会往
+    // `test/arch/test-type-baseline.ts` 那个【只许减】的棘轮里添新条。
+    const dev = g.nodes["dev"];
+    if (dev === undefined) throw new Error("夹具里没有 dev 节点，这一发要判的东西不存在");
+    delete dev.model_family;
+    return g;
+  }
+
+  it("图里有节点缺 model_family ⇒ ok:false + code=unknown_model_family，且零残留", async () => {
+    const { db, w } = await newDb();
+    const r = await commitOrgGraph(w, {
+      graph: graphMissingFamily(),
+      // 变更本身完全合法，且与那个缺家族的节点【无关】（dev 只是恰好在图上）。
+      change: { kind: "add_edge", edge: { from: "test", to: "tech", review_gate: true } },
+      actor: CEO,
+      runningTasks: [],
+      nowMs: NOW,
+      changeSummary: "加一条委派边，图上另有一个没配模型家族的角色",
+    });
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.code).toBe("unknown_model_family");
+    // 零残留：校验在开事务之前 ⇒ 没有新版本、没有图行、也没有那条审计。
+    expect(versionAt(db)).toBe(0);
+    expect(count(db, "delegation_graphs")).toBe(0);
+    expect(count(db, "events")).toBe(0);
+  });
+
+  it("⭐ 顺序：child 不存在时【先】给 unknown_role，不得抛错（判据挪到 revalidate 前面就会红）", async () => {
+    // applyChangeToGraph 在 reparent 的子角色不在图里时是【抛 Error】的。
+    // 所以那条节点判据必须排在 revalidate 之后 —— 否则一次「child 写错名字」
+    // 的请求会从干净的 ok:false 变成一个抛出的异常（HTTP 层翻 500），
+    // 而它指的方向与真相无关。这一发是那个顺序【唯一的**测试**证人】
+    // （另一处证人是 commit.ts 里那段注释，而注释不会红）。
+    // 图同时缺 model_family：两个判据都能命中时，L1 必须赢。
+    const { db, w } = await newDb();
+    const r = await commitOrgGraph(w, {
+      graph: graphMissingFamily(),
+      change: { kind: "reparent", child_role: "nope", new_parent_role: CEO_ROLE_ID },
+      actor: CEO,
+      runningTasks: [],
+      nowMs: NOW,
+      changeSummary: "把一个不存在的角色挂到 CEO 之下",
+    });
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.code).toBe("unknown_role");
+    expect(versionAt(db)).toBe(0);
+  });
+
+  it("反面对照：同一个 change 在【节点齐全】的图上照常提交 ⇒ 拦的确实是那一维", async () => {
+    // 少了这一发，上面那条 422 只证明「这条 add_edge 被拒了」。
+    // 与 describe ① 那发 HTTP 层的反向 canary 同一个理由，只是打在 commitOrgGraph 上。
+    const { db, w } = await newDb();
+    const r = await commitOrgGraph(w, {
+      graph: graph(),
+      change: { kind: "add_edge", edge: { from: "test", to: "tech", review_gate: true } },
+      actor: CEO,
+      runningTasks: [],
+      nowMs: NOW,
+      changeSummary: "同一条委派边，图上节点都配了模型家族",
+    });
+    expect(r.ok).toBe(true);
+    expect(versionAt(db)).toBe(1);
+  });
+});

@@ -32,7 +32,7 @@
 |---|---|---|
 | 绑定参数上限 | 二分至 **4096 行 / 8192 参数仍成功**，上界未穷尽（未测到失败点） | 事件批量写入按 **1000 行/批** 分片安全；禁止一次传数千参数不分片 |
 | 单表列数 ≥ 1000 | 通过 | — |
-| **`AsyncLocalStorage` 传递同一连接** | 跨多层 `await`、`setTimeout`、`Promise.all` 并发子任务全部为同一连接（`[true×6]`、`[CONN-X, CONN-X]`） | 计划 Task 0.4 的「事务上下文」方案在 **Node 原生调度** 下成立 |
+| **`AsyncLocalStorage` 传递同一连接** | 跨多层 `await`、`setTimeout`、`Promise.all` 并发子任务全部为同一连接（`[true×6]`、`[CONN-X, CONN-X]`） | 计划 Task 0.4a 的「事务上下文」方案在 **Node 原生调度** 下成立（本篇原稿引的是**拆分前**的那个编号，计划后来把它拆成 0.4a 探针 / 0.4b 实现，此处指前者） |
 
 **重要限定**：ALS 探针只验证了 Node 自身调度，**没有验证 LangGraph 内部调度是否保持 ALS 上下文**。因此规格 §6.3「Checkpoint 与 events 同事务」在**框架调用路径**上仍未证实 —— 这是 Task 0.4a 的存在理由，也是 §4 风险 3。
 
@@ -40,7 +40,7 @@
 
 - 规格 §5.6 的三档判据中，「整个二进制零原生依赖」居首：免 node-gyp、免 `@electron/rebuild`、Windows 打包只需 Node。
 - **Windows 开发机不需要 MSVC Build Tools** —— D6 里最影响日常开发体验的一条，也是它必须在 Phase 0 第 0 天定案的原因。
-- `better-sqlite3` 唯一实质优势是「官方 SqliteSaver 开箱可用」；而计划 Task 0.4 把契约测试设计为对 `MemorySaver` 与自研 Saver 双向通过，两种实现可互换，该优势不值一个原生依赖。
+- `better-sqlite3` 唯一实质优势是「官方 SqliteSaver 开箱可用」；而计划 Task 0.4b 把契约测试设计为对 `MemorySaver` 与自研 Saver 双向通过，两种实现可互换，该优势不值一个原生依赖。（本篇原稿引的是**拆分前**的编号；契约测试属 0.4b 那一半。）
 
 ## 4. 接受的风险
 

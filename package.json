@@ -8,8 +8,10 @@
     "node": ">=24.0.0 <25.0.0"
   },
   "scripts": {
+    "dev": "tsx packages/hub/src/serve/dev-entry.ts",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:e2e": "playwright test",
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
     "typecheck": "tsc -b",
@@ -18,6 +20,7 @@
     "hub": "tsx packages/hub/src/cli.ts",
     "hub:serve": "tsx packages/hub/src/serve/hub-serve.ts",
     "hub:engine": "tsx packages/hub/src/engine/hub-work.ts",
+    "hub:charter": "tsx packages/hub/src/charter/seed.ts",
     "hub:maintenance": "tsx packages/hub/src/heartbeat/maintenance.ts"
   },
   "devDependencies": {
@@ -25,8 +28,10 @@
     "@langchain/langgraph": "^1.7.1",
     "@langchain/langgraph-checkpoint": "^1.2.2",
     "@langchain/langgraph-checkpoint-sqlite": "^1.1.0",
+    "@playwright/test": "^1.65.1",
     "@types/node": "^26.6.6",
     "@vitest/coverage-v8": "4.1.12",
+    "playwright": "^1.65.1",
     "tsx": "^4.23.15",
     "typescript": "^5.9.3",
     "vitest": "^4.0.12"

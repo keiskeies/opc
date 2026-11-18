@@ -1,0 +1,32 @@
+{
+  "$comment": [
+    "round277 的量测探针：把【测试与守卫自己】纳入类型检查，看还剩多少错。",
+    "round285 起它【是】门禁了，形状是棘轮：test/arch/test-type-baseline.ts 拿这份 project",
+    "真跑一次，按目录判「不许超过登记数」。原来那行「不该变成门禁」的理由（射程外的错",
+    "没人认领 ⇒ 接成门就是恒红门）治的是【清零当前提】那种写法；上限表把清零换成目标状态，",
+    "0 条是绿的，今天各目录的读数也各在其配额内。主张与射程三条登记在 r19。",
+    "它当初存在的理由仍是那条【没人知道的洞】：`tsc -b` 的 include 只有 packages/*/src，",
+    "所以全部测试文件整体不在类型检查范围内 —— 连 test/arch 下那 10 条真错",
+    "（含 claims-registry 的 judge 联合类型漂了三条）都没有任何一道门禁看见过。",
+    "跑法：npx tsc -p .workbuddy/tsconfig.tests.json 2>&1 | grep 'error TS' | wc -l",
+    "只看守卫那一族：同一条命令前面加管道 grep '^test/arch'。",
+    "口径：与 tsconfig.base.json 同一把 strict / noUncheckedIndexedAccess / verbatimModuleSyntax，",
+    "所以这里报的错与 src 那边同价，不是另一套宽松标准。",
+    "⚠ 改这里的 include 会让那条棘轮的语料跟着变窄，而它有一条 filesChecked 下限挡着 ——",
+    "下限在 test-type-baseline.test.ts 里，改窄 include 请连着看那一发，别只把它读成一条装饰。"
+  ],
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "composite": false,
+    "types": ["node"],
+    "paths": {
+      "@opc/contracts": ["../packages/contracts/src/index.ts"]
+    }
+  },
+  "include": [
+    "../test/**/*.ts",
+    "../packages/*/test/**/*.ts",
+    "../vitest.config.ts"
+  ]
+}

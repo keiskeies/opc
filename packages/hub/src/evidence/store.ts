@@ -158,10 +158,16 @@ export interface VerifyReport {
   skipped: number;
 }
 
+/**
+ * ⚠ 列清单与 migrations/0007 是一对：加列必须同时改这里，否则新列静默收 NULL，
+ * 而「register 存了完整包」这句话又变成注释说了算（0065：这正是本列要终结的那格）。
+ * metrics 的序列化口径与 claims 一致：缺省存 NULL（不是 "undefined"、不是 "{}"）——
+ * NULL = 这个包没带「指标」概念，"{}" = 带了但没声明具体指标，这个分别是要保留的。
+ */
 const INSERT_BUNDLE_SQL =
   "INSERT INTO evidence_bundles (id, task_id, producer_role, bundle_type, artifacts, " +
-  "self_check, created_at, model_family, claims, honesty_boundaries) " +
-  "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+  "self_check, created_at, model_family, claims, honesty_boundaries, metrics) " +
+  "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
 
 /** 外链类制品（§8.1 允许「外部链接」作依据）。它没有「本地那一份」可对账。 */
 export function isExternalLink(path: string): boolean {
@@ -302,6 +308,10 @@ export class EvidenceStore {
       bundle.produced_by_model_family,
       JSON.stringify(bundle.claims),
       JSON.stringify(bundle.honesty_boundaries),
+      // 可选字段必须显式折 null：JSON.stringify(undefined) 返回 undefined 本身，
+      // 而 node:sqlite 的参数位拿到 undefined 会按 NULL 绑还是抛，是实现细节 ——
+      // 上面 claims / honesty_boundaries 敢裸写是因为 schema 强制它们存在。
+      bundle.metrics === undefined ? null : JSON.stringify(bundle.metrics),
     ];
     assertParamCount(INSERT_BUNDLE_SQL, params);
     this.#exec(INSERT_BUNDLE_SQL, params);

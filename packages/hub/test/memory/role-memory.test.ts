@@ -14,18 +14,25 @@
  * 让 eventParams 那套校验（action 枚举、actor_id 非空、payload 必须能落成 JSON）
  * 一起跑到夹具上，夹具与生产写入路径**过同一道门**。
  *
- * ⚠ 本文件**不**写 review_decision 事件当主力夹具 —— 规格 §24 风险 2 那句话的对象
- * 在生产里零写入方（见 role-memory.ts 文件头 ①）。用它当夹具会把「这一档今天是空的」
- * 这件事测没。它只在「gate 档的读取逻辑本身对不对」那两节里作为显式合成夹具出现，
- * 并在 coverage 那一节把「生产没有」钉成断言。
+ * ⚠ 这一档的夹具策略【在本篇写下之后翻过一次面】，原文留着以便读懂下面几节为什么
+ * 各自带一句"这是显式合成夹具"。当时写「本文件**不**写 review_decision 当主力夹具 ——
+ * 生产里零写入方」；现在生产有写入方了（`engine/dispatch.ts` 的 `ReviewDecided`，
+ * 见 role-memory.ts 文件头 ① 的【现状】），所以那句话不再成立。
+ * 但**这条策略本身仍然对**，只是理由换了一个：本文件测的是【读侧判据】，
+ * 用 appendAudit 直接写一行 review_decision 是显式合成夹具，它测的是"读侧怎么判这一行"；
+ * 而"生产到底会不会写这一行"是另一条命题，它归 `test/engine/dispatch.test.ts` 与
+ * ⑦ 节最后那一发（全仓扫有没有硬写 action）。两者混在一起的话，
+ * 生产写入方一旦断掉，本文件【照样全绿】——那才是真正的测没。
+ * ⇒ 结论：合成夹具照用，但**别把它读成"生产有数据"**，而 coverage 那一节
+ * 钉的也从「生产没有」改成「空库里没有 + 生产那一发在哪」两句能分别红的话。
  */
 
-import { mkdirSync, readFileSync, rmSync } from "node:fs";
+import { mkdirSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, describe, expect, it } from "vitest";
 import { fixtureTmp } from "../fixtures/fixture-dir.js";
-import { appendAudit } from "../../src/events/recorder.js";
+import { appendAudit, KIND_TO_ACTION } from "../../src/events/recorder.js";
 import { migrate } from "../../src/db/migrate.js";
 import { openDb } from "../../src/db/driver.js";
 import {
@@ -35,8 +42,10 @@ import {
   MAX_MEMORY_LIMIT,
   memoryCoverage,
   MEMORY_ROWS_SQL,
+  NON_DECISION_EVENT_KINDS,
   MEMORY_SCAN_WINDOW,
   NON_STRATEGIC_APPROVAL_TYPES,
+  readMemoryTodayProbe,
   readRoleMemory,
   renderMemoryBlock,
   type CrossRoleScope,
@@ -45,6 +54,12 @@ import {
 
 const HUB = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const ROLE_MEMORY_SRC = join(HUB, "src", "memory", "role-memory.ts");
+/** ⑦ 节那一发要全仓扫的东西：src 目录，以及把绝对路径折算成仓库相对路径的前缀。 */
+const SRC = join(HUB, "src");
+// ⚠ 必须归一分隔符：join 在 Windows 上给反斜杠，而下面把 readdirSync 的结果统一成
+//   正斜杠（断言里的期望值就是正斜杠写的）。不归一的话这个前缀【匹配不上】，
+//   报错时会打出一整串绝对路径 —— 红得对但没法读，而那正是断言消息的全部用处。
+const REPO = (join(HUB, "..", "..") + "/").replace(/\\/g, "/");
 const TMP = fixtureTmp("memory", import.meta.url);
 mkdirSync(TMP, { recursive: true });
 
@@ -484,8 +499,15 @@ describe("② 分类器：纯函数、坏数据不扩散", () => {
   });
 
   it("review_decision 只认署名，不走任务归属", () => {
-    // gate 档的合成夹具。生产没有这个写入方（③ 节钉住），所以这里显式合成，
-    // 并在这一节只判**读取逻辑**。
+    /*
+     * gate 档的合成夹具。⚠ 0060 之后生产**有**这个写入方了（engine/dispatch.ts
+     * 审阅那一轮落一条 ReviewDecided），所以本文件的 ① 节和文件头那句「零写入方」
+     * 都改了口径；这里仍用合成夹具，因为这一节只判**读取逻辑**，
+     * 而真生产者那一侧的形状在 test/engine/dispatch.test.ts 里判。
+     *
+     * 这一发钉的是【不带 note 的那一支】：payload 里没有那句话，可能是 0060 之前
+     * 落库的老行，也可能是另一个不带它的生产者。两种情况读出的都是同一句真话。
+     */
     const db = newDb();
     addTask(db, "T-1", "dev");
     appendAudit(
@@ -511,7 +533,8 @@ describe("② 分类器：纯函数、坏数据不扩散", () => {
     });
     expect(asDev.entries).toEqual([]);
 
-    // 反向对照：审阅者自己读得到，且**理由为 null**（库里从来没有理由这一格）。
+    // 反向对照：审阅者自己读得到，且这一行**没有**理由（理由这一格从 0060 起
+    // 才存在于新行的 payload.note，而这条夹具刻意不带它）。
     const asTest = readRoleMemory(db as never, {
       owner: "test",
       requester: "test",
@@ -521,7 +544,78 @@ describe("② 分类器：纯函数、坏数据不扩散", () => {
     expect(asTest.entries[0]?.scope).toBe("gate");
     expect(asTest.entries[0]?.decision).toBe("reject");
     expect(asTest.entries[0]?.reason).toBeNull();
-    expect(asTest.entries[0]?.basis).toContain("不在 events 里");
+    /*
+     * ⚠ 这里【不再】断言那句「不在 events 里」—— 0060 接上写入方之后那句话变成假的，
+     * 而它是会进提示词的假话（renderMemoryBlock 把 basis 原样拼进去）。
+     * 新句子必须点名【这一行】而不是一整个概念，否则下一轮又会有人把它读成
+     * 「所有 review_decision 都没有理由」——那正是这次要推翻的那句话的形状。
+     */
+    expect(asTest.entries[0]?.basis).toContain("不在这一行里");
+    expect(asTest.entries[0]?.basis).not.toContain("不在 events 里");
+    db.close();
+  });
+
+  it("⭐ 带 payload.note 的 review_decision ⇒ 理由原样引用，basis 换一句真话", () => {
+    /*
+     * 这一发是 0060 的下游。它钉的是【另一支】：生产者把审阅者当轮写的那句 summary
+     * 放进了 payload.note，读取侧就必须把它当理由读出来。
+     *
+     * 为什么单独一发而不是往上面那条加一行 expect：两支的**判据不同**
+     * （一行有没有那句话），而合成成一条的话，「note 恒当真」这个错法
+     * 会让上面那条红、而「note 恒不读」只让这一条红 —— 分开才能各红各的。
+     */
+    const db = newDb();
+    addTask(db, "T-1", "dev");
+    appendAudit(
+      db as never,
+      {
+        taskId: "T-1",
+        actorType: "agent",
+        actorId: "test",
+        action: "review_decision",
+        target: "in_review:dev->test",
+        payload: {
+          gate: "in_review:dev->test",
+          decision: "reject",
+          note: "三份产出里没有一份带测试",
+        },
+        createdAt: NOW,
+      },
+      () => NOW,
+    );
+
+    const asTest = readRoleMemory(db as never, {
+      owner: "test",
+      requester: "test",
+      isTaskOwner: ownerOf(db),
+    });
+    expect(asTest.entries).toHaveLength(1);
+    // 逐字相等，不是 toContain：这一格的原话会进下一轮的提示词，
+    // 而「未经改写」是这一档唯一还能被信任的东西（§24 风险 2 的整条理由）。
+    expect(asTest.entries[0]?.reason).toBe("三份产出里没有一份带测试");
+    expect(asTest.entries[0]?.basis).toContain("原样引用");
+    expect(asTest.entries[0]?.basis).not.toContain("不在这一行里");
+
+    // 空白围拢的那句不当理由：它会渲染成一行「理由：」后面跟着零个字。
+    db.prepare(
+      "INSERT INTO events (task_id, actor_type, actor_id, action, target, payload, created_at) " +
+        "VALUES (?, 'agent', ?, 'review_decision', ?, ?, ?)",
+    ).run(
+      "T-1",
+      "test",
+      "g2",
+      JSON.stringify({ gate: "g2", decision: "pass", note: "   " }),
+      NOW,
+    );
+    const withBlank = readRoleMemory(db as never, {
+      owner: "test",
+      requester: "test",
+      isTaskOwner: ownerOf(db),
+    });
+    expect(withBlank.entries).toHaveLength(2);
+    const blank = withBlank.entries.find((e) => e.basis.includes("g2"));
+    expect(blank?.reason).toBeNull();
+    expect(blank?.basis).toContain("不在这一行里");
     db.close();
   });
 
@@ -562,18 +656,29 @@ describe("③ coverage：把「这一档是空的」报成数据", () => {
     expect(c.total_decision_rows).toBe(0);
   });
 
-  it("图那种「actor 是 hub 而角色知道」的事件会被报成 unattributed，而角色记忆是空的", () => {
+  it("coverage：【请求】不充数成未署名的决定，而 system 署名的【决定】算", () => {
     /*
-     * role-memory.ts 文件头 ③ 的实测复现：图节点执行写的事件 actor 是 system/hub，
-     * 而节点体当场知道角色 id（company.ts 的 askModel 里 charter.roleId 就在手边）。
-     * 这一发同时断言三件事，缺一件就没意思：
-     *  - coverage 看得见它（unattributed > 0）；
-     *  - dev 的记忆是**空的**；
-     *  - 反向对照证明那个空**不是读取坏了**：把同一行改成【决定】形状就看得见。
-     * 只断言前两条会被读成「角色记忆功能坏了」。
+     * 这一发原来叫「图那种 actor 是 hub 而角色知道的事件会被报成 unattributed」。
+     * 那个名字对不上它测的东西：图节点写的行 action 是 state_change，
+     * 根本不在 MEMORY_COVERAGE_SQL 的 IN 列表里 ⇒ 那一行在这里【一个数都不影响】，
+     * 而它看上去像在提供分母。真正让 unattributed 变成 1 的是后面那条 approval，
+     * 而它是【要求批准】= 一条请求，不是一个决定。
+     * ⇒ 旧 coverage 把「有件事等人批」数成了「有个决定没署角色的名」。
+     * 后果不是数字偏一点，是**方向**：优化设计文档 O3 验收第 2 条
+     * （「actor 为 system 的角色决定行必须为 0」）在一台正常运行的 Hub 上
+     * 【永远不可能】绿 —— 因为四处生产者把请求署成 system/hub 是【对的署名】。
+     * 一条永远达不到的验收会被读成「这一项没做完」，而它其实是判据写错了。
+     *
+     * 判据换成共享表 NON_DECISION_EVENT_KINDS 之后，这一发钉四件事：
+     *  ① 那条 state_change 行【确实一个数都不影响】（把原来那句沉默的夹具变成断言）；
+     *  ② 请求行在 rows 里看得见，但【不】计入 unattributed / total_decision_rows；
+     *  ③ 一条 system 署名的【真决定】计入 unattributed —— 文件头 ③ 那个缺口的现代形状；
+     *  ④ 反向对照：同一条决定换成角色署名 ⇒ 总数涨而未署名不涨。
+     * 少了 ③ 与 ④，把 unattributed 写成恒 0 也能全绿（那就是装饰物）。
      */
     const db = newDb();
     addTask(db, "T-1", "dev");
+    // 图节点那一路的形状（audit-middleware 不传 actor ⇒ 落 DEFAULT_ACTOR）。
     appendAudit(
       db as never,
       {
@@ -587,7 +692,7 @@ describe("③ coverage：把「这一档是空的」报成数据", () => {
       },
       () => NOW,
     );
-    // 真实来源：auditedInvoke 写的 ApprovalRequired（action=approval、actor=system/hub）。
+    // 真实来源：四处生产者写的 ApprovalRequired（action=approval、actor=system/hub）。
     appendAudit(
       db as never,
       {
@@ -602,25 +707,25 @@ describe("③ coverage：把「这一档是空的」报成数据", () => {
       () => NOW,
     );
 
-    const c = memoryCoverage(db as never);
-    expect(c.unattributed).toBe(1);
-    expect(c.rows.some((r) => r.actor_id === "hub")).toBe(true);
-    expect(c.has_review_decisions).toBe(false);
+    const first = memoryCoverage(db as never);
+    // ① state_change 不在 coverage 的口径里 —— 明说，别让它当沉默的分母。
+    expect(first.rows.some((r) => r.action === "state_change")).toBe(false);
+    // ② 请求看得见，但不充数。
+    const hubRow = first.rows.find((r) => r.actor_id === "hub");
+    expect(hubRow).toBeDefined();
+    expect(hubRow?.is_decision).toBe(false);
+    expect(first.unattributed).toBe(0);
+    expect(first.total_decision_rows).toBe(0);
+    expect(first.has_review_decisions).toBe(false);
+    expect(
+      readRoleMemory(db as never, {
+        owner: "dev",
+        requester: "dev",
+        isTaskOwner: ownerOf(db),
+      }).entries,
+    ).toEqual([]);
 
-    const asDev = readRoleMemory(db as never, {
-      owner: "dev",
-      requester: "dev",
-      isTaskOwner: ownerOf(db),
-    });
-    expect(asDev.entries).toEqual([]);
-
-    /*
-     * 反向对照。**不是**「hub 自己读得到这一行」—— 那一行是【要求批准】，
-     * 它在两个 requester 下都不该是记忆（classifyMemoryRow 里那条 kind 过滤）。
-     * 真正的对照是：同一份库、同一个 actor，把它换成【做了决定】的形状 ⇒ 可见。
-     * 这样「上面那个空」的原因就被锁死在【不是决定 / 没署角色】上，
-     * 而不是「读取路径根本不通」。
-     */
+    // ③ 同一个署名、同样是 system，但这一行【是个决定】⇒ 计入未署名。
     appendAudit(
       db as never,
       {
@@ -634,13 +739,30 @@ describe("③ coverage：把「这一档是空的」报成数据", () => {
       },
       () => NOW,
     );
-    const asHub = readRoleMemory(db as never, {
-      owner: "hub",
-      requester: "hub",
-      isTaskOwner: ownerOf(db),
-    });
-    expect(asHub.entries).toHaveLength(1);
-    expect(asHub.entries[0]?.decision).toBe("approved");
+    const second = memoryCoverage(db as never);
+    expect(second.unattributed).toBe(1);
+    expect(second.total_decision_rows).toBe(1);
+    // 同一组里请求与决定【分成两行】而不是被折成一行（is_decision 是分组维度）。
+    expect(second.rows.filter((r) => r.actor_id === "hub")).toHaveLength(2);
+
+    // ④ 反向对照：换成角色署名的决定 ⇒ 总数涨，未署名不涨。
+    appendAudit(
+      db as never,
+      {
+        taskId: "T-1",
+        actorType: "agent",
+        actorId: "dev",
+        action: "review_decision",
+        target: "in_review:dev->test",
+        payload: { kind: "ReviewDecided", taskId: "T-1", decision: "pass" },
+        createdAt: NOW,
+      },
+      () => NOW,
+    );
+    const third = memoryCoverage(db as never);
+    expect(third.total_decision_rows).toBe(2);
+    expect(third.unattributed).toBe(1);
+    expect(third.has_review_decisions).toBe(true);
     db.close();
   });
 
@@ -998,6 +1120,145 @@ describe("⑥ few-shot 渲染：标注是数据而不是指令，且不改写内
     });
     expect(got.truncated).toBe(true);
     expect(got.omitted).toBe(0); // 块内没截，是**读的时候就少了**
+  });
+});
+
+/* ═══════════════ ⑦ 今日视图那一格 ↔ coverage 的交叉核对（O3 动作 3）═══════════════ */
+
+describe("⑦ 同一件库的两面：有界的今日探针 与 精确的 coverage 必须给同一个数", () => {
+  it("⭐ 探针的三个数能从 coverage 的 rows 逐字推出来（口径只有一份，两处不许各写一遍）", () => {
+    /*
+     * `readMemoryTodayProbe`（今日视图那一格，不碰 JSON）与 `memoryCoverage`
+     * （判据面，逐行 json_extract）读的是【同一件库的同一个口径】，
+     * 而它们是两条手写的 SQL。本仓抓过最多次的那一族就是「两张表两个答案」，
+     * 所以这一发不是"顺便对一下"，它是这一格存在的许可证：
+     *  · scope_rows ↔ coverage 全部 rows 的条数之和（钉的是那条 `action IN (...)` 名单
+     *    在两条 SQL 里没写岔 —— 改一条不改另一条，这里红，而不是界面上多算/少算）；
+     *  · gate_rows / gate_unattributed_rows ↔ coverage 里 review_decision 那几组的条数，
+     *    以及其中 actor_type='system' 的那部分。
+     * 夹具刻意把三种形状都摆齐（请求 / system 署名的决定 / 角色署名的决定），
+     * 因为只摆一种时"两边都数错同一个方向"也能对上。
+     */
+    const db = newDb();
+    addTask(db, "T-1", "dev");
+    const w = (
+      action: "approval" | "review_decision",
+      actorType: "agent" | "human" | "system",
+      actorId: string,
+      payload: Record<string, unknown>,
+    ): void => {
+      appendAudit(db as never, { taskId: "T-1", actorType, actorId, action, target: "g", payload, createdAt: NOW }, () => NOW);
+    };
+    // ① 请求：action=approval 而 kind 在 NON_DECISION_EVENT_KINDS 里 ⇒ 是素材、不是决定。
+    w("approval", "system", "hub", { kind: "ApprovalRequired", taskId: "T-1", interruptId: "i-1" });
+    // ② system 署名的【真决定】⇒ coverage 的 unattributed 数得到，探针不看这一半。
+    w("approval", "system", "policy-engine", { kind: "ApprovalDecided", interruptId: "i-1", decision: "approved" });
+    // ③ 角色署名的审阅判定。
+    w("review_decision", "agent", "dev", { kind: "ReviewDecided", gate: "in_review:dev->test", decision: "pass" });
+    // ④ system 署名的审阅判定（署名丢了，记忆进不了任何角色的提示词）。
+    w("review_decision", "system", "hub", { kind: "ReviewDecided", gate: "in_review:dev->test", decision: "pass" });
+
+    const probe = readMemoryTodayProbe(db as never);
+    const cov = memoryCoverage(db as never);
+    const sum = (rs: ReadonlyArray<{ readonly count: number }>): number =>
+      rs.reduce((a, b) => a + b.count, 0);
+    const gates = cov.rows.filter((r) => r.action === "review_decision");
+
+    // ① 口径名单同源：探针扫的行 == coverage 分组的行。
+    expect(probe.scope_rows).toBe(sum(cov.rows));
+    expect(probe.scope_rows).toBe(4);
+    // ② 审阅判定那一档：探针 == coverage 的 review_decision 组之和。
+    expect(probe.gate_rows).toBe(sum(gates));
+    expect(probe.gate_rows).toBe(2);
+    // ③ 未署名那一半【在 review_decision 这一档上】两边同数（过了 JSON 与没过 JSON 的同一条判据）。
+    expect(probe.gate_unattributed_rows).toBe(sum(gates.filter((r) => r.actor_type === "system")));
+    expect(probe.gate_unattributed_rows).toBe(1);
+    // ④ 两边【不一致】的那一半也得明写，否则读代码的人会拿探针去对 O3 验收第 2 条：
+    // coverage.unattributed 还含着 approval 那一半（上面第 ② 条那行），探针不看它。
+    expect(cov.unattributed).toBe(2);
+    expect(cov.total_decision_rows).toBe(3);
+    expect(cov.has_review_decisions).toBe(true);
+    db.close();
+  });
+
+  it("⭐ 探针敢不碰 JSON，靠的是【映到 review_decision 的 kind 没有一个被判据当非决定】", () => {
+    /*
+     * 这是 `today.ts` 里那条「边界」的真正守卫，而它守的是一个【命题】不是一条夹具：
+     * 「action='review_decision' 的行一定是决定」这句话成立与否，完全由两张表的
+     * 交集决定 —— `KIND_TO_ACTION`（哪些事件 kind 落成 review_decision）与
+     * `NON_DECISION_EVENT_KINDS`（哪些 kind 不是决定）。
+     * 所以判据从这两张导出的表当场算出来，而不是在这里手写一个 "ReviewDecided"：
+     * 手写那份等于把同一句话抄第二遍，抄错或抄旧是本仓那一族缺陷的形状。
+     *
+     * 什么时候这一发红：有人加了一个新事件 kind、把它映到 `review_decision`，
+     * 并且把它登记进 `NON_DECISION_EVENT_KINDS`（也就是"它是一种 review_decision
+     * 而不是决定"）。那一天起 `GET /today` 的 gate_rows 会比 coverage 多算，
+     * 而界面上那句「审阅判定有 N 条」开始说谎。
+     * 红在这里说清楚「去把探针改成过 JSON 的那一发，或者给那一档单独一格」，
+     * 比让 CEO 先看见一个虚高的数有用。
+     *
+     * ⚠ 反向对照在最后：`ApprovalRequired` 与 `ApprovalTokenRedeemed` 【确实】在非决定名单里，
+     * 而它们映到的是 `approval` ⇒ 这一发不挡它们。少了这一段，
+     * 把判据写成「名单里没有任何 kind 映到 review_decision」这种恒真的怪话也能全绿。
+     */
+    const nonDecision = new Set(NON_DECISION_EVENT_KINDS.map((e) => e.kind));
+    const gateKinds = (Object.keys(KIND_TO_ACTION) as (keyof typeof KIND_TO_ACTION)[]).filter(
+      (k) => KIND_TO_ACTION[k] === "review_decision",
+    );
+    // 分母本身要先站住：这一档确实有 kind 映进来（否则下面那句"交集为空"是空的真）。
+    expect(gateKinds).toEqual(["ReviewDecided"]);
+    expect(gateKinds.filter((k) => nonDecision.has(k))).toEqual([]);
+    // 反向对照：名单里那两位是真的，只是不映到这一档。
+    expect([...nonDecision].sort()).toEqual(["ApprovalRequired", "ApprovalTokenRedeemed"]);
+    expect(nonDecision.has("ReviewDecided")).toBe(false);
+    // 而它们映到 approval ⇒ coverage 会看到它们、探针那一格不会（上面那发的第 ④ 条同一件事）。
+    expect(KIND_TO_ACTION.ApprovalRequired).toBe("approval");
+    expect(KIND_TO_ACTION.ApprovalTokenRedeemed).toBe("approval");
+  });
+
+  it("⭐ 探针敢不看 JSON 的【另一半】前提：src 里没有任何地方硬写 action=review_decision", () => {
+    /*
+     * 上面那一发守的是【枚举表】这一侧：`KIND_TO_ACTION` 与 `NON_DECISION_EVENT_KINDS`
+     * 的交集为空。它守不到的是【写库路径】那一侧 —— `appendAudit` 收的是一个
+     * 【显式的 action】（`AuditRow.action`），谁都能绕过 `KIND_TO_ACTION`
+     * 手写 `action: "review_decision"` 而 payload 里放任何一个 kind。
+     * 那一天 `today.ts` 的 gate_rows 会比 `memoryCoverage` 多算，
+     * 而上面那一发的两张表仍然干干净净、⑦ 的第一发也只对我手搓的夹具成立
+     * （它读不到生产库里那条真行）。
+     * ⇒ 「那个 action 今天只有一个生产者」这句话不能被写成注释就完事，
+     *   它必须有一条能数的断言。这一发数的就是它：
+     *  · src 里【硬写】`action: "review_decision"` 的地方必须为 0 —— 唯一的写法是
+     *    `KIND_TO_ACTION.ReviewDecided`，那样 kind 与 action 由【同一次取值】决定，
+     *    不可能一个说是判定、一个说不是（本仓「分子与判据不许分处两处」那条）；
+     *  · 反过来 `KIND_TO_ACTION.ReviewDecided` 作为 action 被用的地方恰好 1 处
+     *    （`engine/dispatch.ts`）。变 2 处意味着又多了一个生产者 —— 那一档的语义
+     *    第二次被定义，探针的前提要重新谈。
+     *
+     * ⚠ 为什么扫 src 而不是跑一次 dispatch 去看真行：跑一次真 dispatch 要 CLI 与引擎
+     *   夹具（`test/engine/dispatch.test.ts` 那一套），而它只能证明【它跑到的那条边】
+     *   写对了；这一发要的是【全仓没有第二个形状】，那是一个【存在性】命题，
+     *   只有扫全部文件才给得出（同 `docs/review/verify-open-invariants.mjs` 的立场：
+     *   一次运行证明不了不存在）。代价是它认字面 —— 换一种写法（拼变量、换引号）
+     *   就扫不到，这一条局限写在这里而不是藏起来。
+     *
+     * 注释必须先剥：dispatch.ts 与 role-memory.ts 的注释里满是 `review_decision`，
+     * 不剥注释这一发第一版就红给自己看（0053 那一族：判据吃进了讲它的话）。
+     */
+    const files = (readdirSync(SRC, { recursive: true }) as string[])
+      .filter((f) => typeof f === "string" && f.endsWith(".ts"))
+      .map((f) => join(SRC, f).replace(/\\/g, "/"));
+    expect(files.length).toBeGreaterThan(50); // 分母：枚举路径写错时这一发先红，别让扫描空转
+    const code = (rel: string): string =>
+      readFileSync(rel, "utf8").replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, "");
+    const hardcoded = files.filter((f) => code(f).includes('action: "review_decision"'));
+    const viaMap = files.filter((f) => code(f).includes("action: KIND_TO_ACTION.ReviewDecided"));
+    expect(
+      hardcoded.map((f) => f.replace(REPO, "")),
+      "review_decision 只能由 KIND_TO_ACTION.ReviewDecided 落库：硬写 action 会让 kind 与 action 各自表述",
+    ).toEqual([]);
+    expect(viaMap.map((f) => f.replace(REPO, ""))).toEqual([
+      "packages/hub/src/engine/dispatch.ts",
+    ]);
   });
 });
 

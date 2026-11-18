@@ -42,10 +42,14 @@
  *
  * ── 为什么这个模块住在 hub 而不是计划写的 packages/web ──────────────────
  * 计划 3.4 的 Files 写的是 `packages/web/src/replay/search.ts`，但它要开库读 events，
- * 而 `test/arch/package-deps.test.ts` 明令 **web 禁止依赖 SQLite**（规格 §5.6.1 的
- * Hub/UI 边界，那条守卫此刻是红的，红在别的原因）。检索必然读 events，所以只能在 hub。
+ * 而 `test/arch/dependency-boundary.test.ts` 明令 **web 禁止依赖 SQLite**（规格 §5.6.1 的
+ * Hub/UI 边界：往 desktop / web 塞越界 import 探针跑 biome check 断言失败，
+ * 往 hub 塞同样的 import 断言通过 —— 边界既挡住外面也放行里面）。检索必然读 events，所以只能在 hub。
  * web 侧要搜索就调 `GET /replay/:taskId` 的 query（见 http/app.ts）。
  * 这条偏离记在 0013 §6。
+ * 【撤回】这一行原本写的是「`test/arch/package-deps.test.ts` 明令 web 禁止依赖 SQLite」，
+ *   那个文件在 git 全部历史里【零命中】—— 它从未存在过，而后面那句「那条守卫此刻是红的」
+ *   也是假的（它今天绿）。保留原文不静默删（0007 §4.1），round290 量出来的。
  */
 
 import { assertParamCount, assertSingleStatement } from "../db/write-queue.js";

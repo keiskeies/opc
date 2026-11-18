@@ -444,7 +444,7 @@ M15 值得说一句：它**不是**"把共享函数 `driverCellTargetSql` 改掉
    是边表里那两条出边不存在** —— 修法完全不同，别再照着函数名去找。
 2. **`createCard` 在 src 里仍然零生产调用方**（`grep -rn 'createCard(' packages/*/src`
    只命中它自己的定义那一行；`insertCard` 才有三个生产调用方：`seat-card.ts:254`、
-   `engine/charter.ts:449`、`dispatch.ts:1341`）。
+   `engine/charter.ts:449`、`dispatch.ts:1519`）。
    ⇒ 这是本仓记过最多次的那一族的现役样本（`createCard` = 建卡 + 落审计 + 事务，
    而生产里三个建卡点全都绕过它直接调 `insertCard`）。
 3. ⭐ **我顺带断言 `cards.ts` 文件头那句 grep「已经不成立了」—— 这一句是我错的**，
@@ -454,12 +454,12 @@ M15 值得说一句：它**不是**"把共享函数 `driverCellTargetSql` 改掉
    我是**读了第 6 行就下结论**（那正是本篇 §4 与 §11 反复记的那一族的错法，
    而这次的对象是别人写的注释而不是我自己写的）。
 
-   **真翻车的是另一处**：`policy/auto-approve.ts:433` 那句
+   **真翻车的是另一处**：`policy/auto-approve.ts:442` 那句
    「① 那一行不存在（**今天**的真库就是这种：src 里没有任何 `INSERT INTO approvals`）」
    —— 这一句是**现在时**，没有"写之前"这类限定，而它**今天为假**：
-   `cards.ts:237` 就是那句 INSERT，被 `insertCard` 用着，而 `insertCard` 有上面那三个
+   `cards.ts:252` 就是那句 INSERT，被 `insertCard` 用着，而 `insertCard` 有上面那三个
    生产调用方（章程泵经 `ensureCharterCard`、dispatch/approve 经 `mintSeatCard`）——
-   `charter-pump.test.ts:232` 那个 `pendingCards()` 数的正是真库里的 `approvals` 行。
+   `charter-pump.test.ts:248` 那个 `pendingCards()` 数的正是真库里的 `approvals` 行。
    它在那里的作用**不是无害的**：那是 `changes === 0` 那一支的成因 ①，
    注释把一个**今天已经不常见**的成因写成"真库今天就是这样"，
    下一个人读到就会以为「认领不中 ≈ 常态」而不去查它为什么认领不中。
@@ -522,7 +522,7 @@ M15 值得说一句：它**不是**"把共享函数 `driverCellTargetSql` 改掉
 只是我为它写的理由是"名单的读法"而不是"预算条的分母"。
 
 这一条**不能读成"顺手把 (B) 做掉了"**：(B) 要的是**预算条那一侧改用这个字段**
-（`today.ts:294` 那个 `SUM(limit_cents)` 换成进程里的数），而那仍然要改响应口径的语义、
+（`today.ts:339` 那个 `SUM(limit_cents)` 换成进程里的数），而那仍然要改响应口径的语义、
 还要决定"离线读库的人看到没有上限的账本"这件事认不认 —— 都在那一格的范围里。
 我做的只有一件小事：**让我卡片上那一行的数与预算条那个数在屏幕上可分辨** ——
 

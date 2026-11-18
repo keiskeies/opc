@@ -258,9 +258,16 @@ async function world(families: Record<string, string>): Promise<World> {
         // 一格【至多欠一个决定】。多于一个就是 0041 §5 / 0046 §7 那两格登记的
         // 「收件箱里同一条任务两张 pending」的形状，那种情况下点哪张都不对。
         expect(pending.length, "第 " + i + " 步：收件箱里同一条任务欠了 " + pending.length + " 个决定").toBe(1);
+        const isWaiver = (pending[0] as { cardKey: string | null }).cardKey?.startsWith("same-family-review:") ?? false;
         const r = await approveCard(
           q,
-          { taskId: TASK_ID, approvalId: onlyCardId(pending), button: "approve", nowMs: NOW + 1000 + clicks.length },
+          {
+            taskId: TASK_ID,
+            approvalId: onlyCardId(pending),
+            button: "approve",
+            nowMs: NOW + 1000 + clicks.length,
+            ...(isWaiver ? { note: "接受同源审阅风险" } : {}),
+          },
           (e, seq) => {
             recordingBus.publishPersisted(e, seq);
           },

@@ -13,10 +13,23 @@
  *
  * 只扫 src/，不扫 test/：测试专用依赖（vitest、tsx）留在 devDependencies 是对的。
  */
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { listHubSrc } from "./claims-registry.js";
+import { walkFiles } from "./harness-invariants.js";
+import { collect } from "./plan-refs.js";
+import { listSrc } from "./role-spawn-boundary.js";
 import { BOUNDARY_PROBE, isRuntimeFixture } from "./run-fixtures.js";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "../..");
@@ -239,6 +252,9 @@ describe("运行期夹具名单本身", () => {
   // 拆分写法是有意的：本测试检查的正是这个字面量，写成一整串就自我命中了。
   const LIT = "__boundary" + "_probe";
 
+  /** 探针的内容：与被测的那个短命文件长得一样（越界 import 才是它存在的理由）。 */
+  const PROBE_BODY = 'import D from "better-sqlite3";\nexport default D;\n';
+
   it("探针名只允许定义在 run-fixtures.ts 里（防止再出现硬编码的消费者）", () => {
     const dir = join(ROOT, "test", "arch");
     const hits: string[] = [];
@@ -258,5 +274,140 @@ describe("运行期夹具名单本身", () => {
     expect(isRuntimeFixture(BOUNDARY_PROBE)).toBe(true);
     expect(isRuntimeFixture("cli.ts")).toBe(false);
     expect(isRuntimeFixture("index.ts")).toBe(false);
+  });
+
+  it("每一个 readdirSync 的使用者都在名单里过了一遍", () => {
+    // 漏接名单的红是【随机】的 —— 只有撞上那个短命探针才红，撞上概率实测约 1/5
+    //（5 次红 1 次）。随机红守不住任何东西：它会被当成 flake 重跑，重跑就绿。
+    // round277 数过一遍，漏接的有 4 个（plan-refs / role-spawn-boundary / claims-registry /
+    // irreversible-token），每一个都是【单跑恒绿、全量偶发红】。
+    //
+    // ⚠ 判据【不是】「文本里出现 packages/hub/src 就得接名单」。那样写过，连着三代假红：
+    //   ① 整份文件 text.includes ⇒ 注释里举了那个路径的 no-native-deps / test-inventory 红；
+    //   ② 换成 lexTs 只看代码区 ⇒ doc-refs 把一个 src 路径当【测试数据字符串】喂给
+    //      纯判据（它不 walk 任何目录），test-inventory 同理，还是红。
+    // 「从文本猜这段代码会不会读 src」这件事【做不到精确】，而一条会假红的守卫比没有守卫更糟
+    //（0055 那条家规）。所以改成【声明式清单】：唯一的机器判据是「这个文件调用了
+    //  readdirSync」——这个谓词没有歧义；清单里每条【写明要不要排夹具、为什么】。
+    // 新增一个 readdirSync 使用者 ⇒ 清单里没有它 ⇒ 红，逼着做一次决定，而不是靠人想起来。
+    const dir = join(ROOT, "test", "arch");
+    /** 需要排夹具的（walk 进 packages/hub/src 并读文件内容）。 */
+    const NEEDS = new Set([
+      "claims-registry.ts",
+      "dead-modules.ts",
+      "lint-baseline.ts",
+      "plan-refs.ts",
+      "production-deps.test.ts",
+      "role-spawn-boundary.ts",
+      "zero-producer.test.ts",
+      "no-native-deps.test.ts",
+      "dependency-boundary.test.ts",
+      "dead-modules.test.ts",
+      "doc-refs.test.ts",
+      "lint-baseline.test.ts",
+      "harness-invariants.ts",
+      "irreversible-token.test.ts",
+      // 它自己不调 isRuntimeFixture，靠 harness-invariants.walkFiles 排 —— 但它的
+      // SCAN_ROOTS 第 1 条就是 packages/hub/src。放这一格而不是 OUT_OF_SCOPE，
+      // 是因为放进"不碰 src"那一格就等于给下面那条接法检查开了个洞（见下面 WIRED 注释）。
+      "no-null-bytes.test.ts",
+      // round290 新增：两处 walk 一处从 packages/*/src 往下走并读文件内容，
+      // 另一处从仓库根收 *.test.ts 的基名 —— 前者正踩在探针的住址上。
+      // 已按 WIRED 第一种接法接了 isRuntimeFixture（两处 walk 都排）。
+      "comment-test-readers.test.ts",
+    ]);
+    /** walk 的根不含 packages/hub/src，或只收【名字像测试】的文件：短命夹具碰不到。 */
+    const OUT_OF_SCOPE = new Set([
+      "claims-registry.test.ts",
+      // round293 新增（census.ts）。它的 readdirSync 只有 countTestFiles 那一处，从【仓库根】
+      // 往下走 —— 会【路过】packages/hub/src，但只收名字以 .test.ts 结尾的项，而探针的名字
+      // 不像测试 ⇒ 和上面 test-inventory 那一格同形：【按名字天然免疫】，不是【没走到】。
+      // ⚠ 两条别读反：
+      //   ① 别把它读成 NEEDS。普查真正读 hub/src 内容的那条 walk 在 dead-modules.collectModules
+      //      里，那边已经排过夹具（唯一真相）；这里再排一遍就是第二套排除口径，必然漂。
+      //   ② 哪天 countTestFiles 改成收【非测试】文件，这格立刻作废 —— 它得搬去 NEEDS。
+      //      所以这一格的成立条件是【那个后缀判据还在】，由 census.test.ts 的分桶断言钉着。
+      "census.ts",
+      "commit-msg-refs.ts",
+      "decision-index.test.ts",
+      "doc-coords.ts",
+      "doc-ids.test.ts",
+      "index-diff.ts",
+      "pending-decisions.test.ts",
+      // 它调 readdirSync 只为在 node_modules/.pnpm 里找 typescript 的 tsc，
+      // 一个目录名都不碰 packages/hub/src ⇒ 短命探针天然不在射程里。
+      // ⚠ 它【同时】是个扫全仓的守卫（tsc 吃 test/** 与 packages/*/test/**），
+      //    但那条扫描在 tsc 进程里，不在这个文件的 readdirSync 里 —— 别把它读成 NEEDS。
+      "test-type-baseline.ts",
+      // enumerate("") 确实从仓库根往下走（会路过 packages/hub/src），但它只收
+      // looksLikeTest 认下的名字，而探针那个名字不像测试 —— 是【按名字天然免疫】，
+      // 不是【没走到】。这两种在清单里得分开写，否则下次有人改 looksLikeTest 就没人提醒。
+      "test-inventory.test.ts",
+    ]);
+    /** 接上名单的四种写法。walkFiles 算一种：它内部已经排了（第 14 格那一行），
+     *  且这一格由下面那发【临时树当场验】，不是只认一个名字。带括号是为了不让
+     *  「注释里提了一句 walkFiles」也算接上。 */
+    const WIRED = [
+      "isRuntimeFixture",
+      "listHubSrc",
+      "BOUNDARY_PROBE",
+      "walkFiles(",
+    ];
+    const unlisted: string[] = [];
+    const notWired: string[] = [];
+    for (const name of readdirSync(dir)) {
+      if (!name.endsWith(".ts") || name === "run-fixtures.ts") continue;
+      const text = readFileSync(join(dir, name), "utf8");
+      if (!text.includes("readdirSync")) continue;
+      if (OUT_OF_SCOPE.has(name)) continue;
+      if (!NEEDS.has(name)) {
+        unlisted.push(name);
+        continue;
+      }
+      if (!WIRED.some((w) => text.includes(w))) notWired.push(name);
+    }
+    expect(
+      unlisted,
+      "新出现的 readdirSync 使用者：去 production-deps.test.ts 二选一登记（进 NEEDS 还是 " +
+        "OUT_OF_SCOPE，并写清它会不会 walk 进 packages/hub/src）：" +
+        unlisted.join(", "),
+    ).toEqual([] as string[]);
+    expect(
+      notWired,
+      "清单里说要排夹具，代码里却没有任何一条接上名单：" + notWired.join(", "),
+    ).toEqual([] as string[]);
+  });
+
+  it("接了名单的取材函数在【探针真的存在】时不列出它", () => {
+    // 上面那条只管【接线】，管不了【接错】（比如把排除条件少写一个 ! —— 那种写法
+    // 接了名单，行为完全相反）。所以这里当场造一棵临时树、【把探针真的放进去】，
+    // 验三个取材函数都不列它。临时树不碰真仓库，因此这一发与那个短命探针【无关】：
+    // 不管并发怎么跑它恒红或恒绿，是个确定性判据 —— 正是随机红的那条补不上来的位置。
+    const root = mkdtempSync(join(tmpdir(), "probe-excl-"));
+    try {
+      const src = join(root, "packages", "hub", "src");
+      mkdirSync(join(src, "engine"), { recursive: true });
+      writeFileSync(join(src, "real.ts"), "export const a = 1;\n");
+      writeFileSync(join(src, "engine", "sub.ts"), "export const b = 2;\n");
+      writeFileSync(join(src, BOUNDARY_PROBE), PROBE_BODY);
+      const listed = [
+        ...listHubSrc(root),
+        ...listSrc(root),
+        ...collect(root, "packages", ".ts"),
+        // walkFiles 也要验：清单里 no-null-bytes 那一格【完全靠】它排（它自己不调
+        // isRuntimeFixture）。少验这一格，那条接法检查就只是在读一个没人验证过的名字。
+        ...walkFiles(root, (n: string) => n.endsWith(".ts")),
+      ];
+      const hits = listed.filter((p) => p.endsWith(BOUNDARY_PROBE));
+      expect(
+        hits,
+        "取材把运行期夹具列出来了，于是并发时会随机 ENOENT：" + hits.join(", "),
+      ).toEqual([] as string[]);
+      // 正向对照：真实文件必须在清单里。否则【全都列不出来】也能骗过上面那条断言。
+      expect(listed.filter((p) => p.endsWith("real.ts")).length).toBe(4);
+      expect(listed.filter((p) => p.endsWith("sub.ts")).length).toBe(4);
+    } finally {
+      rmSync(root, { force: true, recursive: true });
+    }
   });
 });

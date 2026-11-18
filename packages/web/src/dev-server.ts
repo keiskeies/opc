@@ -13,18 +13,48 @@
  */
 import { createServer, request as createRequest } from "node:http";
 import { readFileSync, existsSync } from "node:fs";
-import { join, extname, resolve } from "node:path";
+import { dirname, join, extname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { stripTypeScriptTypes } from "node:module";
+import { stripTypeScriptTypes, createRequire } from "node:module";
 
 const ROOT = fileURLToPath(new URL("../../..", import.meta.url));
 // public/ 是包根下的目录（不在 src/ 里，所以不会被 tsc 的 rootDir 管着、也不 emit）。
 const PUBLIC = join(ROOT, "packages/web/public");
+
+/**
+ * 浏览器要加载的 zod 目录，让 Node 自己回答。
+ *
+ * ⚠ 这一格原先写的是 `join(ROOT, "node_modules/zod")` —— 那是一个【不存在的目录】，
+ * 而它的症状不是报错，是白屏：/vendor/zod/index.js 在 existsSync 上失败 ⇒ 404 ⇒
+ * 浏览器里 /app.js → /vendor/contracts/index.js → ./api.js → /vendor/zod/index.js
+ * 这条 import 链断在最里层 ⇒ 整个模块图一行都不执行 ⇒ 页面什么都不渲染，
+ * 而服务端日志一片干净（404 只写进响应，不写进 console）。
+ * pnpm 的 isolated linker（默认，本仓没有 .npmrc 改它）只在根 node_modules 放
+ * 【直接依赖】，而 zod 是 packages/contracts 的依赖 ⇒ 它只存在于
+ * node_modules/.pnpm/zod@<ver>/node_modules/zod，根下那个路径【从来不会】被建出来。
+ * 所以「照着 node_modules 描一条路径」在 pnpm 仓里不是"不够健壮"，是【错的】。
+ *
+ * 从 packages/contracts 的解析位置解析 zod/package.json 取目录：拿到的是 Node
+ * 真会加载的那一份（不是"另一份也能用的"），且对 isolated / hoisted / npm 三种
+ * 布局都成立。解析不到就在启动这一刻响亮地抛 —— 这条缺陷存在的全部理由是它安静。
+ */
+function zodDir(): string {
+  const req = createRequire(join(ROOT, "packages/contracts/package.json"));
+  try {
+    return dirname(req.resolve("zod/package.json"));
+  } catch (e) {
+    throw new Error(
+      "解析不到 zod ⇒ 浏览器侧的契约模块图必然白屏（/vendor/zod 会 404）。先 pnpm i。原始错误：" +
+        (e instanceof Error ? e.message : String(e)),
+    );
+  }
+}
+
 // /src/ 与 /vendor/ 两个虚拟挂载点：见 serveModule 的注释。
 const MOUNTS: Record<string, string> = {
   "/src/": join(ROOT, "packages/web/src"),
   "/vendor/contracts/": join(ROOT, "packages/contracts/src"),
-  "/vendor/zod/": join(ROOT, "node_modules/zod"),
+  "/vendor/zod/": zodDir(),
 };
 
 const HUB = { host: "127.0.0.1", port: Number(process.env.HUB_PORT ?? 8787) };

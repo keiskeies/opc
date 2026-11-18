@@ -28,7 +28,6 @@ import { describe, expect, it } from "vitest";
 
 const NL: string = String.fromCharCode(10);
 const ROOT: string = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
-const DECISIONS: string = join(ROOT, "docs", "decisions");
 
 // 不在仓库源码树里的引用：@langchain/core 的构建产物，行号随发版漂移，允许存在但必须在这里报名。
 // 不在名单里又找不到文件，就当作【写错了的文件名】报出来 —— 决策文档里写一个不存在的路径，与本
@@ -65,11 +64,30 @@ function repoNames(): string[] {
 
 function decisionDocs(): Map<string, string> {
   const m: Map<string, string> = new Map();
-  for (const f of readdirSync(DECISIONS)
-    .filter((x: string): boolean => x.endsWith(".md"))
+  const docs: string[] = [];
+  walk(join(ROOT, "docs"), docs);
+  const collisions: string[] = [];
+  for (const rel of docs
+    .filter((p: string): boolean => p.endsWith(".md"))
     .sort()) {
-    m.set(f, readFileSync(join(DECISIONS, f), "utf8"));
+    // 键用【基名】：SNAP 里那 300 多条键的既有形状就是 `<基名>>文件:行号`，改成相对路径会把
+    // 全部历史键一次性判成孤儿 —— 那不是修守卫，那是把守卫的证据全清了。
+    // 代价是基名必须唯一，所以唯一性当场判（见下）。
+    const short: string = rel.split("/").pop() ?? rel;
+    if (m.has(short)) collisions.push(short);
+    m.set(short, readFileSync(join(ROOT, rel), "utf8"));
   }
+  // 语料从「手挑三份」换成「docs/ 递归全量」，理由不是省事，是这一族缺口连着补了三级：
+  // decisions/*.md（一直有）→ 主设计文档（round288 实测 5 条引用、其中 2 条当场就是坏的）
+  // → INDEX（23 条、此前一条读者都没有）。每一级的动作都是「发现漏了一份 ⇒ 手工加一个键」，
+  // 而**手工加的语料表没有任何东西判【漏】这件事** —— 只覆盖一半的守卫，它对没覆盖的那一半
+  // 给出的「全绿」是**范围**的绿、不是**结论**的绿，而这两件事在终端上长得一模一样。
+  // 现在新增一份带坐标的文档 ⇒ 它的坐标进语料 ⇒ 要么补快照，要么红。缺口的判定从「我来数」
+  // 变成「门禁判」。round288 现跑：docs/ 下 73 份 .md，31 份含坐标，未覆盖 0 份。
+  // ⚠ 键是基名而目录树里可能重名 ⇒ 重名会让后读的把先读的【静默顶掉】（Map.set 不报错），
+  //   那是比重复更难发现的一种失效：语料少一份，而没有任何一发会红。所以它必须当场判。
+  //   round288 现跑：73 份 .md 的基名零重复（`find docs -name '*.md' | sed 's|.*/||' | uniq -d`）。
+  expect(collisions).toEqual([]);
   return m;
 }
 
@@ -165,7 +183,7 @@ const SNAP: Record<string, string> = {
   // 这一条是**活坐标**：0041 §4 的论据是「卡片审计那行的 payload 形状跨生产者共用」，
   // 而那个形状的唯一钉子是这一行按【顶层键】读 approval_type ——
   // 有人把它改成嵌一层的读法，快照就该红，逼他重读 §4 那个「共用 kind 掩盖不共用部分」的坑。
-  "0041-engine-entry-work-and-decide.md>cards.test.ts:448":
+  "0041-engine-entry-work-and-decide.md>cards.test.ts:505":
     'expect(payload["approval_type"]).toBe("escalation");',
   // 0025（Task 6.1 常驻 Hub）新写的一条。先在目标文件里 `sed -n '385p'` 读原文再抄，
   // 不凭记忆。写全路径与 0013/0016 那几组保持一致（基名这里其实也能唯一解析）。
@@ -184,8 +202,19 @@ const SNAP: Record<string, string> = {
   // recorder +10 行）。逐条 sed -n '<n>p' 重读现场确认【引用的还是同一行、内容一字未变】
   // 之后才改的坐标 —— 不是按 diff 行数推算的（推算出来的那个数一旦中间还有别的改动就错，
   // 而本轮 real-deps.ts 恰好就不止一处改动）。这是本守卫第【五】次抓同一件事。
-  "0016-parallel-branches-role-memory-and-an-assertion-engine-that-saw-nothing.md>packages/hub/src/memory/role-memory.ts:605":
-    'has_review_decisions: rows.some((r) => r.action === "review_decision"),',
+  //
+  // ⚠ 这一格与下面两格（:587 / :703）后来又漂过一次，而这一次是【本文件改的那一发自己顶的】：
+  // O3 把 is_decision 加成 GROUP BY 维度、又在文件尾加了今日探针，
+  // role-memory.ts 上方净增一百多行 ⇒ 691→803 / 506→587 / 622→703。
+  // ⚠ 而这三个数【在本篇写下之后又漂了一次】（803→834 / 587→618 / 703→734，增量 +31 三格相同，
+  //   加的是文件头那三条实测的【现状】改写）—— 也就是说这段注释本身正在变成
+  //   它自己所描述的那种东西：一句关于当前位置的、写给未来的人的谎。
+  //   留着它，因为它比"这里有个坐标"多说了【为什么会有第二次】。
+  // 上面那句"不是按 diff 行数推算的"因此不是空话 —— 推算会得到 691+112=803 而真是 803，
+  // 但另一格 506→587 差 81、622→703 差 81，两处增量【不同】，按文件总增量推算必错一个。
+  // 三条都是重新 sed -n 读出来再抄的。
+  "0016-parallel-branches-role-memory-and-an-assertion-engine-that-saw-nothing.md>packages/hub/src/memory/role-memory.ts:834":
+    'has_review_decisions: decisions.some((r) => r.action === "review_decision"),',
   "0016-parallel-branches-role-memory-and-an-assertion-engine-that-saw-nothing.md>packages/hub/src/http/real-deps.ts:298":
     'action: "approval",',
   // 291 → 298 是 0043 顶走的（real-deps.ts 文件头那条引擎 import + 适配器 +
@@ -195,7 +224,7 @@ const SNAP: Record<string, string> = {
   // 所以下面两格是【新增】而不是漂移 —— 它们把「同一个 action 值有两条写入路径」
   // 这件事钉在快照上：只留 real-deps 那一格的话，下一个读 0016 §4 的人
   // 会以为默认路线上没有写入方（0042 §7 抓的就是这一族：坐标没坏，指的东西换了）。
-  "0016-parallel-branches-role-memory-and-an-assertion-engine-that-saw-nothing.md>packages/hub/src/engine/approve.ts:362":
+  "0016-parallel-branches-role-memory-and-an-assertion-engine-that-saw-nothing.md>packages/hub/src/engine/approve.ts:408":
     "action: KIND_TO_ACTION.ApprovalDecided,",
   "0016-parallel-branches-role-memory-and-an-assertion-engine-that-saw-nothing.md>packages/hub/src/events/recorder.ts:38":
     'ApprovalDecided: "approval",',
@@ -208,14 +237,14 @@ const SNAP: Record<string, string> = {
     'import { Command } from "@langchain/langgraph";',
   // HUMAN_EDGES 的类型那一行。0043 §6「只有 approve 有出边」这条现状的落点：
   // 出边这个维度的类型是 Partial<Record<"approve", …>> —— 不是运行时忘了填，是类型上就只有这一个键。
-  "0043-default-value-should-be-the-one-that-runs-and-a-500-that-lied-about-replaying.md>dispatch.ts:237":
+  "0043-default-value-should-be-the-one-that-runs-and-a-500-that-lied-about-replaying.md>dispatch.ts:238":
     'export const HUMAN_EDGES: Readonly<Partial<Record<TaskState, Partial<Record<"approve", HumanEdge>>>>> = {',
   // 0043 §7 那张表的第三行：0016 那一格的【当前】落点。
   // 同一节里 0016 键下还有一格 real-deps.ts:298 —— 那是 applyDecision，
   // 只在【显式交了图工厂】时才被走到。两格一起读才说明
   // 「同一个 action 值今天有两条写入路径」这件事（0016 §4 那句话的结论没变，
   // 但只查一处会得出「默认路线上没有写入方」这个错结论）。
-  "0043-default-value-should-be-the-one-that-runs-and-a-500-that-lied-about-replaying.md>engine/approve.ts:362":
+  "0043-default-value-should-be-the-one-that-runs-and-a-500-that-lied-about-replaying.md>engine/approve.ts:408":
     "action: KIND_TO_ACTION.ApprovalDecided,",
   "0043-default-value-should-be-the-one-that-runs-and-a-500-that-lied-about-replaying.md>recorder.ts:38":
     'ApprovalDecided: "approval",',
@@ -242,9 +271,16 @@ const SNAP: Record<string, string> = {
   // 「起草比心跳慢三倍」的设计事实的另一半）、跳过那一轮的计数器（第三格，
   // 0044 §4 里我【撤回】了"静默跳过"那个说法，撤回的依据就是这一行 + 它下面那句 onError）。
   // 三格都是活坐标：被删或被改，0044 §0/§4 的结论跟着失效。
-  "0044-charter-pump-where-do-cards-come-from-and-what-a-zero-cost-failure-costs.md>http/real-deps.ts:537":
+  "0044-charter-pump-where-do-cards-come-from-and-what-a-zero-cost-failure-costs.md>http/real-deps.ts:538":
     '"INSERT INTO tasks (id, parent_id, title, status, assigned_role, current_node, " +',
-  "0044-charter-pump-where-do-cards-come-from-and-what-a-zero-cost-failure-costs.md>engine/claude.ts:88":
+  // 坐标本轮从 :88 漂到 :111（同文件头部加了「今天唯一生效的安全边界」那段说明，+23 行）。
+  // 这一格【内容没变、只有行号动】，正是快照最该被更新的那一种：内容串照抄不动，
+  // 只把 key 换掉 —— 若顺手把内容也换成新行的样子，快照就再也证不了「那句话指的是同一段代码」。
+  // ⚠ 第一次登记的是 :106，第二次是 :109，两次都被这条守卫判红：106 那行是裸一句 `}`，
+  // 109 那行是 `timedOut = true;`。这不是守卫在闹脾气 —— 是我在同一个文件上边改边数，
+  // 每次数完又往头部加了两行。**坐标要等那个文件停手之后再数**（详见 0044 §4 那段）。
+  // 也正因为 key 存行号而值存内容，"看着像"的行号一个都混不过去。
+  "0044-charter-pump-where-do-cards-come-from-and-what-a-zero-cost-failure-costs.md>engine/claude.ts:111":
     "}, i.timeoutMs ?? 180_000);",
   "0044-charter-pump-where-do-cards-come-from-and-what-a-zero-cost-failure-costs.md>serve/timer.ts:336":
     "skipped++;",
@@ -277,28 +313,34 @@ const SNAP: Record<string, string> = {
   // 下面两条是 §4 那两个漏洞的**修法现场**。它们必须是活坐标：0016 §4 整段的论据是
   // 「判据写在哪一层粒度上决定了漏不漏」，而判据一旦被人从行级挪回桶级，
   // 那两行的内容必然变 —— 快照红的时候，正是该重读 §4 的时刻。
-  "0016-parallel-branches-role-memory-and-an-assertion-engine-that-saw-nothing.md>packages/hub/src/memory/role-memory.ts:423":
+  "0016-parallel-branches-role-memory-and-an-assertion-engine-that-saw-nothing.md>packages/hub/src/memory/role-memory.ts:618":
     "const strategic =",
-  "0016-parallel-branches-role-memory-and-an-assertion-engine-that-saw-nothing.md>packages/hub/src/memory/role-memory.ts:536":
+  "0016-parallel-branches-role-memory-and-an-assertion-engine-that-saw-nothing.md>packages/hub/src/memory/role-memory.ts:734":
     "const ceoReadingOwn =",
   // 0015（Task 3.6）本轮新写的引用。逐条在被引用文件里 sed -n '<n>p' 读过原文再抄，
   // 不是从 0015 正文里复制措辞 —— 那等于让快照抄文档，守卫当场失效。
-  // 其中 `org/commit.ts:107` 在同一篇里出现两次（表格 ①、§3 末），快照按 key 去重，一条即可。
-  "0015-charter-editor-and-two-sources-of-budget.md>org/commit.ts:107":
+  // 其中 `org/commit.ts:109` 在同一篇里出现两次（表格 ①、§3 末），快照按 key 去重，一条即可。
+  // 坐标顶漂账：107（原）→ 108（round292，那文件上面插了一条 import）→
+  // 109（round294，`applyChangeToGraph` 的函数头加了三行 ⚠）。同一文件第二次顶漂同一格，
+  // 值得记一句：一条【靠行号】成立的引用，漂一次是意外，漂两次说明那个文件头部一直在长。
+  "0015-charter-editor-and-two-sources-of-budget.md>org/commit.ts:109":
     '"INSERT INTO role_charters (id, role_id, version, config, effective_from, created_by) " +',
-  // 0015 §8 第三条引的是「bump 逐字复制上一版 config」那一句。正文写的是 304-310 这个区间，
-  // 而提取器只认区间起点（取舍一），所以快照按 304 登记。
-  "0015-charter-editor-and-two-sources-of-budget.md>org/commit.ts:304":
+  // 0015 §8 第三条引的是「bump 逐字复制上一版 config」那一句。正文写的是 368-374 这个区间，
+  // 而提取器只认区间起点（取舍一），所以快照按 368 登记。
+  // 顶漂账同上一条：304-310（原）→ 323-329（round292）→ 368-374（round294，
+  // 漂得多是因为 `everyNodeDeclaresModelFamily` 那一跳的注释本轮重写过，+28 行）。
+  "0015-charter-editor-and-two-sources-of-budget.md>org/commit.ts:368":
     "const config = JSON.parse(prev.config) as Record<string, unknown>;",
   "0015-charter-editor-and-two-sources-of-budget.md>0001_init.sql:144":
     "CREATE TABLE role_charters (",
   "0015-charter-editor-and-two-sources-of-budget.md>http/app.ts:1091":
     'consumed_cents: Number(r["consumed_cents"] ?? 0),',
-  "0015-charter-editor-and-two-sources-of-budget.md>tracker.ts:233":
+  // 【round272 坐标 +11】tracker.ts 头部给三条 SQL 的导出加了说明块 ⇒ 下面两条同键一起漂。
+  "0015-charter-editor-and-two-sources-of-budget.md>tracker.ts:244":
     "const breached = before <= limit && after > limit;",
   "0015-charter-editor-and-two-sources-of-budget.md>bus.ts:58":
     '| { kind: "BudgetPaused"; taskId: string; spentUsdCents: number }',
-  "0015-charter-editor-and-two-sources-of-budget.md>tracker.ts:238":
+  "0015-charter-editor-and-two-sources-of-budget.md>tracker.ts:249":
     "taskId: input.taskId,",
   "0015-charter-editor-and-two-sources-of-budget.md>contracts/evidence.ts:165":
     '"dev_to_test": "code_diff",',
@@ -308,7 +350,13 @@ const SNAP: Record<string, string> = {
     "return { configurable: { thread_id: taskId } };",
   "0006-cli-resume-and-identity.md>cli.ts:5":
     "* 验收对象是【命令行退出码】，必须能被真子进程执行来验证。计划 V13 实测过 ——",
-  "0006-cli-resume-and-identity.md>cli.ts:479":
+  // 坐标漂过【两次】（原 :479 → :586 → :621）。第一次是 O1-1 的桩写权限守卫插进
+  // cli.ts 上半部；第二次是 O1-2 之后 cmdRun 尾部那段「桩图跑到 END vs 等人批准」
+  // 的分叉插在同一文件更靠上的位置。同一个形状：cli.ts 里任何一处上半部的插入都会
+  // 把下面整体推下去。
+  // 只换 key，内容串照抄【含那两个转义反斜杠】—— 内容里那对 \\n 正是这一行
+  // 值得钉的地方（它拼的是"错误 + 用法"两段，写法写错就少一个空行）。
+  "0006-cli-resume-and-identity.md>cli.ts:624":
     'io.error("错误：" + p.error + "\\n\\n" + USAGE + "\\n");',
   "0006-cli-resume-and-identity.md>write-queue.test.ts:206":
     'it("失败之后立刻 close()：不得重抛旧失败，且必须真的关掉连接", async () => {',
@@ -318,11 +366,14 @@ const SNAP: Record<string, string> = {
   // 【引用没变错、目标没变错，只是行号动了】也要能被看见，不然「行号引用」这件事
   // 根本没有可靠性可言。0006 正文里那句历史叙述刻意写成「第 225 行」而不是坐标形态，
   // 因为守卫会把手写的每一个 文件:行号 都当成当下的活坐标来要快照。
-  "0006-cli-resume-and-identity.md>production-deps.test.ts:258":
+  "0006-cli-resume-and-identity.md>production-deps.test.ts:274":
     "expect(isRuntimeFixture(BOUNDARY_PROBE)).toBe(true);",
   // 同一轮里第二次被 doc-refs 抓住：正文写了坐标却没登记快照；连着两次 => 【登记快照】
   // 已是写文档的固定动作，见 0006 §7-40。
-  "0007-test-type-coverage-blindspot.md>cli.ts:489": "try {",
+  // 同样漂过【两次】（原 :489 → :596 → :631），同一个原因、同一个文件。
+  // 这一格内容就是裸一句 `try {`，它唯一能证的是【那一行还在、还在原位附近】——
+  // weaker 得很，但那是原作者挑的坐标（0007 §那张表逐处读 try/catch），本守卫不负责替谁改写法。
+  "0007-test-type-coverage-blindspot.md>cli.ts:634": "try {",
   "0007-test-type-coverage-blindspot.md>db/driver.ts:64": "try {",
   "0007-test-type-coverage-blindspot.md>db/migrate.ts:120": "try {",
   "0007-test-type-coverage-blindspot.md>checkpoint/saver.ts:378": "try {",
@@ -450,7 +501,11 @@ const SNAP: Record<string, string> = {
   // 这一发也是当场撞出来的：第一版写裸基名，守卫报的是「找不到该文件，或同名歧义」。
   "0030-im-binding-identity-and-three-holes-i-did-not-design.md>0001_init.sql:249":
     "CREATE TABLE im_bindings (",
-  "0030-im-binding-identity-and-three-holes-i-did-not-design.md>channels/abstraction.ts:584":
+  // ⚠ round283 这一格【内容没变、只有行号动】：602 → 607，因为 abstraction.ts 头部
+  // 那段「通电只到入站那一半」的说明改成了过期标注（+5 行）。按 0044 那一组的口径：
+  // 内容串照抄不动，只换 key —— 把内容也换成新行的样子，快照就再也证不了
+  // 「0030 §0 那句话指的是同一段代码」。
+  "0030-im-binding-identity-and-three-holes-i-did-not-design.md>channels/abstraction.ts:607":
     "readonly actorFor?: (actor: ChannelActor) => ChannelActor | null;",
   // §9 那六条是**活坐标**：那一段的整段论据是「哪些接线代价真无人守、哪些有人守」。
   // 下面每一条都在守【那一句判据还在】—— 有人把 `EXPOSED_ENDPOINTS` 从别名改成手抄、
@@ -509,19 +564,23 @@ const SNAP: Record<string, string> = {
   //     变成新的三目，快照跟着内容走，这正是「0037 §1.2 说 0038 会改这一行」的应验）
   //   · assemble.ts:291 → 305；maintenance.ts:479 → 529（都是前面被插入的内容顶下去的）
   //   · integrity.ts:1135 → 1200（pageIntegrityBroken 的注释加长了）
+  //   · 0064 又改 gateEvidenceCheck 的 not_observable 文案（+3 行）：integrity.ts:1216 → 1219
+  //     （sed -n '1219p' 重读后再改键 —— 0016 那条「别按 diff 行数推算」的规矩）
   "0037-worker-import-in-threads-and-my-first-fix-was-wrong.md>integrity.test.ts:426":
     "expect(viaWorker.unavailable).toBeUndefined();",
-  "0037-worker-import-in-threads-and-my-first-fix-was-wrong.md>integrity.ts:282":
+  "0037-worker-import-in-threads-and-my-first-fix-was-wrong.md>integrity.ts:291":
     'verdict: page.ok ? "ok" : instrumentBroke ? "could_not_run" : "violated",',
-  "0037-worker-import-in-threads-and-my-first-fix-was-wrong.md>integrity.ts:102":
+  "0037-worker-import-in-threads-and-my-first-fix-was-wrong.md>integrity.ts:111":
     "export const INTEGRITY_FAILURES = [",
-  "0037-worker-import-in-threads-and-my-first-fix-was-wrong.md>integrity.ts:1200":
+  "0037-worker-import-in-threads-and-my-first-fix-was-wrong.md>integrity.ts:1219":
     '* `verdict === "not_observable"` / `"could_not_run"` 都【不算】损坏：',
-  // 305 → 316 → 370 → 398：每一次漂移都是【同一文件上方被插入内容顶下去】（0043 的引擎 import
-  // 与 0044 的泵那两段；398 这一次是 0048 的驱动器那两段）。⚠ 这里我【没有】按 diff 行数推算 ——
-  // 0016 那一组已经因为推算被抓过第五次。改坐标前 `sed -n '398p' packages/hub/src/serve/assemble.ts`
+  // 305 → 316 → 370 → 399 → 460：每一次漂移都是【同一文件上方被插入内容顶下去】（0043 的引擎 import
+  // 与 0044 的泵那两段；399 那一次是 0048 的驱动器那两段；460 这一次是 round281 的
+  // BootOverrides.env / imFetchImpl 两格 + BootResult.imWired + boot 里的 IM 装配那一段）。
+  // ⚠ 这里我【没有】按 diff 行数推算 ——
+  // 0016 那一组已经因为推算被抓过第五次。改坐标前 `sed -n '460p' packages/hub/src/serve/assemble.ts`
   // 读过原文，确认还是那一行 `if (!existsSync(dbPath)) {` 才写。
-  "0037-worker-import-in-threads-and-my-first-fix-was-wrong.md>assemble.ts:398":
+  "0037-worker-import-in-threads-and-my-first-fix-was-wrong.md>assemble.ts:460":
     "if (!existsSync(dbPath)) {",
   "0037-worker-import-in-threads-and-my-first-fix-was-wrong.md>maintenance.ts:529":
     "if (!existsSync(dbPath)) {",
@@ -529,9 +588,10 @@ const SNAP: Record<string, string> = {
   // 一行指向「被 0038 改过的那一行」的引用，正是活坐标该被钉住的形状。
   "0038-page-integrity-vocabulary-and-a-machine-to-boot-on.md>maintenance.ts:290":
     '// （`page.verdict === "violated"`）。而 `pageIntegrityBroken` 的注释一直写着',
-  // 0039：本篇引用了 harness-invariants.ts:156 —— 那条「requireAssertions 必须为 true」
-  // 的守卫。0039 改了 vitest.config.ts 的注释但没动开关，这句引用钉住「那条守卫还在这行」。
-  "0039-vitest-installs-and-coverage-attribution-still-does-not.md>harness-invariants.ts:156":
+  // 0039：本篇引用了 harness-invariants.ts:157 —— 那条「requireAssertions 必须为 true」
+  // 的守卫。0039 改了 vitest.config.ts 的注释但没动开关，这句引用钉住「那条守卫还在这一行」。
+  // 行号从 :156 漂到 :157 是 round277 在它上面加了一行 import（walkFiles 要排运行期夹具）。
+  "0039-vitest-installs-and-coverage-attribution-still-does-not.md>harness-invariants.ts:157":
     "if (input.requireAssertions !== REQUIRED_REQUIRE_ASSERTIONS) {",
   // 0042（今日视图 + §16 控制室）这一组八条。同样是先在目标文件里 `sed -n '<n>p'` 读原文再抄。
   // 其中【两条是活坐标，各守一句会被顺手改掉的判断】，其余是「本篇论点挂在那一行上」的锚点：
@@ -547,20 +607,25 @@ const SNAP: Record<string, string> = {
   // 将来 `callersOf("insertCard")` 因为一句补了括号的注释而误报时，这条快照会先红并指回这一组注释。
   "0042-today-view-and-putting-the-criteria-on-the-server-side.md>packages/web/public/app.js:445":
     "attention === null ? false : attention.includes(tk.status) || overBudget(tk);",
-  "0042-today-view-and-putting-the-criteria-on-the-server-side.md>packages/hub/src/engine/runtime.ts:135":
-    '"INSERT INTO budget_events (source_event, scope_type, scope_id, period, amount_cents, task_id, created_at) " +',
-  "0042-today-view-and-putting-the-criteria-on-the-server-side.md>packages/hub/src/budget/tracker.ts:70":
+  // 【round272 这一组从两条变一条】：原来 0042 §2 说「两处 INSERT」，键自然两条
+  // （runtime.ts:156 + tracker.ts:70；那条 runtime 坐标历史上还漂过 :135→:137→:156，
+  // 每次都是它上面加了 import —— 见 0045 那一组同族叙述）。runtime 那份手抄 SQL 本轮删了 ——
+  // 引擎路线 import 的就是 tracker 这一条，scope/period 改成绑参
+  // ⇒ 主张对象收敛成【一语句两调用点】，而那一行今天只有【一处】写着这句 INSERT。
+  // 快照跟着从两条并成一条：留着第二条就得给一个已经不存在的手抄副本编一行号，
+  // 那是把守卫变成改历史。
+  "0042-today-view-and-putting-the-criteria-on-the-server-side.md>packages/hub/src/budget/tracker.ts:81":
     '"INSERT INTO budget_events (source_event, scope_type, scope_id, period, amount_cents, task_id, created_at) " +',
   "0042-today-view-and-putting-the-criteria-on-the-server-side.md>packages/contracts/src/org/graph.ts:65":
     "export const orgNodeSchema = z",
-  "0042-today-view-and-putting-the-criteria-on-the-server-side.md>packages/hub/src/overview/today.ts:108":
+  "0042-today-view-and-putting-the-criteria-on-the-server-side.md>packages/hub/src/overview/today.ts:111":
     'export const ATTENTION_STATUSES: readonly string[] = ["ESCALATED_TO_CEO", ...BLOCKED_STATUSES];',
   // 0045（任务级预算那道门）新写的两条，登记同轮完成（0006 §7-40 那条规矩），
   // 且都是【活坐标】—— 它们的价值全在"那一行现在还写着那句话"：
   //  ① runtime.ts:132 是 §1 那张表的成因（`ENSERT_TASK_BUDGET_SQL` 的 DO NOTHING
   //     ⇒ budgets.limit_cents 第一次写完再也不改）。有人把它改成 DO UPDATE，
   //     0045 §4「上限那一侧读参数」的那条理由就作废了，快照红逼他回去改 §4 与门本身。
-  //  ② today.ts:293 是「门与预算条读同一个累加器」这条取舍的**对面那一侧**：
+  //  ② today.ts:338 是「门与预算条读同一个累加器」这条取舍的**对面那一侧**：
   //     今日视图求和的正是 budgets.consumed_cents。它若改成读别的列，
   //     §4 那句"读另一列就是再造一个两源分叉"当场失效。
   // ⚠ 上面 ② 与下面那条 key 的行号在 0049 那轮从 263 顶到 293（today.ts 上方加了 29 行，
@@ -572,15 +637,24 @@ const SNAP: Record<string, string> = {
   //   这里特意留下"原来是 263 / 原来是 109"这两句，是为了让下一次读到红的人知道
   //   **这次移动过**：快照本身只说"现在那一行写着什么"，而"它被顶过几次"是另一件事
   //   （0015 §8 那段同族）。
-  "0045-task-budget-gate-and-a-parameter-that-only-existed-on-the-cli.md>packages/hub/src/engine/runtime.ts:132":
+  // ① 的坐标本轮又从 :132 漂到 :134（runtime.ts 头部加岗位书的两行 import）。
+  // 上面那段「它上面没加东西」的注释【第二次】作废，同一句理由再抄一遍没意义，
+  // 只记一句：这次是 +2，加的是 import 而不是正文，也就是说
+  // 【连"我只是在文件头加了一行 import"都会顶到下面所有坐标】。
+  // 【round272 换了文件】：这条原本指 `engine/runtime.ts:153` 的手抄副本
+  // `ENSERT_TASK_BUDGET_SQL`（它自己就漂过 :132→:134→:153，两次都是上面加 import）。
+  // 那份副本本轮删了 —— 引擎路线 import 的就是 tracker 这一条，所以 DO NOTHING 这件事
+  // 现在只有一处可看。快照指过去，内容串照抄不动：0045 §1 那句「第一次写进去就再也不改」
+  // 依赖的正是这一行，它换了住址而没换语义。
+  "0045-task-budget-gate-and-a-parameter-that-only-existed-on-the-cli.md>packages/hub/src/budget/tracker.ts:77":
     '"INSERT INTO budgets (id, scope_type, scope_id, period, limit_cents, consumed_cents, hard_stop) " +',
-  "0045-task-budget-gate-and-a-parameter-that-only-existed-on-the-cli.md>packages/hub/src/overview/today.ts:293":
+  "0045-task-budget-gate-and-a-parameter-that-only-existed-on-the-cli.md>packages/hub/src/overview/today.ts:338":
     '"SELECT COUNT(*) AS scopes, COALESCE(SUM(consumed_cents), 0) AS consumed, " +',
-  "0042-today-view-and-putting-the-criteria-on-the-server-side.md>packages/hub/src/charter/budget-sync.ts:438":
+  "0042-today-view-and-putting-the-criteria-on-the-server-side.md>packages/hub/src/charter/budget-sync.ts:449":
     "export function silentOverBudgets(db: DatabaseSync): BudgetTierRow[] {",
   "0042-today-view-and-putting-the-criteria-on-the-server-side.md>packages/desktop/src/ipc-surface.ts:171":
     "export const EXPOSED_ENDPOINTS: readonly ApiEndpoint[] = IMPLEMENTED_ENDPOINTS;",
-  "0042-today-view-and-putting-the-criteria-on-the-server-side.md>http/real-deps.ts:586":
+  "0042-today-view-and-putting-the-criteria-on-the-server-side.md>http/real-deps.ts:587":
     "* 放进那一个事务里（与 insertCard 同事务，理由写在 cards.ts createCard 第 ① 条），",
   // ── 0048 §4.2 ───────────────────────────────────────────────────────────
   // dispatch 成功那一支返回的对象里 `seat` 是**写死的 "agent"**。
@@ -588,7 +662,7 @@ const SNAP: Record<string, string> = {
   // 『这一轮成不成』」整段结论就挂在这一格上：如果哪天成功支改成回传真实席位
   // （例如落点是人席时回 "human"），§4.2 那张表的后两行就要重写 ——
   // 快照在这里红，就是逼回来重读那张表，而不是让文档继续指着一个不再写死的值讲"写死"。
-  "0048-driver-pump-who-presses-enter-after-the-ceo-approves.md>dispatch.ts:1452":
+  "0048-driver-pump-who-presses-enter-after-the-ceo-approves.md>dispatch.ts:1630":
     'seat: "agent",',
   // ── 0049 §7：夹具翻车现场的【写入方】坐标 ────────────────────────────────
   // 这三条不是"活坐标"（没有判据挂在"那一行还写着这句话"上），它们守的是
@@ -612,28 +686,28 @@ const SNAP: Record<string, string> = {
   //    行号漂了那三条就退化成"某人说过"，而复算的人连从哪一行开始看都不知道。
   //  §12 那两条是"追加预算那颗按钮为什么是空按钮"这条判断的**唯一物证**：
   //    `driver-pump.ts:487` 绑的是 `o.taskLimitCents`（门读参数），
-  //    `today.ts:294` 求和的是 `limit_cents`（界面读那一列）。
+  //    `today.ts:339` 求和的是 `limit_cents`（界面读那一列）。
   //    ⚠ 这两行**必须同时被改**才不会造出"屏幕上没超而门挡着"那种分叉 ——
   //    快照在这里红，就是逼改的人去看另一侧动没动，而不是各自改各自的。
   "0049-driver-status-on-the-board-and-a-bind-order-bug-that-was-green.md>seat-card.ts:254":
     "const res = insertCard(db, draft, { nowMs: o.nowMs });",
   "0049-driver-status-on-the-board-and-a-bind-order-bug-that-was-green.md>engine/charter.ts:449":
     "const card = insertCard(db, cardDraft, { nowMs: o.nowMs });",
-  "0049-driver-status-on-the-board-and-a-bind-order-bug-that-was-green.md>dispatch.ts:1341":
+  "0049-driver-status-on-the-board-and-a-bind-order-bug-that-was-green.md>dispatch.ts:1519":
     "const res = insertCard(db, p.draft, { nowMs: o.nowMs });",
-  "0049-driver-status-on-the-board-and-a-bind-order-bug-that-was-green.md>policy/auto-approve.ts:433":
-    "//   ① 那一行不存在（今天的真库就是这种：src 里没有任何 INSERT INTO approvals）；",
-  "0049-driver-status-on-the-board-and-a-bind-order-bug-that-was-green.md>cards.ts:237":
+  "0049-driver-status-on-the-board-and-a-bind-order-bug-that-was-green.md>policy/auto-approve.ts:442":
+    "//   「① 那一行不存在（今天的真库就是这种：src 里没有任何 INSERT INTO approvals）；」",
+  "0049-driver-status-on-the-board-and-a-bind-order-bug-that-was-green.md>cards.ts:252":
     '"INSERT INTO approvals (id, task_id, approval_type, summary, parameters, " +',
-  "0049-driver-status-on-the-board-and-a-bind-order-bug-that-was-green.md>charter-pump.test.ts:232":
+  "0049-driver-status-on-the-board-and-a-bind-order-bug-that-was-green.md>charter-pump.test.ts:248":
     "function pendingCards(w: World, taskId: string): number {",
   "0049-driver-status-on-the-board-and-a-bind-order-bug-that-was-green.md>serve/driver-pump.ts:487":
     ".all(...states, maxAttempts, o.taskLimitCents, perRound) as unknown as {",
-  "0049-driver-status-on-the-board-and-a-bind-order-bug-that-was-green.md>today.ts:294":
+  "0049-driver-status-on-the-board-and-a-bind-order-bug-that-was-green.md>today.ts:339":
     '"COALESCE(SUM(limit_cents), 0) AS declared FROM budgets WHERE scope_type = ? AND period = ?";',
   // ── 0050 §6：打回那条边，以及它新造出来的那个循环 ──────────────────────
   // 这批里只有两格是【活坐标】（主张的形状就是"那一行现在写着这句话"）：
-  //  · runtime.ts:108 —— `REJECTION_COUNT_SQL` 那一行本身，它就是 §4.2.1 那个分子的实现。
+  //  · runtime.ts:112 —— `REJECTION_COUNT_SQL` 那一行本身，它就是 §4.2.1 那个分子的实现。
   //    漂了要回来重读 0050 §6.5（为什么数 `payload.$.to` 而**不数** `action`：
   //    一次打回写两条 state_change 边，数 action 会恒翻倍 ⇒ 上限提前一倍咬）。
   //  · status.ts:59 —— 合法表里那条**一直存在**的补边。它是"三张表两有一无"里
@@ -653,40 +727,205 @@ const SNAP: Record<string, string> = {
     "msg: \"这台 Hub 没开驱动器：想法停在 agent 那一格之后，不会有任何东西去推它。要自动推进请带 --driver-pump 起 Hub，或手工 hub work。\",",
   "0050-abandoned-task-never-resumes-and-a-knob-that-does-not-exist.md>app.js:675":
     "<span class=\"pill ${statusClass(tk.status)}\">${esc(tk.status)}</span>",
-  "0050-abandoned-task-never-resumes-and-a-knob-that-does-not-exist.md>assemble.ts:274":
+  // 275 → 290 与 1667 → 1904：round281 在 BootOverrides 加了 env / imFetchImpl 两格、
+  // 在 BootResult 加了 imWired、在 boot 里加了 IM 装配 + 横幅 + 心跳派发三段，
+  // 同一文件下方的行整体下移。⚠ 两个新坐标都是 `sed -n '<N>p'` 读过原文才写的，
+  // 没有按 diff 推算（0016 那一组已经因为推算被抓过第五次）。
+  "0050-abandoned-task-never-resumes-and-a-knob-that-does-not-exist.md>assemble.ts:290":
     "readonly driverMaxAttempts?: number;",
-  "0050-abandoned-task-never-resumes-and-a-knob-that-does-not-exist.md>assemble.ts:1646":
+  // 漂过【两次】，同一个原因（round284 给外网 HTTP 补自设截止时，在同文件上方改了
+  // 几处「那发 fetch 没有 deadline」的注释，把它一路顶下去）：:1904 → :1911 → :1913。
+  // 行内容一字未动 ⇒ 按 0044 的家规只挪 key，快照那句不改。新行号是守卫报的，
+  // 不是按 diff 推算的（0057 那条：同一轮里同一个坐标按推断错过两次）。
+  "0050-abandoned-task-never-resumes-and-a-knob-that-does-not-exist.md>assemble.ts:1913":
     "* ⚠ 这里【不】列驱动器的按格尝试上限（maxAttempts）与每任务轮数（maxTurns）：",
-  "0050-abandoned-task-never-resumes-and-a-knob-that-does-not-exist.md>dispatch.ts:101":
+  "0050-abandoned-task-never-resumes-and-a-knob-that-does-not-exist.md>dispatch.ts:102":
     "DECOMPOSING: { handoff: { to: \"IN_PROGRESS\", next: \"target\", why: \"拆解完成，活儿交给被点名的角色\" } },",
-  "0050-abandoned-task-never-resumes-and-a-knob-that-does-not-exist.md>dispatch.ts:1207":
+  "0050-abandoned-task-never-resumes-and-a-knob-that-does-not-exist.md>dispatch.ts:1385":
     "action: \"state_change\",",
   "0050-abandoned-task-never-resumes-and-a-knob-that-does-not-exist.md>driver-pump.ts:354":
     "* 这个数字【不是预算】，是最后一道闸 —— advance 文件头写的就是\"防上面两条判据被",
-  "0050-abandoned-task-never-resumes-and-a-knob-that-does-not-exist.md>graph/company.ts:254":
+  "0050-abandoned-task-never-resumes-and-a-knob-that-does-not-exist.md>graph/company.ts:281":
     "if (state.current === \"REJECTED_DOWNWARD\") await write(\"IN_PROGRESS\");",
   "0050-abandoned-task-never-resumes-and-a-knob-that-does-not-exist.md>heartbeat/patrol.ts:139":
     "export function kindOf(alias: string): string {",
-  "0050-abandoned-task-never-resumes-and-a-knob-that-does-not-exist.md>runtime.ts:108":
+  // :108 → :110 → :112 → :117（每一次都是 runtime.ts 头部加了 import）。
+  // 这一格是【活坐标】：0050 §6.5 那个「数 payload.$.to 而不数 action」的分子就是这一行实现的。
+  "0050-abandoned-task-never-resumes-and-a-knob-that-does-not-exist.md>runtime.ts:117":
     "export const REJECTION_COUNT_SQL =",
   "0050-abandoned-task-never-resumes-and-a-knob-that-does-not-exist.md>status-machine.test.ts:172":
     "it(\"§7.1 未给出路的三态【当前】是死路 —— 显式钉住这个已知缺口\", () => {",
   "0050-abandoned-task-never-resumes-and-a-knob-that-does-not-exist.md>status.ts:59":
     "REJECTED_DOWNWARD: [",
-  "0050-abandoned-task-never-resumes-and-a-knob-that-does-not-exist.md>today.ts:55":
+  "0050-abandoned-task-never-resumes-and-a-knob-that-does-not-exist.md>today.ts:58":
     "* 不含 `MEETING_REQUIRED`：它同样是死路（出边空数组），但规格里它的名字属于【会议】",
   // 0051（端到端那一发）两条，同轮登记（0006 §7-40）。两条都先在目标文件里
   // `sed -n '<n>p'` 把原文读出来再抄，不从 0051 正文里复制措辞。
-  // runtime.ts:108 是**活坐标而带一段历史**：0051 §2b 记的正是「这一行曾被我把符号名接错」，
-  // 而快照比的是【行文本】—— 它挡得住「这一行不再是 REJECTION_COUNT_SQL」，
-  // 挡不住「行号对而符号名错」（那一族 0051 §6-6 登记为无守卫）。
-  "0051-end-to-end-one-idea-to-delivered-and-two-false-readings-of-my-own-harness.md>runtime.ts:108":
-    "export const REJECTION_COUNT_SQL =",
+  //
+  // ⚠ 这里【原来有一条 runtime.ts:108 的快照，本轮删掉了】，删的理由值得留着：
+  // 上一版的注释把它判成「活坐标而带一段历史」，那个分类是错的。0051 §2b 那一段
+  // 整段是【回顾一次错标】：它说「0050 当时把第 108 行标成了另一个符号，而那个符号
+  // 当时在第 132 行」，通篇是过去时，它【没有】主张「今天第 N 行写着什么」。
+  // 而快照的语义恰好是后者 —— 于是这条 key 一直在替 0051 主张一件它从未主张过的事，
+  // 并且每次 runtime.ts 头部加行，守卫就红一次，而"修绿"的动作是把一个历史数字
+  // 改成今天的数字 = 改历史。⇒ 0051 正文里那两个行号已改成汉字形态（不进快照），
+  // 口径写在 0050 §6.5 末尾：**断言今天的位置 ⇒ `文件:行号`；陈述当时是什么 ⇒ 「第 N 行」**。
+  // 这一行今天的坐标没有丢：0050 §6.5 顶部那个 `runtime.ts:117`（round272 起）是真活坐标，
+  // 那条主张（§6.5 的分子由这一行实现）本来就是关于【现在】的。
   // bus.ts:256 也是活坐标：0051 §3 那句「不能 for await 那个订阅」的唯一依据是
   // 【空队列时 next() 挂住而不是返回 done】。有人把它改成空就返回，
   // 那条测试写法就能删掉这层包装 —— 快照该红，逼他重读那一段。
   "0051-end-to-end-one-idea-to-delivered-and-two-false-readings-of-my-own-harness.md>bus.ts:256":
     "return new Promise<IteratorResult<FeedItem>>((resolve) => {",
+  // ── 0058（岗位书接进运行时那一批的验证工具）五格，同轮登记（0006 §7-40）──────
+  // 五格都是先在目标文件里 `sed -n '<n>p'` 读出**当前原文**再抄，不从 0058 正文复制。
+  // 其中【两格的行号在抄的时候发现正文写错了】：我在 0058 的表里写的是 :660 / :570，
+  // 而那两处正是本轮我自己往上插注释的位置 —— 注释把我改的那一行顶下去了，
+  // 我按"改动前的行号"写进了文档。守卫把这一下判成"内容与快照不符"而不是"引用没事"，
+  // 所以**文档里的坐标改成了 663 / 574**（改的是文档，不是快照迁就它）。
+  //
+  // 【同一个错在本仓连续犯了两次，这一格就是第二次的现场】：store.test.ts 那一格
+  // 登记时是 663，0059 那一批（岗位书播种）在同一文件 §④ 上面插了 12 行注释，
+  // 又把目标行顶到 675 —— 守卫又抓到了。第一次犯时我写下"改的是文档不是快照"，
+  // 可**没有写下"改完这一个文件就立刻重跑本守卫"**，所以同一个位移照样再犯一次。
+  // 教训不是"抄的时候小心"（那次已经这么写了并且没用），是：**只要动了被引用的文件，
+  // 同一轮内必须跑 doc-refs**，别把它留给"最后一起跑全量"。
+  //
+  // 前两格（runtime.test.ts）是 §4 那张表的**分母**：0058 §4 整节的论据是
+  // 「四发里有一发只有附录杀得死」，而那句话的全部证据就是这一行那条反向对照 +
+  // 它上面两条主断言仍然成立。有人把这一行当"重复的附录"删掉，主断言照绿而
+  // 杀掉那个变异的没了 ⇒ 快照必须钉住它在。:574 那一格性质不同，只是登记性质
+  // （钉住那句 `as never` 强转还在，它是 0058 §7 那条"桩类型刻意收窄"的落点）。
+  "0058-a-restore-that-restored-the-mutant-and-three-reverse-assertions-searching-for-strings-that-do-not-exist.md>runtime.test.ts:477":
+    'expect(w.rt.deps.rolePrompt("dev")).not.toContain("没有你的岗位书");',
+  "0058-a-restore-that-restored-the-mutant-and-three-reverse-assertions-searching-for-strings-that-do-not-exist.md>runtime.test.ts:720":
+    'hook({ db: db as never, taskId: "t1", role: "dev", seq, costCents: 4, nowMs: NOW + 2000 });',
+  "0058-a-restore-that-restored-the-mutant-and-three-reverse-assertions-searching-for-strings-that-do-not-exist.md>store.test.ts:675":
+    'return m ? { f, names: (m[1] ?? "").split(",").map((s) => s.trim().split(" ")[0]).filter(Boolean) } : null;',
+  // ⚠ 后两格是【活坐标，且守的是一件本轮【没有】修的东西】：0058 §5/§8 写的是
+  // 「全仓另有两份私有 stripComments，与本轮修掉的那一份同样有『行注释里的块注释
+  // 起始串会吃掉真代码』这个缺陷」。这两格守的就是**那两份还是那两份** ——
+  // 有人把它们改成一次扫描（或干脆换成 import 共用的那份），快照红，逼他回来把
+  // 0058 §8 那句"未修"删掉。反过来，若允许"文档继续说没修而代码已经修了"，
+  // 那条披露就变成一句读不出真假的往事（本仓抓过的那族：注释承诺了实现已不再具备的性质）。
+  "0058-a-restore-that-restored-the-mutant-and-three-reverse-assertions-searching-for-strings-that-do-not-exist.md>bindings/im.test.ts:102":
+    "function stripComments(text: string): string {",
+  "0058-a-restore-that-restored-the-mutant-and-three-reverse-assertions-searching-for-strings-that-do-not-exist.md>web/renderer-criteria.test.ts:53":
+    "function stripComments(src: string): string {",
+  // ── 0059（播种命令报成功而角色叫不到）两格，同轮登记（0006 §7-40）──────────
+  // 抄法同上面那五格：先在目标文件里读出**当前那一行的原文**再抄，不从 0059 正文复制。
+  //
+  // 这两格是 0059 §3.1 那条主张的**全部**证据，所以它们必须钉住：
+  // 「岗位书按 role_id 存、运行时按组织图节点名查，而这两套 id 今天不相等」这句话
+  // 只有两个支点 —— ① `NODE_TO_TEMPLATE` 真的把 intake/charter/report 挂在
+  // assistant/assistant/ceo 上，② 建卡初值真的缺省成 "intake"。
+  // 有人把 preset.ts 那张表改成语义名（D11 拍板那天）、或者让装配真的传 intakeRole，
+  // 0059 §3.1 那张表就当场变成假的 ⇒ 快照必须红，逼他回来改那句主张。
+  // 反过来，若快照不钉行，过两年有人读到 0059 §3.1 会以为那是句永恒的结构性事实。
+  "0059-a-seed-command-that-reported-success-while-no-role-could-be-called-by.md>roles/preset.ts:27":
+    "export const NODE_TO_TEMPLATE: Record<CompanyNode, string> = {",
+  "0059-a-seed-command-that-reported-success-while-no-role-could-be-called-by.md>http/real-deps.ts:808":
+    'const intakeRole = o.intakeRole ?? "intake";',
+  // ── 0065（metrics 落库）一格，同轮登记 ─────────────────────────────────────
+  // 抄法照旧：先 `sed -n '107p' packages/contracts/src/evidence.ts` 读原文再抄。
+  // 这一格是 0065 §2 整张「加列 vs 删字段」论证的**唯一支点**：删掉 metrics 字段会
+  // 连带杀 `metric:` 判据族 —— 那句话的全部前提是【契约今天还有这个字段】。
+  // 哪天真要删它（回到 O5 动作 3 的另一个选项），这一行必须先过快照这一关。
+  "0065-a-column-for-the-number-that-nothing-computes-yet-and-a-mirror-fixture-that-demonstrated-its-own-demise.md>evidence.ts:107":
+    "metrics: z.record(z.string(), z.number().finite()).optional(),",
+  // ── 0008 §7.1（round287 的改正）一格，同轮登记 ─────────────────────────────
+  // ⚠ 这一格守的东西和上面大多数格【方向相反】：0008 引它不是为了引用那句主张，
+  // 而是为了引用一条**被实测证伪的承诺** —— 模板头注释与 Task 0.7 的模板都写着
+  // 「没签完 CI 就一直红」，而这一发断言的是【占位串还在】⇒ 什么都不做是全绿，
+  // CEO 真签掉一份反而红 2 发（`.workbuddy/round287-mutate-placeholder.mjs`：69 通过 → 2 红）。
+  // 所以这一格是 0008 §7.1 那张「承诺 vs 实测」表的**唯一支点**：
+  // 哪天有人把这一发改成立反（"占位串不许在场"），那句话的报警器才真的存在，
+  // 而 0008 §7.1 的改正段会当场变成假的 —— 快照必须红，逼他回来重写那一段。
+  // ⚠ 键【必须带目录】：仓库里叫 charter.test.ts 的有两个（`roles/` 与 `engine/`），
+  //   裸基名会被 resolveTarget 判成歧义 —— 与 0043 §5 那两格同一个坑。
+  "0008-phase1-gate-semantics.md>roles/charter.test.ts:411":
+    'it("模板的 acceptance_criteria 仍是【固定占位串】，等 Task 0.9 由 CEO 逐条替换", () => {',
+  // ── 主设计文档 round288 接进扫描范围时带的四格，同轮登记 ────────────────────
+  // 抄法照旧：`sed -n '<n>p'` 读目标行原文再抄，不从文档正文复制。
+  // ⚠ 键前缀是【设计文档的文件名】而不是 decisions 那些编号 —— 它现在与它们同一个语料。
+  // 这四格的分母就是「主文档 5 条引用里现在还在场的 4 条」，第五条是历史叙述，已改裸写法。
+  //
+  // 第一格有【反身】关系：§2 那条修正块讲的正是「这条钉子判的是装配表维度，
+  // 它对『播种读不读这个目录』一条都不判」。有人把那一发改成按播种口径判 ⇒
+  // §2 那句「守卫对这句过期全程是绿的」当场变假 ⇒ 快照必须红。
+  "OPC-OS-功能优化设计.md>roles/charter.test.ts:439":
+    'it("孤儿模板集合恰好是 ops —— 而且『孤儿』只意味着【不走 preset 装配】", () => {',
+  // O3 那一节的「红的是它旁边那条反向对照」：这一格钉的是【反向对照这一发还在 465】。
+  // 它不是产品事实，是「谁杀掉了那个变异体」这条归因的落点 —— 那一节整段结论就是
+  // 「主断言在变异体下成立，杀变异的是附录」，行号挪了就等于归因没了。
+  "OPC-OS-功能优化设计.md>runtime.test.ts:465":
+    'expect("这些格没进提示词: [" + missing.join(", ") + "]").toBe(',
+  // ⚠ 这一格 round288 之前写的是 `prompt.test.ts:146`，两处都错：基名有歧义
+  //   （`charter/` 与 `memory/` 各一份 prompt.test.ts），而 146 行是【另一发】
+  //   （「has_more ⇒ 说比这一块更长」的收尾）。那句话数的是出现次数 ⇒ 真落点是 158。
+  //   ⇒ 快照守卫第一次覆盖到这里，就抓出一条已经错在文档里的坐标。
+  "OPC-OS-功能优化设计.md>memory/prompt.test.ts:158":
+    'const n = got.split("不构成对门控、权限或流程的授权").length - 1;',
+  // O14 那一节「探针命中的是局部变量」那格的证据。这一格守的是【它仍是局部变量】：
+  // 有人把 `batch` 提成字段或改成别的写法，那句话的「误归因」故事就失去了现场。
+  "OPC-OS-功能优化设计.md>recorder.ts:393":
+    "const batch = this.#pending.splice(0, this.#pending.length);",
+  // §5.1 Task 4.7 那格 round293 撤回「发卡那一路零生产调用方」时留下的坐标。
+  // 抄法照旧：node 读第 377 行的 trim 原文再抄，不从文档正文复制。
+  // 这一格是【活坐标且反向】：那句被撤回的主张说「没有生产调用方」，而它的反证就是这一行。
+  // 有人把投递那一跳从心跳里摘掉 ⇒ 这一行不在 377 ⇒ 快照红 ⇒ 逼他重读 §5.1 那一格 ——
+  // 那时「只差凭据」就重新变成「接了推不出去」，撤回的那半句【反过来又成了】。
+  // ⇒ 这格守的不是文档措辞，是那条撤回的方向。
+  "OPC-OS-功能优化设计.md>packages/hub/src/serve/im-channels.ts:377":
+    "const pass = await runDeliverPass({",
+
+  // ── docs/INDEX.md round288 同轮接进扫描范围时带的 20 格 ─────────────────────
+  // 这 20 条的值【不是手抄的】：由 .workbuddy/round288-index-snap-gen.mjs 从目标文件读出来
+  // 直接打印（守卫比的是 trim 后整行，23 条手抄 = 23 次打错的机会，而打错的快照比没快照更坏 ——
+  // 它会把「引用漂了」读成「代码变了」）。判断仍留在坐标里：生成器只回答"这一行现在写了什么"。
+  "INDEX.md>0001_init.sql:249":
+    "CREATE TABLE im_bindings (",
+  "INDEX.md>app.js:675":
+    '<span class="pill ${statusClass(tk.status)}">${esc(tk.status)}</span>',
+  "INDEX.md>app.ts:441":
+    "...(deps.nonces === undefined ? {} : { nonces: deps.nonces }),",
+  "INDEX.md>approvals/cards.ts:252":
+    '"INSERT INTO approvals (id, task_id, approval_type, summary, parameters, " +',
+  "INDEX.md>assemble.ts:274":
+    "* 全在【泵自己内部】的外面，所以它们只能靠换掉整趟来数 —— 与章程泵同一条理由。",
+  "INDEX.md>bindings/im.test.ts:102":
+    "function stripComments(text: string): string {",
+  "INDEX.md>graph/company.ts:281":
+    'if (state.current === "REJECTED_DOWNWARD") await write("IN_PROGRESS");',
+  // ⚠ 这一格的值是 `");"` —— 快照几乎不含信息，漂到邻近的另一个 `);` 它也照样绿。
+  //   仍然登记，因为 INDEX 那句话指的就是这个收尾括号（`harness-invariants.ts` 里那条
+  //   断言的结束），而不是指整块。它是【弱快照】：钉得住【那一发还存在且仍在那个位置附近】，
+  //   钉不住语义。弱而不假，与「不登记」不是一回事 —— 记在这里是为了下次读到它的人
+  //   不把它当成一条有牙齿的断言。
+  "INDEX.md>harness-invariants.ts:156": ");",
+  "INDEX.md>harness/gateway.ts:380":
+    "const reject = (code: GatewayRejectCode, reason: string): GatewayOutcome => ({",
+  "INDEX.md>http/real-deps.ts:808":
+    'const intakeRole = o.intakeRole ?? "intake";',
+  "INDEX.md>im.ts:164":
+    '"INSERT INTO im_bindings (id, platform, external_user_id, ceo_role, verified, created_at) " +',
+  "INDEX.md>ipc-surface.test.ts:129":
+    "expect(API_ENDPOINTS).toContain(s.endpoint);",
+  "INDEX.md>roles/preset.ts:27":
+    "export const NODE_TO_TEMPLATE: Record<CompanyNode, string> = {",
+  "INDEX.md>runtime.test.ts:465":
+    'expect("这些格没进提示词: [" + missing.join(", ") + "]").toBe(',
+  "INDEX.md>runtime.ts:109":
+    "* 加上 AUTO_AFTER_EDGE 自动补的 IN_PROGRESS 那一跳，见 dispatch 的 chain），",
+  "INDEX.md>serve/driver-pump.ts:487":
+    ".all(...states, maxAttempts, o.taskLimitCents, perRound) as unknown as {",
+  "INDEX.md>status.ts:59": "REJECTED_DOWNWARD: [",
+  "INDEX.md>today.ts:263":
+    "* 之间夹一次写入会得到一份自相矛盾的摘要条」的立场，只是这里跨了端点）。",
+  "INDEX.md>tokens.ts:208":
+    '"INSERT INTO im_tokens (token, approval_id, expires_at, used) VALUES (?, ?, ?, ?)";',
+  "INDEX.md>web/renderer-criteria.test.ts:53":
+    "function stripComments(src: string): string {",
 };
 
 describe("决策文档里的「文件:行号」引用不漂移", () => {

@@ -32,6 +32,10 @@ import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
 import { afterAll, describe, expect, it } from "vitest";
 import { isTaskTransitionLegal } from "../../src/graph/status.js";
+import {
+  STUB_EDGES,
+  STUB_STOP_STATE,
+} from "../graph/fixtures/company-fixtures.js";
 
 /** 子进程 cwd 必须是 packages/hub：@langchain/core 只在该包的 deps 里（pnpm 严格布局）。 */
 const HUB_ROOT = fileURLToPath(new URL("../../", import.meta.url));
@@ -286,21 +290,23 @@ describe("Task 0.10 —— Hub CLI", () => {
       // （否则 intake 的 INSERT 会炸在 no such table: tasks）。
       expect(existsSync(dbPath)).toBe(true);
 
-      // 完整 14 条 §7.1 状态边
-      expect(countEvents(dbPath)).toBe(14);
+      // 桩该产生的那批 §7.1 状态边，条数从夹具算（见 fixtures 里那份路线）。
+      expect(countEvents(dbPath)).toBe(STUB_EDGES);
       const task = readAll(
         dbPath,
         "SELECT id, status, title, assigned_role FROM tasks",
       );
       expect(task).toHaveLength(1);
-      expect(task[0]?.["status"]).toBe("ARCHIVED");
+      // 停在【等人批准的那一格】。原先断言 ARCHIVED，而那个 ARCHIVED 是桩替
+      // CEO 批出来的两条边换到的（test/arch/stub-terminal-write.ts 判的就是这个）。
+      expect(task[0]?.["status"]).toBe(STUB_STOP_STATE);
       // title 记想法原文（0006 §5）：审计日志要能看出这一趟做的是什么
       expect(task[0]?.["title"]).toBe("做一个 AI 笔记应用");
     });
 
     it("超步事务真的滚动，不是一个事务包整趟", () => {
       // 这条是变异 M4 逼出来的：CLI 是【新的装配点】，装配漏掉
-      // auditor.instrumentSaver(...) 那一层时 —— 图跑完、14 条事件一行不少、退出码 0，
+      // auditor.instrumentSaver(...) 那一层时 —— 图跑完、事件一行不少、退出码 0，
       // 只有"崩溃只回滚半个超步"这个保证当场消失（docs/decisions/0005 §16 第 1 类陷阱）。
       // 用下限而不是精确值：图加一个节点不该让这里红，但"塌成 1 个事务"必须红。
       const r = hub([
@@ -349,7 +355,7 @@ describe("Task 0.10 —— Hub CLI", () => {
         "同一想法",
       ]);
       expect(first.code).toBe(0);
-      expect(countEvents(dbPath)).toBe(14);
+      expect(countEvents(dbPath)).toBe(STUB_EDGES);
 
       const second = hub([
         "run",
@@ -364,8 +370,8 @@ describe("Task 0.10 —— Hub CLI", () => {
       expect(second.code).toBe(2);
       expect(second.err).toContain("已存在");
       // 守卫必须【先查库】：图内 intake 的 INSERT OR IGNORE 对重复 id 一声不响，
-      // 拿它当幂等机制的话，第二次 run 会把整条状态机再走一遍 → 14 条变 28 条。
-      expect(countEvents(dbPath)).toBe(14);
+      // 拿它当幂等机制的话，第二次 run 会把整条状态机再走一遍 → 条数翻倍。
+      expect(countEvents(dbPath)).toBe(STUB_EDGES);
       expect(second.out).not.toContain("END");
     });
 
@@ -377,7 +383,7 @@ describe("Task 0.10 —— Hub CLI", () => {
       expect(
         hub(["run", "--db", dbPath, "--task", "T-B", "--idea", "乙"]).code,
       ).toBe(0);
-      expect(countEvents(dbPath)).toBe(28);
+      expect(countEvents(dbPath)).toBe(STUB_EDGES * 2);
       expect(
         readAll(dbPath, "SELECT id FROM tasks ORDER BY id").map((r) => r["id"]),
       ).toEqual(["T-A", "T-B"]);
@@ -456,11 +462,13 @@ describe("Task 0.10 —— Hub CLI", () => {
       expect(r.out).toContain("T-STAT");
       // Phase 0 出口门禁要"人工核对审计日志可读性"（计划 Task 0.11），status 就是那个人工入口。
       expect(r.out).toContain("CHARTER_PENDING");
-      expect(r.out).toContain("ARCHIVED");
-      // 14 条跃迁：轨迹必须只含状态边。把 action 写死成 "TaskStateChanged" 会查出 0 行
+      // 终点状态从夹具取：写死状态名的话，图一改这里就开始说谎（同一个理由见
+      // cmdStatus 里那句"不写死 ARCHIVED"）。
+      expect(r.out).toContain(STUB_STOP_STATE);
+      // 全部跃迁：轨迹必须只含状态边。把 action 写死成 "TaskStateChanged" 会查出 0 行
       // （events.action 存的是 §22.1 的 state_change），不筛 action 则会混进别的事件类型
       // —— 变异 M5、M6 各杀一条，就是这两个方向。
-      expect(trajectory(r.out)).toHaveLength(14);
+      expect(trajectory(r.out)).toHaveLength(STUB_EDGES);
     });
 
     it("轨迹只含状态跃迁：混进来的别类事件被 action 过滤掉", () => {
@@ -494,12 +502,13 @@ describe("Task 0.10 —— Hub CLI", () => {
       } finally {
         wr.close();
       }
-      expect(countEvents(dbPath)).toBe(15);
+      // 桩自己的那些 + 手动插进去的那一行污染事件。
+      expect(countEvents(dbPath)).toBe(STUB_EDGES + 1);
 
       const r = hub(["status", "--db", dbPath, "--task", "T-POLLUTE"]);
       expect(r.code).toBe(0);
       const pairs = trajectory(r.out);
-      expect(pairs).toHaveLength(14);
+      expect(pairs).toHaveLength(STUB_EDGES);
       // 语义判据：每一对都是合法跃迁。少过滤会在这里抛"未知状态 ?"。
       for (const [from, to] of pairs) {
         expect(
@@ -509,7 +518,7 @@ describe("Task 0.10 —— Hub CLI", () => {
       }
       // 且轨迹是完整链的头尾
       expect(pairs[0]?.[0]).toBe("CHARTER_PENDING");
-      expect(pairs[13]?.[1]).toBe("ARCHIVED");
+      expect(pairs.at(-1)?.[1]).toBe(STUB_STOP_STATE);
     });
   });
 });

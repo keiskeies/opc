@@ -17,12 +17,14 @@ import {
 } from "@opc/contracts";
 import { describe, expect, it } from "vitest";
 import { stringify } from "yaml";
+import { templateFiles } from "../../src/charter/seed.js";
 import {
   charterFieldPaths,
   loadCharterFile,
   loadCharterText,
   mergeForbiddenForRun,
 } from "../../src/roles/loader.js";
+import { NODE_TO_TEMPLATE } from "../../src/roles/preset.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const TEMPLATES = join(HERE, "..", "..", "resources", "charter-templates");
@@ -416,6 +418,37 @@ describe("7 个预设模板（Task 0.7 交付物）", () => {
         texts.some((s) => s.includes(CHARTER_PLACEHOLDER_ACCEPTANCE)),
         name,
       ).toBe(true);
+    }
+  });
+
+  // O2-4「ops.yaml 要么进装载表，要么删掉 —— 留着它最坏」。
+  // 这一发不是选边，是把「它今天到底算什么」变成**算出来的**而不是**说出来的**：
+  // 孤儿集合由 NODE_TO_TEMPLATE 反推，改这张表或加一份模板都会让它红。
+  //
+  // 为什么**留下**而不是删（当时的判断，写在这里免得下一轮当成没决定过）：
+  //  1. `NODE_TO_TEMPLATE` 的键是**图阶段**（intake/charter/product/tech/dev/test/report），
+  //     不是员工。把 ops 塞进去等于让 report 阶段拿运营的岗位书干活 —— 那是凭空造一次
+  //     组织变更，而它不该由实现层代笔（0008 §7）。
+  //  2. 运行时用的 role 是**组织图的节点 id**（`engine/dispatch.ts` 要求
+  //     `graph.nodes[task.role]` 存在），而 `org/commit.ts` 对「没有岗位书的角色」是
+  //     `continue` 而不是编一份。⇒ 删掉这个文件之后，CEO 真加一个 ops 角色时
+  //     **连一份可读的模板都不存在**，那才是「空壳」的加强版。
+  //  3. 「留着它最坏 = 读起来像运营角色已经存在」这半句**已经不再成立**：
+  //     O2-2 的播种命令按目录 glob 读它，而判据 A 让「没签字」的模板整次拒绝、
+  //     零写入 ⇒ 它现在读起来是「有一份没签的运营岗位书」，这句话是真的。
+  it("孤儿模板集合恰好是 ops —— 而且『孤儿』只意味着【不走 preset 装配】", () => {
+    const mounted = new Set(Object.values(NODE_TO_TEMPLATE));
+    const files = templateFiles(TEMPLATES).map((f) =>
+      f.replace(/\.ya?ml$/iu, ""),
+    );
+    const orphans = files.filter((f) => !mounted.has(f));
+    // 断言的是**集合相等**，不是「有个 ops」：加一份新模板而不装配，这一发必须点名它。
+    expect(orphans).toEqual(["ops"]);
+    // 第二半句同样要判：孤儿 ≠ 死文件。播种命令读的是整个目录，所以 ops
+    // 有一条真的入口（签字之后），preset 没有 —— 两种「装载」不是一回事。
+    expect(files).toHaveLength(SEVEN.length);
+    for (const name of orphans) {
+      expect(() => loadCharterFile(join(TEMPLATES, name + ".yaml"))).not.toThrow();
     }
   });
 });

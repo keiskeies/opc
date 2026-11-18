@@ -47,7 +47,50 @@ export function pragmaConstructorOptions(): {
   return { enableForeignKeyConstraints: true, timeout: BUSY_TIMEOUT_MS };
 }
 
-/** 以只读模式打开一个【已存在】的库文件，并施加同一套 PRAGMA。 */
+/**
+ * `PRAGMA user_version` 里「这个库是**桩路线**建的」那个标记值。
+ *
+ * ── 为什么占的是 user_version ───────────────────────────────────────
+ * 需要一个**随库文件走**、**读它不需要写权限**、且**加它不需要迁移**的槽位。
+ * 满足的只有这一格：`PRAGMA user_version` 是 SQLite 留给应用自定义的 4 字节整数，
+ * 存在库文件头里，`openReadonlyDb` 读得到（实测）。本仓此前**全仓零处**引用它
+ * （`grep -rn user_version packages/hub` 只命中本文件），所以这一格是空的。
+ *
+ * ⚠ 反过来讲：从现在起这个槽位**被占了**，而且占它的是【路线归属】而不是【schema 版本】。
+ * SQLite 社区最常见的用法是拿它存迁移条数 —— **本仓不要那么用**，理由是那两个语义
+ * 会互相伪装：迁移条数会随迁移增加，而标记必须恒定。真要给 schema 记版本，
+ * `schema_versions` 表早就在了（0004 那条）。
+ * 这一条由 `packages/hub/test/cli/stub-write-guard.test.ts` 钉着：
+ * 值必须 > 10_000（大到不可能是迁移条数），且除本文件外全仓不许再有人写它。
+ *
+ * ── 为什么是这个【形状】的判据，而不是「库里有没有 tasks 行」────────
+ * 设计文档（docs/OPC-OS-功能优化设计.md O1-1）原本写的是后者。它**不成立**：
+ * 一条全新的真库被误指给桩时，`count(tasks) === 0` ⇒ 守卫放行 ⇒ 桩把生产库
+ * **当成自己的演示库收养**。那正是这条守卫存在的理由，却在最有价值的那一发上绿。
+ * 「有没有 tasks 行」判的是【这个库现在有没有内容】，而要看的是【这个库是谁的】。
+ */
+export const STUB_DB_MARKER = 9_000_001;
+
+/** 读 `user_version`（任何连接都能读，包括只读的）。 */
+export function readUserVersion(db: DatabaseSync): number {
+  const row = db.prepare("PRAGMA user_version").get() as {
+    user_version?: number | bigint;
+  };
+  // node:sqlite 把整数列返回 number 还是 bigint 取决于值域，两种都要能收下：
+  // 判据在这里如果写成 `as number`，将来标记值变大就会**恒不等**，
+  // 于是每个合法的演示库都被拒 —— 而那条红读起来像「守卫生效了」。
+  const v = row.user_version;
+  return typeof v === "bigint" ? Number(v) : (v ?? 0);
+}
+
+/** 打桩路线的归属标记。调用方负责确认这个库**确实是本次新建的**。 */
+export function markStubDb(db: DatabaseSync): void {
+  db.exec("PRAGMA user_version = " + STUB_DB_MARKER + ";");
+}
+
+/**
+ * 以只读模式打开一个【已存在】的库文件，并施加同一套 PRAGMA。
+ */
 export function openReadonlyDb(path: string): DatabaseSync {
   // 实测：只读连接上这四条 PRAGMA 都能执行（journal_mode 在已是 WAL 的库上返回 wal，
   // 不会尝试改模式），foreign_keys 对只读连接也无害。所以只读连接也走 applyPragmas ——

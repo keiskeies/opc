@@ -723,7 +723,7 @@ describe("F. 认领行【先于】花钱：崩溃循环正是上限要挡的那�
     const note = String(r.driven[0]?.note);
     expect(note).toContain("可能已经花掉钱");
     expect(note).toContain("harness_calls");
-    expect(note).toContain("spawn" === "spawn" ? "子进程被 SIGKILL" : "");
+    expect(note).toContain("子进程被 SIGKILL");
   });
 
   it("一条抛了【不牵连】同轮其它任务（逐条各自不牵连）", async () => {

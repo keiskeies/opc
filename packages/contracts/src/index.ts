@@ -120,6 +120,8 @@ export {
   type OrgActor,
   orgChangeSchema,
   type OrgChange,
+  orgGraphNodeSchema,
+  type OrgGraphNode,
   orgGraphSchema,
   type OrgNode,
   orgNodeSchema,
@@ -128,11 +130,13 @@ export {
 } from "./org/graph.js";
 
 export {
+  everyNodeDeclaresModelFamily,
   type NeedsConfirmation,
   rejectMalformed,
   type RejectCode,
   type RunningTasksInput,
   validateNewEdge,
+  validateNewNode,
   validateOrgChange,
   validateReparenting,
   type Verdict,

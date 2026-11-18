@@ -1447,3 +1447,319 @@ describe("0047 顶层判定与「下一位是人类」的写路径", () => {
     expect(res.note).toContain("扮演");
   });
 });
+
+/* ═══════════════════════════════════════════════════════════════════
+   `ReviewDecided` 的生产者（O3 的动作 2；ADR 0060）
+
+   规格 §5.8 把这一条列为六个 kind 之一，`KIND_TO_ACTION` 映到 `review_decision`、
+   `recorder.targetOf` 认它的 `gate`、`role-memory.ts` 里那一整支 `gate` 档分类器在等它
+   —— 四环早就写好了，缺的只是"没人发"。所以这一节测的是**发得对不对**，而它下面
+   那一条（落点表反向穷尽）测的是**将来会不会漏发**：后者的价值高于前者，因为
+   "漏发"这件事在没有那条守卫时是**全绿**的（表里没归类的落点 ⇒ 静默不发）。
+   ═══════════════════════════════════════════════════════════════════ */
+
+/**
+ * 落点 → 「这一轮算不算一次审阅判定、算哪种」的**第二份**，手抄自 §7.1 的语义。
+ *
+ * ⚠ 为什么在测试里再抄一份而不是 import 生产那张表：抄一份的价值恰恰在于它是
+ * **另一处**写的（dispatch.test.ts 文件头 `LEGAL` 同一个理由）。直接 import
+ * `VERDICT_BY_LANDING` 来断言它自己，等于「dispatch 用的表等于 dispatch 用的表」——
+ * 给 IN_REVIEW 加一条出边而把它错分成"不算判定"，那种错法**永远绿**。
+ *
+ * ⚠ 值域是 `null | "pass" | "reject"`，而 `null` 那一格【必须写出理由】。
+ * 静默的 null 与"想清楚了这里不算判定"在断言里长得一模一样，而后者才是可审的。
+ */
+const EXPECT_VERDICT: Record<string, { readonly verdict: "pass" | "reject" | null; readonly why: string }> = {
+  APPROVED_UPWARD: { verdict: "pass", why: "那一格 literally 是【审过了，往上走】" },
+  REJECTED_DOWNWARD: { verdict: "reject", why: "那一格是【打回】" },
+  ESCALATED_TO_CEO: {
+    verdict: null,
+    why:
+      "走到它的那条边叫 blocked =「我判不了」。ReviewDecided.decision 的值域只有 " +
+      "pass|reject，为它硬塞一个取值等于把「CEO 还没判」写成「有人判过了」——" +
+      "那一行在 append-only 库里删不掉。",
+  },
+  DECOMPOSING: { verdict: null, why: "拆解不是审阅" },
+  IN_PROGRESS: { verdict: null, why: "接活儿重做，不是判定" },
+  EVIDENCE_SUBMITTED: { verdict: null, why: "产出方自己那一轮：它交东西，不判自己" },
+};
+
+describe("ReviewDecided —— 落点表反向穷尽（漏归类时这一发红）", () => {
+  /** 每条边怎么走到：状态 + 角色 + 动作。缺了它就没法把 AGENT_EDGES 的每一条都真走一遍。 */
+  const REACH: Record<string, { status: string; role: string; toRole?: string }> = {
+    "CHARTER_APPROVED/pass": { status: "CHARTER_APPROVED", role: "director" },
+    "DECOMPOSING/handoff": { status: "DECOMPOSING", role: "director", toRole: "dev" },
+    "IN_PROGRESS/pass": { status: "IN_PROGRESS", role: "dev" },
+    "IN_REVIEW/pass": { status: "IN_REVIEW", role: "director" },
+    "IN_REVIEW/handoff": { status: "IN_REVIEW", role: "director", toRole: "dev" },
+    "IN_REVIEW/blocked": { status: "IN_REVIEW", role: "director" },
+    "BUDGET_PAUSED/blocked": { status: "BUDGET_PAUSED", role: "director" },
+  };
+
+  it("AGENT_EDGES 的每一个落点都被这份表归类过 —— 新加一条出边而不来说清算不算判定 ⇒ 红", () => {
+    const landings = new Set<string>();
+    for (const [status, byAction] of Object.entries(AGENT_EDGES)) {
+      for (const action of Object.keys(byAction ?? {})) {
+        const e = AGENT_EDGES[status as never]?.[action as never];
+        if (e !== undefined) landings.add(e.to);
+        expect(REACH[status + "/" + action], "边 " + status + "/" + action + " 没有走法夹具").toBeDefined();
+      }
+    }
+    // 反向也判：这份表里不许躺着【边表已经没有】的落点（那是一份没人用的抄本，
+    // 它的存在只会让下一次读它的人以为那条边还在）。
+    for (const landing of landings) {
+      expect(EXPECT_VERDICT[landing], "落点 " + landing + " 没被归类").toBeDefined();
+    }
+    for (const landing of Object.keys(EXPECT_VERDICT)) {
+      expect(landings.has(landing), "抄本里的 " + landing + " 在边表里已不存在").toBe(true);
+    }
+  });
+
+  it("逐条真走一遍 planEdge ⇒ 实际带的判定等于这份手抄（含 null 那几格）", () => {
+    for (const [status, byAction] of Object.entries(AGENT_EDGES)) {
+      for (const action of Object.keys(byAction ?? {})) {
+        const edge = AGENT_EDGES[status as never]?.[action as never];
+        if (edge === undefined) continue;
+        const r = REACH[status + "/" + action] as { status: string; role: string; toRole?: string };
+        const handoffTo = r.toRole ?? null;
+        const p = planEdge({
+          status: r.status as never,
+          role: r.role,
+          graph: GRAPH,
+          decision: { action: action as never, summary: "干了活", ...(handoffTo === null ? {} : { to_role: handoffTo }) },
+          handoffTo,
+          blockedHandoff: null,
+          // 同源性判定【不是这一发要判的东西】，而 pass 在 IN_REVIEW 上会被它拦住：
+          // 给它一个放行，才能走到"落点决定判定"那一格（拦住的那一支另有用例，
+          // 见上面「审阅独立性」那一发 —— 它断的正是被拦下时【不发】这条事件）。
+          review: { ok: true, reason: "" },
+          ceoRoleId: CEO,
+        });
+        const want = EXPECT_VERDICT[edge.to] as { verdict: "pass" | "reject" | null; why: string };
+        const label = status + "/" + action + " → " + edge.to;
+        // 只有真的跃迁了才谈得上带判定：越权 / 没有上级那几支会 stay，
+        // 而 stay 的分支结构上带不了 review（EdgePlan 的判别式管的）。
+        if (!p.move) {
+          expect(p, label + "：这一支不该跃迁").toMatchObject({ move: false });
+          continue;
+        }
+        if (want.verdict === null) {
+          expect(p.review, label + " 不该带审阅判定（" + want.why + "）").toBeUndefined();
+        } else {
+          expect(p.review?.decision, label + " 该带 " + want.verdict).toBe(want.verdict);
+          // 理由必须带上那一轮的 summary：§24 风险 2 要的就是这句人话，
+          // 而它【只进 payload】—— 线上形状被 web 投影吃死了。
+          expect(p.review?.note).toBe("干了活");
+        }
+      }
+    }
+  });
+});
+
+describe("ReviewDecided —— 真库里发的那一行", () => {
+  const decided = (db: Db): Row[] =>
+    db.prepare("SELECT * FROM events WHERE action='review_decision' ORDER BY id").all() as Row[];
+
+  it("审过了 ⇒ 一行 review_decision，署【审阅者本人】而不是 system/hub", async () => {
+    const { db, res, published } = await newWorld({
+      status: "IN_REVIEW",
+      role: "director", // director(sonnet) 审 dev(claude)：不同源 ⇒ 放行
+      lastProducer: "dev",
+      turn: turn(said({ action: "pass", summary: "接口对得上，测试也齐" })),
+    });
+    expect(res.moved).toBe(true);
+
+    const rows = decided(db);
+    expect(rows).toHaveLength(1);
+    const row = rows[0] as Row;
+    // 署名的这一格是整件事的**全部**动机：规格 §24 风险 2 要「谁判的」，
+    // 而落 system/hub 会在写下去的那一刻把它删掉（append-only，删不掉也改不回）。
+    expect(row["actor_type"]).toBe("agent");
+    expect(row["actor_id"]).toBe("director");
+    // gate 指认出「审的是谁的产出」—— §24 风险 1（审阅共谋）事后要查的就是这一格。
+    expect(row["target"]).toBe("in_review:dev->director");
+    const payload = JSON.parse(String(row["payload"])) as Record<string, unknown>;
+    expect(payload["kind"]).toBe("ReviewDecided");
+    expect(payload["decision"]).toBe("pass");
+    expect(payload["note"]).toBe("接口对得上，测试也齐");
+    // ⚠ 线上那份【不带】note：payload 是线上形状的超集，而广播出去的是 evt 本身。
+    // 这一发钉的是"超集只落在库里、没顺着 SSE 漏出去"—— 漏出去等于改 SSE 契约。
+    expect(published.some((p) => p.kind === "ReviewDecided")).toBe(true);
+    expect(JSON.stringify(published)).not.toContain("接口对得上");
+  });
+
+  it("打回 ⇒ decision 是 reject；同一条任务的【产出方】读不到这一行", async () => {
+    const { db } = await newWorld({
+      status: "IN_REVIEW",
+      role: "director",
+      lastProducer: "dev",
+      turn: turn(said({ action: "handoff", to_role: "dev", summary: "缺错误分支" })),
+    });
+    const rows = decided(db);
+    expect(rows).toHaveLength(1);
+    expect(JSON.parse(String(rows[0]?.["payload"]))["decision"]).toBe("reject");
+    // 归属只认署名：这一行是 director 做的决定，不该因为任务归 dev 就算进 dev 的记忆。
+    // （读取侧那一半在 test/memory/role-memory.test.ts 判；这里钉的是落库的署名。）
+    expect(rows[0]?.["actor_id"]).toBe("director");
+  });
+
+  it("查不到产出方 ⇒ gate 里留一个 `?`，而不是【编】一个产出方", async () => {
+    /*
+     * ⚠ 这一发【只能】走打回那一条边，而这不是夹具偷懒，是代码的形状：
+     * `reviewGate` 对「查不到产出方」判【拒】（独立性无从判定 ⇒ 落到拦），
+     * 所以 pass 那一支结构上到不了 `?` —— `in_review:?->X` 只可能出现在 reject 上。
+     * 换句话说那个 `?` 说的是「有人打回了，而我们也知道打回的是【哪一次来历不明的产出】」，
+     * 它【永远不会】被读成「一次来历不明的产出被批过了」。这条方向性正是
+     * "宁可留 `?` 也不编一个名字"敢成立的原因。
+     */
+    const { db, res } = await newWorld({
+      status: "IN_REVIEW",
+      role: "director",
+      lastProducer: null, // 任务一建好就停在 IN_REVIEW（崩溃恢复的那种形状）
+      turn: turn(said({ action: "handoff", to_role: "dev", summary: "重做" })),
+    });
+    expect(res.moved).toBe(true);
+    const rows = decided(db);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.["target"]).toBe("in_review:?->director");
+    expect(JSON.parse(String(rows[0]?.["payload"]))["decision"]).toBe("reject");
+
+    // 反向对照：同一种"查不到产出方"，换成 pass ⇒ 被独立性拦住，一条判定都不发。
+    // 没有这一发，上面那条会被读成"`?` 这一格两种判定都会出现"。
+    const pass = await newWorld({
+      status: "IN_REVIEW",
+      role: "director",
+      lastProducer: null,
+      turn: turn(said({ action: "pass", summary: "行" })),
+    });
+    expect(pass.res.moved).toBe(false);
+    expect(decided(pass.db)).toEqual([]);
+  });
+
+  it("打回超限改升 CEO ⇒ 落点是 ESCALATED_TO_CEO，而【那一次打回仍然留痕】", async () => {
+    /*
+     * 这一发是"键是 edge.to 而不是最终的 to"这条判据存在的【全部】理由。
+     * 按最终的 to 判，这一支会落到没归类的 ESCALATED_TO_CEO ⇒ 不发 ⇒
+     * 「连打三次没过」这条路径一条审阅决定都不留 —— 而那恰恰是最该进角色记忆的一串。
+     * 而它【全绿】：没有任何别的读方会少一块。
+     */
+    const { db, res } = await newWorld({
+      status: "IN_REVIEW",
+      role: "director",
+      lastProducer: "dev",
+      rejections: 3,
+      turn: turn(said({ action: "handoff", to_role: "dev", summary: "第三次还是不行" })),
+    });
+    expect(res.status).toBe("ESCALATED_TO_CEO");
+    const rows = decided(db);
+    expect(rows).toHaveLength(1);
+    const payload = JSON.parse(String(rows[0]?.["payload"])) as Record<string, unknown>;
+    expect(payload["decision"]).toBe("reject");
+    expect(String(payload["note"])).toContain("第三次还是不行");
+  });
+
+  it("被机器拦下的那些轮次【一条都不发】：拦下不算做成了一个判定", async () => {
+    // 每一发都断"零行"，而不是只断没跃迁：状态不动是 planEdge 的事，
+    // 而"审计里多出一条没发生过的判定"是【这一发】才管的事。
+    const cases: { name: string; o: Parameters<typeof newWorld>[0] }[] = [
+      {
+        name: "同源审阅被拦",
+        o: {
+          status: "IN_REVIEW",
+          role: "auditor", // auditor(claude) 审 dev(claude)，CEO 没批
+          lastProducer: "dev",
+          turn: turn(said({ action: "pass", summary: "看着行" })),
+        },
+      },
+      {
+        name: "作者审自己",
+        o: {
+          status: "IN_REVIEW",
+          role: "director",
+          lastProducer: "director",
+          ceoApproved: true,
+          turn: turn(said({ action: "pass", summary: "我审我自己" })),
+        },
+      },
+      {
+        name: "越权交接",
+        o: {
+          status: "IN_REVIEW",
+          role: "director",
+          lastProducer: "dev",
+          // qa 不是 director 的下游（图上 director 的下游是 dev/qa —— 所以换成平级的 ceo 之外的人不行，
+          // 拿"没点名的收件人"这一支：handoffGate 直接拒，planEdge 走 stay）
+          turn: turn(said({ action: "handoff", summary: "不点名" })),
+        },
+      },
+      {
+        name: "一轮 wait",
+        o: {
+          status: "IN_REVIEW",
+          role: "director",
+          lastProducer: "dev",
+          turn: turn(said({ action: "wait", summary: "等 CI" })),
+        },
+      },
+      {
+        name: "执行失败",
+        o: {
+          status: "IN_REVIEW",
+          role: "director",
+          lastProducer: "dev",
+          turn: turn(said({ action: "pass", summary: "半截" }), { ok: false, error: "boom", costCents: 2 }),
+        },
+      },
+      {
+        // 产出方自己那一轮（落 EVIDENCE_SUBMITTED）：它交东西，不判自己
+        name: "产出方交活儿",
+        o: {
+          status: "IN_PROGRESS",
+          role: "dev",
+          turn: turn(said({ action: "pass", summary: "写完了" })),
+        },
+      },
+    ];
+    for (const c of cases) {
+      const { db } = await newWorld(c.o);
+      expect(decided(db), c.name + " 轮不该留审阅判定").toEqual([]);
+    }
+  });
+
+  it("审阅判定那条审计排在状态边【之前】，且每条被写下的都广播了", async () => {
+    /*
+     * 顺序不是洁癖：两件事都靠它。
+     *  ① 因果 —— 先有"审过、通过"，状态才被推进；回放里倒过来读会让人以为状态自己动的。
+     *  ② 记账钩子那句「seq 取本轮最后写下的那条 events.id」必须继续为真。把这一条
+     *     挪到状态边【之后】，那个 seq 就换值了 ⇒ budgets.source_event 上换一批新键
+     *     （幂等键换值 = 同一笔钱可以再记一次），而那与本条要测的东西毫无关系。
+     */
+    const w = await newWorld({
+      status: "IN_REVIEW",
+      role: "director",
+      lastProducer: "dev",
+      turn: turn(said({ action: "pass", summary: "过了" })),
+    });
+    const actions = w.db.prepare("SELECT action FROM events ORDER BY id").all().map((r) => String(r["action"]));
+    expect(actions.indexOf("review_decision")).toBeGreaterThanOrEqual(0);
+    expect(actions.indexOf("review_decision")).toBeLessThan(actions.indexOf("state_change"));
+    // 洞：写下的每一条都得广播（真总线对 seq 严格递增有守卫，乱序当场抛）。
+    const written = w.db.prepare("SELECT id FROM events ORDER BY id").all().map((r) => Number(r["id"]));
+    expect(w.published.map((p) => p.seq)).toEqual(written);
+  });
+
+  it("⭐ 一轮里同一件事不重复发：同一本库连跑两轮，第二轮已经不在 IN_REVIEW 了", async () => {
+    // 这是"审阅判定 = 一次审阅事件"的去重证据。生产里同一次审阅不会跑两遍，
+    // 但 reviewer 那一轮崩在广播之前会重跑，而 events 是 append-only。
+    const w = await newWorld({
+      status: "IN_REVIEW",
+      role: "director",
+      lastProducer: "dev",
+      turn: turn(said({ action: "pass", summary: "过了" })),
+    });
+    expect(decided(w.db)).toHaveLength(1);
+    // 第二轮：任务已经在 IN_PROGRESS/dev 那一格，动作是 pass ⇒ 落 EVIDENCE_SUBMITTED。
+    await w.again(turn(said({ action: "pass", summary: "又交一次" })));
+    expect(decided(w.db)).toHaveLength(1);
+  });
+});

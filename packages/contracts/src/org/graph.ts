@@ -78,6 +78,24 @@ export const orgNodeSchema = z
 export type OrgNode = z.infer<typeof orgNodeSchema>;
 
 /**
+ * 组织图【节点格】的形状 = 节点本体 + `reports_to`。
+ *
+ * ⚠ 这一格在 round294 之前是【内联在 orgGraphSchema 里】的一段 `.extend()`，
+ *   而它当时已经是【两个地方想要的同一个形状】：图里每个节点、以及 `add_node`
+ *   的载荷。内联的代价不是难看，是那条本文件上面刚写过的失效方式 ——
+ *   「把 reports_to 拼成 report_to」在图那一侧被 `.strict()` 挡住，
+ *   而如果 add_node 另写一份字段，那一侧就【没有那个守卫】：
+ *   一个拼错的键在变更载荷上会变成「这个新角色没有上级」，而它是一张森林。
+ *   ⇒ 提取成一份定义，两处吃同一个。别把它读成"顺手重构"：它是那条家规的
+ *     「同一件事只有一处定义」在契约层的落点。
+ */
+export const orgGraphNodeSchema = orgNodeSchema.extend({
+  /** 直接上级；CEO 为 null。 */
+  reports_to: z.string().min(1).nullable(),
+});
+export type OrgGraphNode = z.infer<typeof orgGraphNodeSchema>;
+
+/**
  * 委派边：`from` 产出，`to` 审阅。方向口径与 hub 的 DelegationEdge 一致
  * （author-reviewer.ts 的 `independentReviewerPath(author, edges)` 收的就是这个方向）。
  * 两套边类型【有意不合并】：hub 那一套不带审阅门控的载荷（它判的是运行时的一跳），
@@ -109,12 +127,7 @@ export type DelegationEdge = z.infer<typeof delegationEdgeSchema>;
  */
 export const orgGraphSchema = z
   .object({
-    nodes: z
-      .record(z.string().min(1), orgNodeSchema.extend({
-        /** 直接上级；CEO 为 null。 */
-        reports_to: z.string().min(1).nullable(),
-      }))
-      .default({}),
+    nodes: z.record(z.string().min(1), orgGraphNodeSchema).default({}),
     edges: z.array(delegationEdgeSchema).default([]),
   })
   .strict();
@@ -138,6 +151,33 @@ export const orgChangeSchema = z.discriminatedUnion("kind", [
     })
     .strict(),
   z.object({ kind: z.literal("add_edge"), edge: delegationEdgeSchema }).strict(),
+  // round294（O8 §7 第 18 格那一格自己点名的修法）。加这一种 kind 的【全部】意义在
+  // 「带判据」三个字：round292 之前契约里没有「加节点」这一类变更，而
+  // `commitOrgGraph` 落库的是【请求体那张图】经 applyChangeToGraph 的结果 ⇒
+  // 「在请求体的图里多塞一个节点、变更本身挑一条与它无关的合法 add_edge」一路拿 200，
+  // 那个节点从头到尾没被任何一关问过（主张 r15 的证据②、§7 第 15/18 两格）。
+  // round292 补的是「旁路也得有判据」（everyNodeDeclaresModelFamily 判整张 after 图），
+  // 本轮补的是「有一条正经的路，且这条路上的新节点逐条判过」。
+  //
+  // ⚠ 载荷形状刻意的三点：
+  //  ① 吃【一整个节点】而不是「role_id + 几个散装字段」—— 后者会在 orgNodeSchema
+  //    新增必填字段时静默漏掉那一格（漏一个 `can_manage` 就得到一个"加出来的角色
+  //    永远不能接收汇报"的默认值，而它看着像调用方没传）。这里复用
+  //    `orgGraphNodeSchema`，节点形状【只有一个定义】。
+  //  ② 不在这里挂边。新节点先以「有上级、无委派边」进图，委派边随后走 `add_edge`
+  //    —— 那条路上有全套 L2 判据（门控 / 自审 / 同家族 / 升级可达 / 深度）。
+  //    把边塞进 add_node 等于给同一件事写两条判据不同的路，而其中一条是新的、没测过的。
+  //  ③ 载荷里【只有节点】，没有外层键。落库时 nodes 的那个键就是 node.role_id，
+  //    所以「身份」只有一个来源，不存在「键与 role_id 不一致」这一格可判 ——
+  //    而只要写成 `{role_id, node}` 两段，那一格就会出现，且它的失效方向是
+  //    「变更点名的角色和真正进库的角色不是同一个」。存在的判据是【重名】：
+  //    role_id 已在图里 ⇒ role_exists（改角色走 reparent / 直接交新图，不走这条路）。
+  z
+    .object({
+      kind: z.literal("add_node"),
+      node: orgGraphNodeSchema,
+    })
+    .strict(),
 ]);
 export type OrgChange = z.infer<typeof orgChangeSchema>;
 

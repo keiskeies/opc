@@ -80,7 +80,10 @@ function runGate(cwd: string): Run {
   let claimed = -1;
   for (const l of lines) {
     if (l.startsWith("★FAIL")) {
-      printedFails.push(l.slice(5).split("→")[0].trim());
+      // 解构默认值而不是 `!` 或 `as`：split 恒不返回空数组，所以那个默认值走不到，
+      // 但写成断言就等于「我说它有就有」——这里宁可留一个走不到的空串。
+      const [head = ""] = l.slice(5).split("→");
+      printedFails.push(head.trim());
     }
     if (l.startsWith("★ ")) {
       listedFails.push(l.slice(2).trim());
