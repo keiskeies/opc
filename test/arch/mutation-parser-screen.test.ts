@@ -10,9 +10,10 @@
  * readSummary 逐字节切出来，喂【真 vitest 屏】。
  *
  * ── 判的是三条【跨型不变量】，不是「都必须抛」──────────────────────
- *   甲 全绿屏        ⇒ 红味字段全 0（读成红 = 判据恒红，M0 永远红）
- *   乙 一发用例红    ⇒ 至少一个红味字段 > 0（读成绿 = 整张矩阵假绿）
- *   丙/丁 装载失败屏 ⇒ 【不允许读成「和全绿一样」】：要么抛，要么它自己那格红味非 0
+ *   甲 全绿屏          ⇒ 红味字段全 0（读成红 = 判据恒红，M0 永远红）
+ *   乙 一发用例红      ⇒ 至少一个红味字段 > 0（读成绿 = 整张矩阵假绿）
+ *   丙丁戊己 装载/采集失败屏 ⇒ 【不允许读成「和全绿一样」】：要么抛，要么它自己那格红味非 0
+ *   （丙丁戊己 四型各钉【一格】，扩型理由与分工见 LOAD_FAIL_SCREENS 那段注释）
  *
  * ⚠ 本文件第一版把丙/丁写成「九台【一律】必须抛」，跑出来 6 发红。那不是机器的错，
  *   是我把【一型的补救办法】当成了【全场的判据】。实测（本轮，逐台切字节喂屏）：
@@ -107,12 +108,52 @@ const SCREENS = {
     colorize(
       "[[2m      Tests [[22m [[1m[[32m25 passed[[39m[[22m [[90m (25)[[39m\n",
     ),
+  /**
+   * 装载失败【加】另一发真红（真屏 probe302-mixed-raw.txt）：
+   * Tests 行有数字、用例级也有红 ⇒ 计数型的旧两格【全静默】，只有格③ 认得。
+   */
+  戊:
+    colorize(
+      "[[41m[[1m FAIL [[22m[[49m test/arch/probe302dead.test.ts[[2m [ test/arch/probe302dead.test.ts ][[22m\n" +
+        "[[41m[[1m FAIL [[22m[[49m test/arch/probe302red.test.ts[[2m > [[22mprobe302 真红[[2m > [[22m这一发故意红\n" +
+        "[[2m Test Files [[22m [[1m[[31m2 failed[[39m[[22m[[2m | [[22m[[1m[[32m1 passed[[39m[[22m[[90m (3)[[39m\n",
+    ) +
+    colorize(
+      "[[2m      Tests [[22m [[1m[[31m1 failed[[39m[[22m[[2m | [[22m[[1m[[32m5 passed[[39m[[22m[[90m (6)[[39m\n",
+    ),
+  /** hook 炸 + 其余全绿（probe302-hookgreen-raw.txt）：没有方括号 ⇒ 只有格② 认得。 */
+  己:
+    colorize(
+      "[[41m[[1m FAIL [[22m[[49m test/arch/probe302hook.test.ts[[2m > [[22mprobe302 hook 炸\n" +
+        "[[2m Test Files [[22m [[1m[[31m1 failed[[39m[[22m[[2m | [[22m[[1m[[32m1 passed[[39m[[22m[[90m (2)[[39m\n",
+    ) +
+    colorize(
+      "[[2m      Tests [[22m [[1m[[32m4 passed[[39m[[22m[[2m | [[22m[[33m1 skipped[[39m[[90m (5)[[39m\n",
+    ),
 } as const;
 
 type ScreenName = keyof typeof SCREENS;
 
-/** 装载失败那一族的两型（不变量③ 的输入）。 */
-const LOAD_FAIL_SCREENS: readonly ScreenName[] = ["丙", "丁"];
+/**
+ * 装载/采集失败那一族，四型（不变量③ 的输入）。
+ *
+ * ⚡ round302 从两型扩到四型。原来只有 丙/丁，而计数型那四台【只有两格】：
+ *   丙 被两格同时拦住、丁 只被「文件级红而用例级 0 红」那一格拦住。本轮给它们补了
+ *   第三格（方括号那型 FAIL 行）之后，丁【两格都拦得住】⇒「摘掉某一格还剩几格」
+ *   这件事在 丙丁 两型上量不出来 ⇒ 必须补两型各自【只有一格认得】的屏：
+ *     · 戊 = 装载失败【加】另一发真红 ⇒ 只有格③ 认得（Tests 行有数字、用例级也有红）
+ *       这一型正是 round301 §⑦① 登记的那格残留，现在是【被钉住的】。
+ *     · 己 = hook 炸 + 其余全绿 ⇒ 只有格② 认得（FAIL 行是 `> <suite>`，没方括号）
+ *       没有己，摘掉格② 时丁照样被格③ 拦住 ⇒ 格② 看起来像装饰（假未命中）。
+ *   字节取自真屏 `.workbuddy/probe302-{mixed,hookgreen}-raw.txt`。
+ * ⚠ 登记的残留：hook 炸【加】另一发红（probe302-hook-raw.txt）四台计数型三格都不响 ——
+ *   那种屏上「打到判据的红」与「别处炸的红」在字节上分不开，要分只能靠用例名归因
+ *   （并红型那几台有）。
+ */
+const LOAD_FAIL_SCREENS: readonly ScreenName[] = ["丙", "丁", "戊", "己"];
+
+/** 只有【文件名】没有用例名的那两型（夹具形状自证用）。 */
+const BRACKET_SCREENS: readonly ScreenName[] = ["丙", "丁"];
 
 /** 各台红味字段名不同（failed / red / failedTests / failedFiles / redFiles / files.failed）。 */
 const RED_KEYS = [
@@ -282,8 +323,10 @@ describe("变异机的 readSummary：全场喂真 vitest 屏（round301）", () 
 
   it("语料非空且台数不低于本轮数出来的那个数 —— 语料空了这条会恒绿", () => {
     // 反假绿哨兵：本文件的结论是【逐台】的，所以「一台都没扫到」必须当场红。
-    // 分母来源：本轮 readdirSync 数出 24 台 mutate 机，其中 9 台自己实现 readSummary
+    // 分母来源：本轮 readdirSync 数出 25 台 mutate 机，其中 9 台自己实现 readSummary
     // （4 台计数型 + 5 台并红型，分类见上面的 ARCH_ANCHORS）。
+    // ⚠ 第 25 台是 round302-mutate-cell3.mjs：它被文件名正则【扫进目录】但没有自己的
+    //   readSummary（它靠【切片】借别人的），所以不进语料 ⇒ 它没有「自己的读数」可普查。
     expect(
       corpus.length,
       "切出的台数：" + corpus.join(", "),
@@ -302,21 +345,52 @@ describe("变异机的 readSummary：全场喂真 vitest 屏（round301）", () 
     // 乙 与 丙/丁【真的差在归因上】：前者的 FAIL 行长出用例名，后两者只有文件名。
     // ⚠ 判的是【剥完色码】的文本：色码夹在 `>` 与用例名之间，直接在原字节上
     //   找 "> 那一发" 找不到（本文件第一版就这么错过一次，红在自己身上）。
+    const stripped = (s: ScreenName): string => plain(SCREENS[s]);
     const failLine = (s: ScreenName): string =>
-      plain(SCREENS[s])
+      stripped(s)
         .split("\n")
         .find((l) => l.includes("FAIL")) ?? "";
     expect(
       failLine("乙"),
       "乙 的 FAIL 行没有用例名 ⇒ 它就不是一发【用例】红",
     ).toMatch(/>[^>]*那一发\s*$/u);
-    for (const name of LOAD_FAIL_SCREENS) {
+    for (const name of BRACKET_SCREENS) {
       expect(
         failLine(name),
         name + " 的 FAIL 行长出了用例名 ⇒ 装载失败不是这个形状",
       ).not.toContain(">");
     }
-    expect(plain(SCREENS["丙"])).toMatch(/Tests\s+no tests/u);
+    expect(stripped("丙")).toMatch(/Tests\s+no tests/u);
+
+    /* round302 补：戊/己 的【分界线】本身也得自证。
+       这一族全部的价值在于「两型各自只有一格认得」，而那件事取决于两处字节形状：
+         · 装载失败的专属特征 = `FAIL <文件> [ <同一个文件> ]`（方括号里重复同一路径）
+         · 用例/hook 失败【没有】那个方括号
+       戊 必须【两者都有】（一份装载失败 + 另一发用例红），己 必须【只有后者】。
+       少了这一发，把 己 也写成带方括号的屏 ⇒ 摘掉格② 时它照样被格③ 拦住 ⇒
+       下面那一发「抹格② ⇒ 己失守」永远红，而红因是我的夹具（round300 那一族）。 */
+    const bracketLines = (s: ScreenName): string[] =>
+      stripped(s)
+        .split("\n")
+        .filter((l) => /^\s*FAIL\s+(\S+)\s+\[\s*(\S+)\s*\]\s*$/u.test(l));
+    expect(
+      bracketLines("丙").length + bracketLines("丁").length,
+      "丙/丁 少了方括号那型 FAIL 行 ⇒ 计数型新加的格③ 就没有输入了",
+    ).toBe(2);
+    // 戊：既有方括号（装载失败那一份），又有长出用例名的一发（另一发真红）。
+    expect(bracketLines("戊").length).toBe(1);
+    expect(
+      stripped("戊"),
+      "戊 里没有长出用例名的 FAIL 行 ⇒ 它就不是「装载失败 + 另一发红」",
+      // ⚠ 用例名前面还夹着【另一段 suite】（`> suite > 用例名`）⇒ 这里不能写 `[^>]*`，
+      //   那一支过不了第二个 `>`（本文件第一版就是这么红的，红在夹具自证自己身上）。
+    ).toMatch(/FAIL\s+\S+\s>.*这一发故意红\s*$/mu);
+    // Tests 行有数字 ⇒ 格① 不响；用例级也有红 ⇒ 格② 不响。两格不响的前提钉住。
+    expect(stripped("戊")).toMatch(/Tests\s+1 failed/u);
+    // 己：一发都没红（4 passed | 1 skipped）⇒ 只有格② 认得它；且【不许】有方括号。
+    expect(bracketLines("己").length).toBe(0);
+    expect(stripped("己")).not.toMatch(/Tests\s+\d+ failed/u);
+    expect(stripped("己")).toMatch(/1 skipped/u);
   });
 
   it("语料【每一台】都归得进某一型 —— 认不出就红，不许跳过", () => {
@@ -417,11 +491,41 @@ describe("变异机的 readSummary：全场喂真 vitest 屏（round301）", () 
       bRel,
     );
     const bParse = await importParser(bPunched, bRel + "-punched");
+    /* 戊 单独判：那一屏【本来就有一发真用例红】（probe302-mixed 真屏），抹掉并红后
+       它自己的 failed 仍 > 0 —— 那不是「没坏」，那是【真的红】。本轮探针量过九台，
+       戊 上并红型抹前 failed=3（= 1 发用例红 + 2 份文件红）、抹后 = 1 ⇒
+       判「抹后必须 0」会把这一发写成【永远红】的假判式（round300 那一族：口径跟着
+       字节走，不能跟着上一轮的记忆走）。 */
+    const wuBefore = handle(b.parse, "戊");
     for (const name of LOAD_FAIL_SCREENS) {
       const after = handle(bParse, name);
-      if (after.threw)
+      if (after.threw) {
         problems.push(name + "：抹掉并红后【仍然抛】⇒ 那一格不是承重的");
-      else if (num(after.flat, "failed") > 0) {
+      } else if (name === "戊") {
+        if (num(after.flat, "failed") === 0) {
+          problems.push(
+            "戊：抹掉并红后 failed 成了 0 ⇒ 那一屏的真用例红也没了，锚点抹过头",
+          );
+        } else if (num(after.flat, "failed") >= num(wuBefore.flat, "failed")) {
+          problems.push(
+            "戊：抹掉并红后 failed 没下降（" +
+              num(wuBefore.flat, "failed") +
+              " → " +
+              num(after.flat, "failed") +
+              "）⇒ 文件级红还在被计入",
+          );
+        } else if (
+          num(after.flat, "failed") !== num(after.flat, "failedTests")
+        ) {
+          problems.push(
+            "戊：抹后 failed=" +
+              num(after.flat, "failed") +
+              " 而 failedTests=" +
+              num(after.flat, "failedTests") +
+              " ⇒ 抹得不干净",
+          );
+        }
+      } else if (num(after.flat, "failed") > 0) {
         problems.push(
           name + "：抹掉并红后 failed 仍 = " + num(after.flat, "failed"),
         );
@@ -436,9 +540,12 @@ describe("变异机的 readSummary：全场喂真 vitest 屏（round301）", () 
       }
     }
 
-    /* ── 计数型：抹掉「文件级红而用例级 0 红」那一格 ─────────────────
-       ⇒ 丁（死一份、其余照跑，Tests 行有数字）不再抛；丙仍由另一格拦着 ⇒
-         红的正当位置是【丁】，这一发同时钉住「丁 是独立承重的那一型」。 */
+    /* ── 计数型 A：抹掉「文件级红而用例级 0 红」那一格（格②）───────────
+       ⚡ round302 改了红的【落点】。原来判的是「丁 不再抛」，而本轮补了格③ 之后
+       丁 那一屏【两格都拦得住】⇒ 抹掉格② 时丁仍抛 ⇒ 那一发【永远红】，红因是我
+       自己的判式过期（round300 那一族：登记的口径跟不上机器字节）。
+       现在红的正当落点是【己】（hook 炸 + 其余全绿，没有方括号 ⇒ 格③ 不响），
+       而 戊 仍须抛（格③ 没动）⇒ 这一发同时钉住「己 是格② 独立承重的那一型」。 */
     const cell2 = [
       "failedFiles > 0 && failed === 0",
       "redFiles > 0 && red === 0",
@@ -462,14 +569,54 @@ describe("变异机的 readSummary：全场喂真 vitest 屏（round301）", () 
       aRel,
     );
     const aParse = await importParser(aPunched, aRel + "-punched");
-    const ding = handle(aParse, "丁");
-    if (ding.threw)
+    const ji = handle(aParse, "己");
+    if (ji.threw)
       problems.push(
-        "丁：抹掉那一格后【仍然抛】⇒ 拦它的是别的格，锚点没打在承重处",
+        "己：抹掉格② 后【仍然抛】⇒ 拦它的是别的格，锚点没打在承重处（" +
+          JSON.stringify(ji.flat) +
+          "）",
       );
-    const bing = handle(aParse, "丙");
-    if (!bing.threw)
-      problems.push("丙：抹掉一格后【两格都不拦了】⇒ 丙 不是两格重叠的那一型");
+    for (const name of ["丙", "戊"] as const) {
+      if (!handle(aParse, name).threw) {
+        problems.push(
+          name +
+            "：抹掉格② 之后【连该拦它的格也不拦了】⇒ 那一格不该被这一发影响",
+        );
+      }
+    }
+
+    /* ── 计数型 B：抹掉【格③】（方括号那型 FAIL 行）───────────────────
+       红的正当落点是【戊】（装载失败 + 另一发真红）；丙 由格①、己 由格② 各自拦住
+       ⇒ 三格各自只被一型钉住。没有这一发，日后有人删掉格③ 时本文件【仍然全绿】——
+       round302 那台矩阵（round302-mutate-cell3.mjs）会红，但它是【手跑】的机器，
+       不是常跑守卫；本文件才是每次 arch 全跑都过的那一道。 */
+    const CELL3 = "if (deadFiles.length > 0) {";
+    if (a.slice.includes(CELL3)) {
+      const a3Punched = punch(a.slice, CELL3, "if (false) {", aRel);
+      const a3Parse = await importParser(a3Punched, aRel + "-punched3");
+      const wu = handle(a3Parse, "戊");
+      if (wu.threw)
+        problems.push(
+          "戊：抹掉格③ 后【仍然抛】⇒ 那一格不是那一型唯一的门（" +
+            JSON.stringify(wu.flat) +
+            "）",
+        );
+      for (const name of ["丙", "己"] as const) {
+        if (!handle(a3Parse, name).threw) {
+          problems.push(
+            name +
+              "：抹掉格③ 之后不抛了 ⇒ 它其实是被格③ 拦住的，" +
+              "「三格各自承重」这句话是假的",
+          );
+        }
+      }
+    } else {
+      problems.push(
+        aRel +
+          " 的切片里没有格③ ⇒ 那台计数型把格③ 撤了或改写了；要么补回来，" +
+          "要么把这里的锚点跟着改（别把这一支删掉来让它过）",
+      );
+    }
 
     // 本文件【只读切片】，一个字都不该写进 .workbuddy —— 那几台是自回滚机器，
     // 跑它们的时候不许并发（台账纪律）。这里钉住「没写」。
