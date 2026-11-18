@@ -130,7 +130,7 @@ sections.push("额外：档位 " + c.modelTier + " 预算 " + c.budget.dailyUsd 
 | 有岗位书 ⇒ 逐格出现 | 主断言 |
 | 那一版读坏了 ⇒ 抛 | 主断言（`toThrow(/不是合法 JSON/)`） |
 | 角色名跟着走 | 主断言 |
-| **库里一个版本都没有 ⇒ 明说「没有岗位书」** | **反向对照 `runtime.test.ts:477`；主断言 473/474 全过** |
+| **库里一个版本都没有 ⇒ 明说「没有岗位书」** | **反向对照 `runtime.test.ts:490`；主断言 486/487 全过**【round305 各 +13：文件头部加 import 与夹具默认值，四发用例本体没动】 |
 
 第四发是**实测**而不是推理：单独跑那一发，红因是
 `expected '你在一人公司里担任角色 [dev]…' not to contain '没有你的岗位书'`，
@@ -224,7 +224,7 @@ kind 标为 `string` 的条目，而那个循环**从不读 `string` 这个值**
 | `prompt.test.ts` 解构造出的 `noKey` 不是 `Charter` | 本轮 | 前提**本来就是错的**：transform 逐键列出，`untrustedInputs` 是**必填而值可为 undefined**，读侧永远造不出"键不存在"。改测试并写明"生产造不出这个状态" |
 | `prompt.test.ts` 的 `noKey.untrustedInputs` 访问 | 本轮 | 同上 |
 | `store.test.ts:675` `m[1]` 可能 undefined | `2bcbdb0` **2026-11-11** | 一行 `(m[1] ?? "")`，并写明"三元里 `m` 非空不传递到捕获组"（行号 663 → 675：0059 那一批在同一文件 §④ 上面插了注释，又把这一行顶下去 12 行 —— 同一个错第二次犯，见 0059） |
-| `runtime.test.ts:720` 桩 `Db` 缺 `DatabaseSync` 14 个成员 | `42c8eea` **2026-11-11** | 加 `as never` 并写明这是**刻意收窄的桩类型**（同文件 `appendAudit` 那几行同一写法） |
+| `runtime.test.ts:733` 桩 `Db` 缺 `DatabaseSync` 14 个成员（行号 720 → 733：round305 接 Task 6.1 重试，头部加 import 与夹具默认值把这一行顶下去 13 行；与上一行 663 → 675 同一族——**正文写坐标时没人能担保上面不再加行**） | `42c8eea` **2026-11-11** | 加 `as never` 并写明这是**刻意收窄的桩类型**（同文件 `appendAudit` 那几行同一写法） |
 
 ⇒ **vitest 不会报这些**：esbuild 只剥类型。一条**类型上根本不可能成立**的测试
 （第一行）可以长期绿着，因为它跑的只是剥完类型的 JS。

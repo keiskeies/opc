@@ -123,7 +123,10 @@ CREATE UNIQUE INDEX idx_approvals_card_identity
 ## 4. 泵挂在心跳上的形状：非阻塞派发
 
 心跳一轮做的是巡检 + 备份相位；起草一轮要起子进程，上限 **180 秒**
-（`engine/claude.ts:111` 那个 `i.timeoutMs ?? 180_000` 到点 `SIGKILL`。
+（`engine/claude.ts:201` 那个 `i.timeoutMs ?? 180_000` 到点 `SIGKILL`【round305 坐标 +90：
+claude.ts 为 Task 6.1 的重试判据加了 `started`/`spawnErrno` 两格与那张瞬时 errno 表，
+超时那一支的本体没动 —— 它今天反而是判据里被点名的一格：`costUsd` 写 0 而 `started:true`，
+「没记到钱」不等于「没花钱」】。
 ⚠ **这个坐标在本地未提交的改动里漂过，提交版是 `:88`**，同文件头部加了「今天唯一
 生效的安全边界」那段说明后函数体下移 23 行（`git diff --numstat` = +26 −3，改动
 全在头部，所以整个函数体一起动）。而第一版我把它改成了 `:106` —— 那不是历史坐标也不是

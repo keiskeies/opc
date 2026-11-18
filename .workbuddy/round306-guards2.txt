@@ -1,0 +1,18 @@
+
+[1m[30m[46m RUN [49m[39m[22m [36mv4.1.12 [39m[90mD:/item/opc[39m
+
+(node:55396) [DEP0190] DeprecationWarning: Passing args to a child process with shell option true can lead to security vulnerabilities, as the arguments are not escaped, only concatenated.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+ [32m✓[39m test/arch/doc-ids.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 19[2mms[22m[39m
+ [32m✓[39m test/arch/doc-coords.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 70[2mms[22m[39m
+ [32m✓[39m test/arch/doc-refs.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 98[2mms[22m[39m
+ [32m✓[39m test/arch/claim-coords.test.ts [2m([22m[2m8 tests[22m[2m)[22m[32m 65[2mms[22m[39m
+ [32m✓[39m test/arch/claims-registry.test.ts [2m([22m[2m145 tests[22m[2m)[22m[32m 207[2mms[22m[39m
+ [32m✓[39m test/arch/lint-baseline.test.ts [2m([22m[2m12 tests[22m[2m)[22m[33m 376[2mms[22m[39m
+     [33m[2m✓[22m[39m `pnpm lint` 今天的 error 全部在基线内，且读数本身可信 [33m 371[2mms[22m[39m
+
+[2m Test Files [22m [1m[32m6 passed[39m[22m[90m (6)[39m
+[2m      Tests [22m [1m[32m172 passed[39m[22m[90m (172)[39m
+[2m   Start at [22m 17:36:11
+[2m   Duration [22m 982ms[2m (transform 308ms, setup 0ms, import 474ms, tests 835ms, environment 0ms)[22m
+

@@ -440,7 +440,7 @@ task.status === "IN_REVIEW" && decision?.action === "handoff" ? deps.rejectionCo
 两侧刻意相反：装配侧忘了接线 = 上限永不生效（"配置写了而没生效"那族），要 TS 响；
 纯函数侧三十来个调用点大多没有"打回"这一维，强制写 0 只会让每一处都得解释那个 0 是什么。
 
-`runtime.ts:117` 那个 `REJECTION_COUNT_SQL`（【round272 坐标 +5：runtime.ts 头部加了一条 import，判据本体没动】）数的是 `json_extract(payload,'$.to') = 'REJECTED_DOWNWARD'`
+`runtime.ts:118` 那个 `REJECTION_COUNT_SQL`（【round272 坐标 +5：runtime.ts 头部加了一条 import，判据本体没动】【round305 再 +1：又是头部加 import —— 接上 `turn-retry.js`，判据本体仍没动】）数的是 `json_extract(payload,'$.to') = 'REJECTED_DOWNWARD'`
 而**不是 `action`** —— 一次打回写**两条** `state_change` 边（那一跳 + 自动补的 `IN_PROGRESS` 那一跳），
 数 `action` ⇒ 恒翻倍 ⇒ 上限**提前一倍**咬，而屏幕上没有任何一处会说"这次升级是计数算重了"。
 数 tasks.status 也不行：任务早被自动那一跳落到 `IN_PROGRESS` 重做了，那个数**恒 0**。
@@ -467,8 +467,8 @@ task.status === "IN_REVIEW" && decision?.action === "handoff" ? deps.rejectionCo
 > ⇒ **两类坐标必须用两种形态写**：断言今天的位置 ⇒ `文件:行号`（进快照）；
 > 陈述当时写的是什么 ⇒ 汉字「第 N 行」（不进快照，也不该进）。
 > 本仓此前没有把这条区分写下来过，所以每次文件一动，历史引述就会跟着"漂"，
-> 而把它"修绿"的那一步恰好就是在改历史。上面 §6.5 顶部那个 `runtime.ts:117` 是**今天的位置**
-> （【round272 又 +5：runtime.ts 头部加了一条 import；原为 108，再往前是 112】，
+> 而把它"修绿"的那一步恰好就是在改历史。上面 §6.5 顶部那个 `runtime.ts:118` 是**今天的位置**
+> （【round272 又 +5：runtime.ts 头部加了一条 import；原为 108，再往前是 112；round305 再 +1，还是头部加 import】，
 > 因为 `runtime.ts` 头部不断加行而整体下移），它与这句历史不冲突：
 > 一个说今天，一个说当时。
 

@@ -280,7 +280,7 @@ const SNAP: Record<string, string> = {
   // 109 那行是 `timedOut = true;`。这不是守卫在闹脾气 —— 是我在同一个文件上边改边数，
   // 每次数完又往头部加了两行。**坐标要等那个文件停手之后再数**（详见 0044 §4 那段）。
   // 也正因为 key 存行号而值存内容，"看着像"的行号一个都混不过去。
-  "0044-charter-pump-where-do-cards-come-from-and-what-a-zero-cost-failure-costs.md>engine/claude.ts:111":
+  "0044-charter-pump-where-do-cards-come-from-and-what-a-zero-cost-failure-costs.md>engine/claude.ts:201":
     "}, i.timeoutMs ?? 180_000);",
   "0044-charter-pump-where-do-cards-come-from-and-what-a-zero-cost-failure-costs.md>serve/timer.ts:336":
     "skipped++;",
@@ -711,7 +711,9 @@ const SNAP: Record<string, string> = {
     '"COALESCE(SUM(limit_cents), 0) AS declared FROM budgets WHERE scope_type = ? AND period = ?";',
   // ── 0050 §6：打回那条边，以及它新造出来的那个循环 ──────────────────────
   // 这批里只有两格是【活坐标】（主张的形状就是"那一行现在写着这句话"）：
-  //  · runtime.ts:112 —— `REJECTION_COUNT_SQL` 那一行本身，它就是 §4.2.1 那个分子的实现。
+  //  · runtime.ts:118 —— `REJECTION_COUNT_SQL` 那一行本身，它就是 §4.2.1 那个分子的实现。
+  //    （这条注释自己就比正文漂得更快：它写的是 108 → 112 时的坐标而下面的 key 已经
+  //    跟到 118 —— 注释【不在任何守卫里】，所以它红了没人知道。round305 顺手把它对齐。）
   //    漂了要回来重读 0050 §6.5（为什么数 `payload.$.to` 而**不数** `action`：
   //    一次打回写两条 state_change 边，数 action 会恒翻倍 ⇒ 上限提前一倍咬）。
   //  · status.ts:59 —— 合法表里那条**一直存在**的补边。它是"三张表两有一无"里
@@ -753,9 +755,10 @@ const SNAP: Record<string, string> = {
     "if (state.current === \"REJECTED_DOWNWARD\") await write(\"IN_PROGRESS\");",
   "0050-abandoned-task-never-resumes-and-a-knob-that-does-not-exist.md>heartbeat/patrol.ts:139":
     "export function kindOf(alias: string): string {",
-  // :108 → :110 → :112 → :117（每一次都是 runtime.ts 头部加了 import）。
+  // :108 → :110 → :112 → :117 → :118（每一次都是 runtime.ts 头部加了 import；
+  // 最后一次是 round305 接上 turn-retry.js 那一行）。
   // 这一格是【活坐标】：0050 §6.5 那个「数 payload.$.to 而不数 action」的分子就是这一行实现的。
-  "0050-abandoned-task-never-resumes-and-a-knob-that-does-not-exist.md>runtime.ts:117":
+  "0050-abandoned-task-never-resumes-and-a-knob-that-does-not-exist.md>runtime.ts:118":
     "export const REJECTION_COUNT_SQL =",
   "0050-abandoned-task-never-resumes-and-a-knob-that-does-not-exist.md>status-machine.test.ts:172":
     "it(\"§7.1 未给出路的三态【当前】是死路 —— 显式钉住这个已知缺口\", () => {",
@@ -774,8 +777,11 @@ const SNAP: Record<string, string> = {
   // 并且每次 runtime.ts 头部加行，守卫就红一次，而"修绿"的动作是把一个历史数字
   // 改成今天的数字 = 改历史。⇒ 0051 正文里那两个行号已改成汉字形态（不进快照），
   // 口径写在 0050 §6.5 末尾：**断言今天的位置 ⇒ `文件:行号`；陈述当时是什么 ⇒ 「第 N 行」**。
-  // 这一行今天的坐标没有丢：0050 §6.5 顶部那个 `runtime.ts:117`（round272 起）是真活坐标，
-  // 那条主张（§6.5 的分子由这一行实现）本来就是关于【现在】的。
+  // 这一行今天的坐标没有丢：0050 §6.5 顶部那个 `runtime.ts:118`（round272 起 117，round305 +1）
+  // 是真活坐标，那条主张（§6.5 的分子由这一行实现）本来就是关于【现在】的。
+  // ⚠ round305 又摘掉一条同病 key：`INDEX.md>runtime.ts:109` —— 它替 INDEX 引用的是
+  //   0050 那轮的一句注释（过去时），而它指向的手抄副本 `ENSERT_TASK_BUDGET_SQL`
+  //   在 round272 就被删了（见上面 0045 那一格）。正文已改成「runtime.ts 第 109 行」。
   // bus.ts:256 也是活坐标：0051 §3 那句「不能 for await 那个订阅」的唯一依据是
   // 【空队列时 next() 挂住而不是返回 done】。有人把它改成空就返回，
   // 那条测试写法就能删掉这层包装 —— 快照该红，逼他重读那一段。
@@ -798,11 +804,13 @@ const SNAP: Record<string, string> = {
   // 前两格（runtime.test.ts）是 §4 那张表的**分母**：0058 §4 整节的论据是
   // 「四发里有一发只有附录杀得死」，而那句话的全部证据就是这一行那条反向对照 +
   // 它上面两条主断言仍然成立。有人把这一行当"重复的附录"删掉，主断言照绿而
-  // 杀掉那个变异的没了 ⇒ 快照必须钉住它在。:574 那一格性质不同，只是登记性质
+  // 杀掉那个变异的没了 ⇒ 快照必须钉住它在。runtime.test.ts:733 那一格性质不同，只是登记性质
   // （钉住那句 `as never` 强转还在，它是 0058 §7 那条"桩类型刻意收窄"的落点）。
-  "0058-a-restore-that-restored-the-mutant-and-three-reverse-assertions-searching-for-strings-that-do-not-exist.md>runtime.test.ts:477":
+  // ⚠ 这两格在 round305 各自漂了 +13 / +13（runtime.test.ts 头部加了 3 条 import +
+  //   world() 里加了两个可选钩子的默认值，用例本体一行未改）。
+  "0058-a-restore-that-restored-the-mutant-and-three-reverse-assertions-searching-for-strings-that-do-not-exist.md>runtime.test.ts:490":
     'expect(w.rt.deps.rolePrompt("dev")).not.toContain("没有你的岗位书");',
-  "0058-a-restore-that-restored-the-mutant-and-three-reverse-assertions-searching-for-strings-that-do-not-exist.md>runtime.test.ts:720":
+  "0058-a-restore-that-restored-the-mutant-and-three-reverse-assertions-searching-for-strings-that-do-not-exist.md>runtime.test.ts:733":
     'hook({ db: db as never, taskId: "t1", role: "dev", seq, costCents: 4, nowMs: NOW + 2000 });',
   "0058-a-restore-that-restored-the-mutant-and-three-reverse-assertions-searching-for-strings-that-do-not-exist.md>store.test.ts:675":
     'return m ? { f, names: (m[1] ?? "").split(",").map((s) => s.trim().split(" ")[0]).filter(Boolean) } : null;',
@@ -859,11 +867,20 @@ const SNAP: Record<string, string> = {
   // §2 那句「守卫对这句过期全程是绿的」当场变假 ⇒ 快照必须红。
   "OPC-OS-功能优化设计.md>roles/charter.test.ts:439":
     'it("孤儿模板集合恰好是 ops —— 而且『孤儿』只意味着【不走 preset 装配】", () => {',
-  // O3 那一节的「红的是它旁边那条反向对照」：这一格钉的是【反向对照这一发还在 465】。
+  // O3 那一节的「红的是它旁边那条反向对照」：这一格钉的是【反向对照这一发还在 490】。
   // 它不是产品事实，是「谁杀掉了那个变异体」这条归因的落点 —— 那一节整段结论就是
   // 「主断言在变异体下成立，杀变异的是附录」，行号挪了就等于归因没了。
-  "OPC-OS-功能优化设计.md>runtime.test.ts:465":
-    'expect("这些格没进提示词: [" + missing.join(", ") + "]").toBe(',
+  // ⚠ round305 挪这一格时量出一件比"顶漂"更值得记的事。【可复算的部分】：在 ffae248
+  //   （把这两篇文档入库的那一发）里，第 465 行是【第一发的主断言】，反向对照在 477，
+  //   而同一篇 0058 里写的「:477 / 主断言 473/474」对着 ffae248 是【精确】的
+  //   （第四发从 470 起）⇒ 同一个提交里两种口径并存，一处对得上、两处差 12 行。
+  //   【推断的部分】：那 12 行大概是"跑变异 → 写文档 → 上面又加行 → 入库"的先后顺序
+  //   造成的，但跑变异那一刻的工作区【不在 git 里】，这句话没有凭据，只能这么标着。
+  //   ⇒ 改成 :490 是【对齐语义】而不是平移：那一发的身份是"反向对照"，坐标只是住址。
+  //     同族先例见本文件 `memory/prompt.test.ts:146→158` 那条（守卫第一次覆盖
+  //     就抓出文档本来就错的坐标）。
+  "OPC-OS-功能优化设计.md>runtime.test.ts:490":
+    'expect(w.rt.deps.rolePrompt("dev")).not.toContain("没有你的岗位书");',
   // ⚠ 这一格 round288 之前写的是 `prompt.test.ts:146`，两处都错：基名有歧义
   //   （`charter/` 与 `memory/` 各一份 prompt.test.ts），而 146 行是【另一发】
   //   （「has_more ⇒ 说比这一块更长」的收尾）。那句话数的是出现次数 ⇒ 真落点是 158。
@@ -925,10 +942,20 @@ const SNAP: Record<string, string> = {
     "expect(API_ENDPOINTS).toContain(s.endpoint);",
   "INDEX.md>roles/preset.ts:27":
     "export const NODE_TO_TEMPLATE: Record<CompanyNode, string> = {",
-  "INDEX.md>runtime.test.ts:465":
-    'expect("这些格没进提示词: [" + missing.join(", ") + "]").toBe(',
-  "INDEX.md>runtime.ts:109":
-    "* 加上 AUTO_AFTER_EDGE 自动补的 IN_PROGRESS 那一跳，见 dispatch 的 chain），",
+  // 同上一条（OPC-OS-功能优化设计.md 那一格）：INDEX 那句话指的也是【反向对照】，
+  // 而它写的 `:465` 与「主断言 :461 / :462」是同一个 12 行错位口径 —— 461/462 在
+  // ffae248 里是【第一发】missing 数组的两格。裸写法的那两处不受本守卫管，
+  // 已在 INDEX 正文里按「先说用例、再说坐标」的形态改准。
+  "INDEX.md>runtime.test.ts:490":
+    'expect(w.rt.deps.rolePrompt("dev")).not.toContain("没有你的岗位书");',
+  // ⚠ 这里【原来有一条 INDEX.md>runtime.ts:109 的快照，round305 删掉了】，理由与
+  // 上面 0051 那一条同族（见本文件那段"它上面没加东西"的命运样本）：INDEX 那句话里
+  // 的 `runtime.ts:109` 是【引用 0050 那轮写下的一句注释】，它陈述的是当时，而它指向
+  // 的那份手抄副本（`ENSERT_TASK_BUDGET_SQL`）已经在 round272 删掉了 ⇒ 这条 key
+  // 每次 runtime.ts 头部加行都红一次，而"修绿"只有两种做法：把历史数字改成今天的
+  // （= 改历史），或让守卫继续替 INDEX 主张一件它没主张过的事（= 假绿）。
+  // ⇒ INDEX 正文那个坐标已改成「runtime.ts 第 109 行」的汉字形态（口径同 0050 §6.5：
+  //   断言今天的位置 ⇒ `文件:行号`；陈述当时 ⇒ 「第 N 行」，不进快照）。
   "INDEX.md>serve/driver-pump.ts:487":
     ".all(...states, maxAttempts, o.taskLimitCents, perRound) as unknown as {",
   "INDEX.md>status.ts:59": "REJECTED_DOWNWARD: [",

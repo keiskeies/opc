@@ -467,8 +467,14 @@ Task 6.4 基准轮新增的：
     堵点变成 0025 §8.1 那条**等 CEO 拍**的超步事务持锁范围。
     「外部 cron 拉 `hub:maintenance`」从今天起是**备选**而不是唯一形态，
     但它仍然合法：`pnpm hub:serve` 还没被任何进程管理器管起来（0025 §7 第 5 条）。
-- **`withRetry` 零生产调用方。** 接线点是 LangGraph 节点外面那一层，要 `@langchain/*`。
-  `patrol.ts` 与 `maintenance.ts` 已经有调用方（CLI + 测试），retry 没有。
+- **`withRetry` 零生产调用方。**〔本篇写作时成立；**round305 已翻向**：`engine/turn-retry.ts`
+  import 了 `withRetry`，`engine/runtime.ts` 的 `runTurn` 每轮调一次。⚠ 但「接上了」只意味着
+  【重试外壳每轮都在】，不意味着【真机上会重试】：那条判据要 `started === false` 且 errno 在
+  瞬时白名单上，而本机可复现的 `started:false` 全是确定性的 ENOENT ⇒ 今天一次都不放行。
+  下面那句「要 `@langchain/*`」讲的仍是【图节点外面那一层】的接线，那一层确实还没有。〕
+  接线点是 LangGraph 节点外面那一层，要 `@langchain/*`。
+  `patrol.ts` 与 `maintenance.ts` 已经有调用方（CLI + 测试），retry 没有。〔round305 翻向：
+  `engine/turn-retry.ts` 是 retry 的那个新调用方，上面那条括号说的就是它这一族。〕
 - **心跳不恢复任务。** 规格 §7.3 说追问结果可以是「自动恢复」，
   那一半要把任务推回图里跑，同样堵在图运行时上。
 - **`HeartbeatStalled` 的卡片投影没做。** 事件写进去了，桌面端把事件投影成
