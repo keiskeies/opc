@@ -1,0 +1,17 @@
+对照的旧实现 = c6f6e04（该文件历史上往回数第 2 版，判据：那份字节里【没有】 escapesUpward）
+配额合计 旧 = 291 当前 = 291 ；上限表行数 旧 = 22 当前 = 22
+
+① 往上跳（洞本体）（291 条）
+  旧该【绿】（这就是登记没说的那半格）/ 新该【红】
+  落判据之前 ⇒ 错误 291 条 / 未解析 0 / 语料 291 个 / 【绿：diffTypeBaseline 返回空字符串】
+  当前实现   ⇒ 错误 291 条 / 未解析 0 / 语料 0 个 / 红：出现了基线外的测试目录（../packages/hub/test/acceptance=3, ../packages/hub/test/approvals=14, ../packa…
+
+② 同位置写回仓内（单变量对照）（291 条）
+  两棵树都该【绿】（配额恰好踩满，没超）
+  落判据之前 ⇒ 错误 291 条 / 未解析 0 / 语料 291 个 / 【绿：diffTypeBaseline 返回空字符串】
+  当前实现   ⇒ 错误 291 条 / 未解析 0 / 语料 291 个 / 【绿：diffTypeBaseline 返回空字符串】
+
+③ 仓外绝对式（登记说错方向那一型）（291 条）
+  两棵树都该【红】—— 所以那句射程只对这一型成立
+  落判据之前 ⇒ 错误 291 条 / 未解析 0 / 语料 0 个 / 红：出现了基线外的测试目录（E:/other/repo/packages/hub/test/acceptance=3, E:/other/repo/packages/hub/test/…
+  当前实现   ⇒ 错误 291 条 / 未解析 0 / 语料 0 个 / 红：出现了基线外的测试目录（E:/other/repo/packages/hub/test/acceptance=3, E:/other/repo/packages/hub/test/…

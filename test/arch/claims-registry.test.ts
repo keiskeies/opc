@@ -1066,13 +1066,20 @@ describe("主张登记表：变异判别力（真红，合成输入不碰盘）"
     ...over,
   });
 
-  it("r19 的真仓库那一半：两份取材读得到，且四格锚点今天逐字都在", () => {
+  it("r19 的真仓库那一半：两份取材读得到，且判据锚点今天逐字都在", () => {
     // 正向对照。这一发红说明取材坏了或锚点漂了，而不是主张过期。
+    // ⚠ 锚点【不写死条数】（round300 从 3 加到 6 时改的口）：写「三格锚点」而数组里
+    //   放六条，下一次加锚点就会红在这句话的措辞上 —— 那是最坏的一发红：
+    //   红因不在判据而在注释，读红的人会被支去找一个不存在的塌方。
     const g = realFiles.arch("test-type-baseline.ts");
     for (const a of [
       "if (n > allowed)",
       "unregistered.push(",
       "staleTypeEntries",
+      // round300 那三格（往上跳的仓外路径族）。
+      '  return p === ".." || p.startsWith("../");',
+      "const file = escapesUpward(raw)",
+      'if (rel === "" || isOutsideRepo(raw, rel)',
     ]) {
       expect(g, "判据锚点漂了：" + a).toContain(a);
     }
@@ -1152,6 +1159,73 @@ describe("主张登记表：变异判别力（真红，合成输入不碰盘）"
     expect(spec).not.toBe(realFiles.arch("test-type-baseline.test.ts"));
     const msg = checkOne("r19", fakeFiles(r19Good({ [R19_SPEC]: spec })));
     expect(msg).toContain("反假绿哨兵");
+  });
+
+  // ── round300 加进来的三格：往上跳的仓外路径那一族 ────────────────────
+  // 共同的前提自证：`p.startsWith("../")` 在那份守卫里【整份出现三次】
+  // （toRepoRelative 剥前缀那一行、escapesUpward 的返回值、注释里的一次），
+  // 所以「判据函数体里在不在」与「整份文件里在不在」是【两个不同的读数】。
+  // 这三发各自把一种「整份仍绿而函数体已空」的改法点名，见每发的 note。
+  const guardWith = (from: string, to: string): string => {
+    const real = realFiles.arch("test-type-baseline.ts");
+    const guard = real.replace(from, to);
+    expect(guard, "锚点没命中 = 这一发是空变异，它当然会『绿』").not.toBe(real);
+    return guard;
+  };
+
+  it("变异 r19 之八：escapesUpward 恒假 ⇒ 红，且红因不是「上限比较」那一格", () => {
+    const guard = guardWith(
+      '  return p === ".." || p.startsWith("../");',
+      "  return false;",
+    );
+    const msg = checkOne("r19", fakeFiles(r19Good({ [R19_GUARD]: guard })));
+    expect(msg).toContain("escapesUpward");
+    expect(msg).toContain("花掉本仓");
+    // 红因排除：整份文件里那句前缀比较【还在两处】（toRepoRelative 那一行 + 注释），
+    // 所以这一发同时是「判据必须切函数体而不是搜全文」的证据。
+    expect(msg).not.toContain("上限比较");
+    expect(guard).toContain('p.startsWith("../")');
+  });
+
+  it("变异 r19 之九：注释里写着 escapesUpward 而函数体空了 ⇒ 仍然红", () => {
+    // ⭐ 这一发钉的是【取材口径】而不是判据本身：把整行调用换成一条注释之后，
+    //   「整份文件包含 escapesUpward(raw)」仍然成立（注释里就有这几个字），
+    //   只有【先切函数体、再剥注释】的写法会红。r22 的 method 记过的那条
+    //   withoutComments 盲区（锚点恰好出现在注释里）就是这个形状，这里给它一发正向证据。
+    const real = realFiles.arch("test-type-baseline.ts");
+    const at = real.indexOf("    const file = escapesUpward(raw)");
+    const end = real.indexOf(";", at);
+    expect(at).toBeGreaterThan(-1);
+    expect(end).toBeGreaterThan(at);
+    const guard =
+      real.slice(0, at) +
+      "    // escapesUpward(raw) 决定 file 怎么来\n" +
+      real.slice(end + 1);
+    expect(guard).not.toBe(real);
+    // 前提自证三条：字节【进了】注释、那条【调用】整条没了、而【定义】还在。
+    // 第三条是这一发的重点：定义还在 ⇒ 判「文件里有没有 escapesUpward 这几个字」
+    // 恒绿；第一条是那条「绿分不出【剥注释生效】与【锚点压根没注上】」的反证。
+    // （这里【不能】写 expect(guard).toContain("escapesUpward(raw)") —— 函数定义
+    // 本身就带那六个字，那句恒真，写了等于没写。）
+    expect(guard).toContain("// escapesUpward(raw)");
+    expect(guard).not.toContain("const file = escapesUpward(raw)");
+    expect(guard).toContain("function escapesUpward(");
+    const msg = checkOne("r19", fakeFiles(r19Good({ [R19_GUARD]: guard })));
+    expect(msg).toContain("parseTscOutput 不再调");
+    expect(msg).not.toContain("escapesUpward 的函数体");
+  });
+
+  it("变异 r19 之十：语料那一侧退回只判绝对式 ⇒ 红在 parseListFiles 那一格", () => {
+    // round300 变异机 M3 的合成版：函数还在、名字还在，只是这一处不调它了。
+    const guard = guardWith(
+      'if (rel === "" || isOutsideRepo(raw, rel)',
+      'if (rel === "" || isStillAbsolute(rel)',
+    );
+    const msg = checkOne("r19", fakeFiles(r19Good({ [R19_GUARD]: guard })));
+    expect(msg).toContain("parseListFiles 不再调");
+    // 前两格不许跟着红：三格是【分栏】的，混成一句话就看不出是哪一侧塌了。
+    expect(msg).not.toContain("escapesUpward");
+    expect(msg).not.toContain("parseTscOutput 不再调");
   });
 
   /* ── r20：census.ts 那三格 + 两枚 canary 的在场 ────────────────── */
