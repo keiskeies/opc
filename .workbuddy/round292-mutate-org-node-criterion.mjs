@@ -217,6 +217,27 @@ function readSummary(out, wantFail) {
         clean.slice(-600),
     );
   }
+  /* round302 补（格③）：这一格【不依赖别处有没有红】⇒ 它补的正是 round301 登记的
+     那格残留。格② 只在「用例级 0 红」时响，而真实的一次装载失败常常【和另一发的
+     真红同屏】（变异打坏 src ⇒ 判据那一发红，同时夹具那份装载不起来）：那时格①②
+     都不响，装载失败被【并进那一发正常的红】里读成「命中」。
+     四份真屏实测（.workbuddy/probe302-{mixed,hook,hookgreen,shapes}-raw.txt）：
+       语法坏 / import 找不到 ⇒ `FAIL  <文件> [ <同一个文件> ]`  ← 变异真会造出的两型
+       一个用例红            ⇒ `FAIL  <文件> > suite > 用例名`
+       beforeAll 里抛        ⇒ `FAIL  <文件> > suite`（用例级会长出 skipped）
+     ⇒ 「方括号里把同一条路径重复一遍」是装载失败的【专属】特征，实测误报面为空。 */
+  const deadFiles = [];
+  for (const deadLine of clean.split("\n")) {
+    const deadHit = /^\s*FAIL\s+(\S+)\s+\[\s*(\S+)\s*\]\s*$/u.exec(deadLine);
+    if (deadHit !== null && deadHit[1] === deadHit[2]) deadFiles.push(deadHit[1]);
+  }
+  if (deadFiles.length > 0) {
+    throw new Error(
+      "读到装载失败那型的 FAIL 行（" + deadFiles.join("、") + "）⇒ 整份文件没跑起来，" +
+        "这一发的读数不可信。格①② 在这种屏上【不响】（Tests 行有数字、用例级也有红），" +
+        "只有这一格认得它。尾部：\n" + clean.slice(-800),
+    );
+  }
   if (wantFail !== undefined && (tests.failed > 0) !== wantFail) {
     // 控制组专门用来证明上面这套解析【真的能分辨红与绿】。
     throw new Error(
@@ -254,9 +275,30 @@ function selfCheckParser() {
   );
   // 最危险的那一型：死一份、另两份照跑 ⇒ Tests 行有数字，上一发拦不住。
   const partialLoadFail = wrap(
-    "ESC[41mESC[1m FAIL ESC[22mESC[49m test/org/versioning.test.ts ESC[2m[ x ]ESC[22m\n" +
+    "ESC[41mESC[1m FAIL ESC[22mESC[49m test/org/versioning.test.ts ESC[2m [ test/org/versioning.test.ts ]ESC[22m\n" +
       " Test Files ESC[22m ESC[1mESC[31m1 failed | 2 passedESC[39mESC[22m ESC[90m (3)ESC[39m\n" +
       "      Tests ESC[22m ESC[1mESC[32m84 passedESC[39mESC[22m ESC[90m (84)ESC[39m\n",
+  );
+  /* round302 补两型，各钉【一格】—— 加了格③ 之后，丁那一屏两格都拦得住，
+     所以「摘掉某格还剩几格」这件事必须有【各自唯一】的屏才能量出来：
+       戊 = 装载失败【加】另一发真红（probe302-mixed-raw.txt）⇒ 只有格③ 认得：
+            Tests 行有数字（①不响）而用例级【也有】红（②不响）⇒ 旧三格全静默，
+            这正是 round301 登记的那格残留。
+       己 = hook 炸 + 其余全绿（probe302-hookgreen-raw.txt）⇒ 只有格② 认得：
+            FAIL 行是 `FAIL <文件> > <suite>`（没有方括号 ⇒ ③不响）、Tests 行有数字、
+            而用例级 0 红 ⇒ ②响。没有己，摘掉② 时丁照样被③ 拦住 ⇒ ② 看起来像装饰。
+     ⚠ 登记的残留：hook 炸【加】另一发红（probe302-hook-raw.txt）三格都不响 ——
+       那种屏上「打到判据的红」与「别处炸的红」在字节上分不开，要分只能靠用例名。 */
+  const deadWithRed = wrap(
+    "ESC[41mESC[1m FAIL ESC[22mESC[49m test/arch/probe302dead.test.tsESC[2m [ test/arch/probe302dead.test.ts ]ESC[22m\n" +
+      "ESC[41mESC[1m FAIL ESC[22mESC[49m test/arch/probe302red.test.tsESC[2m > ESC[22mprobe302 真红ESC[2m > ESC[22m这一发故意红\n" +
+      "ESC[2m Test Files ESC[22m ESC[1mESC[31m2 failedESC[39mESC[22mESC[2m | ESC[22mESC[1mESC[32m1 passedESC[39mESC[22mESC[90m (3)ESC[39m\n" +
+      "ESC[2m      Tests ESC[22m ESC[1mESC[31m1 failedESC[39mESC[22mESC[2m | ESC[22mESC[1mESC[32m5 passedESC[39mESC[22mESC[90m (6)ESC[39m\n",
+  );
+  const hookGreen = wrap(
+    "ESC[41mESC[1m FAIL ESC[22mESC[49m test/arch/probe302hook.test.tsESC[2m > ESC[22mprobe302 hook 炸\n" +
+      "ESC[2m Test Files ESC[22m ESC[1mESC[31m1 failedESC[39mESC[22mESC[2m | ESC[22mESC[1mESC[32m1 passedESC[39mESC[22mESC[90m (2)ESC[39m\n" +
+      "ESC[2m      Tests ESC[22m ESC[1mESC[32m4 passedESC[39mESC[22mESC[2m | ESC[22mESC[33m1 skippedESC[39mESC[90m (5)ESC[39m\n",
   );
   const problems = [];
   let checks = 0;
@@ -269,6 +311,25 @@ function selfCheckParser() {
       );
     } catch {
       // 这正是要求的形状。
+    }
+    checks += 1;
+  };
+  /** 与 mustThrow 同，但还要【红话出自哪一格】——见下面戊/己那段注释。 */
+  const mustThrowNamed = (name, text, needle) => {
+    try {
+      const s = readSummary(text, false);
+      problems.push(
+        "自证" + name + "：【没抛】—— 读成了 红发=" + s.tests.failed +
+          " 红文件=" + s.files.failed,
+      );
+    } catch (e) {
+      const msg = String(e instanceof Error ? e.message : e);
+      if (!msg.includes(needle)) {
+        problems.push(
+          "自证" + name + "：抛是抛了，但红话【不是那一格】（要找「" + needle +
+            "」，实得「" + msg.split("\n")[0].slice(0, 70) + "」）⇒ 红因来自别人 = 假变异",
+        );
+      }
     }
     checks += 1;
   };
@@ -292,13 +353,22 @@ function selfCheckParser() {
   checks += 1;
   mustThrow("丙", loadFail);
   mustThrow("丁", partialLoadFail);
+  /* 戊/己【判红话出自哪一格】而不是只判「抛了」：戊 在 292 上就算摘掉格③ 也会抛
+     （wantFail=false 那条控制组判式会接手），己 摘掉格② 也会抛（格③ 之外还有别的门）
+     ⇒ 只判「抛了」就是 round295 M4 那一族【红因来自别人】的假变异。
+     判据用两格红话里各自唯一的句子（格③ 那句由四台共用同一段字节，见台账 round302 ②）。 */
+  mustThrowNamed("戊（装载失败+另一发红）", deadWithRed, "装载失败那型的 FAIL 行");
+  mustThrowNamed("己（hook 炸+其余绿）", hookGreen, "用例级【一条红都没有】");
   if (problems.length > 0) {
     throw new Error(
       "这台机器自己的读数不可信，【一发都没跑】（" + checks + " 格里红 " + problems.length + " 格）：\n  " +
         problems.join("\n  "),
     );
   }
-  console.log("  读数自证  " + checks + " 格全过（真绿/真红读对，两种装载失败都抛）");
+  console.log(
+    "  读数自证  " + checks + " 格全过（真绿/真红读对，四种装载/采集失败屏都抛，" +
+      "其中 戊 只有格③ 认得、己 只有格② 认得）",
+  );
 }
 selfCheckParser();
 

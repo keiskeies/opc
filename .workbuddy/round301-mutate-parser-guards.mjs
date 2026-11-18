@@ -186,6 +186,9 @@ try {
     );
 
     // M2 摘格②：丁那一型必须失守（Tests 行有数字 ⇒ 格①看不见）。
+    // ⚡ round302：这里喂的是 PROBE_PARTIAL（【没有】FAIL 行）⇒ 格③ 看不见它 ⇒
+    //   这一发量的仍是「格② 独立拦得住什么」。若换成机器自证里那份丁夹具（本轮
+    //   已改成真屏的 `[ 同一路径 ]`）⇒ 格③ 会接手 ⇒ 这一发【永远不命中】。
     const m2src = good.replace(cell2.from, cell2.to);
     assertOnce(m2src, cell2.to, short + " M2");
     const before2 = await checkScreen(good, PROBE_PARTIAL, short + "b2");
@@ -193,28 +196,40 @@ try {
     const m2ok = before2.threw && !after2.threw;
     push(
       m2ok,
-      short + " M2 摘格②（丁该失守：①拦不住它 ⇒ ②独立承重）",
+      short + " M2 摘格②（丁该失守：①③ 都看不见它 ⇒ ②独立承重）",
       "改前" + (before2.threw ? "抛" : "【没抛】") + " / 改后" + (after2.threw ? "仍抛" : "不抛了"),
     );
     // M2 的自证侧：自证必须当场抓住这件事，而不是等人去读矩阵。
+    // ⚡ round302 改落点：夹具改成真屏形状后，丙/丁/戊 三型【都有方括号】⇒ 摘掉② 时
+    //   它们仍被 ①/③ 拦住 ⇒ 自证唯一会报的是【己】（hook 炸、没有方括号、用例级 0 红）。
+    //   ⇒ 「格② 独立承重」这句话现在由 己 钉，不再由 丁 钉（丁 与 丙 一样成了重叠型）。
     const m2self = await checkSelf(m2src, short + "s2");
     push(
-      !m2self.passed && m2self.msg.includes("丁"),
-      short + " M2′ 摘格②后【自证自己】该红在丁上",
-      m2self.msg,
+      !m2self.passed && m2self.msg.includes("己") && !m2self.msg.includes("丁"),
+      short + " M2′ 摘格②后【自证自己】该红在己上（丁 已由格③ 接手）",
+      m2self.passed ? "【自证静默】⇒ 摘掉那一格现场没人响" : m2self.msg,
     );
 
-    // M3 两格全摘：自证必须【红】（4 格里红 2 格：丙与丁各自数一次）。
+    // M3 两格全摘：自证必须【红】。
     // ⚡ 这一发的预期本轮被自己的机器推翻过一次：第一版写「两格全摘 ⇒ 静默通过」，
     //   实测是【自证红在丙与丁上】。真口径是自证喂的就是那两型屏 ⇒ 门没了它必然抓到。
     //   ⇒ 又一次 round295 那条泛用主张（「矩阵里的预期也是主张，只有跑出来的红绿
     //   分布能打它」），且这次是【我这一轮刚写的机器】上复发。
+    // ⚡⚡ round302 又改一次口，这次是【被本轮自己的两个改动同时改掉的】：
+    //   ⑴ 补了格③；⑵ 把 丙/丁 夹具里我手写的假方括号 `[ x ]` 换成真屏的
+    //   `[ 同一条路径 ]`（真 vitest 就是这么打的，实测三份 raw）。
+    //   ⇒ 丙/丁/戊 三型现在【都有方括号】⇒ 都被格③ 接手 ⇒ 两格全摘时自证只报【己】。
+    //   判式因此判「红话里有己，且不许有丙丁戊」：后半句同时钉住「格③ 真在替那三型挡」，
+    //   而 round302-mutate-cell3.mjs 的 M1 从另一侧钉同一件事（摘③ ⇒ 戊 失守）。
     const m3src = m2src.replace(CELL1.from, CELL1.to);
     const m3 = await checkSelf(m3src, short + "m3");
+    const stillThere = ["丙", "丁", "戊"].filter((n) => m3.msg.includes(n));
     push(
-      !m3.passed && m3.msg.includes("丙") && m3.msg.includes("丁"),
-      short + " M3 两格全摘（该红在丙【和】丁上：两型各自数一次）",
-      m3.passed ? "【静默通过】⇒ 自证是假的，它没在喂那两型" : m3.msg,
+      !m3.passed && m3.msg.includes("己") && stillThere.length === 0,
+      short + " M3 两格全摘（该【只】红在己上：丙丁戊 已由格③ 接手）",
+      m3.passed
+        ? "【静默通过】⇒ 自证是假的，它没在喂那几型"
+        : m3.msg + (stillThere.length > 0 ? "\n      | ⚠ " + stillThere.join("、") + " 仍在红话里 ⇒ 格③ 没接手" : ""),
     );
 
     // M4 自证摘空而门还在：静默通过 —— 门还在，所以这不是洞，是 M5 的对照组。

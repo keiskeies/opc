@@ -278,6 +278,27 @@ function readSummary(out) {
         "尾部：\n" + clean.slice(-800),
     );
   }
+  /* round302 补（格③）：这一格【不依赖别处有没有红】⇒ 它补的正是 round301 登记的
+     那格残留。格② 只在「用例级 0 红」时响，而真实的一次装载失败常常【和另一发的
+     真红同屏】（变异打坏 src ⇒ 判据那一发红，同时夹具那份装载不起来）：那时格①②
+     都不响，装载失败被【并进那一发正常的红】里读成「命中」。
+     四份真屏实测（.workbuddy/probe302-{mixed,hook,hookgreen,shapes}-raw.txt）：
+       语法坏 / import 找不到 ⇒ `FAIL  <文件> [ <同一个文件> ]`  ← 变异真会造出的两型
+       一个用例红            ⇒ `FAIL  <文件> > suite > 用例名`
+       beforeAll 里抛        ⇒ `FAIL  <文件> > suite`（用例级会长出 skipped）
+     ⇒ 「方括号里把同一条路径重复一遍」是装载失败的【专属】特征，实测误报面为空。 */
+  const deadFiles = [];
+  for (const deadLine of clean.split("\n")) {
+    const deadHit = /^\s*FAIL\s+(\S+)\s+\[\s*(\S+)\s*\]\s*$/u.exec(deadLine);
+    if (deadHit !== null && deadHit[1] === deadHit[2]) deadFiles.push(deadHit[1]);
+  }
+  if (deadFiles.length > 0) {
+    throw new Error(
+      "读到装载失败那型的 FAIL 行（" + deadFiles.join("、") + "）⇒ 整份文件没跑起来，" +
+        "这一发的读数不可信。格①② 在这种屏上【不响】（Tests 行有数字、用例级也有红），" +
+        "只有这一格认得它。尾部：\n" + clean.slice(-800),
+    );
+  }
   // 红了哪几份文件：FAIL 行的第一个字段就是文件路径（相对仓库根、posix 分隔）。
   const files = new Set();
   for (const line of clean.split("\n")) {
@@ -378,9 +399,32 @@ function selfCheckParser() {
     " FAIL  " + E2E + " [ " + E2E + " ]\n" +
     esc + "[2m Test Files esc[22m esc[1mesc[31m1 failed | 3 passed esc[39m esc[90m(4)esc[39m\n  " +
     esc + "[2m      Tests esc[22m esc[1mesc[32m242 passed esc[39m esc[90m(242)esc[39m\n";
-  for (const [name, text] of [
-    ["丙（no tests）", loadFail],
-    ["丁（死一份其余照跑）", partial],
+  /* round302 补两型，各钉【一格】（字节是真跑抓的，见 .workbuddy/probe302-*.txt）。
+     加了格③ 之后 丙/丁 两屏【两格都拦得住】⇒「摘掉某一格还剩几格」必须有各自唯一的屏
+     才量得出来，否则② 会看起来像装饰（红因由别人产生 = round295 M4 那一族）：
+       戊 = 装载失败【加】另一发真红 ⇒ 只有格③ 认得：Tests 行有数字（①不响）、
+            用例级【也有】红（②不响）⇒ 旧两格全静默。钉住 round301 那格残留。
+       己 = hook 炸 + 其余全绿 ⇒ 只有格② 认得：FAIL 行是 `FAIL <文件> > <suite>`
+            （没方括号 ⇒ ③不响）、Tests 行有数字而用例级 0 红。
+     ⚠ 登记的残留：hook 炸【加】另一发红（probe302-hook-raw.txt）三格都不响 ——
+       本机有用例名归因（files/tests 两个 Set），但那种屏上「打到判据的红」与
+       「别处炸的红」都是真红用例名，分不开的边界写在这里而不是藏起来。 */
+  const deadWithRed =
+    " FAIL  " + UNIT + " [ " + UNIT + " ]\n" +
+    " FAIL  " + E2E + " > 证据④ > 那一发故意红\n" +
+    esc + "[2m Test Files esc[22m esc[1mesc[31m2 failed esc[39m esc[2m| esc[22mesc[32m1 passed esc[39m esc[90m(3)esc[39m\n  " +
+    esc + "[2m      Tests esc[22m esc[1mesc[31m1 failed esc[39m esc[2m| esc[22mesc[32m5 passed esc[39m esc[90m(6)esc[39m\n";
+  const hookGreen =
+    " FAIL  test/org/hook-probe.test.ts > L1 validateNewNode\n" +
+    esc + "[2m Test Files esc[22m esc[1mesc[31m1 failed esc[39m esc[2m| esc[22mesc[32m3 passed esc[39m esc[90m(4)esc[39m\n  " +
+    esc + "[2m      Tests esc[22m esc[1mesc[32m91 passed esc[39m esc[2m| esc[22mesc[33m1 skipped esc[39m esc[90m(92)esc[39m\n";
+  for (const [name, text, needle] of [
+    ["丙（no tests）", loadFail, undefined],
+    ["丁（死一份其余照跑）", partial, undefined],
+    /* 戊/己【判红话出自哪一格】：只判「抛了」就是 round295 M4 那一族【红因来自别人】
+       的假变异 —— 摘掉承重那格后别的门照样抛，自证却报"过了"。 */
+    ["戊（装载失败+另一发红，只有格③ 认得）", deadWithRed, "装载失败那型的 FAIL 行"],
+    ["己（hook 炸+其余绿，只有格② 认得）", hookGreen, "用例级【一条红都没有】"],
   ]) {
     try {
       const s = readSummary(text.split("esc").join(esc));
@@ -388,14 +432,26 @@ function selfCheckParser() {
         name + "【没抛】—— 读成 红发=" + s.failed + " 红文件=" + s.files.size +
           "，控制组会在什么都没跑上判命中",
       );
-    } catch {
-      // 这就是要求的形状。
+    } catch (e) {
+      // 这就是要求的形状。戊/己 还要红话出自那一格。
+      if (needle !== undefined) {
+        const msg = String(e instanceof Error ? e.message : e);
+        if (!msg.includes(needle)) {
+          bad.push(
+            name + "：抛是抛了，但红话【不是那一格】（要找「" + needle + "」，实得「" +
+              msg.split("\n")[0].slice(0, 70) + "」）⇒ 红因来自别人 = 假变异",
+          );
+        }
+      }
     }
   }
   if (bad.length > 0) {
     throw new Error("这台机器自己的读数不可信，【一发都没跑】：\n  " + bad.join("\n  "));
   }
-  console.log("  读数自证  合成绿/合成红各读对（红文件归因认得出那两份路径）");
+  console.log(
+    "  读数自证  合成绿/合成红各读对（红文件归因认得出那两份路径）；" +
+      "四种装载/采集失败屏都抛，其中 戊 只由格③ 拦住、己 只由格② 拦住",
+  );
 }
 selfCheckParser();
 

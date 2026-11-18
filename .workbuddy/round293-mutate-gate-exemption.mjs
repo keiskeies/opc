@@ -173,6 +173,27 @@ function readSummary(out) {
         "不是判据红，两种读数都不许采信。尾部：\n" + plain.slice(-800),
     );
   }
+  /* round302 补（格③）：这一格【不依赖别处有没有红】⇒ 它补的正是 round301 登记的
+     那格残留。格② 只在「用例级 0 红」时响，而真实的一次装载失败常常【和另一发的
+     真红同屏】（变异打坏 src ⇒ 判据那一发红，同时夹具那份装载不起来）：那时格①②
+     都不响，装载失败被【并进那一发正常的红】里读成「命中」。
+     四份真屏实测（.workbuddy/probe302-{mixed,hook,hookgreen,shapes}-raw.txt）：
+       语法坏 / import 找不到 ⇒ `FAIL  <文件> [ <同一个文件> ]`  ← 变异真会造出的两型
+       一个用例红            ⇒ `FAIL  <文件> > suite > 用例名`
+       beforeAll 里抛        ⇒ `FAIL  <文件> > suite`（用例级会长出 skipped）
+     ⇒ 「方括号里把同一条路径重复一遍」是装载失败的【专属】特征，实测误报面为空。 */
+  const deadFiles = [];
+  for (const deadLine of plain.split("\n")) {
+    const deadHit = /^\s*FAIL\s+(\S+)\s+\[\s*(\S+)\s*\]\s*$/u.exec(deadLine);
+    if (deadHit !== null && deadHit[1] === deadHit[2]) deadFiles.push(deadHit[1]);
+  }
+  if (deadFiles.length > 0) {
+    throw new Error(
+      "读到装载失败那型的 FAIL 行（" + deadFiles.join("、") + "）⇒ 整份文件没跑起来，" +
+        "这一发的读数不可信。格①② 在这种屏上【不响】（Tests 行有数字、用例级也有红），" +
+        "只有这一格认得它。尾部：\n" + plain.slice(-800),
+    );
+  }
   return {
     red,
     green: passed === null ? 0 : Number(passed[1]),
@@ -211,7 +232,7 @@ function selfCheckParser() {
     [
       "丙 装载失败（no tests）必须抛",
       w(
-        "ESC[41mESC[1m FAIL ESC[22mESC[49m test/arch/plan-gate-paths.test.ts ESC[2m[ x ]ESC[22m\n" +
+        "ESC[41mESC[1m FAIL ESC[22mESC[49m test/arch/plan-gate-paths.test.ts ESC[2m [ test/arch/plan-gate-paths.test.ts ]ESC[22m\n" +
           " Test Files ESC[22m ESC[1mESC[31m1 failedESC[39mESC[22m ESC[90m (1)ESC[39m\n" +
           "      Tests ESC[22m ESC[2mno testsESC[22m\n",
       ),
@@ -220,14 +241,44 @@ function selfCheckParser() {
     [
       "丁 死一份其余照跑必须抛",
       w(
-        "ESC[41mESC[1m FAIL ESC[22mESC[49m test/arch/plan-gate-paths.test.ts ESC[2m[ x ]ESC[22m\n" +
+        "ESC[41mESC[1m FAIL ESC[22mESC[49m test/arch/plan-gate-paths.test.ts ESC[2m [ test/arch/plan-gate-paths.test.ts ]ESC[22m\n" +
           " Test Files ESC[22m ESC[1mESC[31m1 failed | 1 passedESC[39mESC[22m ESC[90m (2)ESC[39m\n" +
           "      Tests ESC[22m ESC[1mESC[32m22 passedESC[39mESC[22m ESC[90m (22)ESC[39m\n",
       ),
       null,
     ],
+    /* round302 补两型，各钉【一格】（字节是真跑抓的，见 probe302-*.txt）：
+         戊 = 装载失败【加】另一发真红 ⇒ 只有格③ 认得（Tests 行有数字、用例级也有红，
+              旧两格全静默）⇒ 钉住 round301 登记的那格残留。
+         己 = hook 炸 + 其余全绿 ⇒ 只有格② 认得（`FAIL <文件> > <suite>` 没方括号）。
+       ⚠ 登记的残留：hook 炸【加】另一发红三格都不响，要分只能靠用例名归因。 */
+    [
+      "戊 装载失败+另一发红（只有格③ 认得）必须抛",
+      w(
+        "ESC[41mESC[1m FAIL ESC[22mESC[49m test/arch/probe302dead.test.tsESC[2m [ test/arch/probe302dead.test.ts ]ESC[22m\n" +
+          "ESC[41mESC[1m FAIL ESC[22mESC[49m test/arch/probe302red.test.tsESC[2m > ESC[22mprobe302 真红ESC[2m > ESC[22m这一发故意红\n" +
+          "ESC[2m Test Files ESC[22m ESC[1mESC[31m2 failedESC[39mESC[22mESC[2m | ESC[22mESC[1mESC[32m1 passedESC[39mESC[22mESC[90m (3)ESC[39m\n" +
+          "ESC[2m      Tests ESC[22m ESC[1mESC[31m1 failedESC[39mESC[22mESC[2m | ESC[22mESC[1mESC[32m5 passedESC[39mESC[22mESC[90m (6)ESC[39m\n",
+      ),
+      null,
+    ],
+    [
+      "己 hook 炸+其余绿（只有格② 认得）必须抛",
+      w(
+        "ESC[41mESC[1m FAIL ESC[22mESC[49m test/arch/probe302hook.test.tsESC[2m > ESC[22mprobe302 hook 炸\n" +
+          "ESC[2m Test Files ESC[22m ESC[1mESC[31m1 failedESC[39mESC[22mESC[2m | ESC[22mESC[1mESC[32m1 passedESC[39mESC[22mESC[90m (2)ESC[39m\n" +
+          "ESC[2m      Tests ESC[22m ESC[1mESC[32m4 passedESC[39mESC[22mESC[2m | ESC[22mESC[33m1 skippedESC[39mESC[90m (5)ESC[39m\n",
+      ),
+      null,
+    ],
   ];
   const problems = [];
+  /* round302：戊/己【判红话出自哪一格】而不是只判「抛了」。只判抛了就是 round295 M4
+     那一族【红因来自别人】的假变异 —— 摘掉承重那格后别的门照样抛，自证却说过了。 */
+  const NAMED = new Map([
+    ["戊 装载失败+另一发红（只有格③ 认得）必须抛", "装载失败那型的 FAIL 行"],
+    ["己 hook 炸+其余绿（只有格② 认得）必须抛", "用例级【一条红都没有】"],
+  ]);
   for (const [name, text, judge] of cases) {
     try {
       const s = readSummary(text);
@@ -238,7 +289,17 @@ function selfCheckParser() {
       const bad = judge(s);
       if (bad !== "") problems.push(name + "：读错（" + bad + "）");
     } catch (e) {
-      if (judge === null) continue;
+      if (judge === null) {
+        const needle = NAMED.get(name);
+        const msg = String(e instanceof Error ? e.message : e);
+        if (needle !== undefined && !msg.includes(needle)) {
+          problems.push(
+            name + "：抛是抛了，但红话【不是那一格】（要找「" + needle + "」，实得「" +
+              msg.split("\n")[0].slice(0, 70) + "」）⇒ 红因来自别人 = 假变异",
+          );
+        }
+        continue;
+      }
       problems.push(
         name + "：真屏【抛了】⇒ M0 永远红：" + String(e.message).slice(0, 80),
       );
@@ -251,7 +312,8 @@ function selfCheckParser() {
     );
   }
   console.log(
-    "  读数自证  " + cases.length + " 格全过（真绿/真红读对，装载失败两型都抛）",
+    "  读数自证  " + cases.length + " 格全过（真绿/真红读对，四种装载/采集失败屏都抛；" +
+      "戊 只由格③ 拦住、己 只由格② 拦住 ⇒ 两格各自承重）",
   );
 }
 selfCheckParser();
