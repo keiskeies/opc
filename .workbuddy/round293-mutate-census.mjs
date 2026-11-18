@@ -117,6 +117,20 @@ function readSummary(out) {
         plain.slice(-1200),
     );
   }
+  // round301 补：Tests 行里【一个数字都没有】的那一型 —— 真 vitest 在
+  // 「整份文件装载失败、一个用例都没跑到」时把它打成 `      Tests  no tests`。
+  // 本机第一版把「读不到 failed」当 0 ⇒ M0 控制组（应绿）在什么都没跑的前提下
+  // 判【命中】，而 M1~M5 若恰好也全炸就一起判【未命中】⇒ 整台机器只剩一句
+  // 「命中 1/7」的红字，读的人以为判据松了。
+  // 判「无数字」而不是「等于 0」：真绿屏是「0 failed 缺失 + N passed」，有数字 ⇒ 不误伤。
+  const seg = line.replace(/^\s*Tests\s+/, "");
+  if (!/\d/u.test(seg)) {
+    throw new Error(
+      "Tests 摘要行里【一个数字都没有】（实得：" + seg.trim() + "）—— 这一型是" +
+        "「一个用例都没跑到」（装载/采集失败），不是「全部通过」。不能当 0。尾部：\n" +
+        plain.slice(-800),
+    );
+  }
   const failed = /(\d+) failed/.exec(line);
   const passed = /(\d+) passed/.exec(line);
   const fileLine = plain
@@ -126,12 +140,94 @@ function readSummary(out) {
     throw new Error("读不到 Test Files 汇总行：\n" + plain.slice(-800));
   }
   const failedFiles = /(\d+) failed/.exec(fileLine);
+  const red = failed === null ? 0 : Number(failed[1]);
+  const redFiles = failedFiles === null ? 0 : Number(failedFiles[1]);
+  // round301 补（本机最危险的那一型）：【死一份、其余照跑】。那时 Tests 行有数字，
+  // 上一格不响，而红只落在 Test Files 行 ⇒ 用例级读到 0 红 ⇒ 控制组判命中、
+  // 变异发判未命中 —— 一张【归因错了】的矩阵，exit 1 但红话说的是假原因。
+  // 与 round298「文件红了而读不到 FAIL 文件名 ⇒ 抛」同族；本机没有 FAIL 行归因，
+  // 所以文件级/用例级不自洽是唯一抓得住它的判据。
+  if (redFiles > 0 && red === 0) {
+    throw new Error(
+      "Test Files 红了 " + redFiles + " 份而用例级【一条红都没有】⇒ 那是装载/采集期" +
+        "失败，不是判据红，两种读数都不许采信。尾部：\n" + plain.slice(-800),
+    );
+  }
   return {
-    red: failed === null ? 0 : Number(failed[1]),
+    red,
     green: passed === null ? 0 : Number(passed[1]),
-    redFiles: failedFiles === null ? 0 : Number(failedFiles[1]),
+    redFiles,
   };
 }
+
+/**
+ * 读数自证（round301 补）：喂三段【真屏逐行抄写】，判的是这台读得对不对。
+ * 字节来自 .workbuddy/probe301-green-raw.txt / -red-raw.txt / -loadfail-raw.txt
+ * （本轮真跑抓的）。分母数出来，不写死。
+ */
+function selfCheckParser() {
+  const esc = String.fromCharCode(27);
+  const w = (s) => s.split("ESC").join(esc);
+  const cases = [
+    [
+      "甲 真绿屏读成绿",
+      w(
+        " Test Files ESC[22m ESC[1mESC[32m1 passedESC[39mESC[22m ESC[90m (1)ESC[39m\n" +
+          "      Tests ESC[22m ESC[1mESC[32m12 passedESC[39mESC[22m ESC[90m (12)ESC[39m\n",
+      ),
+      (s) => (s.red === 0 && s.green === 12 ? "" : "red=" + s.red + " green=" + s.green),
+    ],
+    [
+      "乙 真红屏读成红",
+      w(
+        " Test Files ESC[22m ESC[1mESC[31m1 failedESC[39mESC[22m ESC[90m (1)ESC[39m\n" +
+          "      Tests ESC[22m ESC[1mESC[31m2 failedESC[39mESC[22m | 10 passed ESC[90m (12)ESC[39m\n",
+      ),
+      (s) => (s.red === 2 && s.redFiles === 1 ? "" : "red=" + s.red + " redFiles=" + s.redFiles),
+    ],
+    [
+      "丙 装载失败（no tests）必须抛",
+      w(
+        "ESC[41mESC[1m FAIL ESC[22mESC[49m test/arch/census.test.ts ESC[2m[ x ]ESC[22m\n" +
+          " Test Files ESC[22m ESC[1mESC[31m1 failedESC[39mESC[22m ESC[90m (1)ESC[39m\n" +
+          "      Tests ESC[22m ESC[2mno testsESC[22m\n",
+      ),
+      null,
+    ],
+    [
+      "丁 死一份其余照跑必须抛",
+      w(
+        "ESC[41mESC[1m FAIL ESC[22mESC[49m test/arch/other.test.ts ESC[2m[ x ]ESC[22m\n" +
+          " Test Files ESC[22m ESC[1mESC[31m1 failed | 1 passedESC[39mESC[22m ESC[90m (2)ESC[39m\n" +
+          "      Tests ESC[22m ESC[1mESC[32m24 passedESC[39mESC[22m ESC[90m (24)ESC[39m\n",
+      ),
+      null,
+    ],
+  ];
+  const problems = [];
+  for (const [name, text, judge] of cases) {
+    try {
+      const s = readSummary(text);
+      if (judge === null) {
+        problems.push(name + "：【没抛】—— 读成 red=" + s.red + " redFiles=" + s.redFiles);
+        continue;
+      }
+      const bad = judge(s);
+      if (bad !== "") problems.push(name + "：读错（" + bad + "）");
+    } catch (e) {
+      if (judge === null) continue;
+      problems.push(name + "：真屏【抛了】⇒ M0 永远红：" + String(e.message).slice(0, 80));
+    }
+  }
+  if (problems.length > 0) {
+    throw new Error(
+      "这台机器自己的读数不可信，【一发都没跑】（" + cases.length + " 格里红 " +
+        problems.length + " 格）：\n  " + problems.join("\n  "),
+    );
+  }
+  console.log("  读数自证  " + cases.length + " 格全过（真绿/真红读对，装载失败两型都抛）");
+}
+selfCheckParser();
 
 function runSuite() {
   try {

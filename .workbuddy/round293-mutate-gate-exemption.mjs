@@ -114,24 +114,147 @@ function preflight() {
   if (bad.length > 0) throw new Error("锚点校验失败，一发不发：\n  " + bad.join("\n  "));
 }
 
+/**
+ * round301：round293-mutate-gate-exemption.mjs 的 readSummary 补两格 + 读数自证。
+ *
+ * ⚠ 那个文件原来的剥色正则写成 /<ESC>\[[0-9;]*m/（源码里放了一个【字面 0x1b 字节】）。
+ *   本轮整段替换它时若手打那一行，ESC 会在编辑器的字符串里悄悄丢掉 ⇒ 正是 round292
+ *   中过、round293 自己在注释里写过的那个洞（「看起来像被测对象的错」）。
+ *   所以这里改用 round294/295 的写法：ESC 写成可见的 String.fromCharCode(27)，
+ *   正则用 new RegExp 拼 —— 下一只手「顺手清理不可见字节」也清不掉它。
+ */
+const ESC = String.fromCharCode(27);
+
+/**
+ * 剥 ANSI 后读汇总；读不到就抛。
+ *
+ * round301 补的两格（round293 原注释讲的「剥色正则以偏概全」那条，现在由
+ * 下面那句「剥完还剩 ESC 就抛」当场验，不再只靠注释提醒）：
+ *  ① Tests 行【一个数字都没有】的那一型。真 vitest 在「整份文件装载失败、
+ *     一个用例都没跑到」时把它打成 `      Tests  no tests` —— 没有 failed 也没有
+ *     passed。旧写法把「读不到 failed」当 0 ⇒ M0 控制组（应绿）在【一个用例都没跑】
+ *     的前提下判【命中】。判「无数字」而不是判「等于 0」：真绿屏是
+ *     「failed 缺失 + N passed」，有数字 ⇒ 不误伤真绿（自证甲钉这条不对称）。
+ *  ② 文件级红而用例级 0 红 ⇒ 装载/采集期失败。本机原来【连 Test Files 行都不读】，
+ *     所以「死一份、其余照跑」会读成用例级全绿 ⇒ 控制组判命中、变异发判未命中
+ *     （exit 1 是红，但红话说的是假原因）。与 round298「文件红了而读不到 FAIL 文件名
+ *     ⇒ 抛」同族；本机没有用例名归因，文件级/用例级不自洽是唯一抓得住它的判据。
+ */
 function readSummary(out) {
-  // ⚠ 本轮第二条「工具自己错」的坑，且它伪装成【被测对象的错】：
-  //   第一版这里写的是 /\[[0-9;]*m/g —— 少了 ESC。它把 "[2m" 剥掉了，却把 0x1b 留在行首，
-  //   于是 /^\s*Tests\s/ 对着一行「ESC + 汇总」判不中 ⇒ 报「读不到汇总行」，
-  //   看起来像 vitest 没跑，实际是我的剥色正则没剥干净（vitest 给汇总行上了色）。
-  //   ⇒ 凡是「用正则读别人的输出」的脚本，先拿【一次真输出】验这个正则，再谈变异结果。
-  const plain = out.replace(/\u001b\[[0-9;]*m/g, "");
+  const plain = out.replace(new RegExp(ESC + "\\[[0-9;]*m", "g"), "");
+  if (plain.includes(ESC)) {
+    throw new Error("剥 ANSI 没生效（剥完还剩 ESC 字节）⇒ 汇总行会读不到。");
+  }
   const line = plain.split("\n").find((l) => /^\s*Tests\s/.test(l));
   if (line === undefined) {
     throw new Error("读不到 vitest 汇总行 ⇒ 拒绝把这一发当绿。尾部：\n" + plain.slice(-1000));
   }
+  const seg = line.replace(/^\s*Tests\s+/, "");
+  if (!/\d/u.test(seg)) {
+    throw new Error(
+      "Tests 摘要行里【一个数字都没有】（实得：" + seg.trim() + "）—— 这一型是「一个用例" +
+        "都没跑到」，不是「全部通过」。不能当 0。尾部：\n" + plain.slice(-800),
+    );
+  }
   const failed = /(\d+) failed/.exec(line);
   const passed = /(\d+) passed/.exec(line);
+  const red = failed === null ? 0 : Number(failed[1]);
+  const fileLine = plain.split("\n").find((l) => /^\s*Test Files\s/.test(l));
+  if (fileLine === undefined) {
+    throw new Error(
+      "读不到 Test Files 汇总行 ⇒ 拒绝读成任何一种结果。尾部：\n" + plain.slice(-600),
+    );
+  }
+  const failedFiles = /(\d+) failed/.exec(fileLine);
+  const redFiles = failedFiles === null ? 0 : Number(failedFiles[1]);
+  if (redFiles > 0 && red === 0) {
+    throw new Error(
+      "Test Files 红了 " + redFiles + " 份而用例级【一条红都没有】⇒ 装载/采集期失败，" +
+        "不是判据红，两种读数都不许采信。尾部：\n" + plain.slice(-800),
+    );
+  }
   return {
-    red: failed === null ? 0 : Number(failed[1]),
+    red,
     green: passed === null ? 0 : Number(passed[1]),
+    redFiles,
   };
 }
+
+/**
+ * 读数自证（round301 补）：四段【真屏逐行抄写】，判的是这台读得对不对。
+ * 字节抄自 .workbuddy/probe301-{green,red,loadfail}-raw.txt（本轮真跑抓的，
+ * 色码是真的 ESC）。分母数出来（cases.length），不写死。
+ */
+function selfCheckParser() {
+  const w = (s) => s.split("ESC").join(ESC);
+  const cases = [
+    [
+      "甲 真绿屏读成绿",
+      w(
+        " Test Files ESC[22m ESC[1mESC[32m1 passedESC[39mESC[22m ESC[90m (1)ESC[39m\n" +
+          "      Tests ESC[22m ESC[1mESC[32m11 passedESC[39mESC[22m ESC[90m (11)ESC[39m\n",
+      ),
+      (s) => (s.red === 0 && s.green === 11 ? "" : "red=" + s.red + " green=" + s.green),
+    ],
+    [
+      "乙 真红屏读成红",
+      w(
+        "ESC[41mESC[1m FAIL ESC[22mESC[49m test/arch/plan-gate-paths.test.ts > s > c\n" +
+          " Test Files ESC[22m ESC[1mESC[31m1 failedESC[39mESC[22m ESC[90m (1)ESC[39m\n" +
+          "      Tests ESC[22m ESC[1mESC[31m2 failedESC[39mESC[22m | 9 passed ESC[90m (11)ESC[39m\n",
+      ),
+      (s) =>
+        s.red === 2 && s.redFiles === 1
+          ? ""
+          : "red=" + s.red + " redFiles=" + s.redFiles,
+    ],
+    [
+      "丙 装载失败（no tests）必须抛",
+      w(
+        "ESC[41mESC[1m FAIL ESC[22mESC[49m test/arch/plan-gate-paths.test.ts ESC[2m[ x ]ESC[22m\n" +
+          " Test Files ESC[22m ESC[1mESC[31m1 failedESC[39mESC[22m ESC[90m (1)ESC[39m\n" +
+          "      Tests ESC[22m ESC[2mno testsESC[22m\n",
+      ),
+      null,
+    ],
+    [
+      "丁 死一份其余照跑必须抛",
+      w(
+        "ESC[41mESC[1m FAIL ESC[22mESC[49m test/arch/plan-gate-paths.test.ts ESC[2m[ x ]ESC[22m\n" +
+          " Test Files ESC[22m ESC[1mESC[31m1 failed | 1 passedESC[39mESC[22m ESC[90m (2)ESC[39m\n" +
+          "      Tests ESC[22m ESC[1mESC[32m22 passedESC[39mESC[22m ESC[90m (22)ESC[39m\n",
+      ),
+      null,
+    ],
+  ];
+  const problems = [];
+  for (const [name, text, judge] of cases) {
+    try {
+      const s = readSummary(text);
+      if (judge === null) {
+        problems.push(name + "：【没抛】—— 读成 red=" + s.red + " redFiles=" + s.redFiles);
+        continue;
+      }
+      const bad = judge(s);
+      if (bad !== "") problems.push(name + "：读错（" + bad + "）");
+    } catch (e) {
+      if (judge === null) continue;
+      problems.push(
+        name + "：真屏【抛了】⇒ M0 永远红：" + String(e.message).slice(0, 80),
+      );
+    }
+  }
+  if (problems.length > 0) {
+    throw new Error(
+      "这台机器自己的读数不可信，【一发都没跑】（" + cases.length + " 格里红 " +
+        problems.length + " 格）：\n  " + problems.join("\n  "),
+    );
+  }
+  console.log(
+    "  读数自证  " + cases.length + " 格全过（真绿/真红读对，装载失败两型都抛）",
+  );
+}
+selfCheckParser();
 
 function runSuite(mutLabel) {
   try {

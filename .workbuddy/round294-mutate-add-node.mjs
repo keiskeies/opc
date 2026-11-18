@@ -244,8 +244,40 @@ function readSummary(out) {
     );
   }
   const seg = m[1] ?? "";
+  // round301 补 · 格①：Tests 行里【一个数字都没有】。真 vitest 在「整份文件装载
+  // 失败、一个用例都没跑到」时把 Tests 行打成 `      Tests  no tests`（实测
+  // .workbuddy/probe301-loadfail-raw.txt），而旧写法把「读不到 failed」当 0 ⇒
+  // 控制组（应绿）在【一个用例都没跑】的前提下判命中。
+  // 判「无数字」而不是判「数字为 0」：真绿屏是「failed 缺失 + N passed」，有数字
+  // ⇒ 不误伤（自证戊钉这条不对称）。
+  if (!/\d/u.test(seg)) {
+    throw new Error(
+      "「Tests」摘要行里【一个数字都没有】（实得：" + seg.trim() + "）—— 这一型是" +
+        "「一个用例都没跑到」（装载/采集失败），不是「全部通过」。【不能】当 0。尾部：\n" +
+        clean.slice(-800),
+    );
+  }
   const failed = Number((seg.match(/(\d+) failed/) ?? [0, "0"])[1]);
   const passed = Number((seg.match(/(\d+) passed/) ?? [0, "0"])[1]);
+  // round301 补 · 格②：Test Files 行红而用例级 0 红。本机有【文件归因】，所以
+  // 「死一份、其余照跑」会被读成「files 里多了一份而红发=0」⇒ M0 控制组判
+  // 【未命中】、应红的发也判【未命中】—— 它 exit 1（所以不算假绿），但红话说的是
+  // 「该红的文件没红」，那是【归因错了的假原因】。装载失败必须当场抛，不能让人
+  // 照着假原因去改判据。
+  const tf = clean.match(/^\s*Test Files\s+(.+)$/m);
+  if (tf === null) {
+    throw new Error(
+      "读不到「Test Files」摘要行，不许当 0。尾部：\n" + clean.slice(-400),
+    );
+  }
+  const failedFiles = Number((tf[1].match(/(\d+) failed/) ?? [0, "0"])[1]);
+  if (failedFiles > 0 && failed === 0) {
+    throw new Error(
+      "Test Files 红了 " + failedFiles + " 份而用例级【一条红都没有】⇒ 装载/采集期失败，" +
+        "不是判据红。此时逐文件归因给的是假原因（红话会怪到判据头上），两种读数都不许采信。" +
+        "尾部：\n" + clean.slice(-800),
+    );
+  }
   // 红了哪几份文件：FAIL 行的第一个字段就是文件路径（相对仓库根、posix 分隔）。
   const files = new Set();
   for (const line of clean.split("\n")) {
@@ -335,6 +367,31 @@ function selfCheckParser() {
   if (r.failed <= 0) bad.push("红样本读成 0 红发（这台机器会把红读成绿）");
   if (!r.files.has(UNIT)) bad.push("红样本里认不出 " + UNIT);
   if (!r.files.has(E2E)) bad.push("红样本里认不出 " + E2E);
+  // round301 补：两型装载失败【必须抛】（与 readSummary 里那两格一一对应）。
+  // 为什么分开两发而不是一发：丙（`no tests`）两格都能拦，丁（有数字）只有格②能拦
+  // —— 合成一发的话，摘掉格② 时丙照样拦得住 ⇒ 那一格看起来像没被用到（假未命中）。
+  const loadFail =
+    " FAIL  " + UNIT + " [ " + UNIT + " ]\nError: Transform failed with 1 error:\n" +
+    esc + "[2m Test Files esc[22m esc[1mesc[31m1 failed esc[39m esc[90m(1)esc[39m\n  " +
+    esc + "[2m      Tests esc[22m esc[2mno testsesc[22m\n";
+  const partial =
+    " FAIL  " + E2E + " [ " + E2E + " ]\n" +
+    esc + "[2m Test Files esc[22m esc[1mesc[31m1 failed | 3 passed esc[39m esc[90m(4)esc[39m\n  " +
+    esc + "[2m      Tests esc[22m esc[1mesc[32m242 passed esc[39m esc[90m(242)esc[39m\n";
+  for (const [name, text] of [
+    ["丙（no tests）", loadFail],
+    ["丁（死一份其余照跑）", partial],
+  ]) {
+    try {
+      const s = readSummary(text.split("esc").join(esc));
+      bad.push(
+        name + "【没抛】—— 读成 红发=" + s.failed + " 红文件=" + s.files.size +
+          "，控制组会在什么都没跑上判命中",
+      );
+    } catch {
+      // 这就是要求的形状。
+    }
+  }
   if (bad.length > 0) {
     throw new Error("这台机器自己的读数不可信，【一发都没跑】：\n  " + bad.join("\n  "));
   }

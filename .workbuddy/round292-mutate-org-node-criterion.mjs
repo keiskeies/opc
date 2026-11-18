@@ -56,14 +56,22 @@ mutate(
   "旁路该重新变回 200；端到端那一发与 commit 层那两发都该红",
 );
 
-/* ── M2：改判 before（o.graph）而不是 after —— 预期【绿】，变异等价 ───── */
+/* ── M2：改判 before（o.graph）而不是 after ────────────────────────────
+ * ⚡ round301 改口（原判「变异等价，该绿」已过期）：round292 立这台时
+ * applyChangeToGraph 不碰 model_family，before/after 恒同解 ⇒ 该绿。
+ * round294 给契约加了带继承的 add_node 之后，新节点【只在 after 里】——
+ * 判 before 就看不见它缺 model_family ⇒ 422 变 200，红在
+ * 「证据④的反向 canary」那一发（本轮实测复现，非推断）。
+ * 这台矩阵自己抓住了自己一条过期的「该绿」——round295 那条泛用主张
+ * （「矩阵里的预期也是主张，只有跑出来的红绿分布能打它」）在本机复发并被证实。
+ * 现在这一发是【判 before 的旁路】的点名门，比原来那句废话值钱。 */
 mutate(
   COMMIT,
   "  const families = everyNodeDeclaresModelFamily(after);",
   "  const families = everyNodeDeclaresModelFamily(o.graph);",
-  "M2 判 before 而不是 after（变异等价，该绿）",
-  false,
-  "applyChangeToGraph 不碰 model_family ⇒ 两种写法恒同解；红了说明有测试在判别的不是这条判据",
+  "M2 判 before 而不是 after（round301 改口：add_node 后不再等价 ⇒ 该红）",
+  true,
+  "新节点只在 after 里 ⇒ 判 before 看不见它缺 model_family；红的正当位置是证据④反向 canary",
 );
 
 /* ── M3：只看 undefined，丢掉 trim ─────────────────────────────────────
@@ -173,10 +181,42 @@ function readSummary(out, wantFail) {
     const seg = m[1];
     const failed = Number((seg.match(/(\d+) failed/) ?? [0, "0"])[1]);
     const passed = Number((seg.match(/(\d+) passed/) ?? [0, "0"])[1]);
+    // round301 补：Tests 行【两个数都没有】的那一型。
+    // 真 vitest 在「整份文件装载失败、一个用例都没跑到」时把 Tests 行打成
+    // `      Tests  no tests` —— 没有 failed 也没有 passed。本机第一版把这种
+    // 「读不到数字」当成 0，于是 M0 控制组（应绿）拿到 红发=0 ⇒ 判【命中】，
+    // 而它那句前提「绿是后面每一发红的前提」是在【什么都没跑】上成立的。
+    // 三发文件的语料里死一份、另两发照跑 ⇒ 变异照红 ⇒ 整张矩阵可以 exit 0。
+    // 判「两个数都缺」而不是判「等于 0」：全绿那一屏是「0 failed 缺失 + N passed」，
+    // 有 passed 在 ⇒ 不误伤真绿（这条不对称写在下面的自证里，被钉住了）。
+    if (!/\d/u.test(seg)) {
+      throw new Error(
+        "「" + label + "」摘要行里【一个数字都没有】（实得：" + seg.trim() + "）—— " +
+          "这一型是「一个用例都没跑到」（装载失败 / 采集失败），不是「全部通过」。" +
+          "【不能】当 0：控制组会在什么都没跑的前提下自证通过。摘要尾部：\n" +
+          clean.slice(-600),
+      );
+    }
     return { failed, passed };
   };
   const files = grab("Test Files");
   const tests = grab("Tests");
+  // round301 补：文件级红而用例级全绿 ⇒ 归因失真，不许读成任何一种结果。
+  // 与 round298 那台「文件红了但读不到 FAIL 文件名 ⇒ 抛」同族而更宽：本机没有
+  // 用例名归因（它只数数），所以这一格是唯一能挡住「装载失败被读成控制组绿」的门。
+  // 危害方向：只有【死一份、其余照跑】时最危险 —— 那时 tests 有数字，上一格不响。
+  // ⚠ 登记的残留：若同一屏里【另有真红的用例】（tests.failed > 0），这一格不响，
+  //   装载失败会被并进那一发正常的红里读成「命中」—— 本机没有用例名归因，
+  //   分不清「打到判据的那发红」与「另一份文件炸了」。要堵得先给它加 FAIL 行归因
+  //   （round296 起那几台的做法），那是另起一轮的账。
+  if (files.failed > 0 && tests.failed === 0) {
+    throw new Error(
+      "Test Files 红了 " + files.failed + " 份而用例级【一条红都没有】⇒ 这些文件的红" +
+        "是【装载/采集期】失败（或 hook 失败），不是判据红。此时" +
+        "「红发=0」既不能说变异没打到，也不能说控制组是绿的。摘要尾部：\n" +
+        clean.slice(-600),
+    );
+  }
   if (wantFail !== undefined && (tests.failed > 0) !== wantFail) {
     // 控制组专门用来证明上面这套解析【真的能分辨红与绿】。
     throw new Error(
@@ -185,6 +225,82 @@ function readSummary(out, wantFail) {
   }
   return { files, tests };
 }
+
+/**
+ * 这台机器自己的读数自证（round301 补，round295 起每台新机器都有的那一格）。
+ *
+ * 三段【真屏逐行抄写】（不是编的字节）：全绿 / 一发用例红 / 整份装载失败。
+ * 后两段的字节来自 `.workbuddy/probe301-green-raw.txt` 与
+ * `probe301-loadfail-raw.txt`（本轮真跑抓的，色码是真的 ESC）。
+ * 判的是【这台读得对不对】，不打判据；分母数出来，不写死。
+ */
+function selfCheckParser() {
+  const esc = String.fromCharCode(27);
+  const wrap = (s) => s.split("ESC").join(esc);
+  const green = wrap(
+    " Test Files ESC[22m ESC[1mESC[32m1 passedESC[39mESC[22m ESC[90m (1)ESC[39m\n" +
+      "      Tests ESC[22m ESC[1mESC[32m25 passedESC[39mESC[22m ESC[90m (25)ESC[39m\n",
+  );
+  const oneRed = wrap(
+    "ESC[41mESC[1m FAIL ESC[22mESC[49m test/org/validate.test.ts > s > c\n" +
+      " Test Files ESC[22m ESC[1mESC[31m1 failedESC[39mESC[22m ESC[90m (1)ESC[39m\n" +
+      "      Tests ESC[22m ESC[1mESC[31m1 failedESC[39mESC[22m ESC[90m (2)ESC[39m\n",
+  );
+  // 装载失败那一屏的真形状：Test Files 有 failed，Tests 行是 `no tests`。
+  const loadFail = wrap(
+    "ESC[41mESC[1m FAIL ESC[22mESC[49m test/org/validate.test.ts ESC[2m[ test/org/validate.test.ts ]ESC[22m\n" +
+      " Test Files ESC[22m ESC[1mESC[31m1 failedESC[39mESC[22m ESC[90m (1)ESC[39m\n" +
+      "      Tests ESC[22m ESC[2mno testsESC[22m\n",
+  );
+  // 最危险的那一型：死一份、另两份照跑 ⇒ Tests 行有数字，上一发拦不住。
+  const partialLoadFail = wrap(
+    "ESC[41mESC[1m FAIL ESC[22mESC[49m test/org/versioning.test.ts ESC[2m[ x ]ESC[22m\n" +
+      " Test Files ESC[22m ESC[1mESC[31m1 failed | 2 passedESC[39mESC[22m ESC[90m (3)ESC[39m\n" +
+      "      Tests ESC[22m ESC[1mESC[32m84 passedESC[39mESC[22m ESC[90m (84)ESC[39m\n",
+  );
+  const problems = [];
+  let checks = 0;
+  const mustThrow = (name, text) => {
+    try {
+      const s = readSummary(text, false);
+      problems.push(
+        "自证" + name + "：【没抛】—— 读成了 红发=" + s.tests.failed +
+          " 红文件=" + s.files.failed + "，控制组会在什么都没跑上判命中",
+      );
+    } catch {
+      // 这正是要求的形状。
+    }
+    checks += 1;
+  };
+  try {
+    const s = readSummary(green, false);
+    if (s.tests.failed !== 0 || s.files.failed !== 0) {
+      problems.push("自证甲：真绿屏读成了红");
+    }
+  } catch (e) {
+    problems.push("自证甲：真绿屏【抛了】⇒ 判据把绿读死，M0 永远红：" + String(e.message).slice(0, 90));
+  }
+  checks += 1;
+  try {
+    const s = readSummary(oneRed);
+    if (s.tests.failed !== 1) {
+      problems.push("自证乙：一发用例红读成 红发=" + s.tests.failed);
+    }
+  } catch (e) {
+    problems.push("自证乙：真红屏抛了：" + String(e.message).slice(0, 90));
+  }
+  checks += 1;
+  mustThrow("丙", loadFail);
+  mustThrow("丁", partialLoadFail);
+  if (problems.length > 0) {
+    throw new Error(
+      "这台机器自己的读数不可信，【一发都没跑】（" + checks + " 格里红 " + problems.length + " 格）：\n  " +
+        problems.join("\n  "),
+    );
+  }
+  console.log("  读数自证  " + checks + " 格全过（真绿/真红读对，两种装载失败都抛）");
+}
+selfCheckParser();
 
 function run(label, expectRed, note) {
   const r = spawnSync(
