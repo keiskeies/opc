@@ -605,16 +605,18 @@ describe("schema：形状上的收紧", () => {
     expect(orgChangeSchema.safeParse({ kind: "delete" }).success).toBe(false);
   });
 
-  it("⭐ 登记一条【没判的】：nodes 的键不等于 node.role_id 时，schema 与判据都不拦", () => {
-    // 本轮写 applyChangeToGraph 时我以为「键取 role_id」挡住了「键 A / 值里 id B」
-    // 那种形状 —— 实测【没有】：那条写法只是不新建条目，它【覆盖】了键上那个已有
-    // 角色，而 B 作为孤儿节点进了库（B 的 reports_to 可能指向不存在的东西）。
-    // 这一发是【期望红的登记】改成【期望绿的登记】之前，先把它钉成一条能重跑的证据：
-    // 现在三条判据（schema / rejectMalformed / validateNewNode）对此全部放行。
-    // 修法在 zod 那一层（节点自带 role_id 时要求键 === role_id），本轮【没做】——
-    // 它改的是既有形状的约束，会让一张已有不一致的库图在读取期就红，那是另一件事，
-    // 已登记进本轮台账「没做的下一格」。
-    const ok = orgGraphSchema.safeParse({
+  it("⭐ 键≠node.role_id ⇒ schema 拒（round299 把这条从【登记的洞】翻成【判据】）", () => {
+    /*
+     * 这一发原来钉的是【反方向】：它证明 schema / rejectMalformed / validateNewNode
+     * 三条判据对这种形状【全部放行】，并把修法登记成「下一格」。round299 落了那条修法
+     * （orgGraphSchema 的 superRefine），所以主张翻向，原文里的诊断留着不删 ——
+     * 那半段解释的是【为什么三条旧的都不管】，那是判据分工的账，不会因为加了新的而过期。
+     *
+     * 为什么值得拦：图有两批读者，一批按【键】查（gate 0 / handoff / modelFamily /
+     * 岗位书落库那圈），一批按【值里的 role_id】查（汇报根、下级名单）。键 a / 值 b 时
+     * 升级判据 `上级 === CEO` 两头各拿一半 ⇒ 永远不成立 ⇒ 升级永不触发。
+     */
+    const bad = orgGraphSchema.safeParse({
       nodes: {
         ceo: { role_id: "ceo", can_manage: true, reports_to: null },
         // 键是 a，值里的 id 是 b。
@@ -622,17 +624,84 @@ describe("schema：形状上的收紧", () => {
       },
       edges: [],
     });
-    expect(ok.success).toBe(true);
-    // rejectMalformed 也不管：它只看 reports_to 指向存不存在（ceo 存在）。
-    const graph = ok.data as OrgGraph;
-    expect(rejectMalformed(graph)).toBeNull();
-    // validateNewNode 也不管：它拿到的是 node（role_id = b），而 b 不在图里 ⇒ 通过。
+    expect(bad.success).toBe(false);
+    // 先按【判据没生效】处理再取 error：既是 zod 那份判别式联合要的收窄，
+    // 也是一条前提自证 —— 如果哪天 superRefine 被人摘掉，这一发要说的是
+    // 「夹具本该被拒」，而不是留一条 undefined 走到下面去变成一句看不懂的比对。
+    if (bad.success) throw new Error("夹具本该被拒 ⇒ 那条 superRefine 没生效");
+    // 诊断必须指得出【是哪一个键上的节点自称了别的 id】—— 只报「图不合法」等于
+    // 让下一个人自己去猜是哪一半坏了。path 是 issueSummary 唯一读得出的字段。
+    const issue = bad.error.issues.find((i) => i.path[0] === "nodes");
+    expect(issue?.path).toEqual(["nodes", "a", "role_id"]);
+    expect(String(issue?.message)).toContain("role_id=[b]");
+    // 键上那个节点【自己】没错：坏的是"键与自称不一致"这一对，不是节点形状。
+    expect(
+      orgGraphSchema.safeParse({
+        nodes: {
+          ceo: { role_id: "ceo", can_manage: true, reports_to: null },
+          a: { role_id: "a", can_manage: false, reports_to: "ceo" },
+        },
+        edges: [],
+      }).success,
+    ).toBe(true);
+    /*
+     * 旧注释里那两条「也不管」今天【依旧成立】，而且必须继续钉住 ——
+     * 判据落在 schema 那一层，不代表下面两层也长出了眼睛。把它们留在这里是因为
+     * 有人会把「这条缝被关掉了」读成「谁都能认出坏图了」：把这张图直接喂给
+     * rejectMalformed（不走 schema）它照样放行。
+     */
+    const mismatched: OrgGraph = {
+      nodes: {
+        ceo: { role_id: "ceo", can_manage: true, reports_to: null },
+        a: { role_id: "b", can_manage: false, reports_to: "ceo" },
+      },
+      edges: [],
+    };
+    expect(rejectMalformed(mismatched)).toBeNull();
     expect(
       validateNewNode(
         { role_id: "b", can_manage: false, reports_to: "ceo" },
         { nodes: { ceo: { role_id: "ceo", can_manage: true, reports_to: null } }, edges: [] },
       ),
     ).toEqual({ ok: true });
+  });
+
+  it("反向对照两发：空图与【每个键都等于自己的 role_id】⇒ 该绿（证明新判据不是恒红）", () => {
+    // 少了这一发，"加了一条 superRefine" 与 "加了一条恒失败的 superRefine" 在上一发上
+    // 读起来一模一样 —— 上一发只证得了【坏的被抓】，证不出【好的过】。
+    expect(orgGraphSchema.safeParse({ nodes: {}, edges: [] }).success).toBe(true);
+    expect(
+      orgGraphSchema.safeParse({
+        nodes: {
+          ceo: { role_id: "ceo", can_manage: true, reports_to: null },
+          tech: { role_id: "tech", can_manage: true, reports_to: "ceo" },
+          dev: { role_id: "dev", can_manage: false, reports_to: "tech" },
+        },
+        edges: [{ from: "dev", to: "tech", review_gate: true }],
+      }).success,
+    ).toBe(true);
+  });
+
+  it("⭐ 一条图里多个坏键 ⇒ 每个键各报一条 issue（判据是逐节点而不是遇第一个就退）", () => {
+    // 逐条报是刻意的：一次 422 要能看完就修完。只报第一条会让 CEO 改一次发一次、
+    // 连改 N 次才看到全貌 —— 那条形状在 0006 §7 里记过好几次的反面就是它。
+    const r = orgGraphSchema.safeParse({
+      nodes: {
+        ceo: { role_id: "ceo", can_manage: true, reports_to: null },
+        a: { role_id: "b", can_manage: false, reports_to: "ceo" },
+        x: { role_id: "y", can_manage: false, reports_to: "ceo" },
+      },
+      edges: [],
+    });
+    expect(r.success).toBe(false);
+    if (r.success) throw new Error("夹具本该被拒 ⇒ 那条 superRefine 没生效");
+    const keys = r.error.issues
+      .filter((i) => i.path[0] === "nodes")
+      .map((i) => String(i.path[1]))
+      .sort();
+    expect(keys).toEqual(["a", "x"]);
+    // 前提自证：ceo 那个键【没被报】，否则上面那个相等是「全都报了」造成的。
+    expect(keys).not.toContain("ceo");
   });
 
   it("actor.type 只有两值，编不出第三种", () => {

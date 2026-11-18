@@ -285,6 +285,92 @@ describe("③ 请求体严格：缺键 422，多传 actor 422，brief 只有 cha
       expect(res.status).toBe(HTTP_UNPROCESSABLE);
     }
   });
+
+  /*
+   * ⭐ r22 射程④ 那一格从【登记】翻成【判据】（round299）。
+   * 形状挑的是那条旁路本尊，不是一眼就坏的请求：change 是一条【完全合法】的
+   * reparent（dev 挂到 ceo，L1 判得过），坏的是请求体图里【夹带】的那个节点 ——
+   * 键写 "ghost"，节点自称 role_id "impostor"。这样一旦红，红因只可能是那条新判据，
+   * 不会和"变更本身不合法"混在一起。
+   *
+   * 为什么这一发必须打在 HTTP 上而不是只打在 schema 单测上：那条主张的原文是
+   * 「直接交一张新图【能造出来】」，而"能造出来"说的是这条路走得通。
+   * 判 schema 只证得了尺子有刻度，证不出这条路上真有人拿它量。
+   *
+   * 危害不是抽象的：dispatch 的 gate 0 / handoff / modelFamily 按【键】查，
+   * 而 rootsOf 与 subordinateRoles 取【值里的 role_id】。这张图进库后，
+   * 派给 "impostor" 的任务在 gate 0 那里"不在组织图上"被停，而汇报根又报
+   * "impostor" ⇒ 升级判据的 `上级 === CEO` 两头各拿一半，永不成立。
+   */
+  it("⭐ 请求体夹带「键≠node.role_id」的节点 ⇒ 422，且不备份、不写行（r22 射程④ 关掉）", async () => {
+    const { h, recorder } = harness({ wired: true });
+    const smuggled = graph();
+    // 键 ghost / 自称 impostor。reports_to 指到真存在的 ceo ⇒ 老的
+    // rejectMalformed 那两格（环、悬空上级）本来也看不见它，别指望它兜底。
+    smuggled.nodes.ghost = {
+      role_id: "impostor",
+      can_manage: false,
+      reports_to: "ceo",
+      model_family: "gpt",
+    };
+    const res = await commitOrgRoute(
+      h.deps,
+      h.req({
+        method: "POST",
+        path: "/org",
+        body: JSON.stringify({
+          graph: smuggled,
+          change: { kind: "reparent", child_role: "dev", new_parent_role: "ceo" },
+          change_summary: "夹带一个自称别人的节点",
+        }),
+      }),
+    );
+    expect(res.status).toBe(HTTP_UNPROCESSABLE);
+    // 422 的正文要指得出【是哪一个键上的节点】。issuesOf 把 path join 成点号串，
+    // 所以这里钉的是那条诊断对操作者是否可用，不只是"状态码对了"。
+    expect(JSON.stringify(res.body)).toContain("nodes.ghost.role_id");
+    /*
+     * 备份一次都没发生 —— 这是【顺序】的证据，不是顺手多写的一行。
+     * org.ts 的流程是 schema(117) → commitOrgChange(122)，而备份在后者里面。
+     * 所以 schema 级的拒绝比校验级的拒绝更靠前：validate.test.ts 那发"自环"是
+     * 备份【之后】才被拒（备份仍发生一次），这一发是备份之前。两种 422 不同形，
+     * 混起来读会让人以为"任何 422 都留一份快照"。
+     */
+    expect(recorder.calls).toBe(0);
+    const v = h.db.prepare("SELECT count(*) AS c FROM delegation_graphs").get();
+    expect(Number(v?.c)).toBe(0);
+  });
+
+  it("⭐ 反向对照：同一个形状把键改成【与 role_id 相同】⇒ 200（上一发不是恒 422）", async () => {
+    // 少了这一发，上一发只证得了"这个请求被拒"，证不出"拒的原因是那条新判据"——
+    // 一个把 /org 一律 422 的装配也能让上一发全绿。
+    const { h, recorder } = harness({ wired: true });
+    const honest = graph();
+    honest.nodes.impostor = {
+      role_id: "impostor",
+      can_manage: false,
+      reports_to: "ceo",
+      model_family: "gpt",
+    };
+    const res = await commitOrgRoute(
+      h.deps,
+      h.req({
+        method: "POST",
+        path: "/org",
+        body: JSON.stringify({
+          graph: honest,
+          change: { kind: "reparent", child_role: "dev", new_parent_role: "ceo" },
+          change_summary: "同一个节点，键与自称一致",
+        }),
+      }),
+    );
+    expect(res.status).toBe(200);
+    // 前提自证：这条 change 在【没有夹带任何节点】时同样是 200（见 ④ 那一组），
+    // 所以这里的 200 不是因为"节点多了导致别的判据先放行"，而是这条图本来就该过。
+    expect(recorder.calls).toBe(1);
+    const v = h.db.prepare("SELECT count(*) AS c FROM delegation_graphs").get();
+    expect(Number(v?.c)).toBe(1);
+  });
 });
 
 /* ══════════════════ ④ 装配 + 备份编排 ══════════════════ */

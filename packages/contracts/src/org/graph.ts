@@ -130,7 +130,54 @@ export const orgGraphSchema = z
     nodes: z.record(z.string().min(1), orgGraphNodeSchema).default({}),
     edges: z.array(delegationEdgeSchema).default([]),
   })
-  .strict();
+  .strict()
+  /**
+   * 节点的【键】必须等于它自己的 `role_id`。
+   *
+   * 这条不判的后果不是「数据不好看」，是【一份身份裂成两半】：图有一批读者按
+   * 键读（`nodes[role]`：dispatch 的 gate 0、handoffGate、runtime 的 modelFamily、
+   * charter 的 org_blocked，还有 commit.ts 拿 Object.keys 去写 role_charters.role_id），
+   * 另一些读者取值里的 role_id（dispatch 的 subordinateRoles 与 rootsOf）。
+   * 键="alice"/值="bob" 时，CEO 那一格两头各说一半：rootsOf 交出 "bob" 当根，
+   * 而升级判据比的是 `up === ceoRoleId`、那个 `up` 是键空间里的 "alice" ⇒
+   * 顶层永远不成立 ⇒ 升级永不触发。而本仓自己把「每一轮真烧一次子进程、
+   * 人类席位永远等不到」列为这里最贵的那类故障（dispatch.ts:382-387）。
+   *
+   * 为什么落在 schema 而不是 validate.ts：
+   *   ① rejectMalformed 在三个入口各调一次，判的都是【本次变更之前】那张图，
+   *      而 add_edge 那条根本不进 validateNewNode —— 缝在图上，就该由图的形状管；
+   *   ② 更实在的一条：orgGraphSchema 今天【已经是两处判据的公共入口】
+   *      （api.ts 的请求体 + integrity.ts 那条 delegation_edges_gated 逐版本 safeParse），
+   *      落在这里 ⇒ 写侧拦新的，读侧自检顺手也拿到同一条不变量，不用写两遍；
+   *   ③ validateNewNode 只收到一个 node，拿不到那个键（它自己的注释就这么写的）。
+   *
+   * ⚠ 这是【收紧】，不是补漏：它改变一张已有形状的图是否合法。判它安全是靠
+   *   两条实测而不是感觉 —— 真库 delegation_graphs 今天 0 行（所以没有任何存量图
+   *   会因此在读取期变红），且仓内每一处生产节点的代码都按 role_id 取键
+   *   （唯一那处写入方 applyChangeToGraph 的 `nodes[change.node.role_id]`，
+   *   reparent 那一支只覆盖已有键、spread 不动 role_id）。
+   *   仓外的请求体【今天】能塞进键≠值的图，那一类会被这条 422 —— 那正是目的。
+   */
+  .superRefine((graph, ctx) => {
+    for (const [key, node] of Object.entries(graph.nodes)) {
+      if (node.role_id === key) continue;
+      ctx.addIssue({
+        code: "custom",
+        // path 指到 role_id 那一格：integrity.ts 的 issueSummary 打的是
+        // path.join(":") + code，所以自检里那一行会读成 `nodes.a.role_id:custom`
+        // —— 直接 pointing 到「这个键上的节点自称是别的 id」，不用再去猜是哪一半坏了。
+        path: ["nodes", key, "role_id"],
+        message:
+          "节点键 [" +
+          key +
+          "] 上的节点自称 role_id=[" +
+          node.role_id +
+          "] —— 身份只能有一个来源。图有一批读者按【键】查（gate 0、handoff、" +
+          "modelFamily、岗位书落库），另一些按【值里的 role_id】查（汇报根、下级名单），" +
+          "两者不一致时升级判据的 `上级 === CEO` 永远不成立 ⇒ 升级永不触发。",
+      });
+    }
+  });
 export type OrgGraph = z.infer<typeof orgGraphSchema>;
 export type OrgNodeId = keyof OrgGraph["nodes"];
 
