@@ -242,6 +242,102 @@ describe("工作区越界", () => {
     expect(isInsideWorkspace("/repo", "etc/passwd")).toBe(false);
   });
 
+  it("工作区【自己】带 .. / . / 尾斜杠 ⇒ 先归一再比（旧实现本来就有的一半，也钉住）", () => {
+    // round303 补这一发的理由不是「想多测一条」：新加的格③ 只改了【target 侧的拆法】，
+    // 而 M4 变异（只归一 target、不归一 workspace）证明【原来这一半根本没被测到】——
+    // 一个恒过的判式就是一句装饰。workspace 来自配置/路由表，形状是
+    // `/work/runs/../repo` 这种完全正常（拼接出来的），所以「根要归一」是真需求。
+    expect(isInsideWorkspace("/repo/a/../b", "/repo/b/x.ts")).toBe(true);
+    expect(isInsideWorkspace("/repo/./ws", "/repo/ws/x.ts")).toBe(true);
+    expect(isInsideWorkspace("/repo/ws//", "/repo/ws/x.ts")).toBe(true);
+    // 反向：根归一之后仍然挡得住越界（不许为了「根要归一」把 target 那侧放松）。
+    expect(isInsideWorkspace("/repo/a/../b", "/repo/other/x.ts")).toBe(false);
+  });
+
+  /* ═════ round303：分隔符不统一 ⇒ 越界被放行（实测过危害方向是 fail-OPEN）═════
+   * 本轮用真函数量过（.workbuddy/probe303-direction.test.ts）：旧写法只按 `/` 拆，
+   * 于是【混合形状】那一型是【放行】的 —— `x\..\..\secret\k.txt` 在只认 / 的拆法里
+   * 是【一个】文件名段，`..` 从不被看见，前缀匹配就过了。Windows 上 OS 认 `\` 为
+   * 分隔符 ⇒ 同一串字节的两个读法一个在里面一个在外面，而旧代码只读其中一个。
+   *
+   * ⚠ 可达性要说清楚，别把下面几发读成「现网可打」：`target` 确实是工具调用参数里的
+   *   原样字符串（gateway 的 pathArg，上游零归一化），但 safety.ts 今天【零生产 import】
+   *   （文件头横幅 + dead-modules 的 claimSites 盯着那句）。所以这几发钉的是
+   *   【接线即成真】的那扇门 —— 判据先修对，接线那天它才是对的。
+   *
+   * ⭐ 判据取两种读法的【交集】⇒ 只要有一种读法说在外面就拒。这一族的取舍、
+   *   以及「本轮到底改了哪几对」的实测对照，写在下面那几发里（其中两发是
+   *   【被量纠正过的假话】，那两次改口也留在原地 —— 它们比结论更有信息量）。 */
+  it("⭐ 混合形状：`x\\..\\..` 那种链条在 Windows 读法下越界 ⇒ 必须拒（旧写法放行）", () => {
+    expect(isInsideWorkspace("/repo/ws", "/repo/ws/x\\..\\..\\secret\\k.txt")).toBe(false);
+    expect(isInsideWorkspace("/repo/ws", "/repo/ws/a\\..\\..\\b.ts")).toBe(false);
+    // 同一条链嵌得更深也一样：只要有一种读法跳出根，就不算在里面。
+    expect(isInsideWorkspace("/repo/ws", "/repo/ws/deep/dir\\..\\..\\..\\etc\\passwd")).toBe(false);
+    // 根带末尾斜杠也一样（那一支走的是 startsWith 那条路，不是 p === root）。
+    // ⚠ 这一对【旧口径也拒】（旧口径按 / 拆时 `ws\..\x` 是一个段）——它不属于本轮
+    //   改了行为的 3 对，写在这里是为了钉住「带尾斜杠的根」这条分支没有回归。
+    expect(isInsideWorkspace("/repo/ws/", "/repo/ws\\..\\x")).toBe(false);
+  });
+
+  it("⭐ 反向：两种读法【都】说在里面 ⇒ 不许因为加了 Windows 读法而误伤", () => {
+    // 这一发是上面那组的【方向对照】：只判「越界要拒」可以把判据写成恒拒也过。
+    // 少了这几行，把 isInsideWorkspace 改成 `return false` 全场照样绿。
+    expect(isInsideWorkspace("/repo", "/repo/a/b.ts")).toBe(true);
+    expect(isInsideWorkspace("/repo", "/repo/x.ts")).toBe(true);
+    expect(isInsideWorkspace("/repo", "/repo")).toBe(true);
+    // ⚠ 下面这几行是【实测纠正了我对代价的想象】：我一开始写的是「文件名里真带 \
+    //   一律被拒」，探针量出来不是那样 —— 只要两种读法【都】落在根里就照旧放行。
+    //   一个假想的代价写进测试，等于用测试替我编一个不存在的取舍（round300 那一族）。
+    expect(isInsideWorkspace("/repo", "/repo/weird\\name.ts")).toBe(true);
+    expect(isInsideWorkspace("/repo/ws", "/repo/ws/a\\b\\c.ts")).toBe(true);
+    expect(isInsideWorkspace("/repo/ws", "/repo/ws/x\\..\\y")).toBe(true);
+    expect(isInsideWorkspace("/repo/ws", "/repo/ws/only\\backslash")).toBe(true);
+  });
+
+  it("两侧都是反斜杠形状：今天到不了这里（gateway 先拦非 / 开头的 workspace），钉住是【拒】", () => {
+    // 这一发钉的不是「正确行为」而是【已知的 fail-closed 一侧】：
+    // workspace 不以 / 开头 ⇒ POSIX 读法把整串当【一个相对段】⇒ 与 target 不同解 ⇒ 拒。
+    // gateway.ts 那条「workspace 必须以 / 开头」在前，所以这一型在产线上不可达；
+    // 写在这里是为了让下一个人知道【它现在拒】，而不是以为它能工作。
+    expect(isInsideWorkspace("D:\\repo\\ws", "D:\\repo\\ws\\packages\\a\\file.ts")).toBe(false);
+    // 而斜杠写的 Windows 盘符路径【能】正常工作（两侧同形状、同读法）：
+    expect(isInsideWorkspace("D:/repo/ws", "D:/repo/ws/packages/a/file.ts")).toBe(true);
+    expect(isInsideWorkspace("D:/repo/ws", "D:/repo/ws/../secret/k.txt")).toBe(false);
+  });
+
+  it("交集口径的【代价】实测为零：根边界后紧跟 `\\` 那一型，旧口径本来就拒", () => {
+    // 这一发【本轮改过两次】，两次都是被量纠正的：
+    //  ⑴ 我先写成「文件名里真带 \ ⇒ 一律被拒」，探针证否（见上面反向对照那一发）；
+    //  ⑵ 我再写成「这是本轮多拦的那一型」——那是【出处的假话】。
+    // .workbuddy/probe303-compare.test.ts 把【旧字节】（`git show HEAD:` 切出来的
+    // probe303-old-safety.ts）与新字节放在同一张表上对：21 对里只有 3 对变了，
+    // 全是【混合形状逃逸】那一族；这一对【旧也拒、新也拒】⇒ 本轮【没有多拦任何东西】。
+    // 为什么交集不会多拦：交集 ⊆ 旧（POSIX）那一侧，而 POSIX 本来就把 `ws\a` 当成
+    // 【一个叫 ws\a 的文件名】⇒ 它不在 /repo/ws/ 下面 ⇒ 旧口径同样拒。
+    // ⇒ 「为了安全必须牺牲一批合法路径」这句话，在这一格上【量出来是假的】。
+    expect(isInsideWorkspace("/repo/ws", "/repo/ws\\a")).toBe(false);
+    // 工作区根自己带 `\` 时两种读法同解 ⇒ 照旧放行：
+    expect(isInsideWorkspace("/repo/w\\s", "/repo/w\\s/ok.ts")).toBe(true);
+  });
+
+  it("⭐ 本轮改了行为的那几对，成对钉住（对照 .workbuddy/probe303-compare.txt）", () => {
+    // 分母来源：新旧对照表实测 21 对里【恰好 3 对】变了，全是下面这三行。
+    // 为什么把「只改了这几对」钉住：一条安全判据的改动，最需要知道的不是
+    // 「它现在拦什么」，而是【它比昨天多拦了什么、少拦了什么】——
+    // 少拦一条就是回归。把三对写死，下次有人再动 normalizeAbs 时这里会红。
+    const ESCAPES: [string, string][] = [
+      ["/repo/ws", "/repo/ws/x\\..\\..\\secret\\k.txt"],
+      ["/repo/ws", "/repo/ws/a\\..\\..\\b.ts"],
+      ["/repo/ws", "/repo/ws/deep/dir\\..\\..\\..\\etc\\passwd"],
+    ];
+    for (const [ws, t] of ESCAPES) {
+      expect(isInsideWorkspace(ws, t), ws + " + " + t).toBe(false);
+      const v = workspaceContainmentBlock(ws, t);
+      expect(v.ok, ws + " + " + t + " 被放行 ⇒ 越界").toBe(false);
+      if (!v.ok) expect(v.code).toBe("workspace_escape");
+    }
+  });
+
   it("越界的报错点出两侧路径（不然当事人不知道该改哪儿）", () => {
     const v = workspaceContainmentBlock("/repo", "/etc/passwd");
     expect(v.ok).toBe(false);

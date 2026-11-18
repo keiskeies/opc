@@ -370,18 +370,62 @@ export function sandboxTierBlock(
  *
  * 符号链接**不在这里解**（`realpath` 需要 fs，而本文件是纯判定）。
  * 这是本模块一条真实边界，写在 §「本模块挡不住什么」里而不是藏起来。
+ *
+ * ⚠⚠ round303：这一条判【两种读法都_inside_】，不是判【一种】。
+ * 旧写法只按 `/` 拆（`normalizeAbs` 的 split("/")），而 `\` 在 Windows 上【同样是分隔符】
+ * ⇒ 混合形状那一型是**放行**的：
+ *   工作区 `/repo/ws`、目标 `/repo/ws/x\..\..\secret\k.txt`
+ *   旧读数 = inside（`x\..\..\secret\k.txt` 被当成【一个】文件名段，`..` 从不被看见，
+ *   前缀匹配过）⇒ Windows 上 OS 会把它解析成 `/repo/secret/k.txt` ⇒ **越出工作区却被
+ *   放行**。本轮实测过（.workbuddy/probe303-direction.test.ts），危害方向是 fail-OPEN。
+ * 可达性写清楚，别把它读成「现网可打」：`target` 是工具调用参数里的原样字符串
+ * （gateway.ts 的 pathArg，上游零归一化），但本文件今天【零生产 import】（文件头那句
+ * 横幅 + dead-modules 的 claimSites 盯着）⇒ 这条是【接线即成真】，不是当前在跑的洞。
+ *
+ * 为什么取【两种读法的交集】而不是「按 process.platform 选一种」：
+ *  ① 判据必须【与主机无关】。同一份岗位书 + 同一次调用在 Linux 与 Windows 上判成
+ *     两档，正是 §9.1/§12.7 反复警告的那种「两处答案不一样」的形状；而这里两处是
+ *     【同一台的两次运行】，更难发现。
+ *  ② 交集 ⊆ 旧的 POSIX 那一侧 ⇒ 【只会多拦不会少拦】，危害方向恒为 fail-closed。
+ *     而【实测代价为零】：新旧真字节对过同一张 21 对的表（.workbuddy/probe303-compare.txt，
+ *     旧那份是 `git show HEAD:` 切出来的），只有 3 对变了，全是下面那一族逃逸；
+ *     没有一对从「放行」变成「拒」。我原本以为「文件名里带 \ 的会被多拦」，量出来不是：
+ *     那种两种读法【都】在里面，交集照旧放行。
+ *     ⇒ 与主机无关 + fail-closed + 零代价，这一格不必在两种读法里选一种。
  */
 export function isInsideWorkspace(workspace: string, target: string): boolean {
-  const root: string = normalizeAbs(workspace);
-  const p: string = normalizeAbs(target);
-  if (p === root) return true;
-  return p.startsWith(root.endsWith("/") ? root : root + "/");
+  const insideUnder = (bothSeparators: boolean): boolean => {
+    const root: string = normalizeAbs(workspace, bothSeparators);
+    const p: string = normalizeAbs(target, bothSeparators);
+    if (p === root) return true;
+    return p.startsWith(root.endsWith("/") ? root : root + "/");
+  };
+  // 两种读法【都】说在里面，才算在里面（见上面 ①②）。
+  return insideUnder(false) && insideUnder(true);
 }
 
-function normalizeAbs(p: string): string {
+/**
+ * 归一化到「段用 / 连接」的形状。
+ *
+ * @param bothSeparators false = 只认 `/`（POSIX 读法）；true = `/` 与 `\` 都认
+ *        （Windows 读法）。两种读法由 isInsideWorkspace 各跑一遍取交集。
+ *
+ * ⚠ 输出【恒用 / 连接】而不再原样返回反斜杠。本轮写的时候差点把连接符跟着读法走
+ *   （`join(bothSeparators ? "\\" : "/")`），那样两种读法的归一串永远不相等：
+ *   `p === root` 那一支不成立，`p.startsWith(root + "/")` 也对任何路径都不成立
+ *   ⇒ Windows 那一读对【一切】都回答「在外面」⇒ 交集恒假 ⇒ 判据退化成恒拒。
+ *   这一格【量过】，不是推理：.workbuddy/round303-mutate-containment.mjs 的 M3 把那行
+ *   真改过去，红了 6 发（/repo-evil、.. 归一、根归一、反向对照、反斜杠工作区、代价）。
+ *   ⚠ 我原来在这里写的是「靠 `D:\repo\ws` + 同一路径那一发拦住了」——那是【没验过的
+ *   出处】，实测是一发【宽爆】而不是某一发承重，已按实测改掉。
+ *   顺带留下这条更有用的口径：恒拒这种实现【逃逸那三发全绿】（它们本来就断 false），
+ *   只有「断言在里面」的反向对照拦得住 ⇒ 反向对照不是锦上添花，它是恒拒唯一的探测器。
+ */
+function normalizeAbs(p: string, bothSeparators: boolean): string {
   const parts: string[] = [];
   const abs: boolean = p.startsWith("/");
-  for (const seg of p.split("/")) {
+  const segs: string[] = bothSeparators ? p.split(/[/\\]/u) : p.split("/");
+  for (const seg of segs) {
     if (seg === "" || seg === ".") continue;
     if (seg === "..") {
       if (parts.length > 0 && parts[parts.length - 1] !== "..") parts.pop();
