@@ -139,3 +139,23 @@ zero-producer 当场报 unregistered。这不是误报：那句话确实是一�
    每轮判——保存期判据挡的是新边，存量脏图（手工修库造出来的，validate.ts 文件头明写
    这种图存在）由自检扫更合适。这是一条没做的候选，本轮没做，因为它属于自检清单扩容，
    不属于"接上判据"。
+
+   > 【round298 改口两件事，原文留着不删。】
+   > **其一，这一格落地了**：`integrity.ts` 的 `CHECK_NAMES` 多了第 8 条
+   > `delegation_edges_gated`，它扫 `delegation_graphs` 的**全部版本**（老版本是活的：
+   > 任务盖着自己的 `graph_version`，`readGraphByVersion` 刻意在版本缺失时抛错而不退回
+   > 最新版），读边之前先过一次 `orgGraphSchema`。今天它报 `not_observable`
+   > （实测 `.opc-os/dev.db` 那张表 0 行），而 `not_observable` 不算损坏、不进启动闸门。
+   > **其二，本篇这里那句前提是错的**：上面写「手工修库造出来的」，读者会把它读成
+   > 「防有人手滑改库」。round298 实测**不需要手工修库**——`POST /org` 把请求体里的
+   > **整张图**原样交给 `commitOrgChange`（`http/org.ts`），`orgGraphSchema` 里
+   > `review_gate` 只是 `z.boolean()`；而 §3 那条 `missing_review_gate` 在 `revalidate`
+   > 的 `add_edge` 分支上，**只看本次 change 带来的那条边**。
+   > ⇒ 一次 `add_node` 变更配一张带脏边的图，两道闸门都点头（本轮把这件事写成了
+   > 用产品自己的 schema 与判据跑出来的一发用例，见 `integrity.test.ts` ⑤b「前提自证」）。
+   > ⇒ 所以**自检是兜底，不是替代**：根治要在保存期补一条整图判据（或让 API 逐边判门控），
+   > 那会改变一条现役路由的接受集，属改产品行为，round298 只登记不作。
+   > 泛用那条：**登记一个洞时，"它怎么被踩到"也是要复算的主张**——前提写小了，
+   > 后面所有人都按小的那圈补，补完还以为堵严了。详见 `.workbuddy/AUDIT-LEDGER.txt`
+   > round298 段与登记为 **r23** 的那条主张。
+

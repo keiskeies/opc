@@ -1476,6 +1476,136 @@ function addNodeDispatchCheck(f: Files): string {
   return "";
 }
 
+/**
+ * r23：那条「整图委派边门控」自检的【结构】还在（round298）。
+ *
+ * 为什么这条判据【不打开数据库】：那条自检的结论今天是 not_observable
+ * （实测 dev.db 的 delegation_graphs 0 行），而「报告里那一格写着什么」由
+ * integrity.test.ts 那 7 发钉 —— 这里再跑一遍库就是两处口径互抄。
+ * 本判据只核那一族「结构还在 + 分工没漂」：注册在不在、扫描范围有没有被静默降级、
+ * schema 那道判有没有被撤、以及那条 not_observable 文案里的假句子有没有回来。
+ *
+ * 五格里三格是【反向】的（诱人错法落下就红），因为它们对应的正是三个
+ * 「看起来更合理」的改法：只扫最新版（"旧版本谁还在用"）、把 `!== true` 松成
+ * `== null`（"false 至少填了东西"）、撤掉 schema 那道（"读取口本来就做强转，
+ * 这里何必再判一次"）。每一个都比原写法省字，每一个都让那一格静默失效。
+ */
+function delegationEdgeSelfCheckCheck(f: Files): string {
+  let text: string;
+  try {
+    text = f.src("db/integrity.ts");
+  } catch {
+    return (
+      "packages/hub/src/db/integrity.ts 不在了 —— 「库里有一条跑在整图上的门控自检」" +
+      "重新变成一句散文。r23 的本体就是那份自检，它没了就没有任何东西可判"
+    );
+  }
+  const code = withoutComments(text);
+  // ── ① 名单：那条名字还在 ────────────────────────────────────────────
+  // 只取 CHECK_NAMES 那一段：那个名字在函数体里也出现（`const name: CheckName = …`），
+  // 拿整份文件搜会把「名字还在名单里」判成「名字在文件里出现过」。
+  const names = sliceFrom(
+    text,
+    "export const CHECK_NAMES = [",
+    "export type CheckName",
+  );
+  if (names === null) {
+    return (
+      "integrity.ts 还在，但读不到 CHECK_NAMES 那一段了 —— 于是「名单里有这一格」退回了" +
+      "【整份文件里搜一下】，而那正是把「文本在场」当成「那一格还在」（同 r22 之①）"
+    );
+  }
+  if (!names.includes('"delegation_edges_gated"')) {
+    return (
+      "CHECK_NAMES 里没有 delegation_edges_gated 了 —— 报告不再声明这一格。" +
+      "它此前【有过】⇒ 红的时候别去改主张，先问是谁把那一格撤了（撤回是一次决定）"
+    );
+  }
+  // ── ② 注册：名字在名单里而没人跑它 ⇒ 比没有这一格更坏 ────────────────
+  // 单列一格不与①合并：`guarded(` 那行被摘掉之后，报告里那一格【不会再出现】，
+  // 而读报告的人看见的是「其余八格全 ok」—— 少一格和那一格报 ok 是两种假绿，
+  // 后者会让人以为有人判过。两发的修法也相反（一个补名单，一个补注册）。
+  if (!code.includes('guarded("delegation_edges_gated"')) {
+    return (
+      "delegation_edges_gated 还在名单里，而 auditCoherenceReport 的 guarded 数组不再跑它 —— " +
+      "名字在报告里从此消失，于是「那条自检一直在报 ok」这种假绿变成了更隐蔽的" +
+      "「那一格压根没出现」。名单里有而没人跑 = 一份恒绿的自检"
+    );
+  }
+  // ── ③ 函数体：三格反向，各自对应一种「看起来更合理」的改法 ────────────
+  const body = sliceFrom(
+    text,
+    "function delegationEdgeGateCheck(",
+    "/** zod 错误压成",
+  );
+  if (body === null) {
+    return (
+      "integrity.ts 还在、注册那行还在，但读不到 delegationEdgeGateCheck 的定义 —— " +
+      "上面那根线连向一个不存在的东西（读不到定义与定义改了名在这里同为红，" +
+      "因为注册与定义缺一半都是同一件事故）"
+    );
+  }
+  const bodyCode = withoutComments(body);
+  // 反向之一：只扫最新版。这条是【最便宜的一次静默降级】—— SQL 里多一个 WHERE，
+  // 今天的真库 0 行 ⇒ 两种写法读数【完全相同】，所以它不会在任何现存数据上红。
+  if (
+    !bodyCode.includes("FROM delegation_graphs ORDER BY version") ||
+    bodyCode.includes("MAX(version)")
+  ) {
+    return (
+      "delegationEdgeGateCheck 的 SQL 不再是「扫全部版本」—— 老版本是【活的】：" +
+      "任务盖着自己的 graph_version 读图，而 readGraphByVersion 刻意在版本缺失时抛错、" +
+      "不退回最新版。只扫最新 = 报告 ok 而那个老任务继续跑一条无门控的脏边。" +
+      "⚠ 今天真库 0 行 ⇒ 这一格在真实数据上【不会】红，它只被夹具钉着（integrity.test.ts 那一发 v7 净 + v3 脏）"
+    );
+  }
+  // 反向之二：`!== true` 松成 `== null`。false 是【填了】的值。
+  if (!bodyCode.includes("e.review_gate !== true")) {
+    return (
+      "门控判据不再要求 `review_gate !== true` —— 换成「填没填」就把 false 放过去了，" +
+      "而 false 恰恰是那条【显式关掉门控】的值（§8.2 第 4 条要防的就是它）"
+    );
+  }
+  // 反向之三：撤掉 schema 那道，退回「信读取口的强转」。
+  if (!bodyCode.includes("orgGraphSchema.safeParse(raw)")) {
+    return (
+      "读边之前不再过 orgGraphSchema —— 读取口今天全是 `JSON.parse(...) as OrgGraph` 强转，" +
+      "强转把「契约说不」变成「没人知道」。`{nodes:{}, edges:{}}` 那种形状" +
+      "（test/graph 的存根图当年就长这样）从此在这一格里隐身"
+    );
+  }
+  // 分工那一格：空表【不许】混进 ok。
+  if (!bodyCode.includes("if (edges === 0) {")) {
+    return (
+      "「整库一条委派边都没有」不再单独成栏 —— 空图会读成 ok，而本文件 ④ 节写的正是" +
+      "「空不是通过」（0016 §4b 那一格）。没有对象的自检与合规的自检必须分得开"
+    );
+  }
+  // ── ④ 文案：那条假句子不许回来（与 M5 同一格，口径不同）──────────────
+  // M5 测的是「zero-producer 抓得到」；这里测的是「登记表不许它回来」。
+  // 两处都抓不是重复：那台读的是「这句话与代码现状对不对得上」，
+  // 这一格读的是「这句已经被证伪的话有没有被写回来」。
+  // ⚠ 判【剥掉注释之后】的整份文件：那句假话落在 detail 的字符串字面量里（= 代码），
+  // 而它随时可能被下一个人【写在注释里当反面教材】—— 判原文会因为一句诚实的注释而假红。
+  // 方向不对称是这里的重点：判代码 ⟹ 注释豁免（该绿）；判原文 ⟹ 注释定罪（假红）。
+  if (code.includes("没有任何 INSERT INTO delegation_graphs")) {
+    return (
+      "not_observable 的文案里出现了「src 里没有任何 INSERT INTO delegation_graphs」—— " +
+      "那句是【假的】：写入方是 org/commit.ts 的 INSERT_DELEGATION_GRAPH_SQL，生产路径在调。" +
+      "0063 / zero-producer.ts 那一格说的就是「文案里的事实断言会过期而文案本身恒绿」，" +
+      "本轮 M5 实测过它抓得住 zero-producer，而 ⑤b 那两行 toContain【抓不到】"
+    );
+  }
+  if (!bodyCode.includes("INSERT_DELEGATION_GRAPH_SQL")) {
+    return (
+      "空表那一格的文案不再指名写入方 —— 少了这个名字，读者只能从「表是空的」推回" +
+      "「没人写得进去」，而那正是上面那条假句子的形状。指名字节比写一句形容词便宜，" +
+      "而且它能被这一格核对"
+    );
+  }
+  return "";
+}
+
 /* ═════════════════════ 登记表 ═════════════════════ */ export const REGISTRY: readonly RegistryEntry[] =
   [
     {
@@ -1642,7 +1772,7 @@ function addNodeDispatchCheck(f: Files): string {
       checkedAt: "2026-11-17",
       source: {
         doc: "docs/OPC-OS-功能优化设计.md",
-        line: 1686,
+        line: 1687,
         sentence: "本篇之外还有一份计划文档，而它的出口门前提今天不成立",
       },
       check: r10LintGuardCheck,
@@ -1661,7 +1791,7 @@ function addNodeDispatchCheck(f: Files): string {
       checkedAt: "2026-11-17",
       source: {
         doc: "docs/OPC-OS-功能优化设计.md",
-        line: 1777,
+        line: 1778,
         sentence: "上一格那条计划引用守卫，落地后被自己的变异打回过一次",
       },
       check: r11PlanRefsGuardCheck,
@@ -1680,7 +1810,7 @@ function addNodeDispatchCheck(f: Files): string {
       checkedAt: "2026-11-17",
       source: {
         doc: "docs/OPC-OS-功能优化设计.md",
-        line: 1808,
+        line: 1809,
         sentence: "计划的 6 道出口门禁，今天",
       },
       check: r12GatePathGuardCheck,
@@ -1702,7 +1832,7 @@ function addNodeDispatchCheck(f: Files): string {
       checkedAt: "2026-11-17",
       source: {
         doc: "docs/OPC-OS-功能优化设计.md",
-        line: 1872,
+        line: 1873,
         sentence:
           "今天真的员工身上唯一生效的安全边界，此前一条守卫都没有 —— 顺带量到 `tsc -b` 从不检查测试",
       },
@@ -1725,7 +1855,7 @@ function addNodeDispatchCheck(f: Files): string {
       checkedAt: "2026-11-17",
       source: {
         doc: "docs/OPC-OS-功能优化设计.md",
-        line: 1928,
+        line: 1929,
         sentence: "本篇自己的坐标从来没有门禁",
       },
       check: claimCoordsGuardCheck,
@@ -1795,7 +1925,7 @@ function addNodeDispatchCheck(f: Files): string {
       checkedAt: "2026-11-17",
       source: {
         doc: "docs/OPC-OS-功能优化设计.md",
-        line: 1969,
+        line: 1970,
         sentence: "O8 那条端到端验收写出来了",
       },
       check: orgAddNodeGapCheck,
@@ -1981,7 +2111,7 @@ function addNodeDispatchCheck(f: Files): string {
       checkedAt: "2026-11-17",
       source: {
         doc: "docs/OPC-OS-功能优化设计.md",
-        line: 1895,
+        line: 1896,
         sentence: "round285：这一格接成了门禁，形状是棘轮（登记为 r19）",
       },
       check: testTypeRatchetCheck,
@@ -2077,7 +2207,7 @@ function addNodeDispatchCheck(f: Files): string {
       checkedAt: "2026-11-17",
       source: {
         doc: "docs/OPC-OS-功能优化设计.md",
-        line: 2209,
+        line: 2210,
         sentence: "round293 第二段落地并登记为 r21",
       },
       check: gateExemptionAccountCheck,
@@ -2149,10 +2279,78 @@ function addNodeDispatchCheck(f: Files): string {
       checkedAt: "2026-11-17",
       source: {
         doc: "docs/OPC-OS-功能优化设计.md",
-        line: 2333,
+        line: 2334,
         sentence: "round294 落地并登记为 r22",
       },
       check: addNodeDispatchCheck,
+    },
+    {
+      id: "r23",
+      claim:
+        "「无门控委派边没人核对」那一格从【登记在文档里】翻向【库里有一条跑在整图上的自检】：" +
+        "`integrity.ts` 的 `CHECK_NAMES` 里有 `delegation_edges_gated` 而 `auditCoherenceReport`" +
+        "的 `guarded` 数组里【真的注册了它】⇒ 那条自检仍在扫【全部版本】的图而不是 `MAX(version)`、" +
+        "仍在读边之前过一次 `orgGraphSchema`（读取口今天全是 `JSON.parse(...) as OrgGraph` 强转）、" +
+        "判的是 `review_gate !== true` 而不是「填没填」，且那条 not_observable 文案仍写着" +
+        "「空表 ≠ 没有写入方」。⚠ 射程五条：① 本条判的是【结构还在 + 分工没漂】，" +
+        "它【不打开任何数据库】—— 那条自检在真库里今天报什么，归 integrity.test.ts 那 7 发；" +
+        "② 它【不判】「脏边进不了库」：写侧那两半（HTTP 信请求体带来的整张图 + " +
+        "`revalidate` 只看增量）今天都还在，本轮只加了读侧的兜底，" +
+        "把本条读成「不能再通过请求体塞无门控边了」是误读（round298 台账「没做的下一格」）；" +
+        "③ 老版本【必须】在射程内 —— 任务盖着自己的 graph_version 读图，" +
+        "把扫描退回最新版是一次【静默降级】：报告 ok 而那个老任务照跑脏图；" +
+        "④ 它不判「审阅真的发生过」，那一格归 author-reviewer / events；" +
+        "⑤ `could_not_run` 不在本条射程内，那条文案区分的是「数据读不动」与「尺子放不下去」，" +
+        "混起来会让一次 schema 损坏读成「这条判据没跑」，而后者不拦启动",
+      method:
+        "test/arch/claims-registry.test.ts › r23 判据：读一份【权威落点】、一格都不抄 —— " +
+        "名单与函数体都在 `db/integrity.ts`，本文件不抄 CHECK_NAMES 的全表（抄一份就会在真那份" +
+        "加第 9 条之后继续绿着）。五格全写成【正向：那句话的权威字节此刻在代码里】，" +
+        "判的是【剥掉注释之后】那份（`withoutComments`，洞两条见 r22 的 method —— " +
+        "这一族的注释比代码长，函数头有整段在解释「为什么故意不判」）。" +
+        "⭐ 三格是【反向】的，即「诱人错法一旦落下就红」：只扫 `MAX(version)` ⇒ 红（M2 那一发）/ " +
+        "把 `!== true` 换成 `== null` ⇒ 红（M1 那一发：false 是【填了】的值）/ " +
+        "撤掉 `orgGraphSchema.safeParse` 退回信强转 ⇒ 红（M3 那一发）；" +
+        "另外两格守的是【注册】与【文案】：名单里有名字而 `guarded(` 那行被摘 ⇒ 红" +
+        "（恒绿的自检比没有自检更坏：报告里那一格会一直显示 ok），" +
+        "not_observable 文案里那句假句子回归（「src 里没有任何 INSERT INTO…」）⇒ 红 —— " +
+        "⭐ 与 M5 同一格，但口径不同：M5 测的是【zero-producer 抓得到】，" +
+        "这里测的是【登记表不许它回来】。两处都抓不是重复：" +
+        "那台读的是「这句话与代码现状对不对得上」，这台读的是「这句话有没有被写回来」。" +
+        "另加打在合成语料上的十四发（claims-registry.test.ts，不碰盘）：取材自证一发 + 控制组一字不改 ⇒ 返回空 + " +
+        "十二发变异：integrity.ts 整份不见 ⇒ 红 / 读不到 CHECK_NAMES 那一段 ⇒ 红在【取材】/ " +
+        "名单里摘掉那一格 ⇒ 红 / " +
+        "⭐ 名单留着而 `guarded(` 那行不见 ⇒ 红（与「摘名单」分开报：那两发的修法相反）/ " +
+        "读不到函数定义 ⇒ 红 / SQL 退回 `MAX(version)` ⇒ 红 / 门控判据退回 `== null` ⇒ 红 / " +
+        "撤 schema 那道 ⇒ 红 / 空表那格不再单独成栏（`if (edges === 0)` 短路成 false）⇒ 红 / " +
+        "假句子【写进代码】⇒ 红 / ⭐⭐ 同一句假话【只写进注释】⇒【该绿】（④ 判剥注释后的字节，" +
+        "这一发是那一格唯一的方向证据：判原文会因为一句诚实的反面教材注释而【假红】。" +
+        "它自带两条前提自证 —— 那句【进了字节】且【在函数头之前】，否则" +
+        "「绿」分不出【注释被豁免】与【锚点没注上】）/ 空表文案不再指名写入方 ⇒ 红；" +
+        "除控制组外每发各带一条 not.toContain 排除红因串扰（八格串在一条判据里，" +
+        "只判 toContain 会把「取材坏」与「主张过期」读成同一句话）。" +
+        "外加打在【真生产字节】上的六发自回滚变异" +
+        "（.workbuddy/round298-mutate-edge-gate.mjs，逐字节核对、单独跑、不与任何测试并发；" +
+        "命中 6/6、机器自证 7/7，证据 .workbuddy/round298-edge-gate-mutation-evidence.txt）：" +
+        "M0 控制组该绿 / M1 门控判成「有没有填」⇒ 红 2 / M2 只扫最新版 ⇒ 红 2 / " +
+        "M3 撤 schema 那道 ⇒ 红 2 / M4 空表混进 ok ⇒ 红 2 / " +
+        "⭐ M5 把假句子写回文案 ⇒ 红在【另一条守卫】（zero-producer.test.ts 点名 integrity.ts 那一行），" +
+        "而⑤b 那发【全绿】—— 那 1 发全绿是本轮量出来的盲区，矩阵按【用例名】把它点名，" +
+        "并在 ⑤b 的注释里明写「那两行 toContain 不是守卫，只是便宜取样」。" +
+        "⚠ 这台比 round296 那台多两件事：每发变异【自己声明该由哪条守卫抓】（spec 逐发给），" +
+        "以及装载失败那两种读法各带一发自证 —— 第一版用 `语法炸掉` 试「装载失败」而它是" +
+        "【合法标识符】⇒ 运行期才炸 ⇒ 那条「读不到用例名就不造名」的分支【从没走通过】，" +
+        "换成 `@@@` 那种真非法字节才量出读数（`Tests no tests` + 文件级 FAIL）⇒ " +
+        "**一个永远不可能进入的分支就是一句装饰**，它要在【造出那种读数】之后才算被验证。" +
+        "本条判据不打开数据库、不重跑那台机器，口径同 r12/r13/r21/r22",
+      judge: "claims-registry",
+      checkedAt: "2026-11-18",
+      source: {
+        doc: "docs/OPC-OS-功能优化设计.md",
+        line: 2451,
+        sentence: "round298 落地并登记为 r23",
+      },
+      check: delegationEdgeSelfCheckCheck,
     },
   ];
 

@@ -1,0 +1,12 @@
+机器自证 7/7 通过（用例名归因 / 装载失败不造名 / 全绿读绿 / 读不到摘要要抛 / 红在别处不算命中）
+锚点预检 6/6 命中且互不相同
+基线绿：integrity.test.ts 37 passed；zero-producer.test.ts 11 passed。
+✓ M0 控制组：函数头加一条空注释 ⇒ integrity.test.ts 红发 0（绿）
+✓ M1 门控判成「有没有填」而不是「是不是 true」 ⇒ integrity.test.ts 红发 3（红）
+✓ M2 只扫【最新版】那张图 ⇒ integrity.test.ts 红发 2（红）
+✓ M3 撤掉 orgGraphSchema 那道判，退回【信 as OrgGraph】 ⇒ integrity.test.ts 红发 2（红）
+✓ M4 「整库一条边都没有」不再单独成栏，混进 ok ⇒ integrity.test.ts 红发 2（红）
+✓ M5 把【过期/假】的句子写回 not_observable 的文案 ⇒ zero-producer.test.ts 红发 2（红） ⑤b 侧点名：1 发【全绿】⇒ 盲区量出来了
+还原校验：字节一致
+
+命中 6/6（M0 该绿 + 5 发该红且点名）

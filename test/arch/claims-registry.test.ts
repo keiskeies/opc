@@ -1655,6 +1655,185 @@ describe("主张登记表：变异判别力（真红，合成输入不碰盘）"
   });
 });
 
+/* ── r23（round298）：那条整图门控自检的【结构】还在 ───────────────────
+ * 取材只有一份文件（db/integrity.ts），所以这里的变异全是【同一份字节的局部改动】。
+ * 家规照 r20/r21/r22：每一发都带一条 not.toContain，把"红在别的格"排除掉 ——
+ * 一份判据里八格串联，只判 toContain("不在了") 会把「取材坏」与「主张过期」读成同一句话。 */
+describe("主张登记表：变异 r23（整图委派边门控自检）", () => {
+  const R23 = "db/integrity.ts";
+  /** r23 判据在合成语料下【不红】所需的最小一份好输入 = 真字节原文。 */
+  const r23Good = (
+    over: Record<string, string> = {},
+  ): Record<string, string> => ({
+    [R23]: realFiles.src(R23),
+    ...over,
+  });
+  /** 换掉一段字节，并【先证明那段在】—— 锚点写错会变成空变异而测试"通过"。 */
+  const swap = (text: string, from: string, to: string): string => {
+    expect(text.includes(from)).toBe(true);
+    const out = text.replace(from, to);
+    expect(out).not.toBe(text);
+    return out;
+  };
+
+  it("r23 的真仓库那一半：取材读得到那几处字节（红=取材坏了，不是主张过期）", () => {
+    const t = realFiles.src(R23);
+    expect(t).toContain('"delegation_edges_gated"');
+    expect(t).toContain('guarded("delegation_edges_gated"');
+    expect(t).toContain("function delegationEdgeGateCheck(");
+    expect(t).toContain("FROM delegation_graphs ORDER BY version");
+  });
+
+  it("r23 控制组：原文一字不改 ⇒ 判据返回空（剥注释那几格在真语料上不误伤）", () => {
+    expect(checkOne("r23", fakeFiles(r23Good()))).toBe("");
+  });
+
+  it("变异 r23 之一：integrity.ts 整份不见 ⇒ 红在「不在了」", () => {
+    const without = r23Good();
+    delete without[R23];
+    expect(checkOne("r23", fakeFiles(without))).toContain("不在了");
+  });
+
+  it("变异 r23 之二：读不到 CHECK_NAMES 那一段 ⇒ 红在【取材】而不是红在「名字被摘」", () => {
+    const mutated = swap(
+      realFiles.src(R23),
+      "export const CHECK_NAMES = [",
+      "const RENAMED_NAMES = [",
+    );
+    const msg = checkOne("r23", fakeFiles(r23Good({ [R23]: mutated })));
+    expect(msg).toContain("读不到 CHECK_NAMES 那一段");
+    expect(msg).not.toContain("先问是谁把那一格撤了");
+  });
+
+  it("变异 r23 之三：名单里摘掉那一格 ⇒ 红（报告不再声明它）", () => {
+    const mutated = swap(
+      realFiles.src(R23),
+      '  "delegation_edges_gated",\n',
+      "",
+    );
+    const msg = checkOne("r23", fakeFiles(r23Good({ [R23]: mutated })));
+    expect(msg).toContain("CHECK_NAMES 里没有 delegation_edges_gated");
+    expect(msg).not.toContain("不再跑它");
+  });
+
+  it("⭐ 变异 r23 之四：名单留着而 guarded 那行被摘 ⇒ 红（恒绿的自检比没有更坏）", () => {
+    // 与上一发【分开报】：那一发补名单，这一发补注册；而且这一发的假绿形状不同 ——
+    // 报告里那一格不再出现，读报告的人看见的是"其余全 ok"。
+    const mutated = swap(
+      realFiles.src(R23),
+      '    guarded("delegation_edges_gated", () => delegationEdgeGateCheck(o.db)),\n',
+      "",
+    );
+    // 前提自证：摘掉注册之后，名字【还】在名单里 —— 少了这两行就分不清红在哪一格。
+    expect(mutated).toContain('"delegation_edges_gated"');
+    const msg = checkOne("r23", fakeFiles(r23Good({ [R23]: mutated })));
+    expect(msg).toContain("还在名单里");
+    expect(msg).not.toContain("先问是谁把那一格撤了");
+  });
+
+  it("变异 r23 之五：读不到函数定义 ⇒ 红在【注册连向不存在的东西】", () => {
+    const mutated = swap(
+      realFiles.src(R23),
+      "function delegationEdgeGateCheck(",
+      "function renamedEdgeCheck(",
+    );
+    const msg = checkOne("r23", fakeFiles(r23Good({ [R23]: mutated })));
+    expect(msg).toContain("读不到 delegationEdgeGateCheck 的定义");
+    expect(msg).not.toContain("MAX(version)");
+  });
+
+  it("⭐ 变异 r23 之六：SQL 退回只扫最新版 ⇒ 红（M2 那一发的登记形态）", () => {
+    const mutated = swap(
+      realFiles.src(R23),
+      '"FROM delegation_graphs ORDER BY version",',
+      '"FROM delegation_graphs " +\n        "WHERE version = (SELECT MAX(version) FROM delegation_graphs) ",',
+    );
+    const msg = checkOne("r23", fakeFiles(r23Good({ [R23]: mutated })));
+    expect(msg).toContain("不再是「扫全部版本」");
+    expect(msg).not.toContain("review_gate");
+  });
+
+  it("⭐ 变异 r23 之七：门控判成「有没有填」⇒ 红（M1 那一发：false 是填了的值）", () => {
+    const mutated = swap(
+      realFiles.src(R23),
+      "e.review_gate !== true",
+      "e.review_gate == null",
+    );
+    const msg = checkOne("r23", fakeFiles(r23Good({ [R23]: mutated })));
+    expect(msg).toContain("填没填");
+    expect(msg).not.toContain("orgGraphSchema");
+  });
+
+  it("⭐ 变异 r23 之八：撤掉 orgGraphSchema 那道 ⇒ 红（M3：退回信强转）", () => {
+    const mutated = swap(
+      realFiles.src(R23),
+      "const parsed = orgGraphSchema.safeParse(raw);",
+      "const parsed = { success: true as const, data: raw as never };",
+    );
+    const msg = checkOne("r23", fakeFiles(r23Good({ [R23]: mutated })));
+    expect(msg).toContain("不再过 orgGraphSchema");
+    expect(msg).not.toContain("review_gate !== true");
+  });
+
+  it("变异 r23 之九：空表那格短路成 false ⇒ 红（空不是通过）", () => {
+    const mutated = swap(
+      realFiles.src(R23),
+      "  if (edges === 0) {",
+      "  if (false) {",
+    );
+    const msg = checkOne("r23", fakeFiles(r23Good({ [R23]: mutated })));
+    expect(msg).toContain("不再单独成栏");
+    expect(msg).not.toContain("MAX(version)");
+  });
+
+  it("⭐ 变异 r23 之十：假句子【写进代码】⇒ 红（M5 同一格的登记形态）", () => {
+    const mutated = swap(
+      realFiles.src(R23),
+      '"delegation_graphs 是空的 —— 这一份库还没提交过任何一版组织图，" +',
+      '"delegation_graphs 是空的。src 里【没有任何 INSERT INTO delegation_graphs】" +',
+    );
+    const msg = checkOne("r23", fakeFiles(r23Good({ [R23]: mutated })));
+    expect(msg).toContain("那句是【假的】");
+    expect(msg).not.toContain("不再指名写入方");
+  });
+
+  it("⭐⭐ 变异 r23 之十·乙（反向对照）：同一句假话【只写在注释里】⇒ 该绿", () => {
+    /*
+     * ④ 那一格判【剥掉注释之后】的字节，方向是有意选的：下一个人很可能把那句假话
+     * 当【反面教材】写进注释（本仓到处就是这么干的）。判原文会因为一句诚实的注释而
+     * 【假红】；判代码则注释豁免、字符串字面量（=真文案）照样定罪。
+     * 这一发是那一格唯一的方向证据 —— 少了它，"剥注释"在 ④ 上有没有生效没人证过。
+     */
+    // 注在【函数头之前的一行行注释】里：④ 读的是剥掉注释之后的字节，
+    // 所以这一句既进了语料（下一行自证）、又不该被 ④ 定罪。
+    const anchor =
+      "function delegationEdgeGateCheck(db: DatabaseSync): CheckResult {";
+    const mutated = swap(
+      realFiles.src(R23),
+      anchor,
+      "// 别把这句话写回文案：「src 里没有任何 INSERT INTO delegation_graphs」是假的。\n" +
+        anchor,
+    );
+    // 前提自证：那句确实【进了字节】而【在函数头之前】，否则这一发是空转。
+    expect(mutated).toContain("没有任何 INSERT INTO delegation_graphs");
+    expect(mutated.indexOf("没有任何 INSERT")).toBeLessThan(
+      mutated.indexOf(anchor),
+    );
+    expect(checkOne("r23", fakeFiles(r23Good({ [R23]: mutated })))).toBe("");
+  });
+
+  it("变异 r23 之十一：空表文案不再指名写入方 ⇒ 红（假句子的形状就是这么回来的）", () => {
+    const mutated = swap(
+      realFiles.src(R23),
+      '"INSERT_DELEGATION_GRAPH_SQL（生产路径经 commitOrgGraph）。",',
+      '"（谁写得进来这里，本条不判）。",',
+    );
+    const msg = checkOne("r23", fakeFiles(r23Good({ [R23]: mutated })));
+    expect(msg).toContain("不再指名写入方");
+    expect(msg).not.toContain("那句是【假的】");
+  });
+});
+
 describe("主张登记表：出口文档渲染", () => {
   it("docs/OPC-OS-功能优化设计.md 有登记表小节，且与 REGISTRY 渲染逐字一致", () => {
     const md = readFileSync(OPCOS, "utf8");
