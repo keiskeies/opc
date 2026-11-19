@@ -1,0 +1,12 @@
+库：D:\item\opc\.opc-os\dev.db
+已种：7 个角色（组织图 v7）、3 条任务、4 条预算行、2 张待批审批卡（全可逆，IM 侧也能批）。跳过：无（岗位书 role_charters 刻意不种 —— 七条验收标准只能 CEO 本人写）。
+  · 角色    ceo → tech_director → product_lead → operations → architect → dev_engineer → qa_engineer
+  · 任务    seed-task-1, seed-task-2, seed-task-3
+  · 预算    company|company|monthly, role|dev_engineer|daily, role|qa_engineer|daily, task|seed-task-1|per_task
+  · 审批卡  a315f756-e953-4d52-a919-45a0e4dda102, 1d6fd49a-7f70-4ea3-b22f-90d95ae1ab23
+(node:65800) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+库：D:\item\opc\.opc-os\dev.db
+delegation_graphs 已有 7 个版本 ⇒ 判定已种过，本次一行未动。想重种：删掉 dev 库再跑（库是可扔的演示数据，见 .gitignore）。
+(node:64940) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)

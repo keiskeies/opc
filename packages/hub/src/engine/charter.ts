@@ -45,7 +45,7 @@ import {
   type ApprovalRequiredEvent,
   type NewCardDraft,
 } from "../approvals/cards.js";
-import type { CostHook } from "./dispatch.js";
+import type { CostHook, RunTurnInput } from "./dispatch.js";
 import { LEDGER_SQL } from "./dispatch.js";
 import { parseDecision, type RoleDecision } from "./claude.js";
 
@@ -229,13 +229,11 @@ export async function ensureCharterCard(
   w: HubWriter,
   o: CharterOptions,
   deps: {
-    readonly runTurn: (i: {
-      readonly role: string;
-      readonly rolePrompt: string;
-      readonly prompt: string;
-      readonly resumeSessionId: string | null;
-      readonly maxBudgetUsd: number;
-    }) => Promise<CharterDraftOutcome>;
+    // 参数类型用 RunTurnInput 而不是就地再声明一遍那五格：Step B 给它加了 taskId
+    // 之后，这里手抄的那份【立刻】和 dispatch 那份分叉（work.ts 把同一个回调喂两边，
+    // 同构是 CharterDraftOutcome 注释里写下的契约）。抄一份 = 下一次签名变更只有
+    // tsc 报得出来，而它报出来的是三处错而不是改一处类型。
+    readonly runTurn: (i: RunTurnInput) => Promise<CharterDraftOutcome>;
     readonly rolePrompt: (roleId: string) => string;
     readonly ceoRoleId?: string;
     readonly onCost?: CostHook;
@@ -316,6 +314,7 @@ export async function ensureCharterCard(
   // ── 起草（真花 token，在事务【外】）─────────────────────────────────
   const res = await deps.runTurn({
     role,
+    taskId: o.taskId,
     rolePrompt: deps.rolePrompt(role),
     prompt: buildCharterDraftPrompt({ title, role, ceoRoleId: ceo }),
     resumeSessionId: null,

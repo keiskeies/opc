@@ -22,6 +22,12 @@
    `grep -rn "evaluateGate(" --include='*.ts' packages/hub/src` 去掉定义文件 ⇒ **零行**。
    整个词出现 4 处，其中 3 处是注释或类型注解（`escalation.ts` 与 `auto-approve.ts`
    各一处解释「我消费它那个返回值」，而那两个模块自己也没人调）。
+   【round322 复核：本条第 1 句「evaluateGate 零调用方」已过期。`harness/verifier.ts:640`
+   现在调用 `evaluateGate`（0023 §6 认定的「只差上移一环」已上移，0023 那一族的接线）；
+   `graph/gates/evaluate.ts` 也不是只有它自己的测试在调。第 2 条
+    
+   （`readAutoApprovalReport` 零调用方）经 round322 复算**仍真**（src 无生产调用点）。
+   原句保留。】
    ⇒ 计划那句「**重跑**同类任务」里的第三个动词**无路可走**：没有任何一条链路
    在任务重跑时去问门控。这条不是「实现没做完」，是**没有那个落点**
    （同族第八次：0011 §8 / 0012 §7 / 0013 §7 / 0013 §10.1 / 0014 §3 / 0015 §8 / 0016 §7）。

@@ -1,0 +1,41 @@
+···································································································································································································································································································································································································································································(node:67960) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+····························································(node:35220) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+··············································································
+[Task 6.4 基准实测]
+  批量 2000 行 91.6ms / 逐条事务 547.5ms / 比值 6.0×（计划阈值 < 50 ms，见 0019 §3）
+  5 轮巡检并发下，20 次写最晚在 43.8ms 落地（【历史对照，非本轮测量】摘掉同一条索引时约 1.7s 量级；摘索引后的巡检单趟耗时见 bench-recompute.mjs §1-9 第②臂）
+  回放检索 P50 0.64ms P95 1.17ms（阈值 500ms）
+  20 次回放检索共 13.3ms 期间，20 次写最晚在 41.5ms 落地
+  归因对照：检索占 252.3ms 时写最晚 278.8ms；空转占 252.4ms 时写最晚 282.4ms
+····················································
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  test/arch/no-null-bytes.test.ts > 源码与文档里不许出现 U+FFFD 替换字符（0056 §5 留给下一轮的那一格） > 取材非空且真仓库【一个都没有】（0047 那处已就地修回）
+AssertionError: 文档/源码正文里有坏字符：它不炸任何编译与测试，只让那一个字变成乱码: expected 'packages/hub/src/http/app.ts:1298  】的…' to be '' // Object.is equality
+
+- Expected
++ Received
+
++ packages/hub/src/http/app.ts:1298  】的不变量去换一个计数口径。 * ② 跨任务的聚合事件在<FFFD><FFFD>回放视图】里是看不见的：replay 的取数按 * 
++ packages/hub/src/http/app.ts:1298  的不变量去换一个计数口径。 * ② 跨任务的聚合事件在<FFFD><FFFD>回放视图】里是看不见的：replay 的取数按 * 
+
+ ❯ test/arch/no-null-bytes.test.ts:265:7
+    263|       hits.map((h) => h.path + ":" + h.line + "  " + h.context).join("…
+    264|       "文档/源码正文里有坏字符：它不炸任何编译与测试，只让那一个字变成乱码",
+    265|     ).toBe("");
+       |       ^
+    266|   });
+    267|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed | 147 passed (148)
+      Tests  1 failed | 3201 passed | 6 skipped (3208)
+   Start at  19:31:53
+   Duration  23.70s (transform 16.25s, setup 0ms, import 60.98s, tests 230.39s, environment 11ms)
+
+EXIT=0

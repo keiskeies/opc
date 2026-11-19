@@ -553,3 +553,193 @@ describe("driverLine —— 卡片上那一行只排字符，不重判", () => {
     expect(line("t2", both)).toContain("$5.00");
   });
 });
+
+describe("filterReplayEntries —— §16.7 事件类型过滤（纯函数，服务端已带 action）", () => {
+  const f = (entries: unknown[], filter: unknown): unknown[] =>
+    (fns.filterReplayEntries as (a: unknown, b: unknown) => unknown[])(entries, filter);
+  const actions = (list: unknown[]): unknown[] =>
+    list.map((e) => (e as { action: string }).action);
+  const ev = (action: string, seq: number): Record<string, unknown> => ({ action, seq, actor_id: "ceo", created_at: 1 });
+
+  // 五种 action 各一发 + 一个不在任何规格组里的 state_change。※ 规格五组只映射十值枚举的子集。
+  const SAMPLE = [
+    ev("review_decision", 1),
+    ev("tool_call", 2),
+    ev("budget_consume", 3),
+    ev("approval", 4),
+    ev("meeting", 5),
+    ev("state_change", 6),
+  ];
+
+  it("meeting 组只留 meeting（规格「会议」恰好是枚举里唯一一个同名值）", () => {
+    expect(actions(f(SAMPLE, "meeting"))).toEqual(["meeting"]);
+  });
+
+  it("decide 组只留 review_decision（规格「审阅决定」）", () => {
+    expect(actions(f(SAMPLE, "decide"))).toEqual(["review_decision"]);
+  });
+
+  it("tool 组只留 tool_call（规格「工具调用」）", () => {
+    expect(actions(f(SAMPLE, "tool"))).toEqual(["tool_call"]);
+  });
+
+  it("budget 组只留 budget_consume（规格「预算」）", () => {
+    expect(actions(f(SAMPLE, "budget"))).toEqual(["budget_consume"]);
+  });
+
+  it("approval 组只留 approval（规格「审批」）", () => {
+    expect(actions(f(SAMPLE, "approval"))).toEqual(["approval"]);
+  });
+
+  it("⭐ 不认识的 filter 名 ⇒ 退回【不过滤】（界面上永远不会出现未知值，但防御不是装饰：filter 名是新 select 的 value，将来手滑多一个值不该让整个时间线变空网）", () => {
+    expect(actions(f(SAMPLE, "bogus"))).toEqual(actions(SAMPLE));
+  });
+
+  it("⭐ 原数组不被改（过滤是投影，不是原地删）", () => {
+    const before = actions(SAMPLE);
+    f(SAMPLE, "decide");
+    expect(actions(SAMPLE)).toEqual(before);
+  });
+
+  it("⭐ 不认识的 action 值保留在【全部】里（服务端未来新增枚举值不该被旧前端悄悄吃掉）", () => {
+    const withUnknown = SAMPLE.concat(ev("future_action", 99));
+    expect(actions(f(withUnknown, "all"))).toContain("future_action");
+    // 未知名过滤也不该把它吞掉：它不属于任何组，但 fallback 到 all。
+    expect(actions(f(withUnknown, "decide"))).toEqual(["review_decision"]);
+  });
+});
+
+describe("checkpointBlock —— §16.7 断点状态快照（round327 后端解码的展示半）", () => {
+  const f = (c: Record<string, unknown>): string =>
+    String((fns.checkpointBlock as (x: unknown) => unknown)(c));
+  const ck = (over: Record<string, unknown> = {}) => ({
+    checkpoint_id: "ck-1",
+    parent_checkpoint_id: null,
+    checkpoint_ns: "",
+    type: "json",
+    checkpoint_bytes: 120,
+    metadata_bytes: 0,
+    decoded: true,
+    summary: [
+      { channel: "messages", valueJson: '[{"text":"hi"}]' },
+      { channel: "task", valueJson: '{"id":"t1"}' },
+    ],
+    ...over,
+  });
+
+  it("decoded + summary 非空 ⇒ 每个通道一个 <details>，摘要可见", () => {
+    const html = f(ck());
+    expect(html).toContain("<details");
+    expect(html).toContain("<summary>messages</summary>");
+    expect(html).toContain("<summary>task</summary>");
+    // valueJson 以纯文本进 <pre>，绝不当 HTML 注入。
+    expect(html).toContain("&quot;text&quot;");
+    expect(html).toContain("<pre");
+  });
+
+  it("⭐ decoded=false ⇒ 明说没解码，不显示假的空摘要", () => {
+    const html = f(ck({ decoded: false, summary: null, type: "msgpack" }));
+    expect(html).toContain("通道值未解码");
+    expect(html).toContain("msgpack");
+    expect(html).not.toContain("<details");
+  });
+
+  it("⭐ decoded=true 但 summary 为空（通道值解出来了但对象里没有 channel_values）⇒ 同降级", () => {
+    const html = f(ck({ decoded: true, summary: null }));
+    expect(html).toContain("通道值未解码");
+    expect(html).not.toContain("<details");
+  });
+
+  it("⭐ checkpoint_id 先转义再进 HTML（checkpoint_id 是白名单键但界面上不该有注入口）", () => {
+    const html = f(ck({ checkpoint_id: '<img src=x onerror=alert(1)>' }));
+    expect(html).not.toContain("<img");
+    expect(html).toContain("&lt;img");
+  });
+
+  it("空输入 ⇒ 空串（不制造一个假断点块）", () => {
+    expect(f({})).toBe("");
+  });
+});
+
+/* ═════════ §9.4 批量批准 / 批量打回（round330）═════════
+ * 分工口径：「能不能批量」的判据【只在服务端】（POST /approvals/batch 的
+ * 422 混类型 / 404 缺 id / reject 缺 note）。这边测的只有【选择集算术】：
+ * 谁进请求体（pending ∩ 勾选）与 note 键的有无穷。
+ * ⚠ 这里【没有】「类型是否齐一」的用例，因为 app.js 里没有那个预检 ——
+ * 拆它的理由写在 app.js 批量那一节的注释里（一句话：一份会拦错东西的客户端
+ * 判据比没有更贵，而混类型的答复由服务端的 422 带着 types 列表来说）。
+ * 混类型这件事在本文件的分母 = 下面 approvalCard 那两发（不给非 pending 卡
+ * 勾选框）+ hub 侧 batch-route.test.ts 那一发 422。
+ */
+describe("batchRequestBody —— §9.4 批量选择集（判据在服务端，这边只算选择）", () => {
+  const ap = (over: Record<string, unknown> = {}) => ({
+    id: "a1", status: "pending", approval_type: "escalation", summary: "s", ...over,
+  });
+  const body = (cards: unknown[], ids: unknown[], resume: string, note?: string) =>
+    (fns.batchRequestBody as (a: unknown, b: unknown, c: string, d?: string) => Record<string, unknown>)(cards, ids, resume, note);
+
+  it("⭐ 选中里的非 pending 卡被剔除（勾选框本来就不给它，这里是第二道）", () => {
+    const cards = [ap({ id: "keep" }), ap({ id: "gone", status: "approved" })];
+    expect(body(cards, ["keep", "gone"], "approve", undefined).approval_ids).toEqual(["keep"]);
+  });
+
+  it("note 为空 ⇒ 请求体里根本没有 note 这个键（契约里它是可选键；reject 缺 note 的 422 归服务端说，前端不替它圆场）", () => {
+    const cards = [ap()];
+    for (const n of [undefined, "", "   "]) {
+      const b = body(cards, ["a1"], "reject_with_comment", n);
+      expect(Object.prototype.hasOwnProperty.call(b, "note")).toBe(false);
+    }
+  });
+
+  it("note 有值 ⇒ 带上，且去掉首尾空白", () => {
+    const b = body([ap()], ["a1"], "reject_with_comment", "  先补测试再来  ");
+    expect(b.note).toBe("先补测试再来");
+  });
+
+  it("⭐ 空选择 ⇒ approval_ids: []（中性值；发不发由绑定层裁），null/缺项输入不抛", () => {
+    const b = body([], [], "approve", undefined);
+    expect(b).toEqual({ approval_ids: [], resume: "approve" });
+    expect(body(undefined as unknown as unknown[], undefined as unknown as unknown[], "approve", undefined).approval_ids).toEqual([]);
+  });
+
+  it("勾了但不在卡片列表里的 id ⇒ 不凭空造进请求体（选择集是【列表 ∩ 勾选】，不是勾选）", () => {
+    expect(body([ap()], ["a1", "ghost-id"], "approve", undefined).approval_ids).toEqual(["a1"]);
+  });
+
+  it("⭐ 请求体【不 esc】：出网的是 JSON 载荷，转义会改坏 id 本身", () => {
+    // 这一发钉的是「转义只属于 HTML，不属于数据」那条边界。若哪天有人把 esc
+    // 顺手加进请求体拼装，一条真实存在的记录会被服务端 404 掉。
+    const id = 'a"1<b>';
+    expect(body([ap({ id })], [id], "approve", undefined).approval_ids).toEqual([id]);
+  });
+});
+
+describe("approvalCard 的批量勾选框 —— 只有 pending 卡能被勾进批量", () => {
+  const card = (over: Record<string, unknown> = {}) =>
+    (fns.approvalCard as (a: unknown, n: number, c: boolean, d: boolean) => string)(
+      { id: "a1", status: "pending", approval_type: "escalation", summary: "s", created_at: 1, ...over },
+      2,
+      false,
+      false,
+    );
+
+  it("pending ⇒ 有 data-batch-pick 勾选框，且卡片带 data-approval-id", () => {
+    const html = card();
+    expect(html).toContain("data-batch-pick");
+    expect(html).toContain('data-approval-id="a1"');
+  });
+
+  it("⭐ 已决定的卡没有勾选框（批量不参与），但 data-approval-id 仍在（它是定位手段，与能否勾选无关）", () => {
+    for (const status of ["approved", "rejected", "deferred"]) {
+      const html = card({ status });
+      expect(html, status).not.toContain("data-batch-pick");
+      expect(html, status).toContain('data-approval-id="a1"');
+    }
+  });
+
+  it("id 进属性一律 esc（卡片 id 是我们发的 UUID，但界面不许留注入口）", () => {
+    const html = card({ id: 'x" onfocus="alert(1)' });
+    expect(html).not.toContain('id="x" onfocus="alert(1)"');
+    expect(html).toContain("&quot;");
+  });
+});

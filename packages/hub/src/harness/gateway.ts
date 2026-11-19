@@ -1,24 +1,31 @@
 /**
- * ⚠⚠ 今天【一行都不执行】：harness/gateway.ts 对外零 import，生产路线不经过这里 ⚠⚠
+ * ~~⚠⚠ 今天【一行都不执行】：harness/gateway.ts 对外零 import，生产路线不经过这里 ⚠⚠~~
+ * 【round312 已解，按本横幅自己那句「接线那天方向 B 会红并点名这一行 ⇒ 横幅自删」执行】：
+ * 真员工现在【每一轮】都经过这里 —— 路径是 `engine/runtime.ts` 的 `runTurn`
+ * → `harness/gateway-runner.ts` 的 `runViaGateway` → 本文件的 `callHarness`
+ * → `adapters/claude.ts` → `engine/claude.ts` 的 `runRole`。
+ * 那句「唯一的对外调用入口」从今天起是【现状】而不只是设计目标。
  *
- * 那句「唯一的对外调用入口」是本模块的【设计目标】，不是现状，写在这里是因为它太像现状了。
- * 真的员工走的是 `engine/claude.ts` 起的 `claude -p`，一次调用都不进这个 Gateway；
- * 下面那对注入函数（`checkBudget` / `settle`）也没有调用方 —— 预算侧今天走的是
- * `engine/runtime.ts` 里 `onCost` 那三句：~~它们是手抄的 SQL，与 `budget/tracker.ts`
- * 只差把 `scope_type` / `period` 内联成字面量 `'task'` / `'per_task'` ⇒ 同一件事两份 SQL，
- * 改一处不会带着另一处（O7 的账）~~【round272 已解：那三份副本删了，`onCost` 现在
- * import tracker 导出的 `ENSERT_BUDGET_SQL` / `IDEMPOTENT_INSERT_SQL` / `ADD_CONSUMED_SQL`，
- * scope/period 走绑参 ⇒ 语句只剩一份，由 `claims-registry.test.ts` 那条「不许再抄」钉住】。
- * ⚠ 但**这一格没有兑现「接进 gateway」**：字面那句「把 `onCost` 换成走 gateway」的前提
- * 是 gateway 里有一条调用路径，而它那两个注入函数只是【类型槽】、本文件没有任何预算 SQL，
- * 且 `callHarness` 今天零生产调用方 ⇒ 换过去等于把记账接到一条没人走的路上。
- * 本轮解掉的是那两份 SQL（真实存在的那个洞），不是接线；接线仍归 O6 动作 2/3 的本体。
- * 主张的措辞是照着 `test/arch/dead-modules.ts` 的 claimSites 写的（提模块名 + 否定词），
- * 接线那天 `checkBaseline` 方向 B 会红并点名这一行 ⇒ 这句横幅【自删】，不等谁记得改文档。
- * 缺口、接线点（`onCost` 旁边）、顺序约束都登记在 docs/OPC-OS-功能优化设计.md 的 O6 / O7。
+ * ⚠ 但「接上了」的边界要说清，否则这一段又变成一句太像现状的话：
+ *  · **四层防护里真在跑的是三层**：capabilityGap（0）、forbiddenFlagBlock（1）、
+ *    sandboxTierBlock（2）、workspace 绝对性（3）。工具流（4）今天恒空 ——
+ *    CLI 适配器跑的是 `--permission-mode plan`，那个模式下【没有工具调用】，
+ *    所以 `allowed_tools` 白名单这一层由契约钉着、但没有真 sighting 喂它。
+ *  · **那两个注入函数【仍然没有调用方】**：`checkBudget` / `settle` 由装配方留空。
+ *    ~~预算侧走的是 engine/runtime.ts 里手抄的两份 SQL~~【round272 已解：`onCost`
+ *    现在 import tracker 导出的那三条语句，语句只剩一份，claims-registry 那条「不许再抄」钉住】；
+ *    而今天钱仍然由 `dispatch` 的 `onCost` 记（`settle` 再记一遍 = 同一笔钱两条腿），
+ *    spawn 前那道预算闸住在各 pump 的 `underTaskBudgetSql` 里。
+ *    ⇒ 这是【刻意留的装配边界】，不是漏了一格：换过去之前要先解决「谁记账」，
+ *    它登记在 docs/OPC-OS-功能优化设计.md 的 O7，不在本轮范围。
+ *  · **审计行现在真的落库**：`deps.audit` 那条同步回调攒进行缓冲，由 `runTurn`
+ *    在自己的事务里补写（不搭 `dispatch` 那一笔 —— 回滚会把留痕一起抹掉）。
+ *  · 路由（`harness/routing.ts`）与验证（`harness/verifier.ts`）**仍然零生产调用方**，
+ *    它们的横幅还在；O6-3 的顺序硬约束是「真员工拿到写权限【之前】接路由」。
+ * 主张的措辞是照着 `test/arch/dead-modules.ts` 的 claimSites 写的，基线格与横幅同轮摘除。
  *
  * ─────────────────────────────────────────────────────────────────────
- * 以下是本模块【接上之后】的判据。
+ * 以下是本模块的判据。
  *
  * Harness Gateway：唯一的对外调用入口（计划 Task 5.1，规格 §12.1 / §12.5 / §12.7）。
  *
@@ -83,6 +90,7 @@ import {
   approvalBlock,
   type ApprovalVerdict,
   forbiddenFlagBlock,
+  isAbsoluteWorkspacePath,
   needsApproval,
   preventionFor,
   redactArgs,
@@ -675,7 +683,11 @@ export async function callHarness(
   // ── 3. 工作区 ───────────────────────────────────────────────────────────
   // 装配期只判得了「workspace 本身是不是一个绝对路径」这种形状；
   // 逐次写目标的判定在下面的 tool_call 循环里（那时才知道目标）。
-  if (!req.workspace.startsWith("/")) {
+  // ⚠ 绝对性必须按 POSIX + Windows 两种分隔符读法判（与 safety.ts isInsideWorkspace
+  // 的 round303 立场同源）：旧写法只认 startsWith("/")，把 `D:\repo\ws` 这种
+  // Windows 绝对路径当相对路径拒掉 —— 而 hub 真跑在 Windows 上时 d.cwd 恰是那一形状，
+  // 第 3 层于是成了「只在 Unix 上存在的一层」。
+  if (!isAbsoluteWorkspacePath(req.workspace)) {
     return reject(
       "safety_blocked",
       "工作区必须是绝对路径，实到 [" +

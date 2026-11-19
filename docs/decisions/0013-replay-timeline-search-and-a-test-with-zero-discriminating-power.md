@@ -289,6 +289,15 @@ M10 一开始报「全绿」时我的第一反应是「这条测试真守不住�
 那个教训不随事实过时而失效。② 下面引号里那句 SQL 的**字面内容**已经改了：
 `WHERE ... AND status = 'pending'` 现在写成 `AND status = ?`（绑 contracts 的常量，0026 §9）。
 形状（条件写 + `changes === 0` ⇒ 不写审计）**没变**，变的只是那个值从字面量变成绑参。
+【round316 复核】③ 表里第二行说的「`auto_approved_by` 无人写 / 那一列根本不存在 /
+策略引擎自动审批是 Task 3.5（未做）」今天**也被覆盖**：`policy/auto-approve.ts`
+现在写 `payload.auto_approved_by`（JSON 键路线，非独立列，见其 454/457 行注释
+「计划 Test 项点名的字段名」），`overview/today.ts:372` 与 `replay/query.ts:62`
+都读它 ⇒「无人写」不成立；且 0026 的 cards.ts 让 `approvals` 有了**创建方**，
+0013 当时「3.5 之前先得有人创建卡片」那个前置今天存在。`approvals` 的创建
+（INSERT）此后由 cards.ts 负责、claimed 由 CLAIM_APPROVAL_SQL 负责 ——
+「grep 命中数 ≠ 写入方数」那条撤回的教训仍然成立，只是这两格从「无人」
+变成「有人」，表里那两行今天的正确读法是：**写入方已就位、角色分工已定**。
 
 拍板要读的那张表，第二行我写的是「**`approvals` 有写入方**；`auto_approved_by` 无人写」，
 据此判「策略引擎自动通过这一格**能**实现，但等 Task 3.5」。
@@ -392,6 +401,11 @@ grep -n -A 4 'kind: "ReviewDecided"' packages/hub/src/events/bus.ts
   而改一个恒 false 的常量会红掉那条用例，逼着改的人同时更新它。
   我不猜序列化格式自己解 —— 猜错会得到「解出来一个能看的东西」，
   那比解不出来危险得多。
+  【round327 已关闭】：`@langchain/core@1.3.5` / `langgraph-checkpoint@1.2.2`
+  实测可装（round319），`replay/query.ts` 的 `readCheckpoints` 改 async，
+  接 `decodeCheckpoint`（官方程 `JsonPlusSerializer`，与 saver.ts 同一份），
+  每行带 `decoded` + `summary`；解码失败的**行**降级成 false + null，
+  不崩整请求也不静默跳行（沿用 A/B 两类失效的处置）。
 - **`?keyword=` 的搜索建议（「关键词建议 ≥3 个汉字」）没有落点**。
   那是 UI 提示（C.3 的 UI 约束），而 UI 就是上一条没做的 `Replay.tsx`。
   文案我写进了 `MAX_REPLAY_KEYWORD_CHARS` 那条 422 报错里，

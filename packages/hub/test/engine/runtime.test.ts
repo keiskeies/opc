@@ -24,18 +24,12 @@
  */
 import { chmodSync, mkdirSync, rmSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
-
 import type { OrgGraph } from "@opc/contracts";
-import { fixtureTmp } from "../fixtures/fixture-dir.js";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { migrate } from "../../src/db/migrate.js";
-import { INSERT_DELEGATION_GRAPH_SQL } from "../../src/org/commit.js";
-import { InMemoryEventBus } from "../../src/events/bus.js";
-import { appendAudit } from "../../src/events/recorder.js";
-import { makeDispatch } from "../../src/engine/dispatch.js";
-import type { RunTurnInput, TurnOutcome } from "../../src/engine/dispatch.js";
 import type { RoleRunResult } from "../../src/engine/claude.js";
-import { runTurnWithRetry } from "../../src/engine/turn-retry.js";
+import type { RunTurnInput, TurnOutcome } from "../../src/engine/dispatch.js";
+import { makeDispatch } from "../../src/engine/dispatch.js";
 import {
   CEO_APPROVED_SQL,
   INSERT_HARNESS_CALL_SQL,
@@ -43,10 +37,17 @@ import {
   LOAD_TASK_SQL,
   makeRuntime,
 } from "../../src/engine/runtime.js";
+import { runTurnWithRetry } from "../../src/engine/turn-retry.js";
+import { InMemoryEventBus } from "../../src/events/bus.js";
+import { appendAudit } from "../../src/events/recorder.js";
+import { INSERT_DELEGATION_GRAPH_SQL } from "../../src/org/commit.js";
+import { fixtureTmp } from "../fixtures/fixture-dir.js";
 
 const TMP = fixtureTmp("engine-runtime", import.meta.url);
 const NOW = 1_700_000_000_000;
-const FAKE_CLI = fileURLToPath(new URL("./fixtures/fake-claude.mjs", import.meta.url));
+const FAKE_CLI = fileURLToPath(
+  new URL("./fixtures/fake-claude.mjs", import.meta.url),
+);
 
 type Row = Record<string, unknown>;
 type Db = {
@@ -69,9 +70,24 @@ let fileSeq = 0;
 
 const GRAPH: OrgGraph = {
   nodes: {
-    ceo: { role_id: "ceo", can_manage: true, reports_to: null, model_family: "opus" },
-    director: { role_id: "director", can_manage: true, reports_to: "ceo", model_family: "sonnet" },
-    dev: { role_id: "dev", can_manage: false, reports_to: "director", model_family: "claude" },
+    ceo: {
+      role_id: "ceo",
+      can_manage: true,
+      reports_to: null,
+      model_family: "opus",
+    },
+    director: {
+      role_id: "director",
+      can_manage: true,
+      reports_to: "ceo",
+      model_family: "sonnet",
+    },
+    dev: {
+      role_id: "dev",
+      can_manage: false,
+      reports_to: "director",
+      model_family: "claude",
+    },
     // 没有 model_family 的那一格：装配方必须交出空串（reviewGate 据此拒放行）
     blank: { role_id: "blank", can_manage: false, reports_to: "director" },
   },
@@ -132,14 +148,22 @@ async function world(o: {
   readonly onRetryWarn?: (m: string) => void;
 }): Promise<World> {
   const { WriteQueue } = await import("../../src/db/write-queue.js");
-  const q = new WriteQueue(TMP + "/r-" + process.pid + "-" + ++fileSeq + ".db") as unknown as Queue;
+  const q = new WriteQueue(
+    TMP + "/r-" + process.pid + "-" + ++fileSeq + ".db",
+  ) as unknown as Queue;
   queues.push(q);
   const db = q.writeConnection();
   migrate(db as unknown as Parameters<typeof migrate>[0]);
   db.prepare(
     "INSERT INTO tasks (id, title, status, assigned_role, current_node, created_at, updated_at, graph_version) " +
       "VALUES ('t1', '做个 AI 笔记应用', ?, ?, 'intake', ?, ?, ?)",
-  ).run(o.status ?? "IN_PROGRESS", o.role ?? "dev", NOW, NOW, o.graphVersion ?? 1);
+  ).run(
+    o.status ?? "IN_PROGRESS",
+    o.role ?? "dev",
+    NOW,
+    NOW,
+    o.graphVersion ?? 1,
+  );
   if (o.writeGraph !== false) {
     db.prepare(INSERT_DELEGATION_GRAPH_SQL).run(
       "g1",
@@ -163,6 +187,60 @@ async function world(o: {
     ...(o.onRetryWarn === undefined ? {} : { onRetryWarn: o.onRetryWarn }),
   });
   return { db, q, rt, bus };
+}
+
+/**
+ * 往这个真库里写一版 dev 的岗位书（走真写入方，不手搓 config JSON）。
+ *
+ * round312 从 O2 那一节移到模块作用域：gateway 审计那两发（下面「岗位书的
+ * harness_defaults 真的走到 gateway 的授权侧」）要的是【同一份写入口径】。
+ * 复制一份 config 字面量就是第二份口径 —— 而本仓最贵的那一族失效正是
+ * 「两份同一事实的写法，改一处不动另一处」（round272 收敛记账 SQL 同一条理由）。
+ */
+async function seedCharter(
+  w: World,
+  over: Record<string, unknown> = {},
+): Promise<void> {
+  const { saveCharterVersion } = await import("../../src/charter/store.js");
+  const r = await saveCharterVersion(
+    w.q as unknown as Parameters<typeof saveCharterVersion>[0],
+    {
+      roleId: "dev",
+      nowMs: NOW,
+      changeSummary: "测试用第一版",
+      config: {
+        role_id: "dev",
+        display_name: "开发负责人",
+        version: 1,
+        honesty_boundaries: ["不声称未跑过的测试已通过"],
+        acceptance_criteria: [
+          {
+            condition: "metric:coverage < 80",
+            action: "reject",
+            message: "覆盖率不足 80",
+          },
+        ],
+        forbidden_actions: ["不许直接改生产库"],
+        tool_permissions: ["Read"],
+        model_tier: "execution",
+        budget: { daily_usd: 15, per_task_usd: 5 },
+        decision_scope: {
+          autonomous: ["选实现方案"],
+          requires_consultation: ["改公共接口"],
+          forbidden: ["定公司方向"],
+        },
+        judgment_mode: {
+          type: "bounded_judgment",
+          strict_rules: ["不许跳过测试"],
+          bounded_judgment: [],
+          full_discretion: [],
+        },
+        escalation_triggers: ["碰到不可逆动作就升"],
+        ...over,
+      },
+    } as never,
+  );
+  if (!r.ok) throw new Error("夹具写岗位书被拒：" + r.reason);
 }
 
 describe("runtime 的读回调（真 schema 上的真 SQL）", () => {
@@ -201,7 +279,17 @@ describe("runtime 的读回调（真 schema 上的真 SQL）", () => {
     const ins = (session: string | null, at: number, role = "dev"): void => {
       w.db
         .prepare(INSERT_HARNESS_CALL_SQL)
-        .run("h-" + at, "t1", role, "0.0.0", "{}", session, session === null ? 1 : 0, 1, at);
+        .run(
+          "h-" + at,
+          "t1",
+          role,
+          "0.0.0",
+          "{}",
+          session,
+          session === null ? 1 : 0,
+          1,
+          at,
+        );
     };
     // 时间序：有会话 → 无会话（那次 CLI 没起来）→ 无会话（又一次）
     ins("sess-old", NOW);
@@ -226,8 +314,19 @@ describe("runtime 的读回调（真 schema 上的真 SQL）", () => {
         .run(JSON.stringify(payload), NOW);
     };
     // 最新的是【另一条】状态变化（没有 producerRole），往回第二条才是提交审阅那条
-    evt({ kind: "TaskStateChanged", taskId: "t1", from: "EVIDENCE_SUBMITTED", to: "IN_REVIEW" });
-    evt({ kind: "TaskStateChanged", taskId: "t1", from: "IN_PROGRESS", to: "EVIDENCE_SUBMITTED", producerRole: "dev" });
+    evt({
+      kind: "TaskStateChanged",
+      taskId: "t1",
+      from: "EVIDENCE_SUBMITTED",
+      to: "IN_REVIEW",
+    });
+    evt({
+      kind: "TaskStateChanged",
+      taskId: "t1",
+      from: "IN_PROGRESS",
+      to: "EVIDENCE_SUBMITTED",
+      producerRole: "dev",
+    });
     expect(w.rt.deps.lastProducer("t1")).toBe("dev");
 
     // 一条提交都没有 ⇒ null（不是拿最近一条的 producerRole 顶上，也不是拿 assigned_role）
@@ -257,7 +356,13 @@ describe("runtime 的读回调（真 schema 上的真 SQL）", () => {
           actorId: "director",
           action: "state_change",
           target: to,
-          payload: { kind: "TaskStateChanged", taskId: "t1", from, to, summary: "测试" },
+          payload: {
+            kind: "TaskStateChanged",
+            taskId: "t1",
+            from,
+            to,
+            summary: "测试",
+          },
           createdAt: NOW,
         },
         () => NOW,
@@ -265,7 +370,9 @@ describe("runtime 的读回调（真 schema 上的真 SQL）", () => {
     };
     edge("IN_REVIEW", "REJECTED_DOWNWARD");
     edge("REJECTED_DOWNWARD", "IN_PROGRESS");
-    const rows = w.db.prepare("SELECT COUNT(*) AS n FROM events WHERE action='state_change'").get();
+    const rows = w.db
+      .prepare("SELECT COUNT(*) AS n FROM events WHERE action='state_change'")
+      .get();
     expect(rows?.["n"]).toBe(2); // 一轮确实留了两条 state_change
     expect(w.rt.deps.rejectionCount("t1")).toBe(1); // ⭐ 而分子只能是 1
 
@@ -287,7 +394,11 @@ describe("runtime 的读回调（真 schema 上的真 SQL）", () => {
         actorId: "director",
         action: "review_decision",
         target: "REJECTED_DOWNWARD",
-        payload: { kind: "ReviewDecided", taskId: "t1", to: "REJECTED_DOWNWARD" },
+        payload: {
+          kind: "ReviewDecided",
+          taskId: "t1",
+          to: "REJECTED_DOWNWARD",
+        },
         createdAt: NOW,
       },
       () => NOW,
@@ -319,7 +430,11 @@ describe("runtime 的读回调（真 schema 上的真 SQL）", () => {
     // decided_by 成了判据的一维，夹具就必须能填它 —— 第一版这个 helper 把它写死成 NULL，
     // 于是「approved + 非 ceo」那一格【摆不出来】，测出来会是假绿（看起来测了身份，
     // 实际所有样本的身份都一样）。
-    const card = (status: string, key: string, decidedBy: string | null = null): void => {
+    const card = (
+      status: string,
+      key: string,
+      decidedBy: string | null = null,
+    ): void => {
       w.db
         .prepare(
           "INSERT INTO approvals (id, task_id, approval_type, summary, parameters, recommendation, " +
@@ -338,10 +453,20 @@ describe("runtime 的读回调（真 schema 上的真 SQL）", () => {
     card("approved", "k-no-identity", null);
     card("approved", "k-approved", "ceo");
     expect(w.rt.deps.ceoApproved("t1", "k-approved")).toBe(true);
-    expect(w.rt.deps.ceoApproved("t1", "k-pending"), "pending 不是凭据").toBe(false);
-    expect(w.rt.deps.ceoApproved("t1", "k-rejected"), "rejected 不是凭据").toBe(false);
-    expect(w.rt.deps.ceoApproved("t1", "k-policy"), "策略引擎写的 approved 不是 CEO 的批准").toBe(false);
-    expect(w.rt.deps.ceoApproved("t1", "k-no-identity"), "没署名的 approved 不是凭据").toBe(false);
+    expect(w.rt.deps.ceoApproved("t1", "k-pending"), "pending 不是凭据").toBe(
+      false,
+    );
+    expect(w.rt.deps.ceoApproved("t1", "k-rejected"), "rejected 不是凭据").toBe(
+      false,
+    );
+    expect(
+      w.rt.deps.ceoApproved("t1", "k-policy"),
+      "策略引擎写的 approved 不是 CEO 的批准",
+    ).toBe(false);
+    expect(
+      w.rt.deps.ceoApproved("t1", "k-no-identity"),
+      "没署名的 approved 不是凭据",
+    ).toBe(false);
     expect(w.rt.deps.ceoApproved("t1", "没有这张卡")).toBe(false);
     // SQL 文本也钉一条：有人把 WHERE 里那一维删掉时，上面那发会红，而这一发说出【为什么】红。
     expect(CEO_APPROVED_SQL).toContain("status = 'approved'");
@@ -352,8 +477,18 @@ describe("runtime 的读回调（真 schema 上的真 SQL）", () => {
 describe("rolePrompt 里那句「谁是 CEO」（0047 的装配那一半）", () => {
   const BOSS_GRAPH: OrgGraph = {
     nodes: {
-      boss: { role_id: "boss", can_manage: true, reports_to: null, model_family: "opus" },
-      dev: { role_id: "dev", can_manage: false, reports_to: "boss", model_family: "claude" },
+      boss: {
+        role_id: "boss",
+        can_manage: true,
+        reports_to: null,
+        model_family: "opus",
+      },
+      dev: {
+        role_id: "dev",
+        can_manage: false,
+        reports_to: "boss",
+        model_family: "claude",
+      },
     },
     edges: [],
   };
@@ -373,8 +508,18 @@ describe("rolePrompt 里那句「谁是 CEO」（0047 的装配那一半）", ()
     // 那条退路：编出来的名字会让 agent 对着一个不存在的同事汇报。
     const forest: OrgGraph = {
       nodes: {
-        a: { role_id: "a", can_manage: true, reports_to: null, model_family: "opus" },
-        b: { role_id: "b", can_manage: true, reports_to: null, model_family: "opus" },
+        a: {
+          role_id: "a",
+          can_manage: true,
+          reports_to: null,
+          model_family: "opus",
+        },
+        b: {
+          role_id: "b",
+          can_manage: true,
+          reports_to: null,
+          model_family: "opus",
+        },
       },
       edges: [],
     };
@@ -425,43 +570,6 @@ describe("rolePrompt 里那句「谁是 CEO」（0047 的装配那一半）", ()
  * 变异脚本在系统临时目录，**不是仓库资产**。
  */
 describe("rolePrompt 里的岗位书那一半（O2）", () => {
-  /** 往这个真库里写一版 dev 的岗位书（走真写入方，不手搓 config JSON）。 */
-  async function seedCharter(w: World, over: Record<string, unknown> = {}): Promise<void> {
-    const { saveCharterVersion } = await import("../../src/charter/store.js");
-    const r = await saveCharterVersion(w.q as unknown as Parameters<typeof saveCharterVersion>[0], {
-      roleId: "dev",
-      nowMs: NOW,
-      changeSummary: "测试用第一版",
-      config: {
-        role_id: "dev",
-        display_name: "开发负责人",
-        version: 1,
-        honesty_boundaries: ["不声称未跑过的测试已通过"],
-        acceptance_criteria: [
-          { condition: "metric:coverage < 80", action: "reject", message: "覆盖率不足 80" },
-        ],
-        forbidden_actions: ["不许直接改生产库"],
-        tool_permissions: ["Read"],
-        model_tier: "execution",
-        budget: { daily_usd: 15, per_task_usd: 5 },
-        decision_scope: {
-          autonomous: ["选实现方案"],
-          requires_consultation: ["改公共接口"],
-          forbidden: ["定公司方向"],
-        },
-        judgment_mode: {
-          type: "bounded_judgment",
-          strict_rules: ["不许跳过测试"],
-          bounded_judgment: [],
-          full_discretion: [],
-        },
-        escalation_triggers: ["碰到不可逆动作就升"],
-        ...over,
-      },
-    } as never);
-    if (!r.ok) throw new Error("夹具写岗位书被拒：" + r.reason);
-  }
-
   it("⭐ 有岗位书 ⇒ 标准/禁止项/决策范围【逐格】出现在提示词里", async () => {
     const w = await world({});
     await seedCharter(w);
@@ -507,7 +615,9 @@ describe("rolePrompt 里的岗位书那一半（O2）", () => {
     await seedCharter(w);
     // 把 config 改坏成非法 JSON —— 这是「有行而读不出来」，不是「那一版不存在」。
     w.db
-      .prepare("UPDATE role_charters SET config = '{broken' WHERE role_id = 'dev'")
+      .prepare(
+        "UPDATE role_charters SET config = '{broken' WHERE role_id = 'dev'",
+      )
       .run();
     expect(() => w.rt.deps.rolePrompt("dev")).toThrow(/不是合法 JSON/u);
     // 而它**不是** NO_CHARTER_LINE 那一支：把"读坏了"说成"没有"会引导人去播种，
@@ -543,26 +653,34 @@ describe("rolePrompt 里的记忆那一半（O3）", () => {
     w: World,
     o: { reviewer: string; producer: string; note: string; decision?: string },
   ): void {
-    appendAudit(w.db as never, {
-      taskId: "t1",
-      actorType: "agent",
-      actorId: o.reviewer,
-      action: "review_decision",
-      target: "in_review:" + o.producer + "->" + o.reviewer,
-      payload: {
-        kind: "ReviewDecided",
+    appendAudit(
+      w.db as never,
+      {
         taskId: "t1",
-        gate: "in_review:" + o.producer + "->" + o.reviewer,
-        decision: o.decision ?? "reject",
-        note: o.note,
+        actorType: "agent",
+        actorId: o.reviewer,
+        action: "review_decision",
+        target: "in_review:" + o.producer + "->" + o.reviewer,
+        payload: {
+          kind: "ReviewDecided",
+          taskId: "t1",
+          gate: "in_review:" + o.producer + "->" + o.reviewer,
+          decision: o.decision ?? "reject",
+          note: o.note,
+        },
+        createdAt: NOW,
       },
-      createdAt: NOW,
-    }, () => NOW);
+      () => NOW,
+    );
   }
 
   it("⭐ 这个角色判过一次 ⇒ 那次的理由进了它下一轮的提示词", async () => {
     const w = await world({});
-    decideReview(w, { reviewer: "dev", producer: "director", note: "缺错误分支，打回" });
+    decideReview(w, {
+      reviewer: "dev",
+      producer: "director",
+      note: "缺错误分支，打回",
+    });
     const p = w.rt.deps.rolePrompt("dev");
     // 断的是【内容】而不是"某处调用了 renderMemoryBlock"：前者才是变异能吃到的东西。
     expect(p).toContain("缺错误分支，打回");
@@ -581,7 +699,11 @@ describe("rolePrompt 里的记忆那一半（O3）", () => {
      * = dev 的提示词里躺着 CEO 的战略理由，而【没有一发测试会红】。
      */
     const w = await world({});
-    decideReview(w, { reviewer: "director", producer: "dev", note: "别人的判定理由" });
+    decideReview(w, {
+      reviewer: "director",
+      producer: "dev",
+      note: "别人的判定理由",
+    });
     expect(w.rt.deps.rolePrompt("dev")).not.toContain("别人的判定理由");
     // 反向：署名人自己读得到（否则上面那条只是"根本没读到任何东西"）。
     expect(w.rt.deps.rolePrompt("director")).toContain("别人的判定理由");
@@ -603,7 +725,12 @@ describe("rolePrompt 里的记忆那一半（O3）", () => {
       decideReview(w, {
         reviewer: "dev",
         producer: "director",
-        note: (i === 0 ? "最老那条理由" : i === total - 1 ? "最新那条理由" : "中间第" + i + "条"),
+        note:
+          i === 0
+            ? "最老那条理由"
+            : i === total - 1
+              ? "最新那条理由"
+              : "中间第" + i + "条",
       });
     }
     const p = w.rt.deps.rolePrompt("dev");
@@ -611,7 +738,8 @@ describe("rolePrompt 里的记忆那一半（O3）", () => {
     expect(p).not.toContain("最老那条理由");
   });
 
-  it("⭐ 记忆读失败 ⇒ 【抛】，不 catch 成一句「没有历史」", async () => {    /*
+  it("⭐ 记忆读失败 ⇒ 【抛】，不 catch 成一句「没有历史」", async () => {
+    /*
      * 与上面岗位书那一发同一个立场，而这里多一条更硬的理由：
      * memory/prompt.ts 那句"库里确实没有，不是读取失败"是【无条件】说的 ——
      * catch 之后那句话就成了谎。抛出去由 CLI 收成退出码 1，那是唯一的诚实读数。
@@ -642,16 +770,24 @@ describe("rolePrompt 里的记忆那一半（O3）", () => {
           "VALUES ('A-1', 't1', 'strategic', '摘要', '{}', 'pending')",
       )
       .run();
-    appendAudit(w.db as never, {
-      taskId: "t1",
-      actorType: "human",
-      actorId: "ceo",
-      action: "approval",
-      target: "A-1",
-      payload: { kind: "ApprovalDecided", approvalId: "A-1", resume: "approve" },
-      stateSnapshot: { note: "这条线整个砍掉，明年不做" },
-      createdAt: NOW,
-    }, () => NOW);
+    appendAudit(
+      w.db as never,
+      {
+        taskId: "t1",
+        actorType: "human",
+        actorId: "ceo",
+        action: "approval",
+        target: "A-1",
+        payload: {
+          kind: "ApprovalDecided",
+          approvalId: "A-1",
+          resume: "approve",
+        },
+        stateSnapshot: { note: "这条线整个砍掉，明年不做" },
+        createdAt: NOW,
+      },
+      () => NOW,
+    );
     const p = w.rt.deps.rolePrompt("ceo");
     expect(p).toContain("这条线整个砍掉，明年不做");
     // 反向：同一条，dev 读不到（CEO 的战略理由进 agent 的 prompt 是本模块的第一红线）。
@@ -663,7 +799,11 @@ describe("runtime 跑一轮：真 CLI 桩 + 真记账 + 真留痕", () => {
   it("一轮 pass 之后：状态推进、钱进了 budget_events 与 budgets、会话落 harness_calls", async () => {
     const w = await world({});
     const dispatch = makeDispatch(w.rt.deps);
-    const res = await dispatch({ taskId: "t1", nowMs: NOW + 1000, maxBudgetUsd: 0.5 });
+    const res = await dispatch({
+      taskId: "t1",
+      nowMs: NOW + 1000,
+      maxBudgetUsd: 0.5,
+    });
     // 桩 CLI 的决策是 handoff 给 "tech"（图里没有这个角色）⇒ 越权，状态不动。
     // 这一发测的不是判定（dispatch.test.ts 测尽了），是【装配之后账还在不在】。
     expect(res.moved).toBe(false);
@@ -680,7 +820,9 @@ describe("runtime 跑一轮：真 CLI 桩 + 真记账 + 真留痕", () => {
     expect(rec.recorded).toBe(true);
 
     // 三处账必须一致：tasks / budget_events / budgets
-    const task = w.db.prepare("SELECT consumed_cents FROM tasks WHERE id='t1'").get();
+    const task = w.db
+      .prepare("SELECT consumed_cents FROM tasks WHERE id='t1'")
+      .get();
     expect(task?.["consumed_cents"]).toBe(4);
     const be = w.db.prepare("SELECT * FROM budget_events").all();
     expect(be.length).toBe(1);
@@ -690,11 +832,16 @@ describe("runtime 跑一轮：真 CLI 桩 + 真记账 + 真留痕", () => {
     // 幂等键【是】本轮那条 events.id。刻意断在 res.stateEventSeq 而不是
     // 「events 表最后一行」：卡片与越权尝试那两行是在记账【之后】写的，所以最后一行
     // 不是记账用的那个 id —— 断成"最后一行"会把这条测试变成对写入顺序的猜测。
-    const ids = w.db.prepare("SELECT id FROM events ORDER BY id").all().map((r) => Number(r["id"]));
+    const ids = w.db
+      .prepare("SELECT id FROM events ORDER BY id")
+      .all()
+      .map((r) => Number(r["id"]));
     expect(be[0]?.["source_event"]).not.toBeNull();
     expect(ids).toContain(Number(be[0]?.["source_event"]));
     expect(Number(be[0]?.["source_event"])).toBe(res.stateEventSeq);
-    const b = w.db.prepare("SELECT * FROM budgets WHERE scope_type='task'").all();
+    const b = w.db
+      .prepare("SELECT * FROM budgets WHERE scope_type='task'")
+      .all();
     expect(b.length).toBe(1);
     expect(b[0]?.["consumed_cents"]).toBe(4);
     expect(b[0]?.["limit_cents"]).toBe(1000);
@@ -714,7 +861,11 @@ describe("runtime 跑一轮：真 CLI 桩 + 真记账 + 真留痕", () => {
   it("同一轮重复记账被幂等键挡下：budgets 不重复扣", async () => {
     const w = await world({});
     const dispatch = makeDispatch(w.rt.deps);
-    const res = await dispatch({ taskId: "t1", nowMs: NOW + 1000, maxBudgetUsd: 0.5 });
+    const res = await dispatch({
+      taskId: "t1",
+      nowMs: NOW + 1000,
+      maxBudgetUsd: 0.5,
+    });
     // 幂等键取 res.stateEventSeq，【不是】events 表最后一行：这一轮被越权拦下，
     // 卡片与越权尝试那两行写在记账之后，最后一行是别的行 —— 拿它当键会插进
     // 【第二笔真账】（我第一次就是这么写的，于是这条测试自己造出了它要防的分叉）。
@@ -730,14 +881,29 @@ describe("runtime 跑一轮：真 CLI 桩 + 真记账 + 真留痕", () => {
       // node:sqlite 的 DatabaseSync，而这里的 World.db 是【刻意收窄】的桩类型
       // （只声明 prepare/exec，见文件头第 49 行）。收窄是对的 —— 测试不该能顺手用
       // 到 14 个它不该碰的方法；代价就是喂给真签名时要过一次强转。
-      hook({ db: db as never, taskId: "t1", role: "dev", seq, costCents: 4, nowMs: NOW + 2000 });
+      hook({
+        db: db as never,
+        taskId: "t1",
+        role: "dev",
+        seq,
+        costCents: 4,
+        nowMs: NOW + 2000,
+      });
       return null;
     });
     expect(w.db.prepare("SELECT * FROM budget_events").all().length).toBe(1);
-    expect(w.db.prepare("SELECT consumed_cents FROM budgets").get()?.["consumed_cents"]).toBe(4);
+    expect(
+      w.db.prepare("SELECT consumed_cents FROM budgets").get()?.[
+        "consumed_cents"
+      ],
+    ).toBe(4);
     // tasks 那一列【没有】幂等键可挡（dispatch.ts 的 centsForLeg 那条同源的说明），
     // 所以这一发同时在证明：钩子重复调用只动 budget_events 的去重，不会碰 tasks。
-    expect(w.db.prepare("SELECT consumed_cents FROM tasks").get()?.["consumed_cents"]).toBe(4);
+    expect(
+      w.db.prepare("SELECT consumed_cents FROM tasks").get()?.[
+        "consumed_cents"
+      ],
+    ).toBe(4);
   });
 
   it("留痕失败【不冒泡】但报 recorded:false —— 不能让整条命令非零退出而诱导重跑一轮", async () => {
@@ -777,13 +943,21 @@ describe("runtime 跑一轮：真 CLI 桩 + 真记账 + 真留痕", () => {
   it("图版本缺失时，dispatch 以「版本缺失」停下而【没有烧一次 token】（装配不给回退）", async () => {
     const w = await world({ graphVersion: 9 });
     const dispatch = makeDispatch(w.rt.deps);
-    const res = await dispatch({ taskId: "t1", nowMs: NOW + 1000, maxBudgetUsd: 0.5 });
+    const res = await dispatch({
+      taskId: "t1",
+      nowMs: NOW + 1000,
+      maxBudgetUsd: 0.5,
+    });
     expect(res.moved).toBe(false);
     expect(res.note).toContain("版本 9");
     // 关键：一个 token 都没烧 ⇒ 一条 harness 调用都没发生
     expect(w.db.prepare("SELECT * FROM harness_calls").all().length).toBe(0);
     expect(w.db.prepare("SELECT * FROM budget_events").all().length).toBe(0);
-    expect(w.db.prepare("SELECT consumed_cents FROM tasks").get()?.["consumed_cents"]).toBe(0);
+    expect(
+      w.db.prepare("SELECT consumed_cents FROM tasks").get()?.[
+        "consumed_cents"
+      ],
+    ).toBe(0);
   });
 
   it("回调读的是【已提交】的东西：同轮内先写后读会读到旧值（runtime.ts 文件头那条边界）", async () => {
@@ -793,8 +967,13 @@ describe("runtime 跑一轮：真 CLI 桩 + 真记账 + 真留痕", () => {
     // 本来就看不见。这一发的作用是：如果有人把回调的读连接换成写连接，
     // 他会看到【未提交】数据，而下面这条断言会红。
     await w.q.node(() => {
-      w.q.writeConnection().prepare("UPDATE tasks SET title = '改了' WHERE id='t1'").run();
-      const inTx = w.q.writeConnection().prepare(LOAD_TASK_SQL).get("t1") as Row | undefined;
+      w.q
+        .writeConnection()
+        .prepare("UPDATE tasks SET title = '改了' WHERE id='t1'")
+        .run();
+      const inTx = w.q.writeConnection().prepare(LOAD_TASK_SQL).get("t1") as
+        | Row
+        | undefined;
       expect(inTx?.["title"]).toBe("改了");
       return null;
     });
@@ -826,7 +1005,11 @@ describe("runtime 跑一轮：真 CLI 桩 + 真记账 + 真留痕", () => {
       onRetryWarn: (m) => warns.push(m),
     });
     const dispatch = makeDispatch(w.rt.deps);
-    const res = await dispatch({ taskId: "t1", nowMs: NOW + 1000, maxBudgetUsd: 0.5 });
+    const res = await dispatch({
+      taskId: "t1",
+      nowMs: NOW + 1000,
+      maxBudgetUsd: 0.5,
+    });
     // 确定性失败：退避一次都不该开火。
     expect(sleeps, "ENOENT 是确定性的 ⇒ 判据不该放行").toEqual([]);
     expect(warns).toEqual([]);
@@ -835,11 +1018,32 @@ describe("runtime 跑一轮：真 CLI 桩 + 真记账 + 真留痕", () => {
     expect(res.costCents).toBe(0);
     // 三处账【全空】：进程从未存在 ⇒ 没有钱可记（这是结构性结论，不是「没记到」）。
     expect(w.db.prepare("SELECT * FROM budget_events").all().length).toBe(0);
-    expect(w.db.prepare("SELECT consumed_cents FROM tasks").get()?.["consumed_cents"]).toBe(0);
+    expect(
+      w.db.prepare("SELECT consumed_cents FROM tasks").get()?.[
+        "consumed_cents"
+      ],
+    ).toBe(0);
     // 审计里【有】这一轮：任务停着必须能答出「哪一轮、为什么」。
-    const evts = w.db.prepare("SELECT payload FROM events").all();
+    // ⚠ round312 改口（O6 Step B 接线）：原断言是 `evts[0]` 含「角色执行失败」——
+    //   接线前 events 里这一族只有 dispatch 自己那一行，位置恰好是 0。现在 gateway 的
+    //   harness_call 行在 runTurn 里先落库（id 更小），那一行变成了 dispatch 的在第 1 位。
+    //   位置从来就不是判据（判据是「查得到」），所以按【存在性】断原话，
+    //   并补 Step B 买到的那一格新事实：gateway 层自己也留了一行 adapter_error。
+    const evts = w.db.prepare("SELECT action, payload FROM events").all();
     expect(evts.length).toBeGreaterThan(0);
-    expect(String(evts[0]?.["payload"])).toContain("角色执行失败");
+    expect(
+      evts.some((r: Row): boolean =>
+        String(r["payload"]).includes("角色执行失败"),
+      ),
+      "dispatch 的失败轮话术还得在",
+    ).toBe(true);
+    const gwRows = evts.filter(
+      (r: Row): boolean => r["action"] === "harness_call",
+    );
+    expect(gwRows, "gateway 层对这次「进程从未起来」也要留一行").toHaveLength(
+      1,
+    );
+    expect(String(gwRows[0]?.["payload"])).toContain("adapter_error");
   });
 
   it("⭐ 瞬时 errno 放行重试时：多烧 4 次 spawn 而【一处账都不多记】（透明性判据）", async () => {
@@ -865,19 +1069,33 @@ describe("runtime 跑一轮：真 CLI 桩 + 真记账 + 真留痕", () => {
     const deps = {
       ...w.rt.deps,
       runTurn: async (i: RunTurnInput): Promise<TurnOutcome> => {
-        const r = await runTurnWithRetry(alwaysMissed, {
-          prompt: i.prompt,
-          rolePrompt: i.rolePrompt,
-          cwd: TMP,
-          maxBudgetUsd: i.maxBudgetUsd,
-        }, {
-          sleep: async () => {},
-          onRetryWarn: (m) => warns.push(m),
-        });
-        return { ok: r.ok, text: r.text, costCents: 0, sessionId: r.sessionId, error: r.error };
+        const r = await runTurnWithRetry(
+          alwaysMissed,
+          {
+            prompt: i.prompt,
+            rolePrompt: i.rolePrompt,
+            cwd: TMP,
+            maxBudgetUsd: i.maxBudgetUsd,
+          },
+          {
+            sleep: async () => {},
+            onRetryWarn: (m) => warns.push(m),
+          },
+        );
+        return {
+          ok: r.ok,
+          text: r.text,
+          costCents: 0,
+          sessionId: r.sessionId,
+          error: r.error,
+        };
       },
     };
-    const res = await makeDispatch(deps)({ taskId: "t1", nowMs: NOW + 1000, maxBudgetUsd: 0.5 });
+    const res = await makeDispatch(deps)({
+      taskId: "t1",
+      nowMs: NOW + 1000,
+      maxBudgetUsd: 0.5,
+    });
     expect(misses, "1 次首跑 + 3 次重试").toBe(4);
     expect(warns.length).toBe(3);
     // ⭐ 这一发真正的断言：试了 4 次，而账面【只当发生过 0 次】（进程从未存在）。
@@ -886,8 +1104,12 @@ describe("runtime 跑一轮：真 CLI 桩 + 真记账 + 真留痕", () => {
     expect(res.costCents).toBe(0);
     // 留痕那一侧同理：驱动方调一次 recordTurn，它记的是【这一轮】而不是每次尝试。
     const rec = await w.rt.recordTurn({
-      taskId: "t1", role: res.role, sessionId: res.sessionId,
-      costCents: res.costCents, ok: false, nowMs: NOW + 1000,
+      taskId: "t1",
+      role: res.role,
+      sessionId: res.sessionId,
+      costCents: res.costCents,
+      ok: false,
+      nowMs: NOW + 1000,
     });
     expect(rec.recorded).toBe(true);
     const hc = w.db.prepare("SELECT * FROM harness_calls").all();
@@ -895,5 +1117,116 @@ describe("runtime 跑一轮：真 CLI 桩 + 真记账 + 真留痕", () => {
     expect(hc[0]?.["session_id"]).toBe(null);
     expect(hc[0]?.["cost_cents"]).toBe(0);
     expect(hc[0]?.["exit_code"]).toBe(1);
+  });
+});
+
+/* ═══════════════════════════════════════════════════════════════════
+   ⭐ 岗位书的 harness_defaults 真的走到了 gateway 的授权侧（O6 动作 2 / round312）
+
+   接线之前这一格是【结构上不可能被验】的：runTurn 直调 runRole，gateway 的授权侧
+   （grantedSandbox / grantedForbidden）根本没有值可给。接线之后它有了库里的读数
+   —— harness_call 那一行的 state_snapshot 里就钉着「当时授权到哪」。
+
+   为什么必须有反向那一发（同 O2 那一节的家规）：主断言只写「有岗位书 ⇒ workspace-write」，
+   那么「runtime 恒交 workspace-write、压根没读岗位书」也照样绿。反向那一发把
+   同一份判据的【另一个输入】跑一遍，两个读数不同才证明中间那段是真的在搬数据。
+
+   ⚠ 这一族【还没有】的凭据，写在这里而不是不说：
+    · 「被重试判据放行那几次尝试不落审计缓冲」——本机造不出瞬时 errno（round305 §③
+      同一条），注入假 runTurn 又绕开了这个缓冲（它在 runtime 内部），所以那一格今天
+      只有代码形状、没有测试。上面那发「ENOENT 确定性 ⇒ 仍落一行」是它唯一相邻的实测。
+    · settle / checkBudget 两个注入槽仍空（钱走 onCost，见 runtime.ts 注释），
+      所以本文件不出现「budget_events 来自 gateway」这种断言。
+   ═══════════════════════════════════════════════════════════════════ */
+describe("runTurn → gateway 的授权侧：岗位书那一格落到审计行（O6 Step B）", () => {
+  /** 跑一轮并取出 gateway 落的那一行 harness_call（payload + state_snapshot 都解开）。 */
+  async function oneTurn(w: World): Promise<{
+    payload: Row;
+    snap: Row;
+    rows: Row[];
+  }> {
+    const out = await w.rt.deps.runTurn({
+      role: "dev",
+      taskId: "t1",
+      prompt: "把这件事做完",
+      rolePrompt: "你是 dev。",
+      resumeSessionId: null,
+      maxBudgetUsd: 0.5,
+    });
+    expect(out.ok, out.error ?? "").toBe(true);
+    const rows = w.db
+      .prepare(
+        "SELECT action, target, payload, state_snapshot FROM events WHERE action='harness_call'",
+      )
+      .all();
+    expect(
+      rows,
+      "gateway 那一行必须【落到库里】，而不只是在内存 deps 里",
+    ).toHaveLength(1);
+    return {
+      rows,
+      payload: JSON.parse(String(rows[0]?.["payload"])) as Row,
+      snap: JSON.parse(String(rows[0]?.["state_snapshot"])) as Row,
+    };
+  }
+
+  it("⭐ 岗位书写了 workspace-write ⇒ 授权侧与请求侧【同一轮】都带着它落到库里", async () => {
+    const w = await world({});
+    await seedCharter(w, {
+      harness_defaults: {
+        claude_code: {
+          sandbox: "workspace-write",
+          forbidden_flags: ["--yolo"],
+        },
+      },
+    });
+    const { payload, snap } = await oneTurn(w);
+    // 授权侧（被比侧）：这一格是 buildGatewayDeps 从岗位书读出来的那条读数。
+    expect(snap["granted_sandbox"]).toBe("workspace-write");
+    expect(snap["granted_forbidden"]).toEqual(["--yolo"]);
+    // 请求侧：同一份 entry 的生效值。两侧同源这件事要在库里看得出来。
+    expect(payload["sandbox"]).toBe("workspace-write");
+    expect(snap["forbidden_flags"]).toEqual(["--yolo"]);
+    // 这一发同时是「flush 真的落库」的凭据：slot 是同步签名、写库是异步，
+    // 缓冲只在 runTurn 自己的 node() 里落 —— 没有这一句，「留痕了」可以是内存里的谎。
+    expect(String(payload["status"])).toBe("ok");
+    expect(payload["session_id"]).toBe("sess-1");
+  });
+
+  it("⭐ 反向对照：没有岗位书 ⇒ 落的是 read-only + 空基线，而不是上面那个值", async () => {
+    // 没有 seedCharter：这一发的全部作用是【上一发不是恒真】。
+    const w = await world({});
+    const { payload, snap } = await oneTurn(w);
+    expect(snap["granted_sandbox"]).toBe("read-only");
+    expect(snap["granted_forbidden"]).toEqual([]);
+    expect(payload["sandbox"]).toBe("read-only");
+    // 岗位书缺位时 runtime 明说「没有你的岗位书」，而那一轮【照跑】：
+    // 授权按最严档，不是装配期抛（NO_CHARTER_LINE 那条合法现状，见 runtime.ts 注释）。
+    expect(w.rt.deps.rolePrompt("dev")).toContain("没有你的岗位书");
+  });
+
+  it("同一张库里岗位书按角色走：dev 的档位不会拼到 director 的授权侧", async () => {
+    // 与上面 O2 那一发同族，防的是 readLatestCharter 的 roleId 绑参写错。
+    // 这一格在 gateway 路线上比在提示词路线上更贵：档位绑错 = 授权放开到岗位书
+    // 从未批过的档位，而审计行看起来一切正常。
+    const w = await world({});
+    await seedCharter(w, {
+      harness_defaults: { claude_code: { sandbox: "workspace-write" } },
+    });
+    const out = await w.rt.deps.runTurn({
+      role: "director",
+      taskId: "t1",
+      prompt: "审一下",
+      rolePrompt: "你是 director。",
+      resumeSessionId: null,
+      maxBudgetUsd: 0.5,
+    });
+    expect(out.ok, out.error ?? "").toBe(true);
+    const row = w.db
+      .prepare("SELECT state_snapshot FROM events WHERE action='harness_call'")
+      .all()[0];
+    const snap = JSON.parse(String(row?.["state_snapshot"])) as Row;
+    expect(snap["granted_sandbox"]).toBe("read-only");
+    expect(snap["granted_forbidden"]).toEqual([]);
   });
 });

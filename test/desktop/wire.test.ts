@@ -20,7 +20,7 @@ import { type Server, createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterEach, describe, expect, it } from "vitest";
 import { CHANNEL_SPECS } from "../../packages/desktop/src/ipc-surface.js";
-import { EVENT_CHANNEL } from "../../packages/desktop/src/preload/api.js";
+import { EVENT_CHANNEL, EVENTS_READY_CHANNEL } from "../../packages/desktop/src/preload/api.js";
 import { LINK_EVENT } from "../../packages/desktop/src/main/event-stream.js";
 import { invokeChannels, nodeHttpFetch, wireMain, type IpcMainLike, type SenderLike } from "../../packages/desktop/src/main/wire.js";
 import { verifyRequest } from "../../packages/hub/src/http/auth.js";
@@ -283,7 +283,12 @@ describe("① 通道路由：一条不漏、一条不多", () => {
     const ipc = fakeIpc();
     const s = fakeSender();
     const wire = wireMain({ token: TOKEN, hubAddress: srv.address, ipcMain: ipc.ipcMain, sender: s.sender });
-    expect([...ipc.handlers.keys()].sort()).toEqual(invokeChannels().sort());
+    // 注册集 = 全部 invoke 通道 + 握手通道。握手不进 invokeChannels()
+    // （它不映射 Hub 端点，见 wire.ts 里那段注释），但它的注册【同样】要在这里对账：
+    // 有人把 ready handler 摘掉而这里还绿，就等于把握手闸门静默拆了。
+    expect([...ipc.handlers.keys()].sort()).toEqual(
+      [...invokeChannels(), EVENTS_READY_CHANNEL].sort(),
+    );
 
     const args: Record<string, unknown> = {
       "hub:createTask": { idea: "做个 AI 笔记应用" },
@@ -484,7 +489,9 @@ describe("② 生命周期", () => {
     const wire = wireMain({ token: TOKEN, hubAddress: srv.address, ipcMain: ipc.ipcMain, sender: s.sender });
     wire.unregister();
     expect(ipc.handlers.size).toBe(0);
-    expect(ipc.removed.sort()).toEqual(invokeChannels().sort());
+    // 握手通道也在摘除名单里：漏摘的后果不是报错而是【更糟】—— handler 握着
+    // 已死的 sender 还在，页面重载后的乱序 ready 会去开一条推不出去的流。
+    expect(ipc.removed.sort()).toEqual([...invokeChannels(), EVENTS_READY_CHANNEL].sort());
     wire.stop();
   });
 

@@ -14,6 +14,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
   acceptanceBlocks,
+  deadExemptions,
   exemptedBlocks,
   missingGatePaths,
   NOT_BUILT_TAG,
@@ -120,9 +121,54 @@ describe("门禁住址对账：判据本身", () => {
     ]);
   });
 
-  it("⭐ 反向 canary：豁免计数器【数得出 2】—— 真仓库那条 toBe(1) 不是写死的", () => {
-    // 真仓库那一发把条数钉成【恰好 1】。少了这一发，一个恒返回「一条」的坏计数器
-    // （比如 filter 写成 find、或者 map 前多塞一个 .slice(0,1)）在那一发上【照样绿】,
+  it("死豁免判据：标记贴着「路径全都在」的行 ⇒ 数得出来；贴在那种豁免该在的行 ⇒ 数不出", () => {
+    // 这一族在 2026-11-19 之前只活在真仓库那一发的循环里。豁免账清零（最后一条被正当
+    // 摘掉）之后，那个循环遍历的是【空名单】⇒ 判据永不执行。round298 那句：
+    // 「一个永远不可能进入的分支就是一句装饰」——所以判据搬进 deadExemptions，
+    // 由这一发用合成语料真跑。两发方向相反，缺任一条另一条都可能是恒真/恒假。
+    const md = (p: string): string =>
+      "# 计划\n" + runLine(p) + "\n  【没建。" + NOT_BUILT_TAG + "】\n";
+    // 该数出来：那条豁免点名的路径【全都存在】= 它是死的。
+    expect(
+      deadExemptions(acceptanceBlocks(md("test/e2e/dead.spec.ts")), () => true),
+    ).toEqual([{ lineNo: 2, paths: ["test/e2e/dead.spec.ts"] }]);
+    // 不该数出来：点名了一条真不在盘上的路径 = 那条豁免是活的（它的正当用途）。
+    expect(
+      deadExemptions(
+        acceptanceBlocks(md("test/e2e/alive.spec.ts")),
+        existsOnly(),
+      ),
+    ).toEqual([]);
+    // ⚠ 混合行：同一块里两条路径，一条在一条不在 ⇒ 【不算死豁免】。
+    // 判据是「至少一条真没建」，不是「全都没建」—— 后者会把「建了一半还留着标记」
+    // 那种最该被发现的形状放过。这一发就是钉这一格的。
+    const mixed =
+      "# 计划\n" +
+      runLine("test/e2e/one.spec.ts") +
+      "\n  【`test/e2e/two.spec.ts` 也没建。" +
+      NOT_BUILT_TAG +
+      "】\n";
+    expect(
+      deadExemptions(
+        acceptanceBlocks(mixed),
+        existsOnly("test/e2e/one.spec.ts"),
+      ),
+    ).toEqual([]);
+  });
+
+  it("死豁免判据在【空名单】上返回空而不是抛（真仓库清零那天它就这么过）", () => {
+    // 上面那发证「有死豁免时数得出」，这一发证「一条豁免都没有时它给出空」——
+    // 真仓库那一发现在走的就是这条路。少了这一发，「名单空 ⇒ 抛」与「名单空 ⇒ 空」
+    // 两种写法在这一族今天全绿的读数下分不出来。
+    const md = "# 计划\n" + runLine("test/e2e/x.spec.ts") + "\n  【没建】\n";
+    expect(deadExemptions(acceptanceBlocks(md), existsOnly())).toEqual([]);
+    expect(exemptedBlocks(acceptanceBlocks(md))).toEqual([]);
+  });
+
+  it("⭐ 反向 canary：豁免计数器【数得出 2】—— 真仓库那条 toBe(0) 不是写死的", () => {
+    // 真仓库那一发把条数钉成一个【精确值】（历史上是 1，2026-11-19 起是 0）。
+    // 少了这一发，一个恒返回「一条」/「零条」的坏计数器（filter 写成 find、
+    // map 前多塞一个 .slice(0,1)、或者干脆 return []）在真仓库那一发上【照样绿】,
     // 而它换来的绿意味着：再多一道没建的门、或最后那条豁免被删，都不会有人看见。
     // 同一份判据、合成语料给两条标记 ⇒ 必须数出两条。这是「读数会被写死」那一族的
     // 标准解法（同 census.test.ts 那条 unresolved=1）。
@@ -189,27 +235,21 @@ describe("门禁住址对账：真仓库那一半", () => {
     expect(paths.length).toBeGreaterThanOrEqual(6);
   });
 
-  it("豁免是【可数的账】：钉死为恰好那一条，且它真的豁免掉一条不存在的路径", () => {
-    // round276 给的是上限 2（当时两道 Playwright 门都没建）。round293 改成【恰好 1】，
-    // 理由同 comment-test-readers 那条 retracted 名单：给上下界各留一格才双向都响。
-    //   往上走（2 条）= 有人又开了一道「东西没建」的门 ⇒ 该红一次，逼着当一件事登记；
-    //   往下走（0 条）= 最后那条豁免被人静默删了 ⇒ mobile-approval.spec.ts 当场红，
-    //     而那条红话长得像「计划里有个路径写错了」，不像「有人动了豁免」——
-    //     这一格只有钉死条数才分得开。
-    // 今天唯一活着的豁免是 test/e2e/mobile-approval.spec.ts：它要真飞书沙箱 + 真凭据，
-    // 本机给不出可复核的形状。哪天有人真建了它，这里的 1 会变 0 ⇒ 红，来摘标记。
-    const ex = exemptedBlocks(blocks);
-    expect(ex.length).toBe(1);
-    for (const e of ex) {
-      const reallyMissing = e.paths.filter((p) => !exists(p));
-      expect(
-        reallyMissing.length,
-        "豁免标记贴在一行【所有路径都存在】的位置上 ⇒ 它是死的豁免，该删",
-      ).toBeGreaterThan(0);
-    }
-    // 且活着的那一条必须是 mobile-approval 那一格：换成别的路径 = 有人把标记挪了位置，
-    // 那等于给一个【新的】没建的工件发了豁免，而它没经过任何论证。
-    expect(ex[0]?.paths).toContain("test/e2e/mobile-approval.spec.ts");
+  it("豁免账今天【清零】：一条都没有，而它清零之后仍是一条能红的账", () => {
+    // 这条钉的是【恰好 0】，不是 toBeLessThanOrEqual(1) —— 理由是 r21 立起来的那条：
+    // 单向的界只挡一个方向。清零之后方向只剩一个（有人又开一道「东西没建」的门），
+    // 而它照样要红：多一条 ⇒ 这里红 ⇒ 逼着当一件事登记，而不是悄悄贴一枚标记过去。
+    //
+    // 这条 0 是 2026-11-19 落下来的：最后那条豁免（`test/e2e/mobile-approval.spec.ts`）
+    // 的成立条件是「该文件不存在」，文件建出来那天条件就消失了。摘标记前先用本守卫
+    // 自己的解析函数复算过（.workbuddy/round310-gate-block-probe.mjs）：那一条验收行
+    // 点名的三条路径【全部存在】⇒ 按 deadExemptions 的定义，它当时已是「死的豁免」。
+    expect(exemptedBlocks(blocks)).toEqual([]);
+    // 清零之后这一发是真·空对空吗？不是：deadExemptions 在空名单上返回空，
+    // 而它【判什么】由上面那三发合成语料钉着（含混合行那一发）。
+    // 留在这里是为了：万一有人既贴回一枚标记、又让它贴在一行路径全都在的位置上，
+    // 这一发与上面那一发【同时】红，红话一句说「有几条豁免」、一句说「其中有死的」。
+    expect(deadExemptions(blocks, exists)).toEqual([]);
   });
 
   it("本轮修的三处住址今天逐字存在（「我改过了」也要有一条能重跑的命令）", () => {
@@ -228,10 +268,11 @@ describe("门禁住址对账：真仓库那一半", () => {
     // 2026-11-17 round291：`test/e2e/ceo-loop.spec.ts` 已经建出来了，期望缺项因此【少一条】。
     // 这里必须是【精确相等】而不是 toBeEmpty / 长度下限：多出来一条没人登记的路径，
     // 与少了那条被摘掉豁免的路径，都得在这里红一次。
-    // mobile-approval.spec.ts 【故意留着不建】：它要一个真飞书沙箱 + 真凭据，
-    // 本机给不出可复核的形状 —— 那条豁免是活的（它确实豁免掉一条不存在的路径）。
-    expect([...named].filter((p) => !exists(p))).toEqual([
-      "test/e2e/mobile-approval.spec.ts",
-    ]);
+    // 2026-11-19：`test/e2e/mobile-approval.spec.ts` 也建出来了 ⇒ 期望缺项【清零】。
+    // ⚠ 清零之后这一发反而【更严】了：它现在是「验收行点名的每一条路径都在盘上」，
+    //   而豁免已经没有人可遮（上面那发把账钉成 0）。注意这一发【不看】豁免标记 ——
+    //   所以「给一条路径全都在的行重新贴一枚标记」在这里遮不住任何东西，
+    //   它只会在上面那一发上红。两发的口径差就是这一格的全部理由。
+    expect([...named].filter((p) => !exists(p))).toEqual([]);
   });
 });

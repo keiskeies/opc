@@ -27,12 +27,15 @@ const SEC: string = String.fromCharCode(167);
 
 import type { HeadingSets, Problem, Ref, Row, World } from "./doc-coords.js";
 import {
+  CN_LINE_RE,
   decisionRows,
   extractRefs,
   hashProblems,
   hashTokenCount,
   headingSets,
   itemNumbers,
+  markdownRows,
+  presentTenseClaim,
   repoShortHashes,
   secExists,
   verify,
@@ -263,5 +266,104 @@ describe("决策文档里的坐标（节号 / §7 条目号 / 短哈希）指向
     // 必须去读一遍那些段落再改这个数字，不许默默放过。注释里说【要断言】而断言没落地，
     // 本身就是 0007 §4.1 要消灭的东西：上一版就在这里漏了断言。
     expect(retracted.length).toBe(2);
+  });
+});
+
+/**
+ * 汉字形态的行号引用「不许主张今天的位置」（0050 §6.5 写下、0051 §2 复述的口径）。
+ *
+ * 那条口径原文：「两类坐标必须用两种形态写：断言今天的位置 ⇒ `文件:行号`（进快照）；
+ * 陈述当时写的是什么 ⇒ 汉字「第 N 行」（不进快照，也不该进）」。它的**下半句一直是
+ * `doc-refs` 的豁免**（汉字形态不进提取器，所以快照判不到它），而**上半句在 round332
+ * 之前从来没有读者** ⇒ 汉字形态长期是一条只有豁免、没有义务的写法。本节就是那个读者。
+ *
+ * 实测这种主张在全仓 markdown 里只有 3 行，逐条复算后的**真实**下场（不是初判）：
+ *   · 0051 §2「今天 REJECTION_COUNT_SQL 在 runtime.ts 第 110 行、ENSERT_TASK_BUDGET_SQL
+ *     在第 134 行」—— runtime.ts 被提交过的 5 个版本里这对坐标【从未同时成立】
+ *     （无/107、无/108、108/131、117/已删、118/已删），而写下它的 ffae248 那一刻
+ *     真值已是 117 与「已删」⇒ **落库即假**；
+ *   · 0063 §2 表格「cards.ts 第 237 行就是那句 INSERT」—— 该篇自报量的是 61467b5，
+ *     那里确实是 237；而**把这篇提交进库的那一发 ffae248 自己**把它顶到了 252
+ *     ⇒ 同样是落库即假；
+ *   · 0043 §7「那条 applyDecision（现在在第 298 行）」—— **数没错、挂法错**：298 是
+ *     applyDecision 函数体内那句 `action: "approval"`（函数本体在 237），紧邻下句
+ *     「两行写的 action 值相同」用的正是两个写入点对比。⚠ 本轮初判把它写成「这数
+ *     从来没对过」，那是**我的误读**被自己的判据逼着逐行复算后撤回的 —— 留在 0043
+ *     正文与本文件 git 历史里，不洗（「坐标指错了」与「坐标措辞指错了」是两件事）。
+ * `doc-refs` 对上述三条**一条都看不见**：它只认 `文件:行号` 那个 token 形态。
+ */
+describe("汉字形态的行号不许主张今天的位置（0050 §6.5 口径的上半句）", () => {
+  // 下面 8 发不是"测测看"：每一发都由 `.workbuddy/round332-mutate-predict.probe.mts`
+  // 量过它【能弄死哪一个变异】（逐发 kills 表印在本轮台账与机器输出里）。
+  // 量不出 kills 的发当场就是装饰（0013 整篇讲的就是这种"有鉴别力才配存在"），
+  // 我第一版里的两发就是这么被量出来后删掉的：
+  //   · 「`recorder.ts` 第 239 行 → 第 249 行」—— 没有现在时词，任何变异下都是 false；
+  //   · 「它当年落在第 291 行」—— 只有【同时】拆掉两道闸才翻，单拆哪一道都不翻。
+  // ⚠ 标题【刻意不与本节上方那条老判据同名】：`tests` 在变异机里是个 Set，
+  //   两条同名会塌成一格 ⇒ 「红了哪一发」的归因失真（round331 那条机器自己的家规）。
+  it("presentTenseClaim 判据本身有判别力（否则本节是恒绿装饰）", () => {
+    // c1 正例主形状：现在时 + 「在第 N 行」+ 汉字行号 ⇒ 判（拆掉前置措辞臂 ⇒ 漏 ⇒ 红）
+    expect(
+      presentTenseClaim("那条 `applyDecision`（现在在第 298 行）只被走到。"),
+    ).toBe(true);
+    // c2 「第 N 行」+ 现在时词，但没有位置性措辞 ⇒ 不判。这一发就是 0050 §6.5 那句
+    //    谈这条规矩本身的话，形态与 c1 只差一个动词（取消位置判据 ⇒ 误伤 ⇒ 红）。
+    expect(
+      presentTenseClaim(
+        "> 快照会把「第 108 行现在的内容」当成本篇的主张来钉。",
+      ),
+    ).toBe(false);
+    // c3 有现在时也有「在第 N 行」，但行里有过去时标记【原写】⇒ 豁免。
+    //    这一发钉的是豁免臂本身：拆掉豁免 ⇒ 它翻成 true ⇒ 红。
+    expect(
+      presentTenseClaim("原写的是「那条（现在在第 298 行）」这一句。"),
+    ).toBe(false);
+    // c4 位置措辞被**粗体夹住 ⇒ 仍判。0051 原文写的是 `**第 110 行**`，星号夹在
+    //    「在」与数字之间；不剥强调标记就当场漏掉这一发（漏掉的恰是最该抓的那发）。
+    expect(
+      presentTenseClaim(
+        "> 今天 `X` 在 runtime.ts **第 110 行**、`Y` 在第 134 行，",
+      ),
+    ).toBe(true);
+    // c5 有现在时、有位置性，但整行是【冒号形态】⇒ 不进这条判据（归 doc-refs 快照管，
+    //    两守卫各管一种形态；把判据扩到冒号形态 ⇒ 两守卫抢同一格、汉字这侧反而空了 ⇒ 红）。
+    expect(
+      presentTenseClaim("今天 `REJECTION_COUNT_SQL` 在 runtime.ts:110。"),
+    ).toBe(false);
+    // c6 区间形态（0008 引 INDEX 用「第 269-275 行」）⇒ 判。正则丢掉区间分支 ⇒ 漏 ⇒ 红。
+    expect(presentTenseClaim("现在落在第 269-275 行那一段。")).toBe(true);
+    // c7 后置措辞臂「第 N 行就是」：0063 表格原句就是这个形状。
+    //    拆掉后置臂 ⇒ 漏 ⇒ 红；不剥反引号 ⇒ 「`第 298 行`就是」的星号挡在中间 ⇒ 漏 ⇒ 红。
+    expect(presentTenseClaim("今天的落点：`第 298 行`就是那句 INSERT。")).toBe(
+      true,
+    );
+    // c8 位置性措辞【落在】齐全、但没有现在时词 ⇒ 不判 —— 这正是 0041 §9 那种
+    //    「A → B」漂移记录的形状，汉字形态的存在理由就是这类句子。
+    //    钉的是现在时闸本身：拆掉现在时闸 ⇒ 它翻成 true ⇒ 红。
+    expect(presentTenseClaim("坐标 `recorder.ts` 落在第 249 行，同因；")).toBe(
+      false,
+    );
+    // 提取器自检：区间与单词都要被 CN_LINE_RE 数到，否则上面几发是在断言空集
+    expect("a 第 12 行 b 第 269-275 行".match(CN_LINE_RE)?.length).toBe(2);
+  });
+
+  it("真语料：决策文档与非决策 markdown 里都没有【汉字形态的现在时位置主张】", () => {
+    const hits: string[] = [];
+    let phrases: number = 0;
+    const corpora: Row[][] = [decisionRows(), markdownRows()];
+    for (const rows of corpora) {
+      for (const r of rows) {
+        r.lines.forEach((l: string, i: number): void => {
+          const found: string[] | null = l.match(CN_LINE_RE);
+          if (found !== null) phrases += found.length;
+          if (presentTenseClaim(l)) hits.push(r.doc + " l." + (i + 1));
+        });
+      }
+    }
+    // 装配自检（§7 第 21、22 条那一族）：判据一条没报，必须先证明它【扫到了东西】。
+    // 实测语料量：决策文档 65 份 87 条 + 非决策 markdown 12 份 10 条。取一个远低于
+    // 实测量、又远大于 0 的下界 —— 提取器坏掉时这里会红，而不是让 hits 空得像"文档干净"。
+    expect(phrases).toBeGreaterThanOrEqual(50);
+    expect(hits).toEqual([]);
   });
 });

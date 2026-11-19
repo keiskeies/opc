@@ -17,26 +17,22 @@
  * 那是 Task 3.4 回放视图的事』）。同一段落里它否掉的两种做法（静默跳行 / 整请求 500）
  * 分别对应上面 B 与 A 的反面，所以这里照它执行而不是另起一套。
  *
- * ── Checkpoint 那一半：只登记，不解码 ──────────────────────────────────
+ * ── Checkpoint 那一半：解码已接上（round326 起），失败仍降级 ─────────────
  * 计划写的是「按 Checkpoint + events 重建时间线」。events 是纯 JSON 文本，直接可读；
  * 而 `checkpoints.checkpoint` / `.metadata` 是 `serde.dumpsTyped()` 出来的 BLOB
  * （0004 的 V7/V19：载荷 + 类型标签），读回必须走 `loadsTyped(type, bytes)` ——
- * 那是 `@langchain/core` 的序列化器，**本机装不上**（0009 §2 三条通路实测拿不到）。
+ * 那是 `@langchain/core` 的序列化器，0009 §2 曾记「本机装不上」；round319 实测
+ * @langchain/core@1.3.5 / langgraph-checkpoint@1.2.2 可装，saver.ts 已在用，
+ * 所以本模块现在用官方程 JsonPlusSerializer 解码（见 decodeCheckpoint）。
  *
- * 所以本模块的做法是：把 checkpoint 行**按库里的原样登记进时间线**
- * （thread_id / checkpoint_id / parent_checkpoint_id / type / 字节长度），
- * 解码不了这件事**写在每一行上**（`decoded: false`）。
- * 我不做两件事，理由各一条：
- *  - **不猜序列化格式自己解**。msgpack-ish + 自定义 type 标签，猜错会得到
- *    「解出来一个能看的东西」，而那比解不出来危险得多。
- *  - **不因为解不出就不列这些行**。那样时间线会显得完整而少了节点级步骤，
- *    正是上面 B 类失效。
- * 「逐节点可展开并显示输入输出摘要」这条验收因此**只完成了一半**：
- * 审计侧的节点信息（state_change 的 from/to、actor、快照）齐全，
- * Checkpoint 侧的通道值摘要要等依赖到位。准确边界写进 0013 §8。
+ * 解码的容错口径与 events 同一条：单行解不开 ⇒ 那一行 `decoded: false` + 原文字节
+ * 长度照常登记（A 类「给假样本」/ B 类「静默少一段」都不发生，见下头那两段）。
+ * 「逐节点可展开并显示输入输出摘要」这条验收：审计侧的节点信息（state_change 的
+ * from/to、actor、快照）与 Checkpoint 侧的通道值摘要（summary 字段）现在都在。
  */
 
 import type { DatabaseSync } from "node:sqlite";
+import { JsonPlusSerializer } from "@langchain/langgraph-checkpoint";
 import { assertParamCount, assertSingleStatement } from "../db/write-queue.js";
 import { currentGraphVersion, readGraphByVersion } from "../org/commit.js";
 import { MAX_SEARCH_LIMIT, searchEvents } from "./search.js";
@@ -102,6 +98,12 @@ export type ReplayCheckpoint = {
   readonly checkpoint_bytes: number;
   readonly metadata_bytes: number;
   readonly decoded: boolean;
+  /**
+   * checkpoint 载荷的通道值摘要（§16.7「逐节点可展开并显示输入输出摘要」）。
+   * `decoded: false` 时为 null（解码失败或没提供）。
+   * 形状见 decodeCheckpoint —— 用官方程 JsonPlusSerializer 还原，不是自己猜格式。
+   */
+  readonly summary: readonly { readonly channel: string; readonly valueJson: string }[] | null;
 };
 
 export type ReplayView = {
@@ -256,10 +258,10 @@ export function replayEventsByIdsSql(ids: readonly number[]): string {
 export const MAX_SQL_VARIABLES = 32766;
 
 /** 任务不存在返回 null（让 HTTP 层去决定 404），存在则给出时间线。 */
-export function buildReplayView(
+export async function buildReplayView(
   db: DatabaseSync,
   o: BuildReplayInput,
-): ReplayView | null {
+): Promise<ReplayView | null> {
   const taskRow = readOne(db, REPLAY_TASK_SQL, [o.taskId]);
   if (taskRow === undefined) return null;
 
@@ -355,7 +357,7 @@ export function buildReplayView(
 
   const version = num(taskRow["graph_version"], "tasks.graph_version");
   const graph = graphSection(db, version);
-  const ckpt = readCheckpoints(db, o.taskId);
+  const ckpt = await readCheckpoints(db, o.taskId);
   // complete 只看【有没有降级行】。它不含「被分页截断」这件事 ——
   // 截断由调用方拿 limit/offset 自己判（entries.length === limit 就是可能还有）。
   // 把两件事混进一个布尔，界面上就没法分别显示「中间缺一段」与「下面还有」。
@@ -444,10 +446,60 @@ function graphSection(db: DatabaseSync, version: number): GraphSection {
   }
 }
 
-function readCheckpoints(
+/**
+ * 解码一行 checkpoint 的通道值摘要（§16.7「逐节点可展开并显示输入输出摘要」）。
+ *
+ * checkpoint 载荷是 LangGraph 的 Checkpoint（channel_values 是各通道的当前值）：
+ * 输入/输出在通道里（如 "messages" 是消息列表、"task" 是任务对象），
+ * 但【什么通道存在】由运行中的图决定 —— 本模块不动图的定义，只把
+ * 还原出来的对象里每个通道转成 JSON 字符串交出去，界面上按需展示。
+ *
+ * 三件事与文件头的 A/B 失效同一条处置：
+ *  - serde 抛（未知 type / 损坏 blob）⇒ decoded:false + summary:null，
+ *    而不是整请求 500（A 类）；也不静默跳行（B 类）。
+ *  - 格式【不自己猜】：直接用官方程 JsonPlusSerializer（saver.ts 同一份），
+ *    它的 loadsTyped(type, bytes) 是唯一定义格式的地方。
+ *  - channel 值 JSON.stringify 失败（循环引用等）⇒ 单通道降级成 {"not_json": true}
+ *    而不是整行丢。
+ */
+export async function decodeCheckpoint(
+  type: string | null,
+  blob: Uint8Array,
+  serializer: JsonPlusSerializer = new JsonPlusSerializer(),
+): Promise<{
+  readonly decoded: boolean;
+  readonly summary: readonly { readonly channel: string; readonly valueJson: string }[] | null;
+}> {
+  if (type === null || blob.byteLength === 0) return { decoded: false, summary: null };
+  let state: unknown;
+  try {
+    state = await serializer.loadsTyped(type, blob);
+  } catch {
+    return { decoded: false, summary: null };
+  }
+  const values =
+    typeof state === "object" && state !== null && "channel_values" in state
+      ? (state as { channel_values: Record<string, unknown> }).channel_values
+      : undefined;
+  if (values === undefined || typeof values !== "object" || values === null) {
+    return { decoded: true, summary: null };
+  }
+  const summary = Object.entries(values).map(([channel, value]) => {
+    let valueJson: string;
+    try {
+      valueJson = JSON.stringify(value);
+    } catch {
+      valueJson = '{"not_json":true}';
+    }
+    return { channel, valueJson };
+  });
+  return { decoded: true, summary };
+}
+
+async function readCheckpoints(
   db: DatabaseSync,
   taskId: string,
-): { checkpoints: ReplayCheckpoint[]; unavailableReason?: string } {
+): Promise<{ checkpoints: ReplayCheckpoint[]; unavailableReason?: string }> {
   let rows: Record<string, unknown>[];
   try {
     rows = readAll(db, REPLAY_CHECKPOINTS_SQL, [taskId]);
@@ -472,22 +524,30 @@ function readCheckpoints(
         "不是这条任务没跑过。",
     };
   }
-  return {
-    checkpoints: rows.map((r): ReplayCheckpoint => ({
-      checkpoint_id: str(r["checkpoint_id"], "checkpoint_id"),
-      parent_checkpoint_id:
-        (r["parent_checkpoint_id"] as string | null | undefined) ?? null,
-      checkpoint_ns: str(r["checkpoint_ns"], "checkpoint_ns"),
-      type: (r["type"] as string | null | undefined) ?? null,
-      checkpoint_bytes: byteLen(r["checkpoint"]),
-      metadata_bytes: byteLen(r["metadata"]),
-      // 恒 false，且【不是】待办清单上被忘掉的一格：解码要 @langchain/core 的
-      // serde（见文件头）。写死 false 而不是留个 try/catch 假装尝试过，
-      // 是为了将来真接上 serde 时这一行必须被改到 —— 而改一个恒 false 的常量
-      // 会红掉那条断言 decoded=false 的用例，逼着改的人同时更新用例。
-      decoded: false,
-    })),
-  };
+  const checkpoints = await Promise.all(
+    rows.map(async (r): Promise<ReplayCheckpoint> => {
+      const id = str(r["checkpoint_id"], "checkpoint_id");
+      const type = (r["type"] as string | null | undefined) ?? null;
+      const rawBlob = r["checkpoint"];
+      // node:sqlite 的 BLOB 列读回来是 Uint8Array。非 Uint8Array（不该发生）
+      // 时按空字节交给 decodeCheckpoint —— 它会走 decoded:false 那一支，不会抛。
+      const blob =
+        rawBlob instanceof Uint8Array ? rawBlob : new Uint8Array(0);
+      const decoded = await decodeCheckpoint(type, blob);
+      return {
+        checkpoint_id: id,
+        parent_checkpoint_id:
+          (r["parent_checkpoint_id"] as string | null | undefined) ?? null,
+        checkpoint_ns: str(r["checkpoint_ns"], "checkpoint_ns"),
+        type,
+        checkpoint_bytes: byteLen(r["checkpoint"]),
+        metadata_bytes: byteLen(r["metadata"]),
+        decoded: decoded.decoded,
+        summary: decoded.summary,
+      };
+    }),
+  );
+  return { checkpoints };
 }
 
 function byteLen(v: unknown): number {

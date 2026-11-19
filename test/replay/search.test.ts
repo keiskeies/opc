@@ -600,7 +600,7 @@ describe("③ 时间线：一行读坏不让整段回放不可用，也不静默
     ).run(NOW);
     audit(db, { taskId: "t1", payload: { text: "第三条正常" } });
 
-    const view = buildReplayView(db as never, { taskId: "t1" });
+    const view = await buildReplayView(db as never, { taskId: "t1" });
     if (view === null) throw new Error("任务存在，不该返回 null");
     // 【三条都在】。跳行的话条目数变少而总数不说，CEO 读到的是「这段流程只有 2 步」，
     // 而真相是「有 3 步、其中 1 步读不出来」—— 一条断掉的因果链会被读成
@@ -622,7 +622,7 @@ describe("③ 时间线：一行读坏不让整段回放不可用，也不静默
     const { db } = await newDb();
     addTask(db, "t1");
     audit(db, { taskId: "t1", payload: { text: "没有快照" } });
-    const view = buildReplayView(db as never, { taskId: "t1" });
+    const view = await buildReplayView(db as never, { taskId: "t1" });
     expect(view?.entries[0]?.degraded).toBeUndefined();
     expect(view?.complete).toBe(true);
   });
@@ -640,7 +640,7 @@ describe("③ 时间线：一行读坏不让整段回放不可用，也不静默
     audit(db, { taskId: "t1", payload: { n: 1 }, createdAt: 3000 });
     audit(db, { taskId: "t1", payload: { n: 2 }, createdAt: 2000 });
     audit(db, { taskId: "t1", payload: { n: 3 }, createdAt: 1000 });
-    const view = buildReplayView(db as never, { taskId: "t1" });
+    const view = await buildReplayView(db as never, { taskId: "t1" });
     if (view === null) throw new Error("任务存在");
     const byId = view.entries.map(
       (e) => (e.payload as { n: number }).n,
@@ -666,7 +666,7 @@ describe("③ 时间线：一行读坏不让整段回放不可用，也不静默
 
   it("tasks 里没有这条 ⇒ 返回 null（让 HTTP 层去给 404）", async () => {
     const { db } = await newDb();
-    expect(buildReplayView(db as never, { taskId: "nope" })).toBeNull();
+    expect(await buildReplayView(db as never, { taskId: "nope" })).toBeNull();
   });
 
   it("checkpoints 表整个不存在 ⇒ 空数组 + 原因，而不是静默的空", async () => {
@@ -677,7 +677,7 @@ describe("③ 时间线：一行读坏不让整段回放不可用，也不静默
     const { db } = await newDb();
     addTask(db, "t1");
     audit(db, { taskId: "t1", payload: { text: "只有审计" } });
-    const view = buildReplayView(db as never, { taskId: "t1" });
+    const view = await buildReplayView(db as never, { taskId: "t1" });
     expect(view?.checkpoints).toHaveLength(0);
     expect(typeof view?.checkpoints_unavailable).toBe("string");
     expect((view?.checkpoints_unavailable ?? "").length > 0).toBe(true);
@@ -685,7 +685,7 @@ describe("③ 时间线：一行读坏不让整段回放不可用，也不静默
     expect(view?.complete).toBe(true);
   });
 
-  it("建了 checkpoints 之后：行被登记，而 decoded 恒 false（这是【已知缺口】不是漏做）", async () => {
+  it("建了 checkpoints 之后：行被登记；真实 checkpoint 解码出 summary，坏 blob 降级", async () => {
     const { db } = await newDb();
     addTask(db, "t1");
     db.exec(
@@ -700,18 +700,40 @@ describe("③ 时间线：一行读坏不让整段回放不可用，也不静默
     //     字节数其实是 2，而 4 恰好是它的 hex 文本长度 —— 一个巧合让断言看着像有依据。
     db.prepare(
       "INSERT INTO checkpoints (thread_id, checkpoint_id, type, checkpoint, metadata) " +
-        "VALUES ('t1','ck1','msgpack',X'81A4A5A6',X'81A5')",
+        "VALUES ('t1','ck-raw','msgpack',X'81A4A5A6',X'81A5')",
     ).run();
-    const view = buildReplayView(db as never, { taskId: "t1" });
-    expect(view?.checkpoints).toHaveLength(1);
-    expect(view?.checkpoints[0]?.checkpoint_id).toBe("ck1");
-    expect(view?.checkpoints[0]?.checkpoint_bytes).toBe(4);
-    expect(view?.checkpoints[0]?.metadata_bytes).toBe(2);
+    // 真实 payload：用 saver 同款的 JsonPlusSerializer 现产一个 checkpoint 载荷。
+    // 早先这里写死 msgpack 小 blob + 「本机装不上 @langchain/core」只能登记不能解码
+    // （0013 §8 那条已知缺口）；round319 实测 @langchain/core@1.3.5 可装，
+    // query.ts 已接上 decodeCheckpoint —— 现在这条要证的是【真解码成功】，
+    // 坏 blob 那条留作降级对照（decoded 必须 false 而不是抛）。
+    const { JsonPlusSerializer } = await import("@langchain/langgraph-checkpoint");
+    const serde = new JsonPlusSerializer();
+    const [type, blob] = await serde.dumpsTyped({
+      channel_values: { messages: [{ text: "一眼" }], task: { id: "t1" } },
+    });
+    db.prepare(
+      "INSERT INTO checkpoints (thread_id, checkpoint_id, type, checkpoint, metadata) " +
+        "VALUES ('t1','ck-good',?,?,NULL)",
+    ).run(type, blob);
+
+    const view = await buildReplayView(db as never, { taskId: "t1" });
+    expect(view?.checkpoints).toHaveLength(2);
+    // 降级行：type 不在 JsonPlusSerializer 支持集 ⇒ decoded false + summary null，
+    // 而不是整请求挂掉（A 类失效）或静默少一行（B 类失效）。
+    const raw = view?.checkpoints.find((c) => c.checkpoint_id === "ck-raw");
+    expect(raw?.checkpoint_bytes).toBe(4);
+    expect(raw?.metadata_bytes).toBe(2);
+    expect(raw?.decoded).toBe(false);
+    expect(raw?.summary).toBeNull();
+    // 真解码行：通道值逐通道化成 JSON 字符串交出来。
+    const good = view?.checkpoints.find((c) => c.checkpoint_id === "ck-good");
+    expect(good?.decoded).toBe(true);
+    expect(good?.summary).toEqual([
+      { channel: "messages", valueJson: JSON.stringify([{ text: "一眼" }]) },
+      { channel: "task", valueJson: JSON.stringify({ id: "t1" }) },
+    ]);
     expect(view?.checkpoints_unavailable).toBeUndefined();
-    // ★ 这条断言【故意】锁住一个未完成状态：解码需要 @langchain/core 的 serde，
-    //   本机装不上（0009 §2）。接上 serde 的那天这行会红 —— 那是它在提醒
-    //   「计划的③『输入输出摘要』还没做完」，而不是「实现写坏了」。
-    expect(view?.checkpoints[0]?.decoded).toBe(false);
   });
 });
 
@@ -729,8 +751,8 @@ describe("④ 回放幂等：同一任务连续两次逐字节相同", () => {
     for (let i = 0; i < 6; i++) {
       audit(db, { taskId: "t1", payload: { n: i }, createdAt: NOW });
     }
-    const a = JSON.stringify(buildReplayView(db as never, { taskId: "t1" }));
-    const b = JSON.stringify(buildReplayView(db as never, { taskId: "t1" }));
+    const a = JSON.stringify(await buildReplayView(db as never, { taskId: "t1" }));
+    const b = JSON.stringify(await buildReplayView(db as never, { taskId: "t1" }));
     expect(a).toBe(b);
     // 而且要真的拿到 6 条（否则「两次都是空」也满足上一条）。
     expect((a.match(/"seq":/gu) ?? []).length).toBe(6);
@@ -742,7 +764,7 @@ describe("④ 回放幂等：同一任务连续两次逐字节相同", () => {
     addTask(db, "t2");
     audit(db, { taskId: "t1", payload: { mine: 1 } });
     audit(db, { taskId: "t2", payload: { other: 1 } });
-    const view = buildReplayView(db as never, { taskId: "t1" });
+    const view = await buildReplayView(db as never, { taskId: "t1" });
     expect(view?.entries).toHaveLength(1);
     expect(view?.entries[0]?.payload).toEqual({ mine: 1 });
   });
@@ -781,8 +803,8 @@ describe("⑤ 回放标注当时那一版组织图，不退回当前版", () => 
     addTask(db, "t-old", 1);
     addTask(db, "t-new", 2);
 
-    const old = buildReplayView(db as never, { taskId: "t-old" });
-    const fresh = buildReplayView(db as never, { taskId: "t-new" });
+    const old = await buildReplayView(db as never, { taskId: "t-old" });
+    const fresh = await buildReplayView(db as never, { taskId: "t-new" });
     if (old === null || fresh === null) throw new Error("两条任务都存在");
     expect(old.graph.ok === true && old.graph.reports_to["dev"]).toBe("tech");
     expect(fresh.graph.ok === true && fresh.graph.reports_to["dev"]).toBe("ceo");
@@ -795,7 +817,7 @@ describe("⑤ 回放标注当时那一版组织图，不退回当前版", () => 
     const { db } = await newDb();
     addTask(db, "t1", 1);
     audit(db, { taskId: "t1", payload: { text: "x" } });
-    const view = buildReplayView(db as never, { taskId: "t1" });
+    const view = await buildReplayView(db as never, { taskId: "t1" });
     expect(view?.graph.ok).toBe(false);
     if (view === null || view.graph.ok !== false) throw new Error("应当是降级");
     expect(view.graph.version).toBe(1);
@@ -826,7 +848,7 @@ describe("⑥ 关键词过滤：检索接进时间线", () => {
     }
     audit(db, { taskId: "t1", payload: { n: 99, text: "与关键词无关" }, createdAt: NOW });
 
-    const view = buildReplayView(db as never, { taskId: "t1", keyword: "覆盖率" });
+    const view = await buildReplayView(db as never, { taskId: "t1", keyword: "覆盖率" });
     const ns = (view?.entries ?? []).map((e): unknown => (e.payload as { n: number }).n);
     expect(ns).toEqual([1, 2, 3, 4]);
     // 反向对照：把默认序直接拿来用会得到 [4,3,2,1]。
@@ -843,7 +865,7 @@ describe("⑥ 关键词过滤：检索接进时间线", () => {
     addTask(db, "t2");
     audit(db, { taskId: "t1", payload: { text: "本任务的覆盖率" } });
     audit(db, { taskId: "t2", payload: { text: "别的任务的覆盖率" } });
-    const view = buildReplayView(db as never, { taskId: "t1", keyword: "覆盖率" });
+    const view = await buildReplayView(db as never, { taskId: "t1", keyword: "覆盖率" });
     expect(view?.entries).toHaveLength(1);
     expect((view?.entries[0]?.payload as { text: string }).text).toContain("本任务");
     // 反向对照：不限定任务时两条都在。少了这一半，「只命中一条」可能只是因为
@@ -855,7 +877,7 @@ describe("⑥ 关键词过滤：检索接进时间线", () => {
     const { db } = await newDb();
     addTask(db, "t1");
     audit(db, { taskId: "t1", payload: { text: "有内容" } });
-    const view = buildReplayView(db as never, { taskId: "t1", keyword: "根本没有这个词" });
+    const view = await buildReplayView(db as never, { taskId: "t1", keyword: "根本没有这个词" });
     expect(view).not.toBeNull();
     expect(view?.entries).toHaveLength(0);
     // 空结果【不是】「读坏了」，所以 complete 是真的。把两者混成一个信号，
@@ -869,7 +891,7 @@ describe("⑥ 关键词过滤：检索接进时间线", () => {
     addTask(db, "t1");
     audit(db, { taskId: "t1", payload: { text: "a" } });
     audit(db, { taskId: "t1", payload: { text: "b" } });
-    expect(buildReplayView(db as never, { taskId: "t1", keyword: "" })?.entries).toHaveLength(2);
+    expect((await buildReplayView(db as never, { taskId: "t1", keyword: "" }))?.entries).toHaveLength(2);
     // 而直接问检索函数，空串是【空集】（①节那条）。两个语义必须不同，
     // 且分工清楚：过滤发生在 buildReplayView（空=不筛），
     // 「别拿空串去扫全库」发生在 searchEvents（空=不查）。
@@ -891,8 +913,8 @@ describe("⑥ 关键词过滤：检索接进时间线", () => {
     audit(db, { taskId: "t1", payload: { n: 90, text: "噪声甲" } });
     audit(db, { taskId: "t1", payload: { n: 91, text: "噪声乙" } });
     audit(db, { taskId: "t1", payload: { n: 92, text: "噪声丙" } });
-    const p1 = buildReplayView(db as never, { taskId: "t1", keyword: '"hit":true', limit: 2, offset: 0 });
-    const p2 = buildReplayView(db as never, { taskId: "t1", keyword: '"hit":true', limit: 2, offset: 2 });
+    const p1 = await buildReplayView(db as never, { taskId: "t1", keyword: '"hit":true', limit: 2, offset: 0 });
+    const p2 = await buildReplayView(db as never, { taskId: "t1", keyword: '"hit":true', limit: 2, offset: 2 });
     const ns = (v: typeof p1): number[] =>
       (v?.entries ?? []).map((e): number => (e.payload as { n: number }).n);
     expect(ns(p1)).toEqual([1, 3]);
@@ -910,9 +932,9 @@ describe("⑥ 关键词过滤：检索接进时间线", () => {
      */
     const { db } = await newDb();
     addTask(db, "t1");
-    const view = buildReplayView(db as never, { taskId: "t1", keyword: "覆盖率", limit: 500 });
+    const view = await buildReplayView(db as never, { taskId: "t1", keyword: "覆盖率", limit: 500 });
     expect(view?.effective_limit).toBe(200);
-    const plain = buildReplayView(db as never, { taskId: "t1", limit: 500 });
+    const plain = await buildReplayView(db as never, { taskId: "t1", limit: 500 });
     expect(plain?.effective_limit).toBe(500);
   });
 
@@ -922,7 +944,7 @@ describe("⑥ 关键词过滤：检索接进时间线", () => {
     audit(db, { taskId: "t1", payload: { text: "正常覆盖率一行" } });
     // 直接写一条非法 JSON 的 payload（绕过 recorder 的形状，与③节同一手法）。
     const bad = audit(db, { taskId: "t1", payload: "{坏掉的覆盖率" });
-    const view = buildReplayView(db as never, { taskId: "t1", keyword: "覆盖率" });
+    const view = await buildReplayView(db as never, { taskId: "t1", keyword: "覆盖率" });
     expect(view?.entries).toHaveLength(2);
     expect(view?.complete).toBe(false);
     expect(view?.entries.some((e): boolean => e.degraded === true)).toBe(true);

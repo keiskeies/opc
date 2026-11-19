@@ -3,14 +3,21 @@
  * 「一个想法同时涉及产品与运营，需并行拆解而非串行」）。
  *
  * ── 本模块不含任何 LangGraph 调用，这是**实测逼出来的**而不是风格 ──────────
- * 本机装不上 @langchain/*（0009 §2 三条通路：DNS 通、两个 registry 的 TCP 443 超时、
- * store 与锁文件零命中）。graph/company.ts 现在带着 15 个 TS2307 就是这个原因。
- * 所以这里能交付、也**只有**这些能被本机验证：
+ * 【round319 前提已变】当初「本机装不上 @langchain/*（0009 §2）」已过期：
+ * node_modules/@langchain/langgraph@1.7.1 已装好、tsc 0 error、e2e-linear 与
+ * parallel-real-graph 真图测试全绿。但本模块【仍然】不含 LangGraph 调用 ——
+ * 因为「判定」与「合并语义」这两半是纯函数，本来就该独立于框架可测；
+ * 真图的扇出扇入落点现在由 test/graph/parallel-real-graph.test.ts 承担
+ * （直接消费本文件的 mergeParallelResults）。
+ * 所以这里能交付、也**只有**这些能被本机验证的立场不变：
  *  ① 「该不该并行」这个**判定**（§23.2 反过度设计要求：无绕行需求就不许启用）；
  *  ② **汇聚的合并语义**——也就是规格 §5.4 PoC 门禁第 3 项那句『并行分支 Reducer 合并语义』。
  *     reducer 本质是一个纯函数 `(accumulated, update) => merged`，框架只是**调用**它，
  *     合并对不对与框架在不在无关。这一半做实，接上 `Annotation({…, reducer})` 是接线。
- * 真接进 StateGraph 的扇出扇入需要网络，缺口登记在 0016 §7「没做到」，不写成「已接入」。
+ * 真接进 StateGraph 的扇出扇入【round319 已补测试落点】：
+ * test/graph/parallel-real-graph.test.ts 直接消费本文件的 mergeParallelResults，
+ * 钉住「真图汇聚按声明序而非到达序」。0016 §7 首条从「没做到」改口成
+ * 「前提已过期、已补框架落点」（0016 §7 原文仍留着，加复核标注）。
  *
  * ── 为什么合并语义要单独写而不是「用框架默认的」────────────────────────
  * 默认 reducer 是**覆盖**（`(_a, b) => b`）。并行两条分支写同一个通道时，覆盖的意思是

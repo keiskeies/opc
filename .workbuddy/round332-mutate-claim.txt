@@ -1,0 +1,21 @@
+基线: failed=0 passed=5
+✓ M0 恒假（判据整个失效）               red=true 用例红=1 文件红=1 passed=4
+     红名=["presentTenseClaim 判据本身有判别力（否则本节是恒绿装饰）"]
+✓ M1 不剥强调/代码标记                red=true 用例红=1 文件红=1 passed=4
+     红名=["presentTenseClaim 判据本身有判别力（否则本节是恒绿装饰）"]
+✓ M2 拆过去时豁免                   red=true 用例红=2 文件红=1 passed=3
+     红名=["presentTenseClaim 判据本身有判别力（否则本节是恒绿装饰）","真语料：决策文档与非决策 markdown 里都没有【汉字形态的现在时位置主张】"]
+✓ M3 拆现在时闸                    red=true 用例红=2 文件红=1 passed=3
+     红名=["presentTenseClaim 判据本身有判别力（否则本节是恒绿装饰）","真语料：决策文档与非决策 markdown 里都没有【汉字形态的现在时位置主张】"]
+✓ M4 拆前置措辞臂（只剩后置）             red=true 用例红=1 文件红=1 passed=4
+     红名=["presentTenseClaim 判据本身有判别力（否则本节是恒绿装饰）"]
+✓ M5 拆后置措辞臂（只剩前置）             red=true 用例红=1 文件红=1 passed=4
+     红名=["presentTenseClaim 判据本身有判别力（否则本节是恒绿装饰）"]
+✓ M6 正则丢区间分支                  red=true 用例红=1 文件红=1 passed=4
+     红名=["presentTenseClaim 判据本身有判别力（否则本节是恒绿装饰）"]
+✓ M7 取消位置判据（有词就报）             red=true 用例红=2 文件红=1 passed=3
+     红名=["presentTenseClaim 判据本身有判别力（否则本节是恒绿装饰）","真语料：决策文档与非决策 markdown 里都没有【汉字形态的现在时位置主张】"]
+✓ M8 汉字判据扩到冒号形态               red=true 用例红=2 文件红=1 passed=3
+     红名=["presentTenseClaim 判据本身有判别力（否则本节是恒绿装饰）","真语料：决策文档与非决策 markdown 里都没有【汉字形态的现在时位置主张】"]
+回滚后基线: failed=0 passed=5
+RESULT: 九发全部对上预测

@@ -1,0 +1,35 @@
+
+[1m[30m[46m RUN [49m[39m[22m [36mv4.1.12 [39m[90mD:/item/opc[39m
+
+(node:55472) [DEP0190] DeprecationWarning: Passing args to a child process with shell option true can lead to security vulnerabilities, as the arguments are not escaped, only concatenated.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+ [31m❯[39m test/arch/doc-refs.test.ts [2m([22m[2m2 tests[22m[2m | [22m[31m1 failed[39m[2m)[22m[32m 67[2mms[22m[39m
+     [32m✓[39m 扫描器本身有判别力（否则本节是恒绿装饰）[32m 2[2mms[22m[39m
+[31m     [31m×[31m 全部完整形态引用与快照一致[39m[32m 65[2mms[22m[39m
+
+[31m⎯⎯⎯⎯⎯⎯⎯[39m[1m[41m Failed Tests 1 [49m[22m[31m⎯⎯⎯⎯⎯⎯⎯[39m
+
+[41m[1m FAIL [22m[49m test/arch/doc-refs.test.ts[2m > [22m决策文档里的「文件:行号」引用不漂移[2m > [22m全部完整形态引用与快照一致
+[31m[1mAssertionError[22m: expected 'INDEX.md>app.ts:441 目标行内容与快照不符：快照 [..…' to deeply equal ''[39m
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[31m+ INDEX.md>app.ts:441 目标行内容与快照不符：快照 [...(deps.nonces === undefined ? {} : { nonces: deps.nonces }),] 现在是 [if (gate !== null && gate !== TOKEN_PASS) return gate;] | INDEX.md>assemble.ts:274 目标行内容与快照不符：快照 [* 全在【泵自己内部】的外面，所以它们只能靠换掉整趟来数 —— 与章程泵同一条理由。] 现在是 [/**] | INDEX.md>app.js:675 目标行内容与快照不符：快照 [<span class="pill ${statusClass(tk.status)}">${esc(tk.status)}</span>] 现在是 [if (orphan.items.length) out.push(orphan);] | INDEX.md>app.ts:441 目标行内容与快照不符：快照 [...(deps.nonces === undefined ? {} : { nonces: deps.nonces }),] 现在是 [if (gate !== null && gate !== TOKEN_PASS) return gate;] | INDEX.md>app.js:675 目标行内容与快照不符：快照 [<span class="pill ${statusClass(tk.status)}">${esc(tk.status)}</span>] 现在是 [if (orphan.items.length) out.push(orphan);] | 0012-org-versioned-commit-and-unwritten-graph-version.md>packages/contracts/src/api.ts:40 目标行内容与快照不符：快照 [export const API_ENDPOINTS = [] 现在是 [*/] | 0012-org-versioned-commit-and-unwritten-graph-version.md>packages/contracts/src/api.ts:99 目标行是空行，引用没有内容可指 | 0015-charter-editor-and-two-sources-of-budget.md>http/app.ts:1091 目标行内容与快照不符：快照 [consumed_cents: Number(r["consumed_cents"] ?? 0),] 现在是 [// 而服务端根本还没到那个点。时刻一律以服务端为准（同一个理由见 SSE 快照里的 asOfMs）。] | 0030-im-binding-identity-and-three-holes-i-did-not-design.md>contracts/src/api.ts:40 目标行内容与快照不符：快照 [export const API_ENDPOINTS = [] 现在是 [*/] | 0030-im-binding-identity-and-three-holes-i-did-not-design.md>contracts/src/api.ts:73 目标行内容与快照不符：快照 [export const IMPLEMENTED_ENDPOINTS: readonly ApiEndpoint[] = [] 现在是 [* 它【不】意味着「渲染进程能调到它」—— 那是 desktop/ipc-surface.ts 的 EXPOSED_ENDPOINTS] | 0030-im-binding-identity-and-three-holes-i-did-not-design.md>app.ts:539 目标行内容与快照不符：快照 [const impossible: never = routeHit;] 现在是 [// ★ 这一段本轮被 tsc 逼着重写过，因为原来那版是【反向】的穷尽守卫。] | 0030-im-binding-identity-and-three-holes-i-did-not-design.md>contracts/src/api.ts:40 目标行内容与快照不符：快照 [export const API_ENDPOINTS = [] 现在是 [*/] | 0030-im-binding-identity-and-three-holes-i-did-not-design.md>contracts/src/api.ts:73 目标行内容与快照不符：快照 [export const IMPLEMENTED_ENDPOINTS: readonly ApiEndpoint[] = [] 现在是 [* 它【不】意味着「渲染进程能调到它」—— 那是 desktop/ipc-surface.ts 的 EXPOSED_ENDPOINTS] | 0037-worker-import-in-threads-and-my-first-fix-was-wrong.md>assemble.ts:460 目标行内容与快照不符：快照 [if (!existsSync(dbPath)) {] 现在是 [const acquire =] | 0042-today-view-and-putting-the-criteria-on-the-server-side.md>packages/web/public/app.js:445 目标行内容与快照不符：快照 [attention === null ? false : attention.includes(tk.status) || overBudget(tk);] 现在是 [const t = await getToday(false);] | 0050-abandoned-task-never-resumes-and-a-knob-that-does-not-exist.md>app.js:675 目标行内容与快照不符：快照 [<span class="pill ${statusClass(tk.status)}">${esc(tk.status)}</span>] 现在是 [if (orphan.items.length) out.push(orphan);] | 0050-abandoned-task-never-resumes-and-a-knob-that-does-not-exist.md>assemble.ts:290 目标行内容与快照不符：快照 [readonly driverMaxAttempts?: number;] 现在是 [readonly driverPumpVia?: (] | 0050-abandoned-task-never-resumes-and-a-knob-that-does-not-exist.md>assemble.ts:1913 目标行内容与快照不符：快照 [* ⚠ 这里【不】列驱动器的按格尝试上限（maxAttempts）与每任务轮数（maxTurns）：] 现在是 [taskLimitCents: args.taskLimitCents!,] | 0050-abandoned-task-never-resumes-and-a-knob-that-does-not-exist.md>app.js:528 目标行内容与快照不符：快照 [msg: "这台 Hub 没开驱动器：想法停在 agent 那一格之后，不会有任何东西去推它。要自动推进请带 --driver-pump 起 Hub，或手工 hub work。",] 现在是 [* 而真相可能是"这台 Hub 从来不推任何东西"或"心跳早就停了"。][39m
+
+[36m [2m❯[22m test/arch/doc-refs.test.ts:[2m1022:7[22m[39m
+    [90m1020|[39m         [33m.[39m[34mmap[39m((p) [33m=>[39m p[33m.[39mkey [33m+[39m [32m" "[39m [33m+[39m p[33m.[39mwhy)
+    [90m1021|[39m         [33m.[39m[34mjoin[39m([32m" | "[39m)[33m,[39m
+    [90m1022|[39m     )[33m.[39m[34mtoEqual[39m([32m""[39m)[33m;[39m
+    [90m   |[39m       [31m^[39m
+    [90m1023|[39m     [90m// 引用条数下界：解析被误写成恒真时，提取会变 0，这条会先红。[39m
+    [90m1024|[39m     [34mexpect[39m([33mObject[39m[33m.[39m[34mkeys[39m([33mSNAP[39m)[33m.[39mlength)[33m.[39m[34mtoBeGreaterThanOrEqual[39m([34m15[39m)[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯[22m[39m
+
+
+[2m Test Files [22m [1m[31m1 failed[39m[22m[90m (1)[39m
+[2m      Tests [22m [1m[31m1 failed[39m[22m[2m | [22m[1m[32m1 passed[39m[22m[90m (2)[39m
+[2m   Start at [22m 23:21:59
+[2m   Duration [22m 621ms[2m (transform 12ms, setup 0ms, import 23ms, tests 67ms, environment 0ms)[22m
+

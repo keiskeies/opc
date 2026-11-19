@@ -177,6 +177,12 @@
   `readAutoApprovalReport` 仍只到数据面，桌面/HTTP 仍到不了 `policy/auto-approve.ts`
   （那格在 0052 §3 的差账里，本轮没碰）。§2 那 7 发变异证明的是**断言会红**，
   不是**缺口已补**。
+  【round321 复核：本句四项「仍是零」现为 3 假 1 真。真（仍零）：`syncCharterBudgets`
+  在 src 仍只有定义。假（已接上）：`saveCharterVersion` 由 `charter/seed.ts` 作第一个
+  生产调用方（seed.ts 文件头自有 ⚠ 标注）；`autoApprove` 由 `approvals/query.ts:230`
+  影子判定（O9 阶段一）生产读取；`createCard` 由 `serve/dev-seed.ts:432`（`pnpm dev:seed`
+  入口，dev 专用建卡正当路径）调用。→「缺口一条没消」改为「三项已补、一项仍零」，
+  与 round316 记忆的 insertCard/cards 链现状一致。】
 * **本轮没有新增守卫**去防「以后再写出一条分隔符不相称的判据」。`round257-sep-scan.mjs` 是**一次性脚本**
   而不是普查守卫：它 49 个命中里 40 多个是合法的，直接升成守卫会造出大片假阳
   （0007 §4.1 记的正是假阳逼人关掉守卫的代价）。要做成守卫，判据得先能区分

@@ -400,6 +400,155 @@ describe("⭐ 第 1 层那两半必须成对（0034 §1 新加的判据）", () 
   });
 });
 
+/*
+ * ⭐ `harness_defaults` 的键必须【有人读、且只配一次】—— round331 加的判据。
+ *
+ * 这一组与上面那一组（成对判据）是同族，而它补的口子更靠近安全参数：
+ * 本文件头约束 1 说 `.strict()` 是为了「拼错的字段名若被静默忽略，那条约束就等于没写」，
+ * 可 `harness_defaults` 是 `z.record(z.string(), …)` —— 一个**开放的**键集，于是那份
+ * 拒绝在深一层没了：顶层 `model_tier_typo` 被拒，而 `harness_defaults.claudecode`
+ * （少一个下划线）原样通过。宿主从「一个档位」换成了【沙箱档位 + 绝对禁止项】。
+ *
+ * ⚠ 下面每发都成对写（正向对照 + 反向对照），理由是覆盖判据的方向性：
+ * 只写「坏键被拒」，夹具被清空也会绿（恒真判据那一族：0013 §8 记的就是它 ——
+ * 那一发的「反向对照」从头到尾没经过被测代码，整条用例对目标缺陷分辨能力为零）。
+ */
+describe("⭐ harness_defaults 的键必须有人读（round331：拼错的键 = 禁令静默失效）", () => {
+  /** 一份点了禁止项的合法 harness_defaults（键名由参数定，值固定）。 */
+  const BAN = "--dangerously-skip-permissions";
+  const cell = (key: string): Record<string, unknown> => ({
+    [key]: { sandbox: "workspace-write", forbidden_flags: [BAN] },
+  });
+
+  it("⭐ 键名拼错 ⇒ 拒加载，并报 harness_defaults 这一格", () => {
+    // 失效不是崩，是【全绿而禁令不存在】：读取侧 harnessDefaultsFor 对认不出的键
+    // return undefined，缺省口径（buildGatewayDeps）把 sandbox 落到 read-only、
+    // 把 forbidden_flags 落到 []。前者只是变严，后者是【失败方向为开】——
+    // 岗位书明明写了这条禁令，gateway 照放、审计照写、没人报错。
+    const e = grab(() =>
+      loadCharterText(yamlWith({ harness_defaults: cell("claudecode") }), "x.yaml"),
+    );
+    expect(charterFieldPaths(e)).toContain("harness_defaults");
+  });
+
+  it("⭐ 报错必须点名那个错键名（只说「配错了」他没法改）", () => {
+    const e = grab(() =>
+      loadCharterText(yamlWith({ harness_defaults: cell("claude_cod") }), "x.yaml"),
+    );
+    expect(String(e)).toContain("claude_cod");
+    // 还要给出合法键集：别名表有四个名字，靠人记住必然再错一次。
+    expect(String(e)).toContain("claude_code");
+  });
+
+  it("⭐ 正向对照：合法键名原样放行，值一字不改（判据不是「一律拒」）", () => {
+    // 没有这一发，上面两条红的可能是「任何写了 harness_defaults 的岗位书都被拒」。
+    const c = loadCharterText(
+      yamlWith({ harness_defaults: cell("claude_code") }),
+      "x.yaml",
+    );
+    expect(c.harnessDefaults).toEqual(cell("claude_code"));
+  });
+
+  it("两个合法写法各写一格（claude-code / codex）⇒ 合法：那是两家，不是重复", () => {
+    // 判据若把「多个键」一律当重复，会拦掉一个完全合法的写法（两家都在跑的可能路上）。
+    expect(() =>
+      loadCharterText(
+        yamlWith({
+          harness_defaults: {
+            claude_code: { sandbox: "workspace-write" },
+            codex: { sandbox: "read-only" },
+          },
+        }),
+        "x.yaml",
+      ),
+    ).not.toThrow();
+  });
+
+  it("整个不写这一格 ⇒ 合法（没配 ≠ 配错）", () => {
+    const c = loadCharterText(yamlWith({}), "x.yaml");
+    expect(c.harnessDefaults).toBeUndefined();
+  });
+
+  it("⭐ 同一家写两种写法 ⇒ 拒：后写那一格被读取顺序吞掉，且不报错", () => {
+    // 这一臂比拼错更难发现：claude-code 与 claude_code 【都是合法键】，
+    // `.strict()` 无话可说，而 harnessDefaultsFor 按别名表顺序试键、命中即 return
+    // ⇒ 那份 YAML 里有一格【根本不存在】。生效的是哪一格取决于遍历顺序，
+    // 不取决于 CEO 写的先后 —— 而这一格里装的是沙箱档位与绝对禁止项。
+    const e = grab(() =>
+      loadCharterText(
+        yamlWith({
+          harness_defaults: {
+            "claude-code": { forbidden_flags: [BAN] },
+            claude_code: { sandbox: "workspace-write" },
+          },
+        }),
+        "x.yaml",
+      ),
+    );
+    expect(charterFieldPaths(e)).toContain("harness_defaults");
+    // 报错要点名【被吞掉的那一个】，不是两个都列一遍：修法就是「删掉它或改名」。
+    expect(String(e)).toContain("claude_code");
+  });
+
+  it("⭐ 被点名的是【读取侧真的跳过】那一格，与 YAML 里的书写先后无关", () => {
+    // 判据遍历的是【别名表的顺序】而不是 raw 的键序，而这不是风格选择：
+    // harnessDefaultsFor 也按别名表顺序试键，所以「哪一格实际生效」由别名表定。
+    // 若判据改按 raw 顺序遍历，报错就会点名【实际生效】那一格 —— 让 CEO 去删
+    // 活着的那格、留下读不到的那格，改完仍然不生效而消息说「已修」。
+    // 两种书写顺序都必须得到同一条消息（loser = claude_code，winner = claude-code）。
+    const both = (first: "a" | "b"): Record<string, unknown> =>
+      first === "a"
+        ? {
+            "claude-code": { forbidden_flags: [BAN] },
+            claude_code: { sandbox: "workspace-write" },
+          }
+        : {
+            claude_code: { sandbox: "workspace-write" },
+            "claude-code": { forbidden_flags: [BAN] },
+          };
+    for (const first of ["a", "b"] as const) {
+      const e = grab(() =>
+        loadCharterText(yamlWith({ harness_defaults: both(first) }), "x.yaml"),
+      );
+      expect(String(e), "书写顺序 " + first).toContain(
+        "claude_code（与 claude-code 同指 claude-code",
+      );
+    }
+  });
+
+  it("⭐ 判据【不代填、不自动改名】：拼错的键不会被就地纠成合法名", () => {
+    // 另一条实现路径是「发现 claudecode 就纠成 claude_code」，它省事而不能做：
+    // 自动纠正是替 CEO 判定他写的是笔误还是【另一个角色的配置】，
+    // 而后者正是这里要拦住的那种歧义（与隔壁 search_policy 那条判据同一个立场）。
+    // 钉法：一个【原型链上的名字】也必须被拒。别名表是对象字面量，
+    // 若判据写成 `HARNESS_ID_ALIASES[k] === undefined`（而不是 Object.hasOwn），
+    // `toString` 会取到继承来的函数 ⇒ 这个【根本没人读】的键被判成合法，
+    // 而这条判据从此对任何继承名失效 —— 恰好是它要抓的形状。
+    for (const inherited of ["toString", "constructor", "valueOf"]) {
+      const e = grab(() =>
+        loadCharterText(yamlWith({ harness_defaults: cell(inherited) }), "x.yaml"),
+      );
+      expect(charterFieldPaths(e), inherited).toContain("harness_defaults");
+    }
+  });
+
+  it("⭐ 值写坏仍由读取侧抛 —— 这里【不抄第二份值判据】", () => {
+    // sandbox: "workspace"（少 -write）这一格在 schema 里是合法 record，
+    // 值的形状只有一份口径（harnessDefaultEntrySchema，在 harnessDefaultsFor 里跑）。
+    // 这里若再抄一份值判据，就是两份口径（本仓最贵那一族失效），所以这一发钉的是
+    // 「加载期放行」—— 它必须在读取期才炸，那才是唯一那份 schema 在说话。
+    expect(() =>
+      loadCharterText(
+        yamlWith({ harness_defaults: { claude_code: { sandbox: "workspace" } } }),
+        "x.yaml",
+      ),
+    ).not.toThrow();
+  });
+
+  // 「新判据有没有弄坏存量」不在这里另发一发：上面那个 describe("7 个预设模板")
+  // 第一项就是把七个模板逐个过【同一份 schema】，模板真被这条拒了会在那里红。
+});
+
 describe("7 个预设模板（Task 0.7 交付物）", () => {
   it("每个模板都能被 schema 接受；role_id 必须等于文件名", () => {
     for (const name of SEVEN) {

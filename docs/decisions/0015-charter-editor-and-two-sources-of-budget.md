@@ -50,10 +50,12 @@ $ grep -rn "consumed_cents" --include='*.ts' packages/hub/src
 ```
 
 > **行号与后效（Task 4.1 重测时补；GET /today 那轮又补过一次）**：上面那条 grep 报的 438
-> 是当时的行号，现在那条读在 `http/app.ts:1091`（同一行内容：Task 4.1 那轮顶下去 431 行，
+> 是当时的行号，现在那条读在 `http/app.ts:1168`（同一行内容：Task 4.1 那轮顶下去 431 行，
 > 0031 那轮又顶下去 97 行，`GET /today` 那轮在本函数上方加了 12 行 ⇒ 顶到 1046，
-> 0049 那轮为驱动器状态又顶下去 45 行 ⇒ 现在 1091。
-> 同一行内容被顶过【四】次而每次都要靠快照守卫才没人把坐标读成事实 —— 这正是它存在的全部理由）。
+> 0049 那轮为驱动器状态又顶下去 45 行 ⇒ 顶到 1091，岗位书与预算两组端点从 `dispatch`
+> 拆进 `http/charter.ts` 与 `http/budget.ts` 那一次在其上方净增 59 行 ⇒ 现在 1150，
+> 【规格】§9.4 批量审批那轮给 `Route` 联合加了一条 kind + 一段注释（其上方 +9 行）⇒ 现在 1168。
+> 同一行内容被顶过【六】次而每次都要靠快照守卫才没人把坐标读成事实 —— 这正是它存在的全部理由）。
 > 另外上面那四条测的是**本轮动手之前**的仓库，本轮自己就否掉了其中两条：
 > `INSERT INTO budgets` 现在除了 tracker 那一处还有 `charter/budget-sync.ts` 的一处，
 > `consumed_cents` 的【读】也不止一处（都在 budget-sync 里）。
@@ -125,6 +127,11 @@ $ grep -rn "consumed_cents" --include='*.ts' packages/hub/src
 
 - **没有编辑器界面**。计划写的是 `feat(web)`，本轮交付的是它下面那一层。原因还是 0009 §2 那三条通路（装不上 `@xyflow/react` 那一组）。表单页本身不需要 React Flow，但需要 React + 路由 + IPC 那一套，而 `test/desktop/ipc-surface.test.ts` 用 `toEqual` 钉住 IPC 面、本机没有 Electron 可验（0009 §7 已经报过这本账）。
 - **没有 HTTP 端点**。加一个端点要同时动 `contracts/api.ts` / `http/app.ts` / `desktop/main/channels.ts` / `preload/api.ts` 四处并被那条 IPC 守卫钉住。所以 `saveCharterVersion` / `syncCharterBudgets` / `readBudgetTiers` 今天的运行时消费者是 **0**（同族缺陷**第六次**：0011 §8 / 0012 §7 / 0013 §7 / 0013 §10.1 / 0014 §3 / 本轮）。发现方式仍然是**写文档时顺数据源往下摸**，不是「想到去查调用方」—— 第六次了，说明那个习惯还是没建立。
+  【round322 复核：本句「运行时消费者是 0」已**部分过期**。`saveCharterVersion` 现在有两个
+  生产调用方：`http/charter.ts:195`（HTTP charter 路由）与 `charter/seed.ts:653`
+  （`pnpm hub:charter seed` 种子命令，seed.ts 文件头自标「第一个生产调用方」）；
+  `syncCharterBudgets` / `readBudgetTiers` 经核实**仍零**生产调用方。§1 ①「保存一版新岗位书
+  在 src 里没有任何入口」随之过期（上面两个入口已在）。「没有编辑器界面」那一条不受影响。】
   这一族我在 0014 学到的处置沿用了：把缺口本身**钉成断言**（两个测试文件各有一节扫 `src` 目录，断言 `charter/` 之外零调用方），接线那天它会红。
 - **`org/commit.ts` 那条 bump 路径不落预算**，也不经过 `saveCharterVersion`（§3）。准确的状态是：它**逐字复制** `prev.config` 再改一个 `reportsTo`（`org/commit.ts:368-374`，round294 顶漂自 round292 登记的 `:323-329`、更早 `:304-310`），所以它写出的形状**取决于上一版存的是什么**，本身不会丢字段；而且**它今天根本不触发** —— 表是 0 行（事实 ①），`if (prev === undefined) continue` 每次都跳过。【撤回】我在此处原写「它写的还是旧 config 形状（缺 `modelTier`）」：那是我没实测就写下的具体断言，实测 org/commit 并不硬编码任何形状，缺 `modelTier` 的是 `test/org/versioning.test.ts` 的**测试夹具**（那是 assertCharterShape 用例举的例子，不是生产会写出的东西）。这条**不在本轮范围内修**，因为改它要同时决定「组织变更要不要改限流」（那是 §9 第三项）。
 - **预算的「已消费」永远单调不减**：`daily` 这个 period 名字暗示每天归零，而 src 里**没有归零路径**（实测）。所以「今天的日预算」实际是「自首条消费以来的总额」。这是 `BudgetTracker` 的既有行为、Task 1.6 的验收范围之外，但**它让 §21.3 那句「日消耗 vs 预算」的条形从一开始就是错的**。登记在此，不在本轮改（改归零时机是新的运行期行为）。

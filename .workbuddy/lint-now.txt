@@ -1,0 +1,930 @@
+
+> opc-os@0.0.0 lint D:\item\opc
+> biome check .
+
+packages\desktop\src\main\signed-fetch.ts:79:3 lint/style/useShorthandFunctionType  FIXABLE  ━━━━━━━━━━
+
+  i Use a function type instead of a call signature.
+  
+    78 │ export interface FetchLike {
+  > 79 │   (url: string, init: FetchInitLike): Promise<FetchResponseLike>;
+       │   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    80 │ }
+    81 │ 
+  
+  i Types containing only a call signature can be shortened to a function type.
+  
+  i Safe fix: Alias a function type instead of using an interface with a call signature.
+  
+     76  76 │   }
+     77  77 │   
+     78     │ - export·interface·FetchLike·{
+     79     │ - ··(url:·string,·init:·FetchInitLike):·Promise<FetchResponseLike>;
+     80     │ - }
+         78 │ + export·type·FetchLike·=·(url:·string,·init:·FetchInitLike)·=>·Promise<FetchResponseLike>
+     81  79 │   
+     82  80 │   /** 与 auth.ts 的 HEADER_* 三个常量逐字一致（抄，理由见文件头）。 */
+  
+
+packages\contracts\src\org\graph.ts:254:10 lint/suspicious/noPrototypeBuiltins  FIXABLE  ━━━━━━━━━━━
+
+  ! Do not access Object.prototype method 'hasOwnProperty' from target object.
+  
+    252 │   roleId: string,
+    253 │ ): OrgGraph["nodes"][string] | undefined {
+  > 254 │   return Object.prototype.hasOwnProperty.call(org.nodes, roleId)
+        │          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    255 │     ? org.nodes[roleId]
+    256 │     : undefined;
+  
+  i It's recommended using Object.hasOwn() instead of using Object.hasOwnProperty().
+  
+  i See MDN web docs for more details.
+  
+  i Safe fix: Use 'Object.hasOwn()' instead.
+  
+    252 252 │     roleId: string,
+    253 253 │   ): OrgGraph["nodes"][string] | undefined {
+    254     │ - ··return·Object.prototype.hasOwnProperty.call(org.nodes,·roleId)
+        254 │ + ··return··Object.hasOwn(org.nodes,·roleId)
+    255 255 │       ? org.nodes[roleId]
+    256 256 │       : undefined;
+  
+
+packages\contracts\src\org\graph.ts:349:28 lint/complexity/useMathMinMax  FIXABLE  ━━━━━━━━━━━━━━━━━
+
+  ! This ternary is selecting the larger of the same two operands, which can be simplified.
+  
+    347 │       if (state.get(cur) === "visiting") {
+    348 │         const at = chain.indexOf(cur);
+  > 349 │         return chain.slice(at < 0 ? 0 : at).concat(cur);
+        │                            ^^^^^^^^^^^^^^^
+    350 │       }
+    351 │       state.set(cur, "visiting");
+  
+  i Dedicated min/max functions like Math.max() are clearer and more concise for this purpose.
+  
+  i Unsafe fix: Use Math.max() instead.
+  
+    347 347 │         if (state.get(cur) === "visiting") {
+    348 348 │           const at = chain.indexOf(cur);
+    349     │ - ········return·chain.slice(at·<·0·?·0·:·at).concat(cur);
+        349 │ + ········return·chain.slice(Math.max(at·,·0)).concat(cur);
+    350 350 │         }
+    351 351 │         state.set(cur, "visiting");
+  
+
+packages\hub\scripts\ts-resolve-hook.mjs:21:8 lint/correctness/noUnusedImports  FIXABLE  ━━━━━━━━━━━
+
+  ! This import is unused.
+  
+    19 │  * 其余一律交回 next()，所以真装了的 .js（node_modules 里的）不受影响。
+    20 │  */
+  > 21 │ import { existsSync } from "node:fs";
+       │        ^^^^^^^^^^^^^^
+    22 │ import { dirname, resolve as presolve } from "node:path";
+    23 │ import { fileURLToPath, pathToFileURL } from "node:url";
+  
+  i Unused imports might be the result of an incomplete refactoring.
+  
+  i Unsafe fix: Remove the unused imports.
+  
+     1    │ - /**
+     2    │ - ·*·只做一件事：把·src·里·`import·"./pragmas.js"`·这种【说明符写·.js·而文件是·.ts】的
+     3    │ - ·*·引用解析到·.ts·上。
+     4    │ - ·*
+     5    │ - ·*···node·--experimental-transform-types·--import·./scripts/ts-resolve-hook.mjs·<脚本>
+     6    │ - ·*
+     7    │ - ·*·为什么要这么一层：src/**\/*.ts·用的是·NodeNext·的写法（说明符带·.js，编译产物才对得上），
+     8    │ - ·*·而·`--experimental-transform-types`·只负责【转译】，不会替我把·.js·说明符改指到·.ts。
+     9    │ - ·*·不注册这个钩子的症状是一条·ERR_MODULE_NOT_FOUND，指向·src/db/pragmas.js·——
+    10    │ - ·*·看着像【文件被删了】，真实原因是解析规则。第一次撞上会浪费很久，所以它得有名字。
+    11    │ - ·*
+    12    │ - ·*·与·/tmp/opc-harness/hooks.mjs·的关系：那一份还负责把·`vitest`·指到离线夹具、
+    13    │ - ·*·把·yaml·指到·pnpm·cache·里的替代版本。这里【一样都不带】——
+    14    │ - ·*·scripts/*.mjs·不·import·vitest，也就不需要那两层。少一层是一层的价值：
+    15    │ - ·*·测试夹具的解析钩子是【本机临时物】，而提交进仓库的脚本不该依赖它，
+    16    │ - ·*·依赖了就等于「只有我这台机器能复算」（0019·§7·要的是任何人都能重出那些数）。
+    17    │ - ·*
+    18    │ - ·*·三条同时成立才改写：相对说明符、以·.js·结尾、同目录真的存在那个·.ts。
+    19    │ - ·*·其余一律交回·next()，所以真装了的·.js（node_modules·里的）不受影响。
+    20    │ - ·*/
+    21    │ - import·{·existsSync·}·from·"node:fs";
+        1 │ + 
+    22  2 │   import { dirname, resolve as presolve } from "node:path";
+    23  3 │   import { fileURLToPath, pathToFileURL } from "node:url";
+  
+
+packages\hub\scripts\ts-resolve-hook.mjs:22:8 lint/correctness/noUnusedImports  FIXABLE  ━━━━━━━━━━━
+
+  ! This import is unused.
+  
+    20 │  */
+    21 │ import { existsSync } from "node:fs";
+  > 22 │ import { dirname, resolve as presolve } from "node:path";
+       │        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    23 │ import { fileURLToPath, pathToFileURL } from "node:url";
+    24 │ import { register } from "node:module";
+  
+  i Unused imports might be the result of an incomplete refactoring.
+  
+  i Unsafe fix: Remove the unused imports.
+  
+    20 20 │    */
+    21 21 │   import { existsSync } from "node:fs";
+    22    │ - import·{·dirname,·resolve·as·presolve·}·from·"node:path";
+    23 22 │   import { fileURLToPath, pathToFileURL } from "node:url";
+    24 23 │   import { register } from "node:module";
+  
+
+packages\hub\scripts\ts-resolve-hook.mjs:23:8 lint/correctness/noUnusedImports  FIXABLE  ━━━━━━━━━━━
+
+  ! This import is unused.
+  
+    21 │ import { existsSync } from "node:fs";
+    22 │ import { dirname, resolve as presolve } from "node:path";
+  > 23 │ import { fileURLToPath, pathToFileURL } from "node:url";
+       │        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    24 │ import { register } from "node:module";
+    25 │ 
+  
+  i Unused imports might be the result of an incomplete refactoring.
+  
+  i Unsafe fix: Remove the unused imports.
+  
+    21 21 │   import { existsSync } from "node:fs";
+    22 22 │   import { dirname, resolve as presolve } from "node:path";
+    23    │ - import·{·fileURLToPath,·pathToFileURL·}·from·"node:url";
+    24 23 │   import { register } from "node:module";
+    25 24 │   
+  
+
+packages\contracts\src\evidence.ts format ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  × Formatter would have printed the following content:
+  
+    161 161 │   /** 交接方向 → 该方向必须出现的包类型（规格 §8.1 那张表的机器可读形态）。 */
+    162 162 │   export const HANDOFF_BUNDLE_TYPES: Readonly<Record<string, BundleType>> = {
+    163     │ - ··"product_to_tech":·"spec",
+    164     │ - ··"tech_to_dev":·"design",
+    165     │ - ··"dev_to_test":·"code_diff",
+    166     │ - ··"test_upward":·"test_report",
+    167     │ - ··"ops_to_ceo":·"ops_plan",
+        163 │ + ··product_to_tech:·"spec",
+        164 │ + ··tech_to_dev:·"design",
+        165 │ + ··dev_to_test:·"code_diff",
+        166 │ + ··test_upward:·"test_report",
+        167 │ + ··ops_to_ceo:·"ops_plan",
+    168 168 │   };
+    169 169 │   
+  
+
+packages\contracts\src\index.ts:11:1 assist/source/organizeImports  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━
+
+  × Sort these exports.
+  
+      9 │ export const CONTRACTS_PACKAGE_READY = true;
+     10 │ 
+   > 11 │ export {
+        │ ^^^^^^^^
+   > 12 │   ACCEPTANCE_ACTIONS,
+         ...
+  > 187 │   type ToolApprovalDecision,
+  > 188 │   type ToolApprovalRequest,
+  > 189 │ } from "./harness.js";
+        │ ^^^^^^^^^^^^^^^^^^^^^^
+    190 │ 
+  
+  i Safe fix: Organize imports and exports (Biome)
+  
+      9   9 │   export const CONTRACTS_PACKAGE_READY = true;
+     10  10 │   
+         11 │ + 
+     11  12 │   export {
+     12     │ - ··ACCEPTANCE_ACTIONS,
+     13     │ - ··CHARTER_PLACEHOLDER_ACCEPTANCE,
+     14     │ - ··type·Charter,
+     15     │ - ··type·CharterInput,
+     16     │ - ··charterSchema,
+     17     │ - ··JUDGMENT_MODES,
+     18     │ - ··MODEL_TIERS,
+     19     │ - ··type·ModelTier,
+     20     │ - ··SEARCH_MANDATORY_SOURCES_CONDITION,
+     21     │ - }·from·"./charter.js";
+     22     │ - 
+         13 │ + ··API_ENDPOINTS,
+         14 │ + ··APPROVAL_STATUS_PENDING,
+         15 │ + ··APPROVAL_STATUS_VALUES,
+         16 │ + ··type·ApiEndpoint,
+         17 │ + ··type·ApprovalDecisionRequest,
+         18 │ + ··type·ApprovalOutcome,
+         19 │ + ··type·ApprovalStatusValue,
+         20 │ + ··type·ApprovalView,
+         21 │ + ··approvalDecisionRequestSchema,
+         22 │ + ··approvalOutcome,
+         23 │ + ··approvalViewSchema,
+         24 │ + ··type·BindingRequest,
+         25 │ + ··type·BindingVerifyRequest,
+         26 │ + ··BUDGET_PERIOD_VALUES,
+         27 │ + ··BUDGET_SCOPE_VALUES,
+         28 │ + ··bindingRequestSchema,
+         29 │ + ··bindingVerifyRequestSchema,
+         30 │ + ··type·CommitOrgChangeRequest,
+         31 │ + ··type·CreateTaskRequest,
+         32 │ + ··commitOrgChangeRequestSchema,
+         33 │ + ··createTaskRequestSchema,
+         34 │ + ··decodeSseFrame,
+         35 │ + ··encodeSseFrame,
+         36 │ + ··type·FeedItemView,
+         37 │ + ··feedItemSchema,
+         38 │ + ··GIVE_UP_AFTER_ATTEMPTS,
+         39 │ + ··HTTP_CONFLICT,
+         40 │ + ··HTTP_FORBIDDEN,
+         41 │ + ··HTTP_NOT_FOUND,
+         42 │ + ··HTTP_NOT_IMPLEMENTED,
+         43 │ + ··HTTP_UNAUTHORIZED,
+         44 │ + ··HTTP_UNPROCESSABLE,
+         45 │ + ··IM_BINDING_PLATFORM_VALUES,
+         46 │ + ··IMPLEMENTED_ENDPOINTS,
+         47 │ + ··type·ImBindingPlatformValue,
+         48 │ + ··type·ImBindingView,
+         49 │ + ··imBindingViewSchema,
+         50 │ + ··isImplemented,
+         51 │ + ··MAX_IDEA_CHARS,
+         52 │ + ··type·PutBudgetRequest,
+         53 │ + ··putBudgetRequestSchema,
+         54 │ + ··RECONNECT_BASE_MS,
+         55 │ + ··RECONNECT_MAX_MS,
+         56 │ + ··RESUME_VALUES,
+         57 │ + ··type·ResumeValue,
+         58 │ + ··reconnectDelayMs,
+         59 │ + ··type·SaveCharterRequest,
+         60 │ + ··type·SseFrame,
+         61 │ + ··saveCharterRequestSchema,
+         62 │ + ··shouldGiveUp,
+         63 │ + ··type·TaskView,
+         64 │ + ··taskViewSchema,
+         65 │ + ··UNIMPLEMENTED_ENDPOINTS,
+         66 │ + }·from·"./api.js";
+     23  67 │   export {
+     24     │ - ··type·BundleType,
+     25     │ - ··BUNDLE_TYPES,
+     26     │ - ··type·EvidenceArtifact,
+     27     │ - ··type·EvidenceBundle,
+     28     │ - ··type·EvidenceClaim,
+     29     │ - ··evidenceBundleSchema,
+     30     │ - ··HANDOFF_BUNDLE_TYPES,
+     31     │ - ··isExternalSourceRef,
+     32     │ - ··requiredBundleType,
+     33     │ - ··SHA256_RE,
+     34     │ - ··unresolvableClaimIndexes,
+     35     │ - ··UUID_RE,
+     36     │ - }·from·"./evidence.js";
+     37     │ - 
+         68 │ + ··ACCEPTANCE_ACTIONS,
+         69 │ + ··CHARTER_PLACEHOLDER_ACCEPTANCE,
+         70 │ + ··type·Charter,
+         71 │ + ··type·CharterInput,
+         72 │ + ··charterSchema,
+         73 │ + ··JUDGMENT_MODES,
+         74 │ + ··MODEL_TIERS,
+         75 │ + ··type·ModelTier,
+         76 │ + ··SEARCH_MANDATORY_SOURCES_CONDITION,
+         77 │ + }·from·"./charter.js";
+     38  78 │   export {
+     39     │ - ··type·ApprovalButton,
+     40     │ - ··APPROVAL_BUTTONS,
+     41     │ - ··type·ApprovalCardDraft,
+     42     │ - ··approvalCardDraftSchema,
+     43     │ - ··type·EscalationReason,
+     44     │ - ··ESCALATION_REASONS,
+     45     │ - ··type·GateDecision,
+     46     │ - ··GATE_DECISIONS,
+     47     │ - ··type·RiskTier,
+     48     │ - ··RISK_TIERS,
+     49     │ - ··type·TimeoutBehavior,
+     50     │ - ··TIMEOUT_BEHAVIORS,
+     51     │ - }·from·"./gates.js";
+     52     │ - 
+         79 │ + ··BUNDLE_TYPES,
+         80 │ + ··type·BundleType,
+         81 │ + ··type·EvidenceArtifact,
+         82 │ + ··type·EvidenceBundle,
+         83 │ + ··type·EvidenceClaim,
+         84 │ + ··evidenceBundleSchema,
+         85 │ + ··HANDOFF_BUNDLE_TYPES,
+         86 │ + ··isExternalSourceRef,
+         87 │ + ··requiredBundleType,
+         88 │ + ··SHA256_RE,
+         89 │ + ··UUID_RE,
+         90 │ + ··unresolvableClaimIndexes,
+         91 │ + }·from·"./evidence.js";
+     53  92 │   export {
+     54     │ - ··type·ApiEndpoint,
+     55     │ - ··API_ENDPOINTS,
+     56     │ - ··approvalOutcome,
+     57     │ - ··type·ApprovalDecisionRequest,
+     58     │ - ··approvalDecisionRequestSchema,
+     59     │ - ··type·ApprovalOutcome,
+     60     │ - ··type·ApprovalStatusValue,
+     61     │ - ··APPROVAL_STATUS_PENDING,
+     62     │ - ··APPROVAL_STATUS_VALUES,
+     63     │ - ··type·ApprovalView,
+     64     │ - ··approvalViewSchema,
+     65     │ - ··bindingRequestSchema,
+     66     │ - ··type·BindingRequest,
+     67     │ - ··bindingVerifyRequestSchema,
+     68     │ - ··type·BindingVerifyRequest,
+     69     │ - ··BUDGET_PERIOD_VALUES,
+     70     │ - ··BUDGET_SCOPE_VALUES,
+     71     │ - ··type·CommitOrgChangeRequest,
+     72     │ - ··commitOrgChangeRequestSchema,
+     73     │ - ··createTaskRequestSchema,
+     74     │ - ··type·CreateTaskRequest,
+     75     │ - ··decodeSseFrame,
+     76     │ - ··encodeSseFrame,
+     77     │ - ··type·FeedItemView,
+     78     │ - ··feedItemSchema,
+     79     │ - ··HTTP_CONFLICT,
+     80     │ - ··HTTP_FORBIDDEN,
+  197 more lines truncated
+  
+
+packages\contracts\src\org\graph.ts format ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  × Formatter would have printed the following content:
+  
+    198 198 │       })
+    199 199 │       .strict(),
+    200     │ - ··z.object({·kind:·z.literal("add_edge"),·edge:·delegationEdgeSchema·}).strict(),
+        200 │ + ··z
+        201 │ + ····.object({·kind:·z.literal("add_edge"),·edge:·delegationEdgeSchema·})
+        202 │ + ····.strict(),
+    201 203 │     // round294（O8 §7 第 18 格那一格自己点名的修法）。加这一种 kind 的【全部】意义在
+    202 204 │     // 「带判据」三个字：round292 之前契约里没有「加节点」这一类变更，而
+  
+
+packages\desktop\src\main\channels.ts format ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  × Formatter would have printed the following content:
+  
+     70  70 │       return {
+     71  71 │         ok: false,
+     72     │ - ······error:·{·code:·"bad_args",·message:·"未登记的·IPC·通道："·+·channel.slice(0,·64)·},
+         72 │ + ······error:·{
+         73 │ + ········code:·"bad_args",
+         74 │ + ········message:·"未登记的·IPC·通道："·+·channel.slice(0,·64),
+         75 │ + ······},
+     73  76 │       };
+     74  77 │     }
+    ······· │ 
+     76  79 │       return {
+     77  80 │         ok: false,
+     78     │ - ······error:·{·code:·"bad_args",·message:·spec.channel·+·"·是推送通道，不能被·invoke"·},
+         81 │ + ······error:·{
+         82 │ + ········code:·"bad_args",
+         83 │ + ········message:·spec.channel·+·"·是推送通道，不能被·invoke",
+         84 │ + ······},
+     79  85 │       };
+     80  86 │     }
+     81  87 │     const why = checkArgs(spec, args);
+     82     │ - ··if·(why·!==·null)·return·{·ok:·false,·error:·{·code:·"bad_args",·message:·why·}·};
+         88 │ + ··if·(why·!==·null)
+         89 │ + ····return·{·ok:·false,·error:·{·code:·"bad_args",·message:·why·}·};
+     83  90 │   
+     84  91 │     const { path, init } = toHttpRequest(spec, args);
+    ······· │ 
+     92  99 │           code: "unreachable",
+     93 100 │           message:
+     94     │ - ··········"本机·Hub·未响应："·+·(e·instanceof·Error·?·e.message·:·String(e)).slice(0,·200),
+        101 │ + ··········"本机·Hub·未响应："·+
+        102 │ + ··········(e·instanceof·Error·?·e.message·:·String(e)).slice(0,·200),
+     95 103 │         },
+     96 104 │       };
+    ······· │ 
+    137 145 │         const body: Record<string, unknown> = { idea: o.idea };
+    138 146 │         if (o.parent_id !== undefined) body["parent_id"] = o.parent_id;
+    139     │ - ······return·{·path:·"/tasks",·init:·{·method:·"POST",·body:·JSON.stringify(body)·}·};
+        147 │ + ······return·{
+        148 │ + ········path:·"/tasks",
+        149 │ + ········init:·{·method:·"POST",·body:·JSON.stringify(body)·},
+        150 │ + ······};
+    140 151 │       }
+    141 152 │       case "hub:listTasks":
+    ······· │ 
+    176 187 │         return { path: "/org", init: { method: "GET" } };
+    177 188 │       case "hub:decideApproval": {
+    178     │ - ······const·o·=·(args·??·{})·as·{·approvalId?:·string;·resume?:·string;·note?:·string·};
+        189 │ + ······const·o·=·(args·??·{})·as·{
+        190 │ + ········approvalId?:·string;
+        191 │ + ········resume?:·string;
+        192 │ + ········note?:·string;
+        193 │ + ······};
+    179 194 │         const body: Record<string, unknown> = { resume: o.resume };
+    180 195 │         // note 缺席时【不带这个键】：带一个 undefined 进 JSON 再进审计，
+    ······· │ 
+    189 204 │         // 推送通道不该走到这里（dispatch 已挡）。抛而不是回一个假路径：
+    190 205 │         // 假路径会让一次「忘了加分支」变成一次指向错误方向的 hub_error。
+    191     │ - ······throw·new·Error("通道·"·+·spec.channel·+·"·不是·invoke·通道，无法映射为·HTTP·请求。");
+        206 │ + ······throw·new·Error(
+        207 │ + ········"通道·"·+·spec.channel·+·"·不是·invoke·通道，无法映射为·HTTP·请求。",
+        208 │ + ······);
+    192 209 │       }
+    193 210 │     }
+  
+
+packages\desktop\src\main\event-stream.ts format ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  × Formatter would have printed the following content:
+  
+     66  66 │   export type LinkStatus =
+     67  67 │     | { readonly state: "live" }
+     68     │ - ··|·{·readonly·state:·"retrying";·readonly·attempt:·number;·readonly·delayMs:·number;·readonly·reason:·string·}
+         68 │ + ··|·{
+         69 │ + ······readonly·state:·"retrying";
+         70 │ + ······readonly·attempt:·number;
+         71 │ + ······readonly·delayMs:·number;
+         72 │ + ······readonly·reason:·string;
+         73 │ + ····}
+     69  74 │     | { readonly state: "down"; readonly reason: string };
+     70  75 │   
+    ······· │ 
+    118 123 │   export function openEventStream(o: EventStreamOptions): EventStreamHandle {
+    119 124 │     const [host, port] = o.hubAddress.split(":");
+    120     │ - ··if·(host·===·undefined·||·host.trim()·===·""·||·port·===·undefined·||·!/^\d+$/.test(port))·{
+        125 │ + ··if·(
+        126 │ + ····host·===·undefined·||
+        127 │ + ····host.trim()·===·""·||
+        128 │ + ····port·===·undefined·||
+        129 │ + ····!/^\d+$/.test(port)
+        130 │ + ··)·{
+    121 131 │       // 与 makeSignedFetch 的空 token 同一条纪律：配置缺失要在这里说，
+    122 132 │       // 不要拼出一个必然连不上的地址、让它以「Hub 没起来」的形状出现。
+    123     │ - ····throw·new·Error("hubAddress·必须是·host:port，实到·"·+·JSON.stringify(o.hubAddress));
+        133 │ + ····throw·new·Error(
+        134 │ + ······"hubAddress·必须是·host:port，实到·"·+·JSON.stringify(o.hubAddress),
+        135 │ + ····);
+    124 136 │     }
+    125     │ - ··const·setTimeoutImpl·=·o.setTimeoutImpl·??·((fn:·()·=>·void,·ms:·number)·=>·{
+    126     │ - ····const·t·=·setTimeout(fn,·ms);
+    127     │ - ····return·()·=>·{
+    128     │ - ······clearTimeout(t);
+    129     │ - ····};
+    130     │ - ··});
+        137 │ + ··const·setTimeoutImpl·=
+        138 │ + ····o.setTimeoutImpl·??
+        139 │ + ····((fn:·()·=>·void,·ms:·number)·=>·{
+        140 │ + ······const·t·=·setTimeout(fn,·ms);
+        141 │ + ······return·()·=>·{
+        142 │ + ········clearTimeout(t);
+        143 │ + ······};
+        144 │ + ····});
+    131 145 │   
+    132 146 │     let cursor = o.initialCursor ?? 0;
+    ······· │ 
+    174 188 │         // 下一次壳起来时会从【真正送达的位置】续，而不是跳过这一条。
+    175 189 │         process.stderr.write(
+    176     │ - ········"桌面壳推送失败，事件流已停："·+·(e·instanceof·Error·?·e.message·:·String(e)).slice(0,·200)·+·"\n",
+        190 │ + ········"桌面壳推送失败，事件流已停："·+
+        191 │ + ··········(e·instanceof·Error·?·e.message·:·String(e)).slice(0,·200)·+
+        192 │ + ··········"\n",
+    177 193 │         );
+    178 194 │         return false;
+    ······· │ 
+    191 207 │         // 到这里说明连续失败已经 >= GIVE_UP_AFTER_ATTEMPTS 次。
+    192 208 │         // 放弃之后【不重连】，但界面必须说得出为什么：这是 down 而不是 live 的唯一依据。
+    193     │ - ······status({·state:·"down",·reason:·"连续·"·+·attempt·+·"·次连不上，已停止重连："·+·reason·});
+        209 │ + ······status({
+        210 │ + ········state:·"down",
+        211 │ + ········reason:·"连续·"·+·attempt·+·"·次连不上，已停止重连："·+·reason,
+        212 │ + ······});
+    194 213 │         return;
+    195 214 │       }
+    ······· │ 
+    234 253 │         closed = true;
+    235 254 │         req?.destroy();
+    236     │ - ······status({·state:·"down",·reason:·"事件流给出了不是非负整数的·id："·+·JSON.stringify(frame.id)·});
+        255 │ + ······status({
+        256 │ + ········state:·"down",
+        257 │ + ········reason:·"事件流给出了不是非负整数的·id："·+·JSON.stringify(frame.id),
+        258 │ + ······});
+    237 259 │         return;
+    238 260 │       }
+    ······· │ 
+    268 290 │       };
+    269 291 │       if (req !== null) req.destroy(); // 上一轮流还没散干净（正常路径下已经是 null）
+    270     │ - ····const·r·=·request({·host,·port:·Number(port),·path:·target,·method:·"GET",·headers·});
+        292 │ + ····const·r·=·request({
+        293 │ + ······host,
+        294 │ + ······port:·Number(port),
+        295 │ + ······path:·target,
+        296 │ + ······method:·"GET",
+        297 │ + ······headers,
+        298 │ + ····});
+    271 299 │       req = r;
+    272 300 │       r.on("response", (res) => {
+    ······· │ 
+    281 309 │             req = null;
+    282 310 │             res.destroy();
+    283     │ - ··········const·why·=·"HTTP·"·+·st·+·(body.trim()·===·""·?·""·:·"·"·+·body.trim().slice(0,·200));
+        311 │ + ··········const·why·=
+        312 │ + ············"HTTP·"·+
+        313 │ + ············st·+
+        314 │ + ············(body.trim()·===·""·?·""·:·"·"·+·body.trim().slice(0,·200));
+    284 315 │             if (retryableStatus(st)) scheduleReconnect(why);
+    285     │ - ··········else·status({·state:·"down",·reason:·why·+·"（这一类重试不会成功，检查部署·token·与地址）"·});
+        316 │ + ··········else
+        317 │ + ············status({
+        318 │ + ··············state:·"down",
+        319 │ + ··············reason:·why·+·"（这一类重试不会成功，检查部署·token·与地址）",
+        320 │ + ············});
+    286 321 │           });
+    287 322 │           return;
+  
+
+packages\desktop\src\main\signed-fetch.ts format ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  × Formatter would have printed the following content:
+  
+    103 103 │   }): string {
+    104 104 │     const digest = createHash("sha256").update(o.body, "utf8").digest("hex");
+    105     │ - ··return·[o.method.toUpperCase(),·o.target,·digest,·String(o.timestamp),·o.nonce].join("\n");
+        105 │ + ··return·[
+        106 │ + ····o.method.toUpperCase(),
+        107 │ + ····o.target,
+        108 │ + ····digest,
+        109 │ + ····String(o.timestamp),
+        110 │ + ····o.nonce,
+        111 │ + ··].join("\n");
+    106 112 │   }
+    107 113 │   
+    ······· │ 
+    136 142 │       // 伪装成「token 不对」。前者是配置缺失（该去查启动器有没有传），
+    137 143 │       // 后者会让人去换凭据 —— 而 auth.ts 的 401 刻意不区分这两者。
+    138     │ - ····throw·new·Error("token·不能是空串：桌面壳拿它当·HMAC·密钥，空串签出的每个请求都会·401。");
+        144 │ + ····throw·new·Error(
+        145 │ + ······"token·不能是空串：桌面壳拿它当·HMAC·密钥，空串签出的每个请求都会·401。",
+        146 │ + ····);
+    139 147 │     }
+    140 148 │   }
+    ······· │ 
+    201 209 │     const base = "http://" + o.hubAddress;
+    202 210 │   
+    203     │ - ··const·signedFetch·=·async·(path:·string,·init:·{·method:·string;·body?:·string·}):·Promise<MainFetchResult>·=>·{
+        211 │ + ··const·signedFetch·=·async·(
+        212 │ + ····path:·string,
+        213 │ + ····init:·{·method:·string;·body?:·string·},
+        214 │ + ··):·Promise<MainFetchResult>·=>·{
+    204 215 │       // 签名这件事【只在这里发生一次】，且走的是 signedHeaders ——
+    205 216 │       // 不为整齐：事件流那一路也要签同一个串，两处各写一遍 HMAC 就是两份抄件，
+  
+
+packages\desktop\src\main\wire.ts:31:1 assist/source/organizeImports  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━
+
+  × Some imports or exports are not organized.
+  
+    29 │  *    单独先加通道会造出一个"能调而没人应答"的入口。记在 0052 §7 第 3 条。
+    30 │  */
+  > 31 │ import { request } from "node:http";
+       │ ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  > 32 │ import type { HubEventPayload } from "../preload/api.js";
+  > 33 │ import { EVENT_CHANNEL } from "../preload/api.js";
+  > 34 │ import { CHANNEL_SPECS } from "../ipc-surface.js";
+  > 35 │ import { type IpcError, dispatch } from "./channels.js";
+       │ ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    36 │ import { type EventStreamHandle, openEventStream } from "./event-stream.js";
+    37 │ import { type FetchLike, makeSignedFetch } from "./signed-fetch.js";
+  
+  i Sort the imported names.
+  
+    33 │ import { EVENT_CHANNEL } from "../preload/api.js";
+    34 │ import { CHANNEL_SPECS } from "../ipc-surface.js";
+  > 35 │ import { type IpcError, dispatch } from "./channels.js";
+       │ ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    36 │ import { type EventStreamHandle, openEventStream } from "./event-stream.js";
+    37 │ import { type FetchLike, makeSignedFetch } from "./signed-fetch.js";
+  
+  i Sort these imports.
+  
+    29 │  *    单独先加通道会造出一个"能调而没人应答"的入口。记在 0052 §7 第 3 条。
+    30 │  */
+  > 31 │ import { request } from "node:http";
+       │ ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  > 32 │ import type { HubEventPayload } from "../preload/api.js";
+  > 33 │ import { EVENT_CHANNEL } from "../preload/api.js";
+  > 34 │ import { CHANNEL_SPECS } from "../ipc-surface.js";
+       │ ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    35 │ import { type IpcError, dispatch } from "./channels.js";
+    36 │ import { type EventStreamHandle, openEventStream } from "./event-stream.js";
+  
+  i Safe fix: Organize imports and exports (Biome)
+  
+     30  30 │    */
+     31  31 │   import { request } from "node:http";
+     32     │ - import·type·{·HubEventPayload·}·from·"../preload/api.js";
+     33     │ - import·{·EVENT_CHANNEL·}·from·"../preload/api.js";
+     34     │ - import·{·CHANNEL_SPECS·}·from·"../ipc-surface.js";
+     35     │ - import·{·type·IpcError,·dispatch·}·from·"./channels.js";
+         32 │ + import·{·CHANNEL_SPECS·}·from·"../ipc-surface.js";
+         33 │ + import·type·{·HubEventPayload·}·from·"../preload/api.js";
+         34 │ + import·{·EVENT_CHANNEL·}·from·"../preload/api.js";
+         35 │ + import·{·dispatch,·type·IpcError·}·from·"./channels.js";
+     36  36 │   import { type EventStreamHandle, openEventStream } from "./event-stream.js";
+     37  37 │   import { type FetchLike, makeSignedFetch } from "./signed-fetch.js";
+  
+
+packages\desktop\src\main\wire.ts format ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  × Formatter would have printed the following content:
+  
+     43  43 │    */
+     44  44 │   export interface IpcMainLike {
+     45     │ - ··handle(channel:·string,·handler:·(event:·unknown,·args:·unknown)·=>·Promise<unknown>):·void;
+         45 │ + ··handle(
+         46 │ + ····channel:·string,
+         47 │ + ····handler:·(event:·unknown,·args:·unknown)·=>·Promise<unknown>,
+         48 │ + ··):·void;
+     46  49 │     removeHandler(channel: string): void;
+     47  50 │   }
+    ······· │ 
+    132 135 │           hubAddress: o.hubAddress,
+    133 136 │           push,
+    134     │ - ········...(o.initialCursor·===·undefined·?·{}·:·{·initialCursor:·o.initialCursor·}),
+    135     │ - ········...(o.setTimeoutImpl·===·undefined·?·{}·:·{·setTimeoutImpl:·o.setTimeoutImpl·}),
+        137 │ + ········...(o.initialCursor·===·undefined
+        138 │ + ··········?·{}
+        139 │ + ··········:·{·initialCursor:·o.initialCursor·}),
+        140 │ + ········...(o.setTimeoutImpl·===·undefined
+        141 │ + ··········?·{}
+        142 │ + ··········:·{·setTimeoutImpl:·o.setTimeoutImpl·}),
+    136 143 │         });
+    137 144 │       },
+    ······· │ 
+    177 184 │    */
+    178 185 │   function makeDeps(o: WireOptions) {
+    179     │ - ··return·makeSignedFetch({·token:·o.token,·hubAddress:·o.hubAddress,·fetchImpl:·nodeHttpFetch·});
+        186 │ + ··return·makeSignedFetch({
+        187 │ + ····token:·o.token,
+        188 │ + ····hubAddress:·o.hubAddress,
+        189 │ + ····fetchImpl:·nodeHttpFetch,
+        190 │ + ··});
+    180 191 │   }
+    181 192 │   
+  
+
+packages\desktop\src\preload\api.ts format ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  × Formatter would have printed the following content:
+  
+     50  50 │   export function createExposedApi(ipc: RendererBridge) {
+     51  51 │     return {
+     52     │ - ····createTask:·(input:·{·idea:·string;·parent_id?:·string·}):·Promise<unknown>·=>
+     53     │ - ······ipc.invoke("hub:createTask",·input),
+         52 │ + ····createTask:·(input:·{
+         53 │ + ······idea:·string;
+         54 │ + ······parent_id?:·string;
+         55 │ + ····}):·Promise<unknown>·=>·ipc.invoke("hub:createTask",·input),
+     54  56 │   
+     55  57 │       listTasks: (): Promise<unknown> => ipc.invoke("hub:listTasks"),
+    ······· │ 
+     64  66 │        * 以后读侧改了默认值，这里会安静地继续发旧的那一档。
+     65  67 │        */
+     66     │ - ····listApprovals:·(input?:·{·status?:·string;·limit?:·number·}):·Promise<unknown>·=>
+     67     │ - ······ipc.invoke("hub:listApprovals",·input),
+         68 │ + ····listApprovals:·(input?:·{
+         69 │ + ······status?:·string;
+         70 │ + ······limit?:·number;
+         71 │ + ····}):·Promise<unknown>·=>·ipc.invoke("hub:listApprovals",·input),
+     68  72 │   
+     69  73 │       decideApproval: (input: {
+    ······· │ 
+    107 111 │        * 是在邀请调用方泄漏。
+    108 112 │        */
+    109     │ - ····onHubEvent:·(listener:·(payload:·HubEventPayload)·=>·void):·(()·=>·void)·=>·{
+        113 │ + ····onHubEvent:·(
+        114 │ + ······listener:·(payload:·HubEventPayload)·=>·void,
+        115 │ + ····):·(()·=>·void)·=>·{
+    110 116 │         const wrapped = (payload: unknown): void => {
+    111 117 │           listener(payload as HubEventPayload);
+  
+
+packages\hub\scripts\ts-resolve-hook.mjs:21:1 assist/source/organizeImports  FIXABLE  ━━━━━━━━━━━━━━
+
+  × Sort these imports.
+  
+    19 │  * 其余一律交回 next()，所以真装了的 .js（node_modules 里的）不受影响。
+    20 │  */
+  > 21 │ import { existsSync } from "node:fs";
+       │ ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  > 22 │ import { dirname, resolve as presolve } from "node:path";
+  > 23 │ import { fileURLToPath, pathToFileURL } from "node:url";
+  > 24 │ import { register } from "node:module";
+       │ ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    25 │ 
+    26 │ register(
+  
+  i Safe fix: Organize imports and exports (Biome)
+  
+    20 20 │    */
+    21 21 │   import { existsSync } from "node:fs";
+    22    │ - import·{·dirname,·resolve·as·presolve·}·from·"node:path";
+    23    │ - import·{·fileURLToPath,·pathToFileURL·}·from·"node:url";
+    24    │ - import·{·register·}·from·"node:module";
+       22 │ + import·{·register·}·from·"node:module";
+       23 │ + import·{·dirname,·resolve·as·presolve·}·from·"node:path";
+       24 │ + import·{·fileURLToPath,·pathToFileURL·}·from·"node:url";
+    25 25 │   
+    26 26 │   register(
+  
+
+packages\hub\src\approvals\timeout.ts:42:1 assist/source/organizeImports  FIXABLE  ━━━━━━━━━━━━━━━━━
+
+  × Sort these imports.
+  
+    40 │  * 一张坏了不拖累整批（心跳 job 的 onError 会报它）。
+    41 │  */
+  > 42 │ import type { DatabaseSync } from "node:sqlite";
+       │ ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  > 43 │ import { requireScopeDb } from "../checkpoint/tx-scope.js";
+        ...
+  > 54 │   type Writer,
+  > 55 │ } from "../db/write-queue.js";
+       │ ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    56 │ 
+    57 │ /** 超时执行的审计演员：机器决定，绝不署 human（0026 §2 / O10 验收第 3 条）。 */
+  
+  i Safe fix: Organize imports and exports (Biome)
+  
+     41  41 │    */
+     42  42 │   import type { DatabaseSync } from "node:sqlite";
+     43     │ - import·{·requireScopeDb·}·from·"../checkpoint/tx-scope.js";
+     44     │ - import·{·appendAudit·}·from·"../events/recorder.js";
+     45     │ - import·type·{·DomainEvent·}·from·"../events/bus.js";
+     46     │ - import·{
+     47     │ - ··approvalRequiredEvent,
+     48     │ - ··insertCard,
+     49     │ - ··type·NewCardDraft,
+     50     │ - }·from·"../approvals/cards.js";
+     51     │ - import·{
+     52     │ - ··assertParamCount,
+     53     │ - ··assertSingleStatement,
+     54     │ - ··type·Writer,
+     55     │ - }·from·"../db/write-queue.js";
+         43 │ + import·{
+         44 │ + ··approvalRequiredEvent,
+         45 │ + ··insertCard,
+         46 │ + ··type·NewCardDraft,
+         47 │ + }·from·"../approvals/cards.js";
+         48 │ + import·{·requireScopeDb·}·from·"../checkpoint/tx-scope.js";
+         49 │ + import·{
+         50 │ + ··assertParamCount,
+         51 │ + ··assertSingleStatement,
+         52 │ + ··type·Writer,
+         53 │ + }·from·"../db/write-queue.js";
+         54 │ + import·type·{·DomainEvent·}·from·"../events/bus.js";
+         55 │ + import·{·appendAudit·}·from·"../events/recorder.js";
+     56  56 │   
+     57  57 │   /** 超时执行的审计演员：机器决定，绝不署 human（0026 §2 / O10 验收第 3 条）。 */
+  
+
+packages\hub\src\approvals\timeout.ts format ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  × Formatter would have printed the following content:
+  
+     56  56 │   
+     57  57 │   /** 超时执行的审计演员：机器决定，绝不署 human（0026 §2 / O10 验收第 3 条）。 */
+     58     │ - export·const·TIMEOUT_ACTOR·=·{·actorType:·"system"·as·const,·actorId:·"timeout-executor"·}·as·const;
+         58 │ + export·const·TIMEOUT_ACTOR·=·{
+         59 │ + ··actorType:·"system"·as·const,
+         60 │ + ··actorId:·"timeout-executor",
+         61 │ + }·as·const;
+     59  62 │   
+     60  63 │   /**
+    ······· │ 
+    150 153 │     w: Writer,
+    151 154 │     nowMs: number,
+    152     │ - ):·Promise<
+    153     │ - ··|·{·event:·DomainEvent·|·null;·seq:·number;·skipped:·boolean·}
+    154     │ - ··|·null
+    155     │ - >·{
+        155 │ + ):·Promise<{
+        156 │ + ··event:·DomainEvent·|·null;
+        157 │ + ··seq:·number;
+        158 │ + ··skipped:·boolean;
+        159 │ + }·|·null>·{
+    156 160 │     const b = card.timeoutBehavior;
+    157 161 │     if (b !== "auto_reject" && b !== "auto_approve" && b !== "escalate") {
+    ······· │ 
+    177 181 │     behavior: "auto_reject" | "auto_approve",
+    178 182 │     nowMs: number,
+    179     │ - ):·Promise<{·event:·DomainEvent·|·null;·seq:·number;·skipped:·boolean·}·|·null>·{
+        183 │ + ):·Promise<{
+        184 │ + ··event:·DomainEvent·|·null;
+        185 │ + ··seq:·number;
+        186 │ + ··skipped:·boolean;
+        187 │ + }·|·null>·{
+    180 188 │     const status = behavior === "auto_reject" ? "rejected" : "approved";
+    181     │ - ··const·params:·unknown[]·=·[status,·TIMEOUT_ACTOR.actorId,·nowMs,·card.id,·"pending"];
+        189 │ + ··const·params:·unknown[]·=·[
+        190 │ + ····status,
+        191 │ + ····TIMEOUT_ACTOR.actorId,
+        192 │ + ····nowMs,
+        193 │ + ····card.id,
+        194 │ + ····"pending",
+        195 │ + ··];
+    182 196 │     assertSingleStatement(CLAIM_TIMEOUT_SQL);
+    183 197 │     assertParamCount(CLAIM_TIMEOUT_SQL, params);
+    ······· │ 
+    245 259 │     card: DueApproval,
+    246 260 │     nowMs: number,
+    247     │ - ):·Promise<{·event:·DomainEvent·|·null;·seq:·number;·skipped:·boolean·}·|·null>·{
+        261 │ + ):·Promise<{
+        262 │ + ··event:·DomainEvent·|·null;
+        263 │ + ··seq:·number;
+        264 │ + ··skipped:·boolean;
+        265 │ + }·|·null>·{
+    248 266 │     if (card.taskId === null) return null;
+    249 267 │     const taskRow = db
+    ······· │ 
+    256 274 │       approvalType: "escalation",
+    257 275 │       cardKey: "timeout-escalate:" + card.id,
+    258     │ - ····summary:·"审批卡片·"·+·card.id·+·"（任务·"·+·card.taskId·+·"）超时未决，升级请重新裁定",
+        276 │ + ····summary:
+        277 │ + ······"审批卡片·"·+
+        278 │ + ······card.id·+
+        279 │ + ······"（任务·"·+
+        280 │ + ······card.taskId·+
+        281 │ + ······"）超时未决，升级请重新裁定",
+    259 282 │       parameters: {
+    260 283 │         impact_scope: "审批卡片 " + card.id + "（任务 " + card.taskId + "）超时",
+  
+
+packages\hub\src\budget\tracker.ts format ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  × Formatter would have printed the following content:
+  
+    140 140 │     }
+    141 141 │   
+    142     │ - ··limitCents(scope:·BudgetScope,·scopeId:·string,·period:·BudgetPeriod):·number·{
+        142 │ + ··limitCents(
+        143 │ + ····scope:·BudgetScope,
+        144 │ + ····scopeId:·string,
+        145 │ + ····period:·BudgetPeriod,
+        146 │ + ··):·number·{
+    143 147 │       const sql = SELECT_LIMIT_SQL;
+    144 148 │       assertSingleStatement(sql);
+    145 149 │       const params = [scope, scopeId, period];
+    146 150 │       assertParamCount(sql, params);
+    147     │ - ····const·row·=·this.#db
+    148     │ - ······.prepare(sql)
+    149     │ - ······.get(...(params·as·never[]))·as·{·limit_cents:·number·}·|·undefined;
+        151 │ + ····const·row·=·this.#db.prepare(sql).get(...(params·as·never[]))·as
+        152 │ + ······|·{·limit_cents:·number·}
+        153 │ + ······|·undefined;
+    150 154 │       if (row === undefined) {
+    151 155 │         throw new Error(
+    ······· │ 
+    269 273 │       const params = [i.scope, i.scopeId, i.period];
+    270 274 │       assertParamCount(sql, params);
+    271     │ - ····const·row·=·this.#db
+    272     │ - ······.prepare(sql)
+    273     │ - ······.get(...(params·as·never[]))·as·{·consumed_cents:·number·|·null·}·|·undefined;
+        275 │ + ····const·row·=·this.#db.prepare(sql).get(...(params·as·never[]))·as
+        276 │ + ······|·{·consumed_cents:·number·|·null·}
+        277 │ + ······|·undefined;
+    274 278 │       if (row === undefined) {
+    275 279 │         throw new Error(
+    ······· │ 
+    287 291 │       return row.consumed_cents ?? 0;
+    288 292 │     }
+    289     │ - 
+    290 293 │   }
+    291 294 │   
+  
+
+packages\hub\src\db\page-check.ts format ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  × Formatter would have printed the following content:
+  
+    33 33 │    */
+    34 34 │   export function isPageOk(rows: readonly Record<string, string>[]): boolean {
+    35    │ - ··return·rows.length·===·1·&&·String(Object.values(rows[0]·??·{})[0]·??·"")·===·"ok";
+       35 │ + ··return·(
+       36 │ + ····rows.length·===·1·&&·String(Object.values(rows[0]·??·{})[0]·??·"")·===·"ok"
+       37 │ + ··);
+    36 38 │   }
+    37 39 │   
+  
+
+The number of diagnostics exceeds the limit allowed. Use --max-diagnostics to increase it.
+Diagnostics not shown: 393.
+Checked 319 files in 123ms. No fixes applied.
+Found 297 errors.
+Found 114 warnings.
+Found 2 infos.
+check ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  × Some errors were emitted while running checks.
+  
+
+ ELIFECYCLE  Command failed with exit code 1.

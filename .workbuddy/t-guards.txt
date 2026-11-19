@@ -1,0 +1,285 @@
+
+[1m[30m[46m RUN [49m[39m[22m [36mv4.1.12 [39m[90mD:/item/opc[39m
+
+(node:8048) [DEP0190] DeprecationWarning: Passing args to a child process with shell option true can lead to security vulnerabilities, as the arguments are not escaped, only concatenated.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+ [31m❯[39m test/arch/doc-refs.test.ts [2m([22m[2m2 tests[22m[2m | [22m[31m1 failed[39m[2m)[22m[32m 123[2mms[22m[39m
+     [32m✓[39m 扫描器本身有判别力（否则本节是恒绿装饰）[32m 2[2mms[22m[39m
+[31m     [31m×[31m 全部完整形态引用与快照一致[39m[32m 120[2mms[22m[39m
+ [32m✓[39m test/arch/harness-invariants.test.ts [2m([22m[2m17 tests[22m[2m)[22m[32m 12[2mms[22m[39m
+ [32m✓[39m test/arch/doc-ids.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 35[2mms[22m[39m
+ [32m✓[39m test/arch/desktop-honest-label.test.ts [2m([22m[2m7 tests[22m[2m)[22m[32m 17[2mms[22m[39m
+ [32m✓[39m test/arch/plan-gate-paths.test.ts [2m([22m[2m11 tests[22m[2m)[22m[32m 17[2mms[22m[39m
+ [32m✓[39m test/arch/pending-decisions.test.ts [2m([22m[2m19 tests[22m[2m)[22m[32m 91[2mms[22m[39m
+(node:45724) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ [32m✓[39m test/arch/decision-index.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 8[2mms[22m[39m
+ [32m✓[39m test/arch/role-spawn-boundary.test.ts [2m([22m[2m11 tests[22m[2m)[22m[32m 19[2mms[22m[39m
+ [32m✓[39m test/arch/claim-coords.test.ts [2m([22m[2m8 tests[22m[2m)[22m[32m 85[2mms[22m[39m
+ [32m✓[39m test/arch/doc-coords.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 240[2mms[22m[39m
+ [32m✓[39m test/arch/dependency-boundary.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 295[2mms[22m[39m
+ [32m✓[39m test/arch/production-deps.test.ts [2m([22m[2m7 tests[22m[2m)[22m[32m 68[2mms[22m[39m
+ [32m✓[39m test/arch/no-native-deps.test.ts [2m([22m[2m6 tests[22m[2m)[22m[32m 209[2mms[22m[39m
+ [32m✓[39m test/arch/plan-refs.test.ts [2m([22m[2m10 tests[22m[2m)[22m[32m 24[2mms[22m[39m
+ [32m✓[39m test/arch/mutation-parser-screen.test.ts [2m([22m[2m13 tests[22m[2m)[22m[33m 424[2mms[22m[39m
+(node:53368) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ [31m❯[39m test/arch/claims-registry.test.ts [2m([22m[2m145 tests[22m[2m | [22m[31m1 failed[39m[2m)[22m[33m 491[2mms[22m[39m
+     [32m✓[39m 每条登记的 check 对今天的仓库返回空[32m 188[2mms[22m[39m
+[31m     [31m×[31m r1 判据能扫出 budgets INSERT（真仓库非空 = 取材没坏）[39m[32m 57[2mms[22m[39m
+     [32m✓[39m r1 的另一半：引擎路线【复用】那条语句，而不是又抄一份（O6 动作 2 的落点）[32m 2[2mms[22m[39m
+     [32m✓[39m r3 的桥今天确实存在于 src（主张有可指认的对象）[32m 10[2mms[22m[39m
+     [32m✓[39m r4 的真实仓库没有 new BudgetTracker（今天零发布点确实成立）[32m 50[2mms[22m[39m
+     [32m✓[39m r9 的真仓库那一半：rolePrompt 真的落到 --append-system-prompt[32m 1[2mms[22m[39m
+     [32m✓[39m judge 指向的守卫文件确实存在于 test/arch/（防指向被删的守卫）[32m 1[2mms[22m[39m
+     [32m✓[39m 登记表非空、判据函数非 0、id 互异[32m 1[2mms[22m[39m
+     [32m✓[39m 变异 r1：budgets 的 hard_stop 写成 0 必须红[32m 0[2mms[22m[39m
+     [32m✓[39m 变异 r1 反向：写 1 不红[32m 0[2mms[22m[39m
+     [32m✓[39m 变异 r2：心跳里拔掉 runTimeoutPass 接线必须红[32m 1[2mms[22m[39m
+     [32m✓[39m 变异 r2 反向：接线在场 ⇒ 绿（不是恒红装饰）[32m 0[2mms[22m[39m
+     [32m✓[39m 变异 r3 之一：那位【读者】整份不见 ⇒ 红[32m 0[2mms[22m[39m
+     [32m✓[39m 变异 r3 之二：读者还在但不再调 resolver ⇒ 红，且红因与上一发不串[32m 0[2mms[22m[39m
+     [32m✓[39m 变异 r3 反向：合成里读者在场 → 判据绿（不是恒红）[32m 0[2mms[22m[39m
+     [32m✓[39m 变异 r16 之一：那发验收测试整份不见 ⇒ 红[32m 0[2mms[22m[39m
+     [32m✓[39m 变异 r16 之二：反空转那一格被摘掉 ⇒ 红且红因不串[32m 0[2mms[22m[39m
+     [32m✓[39m 变异 r16 之三：actor 三条断言少「不是 ceo」 ⇒ 红且点名那一半[32m 0[2mms[22m[39m
+     [32m✓[39m 变异 r16 之四：桥不再重查角色 ⇒ 红[32m 0[2mms[22m[39m
+     [32m✓[39m 变异 r16 之五：桥落库前不判可逆性 ⇒ 红[32m 0[2mms[22m[39m
+     [32m✓[39m 变异 r4：注入 new BudgetTracker 必须红（正文里出现 new 点）[32m 0[2mms[22m[39m
+     [32m✓[39m 变异 r5：zero-producer 登记表被摘掉 review_gates 必须红[32m 1[2mms[22m[39m
+     [32m✓[39m 变异 r7（round269 改版）：写路径 recordAutoApproval 出现 src 调用方必须红[32m 0[2mms[22m[39m
+     [32m✓[39m 变异 r9 之一：提示词渲染里删掉一个字段的读者必须红[32m 2[2mms[22m[39m
+     [32m✓[39m 变异 r9 之二：runtime 不再调 renderCharterPrompt ⇒ 只有这一半抓得到[32m 1[2mms[22m[39m
+     [32m✓[39m 变异 r10 之一：守卫文件被摘掉 ⇒ 红（主张重新变回一句散文）[32m 0[2mms[22m[39m
+     [32m✓[39m 变异 r10 之二：文件还在但不再声称管 verify ⇒ 红（只看存在性的判据在这一发面前是绿的）[32m 1[2mms[22m[39m
+     [32m✓[39m 变异 r10 之三：守卫测试不再真跑 biome ⇒ 红（表会被当成证据）[32m 1[2mms[22m[39m
+     [32m✓[39m 变异 r11 之一：守卫文件被摘掉 ⇒ 红[32m 0[2mms[22m[39m
+     [32m✓[39m 变异 r11 之二：取材被悄悄改窄回只扫代码 ⇒ 红（这一格就是 P4 那发变异教出来的）[32m 1[2mms[22m[39m
+     [32m✓[39m 变异 r11 之三：测试不再读真仓库 ⇒ 红（合成夹具不能替真实语料作证）[32m 1[2mms[22m[39m
+     [32m✓[39m 变异 r12 之一：守卫文件被摘掉 ⇒ 红[32m 0[2mms[22m[39m
+     [32m✓[39m 变异 r12 之二：住址判据被换成恒真 ⇒ 红（G4 在登记表层的对应物）[32m 0[2mms[22m[39m
+     [32m✓[39m 变异 r12 之三：豁免改成比语义而不是比字节 ⇒ 红（豁免会退回成散文）[32m 0[2mms[22m[39m
+     [32m✓[39m 变异 r13 之一：守卫文件被摘掉 ⇒ 红[32m 0[2mms[22m[39m
+     [32m✓[39m 变异 r13 之二：相邻判据被换成【两个串都在文件里】⇒ 红[32m 0[2mms[22m[39m
+     [32m✓[39m 变异 r13 之三：探针键不再逐个核对 ⇒ 红[32m 0[2mms[22m[39m
+     [32m✓[39m 变异 r14 之一：坐标守卫被摘掉 ⇒ 红[32m 0[2mms[22m[39m
+     [32m✓[39m 变异 r14 之二：那句「登记行命中了吗」的比较被掏空 ⇒ 红且红因不串[32m 1[2mms[22m[39m
+     [32m✓[39m 变异 r14 之三：把「取材非空」那一发摘掉 ⇒ 红[32m 1[2mms[22m[39m
+     [32m✓[39m r15 的真仓库那一半：取材真的读得到那三个前端根与那发验收测试[32m 2[2mms[22m[39m
+     [32m✓[39m 变异 r15 之一：那发验收测试整份不见 ⇒ 红[32m 0[2mms[22m[39m
+     [32m✓[39m 变异 r15 之二：反空转那一格被摘掉 ⇒ 红且红因不串[32m 1[2mms[22m[39m
+     [32m✓[39m 变异 r15 之三：前提自证那一格被摘掉 ⇒ 红（撞名那天必须有人红）[32m 1[2mms[22m[39m
+     [32m✓[39m 变异 r15 之四：三个前端根全数出 0 个文件 ⇒ 那条读数判不可信而不是绿[32m 1[2mms[22m[39m
+     [32m✓[39m ⭐⭐ 变异 r15 之五：取材表里摘掉 web/public 那一行 ⇒ 红（本轮那个假证人的形状）[32m 2[2mms[22m[39m
+     [32m✓[39m ⭐ 变异 r15 之五·乙：只摘扩展名里的 .js（根留着）⇒ 也红[32m 1[2mms[22m[39m
+     [32m✓[39m ⭐ 变异 r15 之五·丙：换掉【结束锚】⇒ 红在「不可核对」而不是绿到文件尾[32m 1[2mms[22m[39m
+     [32m✓[39m ⭐ r15 之五的控制组：一字不改 ⇒ 返回空（否则上面三发红在变异之外）[32m 1[2mms[22m[39m
+     [32m✓[39m 变异 r15 之六：FRONTEND_CORPUS 整段改名 ⇒ 红在【取材面不可核对】[32m 1[2mms[22m[39m
+     [32m✓[39m r17 的真仓库那一半：三份取材都读得到，且顺序断言读的是真代码[32m 1[2mms[22m[39m
+     [32m✓[39m 变异 r17 之一：那份迁移整份不见 ⇒ 红[32m 3[2mms[22m[39m
+     [32m✓[39m 变异 r17 之二：主键换成自增 id + 唯一索引 ⇒ 红（幂等键换了主人）[32m 2[2mms[22m[39m
+     [32m✓[39m 变异 r17 之三：deliver.ts 变成先发再插 ⇒ 红，且红因是顺序而不是别的[32m 2[2mms[22m[39m
+     [32m✓[39m 变异 r17 之四：摘掉 OR IGNORE ⇒ 红（抢台账从「changes 0」变成抛错）[32m 2[2mms[22m[39m
+     [32m✓[39m 变异 r17 之五：摘掉接外键那一支，但注释里那句话留着 ⇒ 仍然红[32m 2[2mms[22m[39m
+     [32m✓[39m 变异 r17 之六：装配层不再调 runDeliverPass ⇒ 红（那条 other 登记删得有依据）[32m 2[2mms[22m[39m
+     [32m✓[39m 变异 r17 之七：发卡排到判决之前 ⇒ 红（同轮刚批掉的卡会被再推）[32m 2[2mms[22m[39m
+     [32m✓[39m 变异 r17 之八：投递测试不再实测外键 ⇒ 红（那句 catch 失去唯一分母）[32m 2[2mms[22m[39m
+     [32m✓[39m r18 的真仓库那一半：取材读得到，且【两处】调用点各自挂着信号[32m 1[2mms[22m[39m
+     [32m✓[39m 变异 r18 之一：适配器整份不见 ⇒ 红在「不在了」[32m 1[2mms[22m[39m
+     [32m✓[39m 变异 r18 之二：摘掉【取 token】那一发的信号 ⇒ 红在「少于两处」[32m 1[2mms[22m[39m
+     [32m✓[39m 变异 r18 之三：截止写死（常量整句没了）⇒ 红在「写死在调用点」[32m 1[2mms[22m[39m
+     [32m✓[39m 变异 r18 之四：把 0 当成关掉超时（畸形值判据没了）⇒ 红[32m 1[2mms[22m[39m
+     [32m✓[39m 变异 r18 之五：契约上没有 signal 成员 ⇒ 红（「同一个截止」失去主语）[32m 1[2mms[22m[39m
+     [32m✓[39m 变异 r18 之六：测试不再开真监听 ⇒ 红（那份分母退化成断言字段）[32m 2[2mms[22m[39m
+     [32m✓[39m 变异 r18 之七：测试不再把 init.signal 接出去 ⇒ 红[32m 1[2mms[22m[39m
+     [32m✓[39m ⭐ 变异 r18 之八：新加一处【没截止的 fetch】⇒ 那条通用绊线点名它[32m 1[2mms[22m[39m
+     [32m✓[39m r19 的真仓库那一半：两份取材读得到，且判据锚点今天逐字都在[32m 2[2mms[22m[39m
+     [32m✓[39m 变异 r19 之一：判据整份不见 ⇒ 红在「不在了」[32m 1[2mms[22m[39m
+     [32m✓[39m 变异 r19 之二：摘掉上限比较 ⇒ 红在「退回一张表格」[32m 2[2mms[22m[39m
+     [32m✓[39m 变异 r19 之三：新目录不再点名 ⇒ 红，且红因不是「上限比较」[32m 1[2mms[22m[39m
+     [32m✓[39m 变异 r19 之四：空壳豁免那一半没了 ⇒ 红（豁免开始比现实活得久）[32m 1[2mms[22m[39m
+     [32m✓[39m 变异 r19 之五：测试整份不见 ⇒ 红（上面那三格重新变回散文）[32m 1[2mms[22m[39m
+     [32m✓[39m 变异 r19 之六：换查另一份（更窄的）project ⇒ 红在主语换了[32m 1[2mms[22m[39m
+     [32m✓[39m ⭐ 变异 r19 之七：摘掉语料下限那条哨兵 ⇒ 红（少报在棘轮上是绿的方向）[32m 1[2mms[22m[39m
+     [32m✓[39m 变异 r19 之八：escapesUpward 恒假 ⇒ 红，且红因不是「上限比较」那一格[32m 1[2mms[22m[39m
+     [32m✓[39m 变异 r19 之九：注释里写着 escapesUpward 而函数体空了 ⇒ 仍然红[32m 1[2mms[22m[39m
+     [32m✓[39m 变异 r19 之十：语料那一侧退回只判绝对式 ⇒ 红在 parseListFiles 那一格[32m 2[2mms[22m[39m
+     [32m✓[39m 变异 r20 之一：脚本整份不见 ⇒ 红在「不在了」[32m 1[2mms[22m[39m
+     [32m✓[39m 变异 r20 之二：不再从 dead-modules 拿图（自己解析一遍）⇒ 红在恒真判定[32m 1[2mms[22m[39m
+     [32m✓[39m ⭐ 变异 r20 之三：悬空说明符不再抛 ⇒ 红（坏图上的数看着和好图一样）[32m 1[2mms[22m[39m
+     [32m✓[39m 变异 r20 之四：排除入口那一格被摘 ⇒ 红在口径没人执行[32m 12[2mms[22m[39m
+     [32m✓[39m 变异 r20 之五：测试整份不见 ⇒ 红（上面那三格重新变回散文）[32m 0[2mms[22m[39m
+     [32m✓[39m ⭐ 变异 r20 之六：摘掉【成员】判据 ⇒ 红（解析器退化时名单是膨胀的）[32m 0[2mms[22m[39m
+     [32m✓[39m ⭐ 变异 r20 之七：摘掉 unresolved 会自报那发 ⇒ 红（那个 0 分不出真假）[32m 0[2mms[22m[39m
+     [32m✓[39m r20 控制组：两份原文一字不改 ⇒ 判据返回空（上面每一发的对照组）[32m 0[2mms[22m[39m
+     [32m✓[39m 变异 r21 之一：守卫整份不见 ⇒ 红（那份账退回文件头里的一段话）[32m 5[2mms[22m[39m
+     [32m✓[39m ⭐ 变异 r21 之二：摘掉 exemptedBlocks 的 filter ⇒ 红，且不许红在旁边那句 continue 上[32m 3[2mms[22m[39m
+     [32m✓[39m 变异 r21 之三：测试整份不见 ⇒ 红（那三枚钉没有执行者）[32m 4[2mms[22m[39m
+     [32m✓[39m ⭐ 变异 r21 之四：把【恰好 1】换回上下界 ⇒ 红（单向的界挡不住静默摘光）[32m 1[2mms[22m[39m
+     [32m✓[39m 变异 r21 之五：摘掉身份钉 ⇒ 红（只剩条数时，挪个位置照样绿）[32m 1[2mms[22m[39m
+     [32m✓[39m ⭐ 变异 r21 之六：摘掉那发数得出 2 的反向 canary ⇒ 红（那个 1 分不出真假）[32m 1[2mms[22m[39m
+     [32m✓[39m r21 控制组：两份原文一字不改 ⇒ 判据返回空[32m 0[2mms[22m[39m
+     [32m✓[39m r22 的真仓库那一半：三份取材都读得到那三处字节[32m 16[2mms[22m[39m
+     [32m✓[39m r22 控制组：三份原文一字不改 ⇒ 判据返回空（剥注释那两格在真语料上不误伤）[32m 3[2mms[22m[39m
+     [32m✓[39m 变异 r22 之一：契约那份 schema 整份不见 ⇒ 红[32m 1[2mms[22m[39m
+     [32m✓[39m ⭐ 变异 r22 之二：读不到 orgChangeSchema 那一段 ⇒ 红在【取材】而不是红在「kind 被摘」[32m 1[2mms[22m[39m
+     [32m✓[39m 变异 r22 之三：判别式里那一支被摘掉 ⇒ 红[32m 1[2mms[22m[39m
+     [32m✓[39m 变异 r22 之四：hub 那份 commit 整份不见 ⇒ 红（形状在、判据在，执行者没了）[32m 1[2mms[22m[39m
+     [32m✓[39m ⭐ 变异 r22 之五：调用换成一句同义注释 ⇒ 红（本条唯一为「只剩一条注释」写的形状）[32m 1[2mms[22m[39m
+     [32m✓[39m ⭐⭐ 变异 r22 之五·乙：分派条件短路成 false 而调用字节留着 ⇒ 红[32m 1[2mms[22m[39m
+     [32m✓[39m 变异 r22 之六：applyChangeToGraph 收下节点而不写进 nodes ⇒ 红（审计与库里两张图）[32m 1[2mms[22m[39m
+     [32m✓[39m 变异 r22 之七：类型兜底换成默认放行 ⇒ 红[32m 1[2mms[22m[39m
+     [32m✓[39m ⭐ 变异 r22 之八：往 validateNewNode 的【代码】里加一句判家族 ⇒ 红（两处口径会漂）[32m 1[2mms[22m[39m
+     [32m✓[39m ⭐ 变异 r22 之九（反向对照）：【函数体内】一句行注释带上那些字节 ⇒ 该绿[32m 1[2mms[22m[39m
+     [32m✓[39m ⭐ 变异 r22 之十（反向对照）：函数体内【干净的】块注释也不算代码 ⇒ 该绿[32m 1[2mms[22m[39m
+     [32m✓[39m ⭐⭐ 变异 r22 之九·乙：登记洞① —— 字符串里的 // 吃掉同一行的真判据 ⇒ 假绿[32m 2[2mms[22m[39m
+     [32m✓[39m ⭐⭐ 变异 r22 之十·乙：登记洞② 的实测方向 —— 块注释收尾被 // 吃掉 ⇒ 连坐吞码 ⇒ 假绿（不是原猜的假红）[32m 2[2mms[22m[39m
+     [32m✓[39m 变异 r22 之十一：摘掉对 after 图那一跑 ⇒ 红（分工变成漏判）[32m 1[2mms[22m[39m
+     [32m✓[39m 变异 r22 之十二：validate.ts 整份不见 ⇒ 红（②那根线连向一个不存在的目标）[32m 1[2mms[22m[39m
+     [32m✓[39m ⭐ 变异 r22 之十三：定义整段改名 ⇒ 红在【取材】而不是红在「判了家族」[32m 1[2mms[22m[39m
+     [32m✓[39m r23 的真仓库那一半：取材读得到那几处字节（红=取材坏了，不是主张过期）[32m 0[2mms[22m[39m
+     [32m✓[39m r23 控制组：原文一字不改 ⇒ 判据返回空（剥注释那几格在真语料上不误伤）[32m 1[2mms[22m[39m
+     [32m✓[39m 变异 r23 之一：integrity.ts 整份不见 ⇒ 红在「不在了」[32m 0[2mms[22m[39m
+     [32m✓[39m 变异 r23 之二：读不到 CHECK_NAMES 那一段 ⇒ 红在【取材】而不是红在「名字被摘」[32m 2[2mms[22m[39m
+     [32m✓[39m 变异 r23 之三：名单里摘掉那一格 ⇒ 红（报告不再声明它）[32m 1[2mms[22m[39m
+     [32m✓[39m ⭐ 变异 r23 之四：名单留着而 guarded 那行被摘 ⇒ 红（恒绿的自检比没有更坏）[32m 2[2mms[22m[39m
+     [32m✓[39m 变异 r23 之五：读不到函数定义 ⇒ 红在【注册连向不存在的东西】[32m 1[2mms[22m[39m
+     [32m✓[39m ⭐ 变异 r23 之六：SQL 退回只扫最新版 ⇒ 红（M2 那一发的登记形态）[32m 2[2mms[22m[39m
+     [32m✓[39m ⭐ 变异 r23 之七：门控判成「有没有填」⇒ 红（M1 那一发：false 是填了的值）[32m 1[2mms[22m[39m
+     [32m✓[39m ⭐ 变异 r23 之八：撤掉 orgGraphSchema 那道 ⇒ 红（M3：退回信强转）[32m 1[2mms[22m[39m
+     [32m✓[39m 变异 r23 之九：空表那格短路成 false ⇒ 红（空不是通过）[32m 1[2mms[22m[39m
+     [32m✓[39m ⭐ 变异 r23 之十：假句子【写进代码】⇒ 红（M5 同一格的登记形态）[32m 1[2mms[22m[39m
+     [32m✓[39m ⭐⭐ 变异 r23 之十·乙（反向对照）：同一句假话【只写在注释里】⇒ 该绿[32m 1[2mms[22m[39m
+     [32m✓[39m 变异 r23 之十一：空表文案不再指名写入方 ⇒ 红（假句子的形状就是这么回来的）[32m 1[2mms[22m[39m
+     [32m✓[39m r24 的真仓库那一半：三处取材都读得到那几行字节（红=取材坏了）[32m 1[2mms[22m[39m
+     [32m✓[39m r24 控制组：三份原文一字不改 ⇒ 判据返回空（剥注释那几格在真语料上不误伤）[32m 1[2mms[22m[39m
+     [32m✓[39m 变异 r24 之一：graph.ts 整份不见 ⇒ 红在【不在了】而不是红在「superRefine 没了」[32m 1[2mms[22m[39m
+     [32m✓[39m 变异 r24 之二：定义整段改名 ⇒ 红在【取材】而不是红在「判据被摘」[32m 2[2mms[22m[39m
+     [32m✓[39m 变异 r24 之三：整条 superRefine 摘掉 ⇒ 红（主张本体没了）[32m 2[2mms[22m[39m
+     [32m✓[39m ⭐ 变异 r24 之四：摘掉后【留成块注释】⇒ 照样红（注释字节不许替「判了」投票）[32m 2[2mms[22m[39m
+     [32m✓[39m 变异 r24 之五（M3）：遍历对象从 nodes 换成 edges ⇒ 红（判据存在≠判的是这件事）[32m 2[2mms[22m[39m
+     [32m✓[39m ⭐ 变异 r24 之六（M1）：比较方向翻成 !== ⇒ 红（最像「修好了」的坏法）[32m 1[2mms[22m[39m
+     [32m✓[39m 变异 r24 之七（M5）：path 塌成一层 ⇒ 红（拒对了但说不出是哪一个键）[32m 2[2mms[22m[39m
+     [32m✓[39m 变异 r24 之八：加 break ⇒ 红（多坏键只报第一个）[32m 2[2mms[22m[39m
+     [32m✓[39m ⭐ 变异 r24 之九（反向对照）：那些锚点字节【只写在行注释里】⇒ 该绿[32m 2[2mms[22m[39m
+     [32m✓[39m ⭐ 变异 r24 之十（之九的单变量对照）：同一批字节【进了代码】⇒ 该红[32m 1[2mms[22m[39m
+     [32m✓[39m 变异 r24 之十一：api.ts 整份不见 ⇒ 红在前提格（schema 那三格照样绿的形状）[32m 1[2mms[22m[39m
+     [32m✓[39m 变异 r24 之十二：api.ts 的请求体内联一份自己的图形状 ⇒ 红（这条路上不用它了）[32m 2[2mms[22m[39m
+     [32m✓[39m ⭐ 变异 r24 之十二·乙（反向对照）：接线断了但【注释里留着那句话】⇒ 照样红[32m 2[2mms[22m[39m
+     [32m✓[39m 变异 r24 之十三：commit.ts 整份不见 ⇒ 红在前提格[32m 1[2mms[22m[39m
+     [32m✓[39m 变异 r24 之十四：commit.ts 把那条 SQL 改名 ⇒ 红（「进不了库」那句的前提漂了）[32m 1[2mms[22m[39m
+     [32m✓[39m docs/OPC-OS-功能优化设计.md 有登记表小节，且与 REGISTRY 渲染逐字一致[32m 2[2mms[22m[39m
+     [32m✓[39m 渲染只放判据与核对时刻，不放条数（家规）[32m 0[2mms[22m[39m
+ [32m✓[39m test/arch/zero-producer.test.ts [2m([22m[2m11 tests[22m[2m)[22m[33m 340[2mms[22m[39m
+(node:22788) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:37824) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ [32m✓[39m test/arch/irreversible-token.test.ts [2m([22m[2m8 tests[22m[2m)[22m[33m 389[2mms[22m[39m
+ [32m✓[39m test/arch/no-null-bytes.test.ts [2m([22m[2m10 tests[22m[2m)[22m[33m 402[2mms[22m[39m
+[90mstdout[2m | test/arch/dead-modules.test.ts[2m > [22m[2m死模块哨兵[2m > [22m[2m真实语料：解析量非零（判据坏起来的第一个症状是一条边都没解析出来）
+[22m[39m  [死模块哨兵] 模块 96 · 边 309 · 静态入口 8 · 动态入口 2 · 不可达 13
+
+ [32m✓[39m test/arch/matcher-oracle.test.ts [2m([22m[2m10 tests[22m[2m)[22m[32m 5[2mms[22m[39m
+ [32m✓[39m test/arch/config-match.test.ts [2m([22m[2m7 tests[22m[2m)[22m[32m 2[2mms[22m[39m
+ [32m✓[39m test/arch/commit-msg-refs.test.ts [2m([22m[2m4 tests[22m[2m)[22m[33m 644[2mms[22m[39m
+     [33m[2m✓[22m[39m 真实历史: 标题 scope 与实际改动一致，且不引用不存在的编号 [33m 640[2mms[22m[39m
+ [32m✓[39m test/arch/census.test.ts [2m([22m[2m12 tests[22m[2m)[22m[32m 5[2mms[22m[39m
+ [31m❯[39m test/arch/lint-baseline.test.ts [2m([22m[2m12 tests[22m[2m | [22m[31m1 failed[39m[2m)[22m[33m 748[2mms[22m[39m
+     [32m✓[39m 只数 error，warning / info 不进基线（它们不参与 lint 的退出码）[32m 1[2mms[22m[39m
+     [32m✓[39m 运行期夹具探针不进基线（否则与 dependency-boundary 并发时随机红）[32m 0[2mms[22m[39m
+     [32m✓[39m 路径分隔符两种写法都归一（Windows 的 JSON 给反斜杠）[32m 0[2mms[22m[39m
+     [32m✓[39m 恰好在基线上 ⇒ 绿（控制组：判据不是恒红装饰）[32m 0[2mms[22m[39m
+     [32m✓[39m 比基线少 ⇒ 绿（这一发只许减不许增，往下调正是它鼓励的）[32m 0[2mms[22m[39m
+     [32m✓[39m 变异：某类目多一条 ⇒ 红，且红话点名是哪一类、从几到几[32m 0[2mms[22m[39m
+     [32m✓[39m 变异：冒出基线外的新 error 类目 ⇒ 红并点名（防『反正 lint 本来就红』混过去）[32m 0[2mms[22m[39m
+     [32m✓[39m 变异：新增类目藏在一个已有类目之后 ⇒ 仍然红（不是『只看最大值』那种假判据）[32m 0[2mms[22m[39m
+     [32m✓[39m 真把整仓修干净 ⇒ 绿（绝不造出一条恒不可能通过的验收命令）[32m 0[2mms[22m[39m
+     [32m✓[39m 某类目修到 0 条 ⇒ 报「请把这条豁免删掉」（豁免不许比现实活得久）[32m 1[2mms[22m[39m
+     [32m✓[39m biome 平台二进制找得到（找不到就抛，不空跑成假通过）[32m 1[2mms[22m[39m
+[31m     [31m×[31m `pnpm lint` 今天的 error 全部在基线内，且读数本身可信[39m[33m 742[2mms[22m[39m
+ [32m✓[39m test/arch/dead-modules.test.ts [2m([22m[2m23 tests[22m[2m)[22m[33m 669[2mms[22m[39m
+ [32m✓[39m test/arch/gate-selfcheck.test.ts [2m([22m[2m7 tests[22m[2m)[22m[33m 1093[2mms[22m[39m
+   [33m[2m✓[22m[39m 门禁的【结论】必须在已知红名单里（记账对 ≠ 有人看结论，见 0017 §2） [33m 318[2mms[22m[39m
+ [32m✓[39m packages/hub/test/serve/dev-seed.test.ts [2m([22m[2m7 tests[22m[2m)[22m[32m 293[2mms[22m[39m
+ [32m✓[39m test/arch/stub-terminal-write.test.ts [2m([22m[2m30 tests[22m[2m)[22m[32m 12[2mms[22m[39m
+ [32m✓[39m test/arch/comment-test-readers.test.ts [2m([22m[2m12 tests[22m[2m)[22m[32m 4[2mms[22m[39m
+ [32m✓[39m packages/hub/test/http/budget-route.test.ts [2m([22m[2m13 tests[22m[2m)[22m[33m 484[2mms[22m[39m
+ [32m✓[39m packages/hub/test/http/charter-route.test.ts [2m([22m[2m15 tests[22m[2m)[22m[33m 506[2mms[22m[39m
+warning: in the working copy of 'docs/decisions/0009-only.md', LF will be replaced by CRLF the next time Git touches it
+ [32m✓[39m test/arch/comment-citations.test.ts [2m([22m[2m25 tests[22m[2m)[22m[33m 1327[2mms[22m[39m
+     [33m[2m✓[22m[39m 真实仓库：注释里的限定引用全部指向存在的东西 [33m 1102[2mms[22m[39m
+ [32m✓[39m test/arch/test-inventory.test.ts [2m([22m[2m12 tests[22m[2m)[22m[33m 1374[2mms[22m[39m
+     [33m[2m✓[22m[39m 磁盘上每个测试样文件都在 include 覆盖范围内 [33m 1368[2mms[22m[39m
+ [32m✓[39m test/arch/pending-inventory.test.ts [2m([22m[2m16 tests[22m[2m)[22m[33m 1493[2mms[22m[39m
+     [33m[2m✓[22m[39m 被收集的真文件必须一条问题都不报，且扫描通路确实读到了东西 [33m 973[2mms[22m[39m
+     [33m[2m✓[22m[39m 真仓库里唯一带跳过的文件，正是名单里那一个 [33m 504[2mms[22m[39m
+ [32m✓[39m test/arch/coverage-guard.test.ts [2m([22m[2m1 test[22m[2m)[22m[33m 2320[2mms[22m[39m
+   [33m[2m✓[22m[39m 门控判定内核文件覆盖率 ≥ 下限（反假绿：文件必须在场、红即失败） [33m 2318[2mms[22m[39m
+ [32m✓[39m test/arch/test-type-baseline.test.ts [2m([22m[2m26 tests[22m[2m)[22m[33m 8332[2mms[22m[39m
+     [33m[2m✓[22m[39m 真跑一次：今天的数在表内，且读数本身可信 [33m 4445[2mms[22m[39m
+     [33m[2m✓[22m[39m test/arch 自己必须是 0 条（round277 清到 0，这一发钉住它不漂回去） [33m 3604[2mms[22m[39m
+
+[31m⎯⎯⎯⎯⎯⎯⎯[39m[1m[41m Failed Tests 3 [49m[22m[31m⎯⎯⎯⎯⎯⎯⎯[39m
+
+[41m[1m FAIL [22m[49m test/arch/claims-registry.test.ts[2m > [22m主张登记表：判据一（真实仓库今天成立）[2m > [22mr1 判据能扫出 budgets INSERT（真仓库非空 = 取材没坏）
+[31m[1mAssertionError[22m: expected 4 to be 2 // Object.is equality[39m
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[32m- 2[39m
+[31m+ 4[39m
+
+[36m [2m❯[22m test/arch/claims-registry.test.ts:[2m125:26[22m[39m
+    [90m123|[39m       ])
+    [90m124|[39m       [33m.[39m[34mfilter[39m((m) [33m=>[39m m[[34m0[39m][33m.[39m[34mincludes[39m([32m"hard_stop"[39m))[33m;[39m
+    [90m125|[39m     [34mexpect[39m(stmts[33m.[39mlength)[33m.[39m[34mtoBe[39m([34m2[39m)[33m;[39m
+    [90m   |[39m                          [31m^[39m
+    [90m126|[39m     [34mexpect[39m(realFiles[33m.[39m[34msrc[39m([32m"engine/runtime.ts"[39m))[33m.[39m[34mtoContain[39m(
+    [90m127|[39m       [32m"db.prepare(ENSERT_BUDGET_SQL)"[39m[33m,[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/3]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m test/arch/doc-refs.test.ts[2m > [22m决策文档里的「文件:行号」引用不漂移[2m > [22m全部完整形态引用与快照一致
+[31m[1mAssertionError[22m: expected 'INDEX.md>app.ts:441 目标行内容与快照不符：快照 [..…' to deeply equal ''[39m
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[31m+ INDEX.md>app.ts:441 目标行内容与快照不符：快照 [...(deps.nonces === undefined ? {} : { nonces: deps.nonces }),] 现在是 [if (gate !== null && gate !== TOKEN_PASS) return gate;] | INDEX.md>assemble.ts:274 目标行内容与快照不符：快照 [* 全在【泵自己内部】的外面，所以它们只能靠换掉整趟来数 —— 与章程泵同一条理由。] 现在是 [/**] | INDEX.md>app.js:675 目标行内容与快照不符：快照 [<span class="pill ${statusClass(tk.status)}">${esc(tk.status)}</span>] 现在是 [if (orphan.items.length) out.push(orphan);] | INDEX.md>app.ts:441 目标行内容与快照不符：快照 [...(deps.nonces === undefined ? {} : { nonces: deps.nonces }),] 现在是 [if (gate !== null && gate !== TOKEN_PASS) return gate;] | INDEX.md>app.js:675 目标行内容与快照不符：快照 [<span class="pill ${statusClass(tk.status)}">${esc(tk.status)}</span>] 现在是 [if (orphan.items.length) out.push(orphan);] | 0012-org-versioned-commit-and-unwritten-graph-version.md>packages/contracts/src/api.ts:40 目标行内容与快照不符：快照 [export const API_ENDPOINTS = [] 现在是 [*/] | 0012-org-versioned-commit-and-unwritten-graph-version.md>packages/contracts/src/api.ts:99 目标行是空行，引用没有内容可指 | 0015-charter-editor-and-two-sources-of-budget.md>http/app.ts:1091 目标行内容与快照不符：快照 [consumed_cents: Number(r["consumed_cents"] ?? 0),] 现在是 [// 而服务端根本还没到那个点。时刻一律以服务端为准（同一个理由见 SSE 快照里的 asOfMs）。] | 0030-im-binding-identity-and-three-holes-i-did-not-design.md>contracts/src/api.ts:40 目标行内容与快照不符：快照 [export const API_ENDPOINTS = [] 现在是 [*/] | 0030-im-binding-identity-and-three-holes-i-did-not-design.md>contracts/src/api.ts:73 目标行内容与快照不符：快照 [export const IMPLEMENTED_ENDPOINTS: readonly ApiEndpoint[] = [] 现在是 [* 它【不】意味着「渲染进程能调到它」—— 那是 desktop/ipc-surface.ts 的 EXPOSED_ENDPOINTS] | 0030-im-binding-identity-and-three-holes-i-did-not-design.md>app.ts:539 目标行内容与快照不符：快照 [const impossible: never = routeHit;] 现在是 [// ★ 这一段本轮被 tsc 逼着重写过，因为原来那版是【反向】的穷尽守卫。] | 0030-im-binding-identity-and-three-holes-i-did-not-design.md>contracts/src/api.ts:40 目标行内容与快照不符：快照 [export const API_ENDPOINTS = [] 现在是 [*/] | 0030-im-binding-identity-and-three-holes-i-did-not-design.md>contracts/src/api.ts:73 目标行内容与快照不符：快照 [export const IMPLEMENTED_ENDPOINTS: readonly ApiEndpoint[] = [] 现在是 [* 它【不】意味着「渲染进程能调到它」—— 那是 desktop/ipc-surface.ts 的 EXPOSED_ENDPOINTS] | 0037-worker-import-in-threads-and-my-first-fix-was-wrong.md>assemble.ts:460 目标行内容与快照不符：快照 [if (!existsSync(dbPath)) {] 现在是 [const acquire =] | 0042-today-view-and-putting-the-criteria-on-the-server-side.md>packages/web/public/app.js:445 目标行内容与快照不符：快照 [attention === null ? false : attention.includes(tk.status) || overBudget(tk);] 现在是 [const t = await getToday(false);] | 0050-abandoned-task-never-resumes-and-a-knob-that-does-not-exist.md>app.js:675 目标行内容与快照不符：快照 [<span class="pill ${statusClass(tk.status)}">${esc(tk.status)}</span>] 现在是 [if (orphan.items.length) out.push(orphan);] | 0050-abandoned-task-never-resumes-and-a-knob-that-does-not-exist.md>assemble.ts:290 目标行内容与快照不符：快照 [readonly driverMaxAttempts?: number;] 现在是 [readonly driverPumpVia?: (] | 0050-abandoned-task-never-resumes-and-a-knob-that-does-not-exist.md>assemble.ts:1913 目标行内容与快照不符：快照 [* ⚠ 这里【不】列驱动器的按格尝试上限（maxAttempts）与每任务轮数（maxTurns）：] 现在是 [taskLimitCents: args.taskLimitCents!,] | 0050-abandoned-task-never-resumes-and-a-knob-that-does-not-exist.md>app.js:528 目标行内容与快照不符：快照 [msg: "这台 Hub 没开驱动器：想法停在 agent 那一格之后，不会有任何东西去推它。要自动推进请带 --driver-pump 起 Hub，或手工 hub work。",] 现在是 [* 而真相可能是"这台 Hub 从来不推任何东西"或"心跳早就停了"。][39m
+
+[36m [2m❯[22m test/arch/doc-refs.test.ts:[2m1022:7[22m[39m
+    [90m1020|[39m         [33m.[39m[34mmap[39m((p) [33m=>[39m p[33m.[39mkey [33m+[39m [32m" "[39m [33m+[39m p[33m.[39mwhy)
+    [90m1021|[39m         [33m.[39m[34mjoin[39m([32m" | "[39m)[33m,[39m
+    [90m1022|[39m     )[33m.[39m[34mtoEqual[39m([32m""[39m)[33m;[39m
+    [90m   |[39m       [31m^[39m
+    [90m1023|[39m     [90m// 引用条数下界：解析被误写成恒真时，提取会变 0，这条会先红。[39m
+    [90m1024|[39m     [34mexpect[39m([33mObject[39m[33m.[39m[34mkeys[39m([33mSNAP[39m)[33m.[39mlength)[33m.[39m[34mtoBeGreaterThanOrEqual[39m([34m15[39m)[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/3]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m test/arch/lint-baseline.test.ts[2m > [22mlint 基线：真仓库那一半[2m > [22m`pnpm lint` 今天的 error 全部在基线内，且读数本身可信
+[31m[1mAssertionError[22m: lint 基线红，且读数不可信的可能先排除：filesChecked=320 errors=297: expected '`pnpm lint` 的 error 比基线多了（format 161→…' to be '' // Object.is equality[39m
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[31m+ `pnpm lint` 的 error 比基线多了（format 161→166；assist/source/organizeImports 117→122）。这一发是棘轮：只许减不许增。要么把新增的那几条改掉，要么在 LINT_BASELINE 里点名并说清为什么值得。[39m
+
+[36m [2m❯[22m test/arch/lint-baseline.test.ts:[2m180:7[22m[39m
+    [90m178|[39m         [32m" errors="[39m [33m+[39m
+    [90m179|[39m         run[33m.[39msummary[33m.[39merrors[33m,[39m
+    [90m180|[39m     )[33m.[39m[34mtoBe[39m([32m""[39m)[33m;[39m
+    [90m   |[39m       [31m^[39m
+    [90m181|[39m   })[33m;[39m
+    [90m182|[39m })[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/3]⎯[22m[39m
+
+
+[2m Test Files [22m [1m[31m3 failed[39m[22m[2m | [22m[1m[32m33 passed[39m[22m[90m (36)[39m
+[2m      Tests [22m [1m[31m3 failed[39m[22m[2m | [22m[1m[32m525 passed[39m[22m[90m (528)[39m
+[2m   Start at [22m 00:17:09
+[2m   Duration [22m 9.30s[2m (transform 8.66s, setup 0ms, import 13.80s, tests 22.60s, environment 2ms)[22m
+

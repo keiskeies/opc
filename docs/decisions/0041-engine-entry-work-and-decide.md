@@ -26,6 +26,10 @@ Task 3.x 那一阵写完的东西：
 
 `HUMAN_EDGES` 那张表把三条人类出边算好了、`humanEdge()` 能查出来，而 `grep` 出来的命中只有
 表本身、那句人席提示、和一条「落点合法」的表扫描 —— **没有人调它**。
+【round321 复核：「没有人调它」已过期 —— 0044/0046/0048 接人席卡后，`humanEdge()`
+与 `HUMAN_EDGES` 都有生产读者：`dispatch.ts:257` 定义且被 approve 的人席推进读、
+`seat-card.ts:71` 的 `needsSeatCard`（判「要不要给人席建卡」）、`cli.ts:442` 判据。
+写作时点的 grep 读数保留，接线事实以当前 src 为准。】
 `approval_type='charter'` 这个取值在枚举里、在 role-memory 的分类表里、在 LangGraph 那条直通桩节点里，
 **没有任何代码建这种卡**。
 

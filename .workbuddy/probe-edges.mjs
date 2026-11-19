@@ -1,0 +1,11 @@
+import { chromium } from "@playwright/test";
+const b = await chromium.launch();
+const p = await b.newPage({ viewport: { width: 1440, height: 1000 } });
+await p.goto("http://127.0.0.1:9797/#/org", { waitUntil: "domcontentloaded" });
+await p.waitForSelector("#view *", { timeout: 8000 }).catch(() => {});
+await p.waitForTimeout(900);
+const t = await p.locator("#view").innerText();
+console.log("委派边行：" + (t.match(/委派边[^\n]*/) ?? ["读不到"])[0]);
+console.log("边元素数：" + (await p.locator("#view .edge").count()));
+console.log("版本号：" + ((t.match(/graph_version (\d+)/) ?? [])[1] ?? "?"));
+await b.close();

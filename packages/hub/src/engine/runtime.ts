@@ -28,7 +28,12 @@
  */
 import type { DatabaseSync } from "node:sqlite";
 import { randomUUID } from "node:crypto";
-import type { OrgGraph } from "@opc/contracts";
+import {
+  harnessDefaultsFor,
+  harnessRequestSchema,
+  type HarnessRequest,
+  type OrgGraph,
+} from "@opc/contracts";
 import {
   usdToCents,
   resolveCeoRoleId,
@@ -37,8 +42,11 @@ import {
   type DispatchTask,
   type TurnOutcome,
 } from "./dispatch.js";
-import { runRole } from "./claude.js";
+import type { RoleRunResult } from "./claude.js";
+import { retryableWithoutCost } from "./claude.js";
 import { runTurnWithRetry } from "./turn-retry.js";
+import type { GatewayRunnerDeps } from "../harness/gateway-runner.js";
+import { runViaGateway } from "../harness/gateway-runner.js";
 import {
   ADD_CONSUMED_SQL,
   ENSERT_BUDGET_SQL,
@@ -51,6 +59,7 @@ import { isTaskOwnerOf, readRoleMemory } from "../memory/role-memory.js";
 import { memoryPromptSections, PROMPT_MEMORY_LIMIT } from "../memory/prompt.js";
 import { requireScopeDb } from "../checkpoint/tx-scope.js";
 import type { HubWriter } from "../db/write-queue.js";
+import { appendAudit, type AuditRow } from "../events/recorder.js";
 import type { DomainEvent, EventBus } from "../events/bus.js";
 import type { TaskState } from "../graph/status.js";
 
@@ -377,24 +386,111 @@ export function makeRuntime(d: RuntimeDeps): EngineRuntime {
     },
 
     runTurn: async (i): Promise<TurnOutcome> => {
+      // ── O6 Step B（round312）：角色轮改走 harness/gateway ─────────────────
+      // 接线前这里是 `runTurnWithRetry(runRole, …)`，gateway 那四层（能力/禁止项/档位/
+      // 越界）与它的两类审计行【一行都不经过】。现在请求与授权各走各的装配：
+      //  · 授权侧（被比侧）= 岗位书的 harness_defaults（buildGatewayDeps 的口径），
+      //    角色【没有岗位书】时走显式 read-only + 空基线 —— 不给 charterHarnessDefaults:
+      //    undefined，那是 buildGatewayDeps 的装配期抛条件（「岗位书没接」），而
+      //    「有角色没岗位书」是 rolePrompt 第 ② 支明说过的合法现状（NO_CHARTER_LINE），
+      //    把它炸掉等于为了一个口径把现状改出新的失败模式。显式给同值档位是诚实的：
+      //    这句话的真意是「没有岗位书 ⇒ 按最严档跑」，不是「必须有一个岗位书才配跑」。
+      //  · 请求侧 = 同一份 entry 的生效值（sandbox/approval_policy/allowed_tools/
+      //    forbidden_flags）。今天运行时没有「本轮追加禁令」的通道，所以生效 == 基线；
+      //    forbiddenFlagBlock 的「不许缩短」判的是【未来】改请求侧的人。
+      // 审计行按 gateway 的同步 audit 槽【缓冲】，runTurn 结束在自己的 node() 里落库：
+      //  · 不骑 dispatch 那个事务 —— gateway 那两类的含义是「这次外部调用发生了」，
+      //    与「状态边合不合法」无关，捆进状态守卫的事务里，守卫回滚会把「调用发生过」
+      //    一起抹掉（§12.7 第 4 层要的反面；与 recordTurn 不写进 dispatch 事务同一条理由）。
+      //  · slot 本身是同步签名，写库要 await —— 同步槽 + 异步写只有缓冲这一种接法。
+      // ⚠ 被 retryableWithoutCost 判「重试」的那几次尝试【不落】缓冲：进程从未存在 ⇒
+      //   「发生过一次调用」是假的（turn-retry.ts 文件头的透明性主张，扩判据之前它必须真）。
+      // settle / checkBudget 两个注入槽【仍然没接】：钱由 onCost 三句记（round272 收敛后
+      // 只剩一份 SQL），花钱的门前移在泵侧（underTaskBudgetSql）—— 在这里接 settle
+      // 是第二份账。这一格不是遗漏，是接线范围的边界，台账 round312 有名字。
+      const buf: AuditRow[] = [];
+      const pending: AuditRow[] = [];
+      const audit = (row: AuditRow): number => {
+        buf.push(row);
+        // 占位 id：gateway 只把它当「写过了」的回执（auditEventIds 的语义），
+        // 真的 events.id 在 flush 那一刻才存在。今天 callHarness 不读返回值做判定。
+        return buf.length;
+      };
+      const charter = readLatestCharter(read(), i.role);
+      const entry = harnessDefaultsFor(charter?.harnessDefaults, "claude-code");
+      const runnerDeps: GatewayRunnerDeps =
+        charter === undefined
+          ? { audit, grantedSandbox: "read-only", grantedForbidden: [] }
+          : { audit, charterHarnessDefaults: charter.harnessDefaults ?? {} };
+      const req: HarnessRequest = harnessRequestSchema.parse({
+        task_id: i.taskId,
+        role_id: i.role,
+        instruction: i.prompt,
+        workspace: d.cwd,
+        sandbox: entry?.sandbox ?? "read-only",
+        approval_policy: entry?.approval_policy ?? "never",
+        allowed_tools: entry?.allowed_tools ?? [],
+        forbidden_flags: entry?.forbidden_flags ?? [],
+        requested_args: [],
+        // 沿用【装配档】d.maxBudgetUsd 而不是 i.maxBudgetUsd：接线前就是这个形状
+        // （dispatch 传的那格两路同源），换成 i 是另一件事，不在本轮。
+        max_budget_usd: d.maxBudgetUsd,
+        ...(i.resumeSessionId === null || i.resumeSessionId === ""
+          ? {}
+          : { resume_session_id: i.resumeSessionId }),
+      });
       // 重试外壳见 engine/turn-retry.ts 文件头（判据只有一处：claude.ts 的
       // retryableWithoutCost）。这一层只负责两格【只有装配层知道】的事：
       //  sleep 用真的 setTimeout（生产就要真等），warn 走 console.warn。
       // 注入两格都是【可选】的：三个装配点（work.ts / driver-pump / charter-pump）
       // 因此一行都不用改 —— 它们要的是默认行为，而默认值写在这里而不是散落三处。
-      const r = await runTurnWithRetry(runRole, {
-        prompt: i.prompt,
-        rolePrompt: i.rolePrompt,
-        ...(i.resumeSessionId === null || i.resumeSessionId === ""
-          ? {}
-          : { resumeSessionId: i.resumeSessionId }),
-        cwd: d.cwd,
-        maxBudgetUsd: d.maxBudgetUsd,
-        ...(d.bin === undefined ? {} : { bin: d.bin }),
-      }, {
-        sleep: d.sleep ?? ((ms) => new Promise<void>((res) => setTimeout(res, ms))),
-        onRetryWarn: d.onRetryWarn ?? ((m) => console.warn("[hub] " + m)),
-      });
+      const r = await runTurnWithRetry(
+        async (): Promise<RoleRunResult> => {
+          buf.length = 0;
+          const rr = await runViaGateway(
+            {
+              ...(d.bin === undefined ? {} : { bin: d.bin }),
+              ...(d.harnessVersion === undefined
+                ? {}
+                : { version: d.harnessVersion }),
+              // 身份从这条链走到 CLI 的 --append-system-prompt：每轮显式给，
+              // 缺省 "" 那条诚实形状在 runtime 路线上【永远不出现】。
+              rolePrompt: i.rolePrompt,
+            },
+            req,
+            runnerDeps,
+          );
+          if (!retryableWithoutCost(rr)) pending.push(...buf);
+          return rr;
+        },
+        {
+          prompt: i.prompt,
+          rolePrompt: i.rolePrompt,
+          cwd: d.cwd,
+          maxBudgetUsd: d.maxBudgetUsd,
+        },
+        {
+          sleep: d.sleep ?? ((ms) => new Promise<void>((res) => setTimeout(res, ms))),
+          onRetryWarn: d.onRetryWarn ?? ((m) => console.warn("[hub] " + m)),
+        },
+      );
+      // flush 自己开一个 node()：在 runTurn 返回【之后】、dispatch 的事务【之外】。
+      // 失败不冒泡（recordTurn 的同一条立场：留痕落不下去时，冒泡会诱导驱动方
+      // 重跑整轮 = 再烧一次 token 去补审计行），但要说得响亮。
+      if (pending.length > 0) {
+        try {
+          await d.writer.node(() => {
+            const db = requireScopeDb("engine.runtime.flushGatewayAudit");
+            for (const row of pending) appendAudit(db, row, now);
+            return pending.length;
+          });
+        } catch (e) {
+          console.warn(
+            "[hub] gateway 审计行落库失败（这一轮的结果与账照常走，缺的是留痕）：" +
+              (e instanceof Error ? e.message : String(e)),
+          );
+        }
+      }
       return {
         ok: r.ok,
         text: r.text,

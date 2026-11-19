@@ -715,6 +715,17 @@ describe("⑤ 生命周期", () => {
     expect(() => openEventStream({ token: TOKEN, hubAddress: "localhost:abc", push: c.push })).toThrow(/host:port/);
   });
 
+  it("token 空串 ⇒ 构造时就抛，不签出一个必然 401 的头", () => {
+    const c = collector();
+    // 0052 §7-2 登记的分母缺口：事件流的整组测试全部注入固定 token，
+    // 空 token 只测过 makeSignedFetch 那条路。而 connect() 每次都用
+    // signedHeaders（里面的 assertUsableToken 是「每次签时」的那一次调用时机），
+    // 且 connect() 在 openEventStream 返回之前同步执行 ⇒ 这发与上面
+    // hubAddress 那发同形状：配置缺失在构造时当面说，不进重连曲线。
+    expect(() => openEventStream({ token: "", hubAddress: "127.0.0.1:9999", push: c.push })).toThrow(/空串/);
+    expect(() => openEventStream({ token: "   ", hubAddress: "127.0.0.1:9999", push: c.push })).toThrow(/空串/);
+  });
+
   it("initialCursor 让壳【冷启动就续订】（渲染进程重挂后不该从头重放）", async () => {
     const h = await startHub((cursor, conn) => {
       conn.push({ event: "TaskStateChanged", data: "{}", id: String(cursor + 1) });

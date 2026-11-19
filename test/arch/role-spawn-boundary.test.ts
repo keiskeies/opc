@@ -35,7 +35,9 @@ import {
 /** 一份【全都好】的夹具底座。每发变异只在这一份上改一处。 */
 const GOOD_ADAPTER = [
   "/**",
-  " * ⚠ 今天真的员工身上唯一生效的安全边界是本文件那两个参数 ⚠",
+  // ⚡ round312：措辞跟着 HONESTY_MARK 一起换（原「唯一生效的安全边界」→「兜住写文件」，
+  // 理由写在 role-spawn-boundary.ts 那个常量头上）。夹具与真文件说同一句话是这条 canary 的前提。
+  " * ⚠ 写文件这一维，今天兜住写文件的还是本文件那一个参数 ⚠",
   " */",
   'export const ARGS = ["--permission-mode", "plan", "--output-format", "json"];',
   "export const p = spawn(bin, ARGS, { cwd, env });",
@@ -80,7 +82,7 @@ describe("安全边界守卫：四格判据（合成变异）", () => {
     // "plan" 仍在代码区里，只是不再紧跟参数名 —— 例如有人把参数表拆成两个常量。
     const loose = [
       "/**",
-      " * ⚠ 今天真的员工身上唯一生效的安全边界是本文件那两个参数 ⚠",
+      " * ⚠ 写文件这一维，今天兜住写文件的还是本文件那一个参数 ⚠",
       " */",
       'export const FLAG = "--permission-mode";',
       'export const OTHER = "--output-format";',
@@ -97,12 +99,12 @@ describe("安全边界守卫：四格判据（合成变异）", () => {
 
   it("B3：诚实标注挪到代码之后 ⇒ 红（边界没变，读的人被误导了）", () => {
     const noMark = GOOD_ADAPTER.replace(
-      " * ⚠ 今天真的员工身上唯一生效的安全边界是本文件那两个参数 ⚠\n",
+      " * ⚠ 写文件这一维，今天兜住写文件的还是本文件那一个参数 ⚠\n",
       "",
     );
     const after =
       noMark +
-      "\n/** 补一句：今天真的员工身上唯一生效的安全边界是本文件那两个参数 */\n";
+      "\n/** 补一句：写文件这一维，今天兜住写文件的还是本文件那一个参数 */\n";
     expect(red(facts({ adapter: after }))).toContain("第一行代码之前");
     // 反向对照一：同一份夹具【整句去掉】⇒ 也只红这一格（红因不是别的格）。
     expect(checkBoundary(facts({ adapter: noMark }))).toHaveLength(1);
@@ -114,7 +116,7 @@ describe("安全边界守卫：四格判据（合成变异）", () => {
         checkBoundary(
           facts({
             adapter:
-              "/**\n * 无关的一段\n * 又一行\n *\n * 今天真的员工身上唯一生效的安全边界在这里\n */\n" +
+              "/**\n * 无关的一段\n * 又一行\n *\n * 写文件这一维，兜住写文件的就是这一个参数\n */\n" +
               'export const ARGS = ["--permission-mode", "plan"];\n' +
               "export const p = spawn(bin, ARGS);",
           }),

@@ -1,0 +1,40 @@
+
+[1m[30m[46m RUN [49m[39m[22m [36mv4.1.12 [39m[90mD:/item/opc[39m
+
+(node:73016) [DEP0190] DeprecationWarning: Passing args to a child process with shell option true can lead to security vulnerabilities, as the arguments are not escaped, only concatenated.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+(node:67076) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ [31m❯[39m packages/hub/test/budget/hard-stop-gate.test.ts [2m([22m[2m10 tests[22m[2m | [22m[31m1 failed[39m[2m)[22m[33m 441[2mms[22m[39m
+     [32m✓[39m ⭐ 超预算 + hard_stop=1 ⇒ 不进候选【且】进 blocked（这是下面几条的分母）[32m 25[2mms[22m[39m
+     [32m✓[39m ⭐ 超预算 + hard_stop=0 ⇒ 进候选【且】不进 blocked[32m 24[2mms[22m[39m
+     [32m✓[39m ⭐ 放行是真的【起了子进程】：跑一轮泵 ⇒ 起草发生、钱真花出去[32m 33[2mms[22m[39m
+     [32m✓[39m ⭐ 同一份钱、同一道门，只差 hard_stop ⇒ 一个起草一个被挡（对照）[32m 66[2mms[22m[39m
+     [32m✓[39m ⭐ 没有预算行 ⇒ 照旧放行（缺省读成 1，不读成 0）[32m 35[2mms[22m[39m
+     [32m✓[39m ⭐⭐ hard_stop=0 而【状态根本不该被驱动】⇒ 仍不许进候选（挡的是被摘掉的括号）[32m 65[2mms[22m[39m
+     [32m✓[39m ⭐ 候选侧与阻塞侧【同源】：任何 hard_stop 取值下两档恰好互补[32m 27[2mms[22m[39m
+[31m     [31m×[31m ⭐ 驱动器那一支同样读 hard_stop（同一个谓词的另一个读者）[39m[32m 44[2mms[22m[39m
+     [32m✓[39m ⭐ 看板那一格：hard_stop=0 之后不再报 no_budget（读侧三档的第三档）[32m 42[2mms[22m[39m
+     [32m✓[39m 谓词仍是【一条 ?】：加 hard_stop 不许偷加绑参[32m 0[2mms[22m[39m
+
+[31m⎯⎯⎯⎯⎯⎯⎯[39m[1m[41m Failed Tests 1 [49m[22m[31m⎯⎯⎯⎯⎯⎯⎯[39m
+
+[41m[1m FAIL [22m[49m packages/hub/test/budget/hard-stop-gate.test.ts[2m > [22mbudgets.hard_stop = 0 让花钱的门放行（O7 动作 3 的读方）[2m > [22m⭐ 驱动器那一支同样读 hard_stop（同一个谓词的另一个读者）
+[31m[1mError[22m: datatype mismatch[39m
+[36m [2m❯[22m driverCandidates packages/hub/test/budget/hard-stop-gate.test.ts:[2m166:29[22m[39m
+    [90m164|[39m [35mfunction[39m [34mdriverCandidates[39m(w[33m:[39m [33mWorld[39m[33m,[39m taskLimitCents[33m:[39m number)[33m:[39m string[] {
+    [90m165|[39m   [35mconst[39m sql [33m=[39m [34mdriverCandidatesSql[39m([33mDRIVER_ELIGIBLE_STATES[39m)[33m;[39m
+    [90m166|[39m   return (w.db.prepare(sql).all(...(DRIVER_ELIGIBLE_STATES as unknown[…
+    [90m   |[39m                             [31m^[39m
+    [90m167|[39m     [33mString[39m(x[[32m"id"[39m])[33m,[39m
+    [90m168|[39m   )[33m;[39m
+[90m [2m❯[22m packages/hub/test/budget/hard-stop-gate.test.ts:[2m312:12[22m[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯[22m[39m
+
+
+[2m Test Files [22m [1m[31m1 failed[39m[22m[90m (1)[39m
+[2m      Tests [22m [1m[31m1 failed[39m[22m[2m | [22m[1m[32m9 passed[39m[22m[90m (10)[39m
+[2m   Start at [22m 01:32:59
+[2m   Duration [22m 1.29s[2m (transform 189ms, setup 0ms, import 284ms, tests 441ms, environment 0ms)[22m
+

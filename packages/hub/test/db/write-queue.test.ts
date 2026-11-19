@@ -5,7 +5,6 @@ import type {
   CheckpointMetadata,
 } from "@langchain/langgraph-checkpoint";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { fixtureTmp } from "../fixtures/fixture-dir.js";
 import { requireScopeDb } from "../../src/checkpoint/tx-scope.js";
 import { openDb } from "../../src/db/driver.js";
 import { migrate } from "../../src/db/migrate.js";
@@ -14,6 +13,7 @@ import {
   assertSingleStatement,
   WriteQueue,
 } from "../../src/db/write-queue.js";
+import { fixtureTmp } from "../fixtures/fixture-dir.js";
 
 /**
  * Task 0.5　单写者写队列（规格 §5.5、附录 C.2）。
@@ -68,7 +68,9 @@ const countOf = async (q: WriteQueue, table: string): Promise<number> => {
   const rows = await q.read<{ c: number | bigint }>(
     "SELECT count(*) AS c FROM " + table,
   );
-  return Number(rows[0].c);
+  // count(*) 恒出一行；`?.` 只喂 noUncheckedIndexedAccess（先例：
+  // acceptance/phase3.test.ts 的 rows[0]?.["actor_type"] 那一族），不改取值语义。
+  return Number(rows[0]?.c);
 };
 
 /**
@@ -288,7 +290,13 @@ describe("tx 的边界", () => {
         );
         // 在同一事务内自读：能看到说明第一条真的执行了，而非被跳过
         seen.push(
-          Number(db.prepare("SELECT count(*) AS c FROM audit").get().c),
+          Number(
+            (
+              db.prepare("SELECT count(*) AS c FROM audit").get() as {
+                c: number | bigint;
+              }
+            ).c,
+          ),
         );
         throw new Error("故意失败");
       })
@@ -314,9 +322,10 @@ describe("tx 的边界", () => {
       "SELECT b, j FROM blobs",
     );
     expect(rows).toHaveLength(1);
-    expect(rows[0].b, "BLOB 必须以字节到达").toBeInstanceOf(Uint8Array);
-    expect(Array.from(rows[0].b)).toEqual(Array.from(bytes));
-    expect(rows[0].j).toBe('{"k":1}');
+    // 上一发已钉死恰有一行；`?.` 只喂 noUncheckedIndexedAccess，不改取值语义。
+    expect(rows[0]?.b, "BLOB 必须以字节到达").toBeInstanceOf(Uint8Array);
+    expect(Array.from(rows[0]?.b ?? [])).toEqual(Array.from(bytes));
+    expect(rows[0]?.j).toBe('{"k":1}');
   });
 
   it("参数少绑必须抛错（node:sqlite 自己【不报】这个错）", async () => {
@@ -576,12 +585,12 @@ describe("read 走独立连接（规格 §5.5）", () => {
       "SELECT count(*) AS c FROM bind WHERE t = ?",
       ["a' OR 1=1 --"],
     );
-    expect(Number(hit[0].c)).toBe(1);
+    expect(Number(hit[0]?.c)).toBe(1);
     const none = await q.read<{ c: number }>(
       "SELECT count(*) AS c FROM bind WHERE t = ?",
       ["不存在的值"],
     );
-    expect(Number(none[0].c)).toBe(0);
+    expect(Number(none[0]?.c)).toBe(0);
   });
 
   it("read 不排队：外层写事务持锁时仍能读（读不该被写队列饿住）", async () => {

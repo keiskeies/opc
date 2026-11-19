@@ -389,12 +389,72 @@ export const HARNESS_ID_ALIASES: Readonly<Record<string, HarnessId>> = {
   qoder: "qoder",
 };
 
-/** 取某角色岗位书里针对某个 harness 的默认参数。未声明 ⇒ undefined（不是空对象）。 */
+/**
+ * 把 `unrecognizedHarnessKeys` + `shadowedHarnessKeys` 的读数拼成【一句】能照着改的话。
+ *
+ * ⚠ 这一句【只有一份】，被两处用：charterSchema 的 superRefine（写入期 ⇒ 422）
+ * 与 `harnessDefaultsFor`（读取期 ⇒ 抛）。在两处各写一遍同一个解释，就是本仓最贵
+ * 那一族失效（两份抄本）：改了其中一处，另一处的报错会开始说一套做一套。
+ *
+ * @returns 没有问题 ⇒ `null`（不是空串 —— 调用方要能一眼分清「没问题」与「有问题但消息是空」）。
+ */
+export function harnessDefaultsKeyProblem(
+  raw: Record<string, unknown> | undefined,
+): string | null {
+  const unknown = unrecognizedHarnessKeys(raw);
+  const shadowed = shadowedHarnessKeys(raw);
+  if (unknown.length === 0 && shadowed.length === 0) return null;
+  const parts: string[] = [];
+  if (unknown.length > 0) {
+    parts.push(
+      "【没有任何读取方】的键 [" +
+        unknown.join(", ") +
+        "]：读取侧只认 HARNESS_ID_ALIASES 里那些名字，认不出的键会被【整个跳过】",
+    );
+  }
+  if (shadowed.length > 0) {
+    parts.push(
+      "同一家写了【两种写法】，其中一格【永远读不到】：" + shadowed.join("；"),
+    );
+  }
+  return (
+    "harness_defaults 配了【读不到】的格 —— " +
+    parts.join(" ｜ ") +
+    "。两种情形的失效方向【不一样】，而这正是要拦的理由：sandbox 那一格读不到 ⇒ " +
+    "落回 read-only（比要求的严，无害）；forbidden_flags 那一格读不到 ⇒ " +
+    "落回 []（【岗位书写了的禁令一条都不生效，且全绿】）。合法键：" +
+    Object.keys(HARNESS_ID_ALIASES).join(" / ") +
+    "。修法二选一：① 每家只留【一个】上表里的键名（下划线与连字符都合法，留一个）；" +
+    "② 删掉那一格。"
+  );
+}
+
+/** 取某角色岗位书里针对某个 harness 的默认参数。未声明 ⇒ undefined（不是空对象）。
+ *
+ * ⚠⚠ 【键级】判据在读取期也跑一遍（harnessDefaultsKeyProblem），这不是重复校验：
+ * 写入期那一遍（charterSchema）只挡【从那一刻之后】的写入，而本模块的读取侧
+ * 读的是【库里已经存着的那份】—— charter/store.ts 的 readCharterConfig 明写着
+ * 「不重解析」，并把代价写在它自己文件头：「schema 后来收紧了」会让历史版本
+ * 读回来是 Charter 类型而实际缺字段。本仓【没有迁移器】，所以「今天加一条写入期
+ * 判据」对昨天存下的那份岗位书一个字都改不动 —— 而这一格失效方向是【开】
+ * （forbidden_flags 落回 []）。⇒ 读取期这一遍是那条历史数据的唯一兜底。
+ * 抛而不是忽略：与下面「值写坏 ⇒ 抛」完全同一个立场，键与值在失效方向上是一件事。
+ */
 export function harnessDefaultsFor(
   raw: Record<string, unknown> | undefined,
   id: HarnessId,
 ): HarnessDefaultEntry | undefined {
   if (raw === undefined) return undefined;
+  const keyProblem = harnessDefaultsKeyProblem(raw);
+  if (keyProblem !== null) {
+    throw new Error(
+      "岗位书 harness_defaults 读不出【该用哪一格】：" +
+        keyProblem +
+        "。刻意【不静默跳过】：跳过 = 这一格不存在，而它的缺省是" +
+        "forbidden_flags: []（禁令消失而全绿）。这一版多半是在键级判据生效之前" +
+        "存进库的 —— 修法是新存一版岗位书，不是把判据放宽。",
+    );
+  }
   // 反查：先按原键试，再按别名表里指向同一 id 的那些键试。
   const keys: string[] = Object.keys(HARNESS_ID_ALIASES).filter(
     (k: string): boolean => HARNESS_ID_ALIASES[k] === id,
@@ -420,3 +480,88 @@ export function harnessDefaultsFor(
   }
   return undefined;
 }
+
+/**
+ * 列出 `harness_defaults` 里【没有任何读取方会读到】的键。
+ *
+ * ── 这一发补的是 harnessDefaultsFor 自己的失效面 ──────────────────────
+ * 上面那个函数对【认得的键】里写坏的条目是【抛】的（注释写明「刻意不忽略」），
+ * 而对【认不出的键】是 `return undefined` —— 同一份配置里两种失效方向。后者今天
+ * 有真实代价，且两个方向不一样：`sandbox` 认不出 ⇒ 落回 read-only（比想要的严，
+ * 失败方向是【关】）；`forbidden_flags` 认不出 ⇒ 落回 `[]`（【失败方向是开】——
+ * 岗位书写了禁令而那条禁令一条都不生效，且全绿）。实测复算见
+ * `.workbuddy/probe331-harness-key.probe.mts`。
+ *
+ * ── 合法键集【派生自 HARNESS_ID_ALIASES】，不是第二份名单 ──────────────
+ * 判「哪些键有人读」若另抄一份键名清单，就是一段话写两处（本仓最贵的那一族失效）。
+ * 读取侧解析说明符用的就是这张别名表 ⇒ 可写集 == 可读集 是【结构上】成立的：
+ * 将来接第四家时只需往别名表加一行，本判据自动跟上；从别名表删一家，
+ * 它的键也自动变成「没人读」而被拒。
+ *
+ * ⚠ 用 Object.hasOwn 而不是 `HARNESS_ID_ALIASES[k] === undefined`：后者对
+ * `toString` / `constructor` 这类**原型链上的名字**取到的是继承来的函数，
+ * 于是会把一个【根本没人读】的键判成合法 —— 恰好是这条判据要抓的形状。
+ * 别名表是对象字面量（原型是 Object.prototype），这个洞是真的，不是假设。
+ *
+ * ⚠⚠ 本函数判的是「这个键名在不在别名表里」，**不是**「今天有没有一条生产路线
+ * 会去读它」，而这两件事现在【不等价】：表里 `codex` / `qoder` 两格今天没有任何
+ * 生产调用方 —— `runViaGateway` 直接 new `ClaudeCliAdapter`，读取侧三处
+ * （runtime.ts / gateway-runner.ts 的 buildGatewayDeps）都硬编码 "claude-code"，
+ * 而会按 id 取格的路由 `routeTask`（routing.ts，它接 `charterCeiling`）
+ * 【零生产调用方】（那个文件自己的横幅就写着「今天一行都不执行」）。
+ * ⇒ 一份只写 `{codex: {...}}` 的岗位书在这里是【合法而当下无人读】，实测读数见
+ * `.workbuddy/probe331b-harness-shadow.probe.mts` 第 3 格（REJECT 之外那一格：
+ * 键合法、schema 放行、读回 undefined）。
+ * 这**不是**漏判，是口径边界，写清楚免得下一个人把它当 bug 顺手收紧：
+ * 键名合法性与「哪家已接适配器」是两件事（`HARNESS_IDS` 里 qoder 也还没适配器，
+ * 见 adapters 目录）。收紧成「只许 claude-code」会把接第二家的路堵死，而那正是
+ * 这一格存在的理由。真正要盯的是**另一侧**：接 codex 适配器时，读取点必须换成
+ * 按 id 取格（`harnessDefaultsFor(raw, plan.harnessId)`），否则新接的那家
+ * 读的还是 claude-code 那一格 —— 那才是这份配置下一个会静默错的地方。
+ *
+ * @returns 没人读的键名（保持原顺序）；`raw === undefined` ⇒ `[]`（没配 ≠ 配错）。
+ */
+export function unrecognizedHarnessKeys(
+  raw: Record<string, unknown> | undefined,
+): string[] {
+  if (raw === undefined) return [];
+  return Object.keys(raw).filter(
+    (k: string): boolean => !Object.hasOwn(HARNESS_ID_ALIASES, k),
+  );
+}
+
+/**
+ * 列出同一家的【两种写法同时出现】时会被【静默丢掉】的那些键名。
+ *
+ * ── 为什么这是上一条判据的同一族，而不是另一件事 ──────────────────────
+ * `harnessDefaultsFor` 按别名表的**声明顺序**逐个试键，命中即 return。所以
+ * 一份同时写了 `claude-code` 与 `claude_code` 的岗位书里，后写那一格
+ * 【永远读不到】，且不报错、不写审计 —— 与「键名拼错 ⇒ 那格消失」是同一个失效，
+ * 差别只在这里连「认不出」这个线索都没有：两个键名都是合法的。
+ * 后果仍分两个方向（同上一条）：sandbox 那一格被盖掉 ⇒ 落回更严的档（无害方向）；
+ * forbidden_flags 那一格被盖掉 ⇒ 岗位书写的禁令少一条，且全绿。
+ *
+ * ⚠ 判的是【同一家两种写法】，不是【多家各写一格】——
+ * `{ claude_code: {...}, codex: {...} }` 是合法的（两家都在跑的可能路上），
+ * 只有解析到【同一个 id】的多个键同时有值才是「一格配了两次」。
+ *
+ * @returns 会被丢掉的那些键名（每家保留别名表里排最前的那个为胜者，报其余）；
+ *          `raw === undefined` ⇒ `[]`。
+ */
+export function shadowedHarnessKeys(
+  raw: Record<string, unknown> | undefined,
+): string[] {
+  if (raw === undefined) return [];
+  const seen: Map<string, string> = new Map();
+  const out: string[] = [];
+  // 遍历的是【别名表的顺序】而不是 raw 的键序：胜者必须由别名表定，不能由
+  // CEO 在 YAML 里写的先后定 —— 否则「哪一份生效」随编辑顺序漂。
+  for (const [key, id] of Object.entries(HARNESS_ID_ALIASES)) {
+    if (!Object.hasOwn(raw, key)) continue;
+    const winner = seen.get(id);
+    if (winner === undefined) seen.set(id, key);
+    else out.push(key + "（与 " + winner + " 同指 " + id + "，这一格读不到）");
+  }
+  return out;
+}
+

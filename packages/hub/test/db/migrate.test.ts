@@ -1,5 +1,6 @@
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import type { DatabaseSync } from "node:sqlite";
 import { afterAll, beforeAll, expect, it } from "vitest";
 import { MIGRATIONS_DIR, migrate } from "../../src/db/migrate.js";
 import { fixtureTmp } from "../fixtures/fixture-dir.js";
@@ -13,13 +14,14 @@ import { fixtureTmp } from "../fixtures/fixture-dir.js";
 
 const TMP = fixtureTmp("migrate", import.meta.url);
 
-type Db = {
-  prepare: (sql: string) => {
-    all: (...a: unknown[]) => Record<string, unknown>[];
-  };
-  exec: (sql: string) => void;
-  close: () => void;
-};
+/**
+ * 真类型，不是面子类型（round310 在 test/acceptance 立的先例，
+ * 如 rejected-waiver-still-asks.test.ts 的 `World.db: DatabaseSync`）：
+ * openDb 的声明返回就是 node:sqlite 的 DatabaseSync，migrate 收的也是它。
+ * 原先这里手写一份 { prepare/exec/close } 替身，于是 11 处 `migrate(db)`
+ * 全报 TS2345「Db 不能赋给 DatabaseSync」——替身从未与真类型和解过。
+ */
+type Db = DatabaseSync;
 
 const opened: Db[] = [];
 let seq = 0;
@@ -27,7 +29,7 @@ let seq = 0;
 async function open(): Promise<{ db: Db; path: string }> {
   const { openDb } = await import("../../src/db/driver.js");
   const path = join(TMP, "mig-" + process.pid + "-" + ++seq + ".db");
-  const db = openDb(path) as unknown as Db;
+  const db = openDb(path);
   opened.push(db);
   return { db, path };
 }
@@ -219,9 +221,7 @@ it("迁移目录里有不合命名的 .sql 必须抛错，不许静默忽略", a
     "utf8",
   );
   const db = await open();
-  expect(() => migrate(db.db as never, { dir })).toThrow(
-    /0001-init|命名|不符合|name/iu,
-  );
+  expect(() => migrate(db.db, { dir })).toThrow(/0001-init|命名|不符合|name/iu);
 });
 
 it("迁移脚本含 PRAGMA journal_mode 时给出指名 src/db/pragmas.ts 的错误", async () => {
@@ -236,10 +236,10 @@ it("迁移脚本含 PRAGMA journal_mode 时给出指名 src/db/pragmas.ts 的错
     "utf8",
   );
   const db = await open();
-  expect(() => migrate(db.db as never, { dir })).toThrow(/journal_mode/iu);
+  expect(() => migrate(db.db, { dir })).toThrow(/journal_mode/iu);
   let msg = "";
   try {
-    migrate(db.db as never, { dir });
+    migrate(db.db, { dir });
   } catch (e) {
     msg = String((e as Error).message);
   }

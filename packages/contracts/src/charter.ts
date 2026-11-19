@@ -13,6 +13,7 @@
  *    写坏的地方。
  */
 import { z } from "zod";
+import { harnessDefaultsKeyProblem } from "./harness.js";
 
 /** Task 0.9 的 CI 红灯靠它：模板里的验收标准若仍是这个串，说明 CEO 还没签字。 */
 export const CHARTER_PLACEHOLDER_ACCEPTANCE = "CEO-PLACEHOLDER-ACCEPTANCE";
@@ -226,6 +227,62 @@ const charterInput = z
       // 路径指向 acceptance_criteria：那里是**缺东西**的那一侧，也是修法落点。
       // 只指 search_policy 会让人先去改那一格（把领域删掉）而问题其实是标准没写。
       path: ["acceptance_criteria"],
+    });
+  })
+  /**
+   * ⭐ `harness_defaults` 的每一格都必须【有人读、且只配一次】：写了没有读取方的键，
+   * 或同一家写了两种写法 ⇒ **拒加载**。
+   *
+   * ── 这一格补的是本文件自己第 1 条约束的漏洞 ─────────────────────────
+   * 文件头约束 1 说：`.strict()` 是为了「拼错的字段名若被静默忽略，那条约束就等于
+   * 没写」。而 `harness_defaults` 是 `z.record(z.string(), …)` —— 一个**开放的**键集。
+   * 于是那份拒绝在**深一层**没了：顶层 `model_tier_typo` 被拒，而
+   * `harness_defaults.claudecode`（少一个下划线）原样通过。同一个缺陷，换了宿主，
+   * 而且这次宿主是【安全参数的来源】。
+   *
+   * ── 实测到的失效（两个方向，不一样，这才是要紧的地方）──────────────
+   * 读取侧 `harnessDefaultsFor` 对认不出的键 `return undefined`（对认得出而写坏的条目
+   * 是【抛】—— 同一份配置里两种失效方向）。缺省口径落在 `buildGatewayDeps`：
+   *   · `sandbox` 认不出         ⇒ 落回 `read-only`：**比岗位书要求的严**，失败方向是关。
+   *   · `forbidden_flags` 认不出 ⇒ 落回 `[]`：**失败方向是开** —— 岗位书明明写了禁令，
+   *     那条禁令一条都不生效，gateway 照放，审计照写，全绿。
+   * 复算：`npx tsx .workbuddy/probe331-harness-key.probe.mts`（四格：合法键 / 只写
+   * codex / 拼错的 claudecode / 空对象；第 2、3 格读回来的授权与第 4 格【完全相同】，
+   * 这就是「配了而没人读」在数据上的形状）。
+   *
+   * ── 第二个臂：同一家两种写法 ⇒ 后写那一格被【顺序】吞掉 ─────────────
+   * `claude-code` 与 `claude_code` 都在别名表里（两个合法出处，见 harness.ts），
+   * 而读取侧按别名表顺序试键、命中即 return ⇒ 同时写两家键名时那份 YAML 里有【一格
+   * 根本不存在】。这一臂比拼错更难发现：两个名字都是合法键，`.strict()` 无话可说，
+   * 而「哪一格生效」取决于遍历顺序而不是 CEO 的书写顺序。失效方向同上两条
+   * （被吞的是 sandbox ⇒ 变严、无害；是 forbidden_flags ⇒ 少一条禁令、全绿）。
+   *
+   * ── 为什么在 schema 里判，而不是在 buildGatewayDeps 里判 ────────────
+   * 同上一条 search_policy 判据的理由：写入口只有一处（charterSchema），
+   * 在那里判 ⇒ 「存进去的键全都有读取方」是一个【不变式】。放在 buildGatewayDeps 里
+   * 只能拒【那一刻】，而库里已经存下的那份永远没人回头看。
+   *
+   * ── 合法键集派生自 HARNESS_ID_ALIASES，不抄第二份名单 ───────────────
+   * 见 harness.ts 的 unrecognizedHarnessKeys 文件头：读取侧解析键名用的就是那张别名表，
+   * 所以「可写集 == 可读集」是结构性的，接第四家时只需往别名表加一行。
+   *
+   * ⚠ 这里【只判键，不判值】。值的形状已由 harnessDefaultsFor 在运行时抛（那是
+   * 唯一一份值 schema，`harnessDefaultEntrySchema`）；在 schema 里再抄一份值判据就是
+   * 两份口径（本仓最贵那一族）。键与值各有一处判，谁也不抄谁。
+   *
+   * ⚠ 与隔壁那条 search_policy 判据【同方向】：都是「拒掉，不代填」。不自动把
+   * `claudecode` 纠成 `claude_code` —— 自动纠正是替 CEO 决定他写的是笔误还是
+   * 另一个角色的配置，而后者正是这里要拦住的那种歧义。
+   */
+  .superRefine((c, ctx) => {
+    // 消息与读取期【共用一句】（harnessDefaultsKeyProblem），这里只补「去哪一格改」。
+    const problem = harnessDefaultsKeyProblem(c.harness_defaults);
+    if (problem === null) return;
+    ctx.addIssue({
+      code: "custom",
+      message: problem,
+      // 路径指 harness_defaults：错的那一侧就是它，修法也落在那一格。
+      path: ["harness_defaults"],
     });
   });
 

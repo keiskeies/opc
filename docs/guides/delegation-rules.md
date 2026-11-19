@@ -150,15 +150,17 @@
 
 列全，因为「图校验通过」很容易被读成「委派与审阅已经生效」：
 
-1. **三层校验本身接得上，但那条通道零生产调用方。** `org/commit.ts` 的 `applyChange`
-   确实按 §2 的顺序调 `validateReparenting` / `validateNewEdge` / `validateOrgChange`，
-   而**`commitOrgGraph` 在 `packages/*/src` 里没有任何调用方**（http 只从那个文件 import 了一个
-   `currentGraphVersion` 用来读，没有任何路由或 CLI 命令能提交一次组织图变更）。
-   连带地组织图编辑器（Task 3.2 的 React Flow）也还没实现 —— 所以现在改组织图只能直接写库，
-   而**直接写库会绕过这三层校验的全部**。这是本文件最实用的一条：判据写得很全，
-   而唯一能触发它们的那条路今天没有入口。
-2. **门控零生产调用方**（`evaluateGate` 与 `gateCriteriaForRole` 都只有自己的单测在调），
-   委派边上的 `review_gate: true` 今天**不会拦下任何一次交接**。它是配置面的事实，不是运行时的事实。
+1. ~~**三层校验本身接得上，但那条通道零生产调用方。**~~【2026-11-19 改口：接上了】
+   `org/commit.ts` 的 `applyChange` 照旧按 §2 的顺序调那三个校验，而**`commitOrgGraph` 今天有
+   生产调用方**：`real-deps.ts:960`（POST /org 提交通路，`app.js` 组织页真发）与 `dev-seed.ts:351`；
+   `http/org.ts` 头部「一直没有生产调用方」那句注释同样已过期。React Flow 专门编辑器
+   （Task 3.2）确实还没做（复算：web/desktop 里 react-flow 零命中），但「改组织图只能直接写库」
+   不再成立；仍成立的是**直接写库会绕过这三层校验的全部** —— 这一条仍是本节最实用的一条，
+   只是病灶从「没有入口」换成了「入口旁边还留着没有入口时代的写库捷径」。
+2. **门控【读岗位书】那半零生产调用方**（~~`evaluateGate` 与~~ `gateCriteriaForRole` 只有自己的单测在调；
+   【2026-11-19 改口】`evaluateGate` 在 src 有 `harness/verifier.ts:640` 一处调用，但 verifier 的入口
+   `verifyFix` 自己零生产调用方，且它的 criteria 由调用方传入、不来自岗位书库 —— 准确边界以设计文档
+   O2 第 4 条为准），委派边上的 `review_gate: true` 今天**不会拦下任何一次交接**。它是配置面的事实，不是运行时的事实。
    详见 `how-to-write-a-charter.md` §6 第 1 条。
 3. **运行期那两个审阅判据也还没接上。** `sameFamilyReviewBlock` / `selfReviewEdgeBlock` 被
    `gateConfigBlock` 汇总（注释写着「配置页要一次把三个问题都显示出来」），
@@ -169,11 +171,10 @@
    但**没有任何代码去算它** —— 它是一个等着被接的插口（`grep -rn outsideDecisionScope packages/*/src`
    只有两处命中：那个字段声明，和读它的那一行 `if`）。今天写 `跨模块接口变更 → consult: tech`
    不会有任何东西去查这句话。
-5. **`escalation_triggers`（岗位书里那份）零读者。** 那份列表在 `packages/*/src` 里除了 transform
-   那一行再无命中。「升级会沿汇报链往上」这件事如果要发生，得由图与升级路由给 ——
-   所以改升级行为要改那两处，不要改这份列表。⚠ 这一条我**没有**同时验证「升级目标一定沿 `reports_to`
-   解析」：`escalation.ts` 里没有 `reports_to` 字样，我没找到它解析目标的那段代码，
-   所以这句话的正确强度是「没找到沿汇报链解析的实现」，不是「升级不走汇报链」。
+5. **`escalation_triggers`（岗位书里那份）的读者是提示词渲染，不是升级路由。**【2026-11-19 改口：
+   原文「零读者 / 除 transform 一行再无命中」已被 `charter/prompt.ts:149` 推翻 —— 它经 `triggerText`（:108）
+   渲进提示词那一行。】「升级会沿汇报链往上」这件事如果要发生，仍得由图与升级路由给 ——
+   所以改升级行为要改那两处，不要改这份列表（列表只影响模型【读到什么】，不决定路由【做什么】）。
 6. **`tasks.graph_version` 一度全是假的 1，那一格已经补上了**（0012 记的是发现过程）。
    现在 `INSERT_TASK_SQL` 把这一列作为 INSERT 的一列写进去，并且与 `currentGraphVersion()` 的取数
    共用 `node()` 回调里那条连接、那个事务 —— **不能**改成「插入后再发一条 UPDATE」：

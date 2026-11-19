@@ -1,0 +1,1268 @@
+packages\hub\src\http\budget.ts:32:8 lint/style/useImportType  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Some named imports are only used as types.
+  
+    30 │ import { requireScopeDb } from "../checkpoint/tx-scope.js";
+    31 │ import { appendAudit } from "../events/recorder.js";
+  > 32 │ import { assertCents, BUDGET_SCOPES, BUDGET_PERIODS } from "../budget/tracker.js";
+       │        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    33 │ import { CHARTER_ACTOR } from "../charter/store.js";
+    34 │ import { readLatestGraph } from "../org/commit.js";
+  
+  i This import is only used as a type.
+  
+    30 │ import { requireScopeDb } from "../checkpoint/tx-scope.js";
+    31 │ import { appendAudit } from "../events/recorder.js";
+  > 32 │ import { assertCents, BUDGET_SCOPES, BUDGET_PERIODS } from "../budget/tracker.js";
+       │                       ^^^^^^^^^^^^^
+    33 │ import { CHARTER_ACTOR } from "../charter/store.js";
+    34 │ import { readLatestGraph } from "../org/commit.js";
+  
+  i This import is only used as a type.
+  
+    30 │ import { requireScopeDb } from "../checkpoint/tx-scope.js";
+    31 │ import { appendAudit } from "../events/recorder.js";
+  > 32 │ import { assertCents, BUDGET_SCOPES, BUDGET_PERIODS } from "../budget/tracker.js";
+       │                                      ^^^^^^^^^^^^^^
+    33 │ import { CHARTER_ACTOR } from "../charter/store.js";
+    34 │ import { readLatestGraph } from "../org/commit.js";
+  
+  i Importing the types with import type ensures that they are removed by the compilers and avoids loading unnecessary modules.
+  
+  i Safe fix: Add inline type keywords.
+  
+    32 │ import·{·assertCents,·type·BUDGET_SCOPES,·type·BUDGET_PERIODS·}·from·"../budget/tracker.js";
+       │                       +++++               +++++                                             
+
+packages\hub\src\serve\assemble.ts:1912:21 lint/style/noNonNullAssertion ━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+  
+    1910 │     ok: true,
+    1911 │     bounds: {
+  > 1912 │       maxBudgetUsd: args.maxBudgetUsd!,
+         │                     ^^^^^^^^^^^^^^^^^^
+    1913 │       taskLimitCents: args.taskLimitCents!,
+    1914 │       cwd: args.agentCwd!,
+  
+  i A non-null assertion tells TypeScript to ignore a possible null or undefined value. If the value is missing at runtime, the code fails with an error that the compiler could not catch.
+  
+  i Check that the value is defined before using it, for example with an if statement or optional chaining, instead of asserting it.
+  
+
+packages\hub\src\serve\assemble.ts:1913:23 lint/style/noNonNullAssertion ━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+  
+    1911 │     bounds: {
+    1912 │       maxBudgetUsd: args.maxBudgetUsd!,
+  > 1913 │       taskLimitCents: args.taskLimitCents!,
+         │                       ^^^^^^^^^^^^^^^^^^^^
+    1914 │       cwd: args.agentCwd!,
+    1915 │     },
+  
+  i A non-null assertion tells TypeScript to ignore a possible null or undefined value. If the value is missing at runtime, the code fails with an error that the compiler could not catch.
+  
+  i Check that the value is defined before using it, for example with an if statement or optional chaining, instead of asserting it.
+  
+
+packages\hub\src\serve\assemble.ts:1914:12 lint/style/noNonNullAssertion ━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+  
+    1912 │       maxBudgetUsd: args.maxBudgetUsd!,
+    1913 │       taskLimitCents: args.taskLimitCents!,
+  > 1914 │       cwd: args.agentCwd!,
+         │            ^^^^^^^^^^^^^^
+    1915 │     },
+    1916 │   };
+  
+  i A non-null assertion tells TypeScript to ignore a possible null or undefined value. If the value is missing at runtime, the code fails with an error that the compiler could not catch.
+  
+  i Check that the value is defined before using it, for example with an if statement or optional chaining, instead of asserting it.
+  
+
+packages\web\public\app.js:56:3 lint/correctness/noUnusedImports  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Several of these imports are unused.
+  
+    54 │ // 岗位书表单里的三个枚举同理：在浏览器里抄一份合法值清单 = 服务端加档位而下拉框还认旧的。
+    55 │ import {
+  > 56 │   ACCEPTANCE_ACTIONS,
+       │   ^^^^^^^^^^^^^^^^^^
+    57 │   BUDGET_PERIOD_VALUES,
+    58 │   BUDGET_SCOPE_VALUES,
+  
+  i Unused imports might be the result of an incomplete refactoring.
+  
+  i Unsafe fix: Remove the unused imports.
+  
+      54   54 │   // 岗位书表单里的三个枚举同理：在浏览器里抄一份合法值清单 = 服务端加档位而下拉框还认旧的。
+      55   55 │   import {
+      56      │ - ··ACCEPTANCE_ACTIONS,
+      57   56 │     BUDGET_PERIOD_VALUES,
+      58   57 │     BUDGET_SCOPE_VALUES,
+  
+
+packages\hub\src\http\app.ts:23:1 assist/source/organizeImports  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  × Sort these imports.
+  
+    21 │  */
+    22 │ 
+  > 23 │ import { createHash, randomUUID } from "node:crypto";
+       │ ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  > 24 │ import {
+        ...
+  > 90 │ // 仍然不必把整个写队列拖进测试（不传 bindingWriter ⇒ 三条写路由 501，那正是测的分支）。
+  > 91 │ import type { Writer } from "../db/write-queue.js";
+       │ ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    92 │ 
+    93 │ export interface HubRequest {
+  
+  i Safe fix: Organize imports and exports (Biome)
+  
+      22   22 │   
+      23   23 │   import { createHash, randomUUID } from "node:crypto";
+      24      │ - import·{
+      25      │ - ··approvalDecisionRequestSchema,
+      26      │ - ··approvalOutcome,
+      27      │ - ··createTaskRequestSchema,
+      28      │ - ··HTTP_CONFLICT,
+      29      │ - ··HTTP_NOT_FOUND,
+      30      │ - ··HTTP_NOT_IMPLEMENTED,
+      31      │ - ··HTTP_FORBIDDEN,
+      32      │ - ··HTTP_UNAUTHORIZED,
+      33      │ - ··HTTP_UNPROCESSABLE,
+      34      │ - ··isImplemented,
+      35      │ - ··type·ApiEndpoint,
+      36      │ - ··type·ApprovalDecisionRequest,
+      37      │ - ··type·OrgChange,
+      38      │ - ··type·OrgGraph,
+      39      │ - ··type·ResumeValue,
+      40      │ - ··type·TaskView,
+      41      │ - ··taskViewSchema,
+      42      │ - }·from·"@opc/contracts";
+      43      │ - import·type·{·DatabaseSync·}·from·"node:sqlite";
+      44      │ - import·type·{·EventBus·}·from·"../events/bus.js";
+      45      │ - import·{·legalTransitionsFrom,·type·TaskState·}·from·"../graph/status.js";
+      46      │ - import·{·listApprovals·as·listApprovalsFrom·}·from·"../approvals/query.js";
+      47      │ - //·今日视图那几个聚合数的【判据】住在这里（不在·handler·里，也不在界面里算）。
+      48      │ - //·分法与·approvals/query.ts、replay/query.ts·同一条：判定住在模块，HTTP·只是一个入口。
+      49      │ - import·{·readToday·}·from·"../overview/today.js";
+      50      │ - //·驱动器那一格的判据（0048·§7）。!·这是一条【运行期】import，而它把
+      51      │ - //·serve/driver-pump.ts（进而·engine/*）带进了本文件的模块图·——·这与本文件
+      52      │ - //·对·db/write-queue.js·的处理【不一样】（那边刻意·type-only，见·deps.bindingWriter
+      53      │ - //·那一段：它带进来的是"写入能力"，而·HTTP·层不该有能力写）。
+      54      │ - //·这里带进来的只是【三个常量与三个·SQL·片段函数】，没有写通道、没有子进程，
+      55      │ - //·而换法只有一个：把·DRIVER_GAVE_UP_KIND·/·driverCellTargetSql·/
+      56      │ - //·driverCellMarkerSql·在·overview/·里再抄一份·——·那正是本仓为·kindOf()
+      57      │ - //·立过的那条规矩（0026·§0）要拦的事：同一判据两份字面写法，漂了不会有人发现。
+      58      │ - //·所以宁可多一条·import·边，也不要两份抄件。
+      59      │ - import·{·readDriverStatus·}·from·"../overview/driver-status.js";
+           24 │ + import·type·{·DatabaseSync·}·from·"node:sqlite";
+           25 │ + import·{
+           26 │ + ··type·ApiEndpoint,
+           27 │ + ··type·ApprovalDecisionRequest,
+           28 │ + ··approvalDecisionRequestSchema,
+           29 │ + ··approvalOutcome,
+           30 │ + ··createTaskRequestSchema,
+           31 │ + ··HTTP_CONFLICT,
+           32 │ + ··HTTP_FORBIDDEN,
+           33 │ + ··HTTP_NOT_FOUND,
+           34 │ + ··HTTP_NOT_IMPLEMENTED,
+           35 │ + ··HTTP_UNAUTHORIZED,
+           36 │ + ··HTTP_UNPROCESSABLE,
+           37 │ + ··isImplemented,
+           38 │ + ··type·OrgChange,
+           39 │ + ··type·OrgGraph,
+           40 │ + ··type·ResumeValue,
+           41 │ + ··type·TaskView,
+           42 │ + ··taskViewSchema,
+           43 │ + }·from·"@opc/contracts";
+           44 │ + import·{·listApprovals·as·listApprovalsFrom·}·from·"../approvals/query.js";
+           45 │ + //·【又一个·type-only·import】，动机与上面·tokens.ts·那一条【不一样】，值得分开说：
+           46 │ + //·那边是「实现在本文件，所以只要类型」；这边是「实现真在·db/write-queue.js，
+           47 │ + //·但·app.ts·只把它当【注入点的形状】，一次运行期调用都不发」——
+           48 │ + //·真正的·node()·调用全在·http/bindings.ts·里。
+           49 │ + //·所以这条·import·在产物里是·0·字节，而·contract.test.ts·手搓·deps·时
+           50 │ + //·仍然不必把整个写队列拖进测试（不传·bindingWriter·⇒·三条写路由·501，那正是测的分支）。
+           51 │ + import·type·{·Writer·}·from·"../db/write-queue.js";
+           52 │ + import·type·{·EventBus·}·from·"../events/bus.js";
+           53 │ + import·{·legalTransitionsFrom,·type·TaskState·}·from·"../graph/status.js";
+           54 │ + import·type·{·CommitResult·}·from·"../org/commit.js";
+      60   55 │   import type { DriverRuntimeState } from "../overview/driver-status.js";
+      61      │ - //·IM·绑定的四条路由**不写在下面那个·switch·附近**，单独住·http/bindings.ts。
+      62      │ - //·那不是为了分文件整洁：test/bindings/im.test.ts·有一条守卫扫·src，
+      63      │ - //·断言·`im_bindings`·这四个字只出现在·bindings/im.ts·一个文件里。
+      64      │ - //·若把这四个·handler·写在·app.ts，要么我在那里手搓·SQL（绕过那一整列被测试穷尽的预检），
+      65      │ - //·要么天天跟那条守卫打架。分开之后，「HTTP·层不碰那张表」是一句机器守着的话。
+      66      │ - import·{
+      67      │ - ··listBindingsRoute,
+      68      │ - ··rebindBindingRoute,
+      69      │ - ··requestBindingRoute,
+      70      │ - ··verifyBindingRoute,
+      71      │ - }·from·"./bindings.js";
+      72      │ - import·{·commitOrgRoute,·orgGraphRoute·}·from·"./org.js";
+      73      │ - import·{·charterViewRoute,·saveCharterRoute·}·from·"./charter.js";
+      74      │ - import·{·budgetListRoute,·putBudgetRoute·}·from·"./budget.js";
+      75      │ - import·type·{·CommitResult·}·from·"../org/commit.js";
+      76      │ - import·{·ResumeStream,·type·SnapshotSource·}·from·"./sse.js";
+      77      │ - import·{·buildReplayView·}·from·"../replay/query.js";
+      78      │ - import·{·verifyRequest,·type·VerifyInput·}·from·"./auth.js";
+      79      │ - import·{·isLoopbackAddress·}·from·"./bind.js";
+      80      │ - //·【type-only·import】。这一条边界值得说：tokenHttpStatus·的实现【不在】tokens.ts·而在下面，
+      81      │ - //·于是·app.ts·只从那边拿一个类型，运行期仍然不·import·tokens.ts
+      82      │ - //·（那边带·node:crypto·与·db/write-queue）。contract.test.ts·手搓·deps·时能构造出
+      83      │ - //·一个假·reason·而不是被迫把整个·token·存储拖进测试。
+      84      │ - import·type·{·TokenIssueReject,·TokenRejectReason·}·from·"./tokens.js";
+      85      │ - //·【又一个·type-only·import】，动机与上面·tokens.ts·那一条【不一样】，值得分开说：
+      86      │ - //·那边是「实现在本文件，所以只要类型」；这边是「实现真在·db/write-queue.js，
+      87      │ - //·但·app.ts·只把它当【注入点的形状】，一次运行期调用都不发」——
+      88      │ - //·真正的·node()·调用全在·http/bindings.ts·里。
+      89      │ - //·所以这条·import·在产物里是·0·字节，而·contract.test.ts·手搓·deps·时
+      90      │ - //·仍然不必把整个写队列拖进测试（不传·bindingWriter·⇒·三条写路由·501，那正是测的分支）。
+      91      │ - import·type·{·Writer·}·from·"../db/write-queue.js";
+           56 │ + //·驱动器那一格的判据（0048·§7）。!·这是一条【运行期】import，而它把
+           57 │ + //·serve/driver-pump.ts（进而·engine/*）带进了本文件的模块图·——·这与本文件
+           58 │ + //·对·db/write-queue.js·的处理【不一样】（那边刻意·type-only，见·deps.bindingWriter
+           59 │ + //·那一段：它带进来的是"写入能力"，而·HTTP·层不该有能力写）。
+           60 │ + //·这里带进来的只是【三个常量与三个·SQL·片段函数】，没有写通道、没有子进程，
+           61 │ + //·而换法只有一个：把·DRIVER_GAVE_UP_KIND·/·driverCellTargetSql·/
+           62 │ + //·driverCellMarkerSql·在·overview/·里再抄一份·——·那正是本仓为·kindOf()
+           63 │ + //·立过的那条规矩（0026·§0）要拦的事：同一判据两份字面写法，漂了不会有人发现。
+           64 │ + //·所以宁可多一条·import·边，也不要两份抄件。
+           65 │ + import·{·readDriverStatus·}·from·"../overview/driver-status.js";
+           66 │ + //·今日视图那几个聚合数的【判据】住在这里（不在·handler·里，也不在界面里算）。
+           67 │ + //·分法与·approvals/query.ts、replay/query.ts·同一条：判定住在模块，HTTP·只是一个入口。
+           68 │ + import·{·readToday·}·from·"../overview/today.js";
+           69 │ + import·{·buildReplayView·}·from·"../replay/query.js";
+           70 │ + import·{·type·VerifyInput,·verifyRequest·}·from·"./auth.js";
+           71 │ + import·{·isLoopbackAddress·}·from·"./bind.js";
+           72 │ + //·IM·绑定的四条路由**不写在下面那个·switch·附近**，单独住·http/bindings.ts。
+           73 │ + //·那不是为了分文件整洁：test/bindings/im.test.ts·有一条守卫扫·src，
+           74 │ + //·断言·`im_bindings`·这四个字只出现在·bindings/im.ts·一个文件里。
+           75 │ + //·若把这四个·handler·写在·app.ts，要么我在那里手搓·SQL（绕过那一整列被测试穷尽的预检），
+           76 │ + //·要么天天跟那条守卫打架。分开之后，「HTTP·层不碰那张表」是一句机器守着的话。
+           77 │ + import·{
+           78 │ + ··listBindingsRoute,
+           79 │ + ··rebindBindingRoute,
+           80 │ + ··requestBindingRoute,
+           81 │ + ··verifyBindingRoute,
+           82 │ + }·from·"./bindings.js";
+           83 │ + import·{·budgetListRoute,·putBudgetRoute·}·from·"./budget.js";
+           84 │ + import·{·charterViewRoute,·saveCharterRoute·}·from·"./charter.js";
+           85 │ + import·{·commitOrgRoute,·orgGraphRoute·}·from·"./org.js";
+           86 │ + import·{·ResumeStream,·type·SnapshotSource·}·from·"./sse.js";
+           87 │ + //·【type-only·import】。这一条边界值得说：tokenHttpStatus·的实现【不在】tokens.ts·而在下面，
+           88 │ + //·于是·app.ts·只从那边拿一个类型，运行期仍然不·import·tokens.ts
+           89 │ + //·（那边带·node:crypto·与·db/write-queue）。contract.test.ts·手搓·deps·时能构造出
+           90 │ + //·一个假·reason·而不是被迫把整个·token·存储拖进测试。
+           91 │ + import·type·{·TokenIssueReject,·TokenRejectReason·}·from·"./tokens.js";
+      92   92 │   
+      93   93 │   export interface HubRequest {
+  
+
+packages\hub\src\http\app.ts format ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  × Formatter would have printed the following content:
+  
+     263  263 │       readonly approvalId: string;
+     264  264 │     }) => Promise<
+     265      │ - ····{·readonly·ok:·true;·readonly·taskId:·string·}·|·{·readonly·ok:·false;·readonly·reason:·TokenRejectReason·}
+          265 │ + ····|·{·readonly·ok:·true;·readonly·taskId:·string·}
+          266 │ + ····|·{·readonly·ok:·false;·readonly·reason:·TokenRejectReason·}
+     266  267 │     >;
+     267  268 │     /**
+    ········· │ 
+     399  400 │   }
+     400  401 │   
+     401      │ - async·function·route(
+     402      │ - ··deps:·HubDeps,
+     403      │ - ··req:·HubRequest,
+     404      │ - ):·Promise<HubResponse>·{
+          402 │ + async·function·route(deps:·HubDeps,·req:·HubRequest):·Promise<HubResponse>·{
+     405  403 │     const method = req.method.toUpperCase();
+     406  404 │   
+    ········· │ 
+     479  477 │   ): Promise<HubResponse> {
+     480  478 │     const routeHit = matchRoute(method, req.path);
+     481      │ - ··if·(routeHit·===·null)·return·json(HTTP_NOT_FOUND,·{·error:·"no·such·route"·});
+          479 │ + ··if·(routeHit·===·null)
+          480 │ + ····return·json(HTTP_NOT_FOUND,·{·error:·"no·such·route"·});
+     482  481 │     // 501 这一支【此刻没有活的分母】：UNIMPLEMENTED_ENDPOINTS 在 Task 3.4 之后是空的
+     483  482 │     // （GET /replay/:taskId 是它唯一一项，现已落地）。
+    ········· │ 
+     596  595 │     | { kind: "list_bindings"; endpoint: "GET /bindings"; id?: undefined }
+     597  596 │     | { kind: "request_binding"; endpoint: "POST /bindings"; id?: undefined }
+     598      │ - ··|·{·kind:·"verify_binding";·endpoint:·"POST·/bindings/verify";·id?:·undefined·}
+     599      │ - ··|·{·kind:·"rebind_binding";·endpoint:·"POST·/bindings/rebind";·id?:·undefined·}
+          597 │ + ··|·{
+          598 │ + ······kind:·"verify_binding";
+          599 │ + ······endpoint:·"POST·/bindings/verify";
+          600 │ + ······id?:·undefined;
+          601 │ + ····}
+          602 │ + ··|·{
+          603 │ + ······kind:·"rebind_binding";
+          604 │ + ······endpoint:·"POST·/bindings/rebind";
+          605 │ + ······id?:·undefined;
+          606 │ + ····}
+     600  607 │     /**
+     601  608 │      * 组织变更的提交（0040）。**没有 id 段**，同 bindings 那四条的形状：
+    ········· │ 
+     681  688 │       const a = id(segs[1]);
+     682  689 │       if (a === null) return null;
+     683      │ - ····return·{·kind:·"mint_token",·endpoint:·"POST·/approvals/:interruptId/token",·id:·a·};
+          690 │ + ····return·{
+          691 │ + ······kind:·"mint_token",
+          692 │ + ······endpoint:·"POST·/approvals/:interruptId/token",
+          693 │ + ······id:·a,
+          694 │ + ····};
+     684  695 │     }
+     685  696 │     if (method === "GET" && segs.length === 1 && segs[0] === "events") {
+    ········· │ 
+     708  719 │     }
+     709  720 │     if (method === "POST" && segs.length === 2 && segs[0] === "bindings") {
+     710      │ - ····if·(segs[1]·===·"verify")·return·{·kind:·"verify_binding",·endpoint:·"POST·/bindings/verify"·};
+     711      │ - ····if·(segs[1]·===·"rebind")·return·{·kind:·"rebind_binding",·endpoint:·"POST·/bindings/rebind"·};
+          721 │ + ····if·(segs[1]·===·"verify")
+          722 │ + ······return·{·kind:·"verify_binding",·endpoint:·"POST·/bindings/verify"·};
+          723 │ + ····if·(segs[1]·===·"rebind")
+          724 │ + ······return·{·kind:·"rebind_binding",·endpoint:·"POST·/bindings/rebind"·};
+     712  725 │       return null;
+     713  726 │     }
+    ········· │ 
+     870  883 │     }
+     871  884 │     const r = await deps.issueApprovalToken({ approvalId, nowMs: deps.now() });
+     872      │ - ··if·(r.ok·!==·true)·return·json(tokenIssueStatus(r.reason),·tokenIssueBody(r.reason));
+          885 │ + ··if·(r.ok·!==·true)
+          886 │ + ····return·json(tokenIssueStatus(r.reason),·tokenIssueBody(r.reason));
+     873  887 │     return json(201, { token: r.token, expires_at: r.expiresAt });
+     874  888 │   }
+    ········· │ 
+    1351 1365 │      */
+    1352 1366 │     const rawKeyword = query["keyword"];
+    1353      │ - ··if·(rawKeyword·!==·undefined·&&·[...rawKeyword].length·>·MAX_REPLAY_KEYWORD_CHARS)·{
+         1367 │ + ··if·(
+         1368 │ + ····rawKeyword·!==·undefined·&&
+         1369 │ + ····[...rawKeyword].length·>·MAX_REPLAY_KEYWORD_CHARS
+         1370 │ + ··)·{
+    1354 1371 │       return json(HTTP_UNPROCESSABLE, {
+    1355 1372 │         error:
+    ········· │ 
+    1389 1406 │       // 在这里直接抛会让「JSON 写错」和「服务内部错误」混成 500，
+    1390 1407 │       // 而前者是调用方能自己修的。
+    1391      │ - ····return·{·__unparseable__:·createHash("sha256").update(text).digest("hex").slice(0,·8)·};
+         1408 │ + ····return·{
+         1409 │ + ······__unparseable__:·createHash("sha256")
+         1410 │ + ········.update(text)
+         1411 │ + ········.digest("hex")
+         1412 │ + ········.slice(0,·8),
+         1413 │ + ····};
+    1392 1414 │     }
+    1393 1415 │   }
+    ········· │ 
+    1410 1432 │           v.id +
+    1411 1433 │           "）：" +
+    1412      │ - ········r.error.issues.map((x)·=>·x.path.join(".")·+·"·"·+·x.message).join(";·")·+
+         1434 │ + ········r.error.issues
+         1435 │ + ··········.map((x)·=>·x.path.join(".")·+·"·"·+·x.message)
+         1436 │ + ··········.join(";·")·+
+    1413 1437 │           "。契约与库不一致时必须当场响，静默丢行会让「任务不见了」变成一次无从排查的报障。",
+    1414 1438 │       );
+  
+
+packages\hub\src\http\budget.ts:21:1 assist/source/organizeImports  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━
+
+  × Sort these imports.
+  
+    19 │  * （budget-sync 的 budgetTierSummary 同口径），两者都没有 ⇒ 0。
+    20 │  */
+  > 21 │ import {
+       │ ^^^^^^^^
+  > 22 │   BUDGET_PERIOD_VALUES,
+        ...
+  > 35 │ import { isLoopbackAddress } from "./bind.js";
+  > 36 │ import type { HubDeps, HubRequest, HubResponse } from "./app.js";
+       │ ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    37 │ 
+    38 │ function res(status: number, body: unknown): HubResponse {
+  
+  i Safe fix: Organize imports and exports (Biome)
+  
+     27  27 │     putBudgetRequestSchema,
+     28  28 │   } from "@opc/contracts";
+     29     │ - import·{·assertSingleStatement,·assertParamCount,·type·Writer·}·from·"../db/write-queue.js";
+     30     │ - import·{·requireScopeDb·}·from·"../checkpoint/tx-scope.js";
+     31     │ - import·{·appendAudit·}·from·"../events/recorder.js";
+     32     │ - import·{·assertCents,·BUDGET_SCOPES,·BUDGET_PERIODS·}·from·"../budget/tracker.js";
+     33     │ - import·{·CHARTER_ACTOR·}·from·"../charter/store.js";
+         29 │ + import·{·assertCents,·BUDGET_PERIODS,·BUDGET_SCOPES·}·from·"../budget/tracker.js";
+         30 │ + import·{·CHARTER_ACTOR·}·from·"../charter/store.js";
+         31 │ + import·{·requireScopeDb·}·from·"../checkpoint/tx-scope.js";
+         32 │ + import·{·assertParamCount,·assertSingleStatement,·type·Writer·}·from·"../db/write-queue.js";
+         33 │ + import·{·appendAudit·}·from·"../events/recorder.js";
+     34  34 │   import { readLatestGraph } from "../org/commit.js";
+     35     │ - import·{·isLoopbackAddress·}·from·"./bind.js";
+     36     │ - import·type·{·HubDeps,·HubRequest,·HubResponse·}·from·"./app.js";
+         35 │ + import·type·{·HubDeps,·HubRequest,·HubResponse·}·from·"./app.js";
+         36 │ + import·{·isLoopbackAddress·}·from·"./bind.js";
+     37  37 │   
+     38  38 │   function res(status: number, body: unknown): HubResponse {
+  
+
+packages\hub\src\http\budget.ts format ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  × Formatter would have printed the following content:
+  
+     27  27 │     putBudgetRequestSchema,
+     28  28 │   } from "@opc/contracts";
+     29     │ - import·{·assertSingleStatement,·assertParamCount,·type·Writer·}·from·"../db/write-queue.js";
+         29 │ + import·{
+         30 │ + ··assertSingleStatement,
+         31 │ + ··assertParamCount,
+         32 │ + ··type·Writer,
+         33 │ + }·from·"../db/write-queue.js";
+     30  34 │   import { requireScopeDb } from "../checkpoint/tx-scope.js";
+     31  35 │   import { appendAudit } from "../events/recorder.js";
+     32     │ - import·{·assertCents,·BUDGET_SCOPES,·BUDGET_PERIODS·}·from·"../budget/tracker.js";
+         36 │ + import·{
+         37 │ + ··assertCents,
+         38 │ + ··BUDGET_SCOPES,
+         39 │ + ··BUDGET_PERIODS,
+         40 │ + }·from·"../budget/tracker.js";
+     33  41 │   import { CHARTER_ACTOR } from "../charter/store.js";
+     34  42 │   import { readLatestGraph } from "../org/commit.js";
+    ······· │ 
+     81  89 │   
+     82  90 │   /** 行 id 的三段拼接，与 tracker.ts / charter/budget-sync.ts 同形（行的身份就是三元组）。 */
+     83     │ - export·function·budgetRowKey(scopeType:·string,·scopeId:·string,·period:·string):·string·{
+         91 │ + export·function·budgetRowKey(
+         92 │ + ··scopeType:·string,
+         93 │ + ··scopeId:·string,
+         94 │ + ··period:·string,
+         95 │ + ):·string·{
+     84  96 │     return scopeType + "|" + scopeId + "|" + period;
+     85  97 │   }
+    ······· │ 
+     91 103 │     const g = readLatestGraph(deps.db);
+     92 104 │     if (g !== null) return Object.keys(g.graph.nodes).sort();
+     93     │ - ··const·sql·=·"SELECT·DISTINCT·assigned_role·AS·r·FROM·tasks·WHERE·assigned_role·IS·NOT·NULL";
+        105 │ + ··const·sql·=
+        106 │ + ····"SELECT·DISTINCT·assigned_role·AS·r·FROM·tasks·WHERE·assigned_role·IS·NOT·NULL";
+     94 107 │     assertSingleStatement(sql);
+     95 108 │     const rows = deps.db.prepare(sql).all() as unknown as { r: string }[];
+    ······· │ 
+    106 119 │       "FROM budgets ORDER BY scope_type, scope_id, period";
+    107 120 │     assertSingleStatement(sql);
+    108     │ - ··const·raw·=·deps.db.prepare(sql).all()·as·unknown·as·Record<string,·unknown>[];
+        121 │ + ··const·raw·=·deps.db.prepare(sql).all()·as·unknown·as·Record<
+        122 │ + ····string,
+        123 │ + ····unknown
+        124 │ + ··>[];
+    109 125 │     const rows = raw.map((r) => ({
+    110 126 │       scope_type: String(r["scope_type"]),
+    ······· │ 
+    118 134 │       rows.filter((r) => r.scope_type === "role").map((r) => r.scope_id),
+    119 135 │     );
+    120     │ - ··const·unset·=·expectedRoleScopes(deps).filter((role)·=>·!withRole.has(role)).length;
+        136 │ + ··const·unset·=·expectedRoleScopes(deps).filter(
+        137 │ + ····(role)·=>·!withRole.has(role),
+        138 │ + ··).length;
+    121 139 │     return res(200, {
+    122 140 │       rows,
+    ······· │ 
+    209 227 │     });
+    210 228 │     if (wrote === undefined || wrote === null) {
+    211     │ - ····throw·new·Error("事务没有返回结果（WriteQueue·那一层给出空）——·未写入，未审计。");
+        229 │ + ····throw·new·Error(
+        230 │ + ······"事务没有返回结果（WriteQueue·那一层给出空）——·未写入，未审计。",
+        231 │ + ····);
+    212 232 │     }
+    213 233 │     return { auditSeq: wrote.seq, changed: wrote.changed };
+  
+
+packages\hub\src\http\charter.ts:21:1 assist/source/organizeImports  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━
+
+  × Sort these imports.
+  
+    19 │  * 的往返用例挡（蛇形输出再过 charterSchema，缺键/多键当场红）。
+    20 │  */
+  > 21 │ import {
+       │ ^^^^^^^^
+  > 22 │   HTTP_NOT_IMPLEMENTED,
+        ...
+  > 33 │ import { isLoopbackAddress } from "./bind.js";
+  > 34 │ import type { HubDeps, HubRequest, HubResponse } from "./app.js";
+       │ ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    35 │ 
+    36 │ function res(status: number, body: unknown): HubResponse {
+  
+  i Safe fix: Organize imports and exports (Biome)
+  
+     31  31 │     saveCharterVersion,
+     32  32 │   } from "../charter/store.js";
+     33     │ - import·{·isLoopbackAddress·}·from·"./bind.js";
+     34     │ - import·type·{·HubDeps,·HubRequest,·HubResponse·}·from·"./app.js";
+         33 │ + import·type·{·HubDeps,·HubRequest,·HubResponse·}·from·"./app.js";
+         34 │ + import·{·isLoopbackAddress·}·from·"./bind.js";
+     35  35 │   
+     36  36 │   function res(status: number, body: unknown): HubResponse {
+  
+
+packages\hub\src\http\charter.ts format ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  × Formatter would have printed the following content:
+  
+     27  27 │     type CharterInput,
+     28  28 │   } from "@opc/contracts";
+     29     │ - import·{
+     30     │ - ··readLatestCharter,
+     31     │ - ··saveCharterVersion,
+     32     │ - }·from·"../charter/store.js";
+         29 │ + import·{·readLatestCharter,·saveCharterVersion·}·from·"../charter/store.js";
+     33  30 │   import { isLoopbackAddress } from "./bind.js";
+     34  31 │   import type { HubDeps, HubRequest, HubResponse } from "./app.js";
+    ······· │ 
+     65  62 │   
+     66  63 │   /** 回环门。返回 null = 放行，返回 HubResponse = 原样发出。同 org.ts。 */
+     67     │ - export·function·assertLoopbackCharterRoute(req:·HubRequest):·HubResponse·|·null·{
+         64 │ + export·function·assertLoopbackCharterRoute(
+         65 │ + ··req:·HubRequest,
+         66 │ + ):·HubResponse·|·null·{
+     68  67 │     if (isLoopbackAddress(req.peer)) return null;
+     69  68 │     return res(HTTP_UNAUTHORIZED, { error: "unauthorized" });
+    ······· │ 
+     81  80 │       reports_to: c.reportsTo,
+     82  81 │       honesty_boundaries: c.honestyBoundaries,
+     83     │ - ····...(c.cognitiveSkill·===·undefined·?·{}·:·{·cognitive_skill:·c.cognitiveSkill·}),
+         82 │ + ····...(c.cognitiveSkill·===·undefined
+         83 │ + ······?·{}
+         84 │ + ······:·{·cognitive_skill:·c.cognitiveSkill·}),
+     84  85 │       acceptance_criteria: c.acceptanceCriteria.map((a) => ({
+     85  86 │         condition: a.condition,
+    ······· │ 
+     97  98 │             budget_discretion: {
+     98  99 │               daily_usd: c.budgetDiscretion.dailyUsd,
+     99     │ - ············can_reallocate_within_role:·c.budgetDiscretion.canReallocateWithinRole,
+        100 │ + ············can_reallocate_within_role:
+        101 │ + ··············c.budgetDiscretion.canReallocateWithinRole,
+    100 102 │               cannot_exceed: c.budgetDiscretion.cannotExceed,
+    101 103 │             },
+    ······· │ 
+    123 125 │           }),
+    124 126 │       ...(c.stance === undefined ? {} : { stance: c.stance }),
+    125     │ - ····...(c.untrustedInputs·===·undefined·?·{}·:·{·untrusted_inputs:·c.untrustedInputs·}),
+        127 │ + ····...(c.untrustedInputs·===·undefined
+        128 │ + ······?·{}
+        129 │ + ······:·{·untrusted_inputs:·c.untrustedInputs·}),
+    126 130 │       ...(c.searchPolicy === undefined
+    127 131 │         ? {}
+    128     │ - ······:·{·search_policy:·{·tier_1_mandatory:·c.searchPolicy.mandatoryDomains·}·}),
+    129     │ - ····...(c.harnessDefaults·===·undefined·?·{}·:·{·harness_defaults:·c.harnessDefaults·}),
+        132 │ + ······:·{
+        133 │ + ··········search_policy:·{·tier_1_mandatory:·c.searchPolicy.mandatoryDomains·},
+        134 │ + ········}),
+        135 │ + ····...(c.harnessDefaults·===·undefined
+        136 │ + ······?·{}
+        137 │ + ······:·{·harness_defaults:·c.harnessDefaults·}),
+    130 138 │     };
+    131 139 │   }
+    ······· │ 
+    177 185 │           path: "config.role_id",
+    178 186 │           message:
+    179     │ - ··········"config.role_id·["·+·o.config.roleId·+·"]·与·URL·里的·roleId·["·+
+    180     │ - ··········roleId·+·"]·不一致。刻意不取其中之一为准·——·那会让一次编辑改到另一个角色的岗位书。",
+        187 │ + ··········"config.role_id·["·+
+        188 │ + ··········o.config.roleId·+
+        189 │ + ··········"]·与·URL·里的·roleId·["·+
+        190 │ + ··········roleId·+
+        191 │ + ··········"]·不一致。刻意不取其中之一为准·——·那会让一次编辑改到另一个角色的岗位书。",
+    181 192 │         },
+    182 193 │       ]);
+  
+
+packages\hub\src\serve\dev-entry.ts:32:1 assist/source/organizeImports  FIXABLE  ━━━━━━━━━━━━━━━━━━━
+
+  × Some imports or exports are not organized.
+  
+    30 │  * runDev），入口块只回答「这次是被直接执行吗」；被 import 时零副作用。
+    31 │  */
+  > 32 │ import { spawn, type ChildProcess } from "node:child_process";
+       │ ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  > 33 │ import { existsSync, mkdirSync } from "node:fs";
+        ...
+  > 45 │   type ServeIo,
+  > 46 │ } from "./assemble.js";
+       │ ^^^^^^^^^^^^^^^^^^^^^^^
+    47 │ import type { ServeArgs } from "./config.js";
+    48 │ 
+  
+  i Sort the imported names.
+  
+    38 │ import { runCli, type CliIo } from "../db/migrate-cli.js";
+    39 │ import { EXIT_PROBLEM, EXIT_USAGE } from "../heartbeat/maintenance.js";
+  > 40 │ import {
+       │ ^^^^^^^^
+  > 41 │   boot,
+        ...
+  > 45 │   type ServeIo,
+  > 46 │ } from "./assemble.js";
+       │ ^^^^^^^^^^^^^^^^^^^^^^^
+    47 │ import type { ServeArgs } from "./config.js";
+    48 │ 
+  
+  i Sort these imports.
+  
+    30 │  * runDev），入口块只回答「这次是被直接执行吗」；被 import 时零副作用。
+    31 │  */
+  > 32 │ import { spawn, type ChildProcess } from "node:child_process";
+       │ ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  > 33 │ import { existsSync, mkdirSync } from "node:fs";
+        ...
+  > 38 │ import { runCli, type CliIo } from "../db/migrate-cli.js";
+  > 39 │ import { EXIT_PROBLEM, EXIT_USAGE } from "../heartbeat/maintenance.js";
+       │ ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    40 │ import {
+    41 │   boot,
+  
+  i Safe fix: Organize imports and exports (Biome)
+  
+     34  34 │   import { isAbsolute, join, resolve } from "node:path";
+     35  35 │   import { fileURLToPath } from "node:url";
+     36     │ - import·{·isDirectRun·}·from·"../internal/direct-run.js";
+     37     │ - import·{·newLocalToken·}·from·"../http/auth.js";
+     38     │ - import·{·runCli,·type·CliIo·}·from·"../db/migrate-cli.js";
+     39     │ - import·{·EXIT_PROBLEM,·EXIT_USAGE·}·from·"../heartbeat/maintenance.js";
+         36 │ + import·{·type·CliIo,·runCli·}·from·"../db/migrate-cli.js";
+         37 │ + import·{·EXIT_PROBLEM,·EXIT_USAGE·}·from·"../heartbeat/maintenance.js";
+         38 │ + import·{·newLocalToken·}·from·"../http/auth.js";
+         39 │ + import·{·isDirectRun·}·from·"../internal/direct-run.js";
+     40  40 │   import {
+     41     │ - ··boot,
+     42     │ - ··waitForShutdown,
+     43     │ - ··type·BootOverrides,
+         41 │ + ··type·BootOverrides,
+     44  42 │     type BootResult,
+     45     │ - ··type·ServeIo,
+         43 │ + ··boot,
+         44 │ + ··type·ServeIo,
+         45 │ + ··waitForShutdown,
+     46  46 │   } from "./assemble.js";
+     47  47 │   import type { ServeArgs } from "./config.js";
+  
+
+packages\hub\src\serve\dev-entry.ts format ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  × Formatter would have printed the following content:
+  
+    182 182 │      * 记过的是同一个理由。
+    183 183 │      */
+    184     │ - ··waitStop?:·(r:·Extract<BootResult,·{·ok:·true·}>,·io:·ServeIo)·=>·Promise<number>;
+        184 │ + ··waitStop?:·(
+        185 │ + ····r:·Extract<BootResult,·{·ok:·true·}>,
+        186 │ + ····io:·ServeIo,
+        187 │ + ··)·=>·Promise<number>;
+    185 188 │     /**
+    186 189 │      * 停止信号的注册口（默认 process.on/removeListener 那一对照）。
+    ······· │ 
+    233 236 │     // 备份目录是在装配期读一次的（assemble.ts 里 orgBackupDir 那一格），启动后再补
+    234 237 │     // 就等于装配时判定「没备份」，501 照旧。
+    235     │ - ··deps.ensureDir·??·((dir)·=>·mkdirSync(dir,·{·recursive:·true·}))(p.orgBackupDir);
+        238 │ + ··deps.ensureDir·??
+        239 │ + ····((dir)·=>·mkdirSync(dir,·{·recursive:·true·}))(p.orgBackupDir);
+    236 240 │   
+    237 241 │     const r = await deps.bootHub(
+    ······· │ 
+    262 266 │       stoppingEarly = true;
+    263 267 │     };
+    264     │ - ··const·stopListening·=·(deps.onStopSignals·??·defaultStopSignals)(markStopping);
+        268 │ + ··const·stopListening·=·(deps.onStopSignals·??·defaultStopSignals)(
+        269 │ + ····markStopping,
+        270 │ + ··);
+    265 271 │     let webGoneResolve: (code: number) => void = () => {};
+    266 272 │     const webGone = new Promise<number>((res) => {
+    ······· │ 
+    270 276 │       if (!stoppingEarly) {
+    271 277 │         io.warn(
+    272     │ - ········"web·子进程先退出了（退出码·"·+·(code·??·"?")·+·"）⇒·dev·一并停止。\n"·+
+        278 │ + ········"web·子进程先退出了（退出码·"·+
+        279 │ + ··········(code·??·"?")·+
+        280 │ + ··········"）⇒·dev·一并停止。\n"·+
+    273 281 │             "  常见原因是端口被占：" +
+    274 282 │             p.webPort +
+    ······· │ 
+    320 328 │    */
+    321 329 │   export function repoRootOf(moduleUrl: string): string {
+    322     │ - ··return·resolve(fileURLToPath(new·URL(moduleUrl)),·"..",·"..",·"..",·"..",·"..");
+        330 │ + ··return·resolve(
+        331 │ + ····fileURLToPath(new·URL(moduleUrl)),
+        332 │ + ····"..",
+        333 │ + ····"..",
+        334 │ + ····"..",
+        335 │ + ····"..",
+        336 │ + ····"..",
+        337 │ + ··);
+    323 338 │   }
+    324 339 │   
+  
+
+packages\hub\test\http\budget-route.test.ts:11:1 assist/source/organizeImports  FIXABLE  ━━━━━━━━━━━
+
+  × Sort these imports.
+  
+     9 │  * 库与队列都是真的（同 org-route.test.ts / charter-route.test.ts）。
+    10 │  */
+  > 11 │ import { mkdirSync, rmSync } from "node:fs";
+       │ ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  > 12 │ import { join } from "node:path";
+        ...
+  > 22 │ import { newLocalToken, signedHeaders } from "../../src/http/auth.js";
+  > 23 │ import { LOOPBACK_HOST } from "../../src/http/bind.js";
+       │ ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    24 │ 
+    25 │ const TMP = fixtureTmp("http-budget-route", import.meta.url);
+  
+  i Safe fix: Organize imports and exports (Biome)
+  
+     11  11 │   import { mkdirSync, rmSync } from "node:fs";
+     12  12 │   import { join } from "node:path";
+     13     │ - import·{·afterAll,·beforeAll,·describe,·expect,·it·}·from·"vitest";
+     14     │ - import·{·HTTP_NOT_IMPLEMENTED,·HTTP_UNPROCESSABLE·}·from·"@opc/contracts";
+     15     │ - import·{·fixtureTmp·}·from·"../fixtures/fixture-dir.js";
+     16     │ - import·{·DRIVER_OFF·}·from·"../fixtures/driver-state.js";
+         13 │ + import·{·HTTP_NOT_IMPLEMENTED,·HTTP_UNPROCESSABLE·}·from·"@opc/contracts";
+         14 │ + import·{·afterAll,·beforeAll,·describe,·expect,·it·}·from·"vitest";
+         15 │ + import·{·migrate·}·from·"../../src/db/migrate.js";
+         16 │ + import·{·WriteQueue·}·from·"../../src/db/write-queue.js";
+     17  17 │   import { InMemoryEventBus } from "../../src/events/bus.js";
+     18     │ - import·{·WriteQueue·}·from·"../../src/db/write-queue.js";
+     19     │ - import·{·migrate·}·from·"../../src/db/migrate.js";
+     20     │ - import·{·handleRequest,·matchRoute,·type·HubDeps,·type·HubRequest·}·from·"../../src/http/app.js";
+         18 │ + import·{·type·HubDeps,·type·HubRequest,·handleRequest,·matchRoute·}·from·"../../src/http/app.js";
+         19 │ + import·{·newLocalToken,·signedHeaders·}·from·"../../src/http/auth.js";
+         20 │ + import·{·LOOPBACK_HOST·}·from·"../../src/http/bind.js";
+     21  21 │   import { assertLoopbackBudgetRoute, budgetListRoute, putBudgetRoute } from "../../src/http/budget.js";
+     22     │ - import·{·newLocalToken,·signedHeaders·}·from·"../../src/http/auth.js";
+     23     │ - import·{·LOOPBACK_HOST·}·from·"../../src/http/bind.js";
+         22 │ + import·{·DRIVER_OFF·}·from·"../fixtures/driver-state.js";
+         23 │ + import·{·fixtureTmp·}·from·"../fixtures/fixture-dir.js";
+     24  24 │   
+     25  25 │   const TMP = fixtureTmp("http-budget-route", import.meta.url);
+  
+
+packages\hub\test\http\budget-route.test.ts format ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  × Formatter would have printed the following content:
+  
+     18  18 │   import { WriteQueue } from "../../src/db/write-queue.js";
+     19  19 │   import { migrate } from "../../src/db/migrate.js";
+     20     │ - import·{·handleRequest,·matchRoute,·type·HubDeps,·type·HubRequest·}·from·"../../src/http/app.js";
+     21     │ - import·{·assertLoopbackBudgetRoute,·budgetListRoute,·putBudgetRoute·}·from·"../../src/http/budget.js";
+         20 │ + import·{
+         21 │ + ··handleRequest,
+         22 │ + ··matchRoute,
+         23 │ + ··type·HubDeps,
+         24 │ + ··type·HubRequest,
+         25 │ + }·from·"../../src/http/app.js";
+         26 │ + import·{
+         27 │ + ··assertLoopbackBudgetRoute,
+         28 │ + ··budgetListRoute,
+         29 │ + ··putBudgetRoute,
+         30 │ + }·from·"../../src/http/budget.js";
+     22  31 │   import { newLocalToken, signedHeaders } from "../../src/http/auth.js";
+     23  32 │   import { LOOPBACK_HOST } from "../../src/http/bind.js";
+    ······· │ 
+     61  70 │     readonly db: Db;
+     62  71 │     readonly write: Db;
+     63     │ - ··readonly·sign:·(method:·string,·target:·string,·body?:·string)·=>·Record<string,·string>;
+     64     │ - ··readonly·req:·(o:·Partial<HubRequest>·&·{·method:·string;·path:·string·})·=>·HubRequest;
+         72 │ + ··readonly·sign:·(
+         73 │ + ····method:·string,
+         74 │ + ····target:·string,
+         75 │ + ····body?:·string,
+         76 │ + ··)·=>·Record<string,·string>;
+         77 │ + ··readonly·req:·(
+         78 │ + ····o:·Partial<HubRequest>·&·{·method:·string;·path:·string·},
+         79 │ + ··)·=>·HubRequest;
+     65  80 │   }
+     66  81 │   
+    ······· │ 
+     75  90 │     const token = newLocalToken();
+     76  91 │     const clock = () => T0;
+     77     │ - ··const·sign·=·(method:·string,·target:·string,·body·=·""):·Record<string,·string>·=>
+         92 │ + ··const·sign·=·(
+         93 │ + ····method:·string,
+         94 │ + ····target:·string,
+         95 │ + ····body·=·"",
+         96 │ + ··):·Record<string,·string>·=>
+     78  97 │       signedHeaders(token, { method, target, body, now: clock() });
+     79  98 │     const deps: HubDeps = {
+    ······· │ 
+    111 130 │     const nodes: Record<string, unknown> = {};
+    112 131 │     for (const r of roles) {
+    113     │ - ····nodes[r]·=·{·role_id:·r,·can_manage:·false,·reports_to:·null,·model_family:·"gpt"·};
+        132 │ + ····nodes[r]·=·{
+        133 │ + ······role_id:·r,
+        134 │ + ······can_manage:·false,
+        135 │ + ······reports_to:·null,
+        136 │ + ······model_family:·"gpt",
+        137 │ + ····};
+    114 138 │     }
+    115 139 │     db.prepare(
+    ······· │ 
+    120 144 │   
+    121 145 │   function events(db: Db): Row[] {
+    122     │ - ··return·db.prepare("SELECT·action,·task_id,·target,·payload,·actor_type,·actor_id·FROM·events·ORDER·BY·id").all();
+        146 │ + ··return·db
+        147 │ + ····.prepare(
+        148 │ + ······"SELECT·action,·task_id,·target,·payload,·actor_type,·actor_id·FROM·events·ORDER·BY·id",
+        149 │ + ····)
+        150 │ + ····.all();
+    123 151 │   }
+    124 152 │   
+    ······· │ 
+    143 171 │   describe("① matchRoute：budget 两条是单段字面，方法不互换", () => {
+    144 172 │     it("GET/POST /budget 各匹各的；/budget/x、PUT、DELETE 打不到", () => {
+    145     │ - ····expect(matchRoute("GET",·"/budget")).toEqual({·kind:·"list_budget",·endpoint:·"GET·/budget"·});
+        173 │ + ····expect(matchRoute("GET",·"/budget")).toEqual({
+        174 │ + ······kind:·"list_budget",
+        175 │ + ······endpoint:·"GET·/budget",
+        176 │ + ····});
+    146 177 │       expect(matchRoute("POST", "/budget")?.kind).toBe("put_budget");
+    147 178 │       expect(matchRoute("GET", "/budget/")).toBeNull();
+    ······· │ 
+    158 189 │       const h = harness({ wired: true });
+    159 190 │       expect(
+    160     │ - ······assertLoopbackBudgetRoute(h.req({·method:·"POST",·path:·"/budget",·peer:·LAN_PEER,·body:·body(okBody())·})),
+        191 │ + ······assertLoopbackBudgetRoute(
+        192 │ + ········h.req({
+        193 │ + ··········method:·"POST",
+        194 │ + ··········path:·"/budget",
+        195 │ + ··········peer:·LAN_PEER,
+        196 │ + ··········body:·body(okBody()),
+        197 │ + ········}),
+        198 │ + ······),
+    161 199 │       ).toEqual({ status: UNAUTHORIZED, body: { error: "unauthorized" } });
+    162 200 │       const res = await putBudgetRoute(
+    163 201 │         h.deps,
+    164     │ - ······h.req({·method:·"POST",·path:·"/budget",·peer:·LAN_PEER,·body:·body(okBody())·}),
+        202 │ + ······h.req({
+        203 │ + ········method:·"POST",
+        204 │ + ········path:·"/budget",
+        205 │ + ········peer:·LAN_PEER,
+        206 │ + ········body:·body(okBody()),
+        207 │ + ······}),
+    165 208 │       );
+    166 209 │       expect(res.status).toBe(UNAUTHORIZED);
+    167     │ - ····expect(Number(h.db.prepare("SELECT·count(*)·AS·n·FROM·budgets").get()?.n)).toBe(0);
+        210 │ + ····expect(
+        211 │ + ······Number(h.db.prepare("SELECT·count(*)·AS·n·FROM·budgets").get()?.n),
+        212 │ + ····).toBe(0);
+    168 213 │       expect(events(h.db)).toHaveLength(0);
+    169 214 │     });
+    ······· │ 
+    175 220 │     it("501 且消息点名 budgetWriter", async () => {
+    176 221 │       const h = harness({ wired: false });
+    177     │ - ····const·res·=·await·putBudgetRoute(h.deps,·h.req({·method:·"POST",·path:·"/budget",·body:·body(okBody())·}));
+        222 │ + ····const·res·=·await·putBudgetRoute(
+        223 │ + ······h.deps,
+        224 │ + ······h.req({·method:·"POST",·path:·"/budget",·body:·body(okBody())·}),
+        225 │ + ····);
+    178 226 │       expect(res.status).toBe(HTTP_NOT_IMPLEMENTED);
+    179 227 │       expect(JSON.stringify(res.body)).toContain("budgetWriter");
+    ······· │ 
+    196 244 │       ];
+    197 245 │       for (const b of badBodies) {
+    198     │ - ······const·res·=·await·putBudgetRoute(h.deps,·h.req({·method:·"POST",·path:·"/budget",·body:·body(b)·}));
+        246 │ + ······const·res·=·await·putBudgetRoute(
+        247 │ + ········h.deps,
+        248 │ + ········h.req({·method:·"POST",·path:·"/budget",·body:·body(b)·}),
+        249 │ + ······);
+    199 250 │         expect(res.status).toBe(HTTP_UNPROCESSABLE);
+    200 251 │       }
+    201 252 │       // 反例对照：同一装配同一形状只把坏格改回去 ⇒ 200。少了这发，上面循环可能只是恒 422。
+    202     │ - ····const·good·=·await·putBudgetRoute(h.deps,·h.req({·method:·"POST",·path:·"/budget",·body:·body(okBody())·}));
+        253 │ + ····const·good·=·await·putBudgetRoute(
+        254 │ + ······h.deps,
+        255 │ + ······h.req({·method:·"POST",·path:·"/budget",·body:·body(okBody())·}),
+        256 │ + ····);
+    203 257 │       expect(good.status).toBe(200);
+    204     │ - ····expect(Number(h.db.prepare("SELECT·count(*)·AS·n·FROM·budgets").get()?.n)).toBe(1);
+        258 │ + ····expect(
+        259 │ + ······Number(h.db.prepare("SELECT·count(*)·AS·n·FROM·budgets").get()?.n),
+        260 │ + ····).toBe(1);
+    205 261 │     });
+    206 262 │   });
+    ······· │ 
+    213 269 │       const a = await putBudgetRoute(
+    214 270 │         h.deps,
+    215     │ - ······h.req({·method:·"POST",·path:·"/budget",·body:·body(okBody({·scope_type:·"role",·scope_id:·"dev",·limit_cents:·500·}))·}),
+        271 │ + ······h.req({
+        272 │ + ········method:·"POST",
+        273 │ + ········path:·"/budget",
+        274 │ + ········body:·body(
+        275 │ + ··········okBody({·scope_type:·"role",·scope_id:·"dev",·limit_cents:·500·}),
+        276 │ + ········),
+        277 │ + ······}),
+    216 278 │       );
+    217 279 │       expect(a.status).toBe(200);
+    ······· │ 
+    219 281 │       const b = await putBudgetRoute(
+    220 282 │         h.deps,
+    221     │ - ······h.req({·method:·"POST",·path:·"/budget",·body:·body(okBody({·scope_type:·"role",·scope_id:·"dev",·limit_cents:·900,·hard_stop:·false·}))·}),
+        283 │ + ······h.req({
+        284 │ + ········method:·"POST",
+        285 │ + ········path:·"/budget",
+        286 │ + ········body:·body(
+  241 more lines truncated
+  
+
+packages\hub\test\http\charter-route.test.ts:13:1 assist/source/organizeImports  FIXABLE  ━━━━━━━━━━
+
+  × Sort these imports.
+  
+    11 │  * 于是「422 一行都不写」「POST 之后 GET 能拿回」是能红的断言而不是接口 Mock。
+    12 │  */
+  > 13 │ import { mkdirSync, rmSync } from "node:fs";
+       │ ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  > 14 │ import { join } from "node:path";
+        ...
+  > 30 │ import { newLocalToken, signedHeaders } from "../../src/http/auth.js";
+  > 31 │ import { LOOPBACK_HOST } from "../../src/http/bind.js";
+       │ ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    32 │ 
+    33 │ const TMP = fixtureTmp("http-charter-route", import.meta.url);
+  
+  i Safe fix: Organize imports and exports (Biome)
+  
+     13  13 │   import { mkdirSync, rmSync } from "node:fs";
+     14  14 │   import { join } from "node:path";
+     15     │ - import·{·afterAll,·beforeAll,·describe,·expect,·it·}·from·"vitest";
+     16     │ - import·{
+     17     │ - ··HTTP_NOT_IMPLEMENTED,
+     18     │ - ··HTTP_UNPROCESSABLE,
+     19     │ - ··charterSchema,
+     20     │ - ··type·CharterInput,
+     21     │ - }·from·"@opc/contracts";
+     22     │ - import·{·fixtureTmp·}·from·"../fixtures/fixture-dir.js";
+     23     │ - import·{·DRIVER_OFF·}·from·"../fixtures/driver-state.js";
+     24     │ - import·{·InMemoryEventBus·}·from·"../../src/events/bus.js";
+     25     │ - import·{·WriteQueue·}·from·"../../src/db/write-queue.js";
+     26     │ - import·{·migrate·}·from·"../../src/db/migrate.js";
+     27     │ - import·{·handleRequest,·matchRoute,·type·HubDeps,·type·HubRequest·}·from·"../../src/http/app.js";
+     28     │ - import·{·assertLoopbackCharterRoute,·charterViewRoute,·saveCharterRoute·}·from·"../../src/http/charter.js";
+     29     │ - import·{·readLatestCharter·}·from·"../../src/charter/store.js";
+     30     │ - import·{·newLocalToken,·signedHeaders·}·from·"../../src/http/auth.js";
+     31     │ - import·{·LOOPBACK_HOST·}·from·"../../src/http/bind.js";
+         15 │ + import·{
+         16 │ + ··type·CharterInput,
+         17 │ + ··charterSchema,
+         18 │ + ··HTTP_NOT_IMPLEMENTED,
+         19 │ + ··HTTP_UNPROCESSABLE,
+         20 │ + }·from·"@opc/contracts";
+         21 │ + import·{·afterAll,·beforeAll,·describe,·expect,·it·}·from·"vitest";
+         22 │ + import·{·readLatestCharter·}·from·"../../src/charter/store.js";
+         23 │ + import·{·migrate·}·from·"../../src/db/migrate.js";
+         24 │ + import·{·WriteQueue·}·from·"../../src/db/write-queue.js";
+         25 │ + import·{·InMemoryEventBus·}·from·"../../src/events/bus.js";
+         26 │ + import·{·type·HubDeps,·type·HubRequest,·handleRequest,·matchRoute·}·from·"../../src/http/app.js";
+         27 │ + import·{·newLocalToken,·signedHeaders·}·from·"../../src/http/auth.js";
+         28 │ + import·{·LOOPBACK_HOST·}·from·"../../src/http/bind.js";
+         29 │ + import·{·assertLoopbackCharterRoute,·charterViewRoute,·saveCharterRoute·}·from·"../../src/http/charter.js";
+         30 │ + import·{·DRIVER_OFF·}·from·"../fixtures/driver-state.js";
+         31 │ + import·{·fixtureTmp·}·from·"../fixtures/fixture-dir.js";
+     32  32 │   
+     33  33 │   const TMP = fixtureTmp("http-charter-route", import.meta.url);
+  
+
+packages\hub\test\http\charter-route.test.ts format ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  × Formatter would have printed the following content:
+  
+     25  25 │   import { WriteQueue } from "../../src/db/write-queue.js";
+     26  26 │   import { migrate } from "../../src/db/migrate.js";
+     27     │ - import·{·handleRequest,·matchRoute,·type·HubDeps,·type·HubRequest·}·from·"../../src/http/app.js";
+     28     │ - import·{·assertLoopbackCharterRoute,·charterViewRoute,·saveCharterRoute·}·from·"../../src/http/charter.js";
+         27 │ + import·{
+         28 │ + ··handleRequest,
+         29 │ + ··matchRoute,
+         30 │ + ··type·HubDeps,
+         31 │ + ··type·HubRequest,
+         32 │ + }·from·"../../src/http/app.js";
+         33 │ + import·{
+         34 │ + ··assertLoopbackCharterRoute,
+         35 │ + ··charterViewRoute,
+         36 │ + ··saveCharterRoute,
+         37 │ + }·from·"../../src/http/charter.js";
+     29  38 │   import { readLatestCharter } from "../../src/charter/store.js";
+     30  39 │   import { newLocalToken, signedHeaders } from "../../src/http/auth.js";
+    ······· │ 
+     56  65 │     honesty_boundaries: ["不谎报测试结果"],
+     57  66 │     acceptance_criteria: [
+     58     │ - ····{·condition:·"metric:coverage·<·80",·action:·"reject",·message:·"覆盖率不足·80"·},
+         67 │ + ····{
+         68 │ + ······condition:·"metric:coverage·<·80",
+         69 │ + ······action:·"reject",
+         70 │ + ······message:·"覆盖率不足·80",
+         71 │ + ····},
+     59  72 │     ],
+     60  73 │     forbidden_actions: [],
+    ······· │ 
+     63  76 │     budget: { daily_usd: 15, per_task_usd: 5 },
+     64  77 │     decision_scope: { autonomous: [], requires_consultation: [], forbidden: [] },
+     65     │ - ··judgment_mode:·{·type:·"strict_rules",·strict_rules:·[],·bounded_judgment:·[],·full_discretion:·[]·},
+         78 │ + ··judgment_mode:·{
+         79 │ + ····type:·"strict_rules",
+         80 │ + ····strict_rules:·[],
+         81 │ + ····bounded_judgment:·[],
+         82 │ + ····full_discretion:·[],
+         83 │ + ··},
+     66  84 │     escalation_triggers: [],
+     67  85 │     ...over,
+    ······· │ 
+     76  94 │     readonly db: Db;
+     77  95 │     readonly queue: WriteQueue;
+     78     │ - ··readonly·sign:·(method:·string,·target:·string,·body?:·string)·=>·Record<string,·string>;
+     79     │ - ··readonly·req:·(o:·Partial<HubRequest>·&·{·method:·string;·path:·string·})·=>·HubRequest;
+         96 │ + ··readonly·sign:·(
+         97 │ + ····method:·string,
+         98 │ + ····target:·string,
+         99 │ + ····body?:·string,
+        100 │ + ··)·=>·Record<string,·string>;
+        101 │ + ··readonly·req:·(
+        102 │ + ····o:·Partial<HubRequest>·&·{·method:·string;·path:·string·},
+        103 │ + ··)·=>·HubRequest;
+     80 104 │   }
+     81 105 │   
+    ······· │ 
+     90 114 │     const token = newLocalToken();
+     91 115 │     const clock = () => T0;
+     92     │ - ··const·sign·=·(method:·string,·target:·string,·body·=·""):·Record<string,·string>·=>
+        116 │ + ··const·sign·=·(
+        117 │ + ····method:·string,
+        118 │ + ····target:·string,
+        119 │ + ····body·=·"",
+        120 │ + ··):·Record<string,·string>·=>
+     93 121 │       signedHeaders(token, { method, target, body, now: clock() });
+     94 122 │     const deps: HubDeps = {
+    ······· │ 
+    167 195 │     it("⭐ gate 对 LAN 对端返回与凭据错逐字相同的 401；回环为 null", () => {
+    168 196 │       const h = harness({ wired: true });
+    169     │ - ····const·req·=·h.req({·method:·"POST",·path:·"/charter/dev",·body:·charterBody(draft())·});
+    170     │ - ····expect(assertLoopbackCharterRoute(h.req({·method:·"POST",·path:·"/charter/dev",·peer:·LAN_PEER,·body:·charterBody(draft())·}))).toEqual({
+        197 │ + ····const·req·=·h.req({
+        198 │ + ······method:·"POST",
+        199 │ + ······path:·"/charter/dev",
+        200 │ + ······body:·charterBody(draft()),
+        201 │ + ····});
+        202 │ + ····expect(
+        203 │ + ······assertLoopbackCharterRoute(
+        204 │ + ········h.req({
+        205 │ + ··········method:·"POST",
+        206 │ + ··········path:·"/charter/dev",
+        207 │ + ··········peer:·LAN_PEER,
+        208 │ + ··········body:·charterBody(draft()),
+        209 │ + ········}),
+        210 │ + ······),
+        211 │ + ····).toEqual({
+    171 212 │         status: UNAUTHORIZED,
+    172 213 │         body: { error: "unauthorized" },
+    ······· │ 
+    180 221 │         h.deps,
+    181 222 │         "dev",
+    182     │ - ······h.req({·method:·"POST",·path:·"/charter/dev",·peer:·LAN_PEER,·body:·charterBody(draft())·}),
+        223 │ + ······h.req({
+        224 │ + ········method:·"POST",
+        225 │ + ········path:·"/charter/dev",
+        226 │ + ········peer:·LAN_PEER,
+        227 │ + ········body:·charterBody(draft()),
+        228 │ + ······}),
+    183 229 │       );
+    184 230 │       expect(res.status).toBe(UNAUTHORIZED);
+    ······· │ 
+    196 242 │         h.deps,
+    197 243 │         "dev",
+    198     │ - ······h.req({·method:·"POST",·path:·"/charter/dev",·body:·charterBody(draft())·}),
+        244 │ + ······h.req({
+        245 │ + ········method:·"POST",
+        246 │ + ········path:·"/charter/dev",
+        247 │ + ········body:·charterBody(draft()),
+        248 │ + ······}),
+    199 249 │       );
+    200 250 │       expect(res.status).toBe(HTTP_NOT_IMPLEMENTED);
+    ······· │ 
+    213 263 │         actor: { actor_type: "human", actor_id: "attacker" },
+    214 264 │       });
+    215     │ - ····const·res·=·await·saveCharterRoute(h.deps,·"dev",·h.req({·method:·"POST",·path:·"/charter/dev",·body·}));
+        265 │ + ····const·res·=·await·saveCharterRoute(
+        266 │ + ······h.deps,
+        267 │ + ······"dev",
+        268 │ + ······h.req({·method:·"POST",·path:·"/charter/dev",·body·}),
+        269 │ + ····);
+    216 270 │       expect(res.status).toBe(HTTP_UNPROCESSABLE);
+    217 271 │     });
+    ······· │ 
+    224 278 │         JSON.stringify({ config: draft(), change_summary: "   " }),
+    225 279 │       ]) {
+    226     │ - ······const·res·=·await·saveCharterRoute(h.deps,·"dev",·h.req({·method:·"POST",·path:·"/charter/dev",·body:·cfg·}));
+        280 │ + ······const·res·=·await·saveCharterRoute(
+        281 │ + ········h.deps,
+        282 │ + ········"dev",
+        283 │ + ········h.req({·method:·"POST",·path:·"/charter/dev",·body:·cfg·}),
+        284 │ + ······);
+    227 285 │         expect(res.status).toBe(HTTP_UNPROCESSABLE);
+    228 286 │         expect(JSON.stringify(res.body)).toContain("change_summary");
+    ······· │ 
+    237 295 │         version: 1,
+    238 296 │         honestyBoundaries: ["不谎报"],
+    239     │ - ······acceptanceCriteria:·[{·condition:·"metric:coverage·<·80",·action:·"reject",·message:·"x"·}],
+        297 │ + ······acceptanceCriteria:·[
+        298 │ + ········{·condition:·"metric:coverage·<·80",·action:·"reject",·message:·"x"·},
+        299 │ + ······],
+    240 300 │         forbiddenActions: [],
+    241 301 │         toolPermissions: ["read"],
+    242 302 │         modelTier: "execution",
+    243 303 │         budget: { dailyUsd: 15, perTaskUsd: 5 },
+    244     │ - ······decisionScope:·{·autonomous:·[],·requiresConsultation:·[],·forbidden:·[]·},
+    245     │ - ······judgmentMode:·{·type:·"strict_rules",·strictRules:·[],·boundedJudgment:·[],·fullDiscretion:·[]·},
+        304 │ + ······decisionScope:·{
+        305 │ + ········autonomous:·[],
+        306 │ + ········requiresConsultation:·[],
+        307 │ + ········forbidden:·[],
+        308 │ + ······},
+        309 │ + ······judgmentMode:·{
+        310 │ + ········type:·"strict_rules",
+        311 │ + ········strictRules:·[],
+        312 │ + ········boundedJudgment:·[],
+        313 │ + ········fullDiscretion:·[],
+        314 │ + ······},
+    246 315 │         escalationTriggers: [],
+    247 316 │       };
+    248     │ - ····const·res·=·await·saveCharterRoute(h.deps,·"dev",·h.req({·method:·"POST",·path:·"/charter/dev",·body:·charterBody(camel)·}));
+  158 more lines truncated
+  
+
+packages\hub\test\serve\dev-seed.test.ts:24:1 assist/source/organizeImports  FIXABLE  ━━━━━━━━━━━━━━
+
+  × Some imports or exports are not organized.
+  
+    22 │  * 与 charter-pump.test.ts 同一夹具体系。
+    23 │  */
+  > 24 │ import { mkdirSync, rmSync } from "node:fs";
+       │ ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  > 25 │ import { join } from "node:path";
+        ...
+  > 31 │ import { readLatestGraph } from "../../src/org/commit.js";
+  > 32 │ import { readToday, CEO_DECISION_STATUSES } from "../../src/overview/today.js";
+       │ ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    33 │ import {
+    34 │   DEMO_BUDGETS,
+  
+  i Sort the imported names.
+  
+    30 │ import { WriteQueue } from "../../src/db/write-queue.js";
+    31 │ import { readLatestGraph } from "../../src/org/commit.js";
+  > 32 │ import { readToday, CEO_DECISION_STATUSES } from "../../src/overview/today.js";
+       │ ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    33 │ import {
+    34 │   DEMO_BUDGETS,
+  
+  i Sort these imports.
+  
+    22 │  * 与 charter-pump.test.ts 同一夹具体系。
+    23 │  */
+  > 24 │ import { mkdirSync, rmSync } from "node:fs";
+       │ ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  > 25 │ import { join } from "node:path";
+        ...
+  > 29 │ import { migrate } from "../../src/db/migrate.js";
+  > 30 │ import { WriteQueue } from "../../src/db/write-queue.js";
+       │ ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    31 │ import { readLatestGraph } from "../../src/org/commit.js";
+    32 │ import { readToday, CEO_DECISION_STATUSES } from "../../src/overview/today.js";
+  
+  i Safe fix: Organize imports and exports (Biome)
+  
+     26  26 │   import { afterAll, beforeAll, describe, expect, it } from "vitest";
+     27  27 │   import { APPROVAL_TYPES } from "../../src/approvals/cards.js";
+     28     │ - import·{·isIrreversibleApproval·}·from·"../../src/http/tokens.js";
+     29     │ - import·{·migrate·}·from·"../../src/db/migrate.js";
+     30     │ - import·{·WriteQueue·}·from·"../../src/db/write-queue.js";
+         28 │ + import·{·migrate·}·from·"../../src/db/migrate.js";
+         29 │ + import·{·WriteQueue·}·from·"../../src/db/write-queue.js";
+         30 │ + import·{·isIrreversibleApproval·}·from·"../../src/http/tokens.js";
+     31  31 │   import { readLatestGraph } from "../../src/org/commit.js";
+     32     │ - import·{·readToday,·CEO_DECISION_STATUSES·}·from·"../../src/overview/today.js";
+         32 │ + import·{·CEO_DECISION_STATUSES,·readToday·}·from·"../../src/overview/today.js";
+     33  33 │   import {
+     34  34 │     DEMO_BUDGETS,
+  
+
+packages\hub\test\serve\dev-seed.test.ts format ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  × Formatter would have printed the following content:
+  
+    100 100 │         (
+    101 101 │           db
+    102     │ - ··········.prepare("SELECT·COUNT(*)·AS·n·FROM·approvals·WHERE·status·=·'pending'")
+        102 │ + ··········.prepare(
+        103 │ + ············"SELECT·COUNT(*)·AS·n·FROM·approvals·WHERE·status·=·'pending'",
+        104 │ + ··········)
+    103 105 │             .get() as { n: number }
+    104 106 │         ).n,
+    ······· │ 
+    218 220 │         (
+    219 221 │           db
+    220     │ - ··········.prepare("SELECT·COUNT(*)·AS·n·FROM·approvals·WHERE·status·=·'pending'")
+        222 │ + ··········.prepare(
+        223 │ + ············"SELECT·COUNT(*)·AS·n·FROM·approvals·WHERE·status·=·'pending'",
+        224 │ + ··········)
+    221 225 │             .get() as { n: number }
+    222 226 │         ).n;
+    ······· │ 
+    235 239 │       // 预算行也不叠（INSERT ... DO NOTHING），任务级那条还在。
+    236 240 │       expect(
+    237     │ - ······(db.prepare("SELECT·COUNT(*)·AS·n·FROM·budgets").get()·as·{·n:·number·}).n,
+        241 │ + ······(db.prepare("SELECT·COUNT(*)·AS·n·FROM·budgets").get()·as·{·n:·number·})
+        242 │ + ········.n,
+    238 243 │       ).toBe(DEMO_BUDGETS.length);
+    239 244 │     });
+    ······· │ 
+    251 256 │         (b) => b.scope === "task" && b.period === "per_task",
+    252 257 │       );
+    253     │ - ····expect(
+    254     │ - ······taskLevel.reduce((s,·b)·=>·s·+·b.limitCents,·0),
+    255     │ - ····).toBe(view.budget.declared_task_limits_cents);
+        258 │ + ····expect(taskLevel.reduce((s,·b)·=>·s·+·b.limitCents,·0)).toBe(
+        259 │ + ······view.budget.declared_task_limits_cents,
+        260 │ + ····);
+    256 261 │     });
+    257 262 │   });
+  
+
+packages\web\public\app.js:1673:15 lint/suspicious/noAssignInExpressions ━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  × The assignment should not be in an expression.
+  
+    1671 │       buf += td.decode(value, { stream: true });
+    1672 │       let i;
+  > 1673 │       while ((i = buf.indexOf("\n\n")) >= 0) {
+         │               ^^^^^^^^^^^^^^^^^^^^^^^
+    1674 │         const raw = buf.slice(0, i);
+    1675 │         buf = buf.slice(i + 2);
+  
+  i The use of assignments in expressions is confusing.
+    Expressions are often considered as side-effect free.
+  
+
+The number of diagnostics exceeds the limit allowed. Use --max-diagnostics to increase it.
+Diagnostics not shown: 6.
+Checked 11 files in 24ms. No fixes applied.
+Found 16 errors.
+Found 10 warnings.
+check ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  × Some errors were emitted while running checks.
+  
+

@@ -514,7 +514,7 @@ describe("③ 门控消费口：Task 3.6 那条 Test 的可测形态", () => {
 });
 
 describe("④ 接线状态", () => {
-  it("src 里调 saveCharterVersion 的【只有播种命令一处】（缺口上移了一环，不是填上了）", async () => {
+  it("src 里调 saveCharterVersion 的【只有播种命令 + HTTP 写入口两处】（缺口上移，不是填上）", async () => {
     const { readdirSync, readFileSync, statSync } = await import("node:fs");
     // 取材与判据必须同形，否则这一发在 Windows 上恒红而红因与它声称的无关（0053）：
     // 下面 filter 用正斜杠的 "charter/store.ts"，而 join() 在本机给反斜杠 ⇒
@@ -537,15 +537,15 @@ describe("④ 接线状态", () => {
     // ⚠ 它已经红了，红在 O2 动作 2 那条播种命令上（charter/seed.ts）。而**改期望值之前
     // 先问的那一句**（phase3.test.ts 的 verifyFix 那发立的规矩：「变红之后不能直接改成
     // 新值收工，得先问一句：缺口真的消了吗」）实测答案是【没有】：
-    //   以前是「src 里没有任何写岗位书的入口」；
-    //   现在是「有一个入口，而它对 shipped 模板恒拒」—— 七份模板 0 份签过字（Task 0.9
-    //   等 CEO 本人替换占位串，开发者不得代笔），播种跑到判据 A 就整次拒绝。
-    // 结论强度**没有变化**：`role_charters` 今天仍然是 0 行，`rolePrompt` 每一轮仍然走
-    // NO_CHARTER_LINE 那一支。前进的是「缺一次接线」变成「缺 CEO 签七个文件」，
-    // 而后者的执行方是人，不是代码。这一格必须由读到这一行的**人**去清，
-    // 不是再写一条断言能清的 —— 这也是为什么这里留的是【精确等于播种那一处】
-    // 而不是 toEqual([])：多出一个真调用方仍然会红，而红因是"有人接了第二条路"。
-    expect(callers.map((f) => relPosix(f, SRC))).toEqual(["charter/seed.ts"]);
+    //   seed 对 shipped 模板仍恒拒 —— 七份模板 0 份签过字（Task 0.9 等 CEO 本人替换占位串），
+    //   播种跑到判据 A 就整次拒绝。`role_charters` 今天仍然是 0 行这件事没变。
+    // 本轮新增的第二个调用方是 http/charter.ts（POST /charter 的界面写入口，只认回环 + HMAC）。
+    // 这是【缺口上移】不是【缺口填上】：写入口从一条变两条，而岗位书内容仍要 CEO 签字才进得了库，
+    // 执行方仍然是人不是代码。这里留【精确等于这两处】而不是 toEqual([])：
+    // 多出一个真调用方仍然会红，而红因是"有人接了第三条路"。
+    // ⚠ 本块的行数改动要保持【行号中性】：0058 §5 在 doc-refs.test.ts 里钉着本文件
+    //   第 675 行的快照，多删少删都会把那条活坐标顶漂（同一文件的第 ④ 节扫描）。
+    expect(callers.map((f) => relPosix(f, SRC))).toEqual(["charter/seed.ts", "http/charter.ts"]);
   });
 
   it("保存岗位书【同时】把 budget 落进 budgets 表（否则屏幕显示新数字而执行侧按老数字放行）", async () => {

@@ -1,0 +1,58 @@
+
+[1m[30m[46m RUN [49m[39m[22m [36mv4.1.12 [39m[90mD:/item/opc[39m
+
+(node:68040) [DEP0190] DeprecationWarning: Passing args to a child process with shell option true can lead to security vulnerabilities, as the arguments are not escaped, only concatenated.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+(node:45724) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ [31m❯[39m packages/hub/test/acceptance/new-role-to-its-own-criteria.test.ts [2m([22m[2m11 tests[22m[2m | [22m[31m1 failed[39m[2m)[22m[33m 1525[2mms[22m[39m
+     [32m✓[39m 证据①：契约里有「加节点」这一类变更，而它只收【一个完整节点】的形状[32m 3[2mms[22m[39m
+     [32m✓[39m ⭐ 证据②：同一条旁路现在被【节点级判据】拦下 —— 422、零新版本、库里没有那个节点[32m 99[2mms[22m[39m
+     [32m✓[39m ⭐ 证据②的反向 canary：同一个请求体只补上 model_family ⇒ 200（拦的是那一维，不是「加节点」本身）[32m 92[2mms[22m[39m
+     [32m✓[39m 证据④ round294：`add_node` 走正经路【能】加出一个节点，且审计与库一致[32m 94[2mms[22m[39m
+     [33m[2m✓[22m[39m ⭐ 证据④的六条拒绝：每种坏形状 422 + 对的 code + 库里零残留（零新版本、零审计） [33m 838[2mms[22m[39m
+     [32m✓[39m ⭐ 证据④的反向 canary：缺 model_family 的 add_node 仍然 422，但判它的是【继承】那一格[32m 89[2mms[22m[39m
+[31m     [31m×[31m 证据③（round295 翻向）：界面发得出 reparent，发不出 add_edge / add_node[39m[32m 6[2mms[22m[39m
+     [32m✓[39m 正题：org 提交 + 播种之后，派给它的【那一轮】拿到的就是它自己那条标准[32m 113[2mms[22m[39m
+     [32m✓[39m ⭐ 反空转：名字进了图、但没给它签岗位书的那个角色，提示词里一条验收标准都没有[32m 92[2mms[22m[39m
+     [32m✓[39m 前提：这两个新名字【确实】不与任何模板文件名/预设节点名相同（反空转成立的前提）[32m 0[2mms[22m[39m
+     [32m✓[39m 播种那一格不是白给的：同一份模板带回占位串 ⇒ 退 1、零行，第四跳随之读不到标准[32m 23[2mms[22m[39m
+
+[31m⎯⎯⎯⎯⎯⎯⎯[39m[1m[41m Failed Tests 1 [49m[22m[31m⎯⎯⎯⎯⎯⎯⎯[39m
+
+[41m[1m FAIL [22m[49m packages/hub/test/acceptance/new-role-to-its-own-criteria.test.ts[2m > [22m① 第一跳（`POST /org` 加一个角色）：kind 有了，判据也有了（round294）[2m > [22m证据③（round295 翻向）：界面发得出 reparent，发不出 add_edge / add_node
+[31m[1mAssertionError[22m: expected { …(3) } to deeply equal { …(3) }[39m
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[2m  {[22m
+[32m-   "add_edge": [],[39m
+[32m-   "add_node": [],[39m
+[31m+   "add_edge": [[39m
+[31m+     "D:\\item\\opc\\packages\\web\\public\\app.js",[39m
+[31m+   ],[39m
+[31m+   "add_node": [[39m
+[31m+     "D:\\item\\opc\\packages\\web\\public\\app.js",[39m
+[31m+   ],[39m
+[2m    "reparent": [[22m
+[2m      "D:\\item\\opc\\packages\\web\\public\\app.js",[22m
+[2m    ],[22m
+[2m  }[22m
+
+[36m [2m❯[22m packages/hub/test/acceptance/new-role-to-its-own-criteria.test.ts:[2m857:22[22m[39m
+    [90m855|[39m     [90m// ① 逐 kind 的名单。改这一行之前先想清楚：让界面上多一种能发的变更，[39m
+    [90m856|[39m     [90m//    是产品决定（O8 第一跳那一格），不是测试顺手放宽的事。[39m
+    [90m857|[39m     [34mexpect[39m(emitters)[33m.[39m[34mtoEqual[39m({
+    [90m   |[39m                      [31m^[39m
+    [90m858|[39m       reparent[33m:[39m [consolePath][33m,[39m
+    [90m859|[39m       add_edge[33m:[39m [][33m,[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯[22m[39m
+
+
+[2m Test Files [22m [1m[31m1 failed[39m[22m[90m (1)[39m
+[2m      Tests [22m [1m[31m1 failed[39m[22m[2m | [22m[1m[32m10 passed[39m[22m[90m (11)[39m
+[2m   Start at [22m 00:25:57
+[2m   Duration [22m 2.47s[2m (transform 304ms, setup 0ms, import 434ms, tests 1.52s, environment 0ms)[22m
+

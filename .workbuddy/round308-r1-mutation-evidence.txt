@@ -1,0 +1,7 @@
+✔ M0 控制组：一字不改 ⇒ 红因 [（绿）] 期望含 [绿] 回滚逐字节一致=true
+✔ M1 名单内那处改成字面量 0 ⇒ 红因 [budgets.hard_stop 有代码能写成 0：INSERT INTO budgets (id, scope_type, scope_] 期望含 [写成 0] 回滚逐字节一致=true
+✔ M2 名单内那处的 upsert 不再改停法 ⇒ 红因 [r1 名单失效：http/budget.ts 登记的 hard_stop 写点形状里这一段今天不在了 [DO UPDATE SET limi] 期望含 [名单失效] 回滚逐字节一致=true
+✔ M3 名单外多一处绑参写 hard_stop ⇒ 红因 [budgets.hard_stop 多了一处【绑定参数】写点 budget/tracker.ts（值是调用方给的，判据看不见它会不会是 0）] 期望含 [绑定参数] 回滚逐字节一致=true
+✔ M4 名单外一处 upsert 改写 hard_stop ⇒ 红因 [budgets 的 upsert 在 budget/tracker.ts 里改写 hard_stop，而这一处没登记：改一条已有行比新建一行] 期望含 [没登记] 回滚逐字节一致=true
+
+命中 5/5 · 全部文件已回滚=true

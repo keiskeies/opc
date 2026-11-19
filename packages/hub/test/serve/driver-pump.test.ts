@@ -1042,8 +1042,11 @@ describe("J. 默认那一支（真 runtime + 真子进程 + 真执行日志）",
     // 失败那一轮【不留状态边】：库里没有 state_change ⇒ 没有"钱花了而链半截"那种形状。
     expect(rows(w, "SELECT id FROM events WHERE action = 'state_change'")).toHaveLength(0);
     expect(status(w, "t1")).toBe("IN_PROGRESS");
-    // note 说的是【读不懂输出】而不是编一个原因（那一条真在桩的原文里）。
-    expect(String(r.driven[0]?.note)).toContain("CLI 输出不是预期的 JSON");
+    // note 要说得出失败为什么发生，而不是编一个原因（那一条真在桩的原文里）。
+    // O6 Step B（round312）后子进程输出先过 gateway 会话校验：garbage 桩的非 JSON
+    // 输出在 gateway 层判成 no_session，文案从适配器层的「CLI 输出不是预期的 JSON」
+    // 变成 gateway 的拒绝理由 —— 意图（note 带失败原因）没变，错的是断言跟了旧文案。
+    expect(String(r.driven[0]?.note)).toContain("gateway 拒绝（no_session）");
   });
 });
 

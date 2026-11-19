@@ -211,7 +211,7 @@ export interface RegistryEntry {
 /* ═════════════════════ 逐条判据（纯函数）═════════════════════ */
 
 /**
- * r1：budgets.hard_stop 无代码能写成 0。扫 src 全部带 hard_stop 列的 INSERT 的 VALUES。
+ * r1：budgets.hard_stop 写不出 0 —— 除了【登记过的那一处】显式软限入口。
  *
  * ⚠ 【round272：取材从写死三个文件改成全 src 扫】。原来那份写死了
  * `["budget/tracker.ts","charter/budget-sync.ts","engine/runtime.ts"]`，而 runtime 那份
@@ -220,27 +220,159 @@ export interface RegistryEntry {
  * 长在名单外的文件里，这条判据【恒绿】而主张读起来仍然成立。
  * ⚠ 条数【不在这里判】，判在同文件的「真仓库取材非空」那一发里（合成夹具只放一条语句，
  * 把条数下限写进 check 会让变异样本自己撞上它，红因从「写成 0」变成「条数不够」= 一次混两种故障）。
+ *
+ * ── round308 改了主张本身，不只是改判据 ─────────────────────────
+ * 原文「没有任何代码能把它写成 0」已被源码否证：POST /budget 的 upsert
+ * （http/budget.ts）把 hard_stop 作【绑定参数】写，界面那个「硬停」勾选框
+ * 取消勾选 ⇒ 那一格就是 0。这是【设计上要有】的入口（CEO 显式把硬停改成软限），
+ * 所以不能靠删功能让旧主张重新成立，只能把主张改成「记账路径写不出 0，
+ * 写 0 只有登记过的这一处」，并让判据钉住「名单外没有第二处绑参写点」。
+ * 旧文不消：登记表 source 里那句原文与它来自哪一行原样留着。
+ *
+ * 四条规则（一条判据一次只报一种故障）：
+ *  A 字面量 0 ⇒ 红，任何文件（原主张那一半，逐字未动）；
+ *  B hard_stop 那一格是【绑定参数】⇒ 该文件必须在名单里，否则红并点名它；
+ *  C 名单里的文件必须【逐字含】它登记时那份形状 —— 否则名单会变成假证人
+ *    （那处入口哪天被删掉，名单要当场红，而不是继续替一个不存在的功能担保）；
+ *  D 名单外的文件里出现 `DO UPDATE ... hard_stop =` ⇒ 红（upsert 悄悄改停法，
+ *    与 A 同一件事的另一半：改一条已有行比新建一行更没人看得见）。
+ */
+/**
+ * 名单：允许 hard_stop 走【绑定参数】的写点 → 登记时逐字在场的形状片段。
+ * 逐片段 includes 而不是拼成整段匹配：源码里那份 SQL 是跨行字符串拼接，
+ * 拼成整段会被格式化重排打掉 —— C 规则抓的是【语义形状变了】，不该红在一次排版上。
+ */
+const HARD_STOP_BIND_WHITELIST: ReadonlyMap<string, readonly string[]> =
+  new Map([
+    [
+      "http/budget.ts",
+      [
+        "VALUES (?, ?, ?, ?, ?, 0, ?) ",
+        "DO UPDATE SET limit_cents = excluded.limit_cents, hard_stop = excluded.hard_stop",
+      ],
+    ],
+  ]);
+
+/**
+ * 判序【必须】是 A→B→C→D，一条判据一次只报一种故障（round308 变异之六量出来的：
+ * 第一版把 C 放在最前，于是「名单内那处把 hard_stop 改成字面量 0」报的是
+ * 「名单失效」—— 那是真话但不是【最坏的那句真话】，读的人会去修名单而不是去掉那个 0）。
+ * A 字面量 0（最严重，无条件下先扫）→ B 名单外的绑参写点 → C 名单形状漂移 →
+ * D 名单外的 upsert 改停法。
+ * ⚠ C 只对【在 allSrc() 里的】名单文件生效：判据不吃「文件整个不见了」这种输入
+ * （`src()` 缺键会抛，而合成夹具少给一个键与「文件真没了」在判据里逐字一样 ——
+ * fakeFiles 上面那段注释记过这一族）。删掉 http/budget.ts 由同文件那条【条数=4】
+ * 的真仓库取材那一发抓，归因不同、各管各的。
  */
 function hardStopZeroCheck(f: Files): string {
-  const text = f
-    .allSrc()
-    .map((name) => f.src(name))
-    .join("\n;\n");
-  let bad = "";
-  for (const m of text.matchAll(
-    /INSERT\s+INTO\s+budgets[^;]*?VALUES\s*\((.*?)\)/gs,
-  )) {
-    // 只看有 hard_stop 列的 INSERT 形状：列序第十位 hard_stop，VALUES 第七位。
-    if (!m[0].includes("hard_stop")) continue;
-    const parts = (m[1] ?? "").split(",");
-    // 前面 5 个 `?`/数值 + consumed_cents(0) + hard_stop => parts[6]
-    const v = (parts[6] ?? "").replace(/\s/g, "");
-    if (v === "0") {
-      bad = "budgets.hard_stop 有代码能写成 0：" + m[0].slice(0, 80);
-      break;
+  const stmts: { name: string; full: string; v: string }[] = [];
+  for (const name of f.allSrc()) {
+    const text = f.src(name);
+    if (!text.includes("INSERT INTO budgets")) continue;
+    for (const m of text.matchAll(
+      /INSERT\s+INTO\s+budgets[^;]*?VALUES\s*\((.*?)\)/gs,
+    )) {
+      // 只看有 hard_stop 列的 INSERT 形状：列序第七位，VALUES 第七位。
+      if (!m[0].includes("hard_stop")) continue;
+      const parts = ((m[1] ?? "").split(",")[6] ?? "").replace(/\s/g, "");
+      stmts.push({ name, full: m[0], v: parts });
     }
   }
-  return bad;
+  // A
+  for (const s of stmts) {
+    if (s.v === "0")
+      return "budgets.hard_stop 有代码能写成 0：" + s.full.slice(0, 80);
+  }
+  // B
+  for (const s of stmts) {
+    if (s.v !== "1" && !HARD_STOP_BIND_WHITELIST.has(s.name)) {
+      return (
+        "budgets.hard_stop 多了一处【绑定参数】写点 " +
+        s.name +
+        "（值是调用方给的，判据看不见它会不会是 0）。" +
+        "要么改成字面量，要么把它加进 HARD_STOP_BIND_WHITELIST 并说清" +
+        "为什么这一处写 0 是【设计要有】的。"
+      );
+    }
+  }
+  for (const name of f.allSrc()) {
+    const text = f.src(name);
+    // C
+    const pinned = HARD_STOP_BIND_WHITELIST.get(name);
+    if (pinned !== undefined) {
+      for (const frag of pinned) {
+        if (!text.includes(frag)) {
+          return (
+            "r1 名单失效：" +
+            name +
+            " 登记的 hard_stop 写点形状里这一段今天不在了 [" +
+            frag +
+            "] —— 那一处入口被改掉或删除了，请把名单与主张一起改，别留着当假证人。"
+          );
+        }
+      }
+    }
+    // D
+    if (pinned === undefined && text.includes("INSERT INTO budgets")) {
+      if (/DO UPDATE[^;]{0,400}hard_stop\s*=/.test(text)) {
+        return (
+          "budgets 的 upsert 在 " +
+          name +
+          " 里改写 hard_stop，而这一处没登记：改一条已有行比新建一行更没人看得见。" +
+          "（名单见 HARD_STOP_BIND_WHITELIST）"
+        );
+      }
+    }
+  }
+  return hardStopReaderCheck(f);
+}
+
+/**
+ * r1 的【读侧】那一半（2026-11-19）：`underTaskBudgetSql` 现在真读 `hard_stop`。
+ *
+ * ⚠ 这一半和 A–D 是【反着】的两格，读的人容易把它们读成互相矛盾：
+ * A–D 判「除了登记的那一处，谁都写不出 0」，E 判「写得出 0 的那一处【有人在看】」。
+ * 两句同时成立才叫开关 —— 写得出一列而没人读，那一列是装饰；有人读而写不出，那是恒真判据。
+ * 本篇 §2 轴二那一格的原话就是这两件事中间隔着的东西。
+ *
+ * E1 判【读侧的字节在代码里】（剥注释：那一段函数头有整段在解释「为什么故意不看它」，
+ * 判原文会让一句诚实的历史注释替「读了」投一票 —— 正是 r23/r24 立的口径）。
+ * E2 判【最外层那层括号还在】。为什么不只在测试里判：
+ *  ① 它是【行为级】判据，已经由 packages/hub/test/budget/hard-stop-gate.test.ts 那条
+ *     IN_REVIEW + hard_stop=0 不发候选钉住了（全仓唯一看得见摘括号的那一发，
+ *     由 .workbuddy/round309-mutate-hard-stop.mjs 的 M3 实测：摘掉它【只有那一发】红）；
+ *  ② 这里再钉一次字节，是因为那一发在【测试文件】里，而测试文件可以被整份删掉；
+ *     登记表这一格删不掉，它保证「那条行为测试防的东西」在主张层面也不许悄悄回来。
+ * ⚠ 射程：E2 是【字节近似】，不是语义等价。把括号加到调用点上（让五个使用点全都
+ * `AND ( <谓词> )`）会让 E2 红而那是对的写法 —— 那种情形下改这一格，别改成恒真。
+ */
+function hardStopReaderCheck(f: Files): string {
+  let pump: string;
+  try {
+    pump = f.src("serve/charter-pump.ts");
+  } catch {
+    return (
+      "packages/hub/src/serve/charter-pump.ts 不在了 —— 那道花钱的门连同它的读方一起没了，" +
+      "「hard_stop 有读者」这一半主张失去执行者"
+    );
+  }
+  const code = withoutComments(pump);
+  if (!code.includes("SELECT b.hard_stop FROM budgets b ")) {
+    return (
+      "underTaskBudgetSql 不再读 budgets.hard_stop —— 那一列退回【写得出一句硬停而没人看】，" +
+      "而 http/budget.ts 那个勾选框今天还在：界面上取消勾选【什么都不改变】，" +
+      "比恒 1 更坏（恒 1 至少没人以为它能关）"
+    );
+  }
+  if (!code.includes("), 1) = 0)")) {
+    return (
+      "读侧那半条的收尾字节 `, 1) = 0)` 不在了 —— 要么判据方向翻了（= 1 变成放行），" +
+      "要么那层【最外层括号】被摘了。后者是本仓抓过的那族：五个使用点里两个裸拼，" +
+      "SQLite 里 AND 比 OR 紧，摘括号把整条 WHERE 劈成「(状态 ∧ 卡 ∧ 钱) ∨ (hard_stop = 0)」" +
+      "⇒ 任何 hard_stop = 0 的格子里【连状态都不判】就进候选"
+    );
+  }
+  return "";
 }
 
 /**
@@ -1075,7 +1207,7 @@ function claimCoordsGuardCheck(f: Files): string {
  * 东西是一发**验收测试**，不在 `src/` 也不在 `test/arch/` —— 所以 Files 多了一个
  * `hubTest`（它的存在理由写在那个方法的注释里，不在这里复述）。
  *
- * 四条判据各自防的失效：
+ * 五条判据各自防的失效：
  *  ① 验收测试整份不见 ⇒ 那条端到端重新变成一句散文（本篇一路在治的那一格）。
  *  ② 反空转那一发被摘掉 ⇒ 剩下的六发**照样全绿**，而它们只证明「名字进了图」，
  *     正是 O8 正文自己警告的假绿。这条判据核的是【那个角色名还在断言里】，
@@ -1091,6 +1223,13 @@ function claimCoordsGuardCheck(f: Files): string {
  * ⇒ 下限换成了【成员点名】：先核取材那张表本身列了 `web/public` 与 `.js`
  * （读不到那段字节 = 表被改了 ⇒ 红，不静默），再核三个根合起来非空。
  * 「量过」不等于「量对位置」，这一格买的就是这个区别。
+ *
+ *  ⑤ (round308 新加) 名单本身没人对账 ⇒ 文案与那发测试的期望值各说各的。
+ *     round295 把主张从否定式翻成【正向点名】，可那份名单只活在那发测试的
+ *     `expect(emitters).toEqual(…)` 里，本判据当时一格都没核它。round308 有人
+ *     给界面补上 add_edge / add_node（正是那发注释预留的「产品决定」那天），
+ *     文案里的两份空名单当场变假而【判据全绿】—— 与④ 是同一条教训的两半：
+ *     ④ 管「取材看不看得见那个文件」，⑤ 管「点出来的名单有没有人对账」。
  *
  * ⚠ 与 r13 同一条纪律：本判据【不重跑】那 7 发，也不重跑那六发变异。它只核对
  * 那份验收文件在场、且那两个关键的断言对象还在里面。
@@ -1159,6 +1298,41 @@ function orgAddNodeGapCheck(f: Files): string {
       "「界面发不出某种变更」这个读数【不可信】：取材空了的时候，" +
       "一条否定式主张永远绿（本仓反复登记的那一族：先怀疑问的位置，再怀疑读到的数）"
     );
+  }
+  // ⑤ 名单本身（round308）。round295 把这条主张从否定式翻成正向点名，而点名点出来的
+  // 那份名单【只活在那发测试的期望值里】—— 本判据当时没核对它。于是有人在界面上
+  // 补上 add_edge / add_node（round308 正是那一天）之后，主张文案与那发测试各说各的，
+  // 本判据一次也不会响。这跟④ 是同一条教训的另一半：④ 管「取材看不看得见那个文件」，
+  // ⑤ 管「点出来的名单有没有人对账」。
+  // ⚠ 位置【必须留在非空下限之后】，这是变异机器逼出来的（round308 那台第一版实测）：
+  // 写在它【之前】时，「三个根全数出 0」那发变异红在【名单】上而不是【不可信】上 ——
+  // 取材都没了，先报「名单不匹配」是把「读不到」当成「读到了不匹配」，而两者的修法相反
+  // （前者修取材，后者修主张）。与 r1 那条「A→B→C→D 的严序」同一个道理：
+  // 一格判据的【顺序】也是主张的一部分，它不靠注释维持，只有跑出来的红因分布能打它。
+  // ⚠ 仍不核对「app.js 真的发了这三种 kind」—— 那是那发端到端的活（它自己会红）。
+  // 这里只核对「文案点的那三名此刻在那发测试的期望字节里」，与本判据其余四格同一个口径。
+  // 用 sliceFrom 而不是全文搜：全文搜会把「注释里提一句 add_edge: [consolePath]」
+  // 当成名单还在（r22 为同一件事挨过一次变异，见它的 ① 那一格）。
+  const roster = sliceFrom(spec, "expect(emitters).toEqual({", "// ② 前提自证");
+  if (roster === null) {
+    return (
+      "那发验收测试里读不到证据③ 那份【名单】的边界（起锚 `expect(emitters).toEqual({` " +
+      "或止锚 `// ② 前提自证` 改了名 / 整段删了）—— 于是「三种 kind 都由 app.js 发」" +
+      "这一格退回【整份文件里搜一下】，而④ 那句红因写的是同一件事：那正是假证人的形状"
+    );
+  }
+  for (const kind of ["reparent", "add_edge", "add_node"]) {
+    // 不要求尾逗号：那会把判据钉在【行排版】上 —— 谁把三格压成一行（prettier 干得出来），
+    // 最后一格没有逗号，这一格就假红。`]` 紧跟 consolePath 已经排除了
+    // `[consolePathFoo]` 那种同前缀改名，逗号那一格再加只是脆，不是严。
+    if (!roster.includes(`${kind}: [consolePath]`)) {
+      return (
+        `证据③ 的名单里 ${kind} 那一格不再是 \`[consolePath]\` —— 而 r15 的文案现在` +
+        "点名的是【三种 kind 都由 app.js 发】。两种可能，别改错那一处：" +
+        "要么界面又把这一种变更撤了（那是产品决定，文案跟着改口），" +
+        "要么那发测试的期望值被顺手放宽（那正是本判据要拦的）"
+      );
+    }
   }
   return "";
 }
@@ -1286,28 +1460,49 @@ function gateExemptionAccountCheck(f: Files): string {
       "而「条数恰好 1」这件事没人钉，它就只是本轮的一句打算"
     );
   }
-  if (!spec.includes("expect(ex.length).toBe(1)")) {
+  if (!spec.includes("expect(exemptedBlocks(blocks)).toEqual([])")) {
     return (
-      "那条【恰好 1】的钉不在了（被换回上下界就等于没换）—— " +
-      "单向的界只挡「又多开一道没建的门」，挡不住「最后那条豁免被人静默摘掉」，" +
-      "而摘掉之后那条红的措辞指错地方（说得像路径写错了，不像有人动了豁免）"
+      "真仓库那一发的【条数钉】不在了（或被换成上下界）—— 单向的界只挡「又多开一道" +
+      "没建的门」，挡不住「豁免被人静默改数量」。2026-11-19 那条豁免正当摘掉之后，" +
+      "这一枚钉的是【恰好 0】：清零不等于免账，它是那份账的一个读数"
+    );
+  }
+  // ⭐ 2026-11-19 换形状的那一格：豁免账清零后，「死豁免」那条判据在真仓库上遍历的是
+  // 【空名单】⇒ 判据的循环体永不执行。round298 那句「一个永远不可能进入的分支就是
+  // 一句装饰」管的正是这种绿。所以判据搬进守卫导出的 deadExemptions，
+  // 由合成语料（含一条「混合行」）真跑。下面两格一个判【实现还在且真在筛】、
+  // 一个判【它在非空名单上真被执行过】—— 少后者，「return []」那种写法两格都过。
+  if (!guard.includes("export function deadExemptions(")) {
+    return (
+      "deadExemptions 不再是守卫导出的判据 —— 「豁免贴错位置就该数出来」" +
+      "又变回测试里那段在空名单上永不执行的循环（round298 的「装饰分支」那一族）"
+    );
+  }
+  // ⚠ 读整条箭头表达式而不是读 `deadExemptions` 这个名字：名字在文件里出现多处
+  //   （函数名、注释、导出），只判名字 ⇒ 把判据换成 `return []` 它照样绿。
+  //   同 r20 之二 / r21 之二那条教训（「文本在场」≠「我打的那一格还在」）。
+  if (
+    !guard.includes("(e) => e.paths.filter((p) => !exists(p)).length === 0")
+  ) {
+    return (
+      "deadExemptions 里那条「这条豁免行有没有【至少一条】路径真不在盘上」的筛法不在了 —— " +
+      "函数名还在而判据被换成恒真/恒假，那条判据就只是它自己的名字"
     );
   }
   if (
     !spec.includes(
-      'expect(ex[0]?.paths).toContain("test/e2e/mobile-approval.spec.ts")',
+      'deadExemptions(acceptanceBlocks(md("test/e2e/dead.spec.ts"))',
     )
   ) {
     return (
-      "「活着的那一条必须是 mobile-approval」这枚身份钉不在了 —— " +
-      "只剩条数的话，把标记从 A 格挪到 B 格照样绿，而那等于给一个【新的】" +
-      "没建工件发了豁免，且它没经过任何论证（M1 那发变异钉的就是这一格）"
+      "「死豁免【该数出来】」那一发不在了 —— 于是 deadExemptions 在【非空名单】上" +
+      "从没被执行过，今天真仓库那条清零的绿分不清「判据判对了」与「判据恒给空」"
     );
   }
   if (!spec.includes('["test/e2e/two.spec.ts"]')) {
     return (
       "那发【反向 canary】不在了（合成语料给两条标记 ⇒ 必须数出两条）—— " +
-      "于是 `toBe(1)` 分不清「今天真只有一条」与「那个计数器恒给一条」"
+      "于是真仓库那个条数读数分不清「今天真是这个数」与「那个计数器恒给这个数」"
     );
   }
   return "";
@@ -1791,11 +1986,35 @@ export function nodeKeyIdentityCheck(f: Files): string {
     {
       id: "r1",
       claim:
-        "budgets.hard_stop 没有任何代码能把它写成 0（带 hard_stop 的 INSERT INTO budgets 全 src 只有一条 DO NOTHING 语句 + budget-sync 的 DO UPDATE，全写字面量 1）",
+        "budgets.hard_stop 的【记账路径】写不出 0：记账那几处（tracker 的 DO NOTHING、" +
+        "budget-sync 的 DO UPDATE、dev-seed）hard_stop 全是字面量 1；唯一能写 0 的是 " +
+        "POST /budget 的 upsert（http/budget.ts，绑定参数 = 界面那个「硬停」勾选框），" +
+        "它是登记在 HARD_STOP_BIND_WHITELIST 里的显式软限入口 —— 名单外再多一处绑参写点、" +
+        "或那一处形状变了/没了，判据红。" +
+        "⚡【2026-11-19 补上另一半】那一列今天【有读方】：underTaskBudgetSql 读它，" +
+        "hard_stop = 0 的那一格超预算不禁 spawn（五条 SQL 同源共用那一个函数）。" +
+        "两句合起来才叫开关 —— 写得出一列而没人读是装饰，有人读而写不出是恒真判据。" +
+        "⚠ 射程：它【不判】「读得对」，判的是【那半条字节还在且括号还在】；" +
+        "语义那一格归 packages/hub/test/budget/hard-stop-gate.test.ts 那十发" +
+        "（其中一条【摘掉外层括号就红】，全仓唯一看得见那件事的）",
       method:
-        "test/arch/claims-registry.test.ts › r1 判据：扫 src 全部 INSERT INTO budgets 的 VALUES；取材非空由同文件真仓库那一发钉住",
+        "test/arch/claims-registry.test.ts › r1 判据：扫 src 全部 INSERT INTO budgets 的 VALUES" +
+        "（字面量 0 一律红；绑定参数只准名单内那一处，且名单内必须逐字含登记形状；" +
+        "名单外的 upsert 改 hard_stop 也红）；取材非空由同文件真仓库那一发钉住。" +
+        "读侧那一半（hardStopReaderCheck，判【剥掉注释之后】的字节，口径同 r23/r24）：" +
+        "charter-pump.ts 里有 `SELECT b.hard_stop FROM budgets b` ⇒ 没有它红" +
+        "（那一列退回没人读）；收尾那半条 `, 1) = 0)` 逐字在 ⇒ 不在就红" +
+        "（判据方向翻或最外层括号被摘，两种都在这一格响）。" +
+        "外加打在真字节上的变异：写侧四格见 .workbuddy/round309-mutate-hard-stop.mjs" +
+        "（六发、命中 6/6、逐字节回滚；M1b 那一发【只跑旧的三个文件】全绿 = " +
+        "那三条老测试对 hard_stop 零射程的证据；M4 那一发【全绿】= " +
+        "COALESCE(hard_stop, 1) 的兜底值今天不承重，登记的盲区）。" +
+        "读侧那两格另有合成变异打在【真 charter-pump.ts 文本】上（本文件 r1 读侧那一族，" +
+        "含一发【抹掉代码而只留一句「这里以前读它」的注释】—— 那种形状必须【仍然红】，" +
+        "它是「判剥注释后的字节」与「判原文」两种写法之间唯一的方向证据）",
+
       judge: "claims-registry",
-      checkedAt: "2026-11-17",
+      checkedAt: "2026-11-19",
       source: {
         doc: "docs/OPC-OS-功能优化设计.md",
         line: 186,
@@ -1831,7 +2050,7 @@ export function nodeKeyIdentityCheck(f: Files): string {
       checkedAt: "2026-11-17",
       source: {
         doc: "docs/OPC-OS-功能优化设计.md",
-        line: 1228,
+        line: 1339,
         sentence:
           "makeChannelActorResolver（把 channelId → 平台 → 角色的那座桥）零调用方",
       },
@@ -1846,7 +2065,7 @@ export function nodeKeyIdentityCheck(f: Files): string {
       checkedAt: "2026-11-17",
       source: {
         doc: "docs/OPC-OS-功能优化设计.md",
-        line: 978,
+        line: 1059,
         sentence:
           "BudgetTracker（全仓唯一算 breached、唯一发 BudgetPaused 的东西）没有 new 点",
       },
@@ -1862,7 +2081,7 @@ export function nodeKeyIdentityCheck(f: Files): string {
       checkedAt: "2026-11-17",
       source: {
         doc: "docs/OPC-OS-功能优化设计.md",
-        line: 713,
+        line: 737,
         sentence:
           "review_gates 表仍然零 INSERT（db/integrity.ts 里有一条自检明说这件事）",
       },
@@ -1894,7 +2113,7 @@ export function nodeKeyIdentityCheck(f: Files): string {
       checkedAt: "2026-11-17",
       source: {
         doc: "docs/OPC-OS-功能优化设计.md",
-        line: 1106,
+        line: 1217,
         sentence: "O9 自动批准：691 行判据，0 个调用方",
       },
       check: r7NoWriterCheck,
@@ -1909,16 +2128,16 @@ export function nodeKeyIdentityCheck(f: Files): string {
       checkedAt: "2026-11-17",
       source: {
         doc: "docs/OPC-OS-功能优化设计.md",
-        line: 868,
+        line: 901,
         sentence: "harness/ 整目录对外零 import",
       },
       check: (f) => {
-        const needed = [
-          "harness/gateway.ts",
-          "harness/routing.ts",
-          "harness/safety.ts",
-          "harness/verifier.ts",
-        ];
+        // ⚡ round312（O6 Step B 接线）：harness/gateway.ts 与 harness/safety.ts
+        // 不再是死模块 —— runtime.runTurn 经 gateway-runner 真调 callHarness，安全层
+        // 真的前置跑在每次 spawn 之前，且它们都弹出了 dead-modules 的 BASELINE（方向 B）。
+        // 这一格只对账【仍在 BASELINE 里的那两家】：routing / verifier。
+        // 文案一旦又要把 gateway/safety 当「零调用方」登记，是【它先红】而不是守卫先红。
+        const needed = ["harness/routing.ts", "harness/verifier.ts"];
         return needed
           .map((n) => deadModulesHas(f, n))
           .filter((x) => x !== "")
@@ -1952,7 +2171,7 @@ export function nodeKeyIdentityCheck(f: Files): string {
       checkedAt: "2026-11-17",
       source: {
         doc: "docs/OPC-OS-功能优化设计.md",
-        line: 1688,
+        line: 1805,
         sentence: "本篇之外还有一份计划文档，而它的出口门前提今天不成立",
       },
       check: r10LintGuardCheck,
@@ -1971,7 +2190,7 @@ export function nodeKeyIdentityCheck(f: Files): string {
       checkedAt: "2026-11-17",
       source: {
         doc: "docs/OPC-OS-功能优化设计.md",
-        line: 1779,
+        line: 1896,
         sentence: "上一格那条计划引用守卫，落地后被自己的变异打回过一次",
       },
       check: r11PlanRefsGuardCheck,
@@ -1990,7 +2209,7 @@ export function nodeKeyIdentityCheck(f: Files): string {
       checkedAt: "2026-11-17",
       source: {
         doc: "docs/OPC-OS-功能优化设计.md",
-        line: 1810,
+        line: 1927,
         sentence: "计划的 6 道出口门禁，今天",
       },
       check: r12GatePathGuardCheck,
@@ -2012,7 +2231,7 @@ export function nodeKeyIdentityCheck(f: Files): string {
       checkedAt: "2026-11-17",
       source: {
         doc: "docs/OPC-OS-功能优化设计.md",
-        line: 1874,
+        line: 1991,
         sentence:
           "今天真的员工身上唯一生效的安全边界，此前一条守卫都没有 —— 顺带量到 `tsc -b` 从不检查测试",
       },
@@ -2035,7 +2254,7 @@ export function nodeKeyIdentityCheck(f: Files): string {
       checkedAt: "2026-11-17",
       source: {
         doc: "docs/OPC-OS-功能优化设计.md",
-        line: 1930,
+        line: 2047,
         sentence: "本篇自己的坐标从来没有门禁",
       },
       check: claimCoordsGuardCheck,
@@ -2058,8 +2277,9 @@ export function nodeKeyIdentityCheck(f: Files): string {
         "「两个前端零出口」连着六轮【绿着】，而 `packages/web/public/app.js` 从 2026-11-11" +
         '（`git log -S` 追到 2bcbdb0）就在真发 `kind: "reparent"` —— 那发证据的扫描根只列了 ' +
         "`web/src` 与 `desktop/src`、扩展名只筛 `.ts`/`.tsx`，真控制室【不在它的视野里】。" +
-        "⇒ 现在准确的说法是【界面发得出 reparent】（那发证据③ 已翻成正向点名：" +
-        "{reparent:[app.js], add_edge:[], add_node:[]}）。" +
+        "⇒ 【round308 再改口，这次翻的是名单本身】那句「界面发得出 reparent」下面点的" +
+        "两份空名单已经不空了：`{reparent:[app.js], add_edge:[app.js], add_node:[app.js]}`，" +
+        "发的人仍然只有 `packages/web/public/app.js` 一个（round308 实测三种 kind 各只有一份文件写着带引号的字面量）。" +
         "⚠ 它仍然【不】等于「O8 第一跳通了」：`POST /org` 那条通道在 desktop 侧被明确拒绝" +
         "（channels.ts 那句「提交那条 POST /org【没有】通道：self-escaping CEO 写」），" +
         "浏览器里点一次更没有本机证据（0039）。" +
@@ -2070,8 +2290,8 @@ export function nodeKeyIdentityCheck(f: Files): string {
       method:
         "packages/hub/test/acceptance/new-role-to-its-own-criteria.test.ts › 11 发（① 契约形状" +
         "【round294 翻向：现在钉的是 add_node 那一支【解析得通】+ 三种捎带形状解析不通】 / " +
-        "② 旁路现在被拦 + 反向 canary 只差 model_family 就该 200 / ③【round295 翻向：正向点名" +
-        "每种 kind 由谁发 —— reparent 只有 web/public/app.js，另两种为空 + 引号形状 + " +
+        "② 旁路现在被拦 + 反向 canary 只差 model_family 就该 200 / ③【round295 翻向、round308 换名单：正向点名" +
+        "每种 kind 由谁发 —— 三种 kind 都只有 web/public/app.js + 引号形状 + " +
         "扫描器自身的反向 canary + 『构造了载荷』≠『发得出去』那一发】 / 正题三跳 / " +
         "加节点成功那一发 / 六种坏形状逐条 code + 零残留 / 缺家族由继承拦 / " +
         "反空转对照 / 前提自证 / 占位串因果）；test/org/validate.test.ts › " +
@@ -2097,15 +2317,32 @@ export function nodeKeyIdentityCheck(f: Files): string {
         "⚠ M4/M5 那一对是本轮【我自己的预期被推翻】的地方：第一版把边界写成「注释里提到 kind 名就红」，" +
         "跑出来 0 红 —— 真口径是【两侧带引号才算发这个变更】，那发因此是空变异。" +
         "矩阵里「该红/该绿」的预期也是主张，它没有自证，只有跑出来的红绿分布能打它。" +
-        "⚠ 本条判据【仍然只核对那四格字节】（验收测试在场 + 反空转那一格 + 前提那一格 + " +
-        "前端取材表【成员点名】），它【不核对】「契约里没有 add_node」—— 一句否定式主张只要留在判据里，" +
+        "⚠ 本条判据【仍然只核对那五格字节】（验收测试在场 + 反空转那一格 + 前提那一格 + " +
+        "前端取材表【成员点名】+ 名单那三格【逐字对账】），它【不核对】「契约里没有 add_node」—— 一句否定式主张只要留在判据里，" +
         "被推翻的那天它不会红，它会继续绿着替那句假话作证。本轮就是那一天的现场。" +
+        "⚠ 第五格是 round308 补的，补的是【同一条坑的另一半】：round295 把主张换成正向清单，" +
+        "却没给那份清单配读者，于是它又绿了六轮才在名单翻向的当天假一次 —— " +
+        "「把否定式换成正向点名」本身不是修复，点名有人对账才是。" +
+        "round308 的读者三发（之七 放宽成空 / 之七·乙 切片外留诱饵注释 ⇒ 仍红 / 之八 止锚改名 ⇒ 红在边界）" +
+        "外加【顺序】一发（之九：名单坏 + 取材空 ⇒ 红因必须落「不可信」，不许名单抢报）；" +
+        "之九 的供电另打一台（.workbuddy/round308-mutate-r15-order.mjs：把兜底短路成 false ⇒ 之九 翻红且红因=名单抢报，" +
+        "命中 3/3、自回滚逐字节核对）—— 顺序那种缺陷逐格单看全对，只有短路一遍才知道那发是不是恒绿。" +
+        "磁盘侧另有 .workbuddy/round308-mutate-r15-roster.mjs 五发打在【那发验收测试的真字节】上" +
+        "（命中 5/5，证据 .workbuddy/round308-r15-mutation-evidence.txt）；" +
+        "⚠ 那台第一版只读文件名、把「传得进判据」写成了「答不出哪一格」，改成逐条读【用例名】重跑才发现" +
+        "只对了一半：M1/M2 点得到之七本体，M4 只红在控制组上 —— 原因是诱饵抢在 replace 的锚点前面" +
+        "把变异自己中和了。【打在真字节上的矩阵】与【打在合成语料上的】各有一种自我中和的方式，" +
+        "这台要完整分辨率还欠「mustRed 逐条点该红那发」（round300 口径）。" +
+        "【round312 落地】：.workbuddy/round311-mutate-r15-roster-fullres.mjs 已建已跑" +
+        "（机器自证 5/5，打盘 3/5、逐字节回滚；M3/M4 点不到名=点名器读 FAIL 行用例名的" +
+        "可观测面，不是判据失灵 —— 那份机器的文件头与 round312 台账有逐字记录）。" +
+        "「登记未做」不再是今天的形状。" +
         "「契约里那条路还在、还在真调判据」那一格从此由 r22 负责，口径不同、判据也不同",
       judge: "claims-registry",
-      checkedAt: "2026-11-17",
+      checkedAt: "2026-11-19",
       source: {
         doc: "docs/OPC-OS-功能优化设计.md",
-        line: 1971,
+        line: 2088,
         sentence: "O8 那条端到端验收写出来了",
       },
       check: orgAddNodeGapCheck,
@@ -2151,7 +2388,7 @@ export function nodeKeyIdentityCheck(f: Files): string {
       checkedAt: "2026-11-17",
       source: {
         doc: "docs/OPC-OS-功能优化设计.md",
-        line: 1356,
+        line: 1467,
         sentence:
           "里那条真的变成 `approved`，且审计行 actor 是绑定的那个角色而不是",
       },
@@ -2192,7 +2429,7 @@ export function nodeKeyIdentityCheck(f: Files): string {
       checkedAt: "2026-11-17",
       source: {
         doc: "docs/OPC-OS-功能优化设计.md",
-        line: 1319,
+        line: 1430,
         sentence: "round283：动作 4 落地了",
       },
       check: cardDeliveryLedgerCheck,
@@ -2243,7 +2480,7 @@ export function nodeKeyIdentityCheck(f: Files): string {
       checkedAt: "2026-11-17",
       source: {
         doc: "docs/OPC-OS-功能优化设计.md",
-        line: 1292,
+        line: 1403,
         sentence: "这一格现在【有】机器判据：r18",
       },
       check: fetchDeadlineCheck,
@@ -2318,7 +2555,7 @@ export function nodeKeyIdentityCheck(f: Files): string {
       checkedAt: "2026-11-18",
       source: {
         doc: "docs/OPC-OS-功能优化设计.md",
-        line: 1897,
+        line: 2014,
         sentence: "round285：这一格接成了门禁，形状是棘轮（登记为 r19）",
       },
       check: testTypeRatchetCheck,
@@ -2368,7 +2605,7 @@ export function nodeKeyIdentityCheck(f: Files): string {
       checkedAt: "2026-11-17",
       source: {
         doc: "docs/OPC-OS-功能优化设计.md",
-        line: 1462,
+        line: 1573,
         sentence: "round293 落地并登记为 r20",
       },
       check: censusRecomputeCheck,
@@ -2414,7 +2651,7 @@ export function nodeKeyIdentityCheck(f: Files): string {
       checkedAt: "2026-11-17",
       source: {
         doc: "docs/OPC-OS-功能优化设计.md",
-        line: 2211,
+        line: 2328,
         sentence: "round293 第二段落地并登记为 r21",
       },
       check: gateExemptionAccountCheck,
@@ -2491,7 +2728,7 @@ export function nodeKeyIdentityCheck(f: Files): string {
       checkedAt: "2026-11-17",
       source: {
         doc: "docs/OPC-OS-功能优化设计.md",
-        line: 2335,
+        line: 2452,
         sentence: "round294 落地并登记为 r22",
       },
       check: addNodeDispatchCheck,
@@ -2559,7 +2796,7 @@ export function nodeKeyIdentityCheck(f: Files): string {
       checkedAt: "2026-11-18",
       source: {
         doc: "docs/OPC-OS-功能优化设计.md",
-        line: 2452,
+        line: 2569,
         sentence: "round298 落地并登记为 r23",
       },
       check: delegationEdgeSelfCheckCheck,
@@ -2632,7 +2869,7 @@ export function nodeKeyIdentityCheck(f: Files): string {
       checkedAt: "2026-11-18",
       source: {
         doc: "docs/OPC-OS-功能优化设计.md",
-        line: 2525,
+        line: 2642,
         sentence: "round299 落地并登记为 r24",
       },
       check: nodeKeyIdentityCheck,

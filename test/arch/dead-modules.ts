@@ -415,16 +415,29 @@ export type Baseline = ReadonlyMap<string, string>;
  *    别拿上面那层的绿去宣布下面那层过了。
  */
 export const BASELINE: Baseline = new Map([
-  // 簇一：安全层。整目录对外零 import，目录内部互相 import 把每个成员伪装成有人用。
-  ["harness/gateway.ts", "GATEWAY_REJECT_CODES"],
+  // 簇一：安全层。
+  // ⚠ harness/gateway.ts 与 harness/safety.ts 两条【已摘除】（round312，O6 Step B 接线）：
+  // engine/runtime.ts 的 runTurn 现在每轮经 harness/gateway-runner.ts → callHarness，
+  // 方向 B 那条红如约出现并点了名（该改的主张逐条在红行里，本轮逐条改了）。
+  // ⚠ 模块活了 ≠ 安全层整层通了 —— 这两格【今天仍然没接线】：
+  //  · gateway 的 settle（记账）与 checkBudget（预算闸）两条由装配方留空，
+  //    钱实际由 dispatch 的 onCost 那三条语句记（round272 起的同一份 tracker SQL），
+  //    spawn 前的那道预算闸住在各 pump 的 underTaskBudgetSql 里；
+  //  · harness/routing.ts 与 harness/verifier.ts【仍在本表】—— 路由阶段与验证
+  //    今天零生产调用方（它们下面的下一行就是理由）。
+  // 留着这两行就是假账（见 staleBaselineEntries），而"函数有没有人调"从来不由本表判。
   ["harness/routing.ts", "ROUTE_STAGES"],
-  ["harness/safety.ts", "SAFETY_BLOCK_CODES"],
   ["harness/verifier.ts", "VERIFY_REJECT_CODES"],
   // 簇二：只被上面那簇用的下游（继承性不可达 —— 零 importer 口径一条都抓不到）。
   ["graph/gates/author-reviewer.ts", "SameFamilyApproval"],
-  ["search/mcp.ts", "SearchTransport"],
-  ["search/observe.ts", "isSearchToolName"],
-  ["search/policy.ts", "SEARCH_REJECT_CODES"],
+  // ⚠ search/mcp.ts、search/observe.ts、search/policy.ts 三条【已摘除】（round312，同一次接线）：
+  // 这一族是【传递可达】的实测样本 —— runtime → gateway-runner → gateway 之后，
+  // gateway.ts:81 那条【纯类型】的 `import type { ToolSighting } from "../search/observe.js"`
+  // 把 observe.ts 带活了，observe 又带来 mcp（searchGranted）与 policy（OBSERVATION_UNAVAILABLE）。
+  // ⇒ 本表的口径是【编译期可见的 import 边】，`import type` 照算一条边。
+  // 这不是"搜索层接上了"：search/* 的三个函数在真角色轮里【一次都没被调用】
+  // （网关的工具层今天只记录 sighting，策略评估与观察器还没有生产者），
+  // 它们从本表消失说的是【编译依赖走得到】，不是【运行时跑过】—— 两层粒度各守各的。
   // 簇三：单点缺口。
   // ⚠ policy/auto-approve.ts 与 policy/engine.ts 两条【已摘除】（round269，O9 动作 1）：
   // approvals/query.ts 的影子判定 import 了 autoApprove（读路径，只报不批），

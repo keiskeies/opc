@@ -204,7 +204,17 @@ const engineRoute = o.graphFor === undefined;
 **0016 §4 那一格不是漂移，是「指的东西换了」**（0042 §7 那一族的第五次）：
 它当年指的是 `real-deps` 里第 291 行那句 `action: "approval"`。
 0043 之后**默认装配**的 CEO 决策写在 `engine/approve.ts:408`，
-`real-deps` 那条 `applyDecision`（现在在第 298 行）只在**显式交了图工厂**时才被走到。
+`real-deps` 那条 `applyDecision` 里**那句写入**（`http/real-deps.ts:298`）只在**显式交了图工厂**时才被走到。
+⚠ round332 复算本句：原写的是「那条 `applyDecision`（现在在第 298 行）」，也就是把**写入点**的坐标
+挂在**函数名**后面 —— 298 是函数体内那句 `action: "approval"`（函数本体在 `http/real-deps.ts:237`，
+跨度到 325），下面那句「两行写的 `action` 值**相同**」用的正是两个写入点做对比，所以**那个数没错**，
+错的是这个读起来像「函数在 298 行」的挂法。这是 0051 §2(b) 那一族的**镜像**：那条是「行号对、
+符号名错」，这条是「行号对、挂错了主语」。
+⚠⚡ 而我第一遍把它判成「这个坐标从来没对过」——**那是我的误读**，判据逼我逐行复算时才看清
+下一段那三个字的承重。⇒ 记一条方法：**「坐标指错了」与「坐标的措辞指错了」是两件事**，
+只量行号会把自己的误读写成对方的缺陷。本句现在把坐标写明是「那句写入」，并换成冒号形态
+（进 `doc-refs` 快照，与 0016 键下同一行的那一格各自登记），汉字「第 N 行」那种
+只有豁免、没有义务的写法从此不在这一格上。
 两行写的 `action` 值**相同**（都从 `KIND_TO_ACTION.ApprovalDecided` 取，
 `recorder.ts:38` ⇒ `"approval"`），所以那句话的**结论照旧成立**，但今天**只查一处会得出错结论**
 （「默认路线上没有写入方」）。修法是**补一格**，两格都进快照，
@@ -340,6 +350,6 @@ CLI 那条 `hub work`：失败那句话会经 `CharterResult.note` 打到 stderr
 | M8 失败分支的 `publish` 换成空函数 | **红 1**（广播那一条断言） |
 
 ⚠ `charter.ts` 与 `charter.test.ts` 里那两处对本节的引用**都写成 `0043 §10`**，
-而 `engine/charter.ts:351` 与 `test/engine/charter.test.ts:331` 是**先写代码后补这一节**的
+而 `engine/charter.ts:350`（round312 复算：runTurn 签名收敛共享类型时 import 少了一行，本行一字未变） 与 `test/engine/charter.test.ts:331` 是**先写代码后补这一节**的
 （`comment-citations` 那一条守的就是这种顺序：它在我补完这一节之前是**红的**）。
 

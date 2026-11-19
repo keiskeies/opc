@@ -51,6 +51,23 @@ pin 的版本全是壳」的混杂态（0037 §7 只查了 vitest 4.1.12 一个�
 = 0；同法 esbuild@0.28.2 也是 0。而 `node_modules/.pnpm/vitest@4.1.5*` 有实体
 （4.1.5 装得出来）。
 
+【round320 复核：本节结论与那条断言都要修正。实测（2026-11-19，当前 node_modules 状态）：
+① **断言模式本身坏了** —— `-path '*vite*/node_modules/vite'` 匹配到的是一条**目录**，
+   而 `-type f` 对目录恒不命中，所以这条命令**在任何状态下一律输出 0，从来不能证明「空壳」**。
+   修正为末尾补 `/*`（`find node_modules/.pnpm -path '*vite*/node_modules/vite/*' -type f`）
+   后数出来：vite@8.3.6 = 49 个物理文件、esbuild@0.28.2 = 10 个（平台包 @esbuild+win32-x64 = 3）。
+   即「pin 的版本全是壳」不成立。
+② **pin 的 vitest 4.1.12 与 coverage-v8 也不是壳**：`.pnpm/vitest@4.1.12*` 各 120 个物理文件、
+   `.pnpm/@vitest+coverage-v8@4.1.12_vitest@4.1.12` = 14 个。§0 里「4.1.5 装得出来、4.1.12 是壳」
+   的混杂态描述已被自愈（vitest.config.ts round189/193/194 注释链已记 store 补齐过程）。
+③ **「覆盖归因 offline 真不可达」已被推翻**：本机 `npx vitest run --coverage` 真跑
+   `packages/hub/test/gates/{author-reviewer,determinism}.test.ts`，v8 provider 在线，
+   author-reviewer.ts = 100/100/100、evaluate.ts = 96.1/94.82/100、全文件 lines 97.41%、
+   54/54 测试绿，门控 per-glob 阈值（95/95/100/90）判定真实生效。
+   ⇒ 0039 §2「第一条路被判掉了」不成立——第一条路（量真数字再定阈值）现在可走且已走，
+   见 vitest.config.ts round193/194 的实测数字与已设阈值。本篇的历史记录保留，
+   结论以 vitest.config.ts 的更新注释链为当前口径。】
+
 ## 2. 所以 0037 §8 给的两条路，本篇走哪条
 
 0037 §8 说「要么用 4.1.5 量出真数字再决定阈值，要么把『4.1.5 量的数字不能代表 pin 的
@@ -105,3 +122,11 @@ runner**。之前所有绿都是 `node:test` + 自制 harness 给的、`pnpm ver
   是坛子（0037 §7 那 37 处「装不上」照旧真 —— 但其中 8 处 vitest 的已被本篇证伪为「4.1.5 能装」）。
 - **29 处「测得 X」仍不是「门禁过的 X」**：gate 绿是 vitest 4.1.5 给的，不是 `pnpm verify` 给的。
   `pnpm verify` 仍跑不起来。
+
+【round320 复核（末行与上面两行）】：「`pnpm verify` 仍跑不起来」已被 round319-7/3032 §7 实测推翻：
+`pnpm verify` 现在**真能跑**（biome 2.6.5 / tsc / vitest 三件套都在 `.bin` 且各自真执行），
+exit 1 来自 biome **存量** 276 errors / 115 warnings / 2 infos（docs/*.md 不在 biome 范围，
+那是 HEAD 债不是本篇引入）。「29 处测得 X 不是门禁过的 X」中的「门禁」若指 `pnpm verify`
+则已翻转为「验证三件套能跑、唯 biome 存量债不清理」；若指「覆盖率门控」则已因 round193/194
+设了门控 thresholds 而不再是空转 —— 但现在有真数字与真阈值守着，语义从「空转」变「生效」。
+本篇写作时的历史状态保留如上。

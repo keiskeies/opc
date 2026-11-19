@@ -1,0 +1,40 @@
+(node:43304) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+Running 1 test using 1 worker
+
+(node:33188) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+[hub] 未指定 --ceo <名字> ⇒ POST /bindings/verify 会回 501。
+IM 身份绑定的读侧（GET /bindings）与申请（POST /bindings）不受影响。
+校验一个身份必须交出「谁验的」，而这个名字只能由启动命令给出（不给默认值）。
+[hub] 章程泵【已开】（--charter-pump）：每隔一个心跳，停在「等章程」而收件箱里没有卡的任务，
+会由 assigned_role 那个角色【自己起草一份章程提案】放进 CEO 收件箱。
+  · 一轮美元硬顶 0.5 美元　· 单条任务预算上限 500 美分
+  · 角色能读到的目录（--agent-cwd）D:\item\opc
+
+这是【真起子进程、真花钱】的一件事，而它现在由这台常驻进程自动做。泵只【起草】—— 那张卡仍然要 CEO 点，没有任何一条边被自动批掉。
+[hub] 驱动器【已开】（--driver-pump）：每隔一个心跳，停在 agent 那一格（拆解 / 干活 / 审阅）的任务
+会被 assigned_role 那个角色【自己推一轮】，一路走到需要你的那一格才停。
+  · 一轮美元硬顶 0.5 美元　· 单条任务预算上限 500 美分
+  · 角色能读到的目录（--agent-cwd）D:\item\opc
+
+这是【真起子进程、真花钱】的一件事：一条想法可能连着烧掉好几轮。走到人席（等章程 / 等你裁决 / 等终审）它就【停下等你点】—— 没有任何一条人类边被自动批掉。
+→ 同一格试到上限就不再试，并在这个终端【说出来】。那句要响：驱动器每推一轮都在审计里留一行，而停滞巡检把「有审计行」读成「这一格有人在看着」—— 还在试的那几轮里巡检【看不见这一格】，到顶那一刻的当场信号只有这一句。
+[hub] 决策写路径 = 【引擎那一条】：CEO 点批准 ⇒ 认领卡片 + 状态边 + 审计，一个事务，
+任务真的往前一格（例如 CHARTER_PENDING → CHARTER_APPROVED）。不需要图运行时。
+这一台 Hub【两个泵都开着】：章程卡由泵起草，之后的每一格由驱动器自己往前推
+  —— 你只在三处出现：批章程、裁决升级、终审。不需要有人敲 hub work。
+  pnpm hub:engine work --db C:\Users\ADMINI~1\AppData\Local\Temp\opc-e2e-3flY81\hub.db --task <id> \
+      --max-budget-usd <每轮美元硬顶> --task-limit-cents <任务上限美分>
+那【两个参数是必填的】（0041 §8：花钱的上限不给默认值），所以这一行不能整行照抄 —— 少抄一个拿到的是「缺参数」，而它会让人以为是命令写错了。
+⚠ 那条命令要 tsx、@langchain/langgraph 与一个 claude 可执行文件；跑一轮【真的花钱】，两个上限一个都别省。
+缺哪一样它自己会说 —— 这一句不替它担保「这台机器上装得齐」，也不再说「本机装不上」（那句是过期的假话，缘由见上面那段注释）。
+[hub] IM 审批通道【没接】：env 里缺 OPC_FEISHU_APP_ID、OPC_FEISHU_APP_SECRET、OPC_FEISHU_APPROVER_OPEN_ID。
+  · 现在：审批人在手机上收不到卡，审批请在桌面端做。其余一切照常。
+  · 要接：设齐 OPC_FEISHU_APP_ID / OPC_FEISHU_APP_SECRET / OPC_FEISHU_APPROVER_OPEN_ID（可选 OPC_FEISHU_APPROVER_CHAT_ID、OPC_FEISHU_CHANNEL_ID、OPC_FEISHU_ORIGIN）之后重启。
+[hub] 章程泵：本轮起草出 1 张卡，在 CEO 收件箱里等批。花费 6 美分。
+[hub]   · fee7fa71-6b5f-4984-bd94-980870f2420a：章程提案已进 CEO 收件箱（章程提案已拟好，等 CEO 签署）。下一步是那次点击，不是再跑一次起草。
+  ok 1 test\e2e\ceo-loop.spec.ts:234:1 › CEO 一圈：想法 → 看板卡片 → 流转 → 收件箱批准 → 看板更新，全程只用浏览器 (420ms)
+
+  1 passed (1.6s)

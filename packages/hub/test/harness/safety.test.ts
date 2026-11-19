@@ -18,11 +18,12 @@
  * 那种代码【没有任何用例能让它红】，所以必须专门写能让它红的用例：
  * 把「授权档位」与「请求档位」给成不同的值，然后要求它必须拒。
  */
-import { classifyAction } from "../../src/policy/engine.js";
+
 import { describe, expect, it } from "vitest";
 import {
   approvalBlock,
   forbiddenFlagBlock,
+  isAbsoluteWorkspacePath,
   isInsideWorkspace,
   needsApproval,
   normalizeFlag,
@@ -35,6 +36,7 @@ import {
   toolWhitelistBlock,
   workspaceContainmentBlock,
 } from "../../src/harness/safety.js";
+import { classifyAction } from "../../src/policy/engine.js";
 
 /** 岗位书基线禁止项（§4.1.3 那两家共同的那三条）。 */
 const BASELINE = ["--dangerously-skip-permissions", "--no-sandbox", "--yolo"];
@@ -62,7 +64,11 @@ describe("第 4 层：绝对禁止项（计划点名的三条 flag）", () => {
       "--DANGEROUSLY-SKIP-PERMISSIONS",
     ];
     for (const s of shapes) {
-      const v = forbiddenFlagBlock({ baseline: BASELINE, effective: BASELINE, args: [s] });
+      const v = forbiddenFlagBlock({
+        baseline: BASELINE,
+        effective: BASELINE,
+        args: [s],
+      });
       expect(v.ok, "形状 " + s + " 应该被拒").toBe(false);
     }
   });
@@ -71,12 +77,20 @@ describe("第 4 层：绝对禁止项（计划点名的三条 flag）", () => {
     // 这一条断言的是【行为】不是【语义】：我们不主张 `--yolo=false` 在哪家 CLI 上是开启，
     // 我们主张的是「命中禁止项就拦」，所以这条用例不依赖任何解析器行为，
     // 也就不需要（也无法）在离线状态核验三家的 flag 解析约定。
-    const v = forbiddenFlagBlock({ baseline: BASELINE, effective: BASELINE, args: ["--yolo=false"] });
+    const v = forbiddenFlagBlock({
+      baseline: BASELINE,
+      effective: BASELINE,
+      args: ["--yolo=false"],
+    });
     expect(v.ok).toBe(false);
   });
 
   it("报错里点名命中的那一条，而不是只说「不合规」", () => {
-    const v = forbiddenFlagBlock({ baseline: BASELINE, effective: BASELINE, args: ["--verbose", "--yolo"] });
+    const v = forbiddenFlagBlock({
+      baseline: BASELINE,
+      effective: BASELINE,
+      args: ["--verbose", "--yolo"],
+    });
     expect(v.ok).toBe(false);
     if (!v.ok) {
       expect(v.reason).toContain("--yolo");
@@ -138,14 +152,25 @@ describe("第 4 层：绝对禁止项（计划点名的三条 flag）", () => {
     ).toBe(true);
     // 而追加的那条立刻生效 —— 收紧不是装饰：
     expect(
-      forbiddenFlagBlock({ baseline: BASELINE, effective: [...BASELINE, "--afk"], args: ["--afk"] }).ok,
+      forbiddenFlagBlock({
+        baseline: BASELINE,
+        effective: [...BASELINE, "--afk"],
+        args: ["--afk"],
+      }).ok,
     ).toBe(false);
   });
 });
 
 describe("normalizeFlag：等价形状归一到同一个键", () => {
   it("一组等价写法归一后相等", () => {
-    const same = ["--yolo", "--YOLO", "-yolo", "--yolo=true", "  --yolo  ", "--yolo=FALSE"];
+    const same = [
+      "--yolo",
+      "--YOLO",
+      "-yolo",
+      "--yolo=true",
+      "  --yolo  ",
+      "--yolo=FALSE",
+    ];
     const keys = new Set(same.map(normalizeFlag));
     expect(keys.size).toBe(1);
     expect([...keys][0]).toBe("yolo");
@@ -156,7 +181,11 @@ describe("normalizeFlag：等价形状归一到同一个键", () => {
     expect(normalizeFlag("  ")).toBe("");
     // ⚠ 空串这一格值得钉住：它是「参数里一个空字符串」的归一结果，
     // 而只要没人把空串放进禁止项，它就不可能命中（禁止项的 schema 是 min(1) 且归一后不为空的形状）。
-    const v = forbiddenFlagBlock({ baseline: ["--yolo"], effective: ["--yolo"], args: [""] });
+    const v = forbiddenFlagBlock({
+      baseline: ["--yolo"],
+      effective: ["--yolo"],
+      args: [""],
+    });
     expect(v.ok).toBe(true);
   });
 });
@@ -178,7 +207,9 @@ describe("第 1 层：工具白名单", () => {
     expect(toolAllowed("Bash", list, { command: "git status" })).toBe(true);
     expect(toolAllowed("Bash", list, { command: "rm -rf /" })).toBe(false);
     // 另一种写法（Claude 文档风格）也收：
-    expect(toolAllowed("Bash", ["Bash(git *)"], { command: "git commit" })).toBe(true);
+    expect(
+      toolAllowed("Bash", ["Bash(git *)"], { command: "git commit" }),
+    ).toBe(true);
   });
 
   it("不带括号的条目放行该工具任意参数 —— 这是【已知的宽松】，所以钉一条用例", () => {
@@ -189,14 +220,20 @@ describe("第 1 层：工具白名单", () => {
 
   it("前缀比的是参数的字符串形态，所以 {command:'git status'} 与 'git status' 一样", () => {
     expect(toolAllowed("Bash", ["Bash(git:*)"], "git status")).toBe(true);
-    expect(toolAllowed("Bash", ["Bash(git:*)"], { command: "git status" })).toBe(true);
+    expect(
+      toolAllowed("Bash", ["Bash(git:*)"], { command: "git status" }),
+    ).toBe(true);
   });
 });
 
 describe("第 2 层：沙箱档位", () => {
   it("档位排序是 read-only < workspace-write < danger（判据直接比下标）", () => {
-    expect(sandboxTierIndex("read-only")).toBeLessThan(sandboxTierIndex("workspace-write"));
-    expect(sandboxTierIndex("workspace-write")).toBeLessThan(sandboxTierIndex("danger"));
+    expect(sandboxTierIndex("read-only")).toBeLessThan(
+      sandboxTierIndex("workspace-write"),
+    );
+    expect(sandboxTierIndex("workspace-write")).toBeLessThan(
+      sandboxTierIndex("danger"),
+    );
   });
 
   it("提级被拒；同级与降档放行", () => {
@@ -269,10 +306,19 @@ describe("工作区越界", () => {
    *   以及「本轮到底改了哪几对」的实测对照，写在下面那几发里（其中两发是
    *   【被量纠正过的假话】，那两次改口也留在原地 —— 它们比结论更有信息量）。 */
   it("⭐ 混合形状：`x\\..\\..` 那种链条在 Windows 读法下越界 ⇒ 必须拒（旧写法放行）", () => {
-    expect(isInsideWorkspace("/repo/ws", "/repo/ws/x\\..\\..\\secret\\k.txt")).toBe(false);
-    expect(isInsideWorkspace("/repo/ws", "/repo/ws/a\\..\\..\\b.ts")).toBe(false);
+    expect(
+      isInsideWorkspace("/repo/ws", "/repo/ws/x\\..\\..\\secret\\k.txt"),
+    ).toBe(false);
+    expect(isInsideWorkspace("/repo/ws", "/repo/ws/a\\..\\..\\b.ts")).toBe(
+      false,
+    );
     // 同一条链嵌得更深也一样：只要有一种读法跳出根，就不算在里面。
-    expect(isInsideWorkspace("/repo/ws", "/repo/ws/deep/dir\\..\\..\\..\\etc\\passwd")).toBe(false);
+    expect(
+      isInsideWorkspace(
+        "/repo/ws",
+        "/repo/ws/deep/dir\\..\\..\\..\\etc\\passwd",
+      ),
+    ).toBe(false);
     // 根带末尾斜杠也一样（那一支走的是 startsWith 那条路，不是 p === root）。
     // ⚠ 这一对【旧口径也拒】（旧口径按 / 拆时 `ws\..\x` 是一个段）——它不属于本轮
     //   改了行为的 3 对，写在这里是为了钉住「带尾斜杠的根」这条分支没有回归。
@@ -291,7 +337,9 @@ describe("工作区越界", () => {
     expect(isInsideWorkspace("/repo", "/repo/weird\\name.ts")).toBe(true);
     expect(isInsideWorkspace("/repo/ws", "/repo/ws/a\\b\\c.ts")).toBe(true);
     expect(isInsideWorkspace("/repo/ws", "/repo/ws/x\\..\\y")).toBe(true);
-    expect(isInsideWorkspace("/repo/ws", "/repo/ws/only\\backslash")).toBe(true);
+    expect(isInsideWorkspace("/repo/ws", "/repo/ws/only\\backslash")).toBe(
+      true,
+    );
   });
 
   it("两侧都是反斜杠形状：今天到不了这里（gateway 先拦非 / 开头的 workspace），钉住是【拒】", () => {
@@ -299,10 +347,16 @@ describe("工作区越界", () => {
     // workspace 不以 / 开头 ⇒ POSIX 读法把整串当【一个相对段】⇒ 与 target 不同解 ⇒ 拒。
     // gateway.ts 那条「workspace 必须以 / 开头」在前，所以这一型在产线上不可达；
     // 写在这里是为了让下一个人知道【它现在拒】，而不是以为它能工作。
-    expect(isInsideWorkspace("D:\\repo\\ws", "D:\\repo\\ws\\packages\\a\\file.ts")).toBe(false);
+    expect(
+      isInsideWorkspace("D:\\repo\\ws", "D:\\repo\\ws\\packages\\a\\file.ts"),
+    ).toBe(false);
     // 而斜杠写的 Windows 盘符路径【能】正常工作（两侧同形状、同读法）：
-    expect(isInsideWorkspace("D:/repo/ws", "D:/repo/ws/packages/a/file.ts")).toBe(true);
-    expect(isInsideWorkspace("D:/repo/ws", "D:/repo/ws/../secret/k.txt")).toBe(false);
+    expect(
+      isInsideWorkspace("D:/repo/ws", "D:/repo/ws/packages/a/file.ts"),
+    ).toBe(true);
+    expect(isInsideWorkspace("D:/repo/ws", "D:/repo/ws/../secret/k.txt")).toBe(
+      false,
+    );
   });
 
   it("交集口径的【代价】实测为零：根边界后紧跟 `\\` 那一型，旧口径本来就拒", () => {
@@ -347,18 +401,64 @@ describe("工作区越界", () => {
       expect(v.reason).toContain("/etc/passwd");
     }
   });
+
+  /* ═════ round312：isAbsoluteWorkspacePath —— Windows 的「绝对」和 POSIX 不是一回事 ═════
+   * 这条判据是网关第 3 层换上去的（原来那层只判 startsWith("/")），换的理由是一个
+   * 具体的假阴性：`D:\work\repo` 在 Windows 上是绝对路径，却【不以 / 开头】⇒
+   * 旧的网关会把每一轮真活儿拒成 safety_blocked。而松绑不能松成「什么都算绝对」，
+   * 下面那三条拒的就是三种【会被误当绝对】的形状（与 round303 那一族同一个方向：
+   * 判错的代价是 fail-open，一个字符串在两台机器上意味着两个可写范围）。
+   */
+  describe("isAbsoluteWorkspacePath：两种绝对写法都认，三种伪绝对都不认", () => {
+    it("POSIX 与 Windows（反斜杠 / 正斜杠混写）都算绝对", () => {
+      expect(isAbsoluteWorkspacePath("/repo")).toBe(true);
+      expect(isAbsoluteWorkspacePath("D:\\work\\repo")).toBe(true);
+      expect(isAbsoluteWorkspacePath("C:/work/repo")).toBe(true);
+      // 小写盘符同样是绝对路径（Windows 不区分大小写），漏了它 = 换台机器就全拒。
+      expect(isAbsoluteWorkspacePath("d:/work/repo")).toBe(true);
+    });
+
+    it("`D:x`【不是】绝对路径 —— 它是「D 盘当前目录下的 x」", () => {
+      // 这是这一发存在的全部理由：Node 的 path.isAbsolute 在 win32 上也判它是绝对，
+      // 而它的语义依赖进程当前的每个盘符的当前目录 ⇒ 同一份岗位书在两个 cwd 下
+      // 是两个可写范围。判它 false 是【刻意不同意】一个看起来合理的库函数。
+      expect(isAbsoluteWorkspacePath("D:x")).toBe(false);
+      expect(isAbsoluteWorkspacePath("D:work\\repo")).toBe(false);
+    });
+
+    it("UNC、裸相对、空串都不算（宁可拒，不可放行一个歧义路径）", () => {
+      expect(isAbsoluteWorkspacePath("\\\\server\\share\\repo")).toBe(false);
+      expect(isAbsoluteWorkspacePath("repo")).toBe(false);
+      expect(isAbsoluteWorkspacePath("./repo")).toBe(false);
+      expect(isAbsoluteWorkspacePath("")).toBe(false);
+      // 盘符后面缺分隔符（"D:x" 已由上一条判过）与「只有盘符+分隔符」要分清：
+      // "D:\\" 是根，是绝对的；这一条钉住判据没有把整个 D: 前缀一律拒掉。
+      expect(isAbsoluteWorkspacePath("D:\\")).toBe(true);
+    });
+  });
 });
 
 describe("第 3 层：要不要停下来问人", () => {
   it("不可逆的子串 ⇒ 要审批", () => {
-    expect(needsApproval({ tool: "Bash", args: { command: "git push --force origin main" } })).toBe(true);
-    expect(needsApproval({ tool: "Bash", args: { command: "rm -rf build" } })).toBe(true);
+    expect(
+      needsApproval({
+        tool: "Bash",
+        args: { command: "git push --force origin main" },
+      }),
+    ).toBe(true);
+    expect(
+      needsApproval({ tool: "Bash", args: { command: "rm -rf build" } }),
+    ).toBe(true);
     expect(needsApproval({ tool: "Bash", args: "部署到生产" })).toBe(true);
   });
 
   it("只读的子串 ⇒ 不审批", () => {
-    expect(needsApproval({ tool: "Bash", args: { command: "git status" } })).toBe(false);
-    expect(needsApproval({ tool: "Bash", args: { command: "pnpm test" } })).toBe(false);
+    expect(
+      needsApproval({ tool: "Bash", args: { command: "git status" } }),
+    ).toBe(false);
+    expect(
+      needsApproval({ tool: "Bash", args: { command: "pnpm test" } }),
+    ).toBe(false);
   });
 
   it("⭐ harness 的工具名已经进那张表（0021 §10 第 2 条那条已知坏味道的修法）", () => {
@@ -372,22 +472,42 @@ describe("第 3 层：要不要停下来问人", () => {
     // 翻过来的代价说清楚：光看名字的降噪放掉了一批审批，兜住它的只剩
     // 「参数文本过那三张模式表」+「白名单」+「工作区越界」。所以这里同时钉住
     // **仍然是 true 的那三例** —— 它们是这次降噪的边界。
-    expect(needsApproval({ tool: "Read", args: { path: "/repo/x.ts" } })).toBe(false);
-    expect(needsApproval({ tool: "Write", args: { path: "/repo/x.ts" } })).toBe(false);
+    expect(needsApproval({ tool: "Read", args: { path: "/repo/x.ts" } })).toBe(
+      false,
+    );
+    expect(needsApproval({ tool: "Write", args: { path: "/repo/x.ts" } })).toBe(
+      false,
+    );
     // 边界 1：名字降噪**盖不住参数里的不可逆描述**（这条是那次加表的风险兜底）。
     expect(
-      needsApproval({ tool: "Write", args: { path: "/repo/x.ts", new_string: "改完直接发布上线" } }),
+      needsApproval({
+        tool: "Write",
+        args: { path: "/repo/x.ts", new_string: "改完直接发布上线" },
+      }),
     ).toBe(true);
     // 边界 2：**没被列进来的**工具名照旧默认不可逆（表不是白名单，漏名字只会多问）。
-    expect(needsApproval({ tool: "Bash", args: { command: "do Something Weird" } })).toBe(true);
-    expect(needsApproval({ tool: "SomeVendorTool", args: { x: 1 } })).toBe(true);
+    expect(
+      needsApproval({ tool: "Bash", args: { command: "do Something Weird" } }),
+    ).toBe(true);
+    expect(needsApproval({ tool: "SomeVendorTool", args: { x: 1 } })).toBe(
+      true,
+    );
   });
 
   it("⭐ 那张表**只有这一份**（safety 与 policy 两处必须同判）", () => {
     // 加表的这一轮最容易犯的错是「在 safety 里加一份 harness 表」，
     // 于是同一次调用两处判成不同档（0020 记过同一类错）。这条用例是那个错误的机器防线：
     // 它不测任何新逻辑，只要求两侧对**同一批工具名**给出同一个答案。
-    const names = ["Read", "Write", "Edit", "Grep", "Glob", "WebSearch", "WebFetch", "MultiEdit"];
+    const names = [
+      "Read",
+      "Write",
+      "Edit",
+      "Grep",
+      "Glob",
+      "WebSearch",
+      "WebFetch",
+      "MultiEdit",
+    ];
     for (const tool of names) {
       const args = { path: "/repo/x.ts" };
       expect(
@@ -395,7 +515,10 @@ describe("第 3 层：要不要停下来问人", () => {
         "工具 [" +
           tool +
           "] 在 safety 与 policy 两处判得不一样 ⇒ 表已经分叉（safety 里长出了第二份表）",
-      ).toBe(classifyAction({ kind: tool, detail: JSON.stringify(args) }) === "irreversible");
+      ).toBe(
+        classifyAction({ kind: tool, detail: JSON.stringify(args) }) ===
+          "irreversible",
+      );
     }
   });
 
@@ -417,10 +540,13 @@ describe("第 3 层：要不要停下来问人", () => {
     for (const cmd of sentences) {
       expect(
         needsApproval({ tool: "Bash", args: { command: cmd } }),
-        "两侧对 [" + cmd + "] 判得不一样 ⇒ 两张表已经分叉：" +
+        "两侧对 [" +
+          cmd +
+          "] 判得不一样 ⇒ 两张表已经分叉：" +
           JSON.stringify({
             harness: needsApproval({ tool: "Bash", args: { command: cmd } }),
-            policy: classifyAction({ kind: "Bash", detail: cmd }) === "irreversible",
+            policy:
+              classifyAction({ kind: "Bash", detail: cmd }) === "irreversible",
           }),
       ).toBe(classifyAction({ kind: "Bash", detail: cmd }) === "irreversible");
     }
@@ -431,7 +557,10 @@ describe("第 3 层：审批本身", () => {
   it("没人可问 ⇒ 拒，而且 code 是 handler_missing 而不是 denied", () => {
     // 两个码必须分开：一个是【缺陷】（装配漏传参数），一个是【正常业务结果】（有人审过说不了）。
     // 混成一个码的话，「审批回调没接上」这件事在审计统计里与「CEO 拒了」同形。
-    return approvalBlock({ tool: "Bash", args: {}, reason: "r" }, undefined).then((v) => {
+    return approvalBlock(
+      { tool: "Bash", args: {}, reason: "r" },
+      undefined,
+    ).then((v) => {
       expect(v.ok).toBe(false);
       if (!v.ok) expect(v.code).toBe("approval_handler_missing");
     });
@@ -447,7 +576,10 @@ describe("第 3 层：审批本身", () => {
   });
 
   it("批了但没署名 ⇒ decidedBy=null，而不是编一个名字", async () => {
-    const v = await approvalBlock({ tool: "Bash", args: {}, reason: "r" }, () => ({ approved: true }));
+    const v = await approvalBlock(
+      { tool: "Bash", args: {}, reason: "r" },
+      () => ({ approved: true }),
+    );
     expect(v.ok).toBe(true);
     if (v.ok) expect(v.decidedBy).toBeNull();
   });
@@ -479,7 +611,11 @@ describe("第 3 层：审批本身", () => {
 
 describe("脱敏", () => {
   it("按键名脱敏，且【不改入参】", () => {
-    const src = { command: "x", api_key: "sk-live-123", nested: { token: "t", safe: "ok" } };
+    const src = {
+      command: "x",
+      api_key: "sk-live-123",
+      nested: { token: "t", safe: "ok" },
+    };
     const out = redact(src) as Record<string, unknown>;
     const nested = out["nested"] as Record<string, unknown>;
     expect(out["api_key"]).toBe(REDACTED);

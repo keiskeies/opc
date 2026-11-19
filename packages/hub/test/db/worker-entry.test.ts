@@ -31,15 +31,22 @@
  *    别把它们读成同一个结论。
  */
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, describe, expect, it } from "vitest";
-import { fixtureTmp } from "../fixtures/fixture-dir.js";
 import {
   WORKER_RESOLVE_HOOK_URL,
   wrappedWorkerUrl,
 } from "../../src/db/worker-entry.js";
+import { fixtureTmp } from "../fixtures/fixture-dir.js";
 
 const HUB = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const CHILD = join(HUB, "test", "db", "fixtures", "worker-hook-child.mjs");
@@ -78,11 +85,15 @@ describe("① 交给 new Worker 的那第一个参数：入口外面那一层包
 
   it("包装里 register 的正是生产那份钩子，且 await import 的是传进来的那个入口", () => {
     const src = decodeURIComponent(wrapper.pathname);
-    expect(src).toContain("register(" + JSON.stringify(WORKER_RESOLVE_HOOK_URL) + ")");
+    expect(src).toContain(
+      "register(" + JSON.stringify(WORKER_RESOLVE_HOOK_URL) + ")",
+    );
     expect(src).toContain("await import(" + JSON.stringify(entry.href) + ")");
     // 反向对照：换一个入口进来，包装里那个 URL 必须跟着变。
     // 没有这一发，`toContain` 可以靠「永远写死 integrity」蒙绿。
-    const other = wrappedWorkerUrl(new URL("file:///hub/src/db/backup.worker.ts"));
+    const other = wrappedWorkerUrl(
+      new URL("file:///hub/src/db/backup.worker.ts"),
+    );
     const otherSrc = decodeURIComponent(other.pathname);
     expect(otherSrc).toContain("backup.worker.ts");
     expect(otherSrc).not.toContain("integrity.worker.ts");
@@ -102,9 +113,10 @@ describe("① 交给 new Worker 的那第一个参数：入口外面那一层包
       const at = text.indexOf("new Worker(");
       expect(at, file + " 里找不到 new Worker(").toBeGreaterThan(-1);
       const call = text.slice(at, at + 400);
-      expect(call, file + " 又给 new Worker 传 execArgv 了（0037：那条路会撞校验）").not.toContain(
-        "execArgv",
-      );
+      expect(
+        call,
+        file + " 又给 new Worker 传 execArgv 了（0037：那条路会撞校验）",
+      ).not.toContain("execArgv");
       expect(call).toContain("wrappedWorkerUrl(WORKER_URL)");
     }
   });
@@ -124,10 +136,14 @@ describe("① 交给 new Worker 的那第一个参数：入口外面那一层包
      *   所以判据只能按【文件】划，不能按「入口能碰到的所有文件」划 ——
      *   后者会把一条不受影响的正常用法判红，那是 0033 §3 那条「更严的核对拒掉唯一正确的接法」。
      */
-    const entries = listTs(join(HUB, "src")).filter((p) => p.endsWith(".worker.ts"));
+    const entries = listTs(join(HUB, "src")).filter((p) =>
+      p.endsWith(".worker.ts"),
+    );
     // 装配自检：扫不到入口 = 「零个入口」= 这条判据什么都看不见而照样绿
     expect(entries.length).toBeGreaterThanOrEqual(2);
-    const offenders = entries.filter((p) => readCode(p).includes("import.meta.url"));
+    const offenders = entries.filter((p) =>
+      readCode(p).includes("import.meta.url"),
+    );
     expect(
       offenders.map((p) => relative(HUB, p).replace(/\\/gu, "/")),
       "worker 入口里读了 import.meta.url —— 那里它【不是】文件路径而是包装那层 data: URL",
@@ -147,7 +163,10 @@ describe("① 交给 new Worker 的那第一个参数：入口外面那一层包
     expect(listTs(join(HUB, "src")).length).toBeGreaterThanOrEqual(20);
     expect(hits.sort()).toEqual(["src/db/backup.ts", "src/db/integrity.ts"]);
     // 本篇改完之后，src 下【不该再有任何一处】提 execArgv（注释除外，所以走 readCode）。
-    expect(execArgvHits, "还有一处在动 execArgv：" + execArgvHits.join(", ")).toEqual([]);
+    expect(
+      execArgvHits,
+      "还有一处在动 execArgv：" + execArgvHits.join(", "),
+    ).toEqual([]);
   });
 });
 
@@ -163,7 +182,10 @@ describe("② 钩子本体：哪些说明符该改道（直接跑生产那份）
 
   type Hook = (
     specifier: string,
-    context: { parentURL?: string },
+    // `?: string | undefined`：callHook 把 `string | undefined` 的 parentUrl 原样递进来，
+    // 而 exactOptionalPropertyTypes 下 { parentURL?: string } 不收显式 undefined。
+    // 标注补成真形状（先例：src/cli.ts:85 的 db?: string | undefined），不改任何取值。
+    context: { parentURL?: string | undefined },
     next: (s: string, c: unknown) => Promise<{ url: string }>,
   ) => Promise<{ url: string }>;
 
@@ -183,10 +205,14 @@ describe("② 钩子本体：哪些说明符该改道（直接跑生产那份）
   ): Promise<{ url: string; mapped: boolean }> {
     const resolveHook = await getHook();
     let fell = false;
-    const got = await resolveHook(specifier, { parentURL: parentUrl }, async (s) => {
-      fell = true;
-      return { url: "fell-through:" + s };
-    });
+    const got = await resolveHook(
+      specifier,
+      { parentURL: parentUrl },
+      async (s) => {
+        fell = true;
+        return { url: "fell-through:" + s };
+      },
+    );
     return { url: got.url, mapped: !fell };
   }
 
@@ -221,7 +247,10 @@ describe("② 钩子本体：哪些说明符该改道（直接跑生产那份）
     writeFileSync(join(dir, "page-check.js"), "export const P = 1;\n");
     const parent = new URL("file://" + join(dir, "integrity.worker.js")).href;
     expect(existsSync(join(dir, "page-check.js"))).toBe(true);
-    expect(existsSync(join(dir, "page-check.ts")), "这一发要的就是【没有 .ts 同级】那个形状").toBe(false);
+    expect(
+      existsSync(join(dir, "page-check.ts")),
+      "这一发要的就是【没有 .ts 同级】那个形状",
+    ).toBe(false);
     const got = await callHook("./page-check.js", parent);
     expect(got.mapped, "dist 那一态必须整个落回 next").toBe(false);
     expect(got.url).toBe("fell-through:./page-check.js");
@@ -233,7 +262,11 @@ describe("② 钩子本体：哪些说明符该改道（直接跑生产那份）
       ["./sibling.ts", "file://" + join(dir, "a.ts"), "已经是 .ts"],
       ["./sibling.js", undefined, "父线程没有 parentURL（入口那一跳）"],
       ["./sibling.js", "data:text/javascript,x", "父线程不是 file:"],
-      ["./missing-sibling.js", "file://" + join(dir, "a.ts"), "同目录没有那个 .ts"],
+      [
+        "./missing-sibling.js",
+        "file://" + join(dir, "a.ts"),
+        "同目录没有那个 .ts",
+      ],
     ];
     for (const [spec, parent, why] of cases) {
       const got = await callHook(spec, parent);
@@ -252,7 +285,10 @@ describe("② 钩子本体：哪些说明符该改道（直接跑生产那份）
      */
     const pairs: string[] = [];
     for (const p of listTs(join(HUB, "src"))) {
-      if (existsSync(p.replace(/\.ts$/u, ".js")) || existsSync(p.replace(/\.ts$/u, ".mjs"))) {
+      if (
+        existsSync(p.replace(/\.ts$/u, ".js")) ||
+        existsSync(p.replace(/\.ts$/u, ".mjs"))
+      ) {
         pairs.push(relative(HUB, p).replace(/\\/gu, "/"));
       }
     }
@@ -291,16 +327,20 @@ describe("③ ⭐ 真子进程：线程那一侧的解析能力只能来自生�
     //    Node 在启动时就把那份配置读进去了，运行时删挡不住 worker 继承（实测）。
     //    能摘的地方只有 spawn 这一层。
     delete env.NODE_OPTIONS;
-    const r = spawnSync(process.execPath, ["--experimental-transform-types", CHILD], {
-      cwd: HUB,
-      encoding: "utf8",
-      timeout: 170_000,
-      maxBuffer: 32 * 1024 * 1024,
-      // 【不能整体替换 env】：剥 PATH 会让子进程起不来而原因在 spawn 层，
-      // 测试消息里完全看不到（packages/hub/test/cli/smoke.test.ts 记过同一格）。
-      // 所以是【只摘 NODE_OPTIONS 这一项】，不是重建一份 env。
-      env,
-    });
+    const r = spawnSync(
+      process.execPath,
+      ["--experimental-transform-types", CHILD],
+      {
+        cwd: HUB,
+        encoding: "utf8",
+        timeout: 170_000,
+        maxBuffer: 32 * 1024 * 1024,
+        // 【不能整体替换 env】：剥 PATH 会让子进程起不来而原因在 spawn 层，
+        // 测试消息里完全看不到（packages/hub/test/cli/smoke.test.ts 记过同一格）。
+        // 所以是【只摘 NODE_OPTIONS 这一项】，不是重建一份 env。
+        env,
+      },
+    );
     status = r.status;
     out = r.stdout ?? "";
     err = r.stderr ?? "";
@@ -313,11 +353,16 @@ describe("③ ⭐ 真子进程：线程那一侧的解析能力只能来自生�
 
   it("子进程跑通了", () => {
     run();
-    expect(status, "子进程 stderr：\n" + err.slice(-2000) + "\nstdout：\n" + out).toBe(0);
+    expect(
+      status,
+      "子进程 stderr：\n" + err.slice(-2000) + "\nstdout：\n" + out,
+    ).toBe(0);
   });
 
   it("⭐ 子进程的 execArgv 里【没有 --import】", () => {
-    const argv = JSON.parse(line("EXECARGV ").slice("EXECARGV ".length)) as string[];
+    const argv = JSON.parse(
+      line("EXECARGV ").slice("EXECARGV ".length),
+    ) as string[];
     expect(argv).not.toContain("--import");
     expect(argv).toContain("--experimental-transform-types");
   });
@@ -343,20 +388,28 @@ describe("③ ⭐ 真子进程：线程那一侧的解析能力只能来自生�
     // 必须原样读回来。用 --max-old-space-size 而不用 --import：
     // 后者会真的改变 worker 的解析能力，那就不再是「通路」的对照而是另一发实验。
     const sentinel = "--max-old-space-size=64";
-    const env: Record<string, string | undefined> = { ...process.env, NODE_OPTIONS: sentinel };
-    const r = spawnSync(process.execPath, ["--experimental-transform-types", CHILD], {
-      cwd: HUB,
-      encoding: "utf8",
-      timeout: 170_000,
-      maxBuffer: 32 * 1024 * 1024,
-      env,
-    });
+    const env: Record<string, string | undefined> = {
+      ...process.env,
+      NODE_OPTIONS: sentinel,
+    };
+    const r = spawnSync(
+      process.execPath,
+      ["--experimental-transform-types", CHILD],
+      {
+        cwd: HUB,
+        encoding: "utf8",
+        timeout: 170_000,
+        maxBuffer: 32 * 1024 * 1024,
+        env,
+      },
+    );
     const got = (r.stdout ?? "")
       .split("\n")
       .find((l) => l.startsWith("NODEOPTS "));
-    expect(got, "子进程没把 NODE_OPTIONS 报回来：\n" + (r.stderr ?? "").slice(-500)).toBe(
-      "NODEOPTS " + JSON.stringify(sentinel),
-    );
+    expect(
+      got,
+      "子进程没把 NODE_OPTIONS 报回来：\n" + (r.stderr ?? "").slice(-500),
+    ).toBe("NODEOPTS " + JSON.stringify(sentinel));
   });
 
   it("生产入口的备份在【线程】里真跑成了", () => {
@@ -387,7 +440,8 @@ function listTs(dir: string): string[] {
   const out: string[] = [];
   const walk = (d: string): void => {
     for (const e of readdirSync(d, { withFileTypes: true })) {
-      if (e.name === "node_modules" || e.name === "dist" || e.name === ".tmp") continue;
+      if (e.name === "node_modules" || e.name === "dist" || e.name === ".tmp")
+        continue;
       const p = join(d, e.name);
       if (e.isDirectory()) walk(p);
       else if (e.name.endsWith(".ts")) out.push(p);

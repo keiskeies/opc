@@ -370,7 +370,7 @@ hub 内的探针【无报警】。规则方向正确 —— 界外禁止、界�
 > `db/driver.ts:30` 的签名就是 `openDb(path: string): DatabaseSync`，既没有别名也没有包装层。
 > 实测真因是测试侧自己手写了三份互不相同的 `type Db` 桩 ——
 > `driver-preflight.test.ts:17` 用 `InstanceType<typeof import(...)[DatabaseSync]>`，
-> 而 `migrate.test.ts:16` 与 `schema-0001.test.ts:18` 各写了一份结构体桩，于是传给要
+> 而 `migrate.test.ts:24` 与 `schema-0001.test.ts:28`（round312 复算坐标；round311 类型债清偿后这两处已是真类型 `type Db = DatabaseSync;`，本节讲的是当时的桩）各写了一份结构体桩，于是传给要
 > 真 `DatabaseSync` 的函数时报 missing the following properties: aggregate,
 > loadExtension, enableLoadExtension 等。修法是把三份桩收敛成一处（或直接删掉、用真实
 > 类型），与新增工程配置无关。

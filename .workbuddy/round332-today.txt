@@ -1,0 +1,10 @@
+# 【round332 修复【之前】的读数存档，不是当前盘面】
+# 当前状态跑这几条复算：
+#   npx tsx .workbuddy/round332-today-marker.probe.mts   （现在应为 NOW-without-THEN=1，那 1 是 0050 §6.5 谈规矩本身的元句）
+#   npx tsx .workbuddy/round332-check-predicate.probe.mts（现在应为 fired = 0，三处已改成冒号形态）
+# 下面每一行都是修之前量到的原样，保留是为了让台账的③那格可复算，别当现状读。
+NOW  docs/decisions/0043-default-value-should-be-the-one-that-runs-and-a-500-that-lied-about-replaying.md:207  «第 298 行»  | `real-deps` 那条 `applyDecision`（现在在第 298 行）只在**显式交了图工厂**时才被走到
+NOW  docs/decisions/0051-end-to-end-one-idea-to-delivered-and-two-false-readings-of-my-own-harness.md:72  «第 110 行»  | > 今天 `REJECTION_COUNT_SQL` 在 runtime.ts **第 110 行**、`ENSERT_TASK_BUDGET_SQL` 在第 134 行，
+NOW  docs/decisions/0051-end-to-end-one-idea-to-delivered-and-two-false-readings-of-my-own-harness.md:72  «第 134 行»  | > 今天 `REJECTION_COUNT_SQL` 在 runtime.ts **第 110 行**、`ENSERT_TASK_BUDGET_SQL` 在第 134 行，
+
+第N行 phrases total=96  撤回-line exempt=0  NOW-without-THEN=3

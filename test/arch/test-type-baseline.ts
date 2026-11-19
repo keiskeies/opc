@@ -69,7 +69,6 @@ export const TYPE_BASELINE: readonly TypeBaselineEntry[] = [
   { dir: "packages/hub/test/engine", atMost: 70 },
   { dir: "packages/hub/test/serve", atMost: 62 },
   { dir: "packages/hub/test/overview", atMost: 36 },
-  { dir: "packages/hub/test/db", atMost: 31 },
   { dir: "packages/hub/test/http", atMost: 24 },
   { dir: "test/org", atMost: 15 },
   { dir: "packages/hub/test/approvals", atMost: 14 },

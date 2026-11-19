@@ -1,0 +1,8 @@
+{
+  "name": "probe331",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@capacitor/core": "^8.6.2"
+  }
+}

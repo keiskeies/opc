@@ -198,6 +198,20 @@ export interface BootOverrides {
   readonly backupVia?: (
     req: BackupOffLoopRequest,
   ) => Promise<BackupOffLoopOutcome>;
+  /**
+   * 只给【组织提交】用的备份目录，不影响心跳每日备份那条路径。
+   *
+   * 为什么要有这一格而不是让 dev 直接传 `backupDir`：
+   * `ServeArgs` 里 `--no-backup` 与 `--backup-dir` 同时给是配置错误（config.ts 直接
+   * 报错退出），因为那两条对【同一件事】说了相反的话。而 dev 要的是两件不同的事：
+   * 「演示库不进每日备份轮转」（noBackup 管的那件）与「改组织之前要有一份能回退的
+   * 快照」（§6.5 对组织提交单独要求的那件）。把后者单独开一格，两条语义各自成立，
+   * dev 就不必伪造一个 backupDir 去撞那条矛盾检查。
+   *
+   * ⚠ 它【只】喂 orgDbPath/orgBackupDir 那一组。心跳备份仍按 backupDir===undefined
+   * 跳过 —— 别把它当通用备份目录用。
+   */
+  readonly orgBackupDir?: string;
   /** 备份 worker 的超时上限覆盖。不传用 BACKUP_WORKER_TIMEOUT_MS。 */
   readonly backupTimeoutMs?: number;
   /**
@@ -959,11 +973,16 @@ export async function boot(
       // §6.5 要求「改组织之前留一份能回到起点的快照」，没备份目录就不给改。
       // 备份的执行点复用同一个 backupVia（BootOverrides 可注入），于是测试对
       // 心跳备份与组织备份注入同一套假备份，两者的编排方向一致。
-      ...(args.backupDir === undefined
+      //
+      // o.orgBackupDir 是【组织提交专用】的那一格（见它的声明注释）：dev 入口带
+      // noBackup，永远不可能有 args.backupDir，于是拖拽改汇报关系会撞 501。
+      // 这里是个对象字面量，【放不进 const】—— 所以两处回环各写一遍，
+      // 且【只】回环到 org 那一格，不回环到心跳备份（那是 backupDir 单独管的）。
+      ...((o.orgBackupDir ?? args.backupDir) === undefined
         ? {}
         : {
             orgDbPath: dbPath,
-            orgBackupDir: args.backupDir,
+            orgBackupDir: o.orgBackupDir ?? args.backupDir,
             ...(o.backupVia === undefined
               ? {}
               : { backupBeforeCommit: o.backupVia }),
@@ -1090,10 +1109,13 @@ export async function boot(
       // ⚠ 这一支的【原文】是「本入口未接图运行时：批准会落库而图不会自动往下跑，
       // 每条批准之后需要跑一次 hub resume」。那两句话在 0043 之前【字面上都对】，
       // 而它们合起来盖住了一个具体的坏：hub resume 在 cli.ts 那一侧，
-      // cli.ts 顶层 import @langchain/langgraph（本机装不上），
-      // 而那一次批准失败的时候【卡片已经落库成决策了】——
-      // 报错教的那一步在这台机器上跑不起来，而第二次点会返回 replayed:true。
-      // 所以这一支现在说的是【这台机器上真的会发生什么】，不是【哪个模块没装上】。
+      // cli.ts 顶层 import @langchain/langgraph（【当时】本机装不上 —— round308 复算：
+      // 现在 tsx 4.23.15、@langchain/langgraph、claude 三样都在，`hub:engine --help`
+      // 退出码 0。「装不上」作为【今天的一句话】是假的，它当时的实际效果是劝退一条
+      // 跑得通的命令，所以下面横幅里那句已经改掉；这里留着是因为它解释了这一支
+      // 【为什么长这样】：报错教的那一步当时在这台机器上跑不起来，
+      // 而那一次批准失败的时候【卡片已经落库成决策了】，第二次点会返回 replayed:true。
+      // 所以这一支说的是【这台机器上真的会发生什么】，不是【哪个模块没装上】。
       io.warn(
         "决策写路径 = 【引擎那一条】：CEO 点批准 ⇒ 认领卡片 + 状态边 + 审计，一个事务，\n" +
           "任务真的往前一格（例如 CHARTER_PENDING → CHARTER_APPROVED）。不需要图运行时。\n" +
@@ -1116,8 +1138,12 @@ export async function boot(
           "      --max-budget-usd <每轮美元硬顶> --task-limit-cents <任务上限美分>\n" +
           "那【两个参数是必填的】（0041 §8：花钱的上限不给默认值），所以这一行不能整行照抄 —— " +
           "少抄一个拿到的是「缺参数」，而它会让人以为是命令写错了。\n" +
-          "⚠ 那条命令要 tsx，本机装不上（0039 量的那半）：装不上就是跑不了，" +
-          "这一句提示替你解决不了，它只保证【不说一句照抄会挂的补救命令】。",
+          "⚠ 那条命令要 tsx、@langchain/langgraph 与一个 claude 可执行文件；" +
+          "跑一轮【真的花钱】，两个上限一个都别省。\n" +
+          "缺哪一样它自己会说 —— 这一句不替它担保「这台机器上装得齐」，" +
+          "也不再说「本机装不上」（那句是过期的假话，缘由见上面那段注释）。",
+        // ↑ 那句假话在横幅里待过的时间里，它挡掉的是【一条此刻跑得通的命令】：
+        // 一句「反正跑不了」比一句「会花钱」更容易让人不去试，而它劝退的方向是错的。
       );
     } else {
       // 图路线：调用方【显式】交了图工厂，所以这是选上去的，不是默认撞上的。

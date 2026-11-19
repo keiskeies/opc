@@ -1,0 +1,8 @@
+{
+  "name": "probe331",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@qoder-ai/qoder-agent-sdk": "^1.0.59"
+  }
+}

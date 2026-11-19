@@ -163,6 +163,22 @@ const EXEMPT = new Map([
     "211a103257fb",
     "round242 注入态 blob 对照值，文件已删 ⇒ 故意不存在（round255 记 absent）",
   ],
+  // round241 还原基准 = 0008 决策文件内容的 sha256（64 位），round255/260 各处按
+  // 7/8/16 位截断引用。写入当时为真（round260 实测 `git log 0dbc7a4..HEAD` 该文件
+  // 为空 ⇒ 内容从未变）；ffae248（round314 入库）改写 0008 后不再匹配任一 index。
+  // 与 98a4b9d5（台账自摘要）同族：写入当时成立，过期不等于说过 —— 不是腐烂。
+  // 三条覆盖全部现存截断形态（7/8/16 位），同族改文件后若再红应查新 blob 的 sha256。
+  ["03bf24d", "round241 还原基准 = 0008 旧内容 sha256 截断，0008 被 ffae248 改写后过期"],
+  ["03bf24d1", "同上（8 位截断）"],
+  ["03bf24d15241da01", "同上（16 位截断）"],
+  [
+    "521daf21",
+    "round237 注入目标 abstraction.ts 的 JSDoc 旧内容 sha256 截断，ffae248 改写后过期（同 03bf24d 族）",
+  ],
+  [
+    "360ee441",
+    "ui-e2e-walk 运行产物：引擎开的新卡的短 id（seed 卡 360ee441-… 的 8 位显示），运行时生成、非 git 对象",
+  ],
 ]);
 
 /** 紧邻前文（左边 <=40 字符）声明「这一格是对照摘要而非提交引用」。
@@ -381,7 +397,17 @@ for (const f of files) {
   src.split(/\r?\n/).forEach((line, idx) => {
     const where =
       f.replace(ROOT + "\\", "").replace(ROOT + "/", "") + ":" + (idx + 1);
-    for (const m of line.matchAll(/\b[0-9a-fA-F]{7,}\b/g)) {
+    // UUID（8-4-4-4-12，如审批卡 id `af92c1e1-2173-…`）的四段都形似 hex hash，
+    // 但整串【结构上】是运行时生成的 id，不是对 git 对象的声称 —— 在采集前整段
+    // 换成非 hex 占位，避免它的每一段被当成独立引用（round315 实测 18 条假红全
+    // 是这一族：round309 记录、seed.txt、ui-e2e-walk、ui-seed-run2 里的卡 id）。
+    // 为什么用【整行替换】而不是在 match 处回看 36 字符：UUID 的 8 位首段
+    // 恰好也有 8 位，会被 regex 单独采到，回看窗口装不下完整 36 位 UUID。
+    const uuidSafe = line.replace(
+      /\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b/g,
+      "UUID",
+    );
+    for (const m of uuidSafe.matchAll(/\b[0-9a-fA-F]{7,}\b/g)) {
       const h = m[0].toLowerCase();
       tokens++;
       if (exemptSeen.has(h)) exemptSeen.set(h, exemptSeen.get(h) + 1);
@@ -476,7 +502,9 @@ for (const f of files) {
       //    不可能放过一个可解析的提交引用（那已经在 ① 判掉了）。所以这里的误判代价是
       //    「少验一个」，而不是「把腐烂说成好的」。
       if (
-        CLAIMS_TRANSIENT.test(line.slice(Math.max(0, m.index - 40), m.index))
+        CLAIMS_TRANSIENT.test(
+          uuidSafe.slice(Math.max(0, m.index - 40), m.index),
+        )
       ) {
         t.transient++;
         if (transientSamples.length < 8)
@@ -489,7 +517,12 @@ for (const f of files) {
         exemptHit.add(h);
         continue;
       }
-      if (h.length <= 40 && existsLoose(h + "^{commit}")) {
+      // ④b 悬空对象 = 对象还在（可能是 commit，也可能是 blob/tag），但不在任何 ref 上。
+      //     round315 前只查 `<h>^{commit}`，于是「历史 blob 引用」（如 round260 记的
+      //     3b7d385e…，ffae248 改写文件后掉出 HEAD 树）被漏进 ⑤ 误报成腐烂 —— 那一族
+      //     与悬空提交同构：作者引用的对象当时真实存在，只是现在不可从 ref 到达。
+      //     判据只问「这个对象在对象库存不存在」，裸 `-e h` 同时覆盖 commit 与 blob。
+      if (h.length <= 40 && (existsLoose(h + "^{commit}") || existsLoose(h))) {
         t.dangling++;
         dangling.push(h + " @ " + where);
         continue;

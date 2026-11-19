@@ -18,14 +18,17 @@
  * 「404 不写审计」这件事的判据是 events 表的行数，而那张表上有 append-only 触发器，
  * 自造的简化表既没有触发器、也不会因为写错而红 —— 那正是本仓认定自造表不可信的理由。
  */
-import { mkdirSync, rmSync } from "node:fs";
-import { join } from "node:path";
+import { mkdirSync, readFileSync, rmSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import type { DatabaseSync } from "node:sqlite";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
+  API_ENDPOINTS,
   approvalOutcome,
   decodeSseFrame,
   encodeSseFrame,
+  IMPLEMENTED_ENDPOINTS,
   isImplemented,
   UNIMPLEMENTED_ENDPOINTS,
   type SseFrame,
@@ -1128,5 +1131,73 @@ describe("路由与视图", () => {
       h.req({ method: "GET", path: "/tasks", headers: h.sign("GET", "/tasks") }),
     );
     expect(proto.status).toBe(500);
+  });
+});
+
+/**
+ * 契约 ↔ 路由【对拍守卫】。
+ *
+ * 触发（实测）：有人给 matchRoute 加了一条新路由、忘了在 contracts/api.ts 登记；
+ * 或反过来在 IMPLEMENTED_ENDPOINTS 里加了一行、matchRoute 却还没接 ——
+ * 两边各有一份「能用端点」清单，此前没有任何测试比它们。症状是
+ * 「契约里写着已实现、一打 404」或「路由表里能命中、契约却不知道」，
+ * 而 UNIMPLEMENTED_ENDPOINTS 在 Task 3.4 之后是空数组，把那条回退面也捂住了。
+ *
+ * 两个方向都验，且各自防退化：
+ *  - 【正向】IMPLEMENTED 每项都真实命中 matchRoute，且 endpoint 一致。
+ *  - 【反向】app.ts 源码里每一处 `endpoint: "…"` 字面量（Route 联合 + matchRoute
+ *    返回值两处）都在 API_ENDPOINTS（契约全集）里。这样 matchRoute 新加一条
+ *    契约不知道的路由，会红在反向；IMPLEMENTED 新加一行路由没接，红在正向。
+ *
+ * 样例 path 生成：`:段名` 全填字面 "x"。若哪天有人把参数段名改成一个 . 都
+ * 不带的段（`:interruptId` → `interruptId`），或把字面段名漏了大写，
+ * 样例 path 会「碰巧」命中别处或 null —— 那只会在 count 上掉出来。
+ * 所以断言里补一记【样例确实含参数段、确实不含冒号】的自检，防退化。
+ */
+describe("④ 契约端点清单 ↔ matchRoute 路由表：双向对拍", () => {
+  /** `/a/:b/c` → `/a/x/c`。先剥掉方法前缀，再替换参数段。 */
+  const samplePath = (endpoint: string): string => {
+    const path = endpoint.split(" ").slice(1).join(" ");
+    return path.replace(/:[A-Za-z0-9_]+/u, "x");
+  };
+
+  const methodOf = (endpoint: string): string => endpoint.split(" ")[0] ?? "";
+
+  it("正向：每条已实现端点都能被 matchRoute 命中，且 endpoint 一致", () => {
+    for (const ep of IMPLEMENTED_ENDPOINTS) {
+      const hit = matchRoute(methodOf(ep), samplePath(ep));
+      expect(hit, `matchRoute 未命中 ${ep}`).not.toBeNull();
+      expect(hit?.endpoint, `endpoint 不一致: ${ep}`).toBe(ep);
+    }
+  });
+
+  it("反向：app.ts 里每一处 endpoint 字面量都在契约全集里（不许有路由契约外命中）", () => {
+    const hubRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
+    const src = readFileSync(join(hubRoot, "src/http/app.ts"), "utf8");
+    const found = new Set<string>();
+    const re = /endpoint:\s*"([^"]+)"/gu;
+    for (const match of src.matchAll(re)) {
+      found.add(match[1] as string);
+    }
+    expect(found.size).toBeGreaterThan(0); // 防正则退化：一行都没扫到等于没扫
+    for (const ep of found) {
+      expect(
+        (API_ENDPOINTS as readonly string[]).includes(ep),
+        `app.ts 路由用了契约全集外的 endpoint：${ep}`,
+      ).toBe(true);
+    }
+    // 反向的强度：这张表必须【不含】未实现端点（否则等于把"没做"写成"做了"）。
+    for (const ep of found) {
+      expect(UNIMPLEMENTED_ENDPOINTS).not.toContain(ep);
+    }
+  });
+
+  it("样例 path 生成不退化：确实替换了参数段、没留下冒号", () => {
+    for (const ep of IMPLEMENTED_ENDPOINTS) {
+      if (ep.includes(":")) {
+        expect(samplePath(ep)).not.toContain(":");
+        expect(samplePath(ep)).toContain("x");
+      }
+    }
   });
 });

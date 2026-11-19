@@ -147,12 +147,12 @@
 | 差什么 | 规格 | 现状 | 卡在哪 |
 | --- | --- | --- | --- |
 | 批量批准 / 批量打回 |【规格】§9.4、§16.5 | `app.js` 里 `批量`/`batch` **0 命中**；hub `route()` 也没有批量端点 | **前后端都缺**，而审计口径（一次批量 = 一条审计事件）只能由服务端定 |
-| 回放按事件类型过滤 |【规格】§16.7 | 只有任务选择 + 关键词，没有类型过滤 | 前端缺 UI，服务端 entries 已带 `action` |
-| 每节点的完整产出快照 |【规格】§16.7「展开状态快照」 | `eventRow` 只在 `degraded` 时展开 `raw_payload` | 缺的是 checkpoint ↔ 事件的**对齐**，不是 UI |
-| 岗位书（角色章程）编辑器 |【规格】§16.6、§3.2 | `app.js` 里 `charter` **0 命中** | **只能 CEO 写验收标准**（占位串不许我填），所以缺的是"能编辑"而不是"已填" |
+| 回放按事件类型过滤 |【规格】§16.7 | 只有任务选择 + 关键词，没有类型过滤 | 前端缺 UI，服务端 entries 已带 `action`。**【round325 已做】**：app.js 加 `REPLAY_FILTERS`（五组映射 action 枚举：审阅决定/工具调用/预算/审批/会议）+ `filterReplayEntries` 纯函数 + 工具栏过滤下拉，计数行联动显示类型。测试：`app-pure.test.ts` 新增 8 发（含未知过滤名退回不过滤、未知 action 保留），变异两发均被杀。 |
+| 每节点的完整产出快照 |【规格】§16.7「展开状态快照」 | `eventRow` 只在 `degraded` 时展开 `raw_payload` | 缺的是 checkpoint ↔ 事件的**对齐**，不是 UI。**【round327/328 已做】**：后端 `replay/query.ts` 接上 `decodeCheckpoint`（官方程 `JsonPlusSerializer`，round319 实测可装），checkpoint 行带 `decoded` + `summary`（每通道 valueJson）；`search.test.ts` 真 `dumpsTyped` 断言解码成功、坏 blob 降级，两发变异均被杀。前端 `app.js` 加 `checkpointBlock` 纯函数（decoded 行每通道一个 `<details>` 快照，降级行明说未解码），`loadReplay` 渲染「断点状态快照」段；`app-pure.test.ts` 新增 5 发（含通道注入转义、降级不显假摘要），变异两发均被杀。 |
+| 岗位书（角色章程）编辑器 |【规格】§16.6、§3.2 | `app.js` 里 `charter` **0 命中** | **只能 CEO 写验收标准**（占位串不许我填），所以缺的是"能编辑"而不是"已填"。**【round326 复核：已过期】**——当前 `app.js` 的 `renderCharter`（:1283 起）是完整编辑器：角色清单、逐字段表单（acceptance_criteria 逐行输入 + 「必须由你本人写」提示）、change_summary、保存提交，路由表里有 `charter: renderCharter`（:102）。「0 命中」是编辑器进仓之前的旧读数；缺的那半仍是「CEO 写验收标准内容」，不是编辑器本身。 |
 | 组织图三栏拖拽编辑 |【规格】§18 全篇 | `拖拽`/`drag` 只在两句**说明缺失**的注释与横幅里 | reactflow 装不上；且【规格】§18.4「提交才生效」的写路径与 `POST /org` 那道 CEO 门纠缠 |
-| 预算分配 / 信任积分调整 |【规格】§16.6 末、§4.4 | 同一句横幅里承认没有 | **没有数据生产者**（`BUDGET_PAUSED` 零写方、trust 无写入路径）—— 前端先做出来就是一张假面板 |
-| 「自动决策摘要」那一行的数 |【规格】§16.3、§16.5 | 有文案位 | 来源是 `policy/auto-approve.ts`，**它没被装配**（§3.1） |
+| 预算分配 / 信任积分调整 |【规格】§16.6 末、§4.4 | 同一句横幅里承认没有 | **没有数据生产者**（`BUDGET_PAUSED` 零写方、trust 无写入路径）—— 前端先做出来就是一张假面板。**【round328 复核：预算编辑器已建】**——`app.js` 的 `renderBudget`（:1535 起）是完整限额定增表单（scope/period/limit_cents/hard_stop，`POST /budget` 真端点）+ 表格（进度条、未设限额特别提示）；缺的只剩「信任积分调整」那半（:1026 横幅仍在，trust 无数据生产者是**真** blocked，不是界面问题）。 |
+| 「自动决策摘要」那一行的数 |【规格】§16.3、§16.5 | 有文案位 | 来源是 `policy/auto-approve.ts`，**它没被装配**（§3.1）。**【round328 复核：读侧已装配，写侧仍缺】**——`app.js` :232/:376 的「自动决策摘要」已实现（「过去 N，策略引擎自动通过 X 项」），后端 `today.ts:372` 已按 `payload.auto_approved_by` 汇总；`autoApprove` 已被 `approvals/query.ts:230` 影子判定接上。缺的是**写侧**：`recordAutoApproval`（唯一真写入方）仍零生产调用（0014 §3 阶段一），生产里那个数恒 0 —— 放开写是 O9 阶段二的事（CEO 门）。 |
 
 这张表里我认为最值钱的一格是**最后一行**：它不是"前端少一个组件"，
 而是**屏幕上那句摘要今天要写什么数字，取决于后端一个到不了的模块**。
@@ -231,7 +231,11 @@
    现在 `wireMain()` 已经把所有非胶水的东西收进来了，剩下的胶水大约二十行。
 2. **`signedHeaders` / `openEventStream` 的空 token 直调测试** —— §2 ① 那一条的实际补法：
    两条路（走 `makeSignedFetch`、走事件流）各要一发「空 token 必须抛，而不是签出必然 401 的头」。
-   前者的分母已有，后者**没有**。
+   前者的分母已有，后者**没有**。**【round329 复核：已做】**——两条分母都在：
+   `signed-fetch.test.ts`「空串与纯空白都抛」（走 `makeSignedFetch`）与
+   `event-stream.test.ts`「token 空串 ⇒ 构造时就抛」（走 `openEventStream`，其注释明写
+   `connect()` 每次签时都过 `assertUsableToken` 的那次时机，且 `connect()` 在返回前同步执行），
+   空串与纯空白两态各两发。这一格从「待补」改成「已闭」。
 3. **`hub:eventsReady` 这个 invoke 通道**（渲染进程挂好监听再开流）。
    现在流可能早于监听者存在，头几条事件落在没人听的地方。
    这是**白名单改动**，必须与渲染进程那一侧的投影同轮落 —— 单独加通道会造出一个

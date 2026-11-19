@@ -878,6 +878,13 @@ export interface TurnOutcome {
 export interface RunTurnInput {
   readonly role: string;
   /**
+   * 哪条任务触发的这一轮。O6 Step B 起它是【必填】：执行现在经 harness/gateway，
+   * 而 HarnessRequest 的 task_id 是 schema 必填格（审计行按它归属）。
+   * 给成可选再"缺了就不写 task_id"等于把「这次调用属于哪条任务」这件结构事实
+   * 降级成一个可漏的参数 —— 事件流里那一格是 NOT NULL 语义的归属坐标。
+   */
+  readonly taskId: string;
+  /**
    * 【本轮】的简报（任务、状态、能交给谁、最近的汇报）。
    * 里面带着 agent 上一轮自己写的 summary 原文，所以它是【不可信内容】的那一侧。
    */
@@ -1108,6 +1115,7 @@ export function makeDispatch(deps: DispatchDeps): (o: DispatchOptions) => Promis
     const upstream = upstreamOf(graph, task.role);
     const outcome = await deps.runTurn({
       role: task.role,
+      taskId: task.id,
       // 身份走 rolePrompt（→ --append-system-prompt），简报走 prompt（→ stdin）。
       // 在这里就拼成一条的话，装配方拿不到分开的两格，只能把身份再发一遍。
       rolePrompt: deps.rolePrompt(task.role),

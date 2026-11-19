@@ -858,6 +858,11 @@ export function buildHubDeps(o: RealHubDepsOptions): HubDeps {
     // 绑定那三条写路由走【同一个队列】（0031）。给它而不是给 deps.db 那条只读连接：
     // 上面每条写路径写明的同一条理由（P1 同连接重入），没有第二条更弱的写通道。
     bindingWriter: o.queue,
+    // 岗位书与预算的写路由走【同一个队列】，同 bindingWriter 一条理由，不重抄。
+    // 无条件装（不是 org 那种「配了备份才装」）：这两条写路径本身不需要备份点，
+    // 而读侧 GET /charter / GET /budget 本来也无条件（deps.db 那条只读连接）。
+    charterWriter: o.queue,
+    budgetWriter: o.queue,
     ...(o.bindingVerifier === undefined ? {} : { bindingVerifier: o.bindingVerifier }),
     // 组织提交（0040）。只有当装配给了 dbPath + backupDir 才装 —— 那就是
     // 「这台 Hub 为改组织准备了恢复」（文件头 + HubDeps.commitOrgChange 那两段）。

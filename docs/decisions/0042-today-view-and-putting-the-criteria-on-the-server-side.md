@@ -46,7 +46,7 @@
 少了它们，界面只能自己抄一份清单，而**那份抄件没有任何测试能发现它和这里不一致**
 （变异测试跑在 hub 侧，看不见 web 侧）。发出判据之后，看板那一页是**拿着服务端给的清单在筛**：
 
-`packages/web/public/app.js:445` —— `attention.includes(tk.status) || overBudget(tk)`，
+`packages/web/public/app.js:464` —— `attention.includes(tk.status) || overBudget(tk)`，
 左边是服务端发的状态集合，右边是两个服务端给的数比一下（算术，不构成状态机判定，所以留在界面）。
 
 **⚠ 这一句在本篇内被修正过一次**：第一版只发**三份**清单，而且把 `active_statuses`
@@ -289,6 +289,11 @@ body 摘要改成原文。基线复原 5/5 绿。
 
 `node_modules/vitest` 在本机是**空壳**（pin 的 4.1.12 物理文件 0 个；biome / vite / esbuild / tsx 同），
 所以 `pnpm verify` **跑不起来**，下面所有绿都来自 `/tmp/opc-harness` 那个 node:test 替身。
+【round321 复核：本段前提已过期。round320 实测当前 node_modules：`vitest@4.1.12` = 120 个物理文件、
+`vite@8.3.6` = 49、`esbuild@0.28.2` = 10（平台包 @esbuild/win32-x64 = 3）、`tsx` 在 `.bin`、
+`@biomejs/biome` 2.6.5 真执行 —— **不是空壳**；`pnpm verify` 能跑，exit 1 来自 biome 存量
+276 errors（HEAD 债，不清理）。本篇当时用替身 harness 的必要性已被依赖实体化推翻；
+「下面所有绿都来自替身」只对写作时点成立。0039 §0/§1 与 vitest.config.ts round193/194 注释链为当前口径。】
 本轮它被 tmp 清理抹掉过一次，重建后**没有直接采信**：先在我从未碰过的 `test/arch` 上对基线，
 得到 **131 / 117 / 7+6**（基线 131 / 124 / 7），差的 6 发**全部**是替身的比较器比真框架松：
 

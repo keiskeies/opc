@@ -1,0 +1,42 @@
+
+[1m[30m[46m RUN [49m[39m[22m [36mv4.1.12 [39m[90mD:/item/opc[39m
+
+(node:67504) [DEP0190] DeprecationWarning: Passing args to a child process with shell option true can lead to security vulnerabilities, as the arguments are not escaped, only concatenated.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+ [32m✓[39m packages/hub/test/http/bind.test.ts [2m([22m[2m18 tests[22m[2m)[22m[32m 5[2mms[22m[39m
+(node:45332) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:52448) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:61008) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:17824) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:57780) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:68520) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:58500) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:68528) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:11312) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:17272) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ [32m✓[39m packages/hub/test/http/decision-engine-route.test.ts [2m([22m[2m9 tests[22m[2m)[22m[33m 567[2mms[22m[39m
+ [32m✓[39m packages/hub/test/http/budget-route.test.ts [2m([22m[2m13 tests[22m[2m)[22m[33m 741[2mms[22m[39m
+ [32m✓[39m packages/hub/test/http/tokens.test.ts [2m([22m[2m25 tests[22m[2m)[22m[33m 923[2mms[22m[39m
+ [32m✓[39m packages/hub/test/http/tokens-route.test.ts [2m([22m[2m18 tests[22m[2m)[22m[33m 763[2mms[22m[39m
+ [32m✓[39m packages/hub/test/http/charter-route.test.ts [2m([22m[2m15 tests[22m[2m)[22m[33m 765[2mms[22m[39m
+ [32m✓[39m packages/hub/test/http/org-route.test.ts [2m([22m[2m15 tests[22m[2m)[22m[33m 836[2mms[22m[39m
+ [32m✓[39m packages/hub/test/http/real-deps.test.ts [2m([22m[2m32 tests[22m[2m)[22m[33m 1183[2mms[22m[39m
+ [32m✓[39m packages/hub/test/http/server.test.ts [2m([22m[2m20 tests[22m[2m)[22m[33m 1260[2mms[22m[39m
+ [32m✓[39m packages/hub/test/http/bindings-route.test.ts [2m([22m[2m32 tests[22m[2m)[22m[33m 1345[2mms[22m[39m
+ [32m✓[39m packages/hub/test/http/contract.test.ts [2m([22m[2m49 tests[22m[2m)[22m[33m 1441[2mms[22m[39m
+
+[2m Test Files [22m [1m[32m11 passed[39m[22m[90m (11)[39m
+[2m      Tests [22m [1m[32m246 passed[39m[22m[90m (246)[39m
+[2m   Start at [22m 18:42:24
+[2m   Duration [22m 2.40s[2m (transform 2.16s, setup 0ms, import 3.73s, tests 9.83s, environment 1ms)[22m
+

@@ -831,7 +831,7 @@ describe("① 第一跳（`POST /org` 加一个角色）：kind 有了，判据�
     expect((res.body as { code?: string }).code).toBe("unknown_model_family");
   });
 
-  it("证据③（round295 翻向）：界面发得出 reparent，发不出 add_edge / add_node", () => {
+  it("证据③（round308 翻向）：三种 kind 界面都发得出，发的人只有 app.js", () => {
     // ── 这一发【原来】写的是「两个前端里 add_edge / reparent 零出现」，并且绿 ──
     // 那句是假的，而且不是"过期"：`packages/web/public/app.js` 从 2026-11-11 起
     // 就在真发 `kind: "reparent"`（`git log -S` 追到 2bcbdb0，本轮实测 HEAD 版第 932 行）。
@@ -854,10 +854,16 @@ describe("① 第一跳（`POST /org` 加一个角色）：kind 有了，判据�
 
     // ① 逐 kind 的名单。改这一行之前先想清楚：让界面上多一种能发的变更，
     //    是产品决定（O8 第一跳那一格），不是测试顺手放宽的事。
+    // 【round308 换成了三份名单 —— 那一次产品决定真的发生了】
+    // O8 正文与 §5.1 那张表（Task 3.8 → O8「组织可编辑」）要的就是界面上改得动组织，
+    // 而 round294 已经给契约补上带判据的 add_node：界面发不出它，缺的是前端那一格，
+    // 不是 CEO 的闸门。所以这里不是【放宽】，是【照实】。
+    // ⚠ 仍然不叫「O8 第一跳通了」：加进图的角色【没有岗位书】，
+    // 它那一格由本文件 ② 段那两发（data / translator）判 —— 名字进图 ≠ 它有验收标准。
     expect(emitters).toEqual({
       reparent: [consolePath],
-      add_edge: [],
-      add_node: [],
+      add_edge: [consolePath],
+      add_node: [consolePath],
     });
 
     // ② 前提自证：那个"真发变更的文件"【在取材里】。少了这一发，

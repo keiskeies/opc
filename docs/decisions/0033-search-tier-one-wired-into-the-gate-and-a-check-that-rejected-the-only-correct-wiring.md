@@ -288,7 +288,10 @@ count evaluateGate   "src/graph/gates/evaluate.ts"                     # ⇒ 1 �
   那会让「授予」与「计数」两处漂，而漂的后果（授予了而数不到）比放宽更坏。
 - **`pnpm verify` 仍然跑不起来**（`vitest` 解析不到，复算 `node packages/hub/scripts/deps-resolvable.mjs`）
   ⇒ 下面那些绿是 **node:test + 自制 harness** 给的，**不是门禁过了**。
+  【round319-9 复核：前提已过期 —— 同 0032 §7 标注。verify 三件套现全可用，
+  exit 1 来自 biome 存量债；deps-resolvable.mjs 现读数 7 可用 / 7 真缺。】
 - **格式未经校验**：`@biomejs/biome` 装不上，新增代码的排版是我手工对齐的。
+  【round319-9 复核：biome 2.6.5 现可用（存量 276 errors 为 HEAD 债，非环境）。】
 - **本篇没改那七份 YAML**：没有任何一个现成角色真的声明了领域。
   ⇒ 今天第 1 层对所有真实角色的结论都是「无强制领域 ⇒ satisfied」。
   这不是空转（缺省语义被测过），但它意味着**这条链路的实际行为今天与接之前相同**——

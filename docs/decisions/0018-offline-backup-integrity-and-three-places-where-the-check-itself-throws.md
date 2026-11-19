@@ -158,6 +158,11 @@
   `runIntegrityScan` 与 `createBackup` 目前在本仓【零生产调用方】—— 除测试外无人 import。
   堵点是 Task 6.1 的常驻进程与调度器不存在（`cli.ts` 只有 run / status / resume 三个动词，
   `serveHub` 零生产调用方），不是判据缺失。见 §7。
+  【round322 复核：本段「零生产调用方」已过期。`runIntegrityScan` 现在由
+  `heartbeat/maintenance.ts:257`（每日巡检）与 `serve/assemble.ts:860`（启动完整性检查、
+  onMainThread 分支）调用；`createBackup` 由 `db/backup.worker.ts:131`（离线备份 worker）
+  调用；`serveHub` 由 `serve/assemble.ts:1217`（HTTP serve 命令）调用。堵点（Task 6.1
+  常驻进程）已在 0048 之后的轮次落地。原句保留为 0018 写作时的读数。】
 - **执行顺序偏离计划 §10.1**：那一节把 6.x 排在 `{4.7, 5.8}` 之后。选现在做的理由是
   6.2/6.3 是本机【唯一两条不依赖网络与 SDK 就能整条做完】的 Phase 6 条目，
   而 4.x/5.x 整片卡在 D9 与外部 SDK 上（见 docs/INDEX.md 的等待清单）。

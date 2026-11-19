@@ -9,6 +9,7 @@
   },
   "scripts": {
     "dev": "tsx packages/hub/src/serve/dev-entry.ts",
+    "dev:seed": "tsx packages/hub/src/serve/dev-seed.ts",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",

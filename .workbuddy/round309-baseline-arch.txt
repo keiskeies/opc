@@ -1,0 +1,60 @@
+
+[1m[30m[46m RUN [49m[39m[22m [36mv4.1.12 [39m[90mD:/item/opc[39m
+
+(node:31428) [DEP0190] DeprecationWarning: Passing args to a child process with shell option true can lead to security vulnerabilities, as the arguments are not escaped, only concatenated.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+ [32m✓[39m test/arch/doc-ids.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 27[2mms[22m[39m
+ [32m✓[39m test/arch/matcher-oracle.test.ts [2m([22m[2m10 tests[22m[2m)[22m[32m 5[2mms[22m[39m
+ [32m✓[39m test/arch/config-match.test.ts [2m([22m[2m7 tests[22m[2m)[22m[32m 3[2mms[22m[39m
+ [32m✓[39m test/arch/doc-refs.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 129[2mms[22m[39m
+ [32m✓[39m test/arch/harness-invariants.test.ts [2m([22m[2m17 tests[22m[2m)[22m[32m 55[2mms[22m[39m
+ [32m✓[39m test/arch/plan-gate-paths.test.ts [2m([22m[2m11 tests[22m[2m)[22m[32m 15[2mms[22m[39m
+ [32m✓[39m test/arch/desktop-honest-label.test.ts [2m([22m[2m7 tests[22m[2m)[22m[32m 15[2mms[22m[39m
+ [32m✓[39m test/arch/decision-index.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 8[2mms[22m[39m
+ [32m✓[39m test/arch/pending-decisions.test.ts [2m([22m[2m19 tests[22m[2m)[22m[32m 78[2mms[22m[39m
+ [32m✓[39m test/arch/claim-coords.test.ts [2m([22m[2m8 tests[22m[2m)[22m[32m 82[2mms[22m[39m
+ [32m✓[39m test/arch/role-spawn-boundary.test.ts [2m([22m[2m11 tests[22m[2m)[22m[32m 14[2mms[22m[39m
+(node:53360) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ [32m✓[39m test/arch/dependency-boundary.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 273[2mms[22m[39m
+ [32m✓[39m test/arch/doc-coords.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 233[2mms[22m[39m
+ [32m✓[39m test/arch/no-native-deps.test.ts [2m([22m[2m6 tests[22m[2m)[22m[32m 202[2mms[22m[39m
+ [32m✓[39m test/arch/production-deps.test.ts [2m([22m[2m7 tests[22m[2m)[22m[32m 52[2mms[22m[39m
+ [32m✓[39m test/arch/mutation-parser-screen.test.ts [2m([22m[2m13 tests[22m[2m)[22m[33m 404[2mms[22m[39m
+ [32m✓[39m test/arch/plan-refs.test.ts [2m([22m[2m10 tests[22m[2m)[22m[32m 21[2mms[22m[39m
+ [32m✓[39m test/arch/irreversible-token.test.ts [2m([22m[2m8 tests[22m[2m)[22m[33m 306[2mms[22m[39m
+ [32m✓[39m test/arch/zero-producer.test.ts [2m([22m[2m11 tests[22m[2m)[22m[33m 341[2mms[22m[39m
+ [32m✓[39m test/arch/no-null-bytes.test.ts [2m([22m[2m10 tests[22m[2m)[22m[33m 314[2mms[22m[39m
+ [32m✓[39m test/arch/claims-registry.test.ts [2m([22m[2m153 tests[22m[2m)[22m[33m 486[2mms[22m[39m
+[90mstdout[2m | test/arch/dead-modules.test.ts[2m > [22m[2m死模块哨兵[2m > [22m[2m真实语料：解析量非零（判据坏起来的第一个症状是一条边都没解析出来）
+[22m[39m  [死模块哨兵] 模块 96 · 边 309 · 静态入口 8 · 动态入口 2 · 不可达 13
+
+ [32m✓[39m test/arch/commit-msg-refs.test.ts [2m([22m[2m4 tests[22m[2m)[22m[33m 543[2mms[22m[39m
+     [33m[2m✓[22m[39m 真实历史: 标题 scope 与实际改动一致，且不引用不存在的编号 [33m 540[2mms[22m[39m
+ [32m✓[39m test/arch/census.test.ts [2m([22m[2m12 tests[22m[2m)[22m[32m 6[2mms[22m[39m
+ [32m✓[39m test/arch/lint-baseline.test.ts [2m([22m[2m12 tests[22m[2m)[22m[33m 693[2mms[22m[39m
+     [33m[2m✓[22m[39m `pnpm lint` 今天的 error 全部在基线内，且读数本身可信 [33m 686[2mms[22m[39m
+ [32m✓[39m test/arch/dead-modules.test.ts [2m([22m[2m23 tests[22m[2m)[22m[33m 632[2mms[22m[39m
+ [32m✓[39m test/arch/gate-selfcheck.test.ts [2m([22m[2m7 tests[22m[2m)[22m[33m 1001[2mms[22m[39m
+   [33m[2m✓[22m[39m 探针甲：退出码与不符项数同为零（双向蕴含，不预设现在是零） [33m 376[2mms[22m[39m
+ [32m✓[39m test/arch/stub-terminal-write.test.ts [2m([22m[2m30 tests[22m[2m)[22m[32m 11[2mms[22m[39m
+ [32m✓[39m test/arch/comment-test-readers.test.ts [2m([22m[2m12 tests[22m[2m)[22m[32m 5[2mms[22m[39m
+warning: in the working copy of 'docs/decisions/0009-only.md', LF will be replaced by CRLF the next time Git touches it
+ [32m✓[39m test/arch/test-inventory.test.ts [2m([22m[2m12 tests[22m[2m)[22m[33m 1112[2mms[22m[39m
+     [33m[2m✓[22m[39m 磁盘上每个测试样文件都在 include 覆盖范围内 [33m 1103[2mms[22m[39m
+ [32m✓[39m test/arch/comment-citations.test.ts [2m([22m[2m25 tests[22m[2m)[22m[33m 1254[2mms[22m[39m
+     [33m[2m✓[22m[39m 真实仓库：注释里的限定引用全部指向存在的东西 [33m 1036[2mms[22m[39m
+ [32m✓[39m test/arch/pending-inventory.test.ts [2m([22m[2m16 tests[22m[2m)[22m[33m 1351[2mms[22m[39m
+     [33m[2m✓[22m[39m 被收集的真文件必须一条问题都不报，且扫描通路确实读到了东西 [33m 838[2mms[22m[39m
+     [33m[2m✓[22m[39m 真仓库里唯一带跳过的文件，正是名单里那一个 [33m 491[2mms[22m[39m
+ [32m✓[39m test/arch/coverage-guard.test.ts [2m([22m[2m1 test[22m[2m)[22m[33m 2140[2mms[22m[39m
+   [33m[2m✓[22m[39m 门控判定内核文件覆盖率 ≥ 下限（反假绿：文件必须在场、红即失败） [33m 2138[2mms[22m[39m
+ [32m✓[39m test/arch/test-type-baseline.test.ts [2m([22m[2m26 tests[22m[2m)[22m[33m 8419[2mms[22m[39m
+     [33m[2m✓[22m[39m 真跑一次：今天的数在表内，且读数本身可信 [33m 4355[2mms[22m[39m
+     [33m[2m✓[22m[39m test/arch 自己必须是 0 条（round277 清到 0，这一发钉住它不漂回去） [33m 3753[2mms[22m[39m
+
+[2m Test Files [22m [1m[32m33 passed[39m[22m[90m (33)[39m
+[2m      Tests [22m [1m[32m501 passed[39m[22m[90m (501)[39m
+[2m   Start at [22m 01:07:14
+[2m   Duration [22m 9.44s[2m (transform 6.93s, setup 0ms, import 10.63s, tests 20.23s, environment 2ms)[22m
+

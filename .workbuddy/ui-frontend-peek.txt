@@ -1,0 +1,28 @@
+### #/today
+需要你决策 ⏎  ⏎ 没有等你决定的事。 ⏎ 自动决策摘要 · 过去 1 天 ⏎ 活动流（投影自身的轨迹） ⏎  ⏎ 组织状态 ⏎  ⏎ 0 ⏎ 活跃任务 ⏎ 0 ⏎ 1 天 完成 ⏎ 0 ⏎ 被阻塞 ⏎ 0 ⏎ 待你决策 ⏎ 预算 ⏎ 1 天内 $0.00 ⏎ 累计 $0.00 · 已声明上限合计 $0.00 (一行都没设过) ⏎ 口径说明 · 3 条 ⏎  ⏎ 扔个想法 ⏎  ⏎ 提交
+console errors: 0
+
+### #/board
+全部 ⏎ 需要我注意 ⏎ 0 / 0 条 · 游标 #0 · 实时 ⏎ 这台 Hub 没开驱动器：想法停在 agent 那一格之后，不会有任何东西去推它。要自动推进请带 --driver-pump 起 Hub，或手工 hub work。 ⏎ 全部任务 ⏎ 0 ⏎ —
+console errors: 0
+
+### #/inbox
+过去 1 天，策略引擎自动通过 0 项可逆决策，拦截 0 项进入人工审批。当前待处理 0 项。 ⏎ 待批 0 · 读数于 2026/11/18 18:11:14 ⏎ ↻ 重读 ⏎ 收件箱为空。 ⏎ 口径说明 · 3 条
+console errors: 0
+
+### #/org
+graph_version 0 · · 生效 — ⏎ ↻ 刷新 ⏎ 还没有组织图（graph_version 0 = 从没提交过，不是出错）。先用 CLI 提交一版。
+console errors: 0
+
+### #/charter
+组织图是空的（graph_version 0），没有角色可配岗位书。
+console errors: 0
+
+### #/budget
+GET /budget → 404：no such route
+console errors: 1 → Failed to load resource: the server responded with a status of 404 (Not Found)
+
+### #/replay
+查时间线 ⏎ 还没有任务 ⏎ 选一条任务看它的回放。
+console errors: 0
+

@@ -108,12 +108,16 @@ describe("主张登记表：判据一（真实仓库今天成立）", () => {
     expect(r).toBeDefined();
     // 【round272 换了形状】原来这一发断言 tracker.ts 与 engine/runtime.ts 各含一条
     // `INSERT INTO budgets` —— 那两条字面量是同一件事的两份手抄，本轮把 runtime 那份删了。
-    // 于是「取材没坏」今天长这样：① 全 src 扫到【恰好 2 条】带 hard_stop 的语句
+    // 于是「取材没坏」今天长这样：① 全 src 扫到【恰好 4 条】带 hard_stop 的语句
     // （条数下限只能放在这里，不能放进 check —— 合成夹具一条语句就够测红绿，
     // 把条数写进判据会让变异样本自己撞上它，红因从「写成 0」变成「条数不够」）；
     // ② 引擎路线仍然在记账，只是改成【import 那唯一一条】。
     // 少了 ② 的话，删掉 runtime 的记账而 r1 照样绿，而那时"没有代码能写 0"
     // 会因为【根本没有代码在写】而成立 —— 那是假绿的新形状，比原来的假绿更难看出。
+    // 【round308：2 → 4】POST /budget（http/budget.ts，CEO 显式改限额的写路径）与
+    // dev-seed（演示播种）各带一条。4 条里只有 http/budget.ts 那条的 hard_stop 是
+    // 绑定参数（= 界面「硬停」勾选框），它由判据的名单规则单独管 —— 见 registry 里
+    // HARD_STOP_BIND_WHITELIST 那段；条数这一发只保证【取材没坏】，不担保停法。
     const stmts = realFiles
       .allSrc()
       .flatMap((name) => [
@@ -122,7 +126,7 @@ describe("主张登记表：判据一（真实仓库今天成立）", () => {
           .matchAll(/INSERT\s+INTO\s+budgets[^;]*?VALUES\s*\((.*?)\)/gs),
       ])
       .filter((m) => m[0].includes("hard_stop"));
-    expect(stmts.length).toBe(2);
+    expect(stmts.length).toBe(4);
     expect(realFiles.src("engine/runtime.ts")).toContain(
       "db.prepare(ENSERT_BUDGET_SQL)",
     );
@@ -217,8 +221,109 @@ describe("主张登记表：判据一（真实仓库今天成立）", () => {
 });
 
 describe("主张登记表：变异判别力（真红，合成输入不碰盘）", () => {
+  /* ── r1 的读侧那一半（2026-11-19）：写得出 0 的那一处【有人在看】────────
+   * ⚠ 下面每一发都必须交出 `serve/charter-pump.ts` 这个键。判据读它是包在 try 里的，
+   * 缺键抛的错误会被那个 catch 收成「那份文件不在了」——于是「读方没了」与
+   * 「夹具少给一个键」在断言上逐字一样（fakeFiles 上面那段注释记过这一族，
+   * 而本轮【真的踩了一次】：读侧那格刚加上去，四发老夹具就红了，红话是「文件不在了」，
+   * 而那四发想测的是写侧名单。口径：合成夹具要交出判据要的【每一个】键，
+   * 少交一个键测的就不是它以为在测的那件事）。
+   */
+  const R1_PUMP = "serve/charter-pump.ts";
+  /** 读侧那两格要的【真字节】，从真仓库取，不在这里抄一份形状（抄的那份会漂）。 */
+  const r1PumpReader = (): string => realFiles.src(R1_PUMP);
+  /** 抹掉读侧那一半（写侧名单照旧）⇒ 判据必须红在读侧。 */
+  const r1PumpNoReader = (): string =>
+    r1PumpReader().replace(
+      "SELECT b.hard_stop FROM budgets b ",
+      "SELECT b.limit_cents FROM budgets b ",
+    );
+
+  const r1Good = (
+    over: Record<string, string> = {},
+  ): Record<string, string> => ({
+    [R1_PUMP]: r1PumpReader(),
+    ...over,
+  });
+
+  it("变异 r1 之七：读侧没了（那一列退回没人读）⇒ 红，且不许红在名单上", () => {
+    const f = fakeFiles(r1Good({ "http/budget.ts": r1GoodBind }));
+    expect(checkOne("r1", f)).toBe(""); // 控制组：同一份夹具一字不改 ⇒ 空
+    const mutated = fakeFiles(
+      r1Good({
+        [R1_PUMP]: r1PumpNoReader(),
+        "http/budget.ts": r1GoodBind,
+      }),
+    );
+    const msg = checkOne("r1", mutated);
+    expect(msg).toContain("hard_stop");
+    expect(msg).toContain("不再读");
+    // 红因串扰排除：这一发测的是【读侧】，不许它其实红在写侧名单那一族。
+    expect(msg).not.toContain("名单");
+  });
+
+  it("⭐ 变异 r1 之八：摘掉最外层括号 ⇒ 红（那层括号是本仓抓过的那族）", () => {
+    // 只摘收尾那半个 `)` —— 判据读的是 `, 1) = 0)` 这六个字节，
+    // 摘掉它同时是「括号没了」与「判据方向翻了」两种改法共同的落点，
+    // 所以这一发证的是【那一格字节有执行者】，而语义那一格由
+    // packages/hub/test/budget/hard-stop-gate.test.ts 的 IN_REVIEW 那一发挡（全仓唯一）。
+    const spec = r1PumpReader().replace("), 1) = 0)", "), 1) = 0");
+    expect(spec).not.toBe(r1PumpReader());
+    const msg = checkOne(
+      "r1",
+      fakeFiles(r1Good({ [R1_PUMP]: spec, "http/budget.ts": r1GoodBind })),
+    );
+    expect(msg).toContain("括号");
+    expect(msg).not.toContain("不再读");
+  });
+
+  it("⭐ 变异 r1 之九：抹掉代码而只留一句「这里以前读它」的注释 ⇒ 仍红（判的是剥注释后的字节）", () => {
+    // 这一发是 r1 读侧那两格【唯一的方向证据】：没有它，「判原文」与「判剥注释后的
+    // 字节」两种写法在真仓库上读起来逐字一样，而 charter-pump.ts 的函数头正躺着
+    // 一整段解释「为什么故意不看它」的历史注释 —— 判原文会被那种诚实的注释喂绿。
+    const base = r1PumpReader();
+    // 前提自证：先确认那串字节【真在代码里】且在函数头【之后】，
+    // 否则这一发的「红」分不出【注释被剥掉了】与【锚点压根没注在这个文件上】。
+    const anchor = base.indexOf("export function underTaskBudgetSql");
+    const at = base.indexOf("SELECT b.hard_stop FROM budgets b");
+    expect(at).toBeGreaterThan(-1);
+    expect(anchor).toBeLessThan(at);
+    const commented = base.replace(
+      "SELECT b.hard_stop FROM budgets b ",
+      "SELECT b.LIMIT_NOT_REAL FROM budgets b ",
+    );
+    // 把抹掉的那句【以注释形态】放回去 ⇒ 仍【该红】：判的是剥掉注释后的字节，
+    // 一句「这里以前读它」的诚实历史注释不许替「今天读了」投票。
+    // 这一发同时是那一格的方向证据 —— 判【原文】的实现在这一发上会【绿】，
+    // 因为那串字节确实在文件里（只是出现在注释里）。两种读法只在这一发上分得出。
+    const withNote =
+      "/* 历史：这里以前读 SELECT b.hard_stop FROM budgets b 那句 */\n" +
+      commented;
+    expect(
+      checkOne(
+        "r1",
+        fakeFiles(
+          r1Good({ [R1_PUMP]: withNote, "http/budget.ts": r1GoodBind }),
+        ),
+      ),
+    ).toContain("不再读");
+    // 而只【加一句注释】、代码一字不动 ⇒ 该绿（判据对无关文案不敏感）。
+    expect(
+      checkOne(
+        "r1",
+        fakeFiles(
+          r1Good({
+            [R1_PUMP]: "/* 这里解释过为什么不看 hard_stop */\n" + base,
+            "http/budget.ts": r1GoodBind,
+          }),
+        ),
+      ),
+    ).toBe("");
+  });
+
   it("变异 r1：budgets 的 hard_stop 写成 0 必须红", () => {
     const f = fakeFiles({
+      [R1_PUMP]: r1PumpReader(),
       "budget/tracker.ts":
         'const s = "INSERT INTO budgets (… hard_stop) VALUES (?, ?, ?, ?, ?, 0, 0)";',
       "charter/budget-sync.ts": "",
@@ -229,12 +334,64 @@ describe("主张登记表：变异判别力（真红，合成输入不碰盘）"
 
   it("变异 r1 反向：写 1 不红", () => {
     const f = fakeFiles({
+      [R1_PUMP]: r1PumpReader(),
       "budget/tracker.ts":
         'const s = "INSERT INTO budgets (… hard_stop) VALUES (?, ?, ?, ?, ?, 0, 1)";',
       "charter/budget-sync.ts": "",
       "engine/runtime.ts": "",
     });
     expect(checkOne("r1", f)).toBe("");
+  });
+
+  // ── round308：主张改成「记账路径写不出 0，写 0 只有登记过的这一处」之后的三条新规则。
+  //    名单内那一处（http/budget.ts）本身不重测——它由真仓库那一发覆盖；
+  //    这里测的是【名单守不守得住】：B 拦名单外的绑参写点、C 拦名单变成假证人、
+  //    D 拦名单外悄悄 upsert 停法。少了 C 的话，删掉那个入口而名单照旧，
+  //    判据继续替一个不存在的功能担保 —— 与本文件 r10/r11/r12 那一族同一件事。
+  const r1GoodBind =
+    'const s = "INSERT INTO budgets (id, hard_stop) VALUES (?, ?, ?, ?, ?, 0, ?) ON CONFLICT(x) DO UPDATE SET limit_cents = excluded.limit_cents, hard_stop = excluded.hard_stop";';
+
+  it("变异 r1 之三：名单外多一处绑参写 hard_stop ⇒ 红并点名那个文件", () => {
+    const f = fakeFiles({
+      [R1_PUMP]: r1PumpReader(),
+      "http/budget.ts": r1GoodBind,
+      "db/新来的.ts":
+        'const s = "INSERT INTO budgets (id, hard_stop) VALUES (?, ?, ?, ?, ?, 0, ?)";',
+    });
+    expect(checkOne("r1", f)).toContain("db/新来的.ts");
+  });
+
+  it("变异 r1 之四：名单内那份形状被改 ⇒ 红在「名单失效」，不放过假证人", () => {
+    const f = fakeFiles({
+      [R1_PUMP]: r1PumpReader(),
+      // 那一处入口改成写死 1（功能收窄是允许的），但【没人来改名单】。
+      "http/budget.ts": r1GoodBind.replace(
+        "?, ?, ?, ?, ?, 0, ?",
+        "?, ?, ?, ?, ?, 0, 1",
+      ),
+    });
+    expect(checkOne("r1", f)).toContain("名单失效");
+  });
+
+  it("变异 r1 之五：名单外一处 upsert 改写 hard_stop ⇒ 红（改已有行比新建更没人看见）", () => {
+    const f = fakeFiles({
+      [R1_PUMP]: r1PumpReader(),
+      "http/budget.ts": r1GoodBind,
+      "budget/别的路.ts":
+        'const s = "INSERT INTO budgets (id, hard_stop) VALUES (?, ?, ?, ?, ?, 0, 1) ON CONFLICT(x) DO UPDATE SET hard_stop = excluded.hard_stop";',
+    });
+    expect(checkOne("r1", f)).toContain("没登记");
+  });
+
+  it("变异 r1 之六：名单内那处把字面量改成 0 ⇒ 仍红（名单只豁免绑参，不豁免 0）", () => {
+    const f = fakeFiles({
+      [R1_PUMP]: r1PumpReader(),
+      "http/budget.ts": r1GoodBind.replace(
+        "VALUES (?, ?, ?, ?, ?, 0, ?)",
+        "VALUES (?, ?, ?, ?, ?, 0, 0)",
+      ),
+    });
+    expect(checkOne("r1", f)).toContain("写成 0");
   });
 
   it("变异 r2：心跳里拔掉 runTimeoutPass 接线必须红", () => {
@@ -796,6 +953,93 @@ describe("主张登记表：变异判别力（真红，合成输入不碰盘）"
     expect(msg).toContain("不可核对");
     expect(msg).not.toContain("app.js");
     expect(msg).not.toContain("不可信");
+  });
+
+  it("⭐⭐ 变异 r15 之七：名单里 add_edge 那一格被放宽成空 ⇒ 红（round308 补的那格）", () => {
+    // 本轮的正题：round295 把主张翻成【正向点名】，可那份名单只活在那发测试的
+    // `expect(emitters).toEqual(…)` 里，判据一格都没核它。round308 界面补上
+    // add_edge / add_node 之后，文案与名单各说各的而判据【全绿】—— 这一发钉的就是那次。
+    // 方向选「放宽成空」：那是最省字、也最容易顺手做的一种改法（把名单改成 [] 就像在放松断言）。
+    const real = realFiles.hubTest(
+      "acceptance/new-role-to-its-own-criteria.test.ts",
+    );
+    const spec = real.replace("add_edge: [consolePath],", "add_edge: [],");
+    expect(spec).not.toBe(real);
+    const msg = checkOne("r15", fakeFiles(r15Good({ [R15_KEY]: spec })));
+    expect(msg).toContain("名单");
+    expect(msg).toContain("add_edge");
+    // 红因不串：不许是①②③④ 那四种红冒充这一格。
+    expect(msg).not.toContain("反空转那一格");
+    expect(msg).not.toContain("不可信");
+    expect(msg).not.toContain("取材面");
+  });
+
+  it("⭐ 变异 r15 之七·乙：把名单写进【切片之外】的注释而清空真名单 ⇒ 仍红（切片边界有牙）", () => {
+    // 之七 只证了「改了会红」。没有这一发，判⑤ 也可能被写成【整份文件搜一下】——
+    // 那种写法在下面这发里会绿：真名单空了，但文件里别处留着同样那几个字节。
+    // r22 为同一件事挨过一次变异（M8：调用字节留着而分派短路），这里复用的是同一条纪律。
+    // ⚠ 诱饵必须放在【切片之外】：sliceFrom 取的是起锚到止锚之间，而
+    // 「// ② 前提自证」就是止锚 —— 把诱饵插在那行【之前】等于插进名单里，
+    // 那一格会因此变绿，而变绿的原因是变异打错了位置、不是判据有牙。第一版就写错过这一处。
+    const real = realFiles.hubTest(
+      "acceptance/new-role-to-its-own-criteria.test.ts",
+    );
+    const spec = real
+      .replace("add_edge: [consolePath],", "add_edge: [],")
+      .replace(
+        "    expect(emitters).toEqual({",
+        "    /* 切片之外的诱饵字节：add_edge: [consolePath], */\n    expect(emitters).toEqual({",
+      );
+    expect(spec).not.toBe(real);
+    expect(spec).toContain("add_edge: [consolePath],"); // 字节在场，只是不在名单里
+    const msg = checkOne("r15", fakeFiles(r15Good({ [R15_KEY]: spec })));
+    expect(msg).toContain("名单");
+    expect(msg).toContain("add_edge");
+  });
+
+  it("⭐ 变异 r15 之八：名单的止锚改名 ⇒ 红在「名单边界读不到」，不退回全文搜", () => {
+    // 与之六（起锚 FRONTEND_CORPUS 改名）成对：那发管取材表的边界，这发管名单的边界。
+    // sliceFrom 缺任一标记返回 null，而不是【读到文件尾】—— 后者恰好也能让⑤ 绿，
+    // 等哪天名单下面出现一段带同样字节的注释，那一格就悄悄恒绿了（与之五·丙同一族）。
+    const real = realFiles.hubTest(
+      "acceptance/new-role-to-its-own-criteria.test.ts",
+    );
+    // ⚠ 「改名」必须真的把那串字节抹掉：第一版写成 `… 前提自证 RENAMED`，
+    // 而 indexOf 找的是【子串】—— 那行仍以锚点开头 ⇒ 切片一字未变 ⇒ 这发是空变异
+    // （跑出「绿」而原因在变异打不着，与上一发的诱饵放错位置同一种错）。
+    const spec = real.replaceAll("// ② 前提自证", "// ② PREMISE SELF-CHECK");
+    expect(spec).not.toContain("// ② 前提自证"); // 锚点真的不在了，否则这发什么都没说
+    expect(spec).toContain("expect(emitters).toEqual({"); // 红只能红在锚上
+    const msg = checkOne("r15", fakeFiles(r15Good({ [R15_KEY]: spec })));
+    expect(msg).toContain("名单");
+    expect(msg).not.toContain("取材面"); // 不是 cell ④ 那张表的红
+    expect(msg).not.toContain("不可信");
+  });
+
+  it("⭐⭐ 变异 r15 之九：名单坏了【同时】取材也空了 ⇒ 红因必须是「不可信」而不是「名单」", () => {
+    // 这一发钉的是【顺序】，不是任何单格。round308 那台矩阵的第一版把它量了出来：
+    // 第五格最初写在「三个根非空」那道兜底【之前】，于是「三根全 0」那发红在
+    // 名单不匹配上。取材都没了却先报名单 = 把【读不到】当成【读到了不匹配】，
+    // 而两者的修法相反（一个去修取材根目录，一个去改主张文案）。
+    // 单看每一格都对，串起来的顺序才是主张的一部分 —— 这种缺陷只有跑出来才看得见。
+    const real = realFiles.hubTest(
+      "acceptance/new-role-to-its-own-criteria.test.ts",
+    );
+    const spec = real.replace("add_edge: [consolePath],", "add_edge: [],");
+    expect(spec).not.toBe(real);
+    const msg = checkOne(
+      "r15",
+      fakeFiles(
+        r15Good({
+          [R15_KEY]: spec,
+          "count:packages/web/src|.ts": "0",
+          "count:packages/web/public|.js": "0",
+          "count:packages/desktop/src|.ts": "0",
+        }),
+      ),
+    );
+    expect(msg).toContain("不可信");
+    expect(msg).not.toContain("名单里 add_edge"); // 不许抢在兜底前面报这一格
   });
 
   // ── r17：发卡那一趟接上了生产入口。七发各打「证据还在但已不判那件事」的一种 ──
@@ -1360,30 +1604,57 @@ describe("主张登记表：变异判别力（真红，合成输入不碰盘）"
     expect(checkOne("r21", fakeFiles(without))).toContain("不在了");
   });
 
-  it("⭐ 变异 r21 之四：把【恰好 1】换回上下界 ⇒ 红（单向的界挡不住静默摘光）", () => {
+  it("⭐ 变异 r21 之四：把真仓库那个【精确条数】换成上界 ⇒ 红（单向的界挡不住改数量）", () => {
     const spec = realFiles
       .arch("plan-gate-paths.test.ts")
       .replace(
-        "expect(ex.length).toBe(1)",
-        "expect(ex.length).toBeGreaterThan(0)",
+        "expect(exemptedBlocks(blocks)).toEqual([])",
+        "expect(exemptedBlocks(blocks).length).toBeLessThanOrEqual(1)",
       );
     expect(spec).not.toBe(realFiles.arch("plan-gate-paths.test.ts"));
     const msg = checkOne("r21", fakeFiles(r21Good({ [R21_SPEC]: spec })));
-    expect(msg).toContain("恰好 1");
-    expect(msg).not.toContain("身份钉");
+    expect(msg).toContain("条数钉");
+    expect(msg).not.toContain("deadExemptions");
   });
 
-  it("变异 r21 之五：摘掉身份钉 ⇒ 红（只剩条数时，挪个位置照样绿）", () => {
+  it("变异 r21 之五：deadExemptions 不再是导出的判据 ⇒ 红（判据退回永不执行的循环）", () => {
+    // 2026-11-19 那一格的全部理由：豁免账清零后，真仓库那一发遍历的是空名单，
+    // 写在测试里的循环体【永不执行】。搬进守卫才有非空语料可喂。
+    // 这一发证的是【本判据盯得住这次搬家】：把它搬回测试里，登记表要说出来。
+    const guard = realFiles
+      .arch("plan-gate-paths.ts")
+      .replace("export function deadExemptions(", "function deadExemptions(");
+    expect(guard).not.toBe(realFiles.arch("plan-gate-paths.ts"));
+    const msg = checkOne("r21", fakeFiles(r21Good({ [R21_GUARD]: guard })));
+    expect(msg).toContain("deadExemptions");
+    expect(msg).not.toContain("条数钉");
+  });
+
+  it("⭐ 变异 r21 之六：函数在场而筛法被换成恒假 ⇒ 红（名字不等于判据）", () => {
+    // round298 记过这一族：判据读【函数名】而不是读那条表达式，
+    // 把函数体换成 `return []` 它照样绿。所以这里抹的是那条筛法本身。
+    const guard = cut(
+      realFiles.arch("plan-gate-paths.ts"),
+      "(e) => e.paths.filter((p) => !exists(p)).length === 0",
+    );
+    const msg = checkOne("r21", fakeFiles(r21Good({ [R21_GUARD]: guard })));
+    expect(msg).toContain("筛法");
+    expect(msg).not.toContain("导出");
+  });
+
+  it("变异 r21 之七：摘掉「死豁免该数出来」那一发 ⇒ 红（非空名单从没被跑过）", () => {
+    // 真仓库的名单是空的 ⇒ 判据在真仓库上【一次也没有为非空名单跑过】。
+    // 那一发合成语料是它唯一的方向证据；摘掉它，恒返回空的实现与真判据读起来一样。
     const spec = cut(
       realFiles.arch("plan-gate-paths.test.ts"),
-      'expect(ex[0]?.paths).toContain("test/e2e/mobile-approval.spec.ts")',
+      'deadExemptions(acceptanceBlocks(md("test/e2e/dead.spec.ts"))',
     );
     const msg = checkOne("r21", fakeFiles(r21Good({ [R21_SPEC]: spec })));
-    expect(msg).toContain("身份钉");
-    expect(msg).not.toContain("反向");
+    expect(msg).toContain("非空名单");
+    expect(msg).not.toContain("条数钉");
   });
 
-  it("⭐ 变异 r21 之六：摘掉那发数得出 2 的反向 canary ⇒ 红（那个 1 分不出真假）", () => {
+  it("⭐ 变异 r21 之八：摘掉那发数得出 2 的反向 canary ⇒ 红（那个读数分不出真假）", () => {
     // 没有它，一个恒返回「一条」的坏计数器（filter 写成 find / map 前多一个 slice(0,1)）
     // 在 `toBe(1)` 那一发上照样绿。这一发是本判据里唯一防住这一族的。
     const spec = cut(

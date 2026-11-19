@@ -62,6 +62,10 @@ CEO 收件箱会变吵：凡是标准写成自然语言的岗位书，每一闸�
 ## 3. §8.1 那张表接进门控；以及未知方向为什么不抛错
 
 `HANDOFF_BUNDLE_TYPES` 在 contracts 里躺到本轮为止，**没有任何生产调用方**（实测：只有它自己的单测在调）。
+【round322 复核：本句「没有任何生产调用方」已过期。门控现在读它：
+`graph/gates/evaluate.ts:22` import、`:219` `evaluateGate` 里
+`Object.hasOwn(HANDOFF_BUNDLE_TYPES, input.gate)`，而 `evaluateGate` 由
+`harness/verifier.ts:640` 生产调用（0023 §6 认定的那一环已上移）。原句保留。】
 表在、函数在、校验在，接线缺失 —— 于是 §8.1 只是【文档上存在】：`dev_to_test` 收任何 `bundle_type` 都照收。
 
 反向绕过也很便宜：交一个 `bundle_type` 写成 `test_report`、内容只有两句话的包，类型这一维就过了。
@@ -177,8 +181,10 @@ import type { RunnableConfig } from "@langchain/core/runnables";
 ⚠ **先说归因，因为它比这一格内容更要紧：这件事不是我发现的。**
 `docs/INDEX.md` 的「等待 CEO 决策」（0008 §7 那条，第 269-275 行）、`0006 §7` 补维那一段
 （第 1651-1655 行，含两次变异：方向反转报 `expected true to be false`、只换占位串报
-`expected false to be true`）、`0006 §11` 第 3122 行、`0020` 第 48 行、
-以及 `guides/how-to-write-a-charter.md` §3 反例 ④（第 278-282 行）——
+`expected false to be true`）、`0006 §11` 第 3135 行（原写 3122，round333 因该篇 §10.2
+补了「文件数阈值那一格坐标复算」一段而整体下移 +13）、`0020` 第 48 行、
+以及 `guides/how-to-write-a-charter.md` §3 反例 ④（第 288-292 行；原写 278-282，
+round331 因该篇 §5 加了 harness_defaults 那一格而整体下移）——
 **四处早就各自撤回过了**，其中三处原话就写着「这条灯从来不亮，签字了才亮」，
 `guides` 那一处还明写着「含七份模板自己的注释」。
 ⇒ 本轮真正做的只有两件窄事：① 把【还站着一句假机制】的这处 §7.1 改口
@@ -191,8 +197,9 @@ import type { RunnableConfig } from "@langchain/core/runnables";
 ⚠ 顺带一条方法：**改口之前先 grep 那句原话**（`grep -rl "不需要人工催办" docs`）。
 我这次是改完才 grep，于是要回来补这一段 —— 顺序对了，这一段就不用写。
 
-`roles/charter.test.ts:411`（带目录是因为仓库里有
-【两个】 `charter.test.ts`，另一个在 `engine/` 下）那一发断言的是
+`roles/charter.test.ts:560`（带目录是因为仓库里有
+【两个】 `charter.test.ts`，另一个在 `engine/` 下；原写 411，round331 顶漂 +149 ——
+加的是它上面的 harness_defaults 那组用例，判据本体没动）那一发断言的是
 「模板的 acceptance_criteria **仍是**固定占位串」—— 断言的是**占位串还在**，
 git 追溯到建文件那一发（`026afdd`）就是这一侧，从来没翻过。⇒ 真实形状是：
 

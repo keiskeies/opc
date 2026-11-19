@@ -12,9 +12,12 @@
  *    对【生产】成立。dev 的库是一次性演示数据，写在项目自己的 `.opc-os/` 下，
  *    而那一格【已经】被 .gitignore 挡着（「运行时产物与凭据」那一条）——
  *    默认值不是隐式路径，是仓库自己声明过的运行时目录。
- * ② 不做自动备份（noBackup）。
+ * ② 不做【心跳每日】备份（noBackup）。
  *    库是可扔的演示数据；`--no-backup` 在 hub:serve 里是「显式决定」，
  *    在这里是【这条命令的定义】：dev 库进备份目录只会污染真备份的读数。
+ *    ⚠ 这一条不覆盖【组织提交前】那一发快照（BootOverrides.orgBackupDir）——
+ *    那是 §6.5 对「改组织」单独要求的一份回退点，与每日轮转是两件事；
+ *    缺了它拖拽改汇报关系只能拿 501。
  * ③ token 从 `OPC_DEV_TOKEN` 取，缺省当场生成一个。
  *    hub:serve 打印 token 让人复制给 dev-server（ORG_TOKEN）。那条人肉搬运
  *    在一条命令里不该保留：两侧从【同一个来源】拿，复制这一步整个消失。
@@ -26,20 +29,20 @@
  * 结构照 hub-serve.ts 的口径：可判定的一切抽成纯函数（devPaths / webSpawnArgs /
  * runDev），入口块只回答「这次是被直接执行吗」；被 import 时零副作用。
  */
-import { spawn, type ChildProcess } from "node:child_process";
-import { existsSync } from "node:fs";
+import { type ChildProcess, spawn } from "node:child_process";
+import { existsSync, mkdirSync } from "node:fs";
 import { isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { isDirectRun } from "../internal/direct-run.js";
-import { newLocalToken } from "../http/auth.js";
-import { runCli, type CliIo } from "../db/migrate-cli.js";
+import { type CliIo, runCli } from "../db/migrate-cli.js";
 import { EXIT_PROBLEM, EXIT_USAGE } from "../heartbeat/maintenance.js";
+import { newLocalToken } from "../http/auth.js";
+import { isDirectRun } from "../internal/direct-run.js";
 import {
-  boot,
-  waitForShutdown,
   type BootOverrides,
   type BootResult,
+  boot,
   type ServeIo,
+  waitForShutdown,
 } from "./assemble.js";
 import type { ServeArgs } from "./config.js";
 
@@ -70,6 +73,17 @@ export interface ResolvedDevPaths {
   readonly token: string;
   /** token 是这次【生成】的还是 env 给的。横幅要说清，见 runDev。 */
   readonly tokenGenerated: boolean;
+  /**
+   * 组织提交（拖拽改汇报关系）之前的快照目录。
+   *
+   * 为什么 dev 也要有一份：没有它 ⇒ `HubDeps.commitOrgChange` 不装配 ⇒
+   * POST /org 回 501「本装配未接组织提交」。那条 501 在生产的说法是对的
+   * （没配备份目录就不给改组织），但把它留在演示环境里的效果是「拖拽这个功能
+   * 看着在、点提交就死」，而这正是 O13 要避免的「看起来能跑」。
+   * 目录落在 `.opc-os/` 下 —— 与 dev.db 同一条纪律：仓库自己声明过的运行时目录，
+   * 已被 .gitignore 挡着，扔得掉。
+   */
+  readonly orgBackupDir: string;
 }
 
 /**
@@ -94,12 +108,19 @@ export function devPaths(
         ? dbEnv
         : resolve(rootDir, dbEnv);
   const tokenEnv = env["OPC_DEV_TOKEN"] ?? "";
+  const backupEnv = env["OPC_DEV_BACKUP_DIR"]?.trim();
   return {
     dbPath,
     hubPort: Number.isNaN(hub.port) ? DEV_HUB_PORT : hub.port,
     webPort: Number.isNaN(web.port) ? DEV_WEB_PORT : web.port,
     token: tokenEnv === "" ? newLocalToken() : tokenEnv,
     tokenGenerated: tokenEnv === "",
+    orgBackupDir:
+      backupEnv === undefined || backupEnv === ""
+        ? join(rootDir, ".opc-os", "backups")
+        : isAbsolute(backupEnv)
+          ? backupEnv
+          : resolve(rootDir, backupEnv),
   };
 }
 
@@ -150,12 +171,20 @@ export interface DevDeps {
   /** 迁移走 migrate-cli 的 runCli（复用它的输出与退出码，不抄第二份逻辑）。 */
   runMigrate: (argv: readonly string[], io: CliIo) => { code: number };
   /**
+   * 备份目录的创建口。默认 mkdirSync(recursive)。
+   * 注入它是因为 runDev 在测试里不落盘（同一发 mkdir 在 CI 上会往仓库里写目录）。
+   */
+  ensureDir?: (dir: string) => void;
+  /**
    * 「等到该停了」那一发。默认 waitForShutdown（真信号）。
    * 注入它而不是在测试里给自己发 SIGINT：那发信号会被同进程里其他用例留下的
    * 监听收到（waitForShutdown 注册不注销），与 assemble.ts 抽 serveBannerOf 时
    * 记过的是同一个理由。
    */
-  waitStop?: (r: Extract<BootResult, { ok: true }>, io: ServeIo) => Promise<number>;
+  waitStop?: (
+    r: Extract<BootResult, { ok: true }>,
+    io: ServeIo,
+  ) => Promise<number>;
   /**
    * 停止信号的注册口（默认 process.on/removeListener 那一对照）。
    *
@@ -203,10 +232,16 @@ export async function runDev(
     return { code: mig.code };
   }
 
+  // 目录不存在 ⇒ 组织提交那份快照写不出来。mkdir 幂等，且必须【在 boot 之前】：
+  // 备份目录是在装配期读一次的（assemble.ts 里 orgBackupDir 那一格），启动后再补
+  // 就等于装配时判定「没备份」，501 照旧。
+  deps.ensureDir ??
+    ((dir) => mkdirSync(dir, { recursive: true }))(p.orgBackupDir);
+
   const r = await deps.bootHub(
     { dbPath: p.dbPath, port: p.hubPort, noBackup: true },
     io,
-    { token: p.token },
+    { token: p.token, orgBackupDir: p.orgBackupDir },
   );
   if (!r.ok) {
     io.warn("Hub 启动失败：" + r.message);
@@ -230,7 +265,9 @@ export async function runDev(
   const markStopping = (): void => {
     stoppingEarly = true;
   };
-  const stopListening = (deps.onStopSignals ?? defaultStopSignals)(markStopping);
+  const stopListening = (deps.onStopSignals ?? defaultStopSignals)(
+    markStopping,
+  );
   let webGoneResolve: (code: number) => void = () => {};
   const webGone = new Promise<number>((res) => {
     webGoneResolve = res;
@@ -238,7 +275,9 @@ export async function runDev(
   web.once("exit", (code: number | null) => {
     if (!stoppingEarly) {
       io.warn(
-        "web 子进程先退出了（退出码 " + (code ?? "?") + "）⇒ dev 一并停止。\n" +
+        "web 子进程先退出了（退出码 " +
+          (code ?? "?") +
+          "）⇒ dev 一并停止。\n" +
           "  常见原因是端口被占：" +
           p.webPort +
           " 上已有另一个 dev-server（OPC_DEV_WEB_PORT 可换）。",
@@ -288,7 +327,14 @@ export async function runDev(
  * 这一格由用例钉着（写错不会崩，只会让 dev 在 packages/ 下建 .opc-os/）。
  */
 export function repoRootOf(moduleUrl: string): string {
-  return resolve(fileURLToPath(new URL(moduleUrl)), "..", "..", "..", "..", "..");
+  return resolve(
+    fileURLToPath(new URL(moduleUrl)),
+    "..",
+    "..",
+    "..",
+    "..",
+    "..",
+  );
 }
 
 /** tsx/dist/cli.mjs 在不在。缺它 ⇒ 没 pnpm i，给一句人话而不是 spawn ENOENT。 */

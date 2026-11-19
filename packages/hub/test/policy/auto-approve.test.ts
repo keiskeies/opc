@@ -752,7 +752,7 @@ describe("⑦ countSimilarApprovals：R2 的唯一可计算来源", () => {
 });
 
 describe("⑧ 接线状态（接线那天这条会红，逼着同时更新 0014）", () => {
-  it("⭐ 创建路径【已经有了】而【零生产者】⇒ 认领那一路在真库里仍然走不到", () => {
+  it("⭐ 创建路径的唯一调用方是 dev:seed 演示种子 ⇒ 生产意义上的建卡者仍为零，认领那一路在真库里仍然走不到", () => {
     /*
      * 0013 §10.1 的原始实测是「src 里【零】INSERT INTO approvals」，当时钉成断言。
      * 本轮（0026）补上了 src/approvals/cards.ts，那一格【过了】。
@@ -772,13 +772,20 @@ describe("⑧ 接线状态（接线那天这条会红，逼着同时更新 0014�
     expect(writers.map((f) => relPosix(f, SRC))).toEqual([
       "approvals/cards.ts",
     ]);
-    // 而它【没有调用方】：createCard 在 src 里零命中（cards.ts 自己不算）。
+    // 而它【曾经零调用方】——今天名单里多了一个名字，红的就是这一发设计要做的事：
+    // `pnpm dev:seed`（serve/dev-seed.ts，演示种子）成了 createCard 包装的第一个调用方，
+    // 走的正是【正当写入口】而不是旁路。处理照 round269 对「接线日已过」那一发的先例：
+    // 不删、不设豁免，名单翻成今天的真值并钉死【只有这一个名字】——
+    // 生产路径（HTTP/巡检/CLI）哪天也接上，这一发红，逼接的人回来重写这半格。
+    // ⚠ 这一翻【不改标题说的「认领走不到」】：认领 = 下一发的 recordAutoApproval，
+    // 它的名单仍是 []，一个字没动（O9 验收第 1 条的红仍然由那一发守着）。
+    // 同口径在 phase3.test.ts 的 blocker 6 一起翻（两处口径必须一起改）。
     const callers = files.filter(
       (f) =>
         !f.endsWith("approvals/cards.ts") &&
         readFileSync(f, "utf8").includes("createCard("),
     );
-    expect(callers.map((f) => relPosix(f, SRC))).toEqual([]);
+    expect(callers.map((f) => relPosix(f, SRC))).toEqual(["serve/dev-seed.ts"]);
   });
 
   it("⭐ 接线日已过（round269）：读路径有读者，写路径 recordAutoApproval 仍零调用方", async () => {
@@ -847,7 +854,7 @@ describe("⑨ §22.3 第二条的回放标注（消费侧）", () => {
         "VALUES ('task-1','human','ceo','approval','ann-2','{\"resume\":\"approve\"}',?)",
     ).run(NOW + 1);
 
-    const view = buildReplayView(db as never, { taskId: "task-1" });
+    const view = await buildReplayView(db as never, { taskId: "task-1" });
     if (view === null) throw new Error("任务应当存在");
     const auto = view.entries.find((e) => e.target === "ann-1");
     const human = view.entries.find((e) => e.target === "ann-2");
@@ -870,7 +877,7 @@ describe("⑨ §22.3 第二条的回放标注（消费侧）", () => {
       "INSERT INTO events (task_id, actor_type, actor_id, action, target, payload, created_at) " +
         "VALUES ('task-1','system','policy-engine','approval','bad-1','{not json',?)",
     ).run(NOW);
-    const view = buildReplayView(db as never, { taskId: "task-1" });
+    const view = await buildReplayView(db as never, { taskId: "task-1" });
     const e = view?.entries.find((x) => x.target === "bad-1");
     expect(e?.degraded).toBe(true);
     expect(Object.hasOwn(e as object, "auto_approved")).toBe(false);

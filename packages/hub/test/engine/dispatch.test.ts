@@ -26,6 +26,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import type { OrgGraph } from "@opc/contracts";
 import { fixtureTmp } from "../fixtures/fixture-dir.js";
+import { SAME_FAMILY_REVIEW_KEY_PREFIX } from "../../src/approvals/cards.js";
 import { migrate } from "../../src/db/migrate.js";
 import { INSERT_DELEGATION_GRAPH_SQL } from "../../src/org/commit.js";
 import { REJECTION_COUNT_SQL } from "../../src/engine/runtime.js";
@@ -46,6 +47,7 @@ import {
   usdToCents,
   type DispatchDeps,
   type DispatchResult,
+  type ReviewGate,
   type TurnOutcome,
 } from "../../src/engine/dispatch.js";
 
@@ -372,6 +374,52 @@ describe("planEdge —— 一句话能不能变成一条状态边", () => {
     });
     expect(p.move).toBe(false);
     expect(p.note).toContain("模型家族");
+  });
+  it("「已建卡」三个字【只】出现在有卡可建的那两种判定上（0061 §8.3 note 侧守卫）", () => {
+    /**
+     * 声明式映射表：note 声称「已建卡」⟺ 该输入签名在表内。表与 planEdge 的分支、
+     * dispatch 的建卡推送是【各自写的】（本文件 LEGAL 表同一先例：手抄的价值恰恰在于
+     * 它是另一处写的），于是三个方向各自会红：
+     *  · 有人把两处 stay 里的「已建卡」抹掉/改词（真实现消失）⇒ 该声称的格子不再声称 ⇒ 红；
+     *  · 有人给 planEdge 加第三种会写「已建卡」的分支而建卡侧没对应 ⇒ 表外格子声称了 ⇒ 红；
+     *  · 有人把 claim 判据表改宽 ⇒ 表内而 note 没那句话的格子 ⇒ 红。
+     * 表里编码的正是 dispatch 推 pending 的那两个签名（越权交接拦门 / 同源审阅拦门）——
+     * sameFamilyKey 与 review 在 dispatch 里同分支成对赋值，review!==null 即同键必在。
+     */
+    const shouldClaimCard = (sig: {
+      action: string;
+      blockedHandoff: string | null;
+      review: ReviewGate | null;
+    }): boolean =>
+      (sig.action === "handoff" && sig.blockedHandoff !== null) ||
+      (sig.action === "pass" && sig.review !== null && !sig.review.ok);
+    const reviews: (ReviewGate | null)[] = [null, { ok: true }, { ok: false, reason: "同属模型家族 [claude]" }];
+    let cells = 0;
+    for (const status of ["IN_PROGRESS", "IN_REVIEW"] as const) {
+      for (const action of ["pass", "handoff", "wait", "blocked"] as const) {
+        for (const blockedHandoff of [null, "[qa] 不在 [dev] 的汇报子树里。"]) {
+          for (const review of reviews) {
+            const p = planEdge({
+              ...base,
+              status,
+              role: "dev",
+              decision: d(action, action === "handoff" ? { to_role: "qa" } : {}),
+              handoffTo: "qa",
+              blockedHandoff,
+              review,
+            });
+            cells += 1;
+            const sig = action + "/拦门=" + String(blockedHandoff !== null) + "/审阅=" +
+              (review === null ? "null" : review.ok ? "放行" : "拦") + "@" + status;
+            expect(p.note.includes("已建卡"), "签名 " + sig + " 上 note 的声称与建卡表不一致").toBe(
+              shouldClaimCard({ action, blockedHandoff, review }),
+            );
+          }
+        }
+      }
+    }
+    // 规模自检：矩阵若静默退化成「扫了 0 格」，上面的 ⇔ 恒真（0061 §7 第三层同一口径）。
+    expect(cells).toBe(2 * 4 * 2 * 3);
   });
 });
 

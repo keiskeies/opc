@@ -1,0 +1,28 @@
+### #/today
+需要你决策 ⏎  ⏎ 没有等你决定的事。 ⏎ 自动决策摘要 · 过去 1 天 ⏎ 活动流（投影自身的轨迹） ⏎  ⏎ 组织状态 ⏎  ⏎ 3 ⏎ 活跃任务 ⏎ 0 ⏎ 1 天 完成 ⏎ 1 ⏎ 被阻塞 ⏎ 0 ⏎ 待你决策 ⏎ 预算 ⏎ 1 天内 $0.00 ⏎ 累计 $0.00 · 已声明上限合计 $0.00 (一行都没设过) ⏎ 口径说明 · 3 条 ⏎  ⏎ 扔个想法 ⏎  ⏎ 提交
+console errors: 0
+
+### #/board
+全部 ⏎ 需要我注意 ⏎ 3 / 3 条 · 游标 #0 · 实时 ⏎ 这台 Hub 没开驱动器：想法停在 agent 那一格之后，不会有任何东西去推它。要自动推进请带 --driver-pump 起 Hub，或手工 hub work。 ⏎ 深度 0 · ceo ⏎ 1 ⏎ 上线订阅计费功能 ⏎ ESCALATED_TO_CEO ⏎ ceo · 48 秒前 ⏎ seed-tas · $86.00 / $200.00 ⏎ 深度 1 · tech_director / product_lead / operations ⏎ 0 ⏎ — ⏎ 深度 2 · architect ⏎ 0 ⏎ — ⏎ 深度 3 · dev_engineer / qa_engineer ⏎ 
+console errors: 0
+
+### #/inbox
+过去 1 天，策略引擎自动通过 0 项可逆决策，拦截 0 项进入人工审批。当前待处理 0 项。 ⏎ 待批 0 · 读数于 2026/11/18 18:45:09 ⏎ ↻ 重读 ⏎ 收件箱为空。 ⏎ 口径说明 · 3 条
+console errors: 0
+
+### #/org
+graph_version 7 · dev 种子：加入角色 qa_engineer · 生效 2026/11/18 18:44:19 ⏎ ↻ 刷新 ⏎ 拖一张卡到另一张卡上 = 改它的汇报关系。松手不会直接改图：合法性（成环 / 深度）由服务端判，拒了就回弹并说明原因。键盘替代：下方表单。 ⏎  ⏎ 深度 0 · CEO ⏎  ⏎ ceo ⏎ opus ⏎ CEO（顶层） ⏎ 可管理 ⏎  ⏎ 深度 1 · TECH_DIRECTOR / PRODUCT_LEAD / OPERATIONS ⏎  ⏎ tech_director ⏎ opus ⏎ ↗ ceo ⏎ 可管理 ⏎ product_lead ⏎ sonnet ⏎ ↗ ceo ⏎ 可管理 ⏎ operations ⏎ cla
+console errors: 0
+
+### #/charter
+角色 · 7 ⏎  ⏎ ceo ⏎ tech_director ⏎ product_lead ⏎ operations ⏎ architect ⏎ dev_engineer ⏎ qa_engineer ⏎ 岗位书 · ceo ⏎ 这个角色还没有岗位书（charter 为 null）。必填项都在下面，但【验收标准必须由你本人写】—— 项目规矩（0008 §7）不允许任何人代写 acceptance_criteria，界面预填一条都是违规。其余栏也建议逐条过目再提交。 ⏎ role_id ⏎ display_name（显示名） ⏎ version（正整数） ⏎ reports_to（上级）  ⏎ （无 · 顶层） ⏎ tech_director ⏎ product
+console errors: 0
+
+### #/budget
+合计：已用 $206.80 / 上限 $535.00 · 未设限额的角色 5 —— 这是「没设」，不是「是 0」：那些角色此刻花钱没有任何上限拦着 ⏎ ↻ 刷新 ⏎ 作用域	周期	上限	已用	进度	停法 ⏎ company/company	monthly	$500.00	$184.00	 ⏎ 	硬停 ⏎ role/dev_engineer	daily	$20.00	$7.80	 ⏎ 	硬停 ⏎ role/qa_engineer	daily	$15.00	$15.00	 ⏎ 	硬停 ⏎  ⏎ 新增 / 改限额（POST /BUDGET，同键覆盖） ⏎  ⏎  硬停 ⏎ 提交
+console errors: 0
+
+### #/replay
+上线订阅计费功能 · ESCALATED_TO_CEO ⏎ 支付回调重构 · IN_PROGRESS ⏎ 支付链路回归测试 · BUDGET_PAUSED ⏎ 查时间线 ⏎ 上线订阅计费功能 ⏎ ESCALATED_TO_CEO ⏎ seed-task-1 · 角色 ceo · 图版本 7 ⏎ 事件 0 条（服务端 limit 200） · 断点 0 个 ⏎ 这个任务还没有事件。
+console errors: 0
+

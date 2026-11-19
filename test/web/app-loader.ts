@@ -40,11 +40,14 @@ const EXPORTS = [
   "budgetHtml",
   "stat",
   "eventRow",
+  "filterReplayEntries",
+  "checkpointBlock",
   "hierarchyColumns",
   "groupByDepth",
   "statusClass",
   "driverNotice",
   "driverLine",
+  "batchRequestBody",
 ] as const;
 
 export type AppExports = Record<(typeof EXPORTS)[number], (...a: never[]) => unknown>;

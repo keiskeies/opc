@@ -1,0 +1,15 @@
+
+[1m[30m[46m RUN [49m[39m[22m [36mv4.1.12 [39m[90mD:/item/opc[39m
+
+(node:38888) [DEP0190] DeprecationWarning: Passing args to a child process with shell option true can lead to security vulnerabilities, as the arguments are not escaped, only concatenated.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+(node:63712) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ [32m✓[39m packages/hub/test/acceptance/new-role-to-its-own-criteria.test.ts [2m([22m[2m11 tests[22m[2m)[22m[33m 1547[2mms[22m[39m
+     [33m[2m✓[22m[39m ⭐ 证据④的六条拒绝：每种坏形状 422 + 对的 code + 库里零残留（零新版本、零审计） [33m 858[2mms[22m[39m
+
+[2m Test Files [22m [1m[32m1 passed[39m[22m[90m (1)[39m
+[2m      Tests [22m [1m[32m11 passed[39m[22m[90m (11)[39m
+[2m   Start at [22m 00:27:14
+[2m   Duration [22m 2.48s[2m (transform 286ms, setup 0ms, import 415ms, tests 1.55s, environment 0ms)[22m
+

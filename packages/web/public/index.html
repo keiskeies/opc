@@ -145,6 +145,39 @@
    * 不是颜色授权，所以这里用色必须落回那张色表的语义：
    * 绿 = 已定（这条决定已经做了），蓝 = 机器自动（信息性），灰 = 其余。 */
   .ev.decide::before { background:var(--green); }
+
+  /* ── 组织页拖拽（reparent）──────────────────────────────────────
+   * 拖影 = 原卡的缩小复制（position:fixed + transform 跟手）。
+   * 目标高亮用蓝（信息/可选目标），不可投用 err 边框：都不碰琥珀 ——
+   * 拖拽本身不是「等 CEO 决策」。 */
+  .node[draggable], .orgdrag .node { cursor:grab; }
+  .orgdrag .node.dragging { opacity:.45; }
+  .orgdrag .node.dropok { border-color:var(--blue); box-shadow:0 0 0 2px #4a7ba655; }
+  /* 不可投用灰 + 文字说明，【不用红】：红色的落点被 test/web/renderer-criteria.test.ts
+   * 逐处钉死（硬失败 + §7.4 预算条两类），「这一下拖不对」不在名单里，也不该挤进去。 */
+  .orgdrag .node.dropbad { border-color:var(--gray); opacity:.6; }
+  .orgdrag .node.pick { border-color:var(--blue); outline:1px dashed var(--blue); }
+  .org-ghost { position:fixed; z-index:60; pointer-events:none; background:var(--card);
+               border:1px solid var(--blue); border-radius:8px; padding:8px 10px; font-size:13px; opacity:.9; }
+  .dragrow { border-left:3px solid var(--blue); }
+
+  /* ── 岗位书页：左角色清单 + 右表单 ──────────────────────────────── */
+  .charter-cols { display:grid; grid-template-columns:180px 1fr; gap:18px; align-items:start; }
+  @media (max-width:900px) { .charter-cols { grid-template-columns:1fr; } }
+  .rolelist { display:flex; flex-direction:column; gap:6px; position:sticky; top:66px; }
+  .rolebtn { text-align:left; }
+  .rolebtn.act { border-color:var(--blue); background:#1d2634; }
+  label { font-size:12px; color:var(--muted); display:block; }
+  label input, label select { margin-top:3px; }
+  [data-err] { margin-top:4px; }
+
+  /* ── 预算页表格 ──────────────────────────────────────────────────
+   * 超限行的进度条用 --err（§7.4 唯一明写的红就在消耗条上）；
+   * 整表与表单不出现琥珀 —— 预算超限是运营事件，不是战略决策。 */
+  .btable { width:100%; border-collapse:collapse; font-size:13px; }
+  .btable th { text-align:left; color:var(--muted); font-size:11px; font-weight:600; padding:4px 8px; border-bottom:1px solid var(--line); }
+  .btable td { padding:6px 8px; border-bottom:1px solid var(--line); vertical-align:middle; }
+  .btable .meter { margin-top:0; }
 </style>
 </head>
 <body>

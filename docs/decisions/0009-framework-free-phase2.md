@@ -26,6 +26,17 @@ E2E）**我没有替代方案，也确实没写**。
 | 本地 store | `pnpm store path` 下 `find -iname` | hono / electron / react / ag-ui **四个都零命中** |
 | 锁文件 | `grep -c` on `pnpm-lock.yaml` | hono **0**、electron **0**、ag-ui **0**、testing-library **0** |
 
+> **【round319 复核】（2026-11-19）** 上表四条**本身仍成立**：hono / electron / react /
+> ag-ui / testing-library / playwright 六个计划 pin 至今在 lockfile 与实际安装里零命中
+> （react / playwright 仍只有可选 peer 声明，同下文分析）。**过期的是本篇被引用为
+> 「@langchain 装不上」的依据**：`@langchain/core@1.3.5`、`@langchain/langgraph@1.7.1`、
+> `@langchain/langgraph-checkpoint@1.2.2`、`@langchain/langgraph-sdk@1.14.0`、
+> `yaml@2.8.0` 现均已在 `pnpm-lock.yaml` 解析出真实包并装入 `.pnpm` 虚拟商店，
+> ESM 真执行可用、`tsc -b` 0 error ⇒ 代码与文档里 15 处引「0009 §2」论证
+> @langchain / yaml 装不上的注释按**本标注为准**（源头修正，不逐处追改）。
+> 今天真缺的只剩 `@larksuiteoapi/node-sdk` 与 `@modelcontextprotocol/sdk` 两包
+> （lockfile 仍零命中），引用这两包的「装不上」仍成立。
+
 `npm ping` 我第一版拿 `timeout 25` 包了一层 —— **这台机器没有 `timeout` 这个命令**，
 所以那次「跑过了、没输出」实际是 shell 报 command not found 后整条没执行。
 那条被我当成证据用了很久。现在换成上面这张表。
@@ -139,6 +150,16 @@ PATH=~/.nvm/versions/node/v24.14.0/bin:$PATH \
 
 **我的倾向是 R + T**，但这两条都需要一次网络，而这一台机器上我拿不到
 （§2 那三条通路）。所以真正在等的东西很朴素：**一个能装依赖的环境**。
+
+> **【round319 复核】（2026-11-19）** 上面这两句引「§2 那三条通路」论证
+> 「这一个环境拿不到网络」已被实测部分推翻：`pnpm-lock.yaml` 里现在有
+> `@langchain/*` 五个包与 `yaml@2.8.0` 的**真实解析条目**（不是 peer 声明），
+> 且 `@langchain/langgraph` 的 ESM import 真执行可用 —— 这些条目不可能离线凭空产生，
+> 说明期间发生过**至少一次成功的依赖下载**，`TCP 443 超时`不再是全称事实。
+> 这把 §7 的「卡点」从「网络物理不可达」修正为「**恰好缺 Electron/React/vitest 等
+> 那批东西没装上**」——选项的性质没变（R/S/T 三个候选与倾向均不动，那是 CEO 的决定），
+> 但「这台机器拿不到依赖」这句的前提松了。仍缺的两包（lark-sdk / mcp-sdk）见 §2 标注。
+
 在它出现之前，Task 2.4–2.9 我只能继续写「投影与判定」那一半，
 而 Phase 2 的出口标准**持续处于未判定状态**——这句是状态报告，不是牢骚，
 它应当由你而不是我来记账，因为它决定后面几周的风险敞口。

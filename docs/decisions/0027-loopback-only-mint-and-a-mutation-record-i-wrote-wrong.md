@@ -196,8 +196,18 @@ SQL 的 `WHERE ... AND used = ?`）我记成了：
   但从 round281 起，「手机上批一次」多了一条**不走自家界面**的路（飞书卡片回批，
   链路见 0030 §0 与 O12）。⚠ 别把它读成「能做手机审批了」：那条路缺的两样
   （真飞书凭据从未打通 + 发卡零生产者）任缺一个，症状都还是「手机上没有卡」。
+  【round322 复核：括号里「发卡零生产者」已过期 —— `deliverCard` 由
+  `channels/deliver.ts:257` 调用（O12 动作 4 完成）。「真飞书凭据从未打通」仍真，
+  故「症状都还是手机上没有卡」这句整体仍成立。原句保留。】
 - `pnpm verify` **今天仍然跑不起来**（离线，缺 `@langchain/*` 等依赖；
   `tsc -b --force` 的 34 条错误里有一条就是 `real-deps.ts` 那个 `TS2307`）。
+  【round319 复核：本条前提已过期。`pnpm verify` 现在**真跑得起来**（lint 先执
+  行、exit 1 来自 biome 存量 276 errors / 115 warnings / 2 infos，不是环境）；
+  `tsc -b` exit 0、`TS2307` 归零、vitest/tsx 全在 `.bin`。语义从「装不上/
+  跑不了（环境阻塞）」翻为「三件套都能跑，exit 1 是**存量债**不是环境」。
+  biome 只扫 `packages/**/*.ts` 等与 `docs/review`，docs/*.md 不在范围。
+  仍真缺的只剩 `@larksuiteoapi/node-sdk` 与 `@modelcontextprotocol/sdk`
+  （0009 §2 复核块）。原句保留，为当时的离线实测记录。】
   本轮实际跑的是：`node --experimental-transform-types` 逐文件跑测试
   （新增/改动的 5 个文件 150 发全绿）、全量 **1438 发 / 1392 通过 / 38 失败**
   （= 基线那 38 发，**没有新增红**；基线口径见 §5-①）、`tsc -b --force` 回到 **34 条**基线、

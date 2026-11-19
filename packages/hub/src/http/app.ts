@@ -22,8 +22,10 @@
 
 import { createHash, randomUUID } from "node:crypto";
 import {
+  approvalBatchRequestSchema,
   approvalDecisionRequestSchema,
   approvalOutcome,
+  batchApprovalOutcome,
   createTaskRequestSchema,
   HTTP_CONFLICT,
   HTTP_NOT_FOUND,
@@ -34,6 +36,7 @@ import {
   isImplemented,
   type ApiEndpoint,
   type ApprovalDecisionRequest,
+  type BatchResumeValue,
   type OrgChange,
   type OrgGraph,
   type ResumeValue,
@@ -70,6 +73,8 @@ import {
   verifyBindingRoute,
 } from "./bindings.js";
 import { commitOrgRoute, orgGraphRoute } from "./org.js";
+import { charterViewRoute, saveCharterRoute } from "./charter.js";
+import { budgetListRoute, putBudgetRoute } from "./budget.js";
 import type { CommitResult } from "../org/commit.js";
 import { ResumeStream, type SnapshotSource } from "./sse.js";
 import { buildReplayView } from "../replay/query.js";
@@ -294,6 +299,14 @@ export interface HubDeps {
    */
   readonly bindingWriter?: Writer;
   /**
+   * 岗位书与预算的写路径（POST /charter/:roleId、POST /budget）。
+   * 同 bindingWriter 一条：收 WriteQueue 的 node 而不是连接，否则两条写路由
+   * 绕过单写者队列。缺省时对应写路由回 501（real-deps.ts 装配了它们）。
+   */
+  readonly charterWriter?: Writer;
+  /** 预算写入的同一个队列；同 charterWriter 一条理由。 */
+  readonly budgetWriter?: Writer;
+  /**
    * 「谁有权校验一个 IM 身份」在**这台 Hub 上**的名字（0031）。
    *
    * ⚠ 它是【署名来源】，不是【鉴权】。这一点必须写准，因为两处都叫得出
@@ -495,6 +508,8 @@ async function dispatch(
       return listApprovals(deps, req);
     case "decide":
       return decide(deps, routeHit.id, req.body);
+    case "decide_batch":
+      return decideBatch(deps, req.body);
     case "mint_token":
       return mintToken(deps, routeHit.id, req);
     case "events":
@@ -513,6 +528,14 @@ async function dispatch(
       return commitOrgRoute(deps, req);
     case "get_org":
       return orgGraphRoute(deps, req);
+    case "get_charter":
+      return charterViewRoute(deps, routeHit.id);
+    case "save_charter":
+      return saveCharterRoute(deps, routeHit.id, req);
+    case "list_budget":
+      return budgetListRoute(deps);
+    case "put_budget":
+      return putBudgetRoute(deps, req);
     default: {
       // 走到这里意味着【有人加了一种 Route 却没在这里加分支】。
       //
@@ -556,6 +579,17 @@ export type Route =
   | { kind: "today"; endpoint: "GET /today"; id?: undefined }
   | { kind: "list_approvals"; endpoint: "GET /approvals"; id?: undefined }
   | { kind: "decide"; endpoint: "POST /approvals/:interruptId"; id: string }
+  /**
+   * 【规格】§9.4 的批量批准 / 批量打回。没有 id 段：一次批量指的不是某一张现存
+   * 卡片，而是调用方交来的那一组 id（与 POST /org「提交一段图」同一个形状）。
+   *
+   * ⚠ 它在 matchRoute 里必须排在 `POST /approvals/:interruptId` 那条【之前】，
+   * 而且这一处的顺序【是承重的】—— 与上面 `:id/token` 那条旁边写的
+   * 「顺序在这里不承重」正好相反。理由：两条都是 approvals 后面的【两段】，
+   * 靠 segs.length 分不开；`batch` 会被那条当成 id="batch" 匹走，
+   * 症状是「批量端点永远 404 / 或被打进单条 decide」，而 matchRoute 看起来仍合法。
+   */
+  | { kind: "decide_batch"; endpoint: "POST /approvals/batch"; id?: undefined }
   | {
       kind: "mint_token";
       endpoint: "POST /approvals/:interruptId/token";
@@ -590,7 +624,16 @@ export type Route =
    * 走和 GET /tasks / GET /approvals / GET /bindings 一样的统鉴权
    * （orgGraphRoute 的文件头注解释了分岔落在 route() 那道门）。
    */
-  | { kind: "get_org"; endpoint: "GET /org"; id?: undefined };
+  | { kind: "get_org"; endpoint: "GET /org"; id?: undefined }
+  /**
+   * 岗位书的读/写（GET/POST /charter/:roleId，携带 roleId 段；空段或多段 404）。
+   * charter 那两条靠 id 段（roleId）非空。
+   */
+  | { kind: "get_charter"; endpoint: "GET /charter/:roleId"; id: string }
+  | { kind: "save_charter"; endpoint: "POST /charter/:roleId"; id: string }
+  /** 预算的读/写（GET/POST /budget，单段字面，同 org 那组）。 */
+  | { kind: "list_budget"; endpoint: "GET /budget"; id?: undefined }
+  | { kind: "put_budget"; endpoint: "POST /budget"; id?: undefined };
 
 /**
  * 手写匹配而不是引一个路由器：六条形，而引库又要装依赖（见文件头）。
@@ -635,6 +678,23 @@ export function matchRoute(method: string, path: string): Route | null {
   }
   if (method === "GET" && segs.length === 1 && segs[0] === "approvals") {
     return { kind: "list_approvals", endpoint: "GET /approvals" };
+  }
+  // ⚠ 这一条【必须】在下面的 `POST /approvals/:interruptId` 之前，顺序承重。
+  // 两条同为「approvals + 一段」，segs.length 分不开它们：把这条挪到后面，
+  // POST /approvals/batch 会被下面那条匹成 { kind: "decide", id: "batch" }，
+  // 于是批量端点【永远命中不到】，而 matchRoute 的返回值在类型上完全合法 ——
+  // tsc 不响、契约对拍（正向那发）也不响（它拿样例 path 试 IMPLEMENTED 每一项，
+  // `POST /approvals/batch` 的样例就是它自己，会被 decide 那条"正确地"命中并
+  // 交出 endpoint: "POST /approvals/:interruptId" ⇒ 那一发会红在 endpoint 不一致）。
+  // 也就是说这对顺序【有一条会红】，但红的方向是「endpoint 对不上」而不是
+  // 「批量不存在」，读起来像契约登记写错了。所以顺序本身在这里写明。
+  if (
+    method === "POST" &&
+    segs.length === 2 &&
+    segs[0] === "approvals" &&
+    segs[1] === "batch"
+  ) {
+    return { kind: "decide_batch", endpoint: "POST /approvals/batch" };
   }
   if (method === "POST" && segs.length === 2 && segs[0] === "approvals") {
     const a = id(segs[1]);
@@ -688,6 +748,23 @@ export function matchRoute(method: string, path: string): Route | null {
   }
   if (method === "GET" && segs.length === 1 && segs[0] === "org") {
     return { kind: "get_org", endpoint: "GET /org" };
+  }
+  // charter 那两条靠 id 段（roleId）非空；budget 两条单段字面，同 org 那组。
+  if (method === "GET" && segs.length === 2 && segs[0] === "charter") {
+    const r = id(segs[1]);
+    if (r === null) return null;
+    return { kind: "get_charter", endpoint: "GET /charter/:roleId", id: r };
+  }
+  if (method === "POST" && segs.length === 2 && segs[0] === "charter") {
+    const r = id(segs[1]);
+    if (r === null) return null;
+    return { kind: "save_charter", endpoint: "POST /charter/:roleId", id: r };
+  }
+  if (method === "GET" && segs.length === 1 && segs[0] === "budget") {
+    return { kind: "list_budget", endpoint: "GET /budget" };
+  }
+  if (method === "POST" && segs.length === 1 && segs[0] === "budget") {
+    return { kind: "put_budget", endpoint: "POST /budget" };
   }
   return null;
 }
@@ -1205,6 +1282,146 @@ async function decide(
   });
 }
 
+/**
+ * `POST /approvals/batch` —— 【规格】§9.4 的批量批准 / 批量打回。
+ *
+ * ── 审计形状：逐卡一条，与单条审批【逐字同源】，批量不另造事件 ──────
+ * §9.4 字面写的是「一次批量操作写入一条审计事件」。落地的口径由 CEO 定：
+ * **每卡各一条决策事件，批量不新增聚合事件**。理由值得留在这里，因为字面
+ * 与实现不一致是会被下一轮审计当成缺陷的形状：
+ *  ① 「每卡一条」不是一种偷懒，它正是那两条活写路径的形状 —— applyDecision
+ *    把「认领卡片 + 决策审计」锁在同一个事务里（它的不变量②：半套状态
+ *    「卡片已批、审计没有」是回放对不上账时唯一查不出来的那种），
+ *    approveCard 更把一个事务锁成四件事（认领 + 决策审计 + 状态边 + 状态审计）。
+ *    要「整批只写一条」就得把状态与审计拆开或重写 approveCard 的批事务，
+ *    那是拿两条【已被变异实验验过】的不变量去换一个计数口径。
+ *  ② 跨任务的聚合事件在【回放视图】里是看不见的：replay 的取数按
+ *    `WHERE task_id = ?` 过滤。一条 task_id=NULL 的聚合事件因此对
+ *    「这个任务为什么动了」零贡献 —— 它只满足计数，不满足排查。
+ * 所以这里逐卡复用 deps.recordDecision，批量这一侧【一行 approvals 都不写】，
+ * 与 tokens.ts 那条「本模块一行 approvals 都不写」的立场同源。
+ *
+ * ── 为什么不是一个整批事务 ──────
+ * 判据（同类型 + 都存在）在【写之前】一次判完，不过就一张都不动 ——
+ * 这挡住了「半批成功」里最贵的那一型（调用方以为批了 20 张，实际库里只有 13 张）。
+ * 剩下「第 7 张被并发抢先」那一型不在这里处理：recordDecision 返回 false
+ * 就是「那张不是我能改的」，计进 replayed，继续走。把它做成整批回滚会引入
+ * 一个新的失效面（前面的卡已提交、后面回滚不了 —— WriteQueue 串行，
+ * 真要整批原子得给 Writer 加一个跨卡事务，而那是 approveCard 那一层的事）。
+ *
+ * ── 图恢复：一张失败不许丢掉其余，也不许整批 500 ──────
+ * 单条 decide 对 resumeGraph 是【不 catch】的（「200 + 任务一步不动」最贵）。
+ * 批量不能照抄：第 1 张恢复失败就整批 500，剩下 19 张的图【一次都不会恢复】，
+ * 而 500 会诱导调用方【重发整批】—— 已批的那 20 张此刻全是 replayed（幂等空转、
+ * 不再恢复），重发把「图没恢复」永久钉死。所以这里逐张 catch、记第一处原文、
+ * 跑完再报。失败仍然是【响】的（500 + 原文），不是吞掉的；
+ * 报的是「N 张已落库、其中 M 张图没恢复」这个完整事实，而不是「失败了」。
+ */
+async function decideBatch(
+  deps: HubDeps,
+  body: string,
+): Promise<HubResponse> {
+  const parsed = approvalBatchRequestSchema.safeParse(parseJson(body));
+  if (!parsed.success) {
+    return json(HTTP_UNPROCESSABLE, {
+      error: "批量决策体非法",
+      issues: parsed.error.issues.map((i) => ({
+        path: i.path.join("."),
+        message: i.message,
+      })),
+    });
+  }
+  const request = parsed.data;
+  const ids = request.approval_ids;
+  // 一次读把整批判据要的东西取齐（同 decide：判据用只读连接，写走注入点）。
+  // 占位符按 ids 个数生成，值全部绑参 —— 拼字符串进 IN 是本文件里唯一
+  // 一处「看起来可以自己拼 SQL」的诱惑，这里先把它堵在形状上。
+  const rows = deps.db
+    .prepare(
+      "SELECT id, task_id, status, approval_type FROM approvals " +
+        "WHERE id IN (" +
+        ids.map(() => "?").join(", ") +
+        ")",
+    )
+    .all(...(ids as unknown as never[])) as
+    | { id: string; task_id: string | null; status: string; approval_type: string }[]
+    | undefined;
+  const outcome = batchApprovalOutcome({
+    requestedIds: ids,
+    found: (rows ?? []).map((r) => ({
+      approvalId: r.id,
+      taskId: r.task_id ?? "",
+      status: r.status,
+      approvalType: r.approval_type,
+    })),
+  });
+  if (outcome.status !== 200) {
+    return json(outcome.status, {
+      error: outcome.reason,
+      ...(outcome.status === HTTP_UNPROCESSABLE
+        ? { types: outcome.types }
+        : { missing: outcome.missing }),
+    });
+  }
+
+  let applied = 0;
+  let replayed = 0;
+  let resumeFailed = 0;
+  let firstResumeError = "";
+  for (const card of outcome.plan) {
+    // 库里已非 pending ⇒ 幂等重放那一张。不调 recordDecision，与单条 decide
+    // 同一立场（append-only：为同一张卡写第二条决策事件删不掉）。
+    if (card.alreadyDecided) {
+      replayed += 1;
+      continue;
+    }
+    const wrote = await deps.recordDecision({
+      approvalId: card.approvalId,
+      taskId: card.taskId,
+      resume: request.resume,
+      ...(request.note === undefined ? {} : { note: request.note }),
+    });
+    if (!wrote) {
+      // 读与写之间被并发抢掉了（两个窗口各点一次批量，或批量与单条撞上）。
+      // 抢到那一次负责恢复图，这里不重复恢复 —— 同 decide 那条「重复一次 =
+      // 白烧一份预算」的理由。
+      replayed += 1;
+      continue;
+    }
+    applied += 1;
+    try {
+      await deps.resumeGraph(card.taskId);
+    } catch (e) {
+      resumeFailed += 1;
+      if (firstResumeError === "") {
+        firstResumeError = e instanceof Error ? e.message : String(e);
+      }
+    }
+  }
+  if (resumeFailed > 0) {
+    // 决策已落库（不可回滚），只有图没恢复。这句话必须把两半都说出来：
+    // 只说「恢复失败」会让人以为整批没生效，然后去重点一次 —— 而那一次是空转。
+    return json(500, {
+      error:
+        `批量决策已落库 ${applied} 张（重放 ${replayed} 张），但其中 ${resumeFailed} 张` +
+        `的图没有恢复：${firstResumeError}`,
+      applied,
+      replayed,
+      resume_failed: resumeFailed,
+      // 明确告诉调用方【不要重发整批】：卡片已是 decided，重发只会全部读成 replayed，
+      // 图仍然不恢复，而库里白多一次请求。补救路径是驱动器那一侧，不是重试。
+      retry_hint: "不要重发本批：卡片已 decided，重发只会得到 replayed 而图仍不恢复。",
+    });
+  }
+  return json(200, {
+    ok: true,
+    applied,
+    replayed,
+    approval_type: outcome.approvalType,
+    resume: request.resume satisfies BatchResumeValue,
+  });
+}
+
 async function events(deps: HubDeps, req: HubRequest): Promise<HubResponse> {
   const cursorRaw = req.query["cursor"];
   if (cursorRaw !== undefined && !/^\d+$/u.test(cursorRaw)) {
@@ -1284,11 +1501,11 @@ export function notImplementedMessage(endpoint: ApiEndpoint): string {
  * 关键词会进 LIKE 的全表扫（兜底那一档），一条十万字的关键词是一次没人会等的扫描。 */
 export const MAX_REPLAY_KEYWORD_CHARS = 200;
 
-function replay(
+async function replay(
   deps: HubDeps,
   taskId: string,
   query: HubRequest["query"],
-): HubResponse {
+): Promise<HubResponse> {
   for (const key of ["limit", "offset"]) {
     const raw = query[key];
     if (raw !== undefined && !/^\d+$/u.test(raw)) {
@@ -1315,7 +1532,7 @@ function replay(
         " 个。关键词建议 ≥3 个汉字（trigram 的分词窗口，规格附录 C.3）。",
     });
   }
-  const view = buildReplayView(deps.db, {
+  const view = await buildReplayView(deps.db, {
     taskId,
     ...(rawKeyword === undefined || rawKeyword === ""
       ? {}

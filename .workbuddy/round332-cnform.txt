@@ -1,0 +1,33 @@
+# 【round332 修复【之前】的读数存档，不是当前盘面】
+# 当前状态跑这几条复算：
+#   npx tsx .workbuddy/round332-today-marker.probe.mts   （现在应为 NOW-without-THEN=1，那 1 是 0050 §6.5 谈规矩本身的元句）
+#   npx tsx .workbuddy/round332-check-predicate.probe.mts（现在应为 fired = 0，三处已改成冒号形态）
+# 下面每一行都是修之前量到的原样，保留是为了让台账的③那格可复算，别当现状读。
+LIVE/ok               docs/decisions/0005-event-bus-and-audit.md:381  packages/hub/src/graph/audit-middleware.ts:71  [export async function auditedInvoke<T>(o: {]
+LIVE/nofile           docs/decisions/0006-cli-resume-and-identity.md:826  NOTFOUND:276  []
+LIVE/ok               docs/decisions/0006-cli-resume-and-identity.md:1416  test/arch/production-deps.test.ts:225  [).toBe(true);]
+LIVE/ok               docs/decisions/0006-cli-resume-and-identity.md:2746  packages/hub/src/graph/audit-middleware.ts:24  [* interrupt() 让 graph.invoke 正常 resolve，返回对象里多一个 __interrupt]
+LIVE/ok               docs/decisions/0006-cli-resume-and-identity.md:2751  packages/hub/test/graph/interrupt-resume.test.ts:119  [interrupt({ reason: "请批准" });]
+LIVE/ok               docs/decisions/0006-cli-resume-and-identity.md:2831  test/arch/no-native-deps.test.ts:84  [/**]
+LIVE/ok               docs/decisions/0006-cli-resume-and-identity.md:2833  packages/hub/test/db/driver-preflight.test.ts:179  [db.exec("BEGIN");]
+LIVE/ok               docs/decisions/0006-cli-resume-and-identity.md:2833  packages/hub/test/roles/charter.test.ts:310  [// 知道领域写错了的是写岗位书的人。在这里拒会把两者分开。]
+LIVE/ok               docs/decisions/0006-cli-resume-and-identity.md:2833  packages/hub/test/graph/e2e-linear.test.ts:315  [recorder: h.auditor.recorder,]
+LIVE/ok               docs/decisions/0006-cli-resume-and-identity.md:2834  packages/hub/test/cli/smoke.test.ts:339  [expect(r.code).toBe(0);]
+LIVE/ok               docs/decisions/0006-cli-resume-and-identity.md:2856  test/arch/test-inventory.test.ts:174  [}]
+LIVE/ok               docs/decisions/0041-engine-entry-work-and-decide.md:182  packages/hub/src/events/recorder.ts:385  [if (!this.#tx.inTx()) return;]
+LIVE/ok               docs/decisions/0041-engine-entry-work-and-decide.md:185  packages/hub/src/events/recorder.ts:258  [/** 当前事务里本 recorder 写了几行；用于跳过「空事务」的提交往返。 */]
+LIVE/blank            docs/decisions/0041-engine-entry-work-and-decide.md:187  packages/hub/src/events/recorder.ts:239  []
+LIVE/ok               docs/decisions/0041-engine-entry-work-and-decide.md:188  packages/hub/src/db/driver.ts:30  [export function openDb(path: string): DatabaseSync {]
+LIVE/ok               docs/decisions/0051-end-to-end-one-idea-to-delivered-and-two-false-readings-of-my-own-harness.md:59  packages/hub/src/engine/runtime.ts:108  [/**]
+LIVE/ok               docs/decisions/0054-a-race-nobody-could-reproduce-and-a-deterministic-test-that-tested-nothing.md:109  test/arch/run-fixtures.ts:16  [export const BOUNDARY_PROBE = "__boundary_probe.ts";]
+LIVE/blank            docs/decisions/0063-zero-producer-claims-that-measure-the-past.md:26  packages/hub/src/approvals/cards.ts:237  []
+LIVE/ok               docs/decisions/0063-zero-producer-claims-that-measure-the-past.md:28  packages/hub/src/bindings/im.ts:164  ["INSERT INTO im_bindings (id, platform, external_user_id, ce]
+LIVE/ok               docs/decisions/0063-zero-producer-claims-that-measure-the-past.md:29  packages/hub/src/http/tokens.ts:208  ["INSERT INTO im_tokens (token, approval_id, expires_at, used]
+PAST/ok               docs/INDEX.md:76  packages/hub/src/engine/runtime.ts:109  [* 「这条想法已经被打回几次」—— §4.2.1 `max_rejections` 的分子。]
+
+attached=21  bare-phrase(no filename) =76
+tally:
+  LIVE/blank            2
+  LIVE/nofile           1
+  LIVE/ok               17
+  PAST/ok               1

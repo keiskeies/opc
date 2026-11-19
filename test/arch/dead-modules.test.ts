@@ -321,7 +321,7 @@ describe("死模块哨兵", () => {
      * 这一格是【防退化的下界】，不是棘轮：它只管"核对本身有没有东西可核对"，
      * 判据本体是下面那句 invalidBaselineMarks。
      *
-     * 13 = 16 − 3。摘掉的三条各自兑现了它登记的死法（方向 B 那条红如约出现，
+     * 8 = 16 − 8。摘掉的八条各自兑现了它登记的死法（方向 B 那条红如约出现，
      * 然后才删行）：
      *  · round281（O12 动作 2）：`channels/abstraction.ts`
      *  · round281（O12 动作 2）：`channels/approval-bridge.ts`
@@ -330,10 +330,19 @@ describe("死模块哨兵", () => {
      *    ⚠ 模块级可达【不等于】重试在真机上放过行：判据今天一次都不放行
      *    （可复现的 started:false 全是确定性的 ENOENT），那一格由
      *    turn-retry.test.ts 钉，不在本表（本表只判模块可达）。
+     *  · round312（O6 Step B 接线）：`harness/gateway.ts`、`harness/safety.ts` ——
+     *    runtime.ts 的 runTurn 每轮经 gateway-runner 走 callHarness。同样一条
+     *    「模块可达 ≠ 整层生效」在这里再说一遍：gateway 的 settle/checkBudget
+     *    两条槽位今天仍由装配方留空（钱由 dispatch 的 onCost 记，spawn 前预算闸
+     *    住在 pump 的 underTaskBudgetSql 里），路由与验证两模块【还在基线】。
+     *  · round312（同一次接线的传递后果）：`search/mcp.ts`、`search/observe.ts`、
+     *    `search/policy.ts` —— 靠 gateway.ts 那条【纯类型】的 ToolSighting import
+     *    传递可达（本表口径 = 编译期 import 边，`import type` 算一条）。
+     *    这三个的运行时【一次都没被调用】：搜的是编译依赖，不是「搜索层接上了」。
      * ⚠ 下一次动这个数字之前先问：这两条差额有没有一条登记过的死法对应？
      * 没有就是有人删了基线条目而没接线，那种删法正是这条下界存在的全部理由。
      */
-    expect(BASELINE.size).toBeGreaterThanOrEqual(13);
+    expect(BASELINE.size).toBeGreaterThanOrEqual(8);
     expect(invalidBaselineMarks(BASELINE, collectModules()).join("\n")).toBe(
       "",
     );
@@ -382,12 +391,14 @@ describe("死模块哨兵", () => {
     // 不可达的簇用 —— 按【零 importer】数，它们每一个都"有人用"，全数漏判。
     // 它哪天变空，说的是这一族已被接光 ⇒ 那时要重推口径、重挑判据，不是放宽它。
     expect(inherited.length).toBeGreaterThan(0);
-    for (const m of [
-      "harness/gateway.ts",
-      "harness/safety.ts",
-      "harness/routing.ts",
-    ]) {
-      // 这三个互相 import ⇒ 每个都有 importer，而整目录对外零边。
+    // round312 换过名单：harness/gateway.ts 与 safety.ts 原来在这一族里，接线之后
+    // 它们【真的活了】（runtime → gateway-runner → gateway/safety 都是真 import），
+    // 继续列在这里会把一条【进度】写进口径判据里 —— 那条红就再也不能区分
+    // 「口径坏了」和「有人干活了」。挑进来的两条都还死着、且都有 importer：
+    //  · harness/routing.ts ← harness/verifier.ts（那条本身是纯类型 import，
+    //    而 verifier 自己零调用方 ⇒ routing 继承性不可达）
+    //  · graph/gates/author-reviewer.ts ← harness/verifier.ts（同一族）
+    for (const m of ["harness/routing.ts", "graph/gates/author-reviewer.ts"]) {
       // 断言方向：它【必须】在 inherited 里（在 = 零 importer 口径会漏判它）。
       // 上一版这里三元写反了，红的是「它没在」—— 正好把这个口径的证据判成了反的。
       expect(
@@ -483,13 +494,16 @@ describe("死模块哨兵", () => {
     expect(wired[0]?.why).toContain("BASELINE");
 
     /**
-     * 真实仓库此刻在状态①：四个安全层模块都还躺在基线里。
+     * 真实仓库此刻【一分为二】（round312，O6 Step B 接线之后）：
+     * gateway 与 safety 已离开状态①（runtime → gateway-runner → callHarness 每轮真走），
+     * routing 与 verifier 仍躺在基线里（O6-3 的顺序硬约束：它们要在「真员工拿到写权限」
+     * 【之前】接，不能之后）。
      *
      * 这一格的角色是【进度读数】而不是主判据 —— 主判据是上面「主断言」那条
      * （不可达集合 ≡ 基线）。两者都会红，但红话不一样：主判据说"集合对不上"，
      * 这一格说"你正在接线，O6 的文档状态该跟着改"。
      * 判据是 `dead ∧ inBaseline` 两个条件【都要】成立。变异实验：只留 `dead` 那半边
-     * 测试仍绿（今天四个都还死着），因为"从基线被删掉而仍是死的"那条形状另有主判据
+     * 测试仍绿（今天还有模块死着），因为"从基线被删掉而仍是死的"那条形状另有主判据
      * 兜（方向 A）。留着 BASELINE 那半边不是为了独占抓什么，是为了让这条红**说对话** ——
      * 少了它，一个已被移出基线的模块会在这里被叫成"还在状态①"，那是句假话。
      */
@@ -506,18 +520,26 @@ describe("死模块哨兵", () => {
       FOUR.map(
         (m) => m + "=" + (real.has(m) && b.has(m) ? "状态①" : "已离开状态①"),
       ).join(" ; ");
-    const ALL1 = FOUR.map((m) => m + "=状态①").join(" ; ");
-    expect(readout(BASELINE)).toBe(ALL1);
-    // 控制组：把 gateway 那一格从基线里【临时】拿掉，读数必须翻。
+    const NOW = [
+      "harness/gateway.ts=已离开状态①",
+      "harness/safety.ts=已离开状态①",
+      "harness/routing.ts=状态①",
+      "harness/verifier.ts=状态①",
+    ].join(" ; ");
+    expect(readout(BASELINE)).toBe(NOW);
+    // 控制组：把 routing 那一格【临时】从基线里拿掉，读数必须翻。
     // 没有这一条，上面那句里的 `b.has(m)` 是装饰品 —— 删掉它照样绿（变异实验实测）。
     // 这才是它该有的样子：一个条件若在两个输入下给出同一个答案，它就没在判任何东西。
     //
+    // ⚠ 控制为什么从 gateway 换成了 routing：round312 之后 gateway 已不在基线，
+    // 「把它从基线拿掉」是对一个不存在格子的操作 ⇒ 两次读数相同，控制失效。
+    // 控制要拨的永远是【此刻真的在状态①】那一格（判据对 b.has 的敏感性只在那里可测）。
     // ⚠ 这条控制【防的是判据坏掉】，不防"有人把这行删了"（删了它，M5 那种判据变异
     // 会重新活下来，而这条红不会自己响 —— 任何控制都自证不了自己还在）。
     // 所以别把它当冗余简化掉：上面那条在两个输入下都绿，只有这一条能分辨它们。
-    expect(readout(new Map([...BASELINE].filter(([k]) => k !== MOD)))).not.toBe(
-      ALL1,
-    );
+    expect(
+      readout(new Map([...BASELINE].filter(([k]) => k !== "harness/routing.ts"))),
+    ).not.toBe(NOW);
   });
 
   /**
@@ -532,12 +554,12 @@ describe("死模块哨兵", () => {
    * 别的文件替它说话， drift 就藏在别人的行里。
    */
   it("横幅的机器可见性：模块名与否定词必须【同一行】，换行排版就失效", () => {
-    const SRC_ONLY = [
-      "harness/gateway.ts",
-      "harness/safety.ts",
-      "harness/routing.ts",
-      "harness/verifier.ts",
-    ];
+    // round312 名单收窄：gateway 与 safety 的横幅已按【横幅自己的指令】自删
+    // （两句横幅都写着「接线那天方向 B 会红并点名这一行 ⇒ 横幅自删」）。
+    // 留在名单里的必须是【今天还真带着横幅】的模块：它们的横幅在，判据才有对象。
+    // 哪天接上它们，先删横幅、再把这条从名单里拿掉 —— 顺序反了会先红在这里，
+    // 那是故意的：横幅与基线格必须同一轮一起走（见 BASELINE 簇一的注释）。
+    const SRC_ONLY = ["harness/routing.ts", "harness/verifier.ts"];
     const root = repoRoot();
     const rowsOf = (rel: string) => [
       {

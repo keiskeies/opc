@@ -460,7 +460,11 @@ describe("整条链：下发想法 → 起草 → 签署 → 任务动起来", (
     // （ApprovalDecided）共用同一个 action 值（§22.1 的枚举不开第 11 个值），
     // 所以这条断言能钉住的是【顺序 + 条数 + 没有多余的状态变化】，
     // 「哪条是请求、哪条是决策」由上面那发（按 actor / target 筛）钉。
+    // 打头的 'harness_call' 是 O6 Step B（round312）的角色轮走 gateway 时
+    // 每个出口必落的那行审计（harness/gateway.ts 的 finish —— 行 898 注释
+    // 「每个出口都要落」，事件先于角色轮结果写库）。
     expect(actions).toEqual([
+      "harness_call", // O6 接线：这一轮请求与授权的审计行
       KIND_TO_ACTION.RoleTurnReported, // 起草那一轮（钱与提案原文）
       KIND_TO_ACTION.ApprovalRequired, // 那张卡
       KIND_TO_ACTION.ApprovalDecided, // 那次点击

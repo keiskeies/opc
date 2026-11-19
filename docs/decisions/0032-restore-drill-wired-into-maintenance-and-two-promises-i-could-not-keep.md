@@ -255,7 +255,14 @@ expect(isSamePath(path, join(dir, DRILL_TARGET_NAME))).toBe(true);   // path 就
   那两道门的强度由 `backup.test.ts` ⑤ 那批发测，不由本篇。
 - **`pnpm verify` 仍然跑不起来**（`vitest` 解析不到，复算 `node packages/hub/scripts/deps-resolvable.mjs`）
   ⇒ 下面那些绿是 **node:test + 自制 harness** 给的，**不是门禁过了**。
+  【round319-9 复核：本条前提已过期。`pnpm verify` 现在真跑得起来（三件套皆在，
+  exit 1 来自 biome 存量债）；`deps-resolvable.mjs` 修正了探测作用域（hub/contracts/root
+  分开）与 CLI 型包探测（biome 走 `--version` 而非 createRequire），现读数
+  7 可用（@langchain 全家桶 / tsx / vitest / biome 2.6.5 / zod / typescript）7 真缺
+  （react / capacitor / xyflow / lark-sdk / mcp-sdk / codex-sdk / qoder-sdk）。】
 - **格式未经校验**：`@biomejs/biome` 装不上，新增代码的排版是我手工对齐的。
+  【round319-9 复核：biome 2.6.5 现已可用（`.bin` 真执行，npx biome --version 2.6.5），
+  全仓存量 276 errors / 115 warnings / 2 infos 是 HEAD 存量债，非环境阻塞。】
 - **`MAINTENANCE_USAGE` 从三件事改成四件事**，而 `--help` 那发用例只判
   `help === true` 与 `error === undefined`，**不判用法文本内容** ——
   所以「USAGE 里写了四步」这句话没有任何测试撑着（INDEX 里的同类坐标同样无守卫，0031 §5）。

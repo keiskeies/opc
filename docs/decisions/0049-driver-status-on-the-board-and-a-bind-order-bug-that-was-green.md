@@ -444,9 +444,14 @@ M15 值得说一句：它**不是**"把共享函数 `driverCellTargetSql` 改掉
    是边表里那两条出边不存在** —— 修法完全不同，别再照着函数名去找。
 2. **`createCard` 在 src 里仍然零生产调用方**（`grep -rn 'createCard(' packages/*/src`
    只命中它自己的定义那一行；`insertCard` 才有三个生产调用方：`seat-card.ts:254`、
-   `engine/charter.ts:449`、`dispatch.ts:1519`）。
+   `engine/charter.ts:448`、`dispatch.ts:1527`（round312 复算坐标，两行一字未变））。
    ⇒ 这是本仓记过最多次的那一族的现役样本（`createCard` = 建卡 + 落审计 + 事务，
    而生产里三个建卡点全都绕过它直接调 `insertCard`）。
+   【round321 复核：那条可复算断言（`grep 'createCard('` 只命中定义行）已过期 ——
+   `serve/dev-seed.ts:432` 是 `createCard` 的调用点（`pnpm dev:seed` 入口，dev 专用建卡，
+   dev-seed.ts 文件头自己写着「只走 approvals/cards.ts 的 createCard 这一条正当写入口」，
+   卡片键带 `dev-seed:` 前缀不撞生产键空间）。⇒ 「零生产调用方」精确说是「零**运行时**生产
+   调用方」：seed 是开发构建脚本不是服务路径。insertCard 的三个生产调用方坐标不变。】
 3. ⭐ **我顺带断言 `cards.ts` 文件头那句 grep「已经不成立了」—— 这一句是我错的**，
    原文照留。回去把那六行读完整：它写的是
    「**写之前的** grep（当场跑的，不是回忆；0013 §10.1 是它的第一次实测）」——

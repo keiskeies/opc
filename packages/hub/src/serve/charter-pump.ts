@@ -69,7 +69,7 @@ import {
   type CharterDraftOutcome,
 } from "../engine/charter.js";
 import { makeRuntime, type EngineRuntime } from "../engine/runtime.js";
-import type { CostHook } from "../engine/dispatch.js";
+import type { CostHook, RunTurnInput } from "../engine/dispatch.js";
 import { kindOf } from "../heartbeat/patrol.js";
 
 /**
@@ -160,10 +160,10 @@ export const CHARTER_ATTEMPTS_SQL =
  *    ⚠ budget-sync 那条 silentOverBudgets 用的是【严格大于】，两者不是同一个问题
  *      （那条问"已经超了多少"，这一条问"还要不要再花"），差别【刻意留着】而写在这里，
  *      因为两处写法不同而没人写下原因，就是下一次"顺手统一"的引信。
- *    ⚠ 【不看 budgets.hard_stop】：那列今天全仓【没有任何代码能写成 0】
- *      （三条 INSERT 都写字面量 1），所以把它写进判据会得到一条【造不出红】的判据
- *      —— 恒真的判据与恒绿的装饰不可区分。等哪天有人真给"这个格子不许硬停"一个入口，
- *      这一条要一起改（登记在 0045 §6）。
+ *    ⚠ 【看 budgets.hard_stop】：hard_stop = 0 的那一格超预算【不禁 spawn】，
+ *      门读它（underTaskBudgetSql）。这一格从「造不出红」变成有读者，是因为
+ *      PUT /budget 现在能把那列写成 0（http/budget.ts 的 UPSERT）—— 那三条
+ *      写字面量 1 的 INSERT 没变（原话登记在 0045 §6，它当时的推理仍然成立）。
  *    ⚠ 门在【候选 SQL】里而不在逐张卡的循环里：不在 SQL 里筛，超限的任务会
  *      【每轮都占住那 3 个候选位之一】（taskLimit 是"上限的上限"），而 ORDER BY created_at
  *      + LIMIT 会让一条超限的老想法把后面能补的想法【永久饿死】—— 正是本文件头
@@ -178,20 +178,31 @@ export const CHARTER_ATTEMPTS_SQL =
  * 「这条任务在当前这个上限下还【许不许】再花一次钱」。
  *
  * ⚠ 导出成【一个函数】而不是就地写在 SQL 里，理由与 patrol 的 kindOf 同一条
- * （0026 §0 / 本文件 §3）：这个谓词有【两个】使用点 —— 候选 SQL 用它筛掉超限的，
- * CHARTER_BLOCKED_SQL 用它数出"被门挡住的是哪些"。两处各抄一份字面，
+ * （0026 §0 / 本文件 §3）：这个谓词有【五条】 SQL 在用（本文件两条、driver-pump 两条、
+ * overview/driver-status 一条），各抄一份字面，
  * 漂了的那一份不会有人发现：候选那边漂了 = 门失效（花钱），
  * 计数那边漂了 = 门明明挡了而终端一声不响。
  *
- * 绑参数量：一条 `?`（那一份上限）。两侧的形状刻意写成【可以直接 AND 进去】的样子，
- * 因为两个使用点用的必须是【同一个方向】的判据 —— 一边 >= 一边 < 就是自相矛盾。
+ * 绑参数量：一条 `?`（那一份上限）。五条 SQL 的形状刻意写成【可以直接 AND 进去】的样子，
+ * 因为五个使用点用的必须是【同一个方向】的判据 —— 一边 >= 一边 < 就是自相矛盾。
+ *
+ * ⚠ 整条外面那层括号【不能删】：五个使用点里有两个是裸拼的
+ * （CHARTER_CANDIDATES_SQL 与 driver-pump 的 driverCandidatesSql 都写 `AND <谓词> ORDER BY`，
+ * 没有括号），而这一条现在是 `… < ? OR … = 0`。SQLite 里 AND 比 OR 紧，
+ * 摘掉括号会把整条 WHERE 劈成「(状态 ∧ 卡 ∧ 钱) ∨ (hard_stop = 0)」——
+ * 于是任何 hard_stop = 0 的格子里【连状态都不判】就进候选。
+ * 另三个使用点写的是 `NOT ( <谓词> )`，有没有括号都对，所以那种写法看不出这层依赖。
  */
 export function underTaskBudgetSql(t: string): string {
   return (
-    "COALESCE((SELECT b.consumed_cents FROM budgets b " +
+    "(COALESCE((SELECT b.consumed_cents FROM budgets b " +
     "WHERE b.scope_type = 'task' AND b.scope_id = " +
     t +
-    ".id AND b.period = 'per_task'), 0) < ?"
+    ".id AND b.period = 'per_task'), 0) < ?" +
+    " OR COALESCE((SELECT b.hard_stop FROM budgets b " +
+    "WHERE b.scope_type = 'task' AND b.scope_id = " +
+    t +
+    ".id AND b.period = 'per_task'), 1) = 0)"
   );
 }
 
@@ -312,13 +323,9 @@ export const PUMP_GAVE_UP_TARGET = "charter:pump";
  * 被调用的那一次 runTurn 就是【真 spawn 一个 claude 子进程、真花钱】。
  */
 export interface CharterCardDeps {
-  readonly runTurn: (i: {
-    readonly role: string;
-    readonly rolePrompt: string;
-    readonly prompt: string;
-    readonly resumeSessionId: string | null;
-    readonly maxBudgetUsd: number;
-  }) => Promise<CharterDraftOutcome>;
+  // RunTurnInput 同一理由（见 engine/charter.ts 的 deps.runTurn）：这条泵与 CLI
+  // 那条 hub work 喂的是同一个 runtime 回调，两份手抄签名必然在下一格参数上进不同步。
+  readonly runTurn: (i: RunTurnInput) => Promise<CharterDraftOutcome>;
   readonly rolePrompt: (roleId: string) => string;
   readonly onCost?: CostHook;
   readonly ceoRoleId?: string;

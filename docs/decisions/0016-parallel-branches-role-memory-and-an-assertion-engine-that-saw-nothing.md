@@ -24,6 +24,12 @@ Task 3.7。计划那行给的 Files 是 `src/graph/branches.ts`、`src/memory/ro
    `grep -rn '"review_decision"'` 只有 4 处，全在 `events/recorder.ts`（枚举定义 +
    `KIND_TO_ACTION` 映射）与本轮新建的读侧 `memory/role-memory.ts` 里。
    `review_gates` 表的 `INSERT INTO review_gates` 在 src 里也是 **0 处**。
+   【round322 复核：本条第 1 小句（`review_decision` 写入方 0）**已过期** ——
+   `memory/role-memory.ts:16` 文件头已自更「【现状：1 个生产者】」（engine/dispatch.ts 的
+   `appendAudit` 记 `ReviewDecided`）。但第 2 小句（`review_gates` 表零 INSERT）**仍真**：
+   `role-memory.ts:24` 明标「`review_gates` 表仍然零写入方」，0063 §5 又用
+   INSERT-OR-aware 扫描器复算 HEAD 上仍无 `INSERT INTO review_gates` —— 那一格到今天
+   仍由 0063 的守卫在守。原句保留。】
    ⇒ 规格 §24 风险 2 那句『每个角色的**历史审阅决定与理由**』，它的字面对象今天在生产里
    **一条都没有**。这与 0013 §10 那个「`approvals` 有写入方」是我编的、0014 §3 那个
    「策略引擎有调用方」是它其实没有，是同一件事：**规格的宾语不存在**。
@@ -316,6 +322,15 @@ const ceoReadingOwn =
   计划 V1/V4 那句「已验证框架支持」我**无法复现**（它需要 `@langchain/langgraph`）。
   规格 §5.4 PoC 门禁第 3 项『并行分支 Reducer 合并语义』这一项，
   我做的是**语义**而没有做**框架内的落点**。
+  【round319 复核：本条前提已过期，已补框架落点】0009 §2 的「装不上」已被实测
+  推翻 —— `node_modules/@langchain/langgraph@1.7.1` 现在可 ESM 真执行（`invoke`
+  返回 `{"n":3}`），`tsc -b` 0 error、TS2307 归零。新增
+  `test/graph/parallel-real-graph.test.ts`（3 发）直接消费生产函数
+  `mergeParallelResults` 构建真 StateGraph 扇出扇入，钉「真图汇聚按分支声明序
+  而非到达序」，与生产实现逐字一致；慢 200ms 分支制造到达序翻转，断言不变。
+  框架内的落点这一格就此闭合。**不承重**：不把并行接进 company.ts 生产图
+  （0016 §7 自己说计划允许本期仅保留能力，§23.2 反过度设计正冲着「为并行而并行」，
+  那是产品场景决定不是实现层可单方面定的）。
 - **测试文件位置与计划不同。** 计划写 `test/graph/parallel.test.ts`，
   我用的是 `packages/hub/test/graph/branches.test.ts`。
   原因与 0015 §8 同一条：`packages/*/test/**` 才会被 vitest 的 include 收进来

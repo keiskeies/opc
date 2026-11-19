@@ -1,0 +1,34 @@
+SNAP 解析出 156 条键值（守卫自报登记 152 条，差额=本脚本解析面）
+
+✔ INDEX.md>app.ts:441
+    app.ts:441 → 新 packages/hub/src/http/app.ts:451
+✔ INDEX.md>assemble.ts:274
+    assemble.ts:274 → 新 packages/hub/src/serve/assemble.ts:288
+✔ INDEX.md>app.js:675
+    app.js:675 → 新 packages/web/public/app.js:694
+✔ 0012-org-versioned-commit-and-unwritten-graph-version.md>packages/contracts/src/api.ts:40
+    packages/contracts/src/api.ts:40 → 新 packages/contracts/src/api.ts:41
+✔ 0012-org-versioned-commit-and-unwritten-graph-version.md>packages/contracts/src/api.ts:99
+    packages/contracts/src/api.ts:99 → 新 packages/contracts/src/api.ts:108
+✔ 0015-charter-editor-and-two-sources-of-budget.md>http/app.ts:1091
+    http/app.ts:1091 → 新 packages/hub/src/http/app.ts:1150
+✔ 0030-im-binding-identity-and-three-holes-i-did-not-design.md>contracts/src/api.ts:40
+    contracts/src/api.ts:40 → 新 packages/contracts/src/api.ts:41
+✔ 0030-im-binding-identity-and-three-holes-i-did-not-design.md>contracts/src/api.ts:73
+    contracts/src/api.ts:73 → 新 packages/contracts/src/api.ts:78
+✔ 0030-im-binding-identity-and-three-holes-i-did-not-design.md>app.ts:539
+    app.ts:539 → 新 packages/hub/src/http/app.ts:558
+✔ 0037-worker-import-in-threads-and-my-first-fix-was-wrong.md>assemble.ts:460
+    assemble.ts:460 → 新 packages/hub/src/serve/assemble.ts:474
+✔ 0042-today-view-and-putting-the-criteria-on-the-server-side.md>packages/web/public/app.js:445
+    packages/web/public/app.js:445 → 新 packages/web/public/app.js:464
+✔ 0050-abandoned-task-never-resumes-and-a-knob-that-does-not-exist.md>assemble.ts:290
+    assemble.ts:290 → 新 packages/hub/src/serve/assemble.ts:304
+✔ 0050-abandoned-task-never-resumes-and-a-knob-that-does-not-exist.md>assemble.ts:1913
+    assemble.ts:1913 → 新 packages/hub/src/serve/assemble.ts:1939
+✔ 0050-abandoned-task-never-resumes-and-a-knob-that-does-not-exist.md>app.js:528
+    app.js:528 → 新 packages/web/public/app.js:547
+✔ 0050-abandoned-task-never-resumes-and-a-knob-that-does-not-exist.md>app.js:675
+    app.js:675 → 新 packages/web/public/app.js:694
+
+合计 15 格，需人工 0 格

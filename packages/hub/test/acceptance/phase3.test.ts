@@ -964,7 +964,20 @@ describe("④ 两条验收各自【不可测的那一半】（登记，不写成
      * （serve / 巡检 / CLI 都该用它而今天没人用），它【不许】被读成「卡片零生产者」。
      * 有分母的那一发在下面。
      */
-    expect(callersOf("createCard", "approvals/cards.ts")).toEqual([]);
+    /*
+     * 【这一发在本批红过，红因与改法】名单从 [] 长到 [dev-seed.ts]：
+     * `pnpm dev:seed`（serve/dev-seed.ts，演示种子）成了这层包装的第一个调用方。
+     * 上面那句「它【不许】被读成『卡片零生产者』」继续成立，而且这一翻让那笔账
+     * 还掉了一半 —— 注释自己写过「serve / 巡检 / CLI 都该用它而今天没人用」，
+     * serve 那一格现在有人用了（演示路径）。仍待账的是【生产】三条：HTTP/巡检/CLI
+     * 的建卡仍走下层 insertCard，这层包装在生产上零调用方。
+     * ⇒ 名单不是"放宽成有就行"，是【钉死只有这一个名字】：第二个名字出现 ⇒ 红 ⇒
+     *   回来分清那一次是生产接线还是又一个演示写方。
+     * ⚠ 与 auto-approve.test.ts ⑧ 同一次翻（两处口径必须一起改，0014 §⑧ 同族）。
+     */
+    expect(callersOf("createCard", "approvals/cards.ts")).toEqual([
+      SRC + "/serve/dev-seed.ts",
+    ]);
     /**
      * 第 6 条【现在】的真判据：谁在 src 里真建卡 = 谁调 insertCard（cards.ts 自己除外）。
      *

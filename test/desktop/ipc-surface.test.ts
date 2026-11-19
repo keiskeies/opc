@@ -42,6 +42,7 @@ import {
 import {
   createExposedApi,
   EVENT_CHANNEL,
+  EVENTS_READY_CHANNEL,
   type RendererBridge,
 } from "../../packages/desktop/src/preload/api.js";
 
@@ -73,7 +74,7 @@ describe("IPC 暴露面 = 白名单", () => {
     const api = createExposedApi(fakeIpc().bridge);
     const exposed = Object.keys(api)
       .filter((k) => typeof (api as Record<string, unknown>)[k] === "function")
-      .filter((k) => k !== "onHubEvent") // 推送订阅不是 invoke 通道，单独一条测
+      .filter((k) => !NON_INVOKE_METHODS.has(k)) // 订阅/握手不是 Hub invoke，各自单独一条测
       .sort();
     const expected = CHANNEL_SPECS.filter((s) => s.kind === "invoke")
       .map((s) => INVOKE_METHODS[s.channel])
@@ -88,7 +89,7 @@ describe("IPC 暴露面 = 白名单", () => {
     const withBackdoor = { ...api, dbQuery: (sql: string) => sql };
     const exposed = Object.keys(withBackdoor)
       .filter((k) => typeof withBackdoor[k] === "function")
-      .filter((k) => k !== "onHubEvent")
+      .filter((k) => !NON_INVOKE_METHODS.has(k))
       .sort();
     const expected = CHANNEL_SPECS.filter((s) => s.kind === "invoke")
       .map((s) => INVOKE_METHODS[s.channel])
@@ -240,8 +241,7 @@ describe("通道与端点对齐", () => {
     await expect(api.createTask({ idea: "" })).rejects.toThrow("422 idea 非法");
   });
 
-  it("onHubEvent 返回的退订函数【真的摘掉】了监听器", () => {
-    const removed: string[] = [];
+  it("onHubEvent 返回的退订函数【真的摘掉】了监听器", () => {    const removed: string[] = [];
     let added = 0;
     const api = createExposedApi({
       invoke: async () => ({}),
@@ -259,6 +259,34 @@ describe("通道与端点对齐", () => {
     // React 组件重挂十次而不退订，会留下十个活着的监听器；而 Task 2.3 的幂等投影
     // 会把重复帧按 seq 吃掉 ⇒ 功能上【看不出来】，只在内存上长。
     // 所以「有退订函数」这件事必须由一条断言钉住，而不是靠 API 形状看着像。
+  });
+
+  it("⭐ ready 握手的渲染侧：notifyEventsReady 打到 EVENTS_READY_CHANNEL", async () => {
+    // 这一发钉的是【渲染侧那一半接线】：方法存在、走 invoke（不是 fire-and-forget）、
+    // 通道名与主进程注册的是【同一个常量】（main/wire.ts import 的就是这里导出的）。
+    // 「invoke 而不是 send」有内容：走 invoke 时装配错误（主进程没注册 handler）
+    // 会以 reject 出现在调用点上；fire-and-forget 的那次会静默烂掉，
+    // 界面永远等不到事件而哪侧都不红。
+    const f = fakeIpc();
+    const api = createExposedApi(f.bridge);
+    await api.notifyEventsReady();
+    expect(f.calls.map((c) => c.channel)).toEqual([EVENTS_READY_CHANNEL]);
+    // 无参：它携带的信息只有一个（"挂好了"），多塞东西只会让主进程多一条
+    // 它无法校验的入参面。
+    expect(f.calls[0]?.args).toEqual([]);
+  });
+
+  it("ready 通道【不进】端点白名单：specOf 交回 null，invokeChannels 不含它", () => {
+    // 白名单的语义是「渲染进程能让主进程去打哪个 Hub 端点」，而这一发从不出进程。
+    // 钉反例是因为【往里加】的诱惑是真实存在的：加了它 dispatch 会走到
+    // toHttpRequest 的 default 抛（没有端点可映射），症状是渲染进程收到一条
+    // 谁也解释不了的报错。主进程注册集里含它这件事由 wire.test.ts 钉，两边各钉一侧。
+    expect(specOf(EVENTS_READY_CHANNEL)).toBeNull();
+    expect(CHANNEL_SPECS.map((s) => s.channel)).not.toContain(EVENTS_READY_CHANNEL);
+    // 名字本身单独钉一次：它是主进程注册与渲染进程 invoke 共用的【唯一】真相，
+    // 改它必须两侧一起改（两侧都 import 这个常量），而这里钉住字面量防「常量被
+    // 悄悄改名而两侧跟着漂移」—— 改名应是一次显式的、跨协议的改动。
+    expect(EVENTS_READY_CHANNEL).toBe("hub:eventsReady");
   });
 });
 
@@ -422,6 +450,14 @@ const INVOKE_METHODS: Record<string, string> = {
   "hub:listBindings": "listBindings",
   "hub:getOrg": "getOrg",
 };
+
+/**
+ * 暴露面上【不是】Hub invoke 的方法：订阅（纯收推送）与握手（纯通知主进程）。
+ * 相等断言把它们排除在外，而排除【不是】豁免 —— 每一条都有自己单独的断言
+ * （onHubEvent 见退订那一发，notifyEventsReady 见下面「ready 握手」那一组），
+ * 所以「加进这个集合却不写断言」不会得到一条静默的绿。
+ */
+const NON_INVOKE_METHODS = new Set(["onHubEvent", "notifyEventsReady"]);
 
 /* ───────────────── 主进程侧分发（Task 2.2 的 src/main 半边） ───────────────── */
 

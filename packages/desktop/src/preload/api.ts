@@ -115,6 +115,24 @@ export function createExposedApi(ipc: RendererBridge) {
         ipc.removeListener("hub:event", wrapped);
       };
     },
+
+    /**
+     * 告诉主进程「监听已经挂好了，可以开事件流」。
+     *
+     * ⚠ 调用方的义务【写在这一句里】：必须在 onHubEvent() 【之后】调。
+     * 握手保证的是【主进程侧】不早于这一次 invoke 开流，它管不了
+     * 渲染进程自己先 invoke 后挂监听 —— 那个次序在这里没有测试撑着，
+     * 只能靠调用点（未来的投影入口）先 onHubEvent 再 notifyEventsReady。
+     *
+     * 为什么它【不在】暴露面 = invoke 白名单那条相等断言里：白名单对账的是
+     * 「渲染进程能主动打到哪些 Hub 端点」，而这一发【从不出进程】——
+     * 它落在主进程自己的 handler 上（main/wire.ts 注册），不映射任何端点。
+     * 与 onHubEvent 同族：一个纯出、一个纯入，都不是 Hub 调用。
+     * 它仍走 ipc.invoke 而不是 fire-and-forget：拿得到一个 Promise，
+     * 装配出错（handler 没注册）时渲染进程能看到 reject，而不是静默地
+     * 永远等不到事件 —— "能调而没人应答"要红在调用点上，不许绿着烂。
+     */
+    notifyEventsReady: (): Promise<unknown> => ipc.invoke(EVENTS_READY_CHANNEL),
   };
 }
 
@@ -135,3 +153,18 @@ export const EXPOSED_GLOBAL_KEY = "opc";
  * 所以它单独在这里，并由测试【单独】钉住「只有一个推送通道」。
  */
 export const EVENT_CHANNEL = "hub:event";
+
+/**
+ * 「监听挂好了，可以开流」那一次 invoke 的通道名（0052 §7 第 3 条的落地）。
+ *
+ * 与 EVENT_CHANNEL 同处一侧、同一个理由：它【不在】hub 端点白名单里。
+ * 白名单管「渲染进程能主动让主进程去打哪个 Hub 端点」，而这一发
+ * 落在主进程自己的 handler 上（main/wire.ts 注册、收到才 start() 开流），
+ * 从不出进程。它和 hub:subscribeEvents 不冲突而是互补：
+ * 后者是 CHANNEL_SPECS 里那条 push 通道的【契约条目】（对账用），
+ * 前者是【触发开流的信号】—— 开流时机的闸门由 handle 注册制保证，
+ * 不再依赖"胶水在 load 完后手动调 start()"那句注释约定。
+ * 名字在这里【手写】而不是从主进程 import：本文件头 ② 的规矩是不 import
+ * 本包其它模块，而 main/wire.ts 反过来 import 这个常量 —— 一个方向，一份真相。
+ */
+export const EVENTS_READY_CHANNEL = "hub:eventsReady";

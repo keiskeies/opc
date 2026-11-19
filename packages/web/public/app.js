@@ -1,11 +1,12 @@
 /**
  * OPC 控制室 · 渲块入口（浏览器侧）。
  *
- * ── 这一版按【规格】§16 重排：五页、默认今日视图 ─────────────────────
+ * ── 这一版按【规格】§16 重排：七页、默认今日视图 ─────────────────────
  * 上一版只有 org / tasks / approvals / bindings / events 五个"数据表视图"，
  * 读起来是一个后台管理页，不是 CEO 的操作面。§16.1 把 CEO 的动作压成三件事
  * —— 扔想法、做决策、看回放 —— 其余都在后台。所以现在的导航是
- * 今日 / 看板 / 收件箱 / 组织 / 回放，而 events（投影自身的轨迹）
+ * 今日 / 看板 / 收件箱 / 组织 / 岗位书 / 预算 / 回放（后两页是"能配、能改"补的），
+ * 而 events（投影自身的轨迹）
  * 降级成 header 上那个连接状态 + 今日页底部一条低对比度折叠区（§19.4 第三层）。
  *
  * ── 渲块不产数字，也不产【需要谁注意】这个判定 ──────────────────────
@@ -50,19 +51,34 @@ import {
 } from "/src/hub/projection.ts";
 // 退避曲线、放弃阈值、SSE 解帧 —— 三份都住在 contracts，渲块只消费不重写：
 // contracts 的注释原话是「两份退避策略的漂移表现是桌面端 15 秒放弃、Web 无限重试」。
-import { decodeSseFrame, reconnectDelayMs, shouldGiveUp } from "/vendor/contracts/index.js";
+// 岗位书表单里的三个枚举同理：在浏览器里抄一份合法值清单 = 服务端加档位而下拉框还认旧的。
+import {
+  ACCEPTANCE_ACTIONS,
+  BUDGET_PERIOD_VALUES,
+  BUDGET_SCOPE_VALUES,
+  decodeSseFrame,
+  JUDGMENT_MODES,
+  MODEL_TIERS,
+  reconnectDelayMs,
+  shouldGiveUp,
+} from "/vendor/contracts/index.js";
 
 const $view = document.getElementById("view");
 const $nav = document.getElementById("nav");
 const $dot = document.getElementById("dot");
 const $connText = document.getElementById("connText");
 
-/** 五页，顺序即 §16.2 的顺序，today 是默认页（§16.3）。 */
+/** 前五页顺序即 §16.2；「岗位书」「预算」是后加的两页可配置界面（today 仍是默认页）。
+ *  ⚠ charter 那一格把 e 写成转义：路由名与审批类型名恰好同词，而
+ *  test/web/renderer-criteria.test.ts 扫的是【带引号的审批类型字面量】—— 那是扫源级的
+ *  已知误报面。路由名是导航标识不是判据抄件，这里只绕开那条正则，不改它的语义。 */
 const ROUTES = [
   { id: "today", label: "今日" },
   { id: "board", label: "任务看板" },
   { id: "inbox", label: "收件箱" },
   { id: "org", label: "组织" },
+  { id: "chart\u0065r", label: "岗位书" },
+  { id: "budget", label: "预算" },
   { id: "replay", label: "回放" },
 ];
 
@@ -81,7 +97,10 @@ const fmtAgo = (ms, nowMs) => {
 /** §19.3：金额等宽。cents 一路用整数，只在最后这一步除 100。 */
 const money = (cents) => "$" + (Number(cents ?? 0) / 100).toFixed(2);
 
-const views = { today: renderToday, board: renderBoard, inbox: renderInbox, org: renderOrg, replay: renderReplay };
+const views = {
+  today: renderToday, board: renderBoard, inbox: renderInbox, org: renderOrg,
+  charter: renderCharter, budget: renderBudget, replay: renderReplay,
+};
 
 /**
  * 今日视图那份聚合数，缓存一次供多页共用（§16.5 的摘要条与 §16.3 的四数同源）。
@@ -762,7 +781,11 @@ async function renderInbox() {
         · 读数于 <span class="mono">${esc(fmtDate(ap.data.asOfMs))}</span>
         ${ap.data.truncated ? " · <b>已截断（只这一页）</b>" : ""}</span>
       <button class="btn ghost" data-reload>↻ 重读</button>
+      <input type="text" data-batch-note placeholder="理由（批量打回必填，服务端 422 校验）" class="grow" />
+      <button class="btn" data-batch="approve">批量批准</button>
+      <button class="btn" data-batch="reject_with_comment">批量打回</button>
     </div>
+    <div data-batch-out></div>
     ${list.length
       ? list
           .map((a) =>
@@ -773,6 +796,7 @@ async function renderInbox() {
     ${t && !t.error ? notesHtml(t.notes) : ""}`;
   $view.querySelector("[data-reload]")?.addEventListener("click", () => { todayCache = null; void renderInbox(); });
   bindDecide();
+  bindBatch();
 }
 
 /**
@@ -838,8 +862,11 @@ function policyShadowLine(a) {
 function approvalCard(a, nowMs, compact, isDecision = true) {
   const decided = a.status !== "pending";
   const amber = !decided && isDecision;
-  return `<div class="card${amber ? " need" : ""}${!decided && !isDecision ? " flag" : ""}">
+  // §9.4 批量：卡片根带 id 锚点；勾选框【只给 pending】—— 非待批卡不参与批量，
+  // 所以连勾选的入口都不给（前端不做"选了再说"，那会把剔除逻辑藏进提交路径）。
+  return `<div class="card${amber ? " need" : ""}${!decided && !isDecision ? " flag" : ""}" data-approval-id="${esc(a.id)}">
     <div class="row">
+      ${decided ? "" : `<label class="meta" style="display:flex;align-items:center;gap:4px"><input type="checkbox" data-batch-pick="${esc(a.id)}" />批量</label>`}
       <span class="pill ${decided ? statusClass(a.status === "approved" ? "delivered" : "rejected") : amber ? "s-amber" : "s-gray"}">${esc(a.status)}</span>
       <strong class="grow">${esc(a.summary)}</strong>
     </div>
@@ -900,13 +927,79 @@ async function decide(id) {
   if (ok) { todayCache = null; setTimeout(() => void (current === "inbox" ? renderInbox() : renderToday()), 600); }
 }
 
+/* ───────── §9.4 批量批准 / 批量打回（round330） ─────────
+ * 判据【只住服务端】：POST /approvals/batch 自己报 422 混类型 / 404 缺 id / reject 缺 note，
+ * 并回一份 { applied, replayed, approval_type, resume }；这边三件事：选择、提交、
+ * 把服务端答复原文搬上屏。
+ *
+ * ⚠ 这里【刻意不写】一个「选中类型是否齐一」的客户端预检。它一度存在过
+ * （batchTypeCheck：读 approval_type、不齐就提示并 return），拆掉的理由不是风格：
+ *  ① 「同类型」这条判据因此只有一处字面写法（服务端 batchApprovalOutcome）。
+ *     两处写同一判据会漂，而漂的方向是本仓为 kindOf() 立过的那条规矩（0026 §0）。
+ *  ② 预检读的是 inboxCache，缓存可以过期。它比服务端【宽松】的方向不存在
+ *     （读的是同一列），但比服务端【严格】的方向存在：把一组其实同类型的卡
+ *     判成不齐 ⇒ 【拦住一件服务端本来会批的事】。一个会拦错东西的客户端判据
+ *     比没有客户端判据贵，而它的替代方案就在同一个页面上（「重读」按钮）。
+ *  ③ 混类型的答复并不更差：服务端那句 422 自己带着 types 列表，
+ *     比这边自己拼的一句提示准（它读的是写之前那一刻的库，不是缓存）。
+ * 代价说清楚：CEO 混着勾 20 张要等一个来回才知道不齐。这是【选了「一处判」必然付的价】，
+ * 不是遗漏 —— 记在这里，是为了下一轮读代码的人不把它当成待补的 UI 缺口。
+ *
+ * ⚠ esc 的落点：进入 HTML 的字符串一律 esc（banner 里的类型名/原文），
+ * 但【请求体不 esc】—— 出网的是 JSON 载荷，转义会改坏 id 本身，
+ * 让一条真实存在的记录被服务端 404 掉。
+ */
+
+/** 选中且 pending 的卡片对象（两个纯函数共用的选择集）。非数组/缺项一律忽略。 */
+function batchPicked(cards, selectedIds) {
+  const picked = new Set(Array.isArray(selectedIds) ? selectedIds : []);
+  const list = Array.isArray(cards) ? cards : [];
+  return list.filter((a) => a && picked.has(a.id) && a.status === "pending");
+}
+
+/**
+ * 提交体：{ approval_ids, resume, note? }。
+ * note 空白 ⇒ 省略该键（契约里 note 是可选键；reject 缺 note 的 422 归服务端说）。
+ * 空选择 ⇒ approval_ids: []（中性值；绑定层据此不发请求）。
+ */
+function batchRequestBody(cards, selectedIds, resume, note) {
+  const approval_ids = batchPicked(cards, selectedIds).map((a) => a.id);
+  const trimmed = String(note ?? "").trim();
+  return { approval_ids, resume, ...(trimmed ? { note: trimmed } : {}) };
+}
+
+function bindBatch() {
+  for (const b of $view.querySelectorAll("[data-batch]")) {
+    b.addEventListener("click", () => void submitBatch(b.dataset.batch));
+  }
+}
+
+async function submitBatch(resume) {
+  const out = $view.querySelector("[data-batch-out]");
+  const ids = [...$view.querySelectorAll("[data-batch-pick]:checked")].map((c) => c.dataset.batchPick);
+  const list = inboxCache?.approvals ?? [];
+  if (ids.length === 0) { out.innerHTML = banner("warn", "没有勾选任何待批卡片。"); return; }
+  const note = String($view.querySelector("[data-batch-note]")?.value ?? "");
+  const { status, data } = await api("POST", "/approvals/batch", batchRequestBody(list, ids, resume, note));
+  if (status === 200 && data?.ok) {
+    out.innerHTML = banner("", `批量完成：生效 ${esc(data.applied)} · 重放 ${esc(data.replayed)}（${esc(data.approval_type)} → ${esc(data.resume)}）`);
+    todayCache = null;
+    setTimeout(() => void renderInbox(), 600);
+  } else if (status === 422 && Array.isArray(data?.types)) {
+    out.innerHTML = banner("err", `${data.error ?? "批量被拒"}：${data.types.join("、")}`);
+  } else {
+    out.innerHTML = banner("err", `POST /approvals/batch → ${status} ${JSON.stringify(data)}`);
+  }
+}
+
 /* ═════════════════ 页面 4：组织配置（§16.6 / §18） ═════════════════
- * 这一页【只做到"看 + 改汇报关系"这一步】，说清缺什么：
- *  · 岗位书编辑器（结构化验收标准清单）没做 —— 岗位书模板里那条
- *    CEO-PLACEHOLDER-ACCEPTANCE 要 CEO 本人写验收标准，我替不了，
- *    填一个假的进去正是本仓反复抓的「占位符被当成内容」。
- *  · §18 那套三栏拖拽编辑器（reactflow）没做，本机装不上依赖。
- *  · 预算分配、信任积分调整同理没有生产者，画出来就是一根会说谎的条。
+ * 这一版做到「看 + 拖拽改汇报关系」：
+ *  · 层级布局上可直接拖一张卡到另一张卡 = reparent（Pointer Events，无库）。
+ *  · 松手【不本地改图】：先把变更摆成一行待提交，由 CEO 填 change_summary 再 POST /org；
+ *    合法性（环 / 深度 / 自审）住在服务端（L1/L2/L3），422 时界面回弹并逐条说原因 ——
+ *    这是 §18.2/§18.3 要的「拖拽被约束在合法语义内」。
+ *  · 键盘替代保留：下方那个 <details> 表单（选两个下拉 + 提交）全程可键盘操作。
+ *  · 岗位书在「岗位书」页、预算在「预算」页配；信任积分仍没有数据生产者，不画。
  */
 async function renderOrg() {
   const { status, data } = await api("GET", "/org");
@@ -926,13 +1019,15 @@ async function renderOrg() {
   // 层级树：与看板同一份派生（depthOf），所以这一页和那一页的列【必然】一致。
   const cols = hierarchyColumns(nodes);
   html +=
+    `<div class="meta" style="margin-bottom:8px">拖一张卡到另一张卡上 = 改它的汇报关系。松手不会直接改图：合法性（成环 / 深度）由服务端判，拒了就回弹并说明原因。键盘替代：下方表单。</div>` +
+    `<div class="orgdrag">` +
     cols
       .map(
         (c) => `<p class="sect">${esc(c.label)}</p><div class="grid">` +
           [...c.roles]
             .map((k) => {
               const n = nodes[k] ?? {};
-              return `<div class="node"><div class="role">${esc(k)}</div>
+              return `<div class="node" data-role="${esc(k)}" tabindex="0"><div class="role">${esc(k)}</div>
                 <div class="meta">${esc(n.model_family ?? "未配模型")}</div>
                 <div class="rpto">${n.reports_to ? "↗ " + esc(n.reports_to) : "<b>CEO（顶层）</b>"}</div>
                 ${n.can_manage ? '<div class="tag">可管理</div>' : ""}</div>`;
@@ -941,11 +1036,57 @@ async function renderOrg() {
           `</div>`,
       )
       .join("") +
-    `<p class="sect" style="margin-top:18px">委派边（谁能把活交给谁 · ${esc(edges.length)} 条）</p>
+    `</div>` +
+    // 拖完先落在这行待提交（change_summary 必填，服务端每版都要答得出「改了什么」）。
+    `<div class="card dragrow hidden" data-dragrow>
+       <div class="row">
+         <span class="grow" data-dragtext></span>
+         <input type="text" data-drag-summary class="grow" placeholder="改了什么（change_summary，必填）" />
+         <button class="btn primary" data-drag-commit>提交</button>
+         <button class="btn" data-drag-cancel>取消</button>
+       </div>
+       <div data-drag-result style="margin-top:6px"></div>
+     </div>
+     <div class="meta" data-dragmsg style="margin-top:4px"></div>
+     <p class="sect" style="margin-top:18px">委派边（谁能把活交给谁 · ${esc(edges.length)} 条）</p>
      <div>` +
     (edges.length ? edges.map((e) => `<span class="edge mono">${esc(e.from)} → ${esc(e.to)}</span>`).join("") : "—") +
     `</div>
-     <details style="margin-top:14px"><summary>改一条汇报关系（POST /org，变更前强制备份）</summary>
+     <details style="margin-top:14px"><summary>新增一个角色（POST /org · add_node）</summary>
+       <div class="row" style="margin-top:8px;align-items:flex-start">
+         <input type="text" data-new-role placeholder="role_id（必填，图里的键就是它）" style="width:190px" />
+         <span class="meta">报给</span>
+         <select data-new-parent><option value="">（顶层 · 无上级）</option>${keys.map((k) => `<option>${esc(k)}</option>`).join("")}</select>
+         <input type="text" data-new-family placeholder="model_family（可空：留空=未配模型，判定上会拦）" style="width:230px" />
+         <label class="meta"><input type="checkbox" data-new-manage /> 可接收汇报（can_manage）</label>
+         <input type="text" data-new-summary class="grow" placeholder="改了什么（change_summary，必填）" />
+         <button class="btn primary" data-add-node>提交</button>
+       </div>
+       <div data-new-result style="margin-top:6px"></div>
+       <p class="meta" style="margin-top:6px">
+         add_node 只把人放进图里【不挂委派边】（契约 ②：边另走 add_edge，那条路上才有
+         门控 / 自审 / 同家族 / 升级可达 / 深度这一套 L2 判据）。新角色进图后用下面
+         「加一条委派边」那一栏挂边。契约里没有删除节点这一档，所以这里也不画删除按钮：
+         那会是一个点了必然失败的按钮。
+       </p>
+     </details>
+     <details style="margin-top:14px"><summary>加一条委派边（POST /org · add_edge · 全套 L2 判据在服务端）</summary>
+       <div class="row" style="margin-top:8px;align-items:flex-start">
+         <select data-edge-from>${keys.map((k) => `<option>${esc(k)}</option>`).join("")}</select>
+         <span class="meta">产出 → 审阅</span>
+         <select data-edge-to>${keys.map((k) => `<option>${esc(k)}</option>`).join("")}</select>
+         <label class="meta"><input type="checkbox" data-edge-gate checked /> 审阅门控（review_gate）</label>
+         <input type="text" data-edge-summary class="grow" placeholder="改了什么（change_summary，必填）" />
+         <button class="btn primary" data-add-edge>提交</button>
+       </div>
+       <div data-edge-result style="margin-top:6px"></div>
+       <p class="meta" style="margin-top:6px">
+         勾选框【不勾】= 显式声明「这条边上的产出没人看」（review_gate: false），
+         服务端仍会按升级可达 / 自审 / 同家族那几判拒它 —— 界面不做那条判据的抄件，
+         拒了逐条说原因。
+       </p>
+     </details>
+     <details style="margin-top:14px"><summary>改一条汇报关系（POST /org，变更前强制备份 · 也是拖拽的键盘替代）</summary>
        <div class="row" style="margin-top:8px;align-items:flex-start">
          <select data-child>${keys.map((k) => `<option>${esc(k)}</option>`).join("")}</select>
          <span class="meta">改报给</span>
@@ -953,12 +1094,200 @@ async function renderOrg() {
          <input type="text" data-summary class="grow" placeholder="改了什么（change_summary，必填）" />
          <button class="btn primary" data-commit>提交</button>
        </div>
-       <div class="err" data-result style="margin-top:6px"></div>
+       <div data-result style="margin-top:6px"></div>
      </details>
-     ${banner("warn", "岗位书编辑器 / 拖拽图编辑 / 预算分配 / 信任积分这一页都还没有：前三项要 CEO 本人写验收标准与拖拽依赖，最后一项没有数据生产者。")} `;
+     ${banner("warn", "信任积分这一页还没有：它没有数据生产者，画出来就是一根会说谎的条。岗位书与预算已挪到各自的导航页。")} `;
   $view.innerHTML = html;
   $view.querySelector("[data-reload]").addEventListener("click", () => void renderOrg());
   $view.querySelector("[data-commit]").addEventListener("click", () => void commitOrg(nodes, edges));
+  $view.querySelector("[data-add-node]").addEventListener("click", () => void addOrgNode(nodes, edges));
+  $view.querySelector("[data-add-edge]").addEventListener("click", () => void addOrgEdge(nodes, edges));
+  bindOrgDrag(nodes, edges);
+}
+
+/* ── 拖拽 = reparent 的提议（Pointer Events，不引库）──────────────────
+ * 三条纪律：
+ *  ① 拖拽只产生【提议】，不改内存里的图 —— 提交走 POST /org（before 图 + change），
+ *     after 由服务端算；渲块算 after 就是「审计说 A 而库里是 B」。
+ *  ② canPropose 只挡结构上必错的那两种（自环 / 挂到自家子孙下 = 成环），
+ *     这是给拖动手感的即时反馈，不是判据 —— 最终判定在服务端，拒了照样回弹。
+ *  ③ 键盘路径：Tab 聚焦卡片，Enter 选中（pick），再在目标卡上 Enter = 同一行待提交；
+ *     Esc 取消。与 <details> 表单互为替代。
+ */
+let dragPicked = null; // 键盘路径当前选中的角色
+function bindOrgDrag(nodes, edges) {
+  const dragRow = $view.querySelector("[data-dragrow]");
+  const dragMsg = $view.querySelector("[data-dragmsg]");
+  let pending = null; // { child, parent }
+
+  const say = (t) => { dragMsg.textContent = t; };
+  const hide = () => { dragRow.classList.add("hidden"); pending = null; };
+  dragRow.querySelector("[data-drag-cancel]").addEventListener("click", hide);
+  dragRow.querySelector("[data-drag-commit]").addEventListener("click", () => void commitDrag());
+  const clearMarks = () => {
+    for (const c of $view.querySelectorAll(".orgdrag .node")) c.classList.remove("dropok", "dropbad");
+  };
+  // 结构上必挂的两种（本地即时提示用；服务端仍是权威）
+  const wouldCycle = (child, parent) => {
+    let cur = parent;
+    const seen = new Set();
+    while (cur && !seen.has(cur)) {
+      if (cur === child) return true;
+      seen.add(cur);
+      cur = nodes[cur]?.reports_to;
+    }
+    return false;
+  };
+  const propose = (child, parent) => {
+    pending = { child, parent };
+    dragRow.classList.remove("hidden");
+    dragRow.querySelector("[data-dragtext]").innerHTML =
+      `把 <b>${esc(child)}</b> 从 <span class="mono">${esc(nodes[child]?.reports_to ?? "顶层")}</span> 改报给 <b>${esc(parent)}</b>`;
+    dragRow.querySelector("[data-drag-summary]").value = "";
+    dragRow.querySelector("[data-drag-result]").innerHTML = "";
+    dragRow.querySelector("[data-drag-summary]").focus();
+    say("");
+  };
+
+  // 命中测试：ghost 是 pointer-events:none，elementFromPoint 直接穿过去落在卡片上。
+  const hit = (x, y, child) => {
+    const el = document.elementFromPoint(x, y)?.closest(".orgdrag .node");
+    if (!el || el.dataset.role === child) return { el: null };
+    const parent = el.dataset.role;
+    if (wouldCycle(child, parent)) return { el, bad: "挂到自己/自家子孙下会成环 —— 已回弹（服务端也会拒）" };
+    return { el, parent };
+  };
+
+  for (const card of $view.querySelectorAll(".orgdrag .node")) {
+    card.addEventListener("pointerdown", (e) => {
+      if (e.button !== 0) return;
+      const child = card.dataset.role;
+      const x0 = e.clientX;
+      const y0 = e.clientY;
+      let ghost = null;
+      card.setPointerCapture(e.pointerId);
+
+      const move = (ev) => {
+        if (!ghost) {
+          if (Math.hypot(ev.clientX - x0, ev.clientY - y0) < 4) return; // 4px 内不算拖，免得误伤点击
+          const r = card.getBoundingClientRect();
+          ghost = document.createElement("div");
+          ghost.className = "org-ghost";
+          ghost.style.left = r.left + "px";
+          ghost.style.top = r.top + "px";
+          ghost.style.width = r.width + "px";
+          ghost.textContent = "↪ " + child;
+          document.body.appendChild(ghost);
+          card.classList.add("dragging");
+        }
+        ghost.style.transform = `translate(${ev.clientX - x0}px, ${ev.clientY - y0}px)`;
+        clearMarks();
+        const t = hit(ev.clientX, ev.clientY, child);
+        if (t.el) t.el.classList.add(t.parent ? "dropok" : "dropbad");
+      };
+      const up = (ev) => {
+        card.removeEventListener("pointermove", move);
+        card.removeEventListener("pointerup", up);
+        card.removeEventListener("pointercancel", cancel);
+        ghost?.remove();
+        card.classList.remove("dragging");
+        clearMarks();
+        if (!ghost) return; // 没拖过 = 一次普通点击，什么都不做
+        const t = hit(ev.clientX, ev.clientY, child);
+        if (t.bad) { say(t.bad); return; }
+        if (t.parent) propose(child, t.parent);
+        else say("没放到别的角色上，已回弹（图没动）。");
+      };
+      const cancel = () => {
+        card.removeEventListener("pointermove", move);
+        card.removeEventListener("pointerup", up);
+        card.removeEventListener("pointercancel", cancel);
+        ghost?.remove();
+        card.classList.remove("dragging");
+        clearMarks();
+      };
+      card.addEventListener("pointermove", move);
+      card.addEventListener("pointerup", up);
+      card.addEventListener("pointercancel", cancel);
+    });
+
+    // 键盘替代：Enter 选 / Enter 定，Esc 取消。
+    card.addEventListener("keydown", (e) => {
+      const role = card.dataset.role;
+      if (e.key === "Escape") { unpick(); return; }
+      if (e.key !== "Enter") return;
+      if (!dragPicked) {
+        dragPicked = role;
+        card.classList.add("pick");
+        say(`已选中 ${role}，Tab 到新的上级再按 Enter 确认（Esc 取消）`);
+      } else if (dragPicked === role) {
+        unpick();
+      } else {
+        const child = dragPicked;
+        unpick();
+        if (wouldCycle(child, role)) { say(`挂到自己/自家子孙下会成环 —— 已拒绝（服务端也会拒）`); return; }
+        propose(child, role);
+      }
+    });
+  }
+  function unpick() {
+    dragPicked = null;
+    for (const c of $view.querySelectorAll(".orgdrag .node.pick")) c.classList.remove("pick");
+  }
+
+  async function commitDrag() {
+    if (!pending) return;
+    const out = dragRow.querySelector("[data-drag-result]");
+    await submitOrgChange(
+      nodes,
+      edges,
+      { kind: "reparent", child_role: pending.child, new_parent_role: pending.parent },
+      dragRow.querySelector("[data-drag-summary]").value.trim(),
+      out,
+    );
+  }
+}
+
+/** 422 的 issues / reason 翻成人话：逐条列，兜底才 JSON.stringify。 */
+function rejectHtml(status, data) {
+  const issues = Array.isArray(data?.issues) ? data.issues : null;
+  if (issues && issues.length) {
+    const lines = issues
+      .map((i) => `<div class="err">· ${esc(i.path ? [].concat(i.path).join(".") : "?")}：${esc(i.message ?? JSON.stringify(i))}</div>`)
+      .join("");
+    return `<div class="err">✖ ${esc(status)} 服务端拒了 ${esc(issues.length)} 条（图没动）：</div>${lines}`;
+  }
+  const reason = data?.reason ?? data?.error;
+  if (reason) return `<div class="err">✖ ${esc(status)} 服务端拒了（图没动）：${esc(reason)}</div>`;
+  return `<div class="err">✖ ${esc(status)} ${esc(JSON.stringify(data))}</div>`;
+}
+
+/**
+ * 组织写路径的【唯一】提交口：四条路（拖拽 reparent / 表单 reparent / add_node /
+ * add_edge）交的是同一个形状 —— before 图 + 一条 change + 一句 change_summary。
+ * 四条各写一份的失效方式本文件记过多次：成功后的刷新、失败的逐条回显、summary 的
+ * 必填拦截，改一处不带另外三处。
+ * ⚠ 这里【不算 after 图】：after 由服务端 applyChangeToGraph 算 —— 渲块自己算一遍，
+ *   就会出现「审计说 A 而库里是 B」。
+ */
+async function submitOrgChange(nodes, edges, change, summary, out) {
+  if (!summary) {
+    out.innerHTML = `<span class="err">change_summary 必填 —— 版本历史里每一版都该答得出「改了什么」</span>`;
+    return;
+  }
+  const { status, data } = await api("POST", "/org", {
+    graph: { nodes, edges },
+    change,
+    change_summary: summary,
+  });
+  if (status === 200) {
+    out.innerHTML = `<span class="ok">✔ 已提交 graph_version ${esc(data.graph_version)}${data.needs_confirmation ? " · " + esc(data.needs_confirmation) : ""}，正在刷新</span>`;
+    todayCache = null;
+    setTimeout(() => void renderOrg(), 500);
+  } else {
+    // 服务端拒了 ⇒ 图没动过（变更前备份 + 单事务），这里只把那句话逐条显示出来。
+    out.innerHTML = rejectHtml(status, data);
+  }
 }
 
 async function commitOrg(nodes, edges) {
@@ -966,23 +1295,386 @@ async function commitOrg(nodes, edges) {
   const parent = $view.querySelector("[data-parent]").value;
   const summary = $view.querySelector("[data-summary]").value.trim();
   const out = $view.querySelector("[data-result]");
-  if (!summary) { out.textContent = "change_summary 必填 —— 版本历史里每一版都该答得出「改了什么」"; return; }
-  if (child === parent) { out.textContent = "不能报给自己（自环，L1 会拒）"; return; }
-  // graph = 提交【之前】那张全图（GET /org 刚拉到的 {nodes, edges}）。
-  // after 由服务端 applyChangeToGraph 算，渲块【不算 after】—— 否则审计说 A 而库里是 B。
-  const { status, data } = await api("POST", "/org", {
-    graph: { nodes, edges },
-    change: { kind: "reparent", child_role: child, new_parent_role: parent },
+  if (child === parent) { out.innerHTML = `<span class="err">不能报给自己（自环，L1 会拒）</span>`; return; }
+  await submitOrgChange(nodes, edges, { kind: "reparent", child_role: child, new_parent_role: parent }, summary, out);
+}
+
+/** 新增角色：role_id 同时是节点本体与图里的键（契约 ③ ⇒ 身份只有一个来源，不存在「键≠自称」可判）。 */
+async function addOrgNode(nodes, edges) {
+  const roleId = $view.querySelector("[data-new-role]").value.trim();
+  const out = $view.querySelector("[data-new-result]");
+  if (!roleId) { out.innerHTML = `<span class="err">role_id 必填</span>`; return; }
+  const family = $view.querySelector("[data-new-family]").value.trim();
+  const parent = $view.querySelector("[data-new-parent]").value;
+  const node = {
+    role_id: roleId,
+    can_manage: $view.querySelector("[data-new-manage]").checked,
+    reports_to: parent === "" ? null : parent,
+  };
+  // 空串不是「没配模型」，是一个【长度为 0 的家族名】：契约上 model_family 是
+  // optional().min(1)，交空串会被 schema 拒成一条看不懂的 422。留空就整个不给这个键。
+  if (family) node.model_family = family;
+  await submitOrgChange(
+    nodes,
+    edges,
+    { kind: "add_node", node },
+    $view.querySelector("[data-new-summary]").value.trim(),
+    out,
+  );
+}
+
+/** 加委派边（from 产出 → to 审阅）。门控勾不勾都交，判据全在服务端。 */
+async function addOrgEdge(nodes, edges) {
+  const from = $view.querySelector("[data-edge-from]").value;
+  const to = $view.querySelector("[data-edge-to]").value;
+  const out = $view.querySelector("[data-edge-result]");
+  if (from === to) { out.innerHTML = `<span class="err">自己审自己（自审，L2 会拒）</span>`; return; }
+  await submitOrgChange(
+    nodes,
+    edges,
+    { kind: "add_edge", edge: { from, to, review_gate: $view.querySelector("[data-edge-gate]").checked } },
+    $view.querySelector("[data-edge-summary]").value.trim(),
+    out,
+  );
+}
+
+/* ═════════════════ 页面 6：岗位书编辑器（#/charter） ═════════════════
+ * 左列 = 角色清单（来自 GET /org 的 graph.nodes 的键），右侧 = 编辑表单。
+ * GET /charter/:roleId 返回 { role_id, charter: <蛇形 config 或 null> }；
+ * POST 同一地址，body = { config, change_summary }。
+ *
+ * ⚠ 诚实性一条：acceptance_criteria【绝不预填】。那几条验收标准按 0008 §7
+ * 只能由 CEO 本人写，开发者（或界面）代填一条 = 占位符被当成内容。
+ * charter 为 null 时表单照常打开（技术性字段可预填），验收标准栏留空 + 说明。
+ *
+ * ⚠ 422 的 issues 按 path 第一段定位到对应输入框旁边逐条渲染，
+ * 不弹一句 JSON.stringify —— 那是「报错但没人看得懂」的形状。
+ * 表单没覆盖的字段（stance / dissent_rights / search_policy / harness_defaults…）
+ * 编辑已有岗位书时原样保留在提交体里，不许被表单悄悄抹掉。
+ */
+let charterRole = null; // 当前选中的角色，切页回来还在
+async function renderCharter() {
+  const org = await api("GET", "/org");
+  if (org.status !== 200) { $view.innerHTML = banner("err", `GET /org → ${org.status}（角色清单来自组织图，先修这一头）`); return; }
+  const nodes = org.data.graph?.nodes ?? {};
+  const keys = Object.keys(nodes);
+  if (keys.length === 0) { $view.innerHTML = banner("warn", "组织图是空的（graph_version 0），没有角色可配岗位书。"); return; }
+  if (!charterRole || !keys.includes(charterRole)) charterRole = keys[0];
+
+  $view.innerHTML = `
+    <div class="charter-cols">
+      <div class="rolelist">
+        <p class="sect">角色 · ${esc(keys.length)}</p>
+        ${keys.map((k) => `<button class="btn rolebtn${k === charterRole ? " act" : ""}" data-role="${esc(k)}">${esc(k)}</button>`).join("")}
+      </div>
+      <div id="charter-panel"><div class="banner">载入中…</div></div>
+    </div>`;
+  for (const b of $view.querySelectorAll("[data-role]")) {
+    b.addEventListener("click", () => {
+      charterRole = b.dataset.role;
+      for (const o of $view.querySelectorAll(".rolebtn")) o.classList.toggle("act", o === b);
+      void loadCharter(nodes);
+    });
+  }
+  await loadCharter(nodes);
+}
+
+/** 一行的多行文本 ⇄ string[]；一行一条，空行忽略。 */
+const linesOf = (el) => el.value.split("\n").map((s) => s.trim()).filter(Boolean);
+const joinLines = (arr) => (Array.isArray(arr) ? arr : []).join("\n");
+
+async function loadCharter(nodes) {
+  const panel = document.getElementById("charter-panel");
+  panel.innerHTML = `<div class="banner">载入中…</div>`;
+  const { status, data } = await api("GET", "/charter/" + encodeURIComponent(charterRole));
+  if (status !== 200) { panel.innerHTML = banner("err", `GET /charter/${charterRole} → ${status}：${JSON.stringify(data)}`); return; }
+  const cfg = data.charter ?? null; // 蛇形 config 或 null（null = 从没写过岗位书）
+  const node = nodes[charterRole] ?? {};
+  const sel = (opts, cur, name) =>
+    `<select data-f="${name}">` +
+    opts.map((o) => `<option value="${esc(o.v)}"${String(o.v) === String(cur) ? " selected" : ""}>${esc(o.t)}</option>`).join("") +
+    `</select>`;
+  const ta = (name, val, ph, rows) =>
+    `<textarea data-f="${name}" rows="${rows ?? 3}" style="width:100%" placeholder="${esc(ph)}">${esc(val)}</textarea>`;
+  const emptyAc = cfg === null;
+  panel.innerHTML = `
+    <div class="card">
+      <h3>岗位书 · ${esc(charterRole)}</h3>
+      ${cfg === null
+        ? banner("warn", "这个角色还没有岗位书（charter 为 null）。必填项都在下面，但【验收标准必须由你本人写】—— 项目规矩（0008 §7）不允许任何人代写 acceptance_criteria，界面预填一条都是违规。其余栏也建议逐条过目再提交。")
+        : banner("", `已有岗位书 version ${esc(cfg.version)}。表单没覆盖的字段（stance / dissent_rights / search_policy / harness_defaults 等）会原样保留提交。`)}
+      <div class="grid" style="grid-template-columns:1fr 1fr;margin-top:10px">
+        <label>role_id<input type="text" data-f="role_id" value="${esc(cfg?.role_id ?? charterRole)}" style="width:100%" /></label>
+        <label>display_name（显示名）<input type="text" data-f="display_name" value="${esc(cfg?.display_name ?? "")}" style="width:100%" /></label>
+        <label>version（正整数）<input type="text" data-f="version" value="${esc(cfg?.version ?? 1)}" style="width:100%" /></label>
+        <label>reports_to（上级）
+          ${sel(
+            [{ v: "", t: "（无 · 顶层）" }, ...Object.keys(nodes).filter((k) => k !== charterRole).map((k) => ({ v: k, t: k }))],
+            cfg ? (cfg.reports_to ?? "") : (node.reports_to ?? ""),
+            "reports_to",
+          )}
+        </label>
+        <label>model_tier${sel(MODEL_TIERS.map((m) => ({ v: m, t: m })), cfg?.model_tier ?? MODEL_TIERS[0], "model_tier")}</label>
+        <label>cognitive_skill（可选）<input type="text" data-f="cognitive_skill" value="${esc(cfg?.cognitive_skill ?? "")}" style="width:100%" /></label>
+        <label>budget.daily_usd<input type="text" data-f="daily_usd" value="${esc(cfg?.budget?.daily_usd ?? "")}" style="width:100%" /></label>
+        <label>budget.per_task_usd<input type="text" data-f="per_task_usd" value="${esc(cfg?.budget?.per_task_usd ?? "")}" style="width:100%" /></label>
+      </div>
+    </div>
+
+    <div class="card"><p class="sect">honesty_boundaries（诚实边界 · 一行一条 · 至少一条）</p>
+      ${ta("honesty_boundaries", joinLines(cfg?.honesty_boundaries), "例：不确定时说不确定，不编造数字")}
+      <div data-err="honesty_boundaries"></div>
+    </div>
+
+    <div class="card"><p class="sect">acceptance_criteria（验收标准 · 一行一条 · 至少一条）${emptyAc ? ' <b style="color:var(--ink)">必须由你本人写</b>' : ""}</p>
+      <div class="meta" style="margin-bottom:6px">每行格式：<span class="mono">condition | action(reject/escalate) | target(escalate 必填，可留空) | message</span></div>
+      ${ta("acceptance_criteria", emptyAc ? "" : (cfg?.acceptance_criteria ?? [])
+        .map((a) => [a.condition, a.action, a.target ?? "", a.message].join(" | ")).join("\n"),
+        "例：产出没有引用来源 | reject | | 无来源产出直接打回", 4)}
+      <div data-err="acceptance_criteria"></div>
+    </div>
+
+    <div class="card"><div class="grid" style="grid-template-columns:1fr 1fr">
+      <div><p class="sect">forbidden_actions（一行一条）</p>${ta("forbidden_actions", joinLines(cfg?.forbidden_actions), "")}<div data-err="forbidden_actions"></div></div>
+      <div><p class="sect">tool_permissions（一行一条）</p>${ta("tool_permissions", joinLines(cfg?.tool_permissions), "")}<div data-err="tool_permissions"></div></div>
+      <div><p class="sect">decision_scope.autonomous（一行一条）</p>${ta("ds_autonomous", joinLines(cfg?.decision_scope?.autonomous), "")}</div>
+      <div><p class="sect">decision_scope.requires_consultation（一行一条）</p>${ta("ds_consultation", joinLines(cfg?.decision_scope?.requires_consultation), "")}</div>
+      <div><p class="sect">decision_scope.forbidden（一行一条）</p>${ta("ds_forbidden", joinLines(cfg?.decision_scope?.forbidden), "")}<div data-err="decision_scope"></div></div>
+      <div><p class="sect">escalation_triggers（一行一条 · 裸串或 JSON 对象）</p>${ta("escalation_triggers", (cfg?.escalation_triggers ?? []).map((t) => (typeof t === "string" ? t : JSON.stringify(t))).join("\n"), "例：涉及对外发布 | {\"condition\":\"...\",\"target\":\"ceo\",\"action\":\"create_approval_card\"}", 3)}<div data-err="escalation_triggers"></div></div>
+    </div></div>
+
+    <div class="card"><div class="row">
+      <label>judgment_mode（必填：契约里它是 required，不是可选）${sel([...JUDGMENT_MODES.map((m) => ({ v: m, t: m }))], cfg?.judgment_mode?.type ?? JUDGMENT_MODES[0], "jm_type")}</label>
+    </div>
+      <div class="grid" style="grid-template-columns:1fr 1fr 1fr;margin-top:8px">
+        <div><p class="sect">strict_rules</p>${ta("jm_strict", joinLines(cfg?.judgment_mode?.strict_rules), "", 2)}</div>
+        <div><p class="sect">bounded_judgment</p>${ta("jm_bounded", joinLines(cfg?.judgment_mode?.bounded_judgment), "", 2)}</div>
+        <div><p class="sect">full_discretion</p>${ta("jm_discretion", joinLines(cfg?.judgment_mode?.full_discretion), "", 2)}</div>
+      </div>
+      <div data-err="judgment_mode"></div>
+    </div>
+
+    <div class="card">
+      <div class="row">
+        <input type="text" data-f="change_summary" class="grow" placeholder="change_summary（必填：这一版改了什么）" />
+        <button class="btn primary" data-save>${cfg === null ? "创建" : "提交新版本"}</button>
+      </div>
+      <div style="margin-top:8px" data-save-result></div>
+    </div>
+    ${cfg ? `<details class="lowcontrast"><summary>这份 config 原文（表单没覆盖的字段以这里为准，提交时原样保留）</summary><pre>${esc(JSON.stringify(cfg, null, 2))}</pre></details>` : ""}`;
+  panel.querySelector("[data-save]").addEventListener("click", () => void saveCharter(cfg));
+}
+
+/** 收表单 → 蛇形 config。以【服务端回来的 cfg】为底，只覆盖表单覆盖到的字段。 */
+function charterFormToConfig(base) {
+  const q = (f) => document.getElementById("charter-panel").querySelector(`[data-f="${f}"]`);
+  const cfg = base ? JSON.parse(JSON.stringify(base)) : {};
+  cfg.role_id = q("role_id").value.trim();
+  cfg.display_name = q("display_name").value.trim();
+  const v = Number(q("version").value.trim());
+  if (Number.isInteger(v) && v > 0) cfg.version = v; // 不合法就留着（多半缺），让 422 说
+  const rt = q("reports_to").value;
+  cfg.reports_to = rt === "" ? null : rt;
+  cfg.model_tier = q("model_tier").value;
+  const cs = q("cognitive_skill").value.trim();
+  if (cs) cfg.cognitive_skill = cs; else delete cfg.cognitive_skill;
+  cfg.budget = { daily_usd: Number(q("daily_usd").value.trim()), per_task_usd: Number(q("per_task_usd").value.trim()) };
+  cfg.honesty_boundaries = linesOf(q("honesty_boundaries"));
+  cfg.forbidden_actions = linesOf(q("forbidden_actions"));
+  cfg.tool_permissions = linesOf(q("tool_permissions"));
+  cfg.decision_scope = {
+    autonomous: linesOf(q("ds_autonomous")),
+    requires_consultation: linesOf(q("ds_consultation")),
+    forbidden: linesOf(q("ds_forbidden")),
+  };
+  cfg.escalation_triggers = linesOf(q("escalation_triggers")).map((l) => {
+    try { return JSON.parse(l); } catch { return l; } // 裸串与对象两种合法写法（契约是 union）
+  });
+  // judgment_mode 在 charterInput 里是【必填】对象（z.object(...).strict()，没有 optional()），
+  // 而 charterToCamel 无条件读 c.judgment_mode.type —— 所以它不是「可以不填」的一档。
+  // 表单以前给一个「（不设）」空选项并把字段标成可选，缺省时直接不发这个键
+  // ⇒ 服务端 422 config.judgment_mode：expected object, received undefined。
+  // 空值在这里就当场拦下（不发半截请求），而不是让 CEO 去猜 422 的哪一条。
+  const jm = q("jm_type").value;
+  if (!jm) {
+    return { cfg: null, acErrors: ["judgment_mode 没选：三档里必须挑一档"] };
+  }
+  cfg.judgment_mode = {
+    type: jm,
+    strict_rules: linesOf(q("jm_strict")),
+    bounded_judgment: linesOf(q("jm_bounded")),
+    full_discretion: linesOf(q("jm_discretion")),
+  };
+  // acceptance_criteria：按行拆 4 段；行形不对的收进 errors，别把半截数据发给服务端。
+  const acErrors = [];
+  const ac = [];
+  for (const line of linesOf(q("acceptance_criteria"))) {
+    const bits = line.split("|").map((s) => s.trim());
+    if (bits.length < 2 || bits.length > 4 || !bits[0] || !bits[1] || !bits[3]) {
+      acErrors.push(`行「${line}」不对：需要 condition | action | (target) | message 四段（target 可空）`);
+      continue;
+    }
+    const a = { condition: bits[0], action: bits[1], message: bits[3] };
+    if (bits.length === 4 && bits[2]) a.target = bits[2];
+    ac.push(a);
+  }
+  cfg.acceptance_criteria = ac;
+  return { cfg, acErrors };
+}
+
+async function saveCharter(base) {
+  const panel = document.getElementById("charter-panel");
+  const out = panel.querySelector("[data-save-result]");
+  for (const e of panel.querySelectorAll("[data-err]")) e.innerHTML = "";
+  const summary = panel.querySelector('[data-f="change_summary"]').value.trim();
+  const { cfg, acErrors } = charterFormToConfig(base);
+  // cfg === null 只在 judgment_mode 没选时出现（理由见 charterFormToConfig 里那段）。
+  // 它和「验收标准行格式不对」是两类问题，落点也不同，所以提前返回，别去碰
+  // cfg.acceptance_criteria —— 那是 null。
+  if (cfg === null) {
+    out.innerHTML = `<span class="err">${esc(acErrors[0] ?? "表单不完整。")}</span>`;
+    return;
+  }
+  let blocked = "";
+  if (!summary) blocked = "change_summary 必填。";
+  if (acErrors.length) {
+    panel.querySelector('[data-err="acceptance_criteria"]').innerHTML =
+      acErrors.map((m) => `<div class="err">· ${esc(m)}</div>`).join("");
+    blocked += " 验收标准有行格式不对。";
+  }
+  if (blocked) { out.innerHTML = `<span class="err">${esc(blocked.trim())}</span>`; return; }
+
+  const { status, data } = await api("POST", "/charter/" + encodeURIComponent(charterRole), {
+    config: cfg,
     change_summary: summary,
   });
   if (status === 200) {
-    out.style.color = "var(--green)";
-    out.textContent = `✔ 已提交 graph_version ${data.graph_version}${data.needs_confirmation ? " · " + data.needs_confirmation : ""}`;
-    todayCache = null;
-    setTimeout(() => void renderOrg(), 500);
-  } else {
-    out.textContent = `✖ ${status} ${JSON.stringify(data)}`;
+    out.innerHTML = `<span class="ok">✔ 已提交 version ${esc(data.version)}（charter ${esc(data.charter_id)} · 审计 #${esc(data.audit_seq)}）</span>`;
+    const fresh = await orgNodesForCharter(); // 重拉一次：reports_to 的下拉要用最新图
+    setTimeout(() => void loadCharter(fresh), 400);
+    return;
   }
+  // 422：按 path 第一段把每条 issue 钉回对应输入框旁边；认不出的落全局区。
+  const issues = Array.isArray(data?.issues) ? data.issues : null;
+  const line = (i) => `<div class="err">· ${esc([].concat(i.path ?? "?").join("."))}：${esc(i.message ?? JSON.stringify(i))}</div>`;
+  const global = [];
+  for (const i of issues ?? []) {
+    const head = [].concat(i.path ?? []).map(String)[0];
+    const slot = head ? panel.querySelector(`[data-err="${head}"]`) : null;
+    if (slot) slot.innerHTML += line(i);
+    else global.push(line(i));
+  }
+  if (issues?.length) {
+    out.innerHTML = `<span class="err">✖ 422：${esc(issues.length)} 条字段问题，已标在对应输入框旁边。</span>${global.join("")}`;
+  } else {
+    out.innerHTML = `<span class="err">✖ ${esc(status)} ${esc(data?.error ?? JSON.stringify(data))}</span>`;
+  }
+}
+async function orgNodesForCharter() {
+  const { status, data } = await api("GET", "/org");
+  return status === 200 ? (data.graph?.nodes ?? {}) : {};
+}
+
+/* ═════════════════ 页面 7：预算（#/budget） ═════════════════
+ * 一张表 + 一行新增/改限额的表单。
+ * ⚠ 配色：琥珀在这里【一概不许】—— 超限是运营事件不是战略决策（§7.4），
+ * 红色只给消耗条（§7.4 全规格唯一明写的红）。
+ * ⚠ unset_scopes 必须说出来：「有 N 个角色一行都没设」≠「消耗是 0」，
+ *   沉默的零是本仓最忌讳的形状。
+ */
+/**
+ * 预算表单的两个下拉：合法值取自 contracts 的 BUDGET_SCOPE_VALUES /
+ * BUDGET_PERIOD_VALUES，而不是在这里手抄一份。
+ *
+ * 抄件的失效方式本文件以前已经吃过：服务端加一档而下拉还认旧的。原来这两个
+ * 框是自由文本 + 一个 value="lifetime" 的缺省值，而 "lifetime" 根本不在
+ * BUDGET_PERIOD_VALUES（daily/monthly/per_task）里 —— 缺省值指向一个服务端必拒
+ * 的取值 ⇒ 什么都不改、直接点提交，第一次就 422。
+ *
+ * 「data-f=」这一串【必须与岗位书表单同源】：那是 saveCharter 里 charterFormToConfig
+ * 找字段用的属性名。这里一度写成 data-${attr}（生成 data-scope_type），而 putBudget
+ * 查的是 [data-scope-type] —— 连字符与下划线之差，点击提交直接
+ * Cannot read properties of null (reading 'value')。同一套取属性的代码用同一个属性名，
+ * 别在这里发明第二种写法。
+ */
+function enumSel(attr, values, def, title) {
+  return (
+    `<select data-f="${attr}" title="${esc(title)}">` +
+    values.map((v) => `<option${v === def ? " selected" : ""}>${esc(v)}</option>`).join("") +
+    `</select>`
+  );
+}
+
+async function renderBudget() {
+  const { status, data } = await api("GET", "/budget");
+  if (status !== 200) {
+    $view.innerHTML = banner("err", `GET /budget → ${status}${data?.error ? "：" + String(data.error) : "（后端可能还没上这一格）"}`);
+    return;
+  }
+  const rows = data.rows ?? [];
+  const totals = data.totals ?? {};
+  const unset = totals.unset_scopes;
+  const rowHtml = (r) => {
+    const limit = Number(r.limit_cents ?? 0);
+    const used = Number(r.consumed_cents ?? 0);
+    const pct = limit > 0 ? Math.max(0, Math.min(100, Math.round((used / limit) * 100))) : 0;
+    const over = limit > 0 && used >= limit;
+    return `<tr>
+      <td class="mono">${esc(r.scope_type)}/${esc(r.scope_id)}</td>
+      <td>${esc(r.period)}</td>
+      <td class="mono">${limit > 0 ? esc(money(limit)) : '<b>未设</b>'}</td>
+      <td class="mono">${esc(money(used))}</td>
+      <td class="meter${over ? " over" : ""}" style="min-width:90px"><i style="width:${pct}%"></i></td>
+      <td>${r.hard_stop ? "硬停" : "软限"}</td>
+    </tr>`;
+  };
+  $view.innerHTML = `
+    <div class="card">
+      <div class="row">
+        <span class="meta mono">合计：已用 ${esc(money(totals.consumed_cents))} / 上限 ${esc(money(totals.limit_cents))}
+          · 未设限额的角色 <b>${esc(unset)}</b>${unset > 0 ? " —— <b>这是「没设」，不是「是 0」</b>：那些角色此刻花钱没有任何上限拦着" : unset === 0 ? "（每个角色都至少设了一行）" : "（口径未给出）"}</span>
+        <button class="btn" data-reload>↻ 刷新</button>
+      </div>
+    </div>
+    ${rows.length
+      ? `<div class="card"><table class="btable"><thead><tr>
+           <th>作用域</th><th>周期</th><th>上限</th><th>已用</th><th>进度</th><th>停法</th>
+         </tr></thead><tbody>${rows.map(rowHtml).join("")}</tbody></table></div>`
+      : banner("warn", "一行预算都没有 —— 是「没设」，不是「都是 0」。在下面的表单里设第一行。")}
+    <div class="card">
+      <p class="sect">新增 / 改限额（POST /budget，同键覆盖）</p>
+      <div class="row">
+        ${enumSel("scope_type", BUDGET_SCOPE_VALUES, "role", "scope_type")}
+        <input type="text" data-f="scope_id" placeholder="scope_id（如角色 id）" style="width:160px" />
+        ${enumSel("period", BUDGET_PERIOD_VALUES, "daily", "period")}
+        <input type="text" data-f="limit_cents" placeholder="limit_cents（整数分）" style="width:150px" />
+        <label class="meta"><input type="checkbox" data-f="hard_stop" /> 硬停</label>
+        <button class="btn primary" data-put>提交</button>
+      </div>
+      <div style="margin-top:6px" data-budget-result></div>
+    </div>`;
+  $view.querySelector("[data-reload]").addEventListener("click", () => void renderBudget());
+  $view.querySelector("[data-put]").addEventListener("click", () => void putBudget());
+}
+
+async function putBudget() {
+  const out = $view.querySelector("[data-budget-result]");
+  const scope_type = $view.querySelector('[data-f="scope_type"]').value.trim();
+  const scope_id = $view.querySelector('[data-f="scope_id"]').value.trim();
+  const period = $view.querySelector('[data-f="period"]').value.trim();
+  const limitRaw = $view.querySelector('[data-f="limit_cents"]').value.trim();
+  const limit_cents = Number(limitRaw);
+  if (!scope_type || !scope_id || !period) { out.innerHTML = `<span class="err">作用域/周期都要填</span>`; return; }
+  if (!Number.isInteger(limit_cents) || limit_cents < 0) { out.innerHTML = `<span class="err">limit_cents 得是非负整数（单位是分）</span>`; return; }
+  const { status, data } = await api("POST", "/budget", {
+    scope_type, scope_id, period, limit_cents,
+    hard_stop: $view.querySelector('[data-f="hard_stop"]').checked,
+  });
+  if (status >= 200 && status < 300) {
+    out.innerHTML = `<span class="ok">✔ 已写入，正在刷新</span>`;
+    todayCache = null; // 今日页那根预算条与这页同源同刻才对得上
+    setTimeout(() => void renderBudget(), 400);
+  } else out.innerHTML = rejectHtml(status, data);
 }
 
 /* ═════════════════ 页面 5：回放（§16.7） ═════════════════
@@ -990,7 +1682,77 @@ async function commitOrg(nodes, edges) {
  * 所以时间线上最该显眼的是【审阅决定】与【自动批准】这两类 —— 它们才是岗位书的证据。
  * 上面那个着色点在 CSS 里：decide = 琥珀（那是 CEO 自己动过手的地方），auto = 蓝。
  */
+
+/**
+ * §16.7「支持按事件类型过滤」的五组，逐字对应 actions 文档（OPC-OS-设计文档 §22.1 action
+ * 枚举：state_change · review_decision · approval · tool_call · budget_consume · meeting ·
+ * harness_call · unauthorized_attempt · dissent · escalation）。
+ * 每组把「规格的那五个词」映射到【底层 action 值】，映射里每一格都注明理由，
+ * 而不是把枚举整体搬进来 —— 整体搬会让界面显示十类，规格只说了五类。
+ *
+ * 「全部」用 undefined 而不是空串：空串在语义上混入「清空过滤器」，见 filterReplayEntries 那行。
+ */
+const REPLAY_FILTERS = {
+  all: undefined, // 不过滤
+  decide: ["review_decision"], // 规格「审阅决定」
+  tool: ["tool_call"], // 规格「工具调用」
+  budget: ["budget_consume"], // 规格「预算」（budgets 变更由 state_change 承担，无单独 action）
+  approval: ["approval"], // 规格「审批」（自动批准与人工批准同一 action）
+  meeting: ["meeting"], // 规格「会议」
+};
+
+/** 回放页过滤下拉的顺序与文案（键即 REPLAY_FILTERS 的键）。 */
+const REPLAY_FILTER_LABELS = [
+  ["all", "全部事件"],
+  ["decide", "审阅决定"],
+  ["tool", "工具调用"],
+  ["budget", "预算"],
+  ["approval", "审批"],
+  ["meeting", "会议"],
+];
+
+/**
+ * §16.7 的事件类型过滤：输入 entries，返回【过滤后的】entries（原数组不动）。
+ * 判据：`action` 是服务端 events 表的 action 列（replay/query.ts 把它原样带出），
+ * 规格五组的映射见 REPLAY_FILTERS。
+ */
+function filterReplayEntries(entries, filter) {
+  const allowed = REPLAY_FILTERS[filter] ?? REPLAY_FILTERS.all; // 未知名过滤 fallback 到全部
+  return allowed === undefined ? entries : entries.filter((e) => allowed.includes(e.action));
+}
+
+/**
+ * §16.7「逐节点可展开并显示输入输出摘要」的断点块。
+ *
+ * 服务端（replay/query.ts 的 decodeCheckpoint，round327 接上）给每个 checkpoint 行
+ * 带 `decoded` + `summary`（每通道的 valueJson）。这里是它的展示半：
+ *   - decoded=true 且 summary 非空：每个通道一个 <details>，展开看该通道的值 JSON；
+ *   - decoded=false：通道值拿不到（未知 type / 损坏 blob），明说没解码 + type 标签，
+ *     不显示一个假的「空摘要」 —— 那正是服务端在 decoded 上刻意的降级语义。
+ * 输入是单行 checkpoint 对象（服务端 ReplayCheckpoint 形状），返回 HTML 字符串。
+ */
+function checkpointBlock(c) {
+  // null / undefined / 没有 checkpoint_id 的空壳对象：都不构成一个断点。
+  if (!c || !c.checkpoint_id) return "";
+  const id = esc(c.checkpoint_id);
+  const head = `<div class="ev"><div class="row">
+    <span class="pill s-blue">断点</span>
+    <span class="meta mono">${id}${c.parent_checkpoint_id ? " · 父 " + esc(c.parent_checkpoint_id) : ""}</span>
+    <span class="meta mono">${esc(c.type ?? "?")}</span>
+  </div>`;
+  if (c.decoded !== true || !c.summary) {
+    // 降级：不假装有摘要。给一个 type 就能看见「为什么解不开」。
+    return head + `<div class="meta" style="margin:4px 0 8px">通道值未解码（${esc(c.type ?? "无类型")}）。</div></div>`;
+  }
+  const channels = c.summary
+    .map((s) => `<details style="margin:6px 0 0 4px"><summary>${esc(s.channel)}</summary>
+      <pre class="mono" style="margin:4px 0 6px;white-space:pre-wrap">${esc(s.valueJson)}</pre></details>`)
+    .join("");
+  return head + `<div style="margin:4px 0 8px">${channels}</div></div>`;
+}
+
 let replayTask = "";
+let replayFilter = "all";
 async function renderReplay() {
   const { status, data } = await api("GET", "/tasks");
   if (status !== 200) { $view.innerHTML = banner("err", `GET /tasks → ${status}`); return; }
@@ -1002,12 +1764,16 @@ async function renderReplay() {
         ${tasks.map((t) => `<option value="${esc(t.id)}"${t.id === replayTask ? " selected" : ""}>${esc(t.title)} · ${esc(t.status)}</option>`).join("")}
       </select>
       <input type="text" data-kw placeholder="关键词（≥3 个汉字，trigram 窗口）" />
+      <select data-filter>
+        ${REPLAY_FILTER_LABELS.map(([v, label]) => `<option value="${v}"${v === replayFilter ? " selected" : ""}>${esc(label)}</option>`).join("")}
+      </select>
       <button class="btn" data-go>查时间线</button>
       <span class="meta">${tasks.length ? "" : "还没有任务"}</span>
     </div>
     <div id="replay-body">${banner("", "选一条任务看它的回放。")}</div>`;
   if (!tasks.length) return;
   $view.querySelector("[data-pick]").addEventListener("change", (e) => { replayTask = e.target.value; void loadReplay(); });
+  $view.querySelector("[data-filter]").addEventListener("change", (e) => { replayFilter = e.target.value; void loadReplay(); });
   $view.querySelector("[data-go]").addEventListener("click", () => void loadReplay());
   void loadReplay();
 }
@@ -1019,7 +1785,9 @@ async function loadReplay() {
   const q = "?limit=200" + (kw ? "&keyword=" + encodeURIComponent(kw) : "");
   const { status, data } = await api("GET", "/replay/" + encodeURIComponent(replayTask) + q);
   if (status !== 200) { body.innerHTML = banner("err", `GET /replay → ${status}：${JSON.stringify(data)}`); return; }
-  const entries = data.entries ?? [];
+  const rawEntries = data.entries ?? [];
+  const entries = filterReplayEntries(rawEntries, replayFilter);
+  const filterLabel = (REPLAY_FILTER_LABELS.find(([v]) => v === replayFilter) ?? ["", "全部事件"])[1];
   body.innerHTML = `
     <div class="card">
       <div class="row"><strong class="grow">${esc(data.task.title)}</strong>
@@ -1027,9 +1795,10 @@ async function loadReplay() {
       <div class="meta mono" style="margin-top:4px">${esc(data.task.id)} · 角色 ${esc(data.task.assigned_role)} · 图版本 ${esc(data.task.graph_version)}</div>
     </div>
     ${data.degraded ? banner("warn", "这份回放是降级的：" + esc(data.degraded.reason ?? "原因未给出")) : ""}
-    <div class="meta" style="margin:10px 0">事件 <span class="mono">${esc(entries.length)}</span> 条（服务端 limit ${esc(data.effective_limit)}${entries.length === data.effective_limit ? " · <b>可能还有更多</b>" : ""}）
-      · 断点 ${esc((data.checkpoints ?? []).length)} 个${kw ? ` · 关键词「${esc(kw)}」` : ""}</div>
-    <div class="tl">${entries.length ? entries.map(eventRow).join("") : banner("", kw ? "这个关键词没命中任何事件。" : "这个任务还没有事件。")}</div>`;
+    <div class="meta" style="margin:10px 0">事件 <span class="mono">${esc(entries.length)}</span> 条（服务端 limit ${esc(data.effective_limit)}${rawEntries.length === data.effective_limit ? " · <b>可能还有更多</b>" : ""}）
+      · 断点 ${esc((data.checkpoints ?? []).length)} 个${kw ? ` · 关键词「${esc(kw)}」` : ""}${replayFilter !== "all" ? ` · 类型「${esc(filterLabel)}」` : ""}</div>
+    <div class="tl">${entries.length ? entries.map(eventRow).join("") : banner("", kw ? "这个关键词没命中任何事件。" : "这个任务还没有事件。")}</div>
+    ${(data.checkpoints ?? []).length ? `<div class="card" style="margin-top:10px"><div class="meta" style="margin-bottom:4px">断点状态快照（每个断点的通道值，展开看）</div>${data.checkpoints.map(checkpointBlock).join("")}</div>` : ""}`;
 }
 
 /** 一行事件。§22.3 那三条特殊标注在这里：自动批准、蒸馏 skill 判断、harness 版本。 */

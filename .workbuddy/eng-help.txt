@@ -1,0 +1,21 @@
+用法：hub work --db <path> --task <id> --max-budget-usd <每轮美元硬顶>
+             --task-limit-cents <任务预算上限（美分）> [--max-turns 12] [--cwd <目录>] [--bin claude]
+
+  · 这一条走【引擎路线】：一个角色 = 一次 claude -p，下一步找谁由它自己说，
+    而能不能推进这一步由 hub 判（docs/decisions/0041）。
+  · 两个上限【必填】：不给默认值 = 没配也能跑，而跑起来才知道花多少没顶。
+  · 本命令不建任务。建任务走 hub run / POST /tasks（那条路会把 graph_version 与
+    任务行放在同一事务里取，§18.4）；这里再写一份 INSERT 就是第二条可能不一致的路径。
+  · 停在人坐的格子（章程待批 / 升 CEO / 终审）时，下一步是 hub decide（或收件箱里
+    的一次点击），不是再敲一次 hub work。
+
+用法：hub decide --db <path> --task <id> [--card <卡片 id>] --button <按钮> [--note <理由>]
+
+  · --button：approve / reject_with_comment / defer_deep_review（就这三颗，§8.2 第 4 条）。
+  · --card 可以省：那条任务只有一张待批卡时按那张办；【有多张则必须指定】——
+    替 CEO 猜「她想批哪一张」等于系统替她做了一次决定。
+  · --note：reject_with_comment 时【必填】（没有理由的打回到产出方那里就是「被拒了，为什么不知道」）。
+  · 只有 approve 真的会把任务往前推一格。另两颗按 §7.1 没有出边：卡片记掉而任务原地不动，
+    这一点会明写在输出里而不是含糊过去（缺的是规格，已登记 0041）。
+(node:65884) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)

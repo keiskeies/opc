@@ -77,6 +77,10 @@
 >    从此**有了装配上的主语**，但**还没有远端上的证据** —— 这条边界写在 r16 与
 >    `im-channels.test.ts` 文件头，两处同一个口径。
 >  ② **发卡那一路仍然没有生产者**：`deliverCard` 在 src 里零调用方（O12 动作 4）。
+>    【round322 复核：「`deliverCard` 在 src 里零调用方」已过期。`channels/deliver.ts:257`
+>    现在调用 `deliverCard`（O12 动作 4 完成，round283 接的 `serve/im-channels.ts` 的
+>    pollRound 每心跳派发那一路）。⇒ ② 的空缺已补，但 ①（真飞书凭据从未打通）
+>    仍然成立 —— 「手机上没有卡」今天的成因只剩凭据那半。原句保留。】
 >    于是今天的诚实形状是「**回得来，推不过去**」——审批人如果真在手机上手打一句批准，
 >    那边会落库；可没有任何东西把卡推到他面前，所以他不知道该批什么。
 > ⇒ §0 那句结论**仍然要留着**，只是它的含义从「这句话没有主语」换成
@@ -422,17 +426,17 @@ verified = 0   ceo_role = 'ceo'   verified_by = 'ceo'
 1. **「三张手抄的端点表」不存在。** `contracts/src/api.ts` 的 `:35` 实测是 `API_ENDPOINTS`
    **数组中间的一个条目**、`:52` 在**一段注释里**、`:61` 又是 `IMPLEMENTED_ENDPOINTS`
    的一个条目 —— 我把「grep 命中 `POST /approvals/…` 的三行」当成了「三张表」。
-   真实的清单是 `contracts/src/api.ts:40` 与 `contracts/src/api.ts:73` **两张**，
-   而 `UNIMPLEMENTED_ENDPOINTS`（同文件 `:99`）**是空数组**；
+   真实的清单是 `contracts/src/api.ts:41` 与 `contracts/src/api.ts:79` **两张**，
+   而 `UNIMPLEMENTED_ENDPOINTS`（同文件 `:110`）**是空数组**；
    桌面侧 `ipc-surface.ts:171` 的 `EXPOSED_ENDPOINTS` 是 `= IMPLEMENTED_ENDPOINTS` 的**别名**，
    不是第三份手抄 —— 别名不会漂，**手抄才会**，而我把别名数成了手抄，于是「七处」里有一处是凭影子加的。
 2. **「没有一处会替你报错」是错的，而且错在**最**该有守卫的那两处**：
-   - `app.ts:539` 是 `const impossible: never = routeHit` ——
+   - `app.ts:562` 是 `const impossible: never = routeHit` ——
      `Route` 加了一种 kind 而 `handleRequest` 没跟上 ⇒ **编译期就不过**（那段注释自己写着
      「漏分支 ⇒ 这一行编译不过」）；
-   - `ipc-surface.test.ts:129-130` 断言每个 `CHANNEL_SPECS` 条目的端点**必须同时在**
-     `API_ENDPOINTS` 与 `IMPLEMENTED_ENDPOINTS` 里，`:133` 断言 `EXPOSED_ENDPOINTS`
-     **等于** `IMPLEMENTED_ENDPOINTS`，`:71` 断言渲染进程暴露的方法集**恰好等于**
+   - `ipc-surface.test.ts:130-131` 断言每个 `CHANNEL_SPECS` 条目的端点**必须同时在**
+     `API_ENDPOINTS` 与 `IMPLEMENTED_ENDPOINTS` 里，`:134` 断言 `EXPOSED_ENDPOINTS`
+     **等于** `IMPLEMENTED_ENDPOINTS`，`:72` 断言渲染进程暴露的方法集**恰好等于**
      invoke 通道集（同文件 `:85` 还有一发 canary：注入一个 `dbQuery` 后门，上面那条**必须**变红）。
 3. **真正没人管的那个方向是**一个**具体方向，不是「处处危险」**：
    上面那几条判的都是「**有通道 ⇒ 端点必须在清单里**」（多一个会红）。
@@ -440,14 +444,14 @@ verified = 0   ceo_role = 'ceo'   verified_by = 'ceo'
    两张清单里有它）而**桌面侧没接线**」—— **没有任何断言**：
    `channelFor()` 对没接线的端点**返回 null 是设计行为**
    （`ipc-surface.ts:179` 那段注释写着「未实现的端点不进白名单」，
-   而 `:134` 那条测试 `channelFor("GET /replay/:taskId")` 断言的正是 null）。
+   而 `:135` 那条测试 `channelFor("GET /replay/:taskId")` 断言的正是 null）。
    ⇒ 后果说得准一点：**HTTP 那一条能通、curl 得到 200、测试全绿，而桌面应用里点不到它**
    —— 不是「哪儿都不报错」，是**恰好在这一条边上不报错**，而这条边正好是
    「我以为接完了」与「接完了」之间唯一那条缝。
 
 所以真实的接线代价是（**按声明处数**，不是按 grep 命中数）：
 `Route` 联合 + `handleRequest` 分支（这两处**编译期**逼你成对改）、
-`contracts/src/api.ts:40` 与 `contracts/src/api.ts:73` 两张清单、`ipc-surface.ts` 的 `CHANNEL_SPECS` 条目
+`contracts/src/api.ts:41` 与 `contracts/src/api.ts:79` 两张清单、`ipc-surface.ts` 的 `CHANNEL_SPECS` 条目
 + `INVOKE_METHODS` 映射 + 渲染侧那个方法（这三处**有断言**，漏了会红）、
 以及 `preload/api.ts` 那层转发。
 **「漏了不报错」的那一格只有「已实现而未接桌面」这一个方向**，
@@ -603,6 +607,15 @@ verified = 0   ceo_role = 'ceo'   verified_by = 'ceo'
   这条口径每次都得重说一遍，否则「1542 pass」会被读成门禁过了。
   ⚠ 我原本在这里写的是「有**相当一部分**是这一条造成的」—— 那是一句**没数过的谦虚**，
   而它比「全部」更容易让人以为剩下的那些红是真的行为红。
+  【round321 复核：本段「今天的结果是只有 zod 与 typescript 解析得到，其余 12 条解析不到」
+  已过期 —— round319-9 重写 `deps-resolvable.mjs` 后（per-probe scope + CLI 型探测），
+  实测读数为 **7 可用**（`@langchain/core`、`@langchain/langgraph`、`tsx/cli`、`vitest`、
+  `@biomejs/biome` 2.6.5 真执行、`zod`、`typescript`）+ **7 真缺**（react / @capacitor/core /
+  @xyflow/react / @larksuiteoapi/node-sdk / @modelcontextprotocol/sdk / @openai/codex-sdk /
+  @qoder-ai/qoder-agent-sdk）。「那 37 发失败没有一条是行为红」的归因仍成立，但它现在改由
+  vitest 真跑（round319-7 起 145 文件 3145 通过 / 0 红）+ biome 存量债（276 errors，非环境）
+  共同支撑。同一段下面两句「`pnpm verify` 跑不起来」「biome 装不上 ⇒ 格式未经校验」一并过期，
+  见 0032/0033 §7 的 round319-9 复核与 0027 §7 的 round319 复核。】
 
   ⚠ **这个脚本存在的理由是它替我挡下了一次我自己做错的判断**，而那错误值得单独记：
   我第一版是拿 `ls node_modules/.pnpm | grep tsx` 判「装没装」的，看到

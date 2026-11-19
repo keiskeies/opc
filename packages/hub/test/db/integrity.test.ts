@@ -25,29 +25,40 @@
  * 与 backup.test.ts 同一条理由：这里要验的东西（触发器、FTS、外键）
  * 全是【真 schema 的行为】，手搓表会让检查项对着一个不存在的世界给出漂亮结论。
  */
-import { mkdirSync, rmSync, copyFileSync, openSync, ftruncateSync, fstatSync, closeSync, existsSync, readFileSync, readdirSync } from "node:fs";
+import {
+  closeSync,
+  copyFileSync,
+  existsSync,
+  fstatSync,
+  ftruncateSync,
+  mkdirSync,
+  openSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+} from "node:fs";
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { commitOrgChangeRequestSchema, validateNewNode } from "@opc/contracts";
-import { fixtureTmp } from "../fixtures/fixture-dir.js";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { openDb } from "../../src/db/driver.js";
-import { openSnapshotReadonlyDb } from "../../src/db/pragmas.js";
-import { migrate } from "../../src/db/migrate.js";
-import { WriteQueue } from "../../src/db/write-queue.js";
 import {
   APPEND_ONLY_PROBE_KIND,
+  auditCoherenceReport,
   CHECK_NAMES,
   CHECK_VERDICTS,
+  type CheckResult,
   INTEGRITY_PROBE_ACTOR,
-  auditCoherenceReport,
   pageIntegrityBroken,
   probeAppendOnly,
   replayFingerprint,
   runIntegrityScan,
-  type CheckResult,
 } from "../../src/db/integrity.js";
+import { migrate } from "../../src/db/migrate.js";
 import { isPageOk, reportText } from "../../src/db/page-check.js";
+import { openSnapshotReadonlyDb } from "../../src/db/pragmas.js";
+import { WriteQueue } from "../../src/db/write-queue.js";
+import { fixtureTmp } from "../fixtures/fixture-dir.js";
 
 const HUB = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const TMP = fixtureTmp("integrity", import.meta.url);
@@ -56,7 +67,10 @@ const opened: { close(): void }[] = [];
 let seq = 0;
 
 /** 跑过迁移、带 N 条事件的库。 */
-function migratedDb(events: number): { path: string; db: ReturnType<typeof openDb> } {
+function migratedDb(events: number): {
+  path: string;
+  db: ReturnType<typeof openDb>;
+} {
   const path = join(TMP, "ig-" + process.pid + "-" + ++seq + ".db");
   const db = openDb(path);
   opened.push(db);
@@ -88,7 +102,11 @@ function insertEvents(
   for (let i = startAt; i < startAt + n; i++) {
     ins.run(
       taskId,
-      JSON.stringify({ i, to: status, note: "第" + i + "号事件的独有正文" + i }),
+      JSON.stringify({
+        i,
+        to: status,
+        note: "第" + i + "号事件的独有正文" + i,
+      }),
       1_700_000_000_000 + i,
     );
   }
@@ -117,7 +135,10 @@ function countRows(db: ReturnType<typeof openDb>, table: string): number {
   return Number(row.c);
 }
 
-function resultByName(checks: readonly CheckResult[], name: string): CheckResult {
+function resultByName(
+  checks: readonly CheckResult[],
+  name: string,
+): CheckResult {
   const hit = checks.find((c) => c.name === name);
   if (hit === undefined) throw new Error("报告里没有这一条：" + name);
   return hit;
@@ -173,7 +194,11 @@ describe("① 页面检查必须离开主线程（Task 6.2 的验收原文）", 
     }
     db.exec("PRAGMA wal_checkpoint(TRUNCATE)");
     const rows = Number(
-      (db.prepare("SELECT count(*) AS c FROM events").get() as { c: number | bigint }).c,
+      (
+        db.prepare("SELECT count(*) AS c FROM events").get() as {
+          c: number | bigint;
+        }
+      ).c,
     );
     expect(rows).toBeGreaterThan(100_000);
 
@@ -203,7 +228,10 @@ describe("① 页面检查必须离开主线程（Task 6.2 的验收原文）", 
       expect(res.ok).toBe(true);
       // 反向对照之一：若判据其实跑在主线程上，这里 ticks 会是 0（同步扫描期间
       // 定时器不可能推进），这一发就红。
-      expect(ticks, "扫描期间主线程定时器一次都没推进 ⇒ 判据多半还在主线程上").toBeGreaterThan(0);
+      expect(
+        ticks,
+        "扫描期间主线程定时器一次都没推进 ⇒ 判据多半还在主线程上",
+      ).toBeGreaterThan(0);
       // 反向对照之二：若扫描占了写队列，这条 INSERT 会失败或排在扫描之后。
       const during = await q.read(
         "SELECT count(*) AS c FROM events WHERE json_extract(payload, '$.during') = 'scan'",
@@ -219,7 +247,10 @@ describe("① 页面检查必须离开主线程（Task 6.2 的验收原文）", 
     const { path, db } = migratedDb(30);
     const q = new WriteQueue(path);
     try {
-      const viaWorker = await runIntegrityScan({ dbPath: path, db: q.readConnection() });
+      const viaWorker = await runIntegrityScan({
+        dbPath: path,
+        db: q.readConnection(),
+      });
       const viaMain = await runIntegrityScan({
         dbPath: path,
         db: q.readConnection(),
@@ -230,7 +261,9 @@ describe("① 页面检查必须离开主线程（Task 6.2 的验收原文）", 
       expect(viaMain.via).toBe("main_thread");
       expect(viaWorker.ok).toBe(viaMain.ok);
       expect(viaWorker.pageReport).toBe(viaMain.pageReport);
-      expect(viaWorker.checks.map((c) => c.name)).toEqual(viaMain.checks.map((c) => c.name));
+      expect(viaWorker.checks.map((c) => c.name)).toEqual(
+        viaMain.checks.map((c) => c.name),
+      );
       // 字段集合一致：worker 那边是手写的一份类型（模块图要小），
       // 没有这发断言，两侧字段可以各自演化而谁都不报错。
       const keysOf = (r: object): string[] => Object.keys(r).sort();
@@ -252,7 +285,11 @@ describe("① 页面检查必须离开主线程（Task 6.2 的验收原文）", 
     const { db } = migratedDb(3);
     const missing = join(TMP, "这份文件不存在-" + ++seq + ".db");
     expect(existsSync(missing)).toBe(false);
-    const res = await runIntegrityScan({ dbPath: missing, db, timeoutMs: 5_000 });
+    const res = await runIntegrityScan({
+      dbPath: missing,
+      db,
+      timeoutMs: 5_000,
+    });
     expect(res.via).toBe("worker");
     expect(res.ok).toBe(false);
     // 关键是【没有】变成 main_thread。
@@ -310,7 +347,9 @@ describe("① 页面检查必须离开主线程（Task 6.2 的验收原文）", 
     const { path, db } = migratedDb(50);
     const res = await runIntegrityScan({ dbPath: path, db, timeoutMs: 0 });
     expect(res.unavailable).toBe("worker_timeout");
-    expect(resultByName(res.checks, "page_integrity").verdict).toBe("could_not_run");
+    expect(resultByName(res.checks, "page_integrity").verdict).toBe(
+      "could_not_run",
+    );
     expect(pageIntegrityBroken(res)).toBe(false);
     expect(res.ok).toBe(false);
 
@@ -330,8 +369,15 @@ describe("① 页面检查必须离开主线程（Task 6.2 的验收原文）", 
     const fd = openSync(broken, "r+");
     ftruncateSync(fd, Math.floor(fstatSync(fd).size * 0.5));
     closeSync(fd);
-    const r2 = await runIntegrityScan({ dbPath: broken, db, timeoutMs: 10_000 });
-    expect(r2.unavailable, "损坏库上的检查必须【跑成】，否则这一发测的是别的东西").toBeUndefined();
+    const r2 = await runIntegrityScan({
+      dbPath: broken,
+      db,
+      timeoutMs: 10_000,
+    });
+    expect(
+      r2.unavailable,
+      "损坏库上的检查必须【跑成】，否则这一发测的是别的东西",
+    ).toBeUndefined();
     expect(resultByName(r2.checks, "page_integrity").verdict).toBe("violated");
     expect(pageIntegrityBroken(r2)).toBe(true);
     expect(resultByName(r2.checks, "page_integrity").checked).toBe(1);
@@ -348,9 +394,16 @@ describe("① 页面检查必须离开主线程（Task 6.2 的验收原文）", 
     const { db } = migratedDb(5);
     const dirPath = join(TMP, "这是个目录-" + ++seq);
     mkdirSync(dirPath);
-    const res = await runIntegrityScan({ dbPath: dirPath, db, timeoutMs: 10_000 });
+    const res = await runIntegrityScan({
+      dbPath: dirPath,
+      db,
+      timeoutMs: 10_000,
+    });
     expect(res.via).toBe("worker");
-    expect(res.unavailable, "worker 自己 catch 掉的抛错不是仪器故障").toBeUndefined();
+    expect(
+      res.unavailable,
+      "worker 自己 catch 掉的抛错不是仪器故障",
+    ).toBeUndefined();
     expect(resultByName(res.checks, "page_integrity").verdict).toBe("violated");
     expect(pageIntegrityBroken(res)).toBe(true);
     expect(resultByName(res.checks, "page_integrity").checked).toBe(1);
@@ -362,7 +415,10 @@ describe("② 页面判据本身（page-check.ts，两侧共用那一份）", ()
     const { path } = migratedDb(20);
     const ro = openSnapshotReadonlyDb(path);
     try {
-      const rows = ro.prepare("PRAGMA integrity_check").all() as Record<string, string>[];
+      const rows = ro.prepare("PRAGMA integrity_check").all() as Record<
+        string,
+        string
+      >[];
       expect(rows).toHaveLength(1);
       expect(isPageOk(rows)).toBe(true);
       expect(reportText(rows)).toBe("ok");
@@ -374,13 +430,18 @@ describe("② 页面判据本身（page-check.ts，两侧共用那一份）", ()
   it("「包含 ok」不算通过：多行诊断必须判失败", () => {
     // 这是判据的单测，不是 SQLite 的行为测试 —— 损坏库返回什么由 SQLite 决定，
     // 而【我怎么解读它】是我的判据。所以直接喂行。
-    const corrupt = [{ integrity_check: "*** in database main ***" }, { integrity_check: "Tree 2 page 4: looks ok-ish" }];
+    const corrupt = [
+      { integrity_check: "*** in database main ***" },
+      { integrity_check: "Tree 2 page 4: looks ok-ish" },
+    ];
     expect(isPageOk(corrupt)).toBe(false);
     expect(reportText(corrupt)).toContain("in database main");
     // 反向对照：同一份数据里【确实含有】子串 "ok"，
     // 所以「用 includes 判」会放过去 —— 这一发就是那条错的判据的反例。
     expect(reportText(corrupt)).toContain("ok");
-    expect(isPageOk([{ integrity_check: "ok" }, { integrity_check: "ok" }])).toBe(false);
+    expect(
+      isPageOk([{ integrity_check: "ok" }, { integrity_check: "ok" }]),
+    ).toBe(false);
     expect(isPageOk([])).toBe(false);
   });
 
@@ -425,8 +486,12 @@ describe("② 页面判据本身（page-check.ts，两侧共用那一份）", ()
     // 那是本次检查的【结论】，走 violated 那条路，不是仪器故障。
     // （worker_error 只会来自 worker 的 error 事件，即加载失败那种。）
     expect(viaWorker.unavailable).toBeUndefined();
-    expect(resultByName(viaWorker.checks, "page_integrity").detail).toContain("malformed");
-    expect(resultByName(viaWorker.checks, "page_integrity").verdict).toBe("violated");
+    expect(resultByName(viaWorker.checks, "page_integrity").detail).toContain(
+      "malformed",
+    );
+    expect(resultByName(viaWorker.checks, "page_integrity").verdict).toBe(
+      "violated",
+    );
 
     // 而【主线程这一支 + 连接已经开着、文件随后被截断】也必须出报告。
     // 这就是 P1 形态：Hub 跑着，另一个进程（同步盘 / 误操作的 cp）把文件截了。
@@ -447,8 +512,12 @@ describe("② 页面判据本身（page-check.ts，两侧共用那一份）", ()
       expect(res.ok).toBe(false);
       // 不是「检查自己坏了」：坏的是库，所以走 violated 而不是 unavailable。
       expect(res.unavailable).toBeUndefined();
-      expect(resultByName(res.checks, "page_integrity").verdict).toBe("violated");
-      expect(resultByName(res.checks, "page_integrity").detail).toContain("直接抛错");
+      expect(resultByName(res.checks, "page_integrity").verdict).toBe(
+        "violated",
+      );
+      expect(resultByName(res.checks, "page_integrity").detail).toContain(
+        "直接抛错",
+      );
     } finally {
       live2.close();
       live.close();
@@ -491,7 +560,9 @@ describe("③ 回放确定性", () => {
     d3.exec("DROP TRIGGER events_no_delete");
     d3.exec("DROP TRIGGER events_fts_au");
     d3.exec("DROP TRIGGER events_fts_ad");
-    d3.exec("UPDATE events SET payload = json_set(payload, '$.note', '被人改过的一行') WHERE id = 3");
+    d3.exec(
+      "UPDATE events SET payload = json_set(payload, '$.note', '被人改过的一行') WHERE id = 3",
+    );
     const f2 = replayFingerprint(d3, { taskId: "T-1" });
     expect(f2.rows).toBe(f1.rows);
     expect(f2.fingerprint).not.toBe(f1.fingerprint);
@@ -516,7 +587,11 @@ describe("④ append-only 探针：真去撞，四种结局都要能分辨", () 
     const q = new WriteQueue(path);
     try {
       const before = Number(
-        (db.prepare("SELECT count(*) AS c FROM events").get() as { c: number | bigint }).c,
+        (
+          db.prepare("SELECT count(*) AS c FROM events").get() as {
+            c: number | bigint;
+          }
+        ).c,
       );
       const r = await probeAppendOnly({ writer: q });
       expect(r.outcome).toBe("rejected_as_expected");
@@ -526,17 +601,34 @@ describe("④ append-only 探针：真去撞，四种结局都要能分辨", () 
 
       // 审计真的落库了（Task 6.2 验收②的【写入】那一半）。
       const audit = db
-        .prepare("SELECT task_id, actor_type, actor_id, action, payload FROM events WHERE id = ?")
+        .prepare(
+          "SELECT task_id, actor_type, actor_id, action, payload FROM events WHERE id = ?",
+        )
         .get(r.auditEventId as number) as
-        | { task_id: string | null; actor_type: string; actor_id: string; action: string; payload: string }
+        | {
+            task_id: string | null;
+            actor_type: string;
+            actor_id: string;
+            action: string;
+            payload: string;
+          }
         | undefined;
       expect(audit).toBeDefined();
-      expect(audit?.actorId ?? audit?.actor_id).toBe(INTEGRITY_PROBE_ACTOR.actorId);
+      // 行类型用的是库列名 actor_id（TS2551：`actorId` 在这一行上不存在）。
+      // 原来写的 `audit?.actorId ?? audit?.actor_id` 运行时恒走右半边 ——
+      // sqlite 回来的行只有 actor_id，没有驼峰键 —— 删掉那个死左半边即等价。
+      expect(audit?.actor_id).toBe(INTEGRITY_PROBE_ACTOR.actorId);
       expect(audit?.action).toBe("unauthorized_attempt");
-      expect(JSON.parse(String(audit?.payload))["kind"]).toBe(APPEND_ONLY_PROBE_KIND);
+      expect(JSON.parse(String(audit?.payload))["kind"]).toBe(
+        APPEND_ONLY_PROBE_KIND,
+      );
       // 反向对照：探针【没有】改动被撞的那一行。
       const after = Number(
-        (db.prepare("SELECT count(*) AS c FROM events").get() as { c: number | bigint }).c,
+        (
+          db.prepare("SELECT count(*) AS c FROM events").get() as {
+            c: number | bigint;
+          }
+        ).c,
       );
       expect(after).toBe(before + 1); // 只多了那条审计
       expect(r.detail).toContain(String(r.probedEventId));
@@ -571,7 +663,12 @@ describe("④ append-only 探针：真去撞，四种结局都要能分辨", () 
      * 【一次不完整的 schema 改动】。所以这里按真实世界「有人整块拿掉 append-only 语义」
      * 的样子把四条一起拆，才是 append_only_broken 的正身。
      */
-    for (const t of ["events_no_update", "events_no_delete", "events_fts_au", "events_fts_ad"]) {
+    for (const t of [
+      "events_no_update",
+      "events_no_delete",
+      "events_fts_au",
+      "events_fts_ad",
+    ]) {
       db.exec("DROP TRIGGER " + t);
     }
     const q = new WriteQueue(path);
@@ -598,8 +695,12 @@ describe("④ append-only 探针：真去撞，四种结局都要能分辨", () 
      */
     const { path, db } = migratedDb(10);
     db.exec("DROP TRIGGER events_no_update; DROP TRIGGER events_no_delete;");
-    db.exec("CREATE TRIGGER swallow_u BEFORE UPDATE ON events BEGIN SELECT RAISE(IGNORE); END;");
-    db.exec("CREATE TRIGGER swallow_d BEFORE DELETE ON events BEGIN SELECT RAISE(IGNORE); END;");
+    db.exec(
+      "CREATE TRIGGER swallow_u BEFORE UPDATE ON events BEGIN SELECT RAISE(IGNORE); END;",
+    );
+    db.exec(
+      "CREATE TRIGGER swallow_d BEFORE DELETE ON events BEGIN SELECT RAISE(IGNORE); END;",
+    );
     const q = new WriteQueue(path);
     try {
       const r = await probeAppendOnly({ writer: q });
@@ -635,11 +736,15 @@ describe("⑤ §22.4 审计自洽：三条规则 + FTS + 枚举", () => {
     const { db } = migratedDb(15);
     db.exec("DROP TRIGGER events_no_update; DROP TRIGGER events_no_delete;");
     db.exec("DROP TRIGGER events_fts_au; DROP TRIGGER events_fts_ad;");
-    db.exec("UPDATE events SET payload = json_set(payload, '$.to', 'IN_PROGRESS') WHERE id = 5");
+    db.exec(
+      "UPDATE events SET payload = json_set(payload, '$.to', 'IN_PROGRESS') WHERE id = 5",
+    );
     db.exec("UPDATE events SET action = 'state_change' WHERE id = 5");
     const checks = auditCoherenceReport({ db });
     expect(resultByName(checks, "action_enum").verdict).toBe("ok");
-    expect(resultByName(checks, "state_machine_agrees_with_events").verdict).toBe("ok");
+    expect(
+      resultByName(checks, "state_machine_agrees_with_events").verdict,
+    ).toBe("ok");
     expect(resultByName(checks, "fts_index").verdict).toBe("ok");
     // checked = 0 而 verdict = ok 是矛盾的（类型上允许，语义上是假绿），逐条拦。
     for (const c of checks) {
@@ -658,7 +763,9 @@ describe("⑤ §22.4 审计自洽：三条规则 + FTS + 枚举", () => {
     expect(c.detail).toContain("totely_made_up_action");
     // 反向对照：把那一行去掉（换新库）就不再 violated。
     const { db: clean } = migratedDb(5);
-    expect(resultByName(auditCoherenceReport({ db: clean }), "action_enum").verdict).toBe("ok");
+    expect(
+      resultByName(auditCoherenceReport({ db: clean }), "action_enum").verdict,
+    ).toBe("ok");
   });
 
   it("改了 tasks.status 而没写事件 ⇒ violated（§6.3 那个形状）", () => {
@@ -671,7 +778,10 @@ describe("⑤ §22.4 审计自洽：三条规则 + FTS + 枚举", () => {
         "VALUES ('T-1','system','hub','state_change','{\"to\":\"IN_PROGRESS\"}','{}',?)",
     ).run(1_750_000_000_000);
     db.exec("UPDATE tasks SET status = 'DONE' WHERE id = 'T-1'");
-    const c = resultByName(auditCoherenceReport({ db }), "state_machine_agrees_with_events");
+    const c = resultByName(
+      auditCoherenceReport({ db }),
+      "state_machine_agrees_with_events",
+    );
     expect(c.verdict).toBe("violated");
     expect(c.detail).toContain("T-1");
     expect(c.detail).toContain("DONE");
@@ -694,7 +804,10 @@ describe("⑤ §22.4 审计自洽：三条规则 + FTS + 枚举", () => {
       "INSERT INTO events (task_id, actor_type, actor_id, action, payload, state_snapshot, created_at) " +
         "VALUES ('T-9','system','hub','task_created','{}','{}',?)",
     ).run(1);
-    const c2 = resultByName(auditCoherenceReport({ db: d }), "state_machine_agrees_with_events");
+    const c2 = resultByName(
+      auditCoherenceReport({ db: d }),
+      "state_machine_agrees_with_events",
+    );
     expect(c2.verdict).toBe("not_observable");
     expect(c2.checked).toBe(0);
     expect(c2.detail).toContain("没有发生过");
@@ -702,8 +815,14 @@ describe("⑤ §22.4 审计自洽：三条规则 + FTS + 枚举", () => {
 
   it("review_gates / harness_calls 为空 ⇒ not_observable，并说清为什么", () => {
     const { db } = migratedDb(5);
-    const gate = resultByName(auditCoherenceReport({ db }), "gate_evidence_reference");
-    const harness = resultByName(auditCoherenceReport({ db }), "harness_call_recorded");
+    const gate = resultByName(
+      auditCoherenceReport({ db }),
+      "gate_evidence_reference",
+    );
+    const harness = resultByName(
+      auditCoherenceReport({ db }),
+      "harness_call_recorded",
+    );
     expect(gate.verdict).toBe("not_observable");
     expect(harness.verdict).toBe("not_observable");
     // 这一条不是兜底文案，是【实测的写入方状态】：src 里零 INSERT。
@@ -736,17 +855,27 @@ describe("⑤ §22.4 审计自洽：三条规则 + FTS + 枚举", () => {
 
     // 现在把引用打断：证据包引用置空 + 花掉的钱不进预算账。
     db.exec("DROP TRIGGER events_no_update; DROP TRIGGER events_no_delete;");
-    db.prepare("UPDATE review_gates SET evidence_bundle_id = NULL WHERE id = 'G-1'").run();
+    db.prepare(
+      "UPDATE review_gates SET evidence_bundle_id = NULL WHERE id = 'G-1'",
+    ).run();
     db.prepare(
       "INSERT INTO harness_calls (id, task_id, agent_role, harness, harness_version, args_redacted, cost_cents, created_at) " +
         "VALUES ('H-2','T-1','dev','claude','1','{}',9,2)",
     ).run();
     db.exec("DELETE FROM budget_events");
     const after = auditCoherenceReport({ db });
-    expect(resultByName(after, "gate_evidence_reference").verdict).toBe("violated");
-    expect(resultByName(after, "gate_evidence_reference").detail).toContain("G-1");
-    expect(resultByName(after, "harness_call_recorded").verdict).toBe("violated");
-    expect(resultByName(after, "harness_call_recorded").detail).toContain("H-2");
+    expect(resultByName(after, "gate_evidence_reference").verdict).toBe(
+      "violated",
+    );
+    expect(resultByName(after, "gate_evidence_reference").detail).toContain(
+      "G-1",
+    );
+    expect(resultByName(after, "harness_call_recorded").verdict).toBe(
+      "violated",
+    );
+    expect(resultByName(after, "harness_call_recorded").detail).toContain(
+      "H-2",
+    );
   });
 
   it("FTS 索引分叉：两条内置尺子都说 ok，本检查点名那一行", () => {
@@ -758,16 +887,19 @@ describe("⑤ §22.4 审计自洽：三条规则 + FTS + 枚举", () => {
      * 所以本条检查必须自己逐行问「你还在吗」，而且问的是【自己那一段】。
      */
     const { db } = migratedDb(60);
-    expect(JSON.stringify(db.prepare("PRAGMA integrity_check").all())).toContain("ok");
-    db.prepare("INSERT INTO events_fts(events_fts) VALUES('integrity-check')").run();
+    expect(
+      JSON.stringify(db.prepare("PRAGMA integrity_check").all()),
+    ).toContain("ok");
+    db.prepare(
+      "INSERT INTO events_fts(events_fts) VALUES('integrity-check')",
+    ).run();
 
     const victim = db
       .prepare("SELECT id, payload FROM events ORDER BY id LIMIT 1 OFFSET 37")
       .get() as { id: number; payload: string };
-    db.prepare("INSERT INTO events_fts(events_fts, rowid, payload) VALUES('delete', ?, ?)").run(
-      victim.id,
-      victim.payload,
-    );
+    db.prepare(
+      "INSERT INTO events_fts(events_fts, rowid, payload) VALUES('delete', ?, ?)",
+    ).run(victim.id, victim.payload);
     // 反向对照：索引里真的没有它了（不是我的检查误报）。
     const gone = db
       .prepare("SELECT rowid AS rid FROM events_fts WHERE events_fts MATCH ?")
@@ -779,7 +911,9 @@ describe("⑤ §22.4 审计自洽：三条规则 + FTS + 枚举", () => {
     // 必须点名到【具体哪一行】，不能只说「有分叉」。
     expect(c.detail).toContain(String(victim.id));
     // 而且分叉之后内置尺子仍然说 ok —— 这一发就是「为什么不能只跑 integrity_check」。
-    expect(JSON.stringify(db.prepare("PRAGMA integrity_check").all())).toContain("ok");
+    expect(
+      JSON.stringify(db.prepare("PRAGMA integrity_check").all()),
+    ).toContain("ok");
   });
 
   it("payload 整齐划一也照样点名分叉行（命中判定问的是 rowid 归属）", () => {
@@ -809,14 +943,16 @@ describe("⑤ §22.4 审计自洽：三条规则 + FTS + 枚举", () => {
     const SAME = '{"same":"每字节都一样的正文"}';
     for (let i = 0; i < 200; i++) ins.run(SAME, 1_700_000_000_000 + i);
     // 先证明整齐本身【不】让检查失效。
-    expect(resultByName(auditCoherenceReport({ db }), "fts_index").verdict).toBe("ok");
+    expect(
+      resultByName(auditCoherenceReport({ db }), "fts_index").verdict,
+    ).toBe("ok");
     // 再打断其中一行 —— 必须仍然点得到。
     const victim = db
       .prepare("SELECT id, payload FROM events ORDER BY id LIMIT 1 OFFSET 56")
       .get() as { id: number; payload: string };
-    db
-      .prepare("INSERT INTO events_fts(events_fts, rowid, payload) VALUES('delete', ?, ?)")
-      .run(victim.id, victim.payload);
+    db.prepare(
+      "INSERT INTO events_fts(events_fts, rowid, payload) VALUES('delete', ?, ?)",
+    ).run(victim.id, victim.payload);
     const c = resultByName(auditCoherenceReport({ db }), "fts_index");
     expect(c.verdict).toBe("violated");
     expect(c.detail).toContain(String(victim.id));
@@ -824,7 +960,10 @@ describe("⑤ §22.4 审计自洽：三条规则 + FTS + 枚举", () => {
 
   it("ftsSample = 0 是【显式关掉】，结论记 not_observable", () => {
     const { db } = migratedDb(30);
-    const c = resultByName(auditCoherenceReport({ db, ftsSample: 0 }), "fts_index");
+    const c = resultByName(
+      auditCoherenceReport({ db, ftsSample: 0 }),
+      "fts_index",
+    );
     expect(c.verdict).toBe("not_observable");
     expect(c.detail).toContain("显式关掉");
     expect(c.checked).toBe(0);
@@ -846,9 +985,24 @@ describe("⑤b 委派边门控（0064 §6 第 4 条：存量脏图归自检，�
   ): string {
     return JSON.stringify({
       nodes: {
-        ceo: { role_id: "ceo", can_manage: true, model_family: "f", reports_to: null },
-        a: { role_id: "a", can_manage: false, model_family: "f", reports_to: "ceo" },
-        b: { role_id: "b", can_manage: false, model_family: "f", reports_to: "ceo" },
+        ceo: {
+          role_id: "ceo",
+          can_manage: true,
+          model_family: "f",
+          reports_to: null,
+        },
+        a: {
+          role_id: "a",
+          can_manage: false,
+          model_family: "f",
+          reports_to: "ceo",
+        },
+        b: {
+          role_id: "b",
+          can_manage: false,
+          model_family: "f",
+          reports_to: "ceo",
+        },
       },
       edges,
     });
@@ -907,7 +1061,9 @@ describe("⑤b 委派边门控（0064 §6 第 4 条：存量脏图归自检，�
     expect(okCell.checked).toBe(2);
     // 反向对照（本文件的家规：每一格 ok 后面跟一发必须变红的）：
     // 同一个库，把一条边的门控翻掉 —— 不是换新库，是证明判据真的在看那个布尔。
-    db.exec("UPDATE delegation_graphs SET graph_json = replace(graph_json, '\"review_gate\":true', '\"review_gate\":false')");
+    db.exec(
+      "UPDATE delegation_graphs SET graph_json = replace(graph_json, '\"review_gate\":true', '\"review_gate\":false')",
+    );
     const bad = resultByName(auditCoherenceReport({ db }), GATE_NAME);
     expect(bad.verdict).toBe("violated");
     expect(bad.detail).toContain("a → b");
@@ -923,8 +1079,18 @@ describe("⑤b 委派边门控（0064 §6 第 4 条：存量脏图归自检，�
      * 只扫最新 = 报告 ok 而生产照跑脏图。
      */
     const { db } = migratedDb(5);
-    insertGraph(db, "g7", 7, graphJson([{ from: "a", to: "b", review_gate: true }]));
-    insertGraph(db, "g3", 3, graphJson([{ from: "b", to: "a", review_gate: false }]));
+    insertGraph(
+      db,
+      "g7",
+      7,
+      graphJson([{ from: "a", to: "b", review_gate: true }]),
+    );
+    insertGraph(
+      db,
+      "g3",
+      3,
+      graphJson([{ from: "b", to: "a", review_gate: false }]),
+    );
     const c = resultByName(auditCoherenceReport({ db }), GATE_NAME);
     expect(c.verdict).toBe("violated");
     expect(c.detail).toContain("v3(g3)");
@@ -1015,7 +1181,9 @@ describe("⑥ could_not_run：有东西可查而尺子放不下去", () => {
     db.exec("DROP TRIGGER events_no_update; DROP TRIGGER events_no_delete;");
     db.exec("DROP TABLE events");
     // 前提：内置尺子说没问题。少了这一句，这一发就退化成「看哪个都该红」。
-    expect(JSON.stringify(db.prepare("PRAGMA integrity_check").all())).toContain("ok");
+    expect(
+      JSON.stringify(db.prepare("PRAGMA integrity_check").all()),
+    ).toContain("ok");
 
     const checks = auditCoherenceReport({ db });
     const notRun = checks.filter((c) => c.verdict === "could_not_run");
@@ -1060,7 +1228,9 @@ describe("⑥ could_not_run：有东西可查而尺子放不下去", () => {
         writer: q,
         onMainThread: true,
       });
-      expect(resultByName(res.checks, "append_only").verdict).toBe("could_not_run");
+      expect(resultByName(res.checks, "append_only").verdict).toBe(
+        "could_not_run",
+      );
       // 报告是【一份完整的报告】而不是一个 rejection：格数一条不少。
       expect(res.checks).toHaveLength(CHECK_NAMES.length);
     } finally {
@@ -1079,28 +1249,36 @@ describe("⑦ 结论集合本身", () => {
      */
     const seen = new Set<string>();
     const healthy = migratedDb(30);
-    for (const c of auditCoherenceReport({ db: healthy.db })) seen.add(c.verdict);
+    for (const c of auditCoherenceReport({ db: healthy.db }))
+      seen.add(c.verdict);
     const empty = openDb(join(TMP, "空-" + ++seq + ".db"));
     opened.push(empty);
     migrate(empty as never);
     for (const c of auditCoherenceReport({ db: empty })) seen.add(c.verdict);
     const broken = migratedDb(20);
-    broken.db.exec("DROP TRIGGER events_no_update; DROP TRIGGER events_no_delete;");
+    broken.db.exec(
+      "DROP TRIGGER events_no_update; DROP TRIGGER events_no_delete;",
+    );
     broken.db.exec("DROP TABLE events");
-    for (const c of auditCoherenceReport({ db: broken.db })) seen.add(c.verdict);
+    for (const c of auditCoherenceReport({ db: broken.db }))
+      seen.add(c.verdict);
     const diverged = migratedDb(60);
     const v = diverged.db
       .prepare("SELECT id, payload FROM events ORDER BY id LIMIT 1 OFFSET 3")
       .get() as { id: number; payload: string };
     diverged.db
-      .prepare("INSERT INTO events_fts(events_fts, rowid, payload) VALUES('delete', ?, ?)")
+      .prepare(
+        "INSERT INTO events_fts(events_fts, rowid, payload) VALUES('delete', ?, ?)",
+      )
       .run(v.id, v.payload);
-    for (const c of auditCoherenceReport({ db: diverged.db })) seen.add(c.verdict);
+    for (const c of auditCoherenceReport({ db: diverged.db }))
+      seen.add(c.verdict);
 
     // 观察到的必须是枚举的【子集】，且四种里至少有三种真出现过。
     // 说「至少三种」而不是四种：ok / violated / not_observable / could_not_run
     // 里 could_not_run 只在 broken 那份库里出现，其余三条来自 healthy / empty / diverged。
-    for (const v2 of seen) expect(CHECK_VERDICTS as readonly string[]).toContain(v2);
+    for (const v2 of seen)
+      expect(CHECK_VERDICTS as readonly string[]).toContain(v2);
     expect(seen.size).toBeGreaterThanOrEqual(3);
     expect(seen.has("could_not_run")).toBe(true);
     expect(CHECK_VERDICTS).toHaveLength(4);
@@ -1137,12 +1315,16 @@ describe("⑦ 结论集合本身", () => {
     // 更直接的理由是：这一发要守的是【有没有第二处】，而它自己必须先证明
     // 「第二处如果存在，我认得出来」。
     expect(
-      deriveLine('  const W = new URL(import.meta.url.replace(/x/u, ".worker.$1"));'),
+      deriveLine(
+        '  const W = new URL(import.meta.url.replace(/x/u, ".worker.$1"));',
+      ),
       "判据必须认得出「有人把推导式重新内联回来」那一行",
     ).toBe(true);
     // 反向对照：一句提到这件事的散文不许命中（本篇撞的就是它）。
     expect(
-      deriveLine(" * 本节原本是内联那串 import.meta.url.replace(...)，注明全仓只允许一处"),
+      deriveLine(
+        " * 本节原本是内联那串 import.meta.url.replace(...)，注明全仓只允许一处",
+      ),
       "判据不许把历史叙述当成第二处推导式",
     ).toBe(false);
     const srcDir = join(HUB, "src");
@@ -1151,7 +1333,8 @@ describe("⑦ 结论集合本身", () => {
       for (const e of readdirSync(dir, { withFileTypes: true })) {
         // 与 doc-refs.ts 同一份跳过口径：dist 是产物（里面【必然】有 .js 版的推导式，
         // 那是同一次编译的复制品而不是「第二处有人猜扩展名」，数它会恒红）。
-        if (e.name === "node_modules" || e.name === "dist" || e.name === ".tmp") continue;
+        if (e.name === "node_modules" || e.name === "dist" || e.name === ".tmp")
+          continue;
         const p = join(dir, e.name);
         if (e.isDirectory()) walk(p);
         else if (e.name.endsWith(".ts")) files.push(p);
@@ -1192,8 +1375,8 @@ describe("⑦ 结论集合本身", () => {
     // （报 worker_unavailable / worker_error），所以这个洞不会让任何东西变红：
     // 全部「走 worker」的用例其实都走的是失败分支，而它们照样绿。
     // 这一发就是那个洞的锁。断言的对象跟着推导式一起搬到 worker-entry.ts。
-    expect(readFileSync(join(HUB, "src", "db", "worker-entry.ts"), "utf8")).toContain(
-      '".worker.$1"',
-    );
+    expect(
+      readFileSync(join(HUB, "src", "db", "worker-entry.ts"), "utf8"),
+    ).toContain('".worker.$1"');
   });
 });

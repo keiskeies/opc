@@ -138,6 +138,28 @@ export function exemptedBlocks(
     .map((b) => ({ lineNo: b.lineNo, paths: pathTokens(b.text) }));
 }
 
+/**
+ * 死豁免：贴着「点名的路径【全都存在】」那一行的标记。
+ *
+ * 豁免的成立条件是「这个东西还没建」，东西建出来那一刻条件就消失了 —— 标记留在原地
+ * 不是「宽松」，是一枚【假账】：它让下一条「这条验收行没复核」的追问看起来已经论证过。
+ * 所以这必须判，且判据是「那条豁免行点名的路径有没有【至少一条】真不在盘上」。
+ *
+ * ⚠ 为什么它是【导出函数】而不是测试里那个循环（2026-11-19 改的形状，理由值得留着）：
+ * 豁免账清零那天（最后一条豁免被正当摘掉），真仓库那一发遍历的是一个【空名单】——
+ * 循环体从此【永不执行】。round298 记过同一族：「一个永远不可能进入的分支就是一句装饰」，
+ * 它要在【造出那种读数】之后才算被验证。判据住进守卫、测试只喂语料，才让它在
+ * 名单为空的那天仍然被【合成语料】真跑一次（见 .test.ts 的「死豁免」那两发）。
+ */
+export function deadExemptions(
+  blocks: ReadonlyArray<{ lineNo: number; text: string }>,
+  exists: (p: string) => boolean,
+): Array<{ lineNo: number; paths: string[] }> {
+  return exemptedBlocks(blocks).filter(
+    (e) => e.paths.filter((p) => !exists(p)).length === 0,
+  );
+}
+
 export function readPlan(root: string): string {
   const p = join(root, PLAN_PATH);
   if (!existsSync(p)) {

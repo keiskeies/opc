@@ -1,0 +1,31 @@
+packages/hub/test/db/backup.test.ts(1089,61): error TS2698: Spread types may only be created from object types.
+packages/hub/test/db/integrity.test.ts(534,21): error TS2551: Property 'actorId' does not exist on type '{ task_id: string | null; actor_type: string; actor_id: string; action: string; payload: string; }'. Did you mean 'actor_id'?
+packages/hub/test/db/migrate.test.ts(81,23): error TS2345: Argument of type 'Db' is not assignable to parameter of type 'DatabaseSync'.
+packages/hub/test/db/migrate.test.ts(91,24): error TS2345: Argument of type 'Db' is not assignable to parameter of type 'DatabaseSync'.
+packages/hub/test/db/migrate.test.ts(98,11): error TS2345: Argument of type 'Db' is not assignable to parameter of type 'DatabaseSync'.
+packages/hub/test/db/migrate.test.ts(124,11): error TS2345: Argument of type 'Db' is not assignable to parameter of type 'DatabaseSync'.
+packages/hub/test/db/migrate.test.ts(130,25): error TS2345: Argument of type 'Db' is not assignable to parameter of type 'DatabaseSync'.
+packages/hub/test/db/migrate.test.ts(131,26): error TS2345: Argument of type 'Db' is not assignable to parameter of type 'DatabaseSync'.
+packages/hub/test/db/migrate.test.ts(135,18): error TS2345: Argument of type 'Db' is not assignable to parameter of type 'DatabaseSync'.
+packages/hub/test/db/migrate.test.ts(141,11): error TS2345: Argument of type 'Db' is not assignable to parameter of type 'DatabaseSync'.
+packages/hub/test/db/migrate.test.ts(142,11): error TS2345: Argument of type 'Db' is not assignable to parameter of type 'DatabaseSync'.
+packages/hub/test/db/migrate.test.ts(148,11): error TS2345: Argument of type 'Db' is not assignable to parameter of type 'DatabaseSync'.
+packages/hub/test/db/migrate.test.ts(185,24): error TS2345: Argument of type 'Db' is not assignable to parameter of type 'DatabaseSync'.
+packages/hub/test/db/schema-0001.test.ts(37,11): error TS2345: Argument of type 'Db' is not assignable to parameter of type 'DatabaseSync'.
+packages/hub/test/db/schema-0001.test.ts(117,5): error TS2322: Type '[string, string, []]' is not assignable to type '[label: string, sql: string]'.
+packages/hub/test/db/schema-0001.test.ts(122,5): error TS2322: Type '[string, string, []]' is not assignable to type '[label: string, sql: string]'.
+packages/hub/test/db/schema-0001.test.ts(127,5): error TS2322: Type '[string, string, []]' is not assignable to type '[label: string, sql: string]'.
+packages/hub/test/db/schema-0001.test.ts(132,5): error TS2322: Type '[string, string, []]' is not assignable to type '[label: string, sql: string]'.
+packages/hub/test/db/schema-0001.test.ts(137,5): error TS2322: Type '[string, string, []]' is not assignable to type '[label: string, sql: string]'.
+packages/hub/test/db/schema-0001.test.ts(142,5): error TS2322: Type '[string, string, []]' is not assignable to type '[label: string, sql: string]'.
+packages/hub/test/db/schema-0001.test.ts(147,5): error TS2322: Type '[string, string, []]' is not assignable to type '[label: string, sql: string]'.
+packages/hub/test/db/schema-0001.test.ts(152,5): error TS2322: Type '[string, string, []]' is not assignable to type '[label: string, sql: string]'.
+packages/hub/test/db/schema-0001.test.ts(157,5): error TS2322: Type '[string, string, []]' is not assignable to type '[label: string, sql: string]'.
+packages/hub/test/db/worker-entry.test.ts(186,46): error TS2379: Argument of type '{ parentURL: string | undefined; }' is not assignable to parameter of type '{ parentURL?: string; }' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.
+packages/hub/test/db/write-queue.test.ts(71,17): error TS2532: Object is possibly 'undefined'.
+packages/hub/test/db/write-queue.test.ts(291,18): error TS2532: Object is possibly 'undefined'.
+packages/hub/test/db/write-queue.test.ts(317,12): error TS2532: Object is possibly 'undefined'.
+packages/hub/test/db/write-queue.test.ts(318,23): error TS2532: Object is possibly 'undefined'.
+packages/hub/test/db/write-queue.test.ts(319,12): error TS2532: Object is possibly 'undefined'.
+packages/hub/test/db/write-queue.test.ts(579,19): error TS2532: Object is possibly 'undefined'.
+packages/hub/test/db/write-queue.test.ts(584,19): error TS2532: Object is possibly 'undefined'.

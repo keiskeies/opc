@@ -29,17 +29,17 @@ import type {
   ToolApprovalRequest,
 } from "@opc/contracts";
 import { harnessRequestSchema } from "@opc/contracts";
+import { describe, expect, it } from "vitest";
 import type { AuditRow } from "../../src/events/recorder.js";
 import {
-  capabilityGap,
   callHarness,
+  capabilityGap,
   type GatewayDeps,
   type GatewayOutcome,
   type HarnessAttemptPayload,
   type HarnessCallPayload,
   pathArg,
 } from "../../src/harness/gateway.js";
-import { describe, expect, it } from "vitest";
 
 /* ═════════════════ fake 适配器与 deps ═════════════════ */
 
@@ -59,7 +59,11 @@ function req(over: Partial<HarnessRequestInput> = {}): HarnessRequest {
     sandbox: "workspace-write",
     approval_policy: "never",
     allowed_tools: ["Read", "Bash", "Write"],
-    forbidden_flags: ["--dangerously-skip-permissions", "--no-sandbox", "--yolo"],
+    forbidden_flags: [
+      "--dangerously-skip-permissions",
+      "--no-sandbox",
+      "--yolo",
+    ],
     requested_args: ["--sandbox", "workspace-write"],
     max_budget_usd: 1,
     ...over,
@@ -106,7 +110,10 @@ function fakeAdapter(
   } = {},
 ): HarnessAdapter & { resumeArgs: string[]; lastHandler: unknown } {
   const caps: HarnessCapabilities = { ...FULL_CAPS, ...(o.caps ?? {}) };
-  const adapter: HarnessAdapter & { resumeArgs: string[]; lastHandler: unknown } = {
+  const adapter: HarnessAdapter & {
+    resumeArgs: string[];
+    lastHandler: unknown;
+  } = {
     id: (o.id ?? "codex") as HarnessId,
     capabilities: caps,
     resumeArgs: [],
@@ -133,7 +140,11 @@ async function* stream(
   for (const ev of events) {
     // 模拟「有审批回调的 harness」：不可逆那几发先问再动。
     if (ev.kind === "tool_call" && o.asked !== undefined) {
-      const r: ToolApprovalRequest = { tool: ev.tool, args: ev.redactedArgs, reason: "fake 问你" };
+      const r: ToolApprovalRequest = {
+        tool: ev.tool,
+        args: ev.redactedArgs,
+        reason: "fake 问你",
+      };
       o.asked.push(r);
       const d = await onApproval(r);
       if (!d.approved && o.proceedAfterDenial !== true) continue; // 老实的 harness：不动手
@@ -143,7 +154,9 @@ async function* stream(
 }
 
 /** 收集审计行的 deps。`audit` 是**必填**那一格的最小实现。 */
-function deps(over: Partial<GatewayDeps> = {}): GatewayDeps & { rows: AuditRow[] } {
+function deps(
+  over: Partial<GatewayDeps> = {},
+): GatewayDeps & { rows: AuditRow[] } {
   const rows: AuditRow[] = [];
   return {
     rows,
@@ -152,7 +165,11 @@ function deps(over: Partial<GatewayDeps> = {}): GatewayDeps & { rows: AuditRow[]
       return rows.length;
     },
     grantedSandbox: "workspace-write",
-    grantedForbidden: ["--dangerously-skip-permissions", "--no-sandbox", "--yolo"],
+    grantedForbidden: [
+      "--dangerously-skip-permissions",
+      "--no-sandbox",
+      "--yolo",
+    ],
     ...over,
   };
 }
@@ -165,7 +182,10 @@ function calls(d: { rows: AuditRow[] }): HarnessCallPayload[] {
 function attempts(d: { rows: AuditRow[] }): HarnessAttemptPayload[] {
   return d.rows
     .filter((r: AuditRow): boolean => r.action === "unauthorized_attempt")
-    .map((r: AuditRow): HarnessAttemptPayload => r.payload as HarnessAttemptPayload);
+    .map(
+      (r: AuditRow): HarnessAttemptPayload =>
+        r.payload as HarnessAttemptPayload,
+    );
 }
 function okOf(g: GatewayOutcome): void {
   expect(g.ok).toBe(true);
@@ -181,12 +201,20 @@ describe("能力声明不符 ⇒ 拒绝调用，不是降级执行", () => {
       capabilities: { ...FULL_CAPS, toolApproval: false },
       execute: () => {
         executed = true;
-        return stream([SESSION, finished()], async () => ({ approved: true }), {});
+        return stream(
+          [SESSION, finished()],
+          async () => ({ approved: true }),
+          {},
+        );
       },
       resume: () => stream([], async () => ({ approved: true }), {}),
       getCost: async () => COST,
     };
-    const g = await callHarness(adapter, req({ approval_policy: "on-request" }), deps());
+    const g = await callHarness(
+      adapter,
+      req({ approval_policy: "on-request" }),
+      deps(),
+    );
     expect(g.ok).toBe(false);
     if (!g.ok) expect(g.code).toBe("capability_gap");
     // 这条断言才是「不是静默降级」的机器证明：光看返回码分不清「拒了」与「拒了但照跑」。
@@ -201,7 +229,12 @@ describe("能力声明不符 ⇒ 拒绝调用，不是降级执行", () => {
         resume_session_id: "s1",
         output_schema: "TestReport",
       }),
-      { budgetHardCap: false, toolApproval: false, resume: false, structuredOutput: false },
+      {
+        budgetHardCap: false,
+        toolApproval: false,
+        resume: false,
+        structuredOutput: false,
+      },
     );
     expect(gaps.length).toBe(4);
     expect(gaps.join("\n")).toContain("approval_policy=on-request");
@@ -212,15 +245,24 @@ describe("能力声明不符 ⇒ 拒绝调用，不是降级执行", () => {
 
   it("不要求的项不算缺口：不恢复就别要求 resume 能力", () => {
     expect(
-      capabilityGap(req(), { budgetHardCap: true, toolApproval: false, resume: false, structuredOutput: false })
-        .length,
+      capabilityGap(req(), {
+        budgetHardCap: true,
+        toolApproval: false,
+        resume: false,
+        structuredOutput: false,
+      }).length,
     ).toBe(0);
   });
 
   it("approval_policy=never + 无审批能力 ⇒ 闸门放行（车间内自主，§12.8）", () => {
     // 但注意这【不等于】不可逆调用会被放行：needsApproval 刻意不看 approval_policy。
     // 那一层在下面的「never 也照样要审批」那条用例里钉。
-    expect(capabilityGap(req({ approval_policy: "never" }), { ...FULL_CAPS, toolApproval: false }).length).toBe(0);
+    expect(
+      capabilityGap(req({ approval_policy: "never" }), {
+        ...FULL_CAPS,
+        toolApproval: false,
+      }).length,
+    ).toBe(0);
   });
 
   it("⭐ 声明 structuredOutput=false 却在结果里塞 structured ⇒ 不采信结果", async () => {
@@ -258,7 +300,9 @@ describe("预算闸门（§12.5 调用前拒）", () => {
     const g = await callHarness(
       { ...a, execute: (rq, h) => ((executed = true), real(rq, h)) },
       req(),
-      deps({ checkBudget: () => ({ over: true, spentCents: 1000, limitCents: 1000 }) }),
+      deps({
+        checkBudget: () => ({ over: true, spentCents: 1000, limitCents: 1000 }),
+      }),
     );
     expect(g.ok).toBe(false);
     if (!g.ok) expect(g.code).toBe("budget_exceeded");
@@ -268,9 +312,13 @@ describe("预算闸门（§12.5 调用前拒）", () => {
   it("请求上限超总上限 ⇒ budget_exceeded，且报错说清是【配置错】而不是【额度用尽】", async () => {
     // 这一条钉的是我自己写过的「算了不用」：wantedCents 算出来而判据只看 b.over，
     // 于是「max_budget 写成 $20 而总额度只有 $10」这种配置错误在额度尚有余量时能放行。
-    const g = await callHarness(fakeAdapter([SESSION, finished()]), req({ max_budget_usd: 20 }), deps({
-      checkBudget: () => ({ over: false, spentCents: 100, limitCents: 1000 }),
-    }));
+    const g = await callHarness(
+      fakeAdapter([SESSION, finished()]),
+      req({ max_budget_usd: 20 }),
+      deps({
+        checkBudget: () => ({ over: false, spentCents: 100, limitCents: 1000 }),
+      }),
+    );
     expect(g.ok).toBe(false);
     if (!g.ok) {
       expect(g.code).toBe("budget_exceeded");
@@ -279,7 +327,11 @@ describe("预算闸门（§12.5 调用前拒）", () => {
   });
 
   it("无预算声明（undefined）⇒ 不拦", async () => {
-    const g = await callHarness(fakeAdapter([SESSION, finished()]), req(), deps({ checkBudget: () => undefined }));
+    const g = await callHarness(
+      fakeAdapter([SESSION, finished()]),
+      req(),
+      deps({ checkBudget: () => undefined }),
+    );
     okOf(g);
   });
 });
@@ -289,7 +341,11 @@ describe("预算闸门（§12.5 调用前拒）", () => {
 describe("调用前的四层：越权尝试必须【留下审计】而不只是返回拒", () => {
   it("参数里带 --yolo ⇒ 拒 + 一行 unauthorized_attempt（stage=pre_call）", async () => {
     const d = deps();
-    const g = await callHarness(fakeAdapter([SESSION, finished()]), req({ requested_args: ["--yolo"] }), d);
+    const g = await callHarness(
+      fakeAdapter([SESSION, finished()]),
+      req({ requested_args: ["--yolo"] }),
+      d,
+    );
     expect(g.ok).toBe(false);
     if (!g.ok) expect(g.code).toBe("safety_blocked");
     const at = attempts(d);
@@ -310,9 +366,9 @@ describe("调用前的四层：越权尝试必须【留下审计】而不只是�
     expect(g.ok).toBe(false);
     expect(attempts(d)[0]!.kind).toBe("forbidden_flag");
     // 被移除的两条要逐条点名（只说「缩短了三条里的两条」而不知道是哪两条，没法修）。
-    expect((attempts(d)[0]!.detail?.["removed_flags"] as string[]).sort()).toEqual(
-      ["dangerously-skip-permissions", "no-sandbox"].sort(),
-    );
+    expect(
+      (attempts(d)[0]!.detail?.["removed_flags"] as string[]).sort(),
+    ).toEqual(["dangerously-skip-permissions", "no-sandbox"].sort());
   });
 
   it("沙箱提级（授权 read-only 而请求 workspace-write）⇒ 拒", async () => {
@@ -330,8 +386,16 @@ describe("调用前的四层：越权尝试必须【留下审计】而不只是�
     // 而【没有任何用例能让它红】：所有断言都只喂一个档位。
     // 所以这一条必须把【同一个请求】在两个授权档位下各跑一次，要求一个过一个拒。
     const r = req({ sandbox: "workspace-write" });
-    const raised = await callHarness(fakeAdapter([SESSION, finished()]), r, deps({ grantedSandbox: "read-only" }));
-    const allowed = await callHarness(fakeAdapter([SESSION, finished()]), r, deps({ grantedSandbox: "workspace-write" }));
+    const raised = await callHarness(
+      fakeAdapter([SESSION, finished()]),
+      r,
+      deps({ grantedSandbox: "read-only" }),
+    );
+    const allowed = await callHarness(
+      fakeAdapter([SESSION, finished()]),
+      r,
+      deps({ grantedSandbox: "workspace-write" }),
+    );
     expect(raised.ok).toBe(false);
     expect(allowed.ok).toBe(true);
   });
@@ -346,9 +410,47 @@ describe("调用前的四层：越权尝试必须【留下审计】而不只是�
   });
 
   it("相对路径工作区 ⇒ 拒（同一条岗位书在两个 cwd 下意味着两个可写范围）", async () => {
-    const g = await callHarness(fakeAdapter([SESSION, finished()]), req({ workspace: "repo" }), deps());
+    const g = await callHarness(
+      fakeAdapter([SESSION, finished()]),
+      req({ workspace: "repo" }),
+      deps(),
+    );
     expect(g.ok).toBe(false);
     if (!g.ok) expect(g.code).toBe("safety_blocked");
+  });
+
+  /**
+   * ⭐ Windows 的绝对路径在这一层【放行】（round312，O6 Step B 接线时补的）。
+   *
+   * 这一发的理由是【真的假阴性】而不是「多覆盖一种写法」：第 3 层旧写法只判
+   * `workspace.startsWith("/")`，而 hub 就跑在 Windows 上 —— 装配方交出的
+   * `d.cwd` 恰是 `D:\item\opc` 这种形状 ⇒ 每一轮真员工都被拒成 safety_blocked。
+   * 只留上面那发「相对 ⇒ 拒」，判据写成恒拒也照样全绿（round303 记过同一课：
+   * 「恒拒这种实现逃逸那三发全绿，只有断言在里面的反向对照拦得住」）。
+   * 所以这里三个形状一起判：两种放行、一种【看起来绝对但其实驱动器相对】的拒。
+   */
+  it("⭐ 绝对性按两种分隔符读：`D:\\ws` 与 `C:/ws` 放行，`D:ws` 仍拒", async () => {
+    const win = await callHarness(
+      fakeAdapter([SESSION, finished()]),
+      req({ workspace: "D:\\item\\opc\\ws" }),
+      deps(),
+    );
+    okOf(win);
+    const fwd = await callHarness(
+      fakeAdapter([SESSION, finished()]),
+      req({ workspace: "C:/item/opc/ws" }),
+      deps(),
+    );
+    okOf(fwd);
+    // 反向对照：`D:ws` 是「D 盘当前目录下的 ws」，歧义正是这一层要拒的东西。
+    // 缺这一发，「把正则松成 /^[A-Za-z]:/」——那会把 D:ws 也放进来——不会被发现。
+    const driveRel = await callHarness(
+      fakeAdapter([SESSION, finished()]),
+      req({ workspace: "D:ws" }),
+      deps(),
+    );
+    expect(driveRel.ok).toBe(false);
+    if (!driveRel.ok) expect(driveRel.code).toBe("safety_blocked");
   });
 });
 
@@ -358,9 +460,16 @@ describe("逐次工具调用", () => {
   it("⭐ 白名单外的工具 ⇒ 记一行 tool_not_allowed 且【整次调用被中止】", async () => {
     const d = deps();
     const g = await callHarness(
-      fakeAdapter([SESSION, { kind: "tool_call", tool: "NotebookEdit", redactedArgs: {} }, finished()], {
-        // 没有 asked：模拟一个【不问就动】的适配器，于是事件流那一路是唯一的观测点
-      }),
+      fakeAdapter(
+        [
+          SESSION,
+          { kind: "tool_call", tool: "NotebookEdit", redactedArgs: {} },
+          finished(),
+        ],
+        {
+          // 没有 asked：模拟一个【不问就动】的适配器，于是事件流那一路是唯一的观测点
+        },
+      ),
       req(),
       d,
     );
@@ -385,7 +494,11 @@ describe("逐次工具调用", () => {
     const g = await callHarness(
       fakeAdapter([
         SESSION,
-        { kind: "tool_call", tool: "Write", redactedArgs: { file_path: "/etc/passwd" } },
+        {
+          kind: "tool_call",
+          tool: "Write",
+          redactedArgs: { file_path: "/etc/passwd" },
+        },
         finished(),
       ]),
       req(),
@@ -410,9 +523,20 @@ describe("逐次工具调用", () => {
     const d = deps();
     let approvalsAskedToHuman = 0;
     const g = await callHarness(
-      fakeAdapter([SESSION, { kind: "tool_call", tool: "Bash", redactedArgs: { command: "rm -rf build" } }, finished()], {
-        asked,
-      }),
+      fakeAdapter(
+        [
+          SESSION,
+          {
+            kind: "tool_call",
+            tool: "Bash",
+            redactedArgs: { command: "rm -rf build" },
+          },
+          finished(),
+        ],
+        {
+          asked,
+        },
+      ),
       req(),
       d,
       () => {
@@ -427,7 +551,11 @@ describe("逐次工具调用", () => {
     if (g.ok) {
       const p = calls(d)[0]!;
       expect(p.approvals.length).toBe(1);
-      expect(p.approvals[0]).toEqual({ tool: "Bash", approved: true, decided_by: "ceo" });
+      expect(p.approvals[0]).toEqual({
+        tool: "Bash",
+        approved: true,
+        decided_by: "ceo",
+      });
     }
   });
 
@@ -438,7 +566,15 @@ describe("逐次工具调用", () => {
     const d = deps();
     let humanAsked = 0;
     const g = await callHarness(
-      fakeAdapter([SESSION, { kind: "tool_call", tool: "Bash", redactedArgs: { command: "rm -rf build" } }, finished()]),
+      fakeAdapter([
+        SESSION,
+        {
+          kind: "tool_call",
+          tool: "Bash",
+          redactedArgs: { command: "rm -rf build" },
+        },
+        finished(),
+      ]),
       req(),
       d,
       () => {
@@ -488,10 +624,21 @@ describe("逐次工具调用", () => {
   it("审批被拒 ⇒ 记 approval_denied；适配器拒了照跑 ⇒ 多一行 proceeded_after_verdict", async () => {
     const d = deps();
     const g = await callHarness(
-      fakeAdapter([SESSION, { kind: "tool_call", tool: "Bash", redactedArgs: { command: "rm -rf build" } }, finished()], {
-        asked: [],
-        proceedAfterDenial: true,
-      }),
+      fakeAdapter(
+        [
+          SESSION,
+          {
+            kind: "tool_call",
+            tool: "Bash",
+            redactedArgs: { command: "rm -rf build" },
+          },
+          finished(),
+        ],
+        {
+          asked: [],
+          proceedAfterDenial: true,
+        },
+      ),
       req(),
       d,
       () => ({ approved: false, decidedBy: "ceo", note: "等测试" }),
@@ -512,7 +659,15 @@ describe("逐次工具调用", () => {
   it("⭐ approval_policy=never 也挡不住不可逆调用的审批（§12.8 的边界）", async () => {
     const d = deps();
     const g = await callHarness(
-      fakeAdapter([SESSION, { kind: "tool_call", tool: "Bash", redactedArgs: { command: "rm -rf build" } }, finished()]),
+      fakeAdapter([
+        SESSION,
+        {
+          kind: "tool_call",
+          tool: "Bash",
+          redactedArgs: { command: "rm -rf build" },
+        },
+        finished(),
+      ]),
       req({ approval_policy: "never" }),
       d,
     ); // 没有 onApproval
@@ -528,9 +683,20 @@ describe("逐次工具调用", () => {
     const asked: ToolApprovalRequest[] = [];
     const d = deps();
     const g = await callHarness(
-      fakeAdapter([SESSION, { kind: "tool_call", tool: "Bash", redactedArgs: { command: "rm -rf build" } }, finished()], {
-        asked,
-      }),
+      fakeAdapter(
+        [
+          SESSION,
+          {
+            kind: "tool_call",
+            tool: "Bash",
+            redactedArgs: { command: "rm -rf build" },
+          },
+          finished(),
+        ],
+        {
+          asked,
+        },
+      ),
       req(),
       d,
       // 故意不传 onApproval
@@ -538,16 +704,32 @@ describe("逐次工具调用", () => {
     okOf(g);
     expect(asked.length).toBe(1);
     const at = attempts(d);
-    expect(at.some((a: HarnessAttemptPayload): boolean => a.kind === "approval_handler_missing")).toBe(true);
+    expect(
+      at.some(
+        (a: HarnessAttemptPayload): boolean =>
+          a.kind === "approval_handler_missing",
+      ),
+    ).toBe(true);
   });
 
   it("只读工具不审批、不记账（ approvals 那一格只装真的问过人的）", async () => {
     const asked: ToolApprovalRequest[] = [];
     const d = deps();
     const g = await callHarness(
-      fakeAdapter([SESSION, { kind: "tool_call", tool: "Bash", redactedArgs: { command: "git status" } }, finished()], {
-        asked,
-      }),
+      fakeAdapter(
+        [
+          SESSION,
+          {
+            kind: "tool_call",
+            tool: "Bash",
+            redactedArgs: { command: "git status" },
+          },
+          finished(),
+        ],
+        {
+          asked,
+        },
+      ),
       req(),
       d,
     );
@@ -583,7 +765,11 @@ describe("prevention 那一格：挡住的是【拦下了】还是【只看见�
   it("策略是 never 时【不算】enforced —— 能问不代表会问（判据是能力 ∧ 策略）", async () => {
     // 只判能力会得到一个更乐观的值，而 approval_policy=never 恰恰是「这家不会问」的声明。
     const d = deps();
-    await callHarness(fakeAdapter([SESSION, finished()], { caps: { toolApproval: true } }), req({ approval_policy: "never" }), d);
+    await callHarness(
+      fakeAdapter([SESSION, finished()], { caps: { toolApproval: true } }),
+      req({ approval_policy: "never" }),
+      d,
+    );
     expect(calls(d)[0]!.prevention).toBe("observed_only");
   });
 });
@@ -593,7 +779,11 @@ describe("prevention 那一格：挡住的是【拦下了】还是【只看见�
 describe("harness_call 那一行：§12.7 第四层那七项一项都不许缺", () => {
   it("七个点名项全在，且缺值的写 null 而不是省键", async () => {
     const d = deps();
-    const g = await callHarness(fakeAdapter([SESSION, { kind: "usage", cost: COST }, finished()]), req(), d);
+    const g = await callHarness(
+      fakeAdapter([SESSION, { kind: "usage", cost: COST }, finished()]),
+      req(),
+      d,
+    );
     okOf(g);
     const p = calls(d)[0]!;
     for (const k of [
@@ -611,10 +801,9 @@ describe("harness_call 那一行：§12.7 第四层那七项一项都不许缺",
     expect(p.spent_cents).toBe(120);
     expect(p.cost_source).toBe("harness");
     // 快照里必须能看到【当时的授权范围】：只有参数重放不出当时授到哪。
-    const snap = d.rows.find((r: AuditRow): boolean => r.action === "harness_call")!.stateSnapshot as Record<
-      string,
-      unknown
-    >;
+    const snap = d.rows.find(
+      (r: AuditRow): boolean => r.action === "harness_call",
+    )!.stateSnapshot as Record<string, unknown>;
     expect(snap["granted_sandbox"]).toBe("workspace-write");
     expect(snap["granted_forbidden"]).toContain("--yolo");
   });
@@ -632,7 +821,14 @@ describe("harness_call 那一行：§12.7 第四层那七项一项都不许缺",
     const d = deps();
     await callHarness(
       fakeAdapter([SESSION, finished()]),
-      req({ requested_args: ["--sandbox", "workspace-write", "--token", "sk-live-secret"] }),
+      req({
+        requested_args: [
+          "--sandbox",
+          "workspace-write",
+          "--token",
+          "sk-live-secret",
+        ],
+      }),
       d,
     );
     const p = calls(d)[0]!;
@@ -660,7 +856,11 @@ describe("harness_call 那一行：§12.7 第四层那七项一项都不许缺",
     expect(calls(broken)[0]!.status).toBe("adapter_error");
 
     const blocked = deps();
-    await callHarness(fakeAdapter([SESSION, finished()]), req({ requested_args: ["--yolo"] }), blocked);
+    await callHarness(
+      fakeAdapter([SESSION, finished()]),
+      req({ requested_args: ["--yolo"] }),
+      blocked,
+    );
     // 前置四层命中时【不写】harness_call：那次调用根本没发生，写一条 status=blocked
     // 会让回放页以为有个会话跑过。它留的是 unauthorized_attempt 那一行。
     expect(calls(blocked).length).toBe(0);
@@ -687,7 +887,10 @@ describe("适配器异常 ⇒ 拒而不编一个看起来合法的结果", () =>
   it("两个 session_started ⇒ duplicate_session_event，且不取后者", async () => {
     const d = deps();
     const g = await callHarness(
-      fakeAdapter([SESSION, { kind: "session_started", sessionId: "sess-2" }, finished()], {}),
+      fakeAdapter(
+        [SESSION, { kind: "session_started", sessionId: "sess-2" }, finished()],
+        {},
+      ),
       req(),
       d,
     );
@@ -740,13 +943,21 @@ describe("适配器异常 ⇒ 拒而不编一个看起来合法的结果", () =>
 describe("恢复与消耗上报", () => {
   it("请求带 resume_session_id ⇒ 走 adapter.resume 而不是 execute", async () => {
     const a = fakeAdapter([SESSION, finished()], { caps: { resume: true } });
-    const g = await callHarness(a, req({ resume_session_id: "sess-old" }), deps());
+    const g = await callHarness(
+      a,
+      req({ resume_session_id: "sess-old" }),
+      deps(),
+    );
     okOf(g);
     expect(a.resumeArgs).toEqual(["sess-old"]);
   });
 
   it("settle 的幂等键【不含随机值】：同一个逻辑调用重复上报只扣一次", async () => {
-    const g = await callHarness(fakeAdapter([SESSION, { kind: "usage", cost: COST }, finished()]), req(), deps());
+    const g = await callHarness(
+      fakeAdapter([SESSION, { kind: "usage", cost: COST }, finished()]),
+      req(),
+      deps(),
+    );
     okOf(g);
     if (g.ok) expect(g.settleIdempotencyKey).toBe("harness:task-1:dev:sess-1");
     // 键里含 taskId + roleId + sessionId，所以同一会话的重复上报同键；
@@ -755,7 +966,11 @@ describe("恢复与消耗上报", () => {
 
   it("settle 只在真的有消耗时被调（0 不上报，免得留一条假的消费）", async () => {
     let settled = 0;
-    await callHarness(fakeAdapter([SESSION, finished()]), req(), deps({ settle: () => void (settled += 1) }));
+    await callHarness(
+      fakeAdapter([SESSION, finished()]),
+      req(),
+      deps({ settle: () => void (settled += 1) }),
+    );
     expect(settled).toBe(0);
     await callHarness(
       fakeAdapter([SESSION, { kind: "usage", cost: COST }, finished()]),
@@ -772,7 +987,15 @@ describe("恢复与消耗上报", () => {
       // 用一条【只读】的工具调用：`Read` + `{path:...}` 会被 §9.1 那张表判成
       // 「认不出 ⇒ 默认不可逆」（见 safety.test.ts 那条 ⭐ 用例），于是这条装配用例
       // 测的会变成审批而不是装配。`git status` 是表里的只读项。
-      fakeAdapter([SESSION, { kind: "tool_call", tool: "Bash", redactedArgs: { command: "git status" } }, finished()]),
+      fakeAdapter([
+        SESSION,
+        {
+          kind: "tool_call",
+          tool: "Bash",
+          redactedArgs: { command: "git status" },
+        },
+        finished(),
+      ]),
       req(),
       deps(),
     );
@@ -813,7 +1036,10 @@ describe("toolSightings：第 1 层『搜过没有』的那个数的来源", () 
     // 否则「一次老实的搜索」会被数成两次，而那个数字会进第 1 层的判据。
     const asked: ToolApprovalRequest[] = [];
     return callHarness(
-      fakeAdapter([SESSION, WS({ query: "x" }), WS({ query: "x" }), finished()], { asked }),
+      fakeAdapter(
+        [SESSION, WS({ query: "x" }), WS({ query: "x" }), finished()],
+        { asked },
+      ),
       req({ allowed_tools: ["Read", "WebSearch"] }),
       deps(),
       async () => ({ approved: true }),
@@ -830,7 +1056,12 @@ describe("toolSightings：第 1 层『搜过没有』的那个数的来源", () 
 
   it("不同参数的同一工具 ⇒ 算两次（否则第一次会替第二次放行）", async () => {
     const g = await callHarness(
-      fakeAdapter([SESSION, WS({ query: "a" }), WS({ query: "b" }), finished()]),
+      fakeAdapter([
+        SESSION,
+        WS({ query: "a" }),
+        WS({ query: "b" }),
+        finished(),
+      ]),
       req({ allowed_tools: ["Read", "WebSearch"] }),
       deps(),
     );
@@ -840,7 +1071,11 @@ describe("toolSightings：第 1 层『搜过没有』的那个数的来源", () 
 
   it("被拒那条路也带它 ⇒ 「看不见」这件事在两个出口都可读", async () => {
     const g = await callHarness(
-      fakeAdapter([SESSION, { kind: "tool_call", tool: "Bash", redactedArgs: {} }, finished()]),
+      fakeAdapter([
+        SESSION,
+        { kind: "tool_call", tool: "Bash", redactedArgs: {} },
+        finished(),
+      ]),
       req(), // 白名单里没有 Bash ⇒ 观测到一次未授权 ⇒ 中止
       deps(),
     );

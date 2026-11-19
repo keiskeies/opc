@@ -123,7 +123,7 @@ CREATE UNIQUE INDEX idx_approvals_card_identity
 ## 4. 泵挂在心跳上的形状：非阻塞派发
 
 心跳一轮做的是巡检 + 备份相位；起草一轮要起子进程，上限 **180 秒**
-（`engine/claude.ts:201` 那个 `i.timeoutMs ?? 180_000` 到点 `SIGKILL`【round305 坐标 +90：
+（`engine/claude.ts:213` 那个（round312 复算坐标：文件头诚实标注段按改口重写，本行一字未变） `i.timeoutMs ?? 180_000` 到点 `SIGKILL`【round305 坐标 +90：
 claude.ts 为 Task 6.1 的重试判据加了 `started`/`spawnErrno` 两格与那张瞬时 errno 表，
 超时那一支的本体没动 —— 它今天反而是判据里被点名的一格：`costUsd` 写 0 而 `started:true`，
 「没记到钱」不等于「没花钱」】。

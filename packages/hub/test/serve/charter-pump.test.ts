@@ -963,7 +963,10 @@ describe("H. 默认那一支（makeRuntime + 真子进程 + 真执行日志）",
     expect(Number(hc[0]?.["exit_code"])).toBe(1);
     expect(Number(hc[0]?.["cost_cents"])).toBe(0);
     // 失败原文进结论：一个人只看库会以为"什么都没发生"，看终端才拿得到原因。
-    expect(r.cards[0]?.note).toContain("CLI 输出不是预期的 JSON");
+    // O6 Step B（round312）后子进程输出先过 gateway 会话校验：garbage 桩的非 JSON
+    // 输出在 gateway 层判成 no_session（无 session_started ⇒ 拒），不再走到适配器
+    // 的 JSON 解析。文案变了，意图没变 —— note 仍带着失败原因。
+    expect(r.cards[0]?.note).toContain("gateway 拒绝（no_session）");
   });
 
   it("⭐ 必填的 --agent-cwd【真的】到了子进程的工作目录", async () => {

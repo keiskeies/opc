@@ -1,0 +1,516 @@
+packages/hub/test/acceptance/phase1-gates.test.ts(99,11): error TS2345: Argument of type 'Db' is not assignable to parameter of type 'DatabaseSync'.
+  Type 'Db' is missing the following properties from type 'DatabaseSync': aggregate, loadExtension, enableLoadExtension, enableDefensive, and 13 more.
+packages/hub/test/acceptance/phase1-gates.test.ts(124,64): error TS2769: No overload matches this call.
+  Overload 1 of 2, '(store: { db: DatabaseSync; }, callback: () => Promise<T>): Promise<T>', gave the following error.
+    Type 'Db' is missing the following properties from type 'DatabaseSync': aggregate, loadExtension, enableLoadExtension, enableDefensive, and 13 more.
+  Overload 2 of 2, '(store: { db: DatabaseSync; }, callback: () => Promise<T>): Promise<T>', gave the following error.
+    Type 'Db' is missing the following properties from type 'DatabaseSync': aggregate, loadExtension, enableLoadExtension, enableDefensive, and 13 more.
+packages/hub/test/acceptance/rejected-waiver-still-asks.test.ts(216,30): error TS2352: Conversion of type 'CardRow | undefined' to type 'Row' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+  Type 'CardRow' is not comparable to type 'Row'.
+    Index signature for type 'string' is missing in type 'CardRow'.
+packages/hub/test/approvals/cards.test.ts(215,16): error TS2532: Object is possibly 'undefined'.
+packages/hub/test/approvals/cards.test.ts(230,7): error TS2532: Object is possibly 'undefined'.
+packages/hub/test/approvals/cards.test.ts(246,19): error TS2532: Object is possibly 'undefined'.
+packages/hub/test/approvals/cards.test.ts(247,19): error TS2532: Object is possibly 'undefined'.
+packages/hub/test/approvals/cards.test.ts(260,19): error TS2532: Object is possibly 'undefined'.
+packages/hub/test/approvals/cards.test.ts(271,19): error TS2532: Object is possibly 'undefined'.
+packages/hub/test/approvals/cards.test.ts(285,19): error TS2532: Object is possibly 'undefined'.
+packages/hub/test/approvals/cards.test.ts(293,19): error TS2532: Object is possibly 'undefined'.
+packages/hub/test/approvals/cards.test.ts(357,19): error TS2532: Object is possibly 'undefined'.
+packages/hub/test/approvals/cards.test.ts(402,19): error TS2532: Object is possibly 'undefined'.
+packages/hub/test/approvals/cards.test.ts(421,10): error TS2339: Property 'parameters' does not exist on type 'never'.
+packages/hub/test/approvals/cards.test.ts(438,19): error TS2532: Object is possibly 'undefined'.
+packages/hub/test/approvals/cards.test.ts(506,45): error TS2339: Property 'summary' does not exist on type 'never'.
+packages/hub/test/approvals/timeout.test.ts(236,7): error TS2554: Expected 3 arguments, but got 2.
+packages/hub/test/budget/tracker.test.ts(115,11): error TS2345: Argument of type 'Db' is not assignable to parameter of type 'DatabaseSync'.
+  Type 'Db' is missing the following properties from type 'DatabaseSync': aggregate, loadExtension, enableLoadExtension, enableDefensive, and 13 more.
+packages/hub/test/budget/tracker.test.ts(136,64): error TS2769: No overload matches this call.
+  Overload 1 of 2, '(store: { db: DatabaseSync; }, callback: () => Promise<T>): Promise<T>', gave the following error.
+    Type 'Db' is missing the following properties from type 'DatabaseSync': aggregate, loadExtension, enableLoadExtension, enableDefensive, and 13 more.
+  Overload 2 of 2, '(store: { db: DatabaseSync; }, callback: () => Promise<T>): Promise<T>', gave the following error.
+    Type 'Db' is missing the following properties from type 'DatabaseSync': aggregate, loadExtension, enableLoadExtension, enableDefensive, and 13 more.
+packages/hub/test/channels/feishu-http.test.ts(202,6): error TS1064: The return type of an async function or method must be the global Promise<T> type. Did you mean to write 'Promise<{ signal: AbortSignal | undefined; aborted: boolean; }>'?
+packages/hub/test/channels/feishu-http.test.ts(207,39): error TS2540: Cannot assign to 'fetchTimeoutMs' because it is a read-only property.
+packages/hub/test/channels/feishu.test.ts(233,28): error TS2345: Argument of type 'NormalizedMessage | undefined' is not assignable to parameter of type 'NormalizedMessage'.
+  Type 'undefined' is not assignable to type 'NormalizedMessage'.
+packages/hub/test/channels/feishu.test.ts(257,28): error TS2345: Argument of type 'NormalizedMessage | undefined' is not assignable to parameter of type 'NormalizedMessage'.
+  Type 'undefined' is not assignable to type 'NormalizedMessage'.
+packages/hub/test/channels/feishu.test.ts(286,12): error TS2379: Argument of type '{ sender: undefined; }' is not assignable to parameter of type 'Partial<FeishuMessageItem>' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.
+  Types of property 'sender' are incompatible.
+    Type 'undefined' is not assignable to type '{ readonly id?: string; }'.
+packages/hub/test/channels/feishu.test.ts(291,12): error TS2379: Argument of type '{ body: undefined; }' is not assignable to parameter of type 'Partial<FeishuMessageItem>' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.
+  Types of property 'body' are incompatible.
+    Type 'undefined' is not assignable to type '{ readonly content?: string; }'.
+packages/hub/test/channels/feishu.test.ts(327,28): error TS2345: Argument of type 'NormalizedMessage | undefined' is not assignable to parameter of type 'NormalizedMessage'.
+  Type 'undefined' is not assignable to type 'NormalizedMessage'.
+packages/hub/test/charter/budget-sync.test.ts(107,64): error TS2769: No overload matches this call.
+  Overload 1 of 2, '(store: { db: DatabaseSync; }, callback: () => Promise<T>): Promise<T>', gave the following error.
+    Type 'AnyDb' is missing the following properties from type 'DatabaseSync': aggregate, loadExtension, enableLoadExtension, enableDefensive, and 13 more.
+  Overload 2 of 2, '(store: { db: DatabaseSync; }, callback: () => Promise<T>): Promise<T>', gave the following error.
+    Type 'AnyDb' is missing the following properties from type 'DatabaseSync': aggregate, loadExtension, enableLoadExtension, enableDefensive, and 13 more.
+packages/hub/test/db/schema-0001.test.ts(293,19): error TS18048: 'row' is possibly 'undefined'.
+packages/hub/test/engine/approve.test.ts(169,5): error TS2345: Argument of type 'Queue' is not assignable to parameter of type 'HubWriter'.
+  The types returned by 'readConnection()' are incompatible between these types.
+    Type 'Db' is missing the following properties from type 'DatabaseSync': aggregate, close, loadExtension, enableLoadExtension, and 14 more.
+packages/hub/test/engine/approve.test.ts(376,25): error TS2345: Argument of type 'Queue' is not assignable to parameter of type 'HubWriter'.
+  The types returned by 'readConnection()' are incompatible between these types.
+    Type 'Db' is missing the following properties from type 'DatabaseSync': aggregate, close, loadExtension, enableLoadExtension, and 14 more.
+packages/hub/test/engine/approve.test.ts(379,25): error TS2345: Argument of type 'Queue' is not assignable to parameter of type 'HubWriter'.
+  The types returned by 'readConnection()' are incompatible between these types.
+    Type 'Db' is missing the following properties from type 'DatabaseSync': aggregate, close, loadExtension, enableLoadExtension, and 14 more.
+packages/hub/test/engine/approve.test.ts(384,31): error TS2345: Argument of type 'Queue' is not assignable to parameter of type 'HubWriter'.
+  The types returned by 'readConnection()' are incompatible between these types.
+    Type 'Db' is missing the following properties from type 'DatabaseSync': aggregate, close, loadExtension, enableLoadExtension, and 14 more.
+packages/hub/test/engine/charter.test.ts(157,5): error TS2345: Argument of type 'Queue' is not assignable to parameter of type 'HubWriter'.
+  The types returned by 'readConnection()' are incompatible between these types.
+    Type 'Db' is missing the following properties from type 'DatabaseSync': aggregate, close, loadExtension, enableLoadExtension, and 14 more.
+packages/hub/test/engine/claude.test.ts(31,8): error TS5097: An import path can only end with a '.ts' extension when 'allowImportingTsExtensions' is enabled.
+packages/hub/test/engine/dispatch.test.ts(522,12): error TS18048: 'LEGAL.IN_PROGRESS' is possibly 'undefined'.
+packages/hub/test/engine/dispatch.test.ts(523,12): error TS18048: 'LEGAL.EVIDENCE_SUBMITTED' is possibly 'undefined'.
+packages/hub/test/engine/dispatch.test.ts(524,12): error TS18048: 'LEGAL.IN_REVIEW' is possibly 'undefined'.
+packages/hub/test/engine/dispatch.test.ts(791,30): error TS2532: Object is possibly 'undefined'.
+packages/hub/test/engine/dispatch.test.ts(792,30): error TS2532: Object is possibly 'undefined'.
+packages/hub/test/engine/dispatch.test.ts(795,12): error TS18048: 't' is possibly 'undefined'.
+packages/hub/test/engine/dispatch.test.ts(796,12): error TS18048: 't' is possibly 'undefined'.
+packages/hub/test/engine/dispatch.test.ts(797,12): error TS18048: 't' is possibly 'undefined'.
+packages/hub/test/engine/dispatch.test.ts(851,12): error TS18048: 't' is possibly 'undefined'.
+packages/hub/test/engine/dispatch.test.ts(852,12): error TS18048: 't' is possibly 'undefined'.
+packages/hub/test/engine/dispatch.test.ts(855,12): error TS18048: 't' is possibly 'undefined'.
+packages/hub/test/engine/dispatch.test.ts(905,12): error TS18048: 't' is possibly 'undefined'.
+packages/hub/test/engine/dispatch.test.ts(906,12): error TS18048: 't' is possibly 'undefined'.
+packages/hub/test/engine/dispatch.test.ts(924,12): error TS18048: 't' is possibly 'undefined'.
+packages/hub/test/engine/dispatch.test.ts(944,12): error TS2532: Object is possibly 'undefined'.
+packages/hub/test/engine/dispatch.test.ts(945,12): error TS2532: Object is possibly 'undefined'.
+packages/hub/test/engine/dispatch.test.ts(988,33): error TS2532: Object is possibly 'undefined'.
+packages/hub/test/engine/dispatch.test.ts(989,31): error TS2532: Object is possibly 'undefined'.
+packages/hub/test/engine/dispatch.test.ts(1012,12): error TS2532: Object is possibly 'undefined'.
+packages/hub/test/engine/dispatch.test.ts(1063,12): error TS2532: Object is possibly 'undefined'.
+packages/hub/test/engine/dispatch.test.ts(1068,12): error TS2532: Object is possibly 'undefined'.
+packages/hub/test/engine/dispatch.test.ts(1080,12): error TS2532: Object is possibly 'undefined'.
+packages/hub/test/engine/dispatch.test.ts(1081,33): error TS2532: Object is possibly 'undefined'.
+packages/hub/test/engine/dispatch.test.ts(1089,12): error TS2532: Object is possibly 'undefined'.
+packages/hub/test/engine/dispatch.test.ts(1128,12): error TS2532: Object is possibly 'undefined'.
+packages/hub/test/engine/dispatch.test.ts(1130,19): error TS2532: Object is possibly 'undefined'.
+packages/hub/test/engine/dispatch.test.ts(1163,19): error TS2532: Object is possibly 'undefined'.
+packages/hub/test/engine/dispatch.test.ts(1230,12): error TS2532: Object is possibly 'undefined'.
+packages/hub/test/engine/dispatch.test.ts(1232,12): error TS2532: Object is possibly 'undefined'.
+packages/hub/test/engine/dispatch.test.ts(1243,30): error TS2532: Object is possibly 'undefined'.
+packages/hub/test/engine/dispatch.test.ts(1253,70): error TS2532: Object is possibly 'undefined'.
+packages/hub/test/engine/dispatch.test.ts(1364,19): error TS2532: Object is possibly 'undefined'.
+packages/hub/test/engine/dispatch.test.ts(1369,19): error TS2532: Object is possibly 'undefined'.
+packages/hub/test/engine/dispatch.test.ts(1504,45): error TS2339: Property 'to' does not exist on type 'never'.
+packages/hub/test/engine/dispatch.test.ts(1535,31): error TS2353: Object literal may only specify known properties, and 'reason' does not exist in type '{ readonly ok: true; }'.
+packages/hub/test/engine/dispatch.test.ts(1538,42): error TS2339: Property 'to' does not exist on type 'never'.
+packages/hub/test/engine/dispatch.test.ts(1539,60): error TS2339: Property 'to' does not exist on type 'never'.
+packages/hub/test/engine/driver.test.ts(230,26): error TS2749: 'WriteQueue' refers to a value, but is being used as a type here. Did you mean 'typeof WriteQueue'?
+packages/hub/test/engine/seat-card.test.ts(208,12): error TS2532: Object is possibly 'undefined'.
+packages/hub/test/engine/seat-card.test.ts(209,12): error TS2532: Object is possibly 'undefined'.
+packages/hub/test/engine/seat-card.test.ts(210,19): error TS2532: Object is possibly 'undefined'.
+packages/hub/test/engine/seat-card.test.ts(212,19): error TS2532: Object is possibly 'undefined'.
+packages/hub/test/engine/seat-card.test.ts(214,38): error TS2532: Object is possibly 'undefined'.
+packages/hub/test/engine/seat-card.test.ts(221,12): error TS2532: Object is possibly 'undefined'.
+packages/hub/test/engine/seat-card.test.ts(223,12): error TS2532: Object is possibly 'undefined'.
+packages/hub/test/engine/seat-card.test.ts(224,12): error TS2532: Object is possibly 'undefined'.
+packages/hub/test/engine/seat-card.test.ts(226,12): error TS2532: Object is possibly 'undefined'.
+packages/hub/test/engine/seat-card.test.ts(226,36): error TS2532: Object is possibly 'undefined'.
+packages/hub/test/engine/seat-card.test.ts(228,33): error TS2532: Object is possibly 'undefined'.
+packages/hub/test/engine/seat-card.test.ts(394,19): error TS2532: Object is possibly 'undefined'.
+packages/hub/test/engine/seat-card.test.ts(395,19): error TS2532: Object is possibly 'undefined'.
+packages/hub/test/engine/seat-card.test.ts(406,35): error TS2532: Object is possibly 'undefined'.
+packages/hub/test/engine/seat-card.test.ts(462,12): error TS2532: Object is possibly 'undefined'.
+packages/hub/test/engine/seat-card.test.ts(494,19): error TS2532: Object is possibly 'undefined'.
+packages/hub/test/engine/seat-card.test.ts(650,64): error TS2532: Object is possibly 'undefined'.
+packages/hub/test/engine/seat-card.test.ts(660,66): error TS2532: Object is possibly 'undefined'.
+packages/hub/test/engine/seat-card.test.ts(699,35): error TS2532: Object is possibly 'undefined'.
+packages/hub/test/engine/seat-card.test.ts(706,12): error TS2532: Object is possibly 'undefined'.
+packages/hub/test/engine/seat-card.test.ts(706,34): error TS2532: Object is possibly 'undefined'.
+packages/hub/test/engine/seat-card.test.ts(707,90): error TS2532: Object is possibly 'undefined'.
+packages/hub/test/engine/seat-card.test.ts(711,7): error TS2532: Object is possibly 'undefined'.
+packages/hub/test/engine/seat-card.test.ts(719,56): error TS2532: Object is possibly 'undefined'.
+packages/hub/test/engine/seat-card.test.ts(735,37): error TS2532: Object is possibly 'undefined'.
+packages/hub/test/engine/seat-card.test.ts(758,21): error TS2532: Object is possibly 'undefined'.
+packages/hub/test/evidence/bundle.test.ts(52,11): error TS2345: Argument of type 'Db' is not assignable to parameter of type 'DatabaseSync'.
+  Type 'Db' is missing the following properties from type 'DatabaseSync': aggregate, loadExtension, enableLoadExtension, enableDefensive, and 13 more.
+packages/hub/test/gates/determinism.test.ts(351,34): error TS2379: Argument of type '{ integrityOk: undefined; }' is not assignable to parameter of type 'Partial<GateInput>' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.
+  Types of property 'integrityOk' are incompatible.
+    Type 'undefined' is not assignable to type 'boolean'.
+packages/hub/test/graph/branches.test.ts(241,33): error TS2345: Argument of type 'readonly ParallelBranch[] | undefined' is not assignable to parameter of type 'readonly ParallelBranch[]'.
+  Type 'undefined' is not assignable to type 'readonly ParallelBranch[]'.
+packages/hub/test/graph/fixtures/e2e-crash-child.ts(169,30): error TS2345: Argument of type '{ idea: string; current: string; } | null' is not assignable to parameter of type 'UpdateType<{ idea: BaseChannel<string, string | OverwriteValue<string>, unknown>; current: BaseChannel<TaskState, TaskState | OverwriteValue<TaskState>, unknown>; passed: BaseChannel<...>; reworkUsed: BaseChannel<...>; trail: BaseChannel<...>; }> | CommandInstance<...> | null'.
+  Type '{ idea: string; current: string; }' is not assignable to type 'UpdateType<{ idea: BaseChannel<string, string | OverwriteValue<string>, unknown>; current: BaseChannel<TaskState, TaskState | OverwriteValue<TaskState>, unknown>; passed: BaseChannel<...>; reworkUsed: BaseChannel<...>; trail: BaseChannel<...>; }> | CommandInstance<...> | null'.
+    Type '{ idea: string; current: string; }' is not assignable to type 'UpdateType<{ idea: BaseChannel<string, string | OverwriteValue<string>, unknown>; current: BaseChannel<TaskState, TaskState | OverwriteValue<TaskState>, unknown>; passed: BaseChannel<...>; reworkUsed: BaseChannel<...>; trail: BaseChannel<...>; }>'.
+      Types of property 'current' are incompatible.
+        Type 'string' is not assignable to type 'TaskState | OverwriteValue<TaskState>'.
+packages/hub/test/harness/gateway.test.ts(81,5): error TS2741: Property 'structured' is missing in type '{ harnessId: string; harnessVersion: string; modelFamily: string; output: string; diffHash: string; }' but required in type '{ harnessId: string; harnessVersion: string; modelFamily: string; output: string; diffHash: string | null; structured: unknown; }'.
+packages/hub/test/harness/gateway.test.ts(116,29): error TS2345: Argument of type 'ApprovalHandler' is not assignable to parameter of type '(r: ToolApprovalRequest) => Promise<ToolApprovalDecision>'.
+  Type 'ToolApprovalDecision | Promise<ToolApprovalDecision>' is not assignable to type 'Promise<ToolApprovalDecision>'.
+    Type 'ToolApprovalDecision' is missing the following properties from type 'Promise<ToolApprovalDecision>': then, catch, finally, [Symbol.toStringTag]
+packages/hub/test/harness/gateway.test.ts(121,29): error TS2345: Argument of type 'ApprovalHandler' is not assignable to parameter of type '(r: ToolApprovalRequest) => Promise<ToolApprovalDecision>'.
+  Type 'ToolApprovalDecision | Promise<ToolApprovalDecision>' is not assignable to type 'Promise<ToolApprovalDecision>'.
+    Type 'ToolApprovalDecision' is missing the following properties from type 'Promise<ToolApprovalDecision>': then, catch, finally, [Symbol.toStringTag]
+packages/hub/test/harness/gateway.test.ts(720,11): error TS2741: Property 'structured' is missing in type '{ harnessId: string; modelFamily: string; output: string; diffHash: null; harnessVersion: string; }' but required in type '{ harnessId: string; harnessVersion: string; modelFamily: string; output: string; diffHash: string | null; structured: unknown; }'.
+packages/hub/test/harness/verifier.test.ts(68,7): error TS2739: Type '{ spentCents: number; remainingCents: null; source: "harness"; }' is missing the following properties from type '{ spentCents: number; remainingCents: number | null; inputTokens: number | undefined; outputTokens: number | undefined; source: "harness" | "converted" | "estimated"; }': inputTokens, outputTokens
+packages/hub/test/harness/verifier.test.ts(98,5): error TS2322: Type '{ kind: "finished"; exitCode: number; outcome: { harnessId: string; harnessVersion: string; modelFamily: string; output: string; diffHash: null; }; }' is not assignable to type 'HarnessEvent'.
+  Types of property 'outcome' are incompatible.
+    Property 'structured' is missing in type '{ harnessId: string; harnessVersion: string; modelFamily: string; output: string; diffHash: null; }' but required in type '{ harnessId: string; harnessVersion: string; modelFamily: string; output: string; diffHash: string | null; structured: unknown; }'.
+packages/hub/test/harness/verifier.test.ts(99,5): error TS2322: Type '{ kind: "finished"; exitCode: number; outcome: { harnessId: string; harnessVersion: string; modelFamily: string; output: string; diffHash: null; }; }' is not assignable to type 'HarnessEvent'.
+  Types of property 'outcome' are incompatible.
+    Property 'structured' is missing in type '{ harnessId: string; harnessVersion: string; modelFamily: string; output: string; diffHash: null; }' but required in type '{ harnessId: string; harnessVersion: string; modelFamily: string; output: string; diffHash: string | null; structured: unknown; }'.
+packages/hub/test/harness/verifier.test.ts(100,5): error TS2322: Type '{ kind: "finished"; exitCode: number; outcome: { harnessId: string; harnessVersion: string; modelFamily: string; output: string; diffHash: null; }; }' is not assignable to type 'HarnessEvent'.
+  Types of property 'outcome' are incompatible.
+    Property 'structured' is missing in type '{ harnessId: string; harnessVersion: string; modelFamily: string; output: string; diffHash: null; }' but required in type '{ harnessId: string; harnessVersion: string; modelFamily: string; output: string; diffHash: string | null; structured: unknown; }'.
+packages/hub/test/harness/verifier.test.ts(314,22): error TS2339: Property 'reasons' does not exist on type 'GateVerdict'.
+  Property 'reasons' does not exist on type '{ decision: "pass"; unresolved: string[]; }'.
+packages/hub/test/harness/verifier.test.ts(319,26): error TS2339: Property 'reasons' does not exist on type 'GateVerdict'.
+  Property 'reasons' does not exist on type '{ decision: "pass"; unresolved: string[]; }'.
+packages/hub/test/harness/verifier.test.ts(355,22): error TS2339: Property 'reasons' does not exist on type 'GateVerdict'.
+  Property 'reasons' does not exist on type '{ decision: "pass"; unresolved: string[]; }'.
+packages/hub/test/harness/verifier.test.ts(586,14): error TS2339: Property 'instructionFlags' does not exist on type 'VerifyOutcome'.
+  Property 'instructionFlags' does not exist on type '{ ok: false; code: "unknown_model_family" | "same_model_family" | "approval_by_author" | "same_workspace" | "nested_workspace" | "same_role" | "same_session" | "empty_session" | "verifier_not_enforced" | "bad_artifact" | "verifier_call_failed"; reason: string; }'.
+packages/hub/test/heartbeat/patrol.test.ts(354,7): error TS2345: Argument of type '{ actorType: "system"; actorId: string; taskId: string; action: "state_change"; payload: { note: string; }; createdAt: number; }' is not assignable to parameter of type 'AuditRow'.
+  Property 'target' is missing in type '{ actorType: "system"; actorId: string; taskId: string; action: "state_change"; payload: { note: string; }; createdAt: number; }' but required in type 'AuditRow'.
+packages/hub/test/http/bind.test.ts(128,42): error TS2379: Argument of type '{ requested: "127.0.0.1" | "0.0.0.0" | undefined; remoteApprovalsWired: boolean; }' is not assignable to parameter of type '{ readonly requested?: string; readonly remoteApprovalsWired: boolean; }' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.
+  Types of property 'requested' are incompatible.
+    Type 'string | undefined' is not assignable to type 'string'.
+      Type 'undefined' is not assignable to type 'string'.
+packages/hub/test/http/bind.test.ts(192,18): error TS7009: 'new' expression, whose target lacks a construct signature, implicitly has an 'any' type.
+packages/hub/test/http/bind.test.ts(195,18): error TS7009: 'new' expression, whose target lacks a construct signature, implicitly has an 'any' type.
+packages/hub/test/http/contract.test.ts(71,11): error TS2345: Argument of type 'Db' is not assignable to parameter of type 'DatabaseSync'.
+  Type 'Db' is missing the following properties from type 'DatabaseSync': aggregate, loadExtension, enableLoadExtension, enableDefensive, and 13 more.
+packages/hub/test/http/contract.test.ts(111,44): error TS1064: The return type of an async function or method must be the global Promise<T> type. Did you mean to write 'Promise<{ deps: HubDeps; db: Db; bus: InMemoryEventBus; calls: { decision: number; created: number; resumed: string[]; }; sign: (method: string, path: string, body?: string | undefined) => Record<...>; req: (o: Partial<...> & { ...; }) => HubRequest; approvals: (id: string, status?: string | undefined) => void; }>'?
+packages/hub/test/http/contract.test.ts(602,21): error TS2339: Property 'replayed' does not exist on type 'ApprovalOutcome'.
+  Property 'replayed' does not exist on type '{ status: 404; reason: string; }'.
+packages/hub/test/http/contract.test.ts(763,12): error TS2540: Cannot assign to 'resumeGraph' because it is a read-only property.
+packages/hub/test/http/decision-engine-route.test.ts(72,15): error TS2339: Property 'close' does not exist on type 'HubWriter'.
+packages/hub/test/http/decision-engine-route.test.ts(134,13): error TS2551: Property 'writeConnection' does not exist on type 'HubWriter'. Did you mean 'readConnection'?
+packages/hub/test/http/decision-engine-route.test.ts(139,8): error TS2551: Property 'writeConnection' does not exist on type 'HubWriter'. Did you mean 'readConnection'?
+packages/hub/test/http/decision-engine-route.test.ts(160,10): error TS2551: Property 'writeConnection' does not exist on type 'HubWriter'. Did you mean 'readConnection'?
+packages/hub/test/http/decision-engine-route.test.ts(162,14): error TS2769: No overload matches this call.
+  Overload 1 of 2, '(...anonymousParameters: SQLInputValue[]): StatementResultingChanges', gave the following error.
+    Argument of type 'string | undefined' is not assignable to parameter of type 'SQLInputValue'.
+      Type 'undefined' is not assignable to type 'SQLInputValue'.
+  Overload 2 of 2, '(namedParameters: Record<string, SQLInputValue>, ...anonymousParameters: SQLInputValue[]): StatementResultingChanges', gave the following error.
+    Argument of type 'string | undefined' is not assignable to parameter of type 'Record<string, SQLInputValue>'.
+      Type 'undefined' is not assignable to type 'Record<string, SQLInputValue>'.
+packages/hub/test/http/decision-engine-route.test.ts(170,9): error TS2551: Property 'writeConnection' does not exist on type 'HubWriter'. Did you mean 'readConnection'?
+packages/hub/test/http/decision-engine-route.test.ts(235,76): error TS2345: Argument of type 'unknown' is not assignable to parameter of type 'SQLInputValue'.
+packages/hub/test/http/org-route.test.ts(464,15): error TS18046: 'res.body' is of type 'unknown'.
+packages/hub/test/http/org-route.test.ts(466,12): error TS18048: 'g.nodes.dev' is possibly 'undefined'.
+packages/hub/test/http/org-route.test.ts(467,12): error TS18048: 'g.nodes.tech' is possibly 'undefined'.
+packages/hub/test/http/server.test.ts(96,11): error TS2345: Argument of type 'Db' is not assignable to parameter of type 'DatabaseSync'.
+  Type 'Db' is missing the following properties from type 'DatabaseSync': aggregate, loadExtension, enableLoadExtension, enableDefensive, and 13 more.
+packages/hub/test/http/tokens-route.test.ts(93,11): error TS2345: Argument of type 'Db' is not assignable to parameter of type 'DatabaseSync'.
+  Type 'Db' is missing the following properties from type 'DatabaseSync': aggregate, loadExtension, enableLoadExtension, enableDefensive, and 13 more.
+packages/hub/test/http/tokens-route.test.ts(313,11): error TS2375: Type '{ issueApprovalToken: undefined; db: DatabaseSync; bus: EventBus; token: string; now: () => number; driverState: () => DriverRuntimeState; ... 10 more ...; budgetWriter?: Writer; }' is not assignable to type 'HubDeps' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.
+  Types of property 'issueApprovalToken' are incompatible.
+    Type 'undefined' is not assignable to type '(o: { readonly approvalId: string; readonly nowMs: number; }) => Promise<{ readonly ok: true; readonly token: string; readonly expiresAt: number; } | { readonly ok: false; readonly reason: TokenIssueReject; }>'.
+packages/hub/test/http/tokens-route.test.ts(456,11): error TS2375: Type '{ redeemApprovalToken: undefined; db: DatabaseSync; bus: EventBus; token: string; now: () => number; driverState: () => DriverRuntimeState; ... 10 more ...; budgetWriter?: Writer; }' is not assignable to type 'HubDeps' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.
+  Types of property 'redeemApprovalToken' are incompatible.
+    Type 'undefined' is not assignable to type '(o: { readonly token: string; readonly approvalId: string; }) => Promise<{ readonly ok: true; readonly taskId: string; } | { readonly ok: false; readonly reason: TokenRejectReason; }>'.
+packages/hub/test/http/tokens.test.ts(192,19): error TS2532: Object is possibly 'undefined'.
+packages/hub/test/http/tokens.test.ts(193,12): error TS2532: Object is possibly 'undefined'.
+packages/hub/test/http/tokens.test.ts(195,31): error TS2532: Object is possibly 'undefined'.
+packages/hub/test/memory/role-memory.test.ts(345,7): error TS2554: Expected 1 arguments, but got 2.
+packages/hub/test/overview/today.test.ts(168,22): error TS2345: Argument of type 'Db' is not assignable to parameter of type 'DatabaseSync'.
+  Type 'Db' is missing the following properties from type 'DatabaseSync': aggregate, close, loadExtension, enableLoadExtension, and 14 more.
+packages/hub/test/overview/today.test.ts(177,22): error TS2345: Argument of type 'Db' is not assignable to parameter of type 'DatabaseSync'.
+  Type 'Db' is missing the following properties from type 'DatabaseSync': aggregate, close, loadExtension, enableLoadExtension, and 14 more.
+packages/hub/test/overview/today.test.ts(189,22): error TS2345: Argument of type 'Db' is not assignable to parameter of type 'DatabaseSync'.
+  Type 'Db' is missing the following properties from type 'DatabaseSync': aggregate, close, loadExtension, enableLoadExtension, and 14 more.
+packages/hub/test/overview/today.test.ts(199,22): error TS2345: Argument of type 'Db' is not assignable to parameter of type 'DatabaseSync'.
+  Type 'Db' is missing the following properties from type 'DatabaseSync': aggregate, close, loadExtension, enableLoadExtension, and 14 more.
+packages/hub/test/overview/today.test.ts(219,25): error TS2345: Argument of type 'Db' is not assignable to parameter of type 'DatabaseSync'.
+  Type 'Db' is missing the following properties from type 'DatabaseSync': aggregate, close, loadExtension, enableLoadExtension, and 14 more.
+packages/hub/test/overview/today.test.ts(236,22): error TS2345: Argument of type 'Db' is not assignable to parameter of type 'DatabaseSync'.
+  Type 'Db' is missing the following properties from type 'DatabaseSync': aggregate, close, loadExtension, enableLoadExtension, and 14 more.
+packages/hub/test/overview/today.test.ts(245,22): error TS2345: Argument of type 'Db' is not assignable to parameter of type 'DatabaseSync'.
+  Type 'Db' is missing the following properties from type 'DatabaseSync': aggregate, close, loadExtension, enableLoadExtension, and 14 more.
+packages/hub/test/overview/today.test.ts(248,22): error TS2345: Argument of type 'Db' is not assignable to parameter of type 'DatabaseSync'.
+  Type 'Db' is missing the following properties from type 'DatabaseSync': aggregate, close, loadExtension, enableLoadExtension, and 14 more.
+packages/hub/test/overview/today.test.ts(254,25): error TS2345: Argument of type 'Db' is not assignable to parameter of type 'DatabaseSync'.
+  Type 'Db' is missing the following properties from type 'DatabaseSync': aggregate, close, loadExtension, enableLoadExtension, and 14 more.
+packages/hub/test/overview/today.test.ts(268,25): error TS2345: Argument of type 'Db' is not assignable to parameter of type 'DatabaseSync'.
+  Type 'Db' is missing the following properties from type 'DatabaseSync': aggregate, close, loadExtension, enableLoadExtension, and 14 more.
+packages/hub/test/overview/today.test.ts(280,25): error TS2345: Argument of type 'Db' is not assignable to parameter of type 'DatabaseSync'.
+  Type 'Db' is missing the following properties from type 'DatabaseSync': aggregate, close, loadExtension, enableLoadExtension, and 14 more.
+packages/hub/test/overview/today.test.ts(319,25): error TS2345: Argument of type 'Db' is not assignable to parameter of type 'DatabaseSync'.
+  Type 'Db' is missing the following properties from type 'DatabaseSync': aggregate, close, loadExtension, enableLoadExtension, and 14 more.
+packages/hub/test/overview/today.test.ts(338,25): error TS2345: Argument of type 'Db' is not assignable to parameter of type 'DatabaseSync'.
+  Type 'Db' is missing the following properties from type 'DatabaseSync': aggregate, close, loadExtension, enableLoadExtension, and 14 more.
+packages/hub/test/overview/today.test.ts(354,22): error TS2345: Argument of type 'Db' is not assignable to parameter of type 'DatabaseSync'.
+  Type 'Db' is missing the following properties from type 'DatabaseSync': aggregate, close, loadExtension, enableLoadExtension, and 14 more.
+packages/hub/test/overview/today.test.ts(365,22): error TS2345: Argument of type 'Db' is not assignable to parameter of type 'DatabaseSync'.
+  Type 'Db' is missing the following properties from type 'DatabaseSync': aggregate, close, loadExtension, enableLoadExtension, and 14 more.
+packages/hub/test/overview/today.test.ts(369,13): error TS2339: Property 'BLOCKED' does not exist on type 'typeof import("D:/item/opc/packages/hub/src/graph/status", { with: { "resolution-mode": "import" } })'.
+packages/hub/test/overview/today.test.ts(395,25): error TS2345: Argument of type 'Db' is not assignable to parameter of type 'DatabaseSync'.
+  Type 'Db' is missing the following properties from type 'DatabaseSync': aggregate, close, loadExtension, enableLoadExtension, and 14 more.
+packages/hub/test/overview/today.test.ts(408,22): error TS2345: Argument of type 'Db' is not assignable to parameter of type 'DatabaseSync'.
+  Type 'Db' is missing the following properties from type 'DatabaseSync': aggregate, close, loadExtension, enableLoadExtension, and 14 more.
+packages/hub/test/overview/today.test.ts(414,22): error TS2345: Argument of type 'Db' is not assignable to parameter of type 'DatabaseSync'.
+  Type 'Db' is missing the following properties from type 'DatabaseSync': aggregate, close, loadExtension, enableLoadExtension, and 14 more.
+packages/hub/test/overview/today.test.ts(420,25): error TS2345: Argument of type 'Db' is not assignable to parameter of type 'DatabaseSync'.
+  Type 'Db' is missing the following properties from type 'DatabaseSync': aggregate, close, loadExtension, enableLoadExtension, and 14 more.
+packages/hub/test/overview/today.test.ts(437,25): error TS2345: Argument of type 'Db' is not assignable to parameter of type 'DatabaseSync'.
+  Type 'Db' is missing the following properties from type 'DatabaseSync': aggregate, close, loadExtension, enableLoadExtension, and 14 more.
+packages/hub/test/overview/today.test.ts(452,25): error TS2345: Argument of type 'Db' is not assignable to parameter of type 'DatabaseSync'.
+  Type 'Db' is missing the following properties from type 'DatabaseSync': aggregate, close, loadExtension, enableLoadExtension, and 14 more.
+packages/hub/test/overview/today.test.ts(461,25): error TS2345: Argument of type 'Db' is not assignable to parameter of type 'DatabaseSync'.
+  Type 'Db' is missing the following properties from type 'DatabaseSync': aggregate, close, loadExtension, enableLoadExtension, and 14 more.
+packages/hub/test/overview/today.test.ts(475,25): error TS2345: Argument of type 'Db' is not assignable to parameter of type 'DatabaseSync'.
+  Type 'Db' is missing the following properties from type 'DatabaseSync': aggregate, close, loadExtension, enableLoadExtension, and 14 more.
+packages/hub/test/overview/today.test.ts(511,22): error TS2345: Argument of type 'Db' is not assignable to parameter of type 'DatabaseSync'.
+  Type 'Db' is missing the following properties from type 'DatabaseSync': aggregate, close, loadExtension, enableLoadExtension, and 14 more.
+packages/hub/test/overview/today.test.ts(512,22): error TS2345: Argument of type 'Db' is not assignable to parameter of type 'DatabaseSync'.
+  Type 'Db' is missing the following properties from type 'DatabaseSync': aggregate, close, loadExtension, enableLoadExtension, and 14 more.
+packages/hub/test/overview/today.test.ts(516,22): error TS2345: Argument of type 'Db' is not assignable to parameter of type 'DatabaseSync'.
+  Type 'Db' is missing the following properties from type 'DatabaseSync': aggregate, close, loadExtension, enableLoadExtension, and 14 more.
+packages/hub/test/overview/today.test.ts(517,22): error TS2345: Argument of type 'Db' is not assignable to parameter of type 'DatabaseSync'.
+  Type 'Db' is missing the following properties from type 'DatabaseSync': aggregate, close, loadExtension, enableLoadExtension, and 14 more.
+packages/hub/test/overview/today.test.ts(667,25): error TS2345: Argument of type 'Db' is not assignable to parameter of type 'DatabaseSync'.
+  Type 'Db' is missing the following properties from type 'DatabaseSync': aggregate, close, loadExtension, enableLoadExtension, and 14 more.
+packages/hub/test/overview/today.test.ts(693,30): error TS2345: Argument of type 'Db' is not assignable to parameter of type 'DatabaseSync'.
+  Type 'Db' is missing the following properties from type 'DatabaseSync': aggregate, close, loadExtension, enableLoadExtension, and 14 more.
+packages/hub/test/overview/today.test.ts(706,29): error TS2345: Argument of type 'Db' is not assignable to parameter of type 'DatabaseSync'.
+  Type 'Db' is missing the following properties from type 'DatabaseSync': aggregate, close, loadExtension, enableLoadExtension, and 14 more.
+packages/hub/test/overview/today.test.ts(728,27): error TS2345: Argument of type 'Db' is not assignable to parameter of type 'DatabaseSync'.
+  Type 'Db' is missing the following properties from type 'DatabaseSync': aggregate, close, loadExtension, enableLoadExtension, and 14 more.
+packages/hub/test/overview/today.test.ts(741,29): error TS2345: Argument of type 'Db' is not assignable to parameter of type 'DatabaseSync'.
+  Type 'Db' is missing the following properties from type 'DatabaseSync': aggregate, close, loadExtension, enableLoadExtension, and 14 more.
+packages/hub/test/overview/today.test.ts(767,28): error TS2345: Argument of type 'Db' is not assignable to parameter of type 'DatabaseSync'.
+  Type 'Db' is missing the following properties from type 'DatabaseSync': aggregate, close, loadExtension, enableLoadExtension, and 14 more.
+packages/hub/test/overview/today.test.ts(772,31): error TS2345: Argument of type 'Db' is not assignable to parameter of type 'DatabaseSync'.
+  Type 'Db' is missing the following properties from type 'DatabaseSync': aggregate, close, loadExtension, enableLoadExtension, and 14 more.
+packages/hub/test/overview/today.test.ts(791,46): error TS2345: Argument of type 'Db' is not assignable to parameter of type 'DatabaseSync'.
+  Type 'Db' is missing the following properties from type 'DatabaseSync': aggregate, close, loadExtension, enableLoadExtension, and 14 more.
+packages/hub/test/policy/auto-approve.test.ts(452,19): error TS2571: Object is of type 'unknown'.
+packages/hub/test/search/policy.test.ts(368,14): error TS2339: Property 'reasons' does not exist on type 'GateVerdict'.
+  Property 'reasons' does not exist on type '{ decision: "pass"; unresolved: string[]; }'.
+packages/hub/test/serve/assemble-driver.test.ts(210,5): error TS2741: Property 'status' is missing in type '{ taskId: string; role: string; moved: false; seat: "agent"; note: string; costCents: number; sessionId: null; stateEventSeq: null; card: null; }' but required in type 'DispatchResult'.
+packages/hub/test/serve/assemble-driver.test.ts(283,18): error TS2352: Conversion of type '{ driverPump: undefined; dbPath?: string; port?: number; portFile?: string; backupDir?: string; heartbeatMs?: number; noBackup?: boolean; bind?: string; ceo?: string; charterPump?: boolean; maxBudgetUsd?: number; taskLimitCents?: number; agentCwd?: string; help?: boolean; error?: string; }' to type 'ServeArgs' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+  Types of property 'driverPump' are incompatible.
+    Type 'undefined' is not comparable to type 'boolean'.
+packages/hub/test/serve/assemble-driver.test.ts(283,83): error TS2379: Argument of type '{ acquire: () => { readonly ok: true; readonly path: string; readonly tookOverFrom?: LockHolder | undefined; }; serve: (d: HubDeps, p: number, b: unknown) => Promise<HubServer>; scheduler: FakeScheduler; now: () => number; driveTask: DriveTaskFn | undefined; }' is not assignable to parameter of type 'BootOverrides' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.
+  Types of property 'driveTask' are incompatible.
+    Type 'DriveTaskFn | undefined' is not assignable to type 'DriveTaskFn'.
+      Type 'undefined' is not assignable to type 'DriveTaskFn'.
+packages/hub/test/serve/assemble-driver.test.ts(307,18): error TS2352: Conversion of type '{ driverPump: undefined; dbPath?: string; port?: number; portFile?: string; backupDir?: string; heartbeatMs?: number; noBackup?: boolean; bind?: string; ceo?: string; charterPump?: boolean; maxBudgetUsd?: number; taskLimitCents?: number; agentCwd?: string; help?: boolean; error?: string; }' to type 'ServeArgs' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+  Types of property 'driverPump' are incompatible.
+    Type 'undefined' is not comparable to type 'boolean'.
+packages/hub/test/serve/assemble-driver.test.ts(307,83): error TS2379: Argument of type '{ acquire: () => { readonly ok: true; readonly path: string; readonly tookOverFrom?: LockHolder | undefined; }; serve: (d: HubDeps, p: number, b: unknown) => Promise<HubServer>; scheduler: FakeScheduler; now: () => number; driveTask: DriveTaskFn | undefined; }' is not assignable to parameter of type 'BootOverrides' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.
+  Types of property 'driveTask' are incompatible.
+    Type 'DriveTaskFn | undefined' is not assignable to type 'DriveTaskFn'.
+      Type 'undefined' is not assignable to type 'DriveTaskFn'.
+packages/hub/test/serve/assemble-driver.test.ts(347,26): error TS2379: Argument of type '{ driverPump: undefined; charterPump: true; }' is not assignable to parameter of type 'Partial<ServeArgs>' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.
+  Types of property 'driverPump' are incompatible.
+    Type 'undefined' is not assignable to type 'boolean'.
+packages/hub/test/serve/assemble-driver.test.ts(349,9): error TS2379: Argument of type '{ acquire: () => { readonly ok: true; readonly path: string; readonly tookOverFrom?: LockHolder | undefined; }; serve: (d: HubDeps, p: number, b: unknown) => Promise<HubServer>; scheduler: FakeScheduler; now: () => number; driveTask: DriveTaskFn | undefined; charterPumpVia: () => Promise<PumpRoundResult>; }' is not assignable to parameter of type 'BootOverrides' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.
+  Types of property 'driveTask' are incompatible.
+    Type 'DriveTaskFn | undefined' is not assignable to type 'DriveTaskFn'.
+      Type 'undefined' is not assignable to type 'DriveTaskFn'.
+packages/hub/test/serve/assemble-driver.test.ts(361,13): error TS2322: Type 'Promise<{ cards: never[]; costCents: number; abandoned: never[]; turns: never[]; }>' is not assignable to type 'Promise<PumpRoundResult>'.
+  Property 'blocked' is missing in type '{ cards: never[]; costCents: number; abandoned: never[]; turns: never[]; }' but required in type 'PumpRoundResult'.
+packages/hub/test/serve/assemble-driver.test.ts(387,40): error TS2379: Argument of type '{ acquire: () => { readonly ok: true; readonly path: string; readonly tookOverFrom?: LockHolder | undefined; }; serve: (d: HubDeps, p: number, b: unknown) => Promise<HubServer>; scheduler: FakeScheduler; now: () => number; driveTask: DriveTaskFn | undefined; }' is not assignable to parameter of type 'BootOverrides' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.
+  Types of property 'driveTask' are incompatible.
+    Type 'DriveTaskFn | undefined' is not assignable to type 'DriveTaskFn'.
+      Type 'undefined' is not assignable to type 'DriveTaskFn'.
+packages/hub/test/serve/assemble-driver.test.ts(414,40): error TS2379: Argument of type '{ acquire: () => { readonly ok: true; readonly path: string; readonly tookOverFrom?: LockHolder | undefined; }; serve: (d: HubDeps, p: number, b: unknown) => Promise<HubServer>; scheduler: FakeScheduler; now: () => number; driveTask: DriveTaskFn | undefined; }' is not assignable to parameter of type 'BootOverrides' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.
+  Types of property 'driveTask' are incompatible.
+    Type 'DriveTaskFn | undefined' is not assignable to type 'DriveTaskFn'.
+      Type 'undefined' is not assignable to type 'DriveTaskFn'.
+packages/hub/test/serve/assemble-driver.test.ts(439,40): error TS2379: Argument of type '{ acquire: () => { readonly ok: true; readonly path: string; readonly tookOverFrom?: LockHolder | undefined; }; serve: (d: HubDeps, p: number, b: unknown) => Promise<HubServer>; scheduler: FakeScheduler; now: () => number; driveTask: DriveTaskFn | undefined; driverTaskLimit: number; }' is not assignable to parameter of type 'BootOverrides' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.
+  Types of property 'driveTask' are incompatible.
+    Type 'DriveTaskFn | undefined' is not assignable to type 'DriveTaskFn'.
+      Type 'undefined' is not assignable to type 'DriveTaskFn'.
+packages/hub/test/serve/assemble-driver.test.ts(502,5): error TS2349: This expression is not callable.
+  Type 'never' has no call signatures.
+packages/hub/test/serve/assemble-driver.test.ts(562,5): error TS2349: This expression is not callable.
+  Type 'never' has no call signatures.
+packages/hub/test/serve/assemble-driver.test.ts(577,40): error TS2379: Argument of type '{ acquire: () => { readonly ok: true; readonly path: string; readonly tookOverFrom?: LockHolder | undefined; }; serve: (d: HubDeps, p: number, b: unknown) => Promise<HubServer>; scheduler: FakeScheduler; now: () => number; driveTask: DriveTaskFn | undefined; }' is not assignable to parameter of type 'BootOverrides' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.
+  Types of property 'driveTask' are incompatible.
+    Type 'DriveTaskFn | undefined' is not assignable to type 'DriveTaskFn'.
+      Type 'undefined' is not assignable to type 'DriveTaskFn'.
+packages/hub/test/serve/assemble-driver.test.ts(602,79): error TS2379: Argument of type '{ acquire: () => { readonly ok: true; readonly path: string; readonly tookOverFrom?: LockHolder | undefined; }; serve: (d: HubDeps, p: number, b: unknown) => Promise<HubServer>; scheduler: FakeScheduler; now: () => number; driveTask: DriveTaskFn | undefined; }' is not assignable to parameter of type 'BootOverrides' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.
+  Types of property 'driveTask' are incompatible.
+    Type 'DriveTaskFn | undefined' is not assignable to type 'DriveTaskFn'.
+      Type 'undefined' is not assignable to type 'DriveTaskFn'.
+packages/hub/test/serve/assemble-driver.test.ts(622,18): error TS2352: Conversion of type '{ taskLimitCents: undefined; dbPath?: string; port?: number; portFile?: string; backupDir?: string; heartbeatMs?: number; noBackup?: boolean; bind?: string; ceo?: string; charterPump?: boolean; ... 4 more ...; error?: string; }' to type 'ServeArgs' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+  Types of property 'taskLimitCents' are incompatible.
+    Type 'undefined' is not comparable to type 'number'.
+packages/hub/test/serve/assemble-driver.test.ts(644,22): error TS2554: Expected 2 arguments, but got 1.
+packages/hub/test/serve/assemble-driver.test.ts(656,25): error TS2554: Expected 2 arguments, but got 1.
+packages/hub/test/serve/assemble-driver.test.ts(662,12): error TS2554: Expected 2 arguments, but got 1.
+packages/hub/test/serve/assemble-driver.test.ts(678,60): error TS2379: Argument of type '{ acquire: () => { readonly ok: true; readonly path: string; readonly tookOverFrom?: LockHolder | undefined; }; serve: (d: HubDeps, p: number, b: unknown) => Promise<HubServer>; scheduler: FakeScheduler; now: () => number; driveTask: DriveTaskFn | undefined; }' is not assignable to parameter of type 'BootOverrides' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.
+  Types of property 'driveTask' are incompatible.
+    Type 'DriveTaskFn | undefined' is not assignable to type 'DriveTaskFn'.
+      Type 'undefined' is not assignable to type 'DriveTaskFn'.
+packages/hub/test/serve/assemble-driver.test.ts(699,65): error TS2379: Argument of type '{ acquire: () => { readonly ok: true; readonly path: string; readonly tookOverFrom?: LockHolder | undefined; }; serve: (d: HubDeps, p: number, b: unknown) => Promise<HubServer>; scheduler: FakeScheduler; now: () => number; driveTask: DriveTaskFn | undefined; }' is not assignable to parameter of type 'BootOverrides' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.
+  Types of property 'driveTask' are incompatible.
+    Type 'DriveTaskFn | undefined' is not assignable to type 'DriveTaskFn'.
+      Type 'undefined' is not assignable to type 'DriveTaskFn'.
+packages/hub/test/serve/assemble-driver.test.ts(726,65): error TS2379: Argument of type '{ acquire: () => { readonly ok: true; readonly path: string; readonly tookOverFrom?: LockHolder | undefined; }; serve: (d: HubDeps, p: number, b: unknown) => Promise<HubServer>; scheduler: FakeScheduler; now: () => number; driveTask: DriveTaskFn | undefined; }' is not assignable to parameter of type 'BootOverrides' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.
+  Types of property 'driveTask' are incompatible.
+    Type 'DriveTaskFn | undefined' is not assignable to type 'DriveTaskFn'.
+      Type 'undefined' is not assignable to type 'DriveTaskFn'.
+packages/hub/test/serve/assemble-driver.test.ts(753,69): error TS2379: Argument of type '{ acquire: () => { readonly ok: true; readonly path: string; readonly tookOverFrom?: LockHolder | undefined; }; serve: (d: HubDeps, p: number, b: unknown) => Promise<HubServer>; scheduler: FakeScheduler; now: () => number; driveTask: DriveTaskFn | undefined; }' is not assignable to parameter of type 'BootOverrides' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.
+  Types of property 'driveTask' are incompatible.
+    Type 'DriveTaskFn | undefined' is not assignable to type 'DriveTaskFn'.
+      Type 'undefined' is not assignable to type 'DriveTaskFn'.
+packages/hub/test/serve/assemble-driver.test.ts(777,40): error TS2379: Argument of type '{ acquire: () => { readonly ok: true; readonly path: string; readonly tookOverFrom?: LockHolder | undefined; }; serve: (d: HubDeps, p: number, b: unknown) => Promise<HubServer>; scheduler: FakeScheduler; now: () => number; driveTask: DriveTaskFn | undefined; driverMaxAttempts: number; }' is not assignable to parameter of type 'BootOverrides' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.
+  Types of property 'driveTask' are incompatible.
+    Type 'DriveTaskFn | undefined' is not assignable to type 'DriveTaskFn'.
+      Type 'undefined' is not assignable to type 'DriveTaskFn'.
+packages/hub/test/serve/assemble-driver.test.ts(828,40): error TS2379: Argument of type '{ acquire: () => { readonly ok: true; readonly path: string; readonly tookOverFrom?: LockHolder | undefined; }; serve: (d: HubDeps, p: number, b: unknown) => Promise<HubServer>; scheduler: FakeScheduler; now: () => number; driveTask: DriveTaskFn | undefined; driverMaxAttempts: number; }' is not assignable to parameter of type 'BootOverrides' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.
+  Types of property 'driveTask' are incompatible.
+    Type 'DriveTaskFn | undefined' is not assignable to type 'DriveTaskFn'.
+      Type 'undefined' is not assignable to type 'DriveTaskFn'.
+packages/hub/test/serve/assemble-pump.test.ts(286,9): error TS2352: Conversion of type '{ charterPump: undefined; maxBudgetUsd: undefined; dbPath?: string; port?: number; portFile?: string; backupDir?: string; heartbeatMs?: number; noBackup?: boolean; bind?: string; ceo?: string; ... 4 more ...; error?: string; }' to type 'ServeArgs' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+  Types of property 'charterPump' are incompatible.
+    Type 'undefined' is not comparable to type 'boolean'.
+packages/hub/test/serve/assemble-pump.test.ts(308,18): error TS2352: Conversion of type '{ charterPump: undefined; dbPath?: string; port?: number; portFile?: string; backupDir?: string; heartbeatMs?: number; noBackup?: boolean; bind?: string; ceo?: string; maxBudgetUsd?: number; taskLimitCents?: number; agentCwd?: string; driverPump?: boolean; help?: boolean; error?: string; }' to type 'ServeArgs' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+  Types of property 'charterPump' are incompatible.
+    Type 'undefined' is not comparable to type 'boolean'.
+packages/hub/test/serve/assemble-pump.test.ts(460,11): error TS2322: Type 'Promise<PumpRoundResult | { cards: never[]; costCents: number; abandoned: never[]; turns: never[]; }>' is not assignable to type 'Promise<PumpRoundResult>'.
+  Type 'PumpRoundResult | { cards: never[]; costCents: number; abandoned: never[]; turns: never[]; }' is not assignable to type 'PumpRoundResult'.
+    Property 'blocked' is missing in type '{ cards: never[]; costCents: number; abandoned: never[]; turns: never[]; }' but required in type 'PumpRoundResult'.
+packages/hub/test/serve/assemble-pump.test.ts(494,5): error TS2349: This expression is not callable.
+  Type 'never' has no call signatures.
+packages/hub/test/serve/assemble-pump.test.ts(656,19): error TS2345: Argument of type '{ cards: never[]; costCents: number; abandoned: never[]; turns: never[]; }' is not assignable to parameter of type 'PumpRoundResult | PromiseLike<PumpRoundResult>'.
+  Property 'blocked' is missing in type '{ cards: never[]; costCents: number; abandoned: never[]; turns: never[]; }' but required in type 'PumpRoundResult'.
+packages/hub/test/serve/assemble-pump.test.ts(673,5): error TS2349: This expression is not callable.
+  Type 'never' has no call signatures.
+packages/hub/test/serve/assemble-pump.test.ts(683,30): error TS2352: Conversion of type '{ charterPump: undefined; }' to type 'ServeArgs' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+  Types of property 'charterPump' are incompatible.
+    Type 'undefined' is not comparable to type 'boolean'.
+packages/hub/test/serve/assemble-pump.test.ts(725,9): error TS2352: Conversion of type '{ maxBudgetUsd: undefined; dbPath?: string; port?: number; portFile?: string; backupDir?: string; heartbeatMs?: number; noBackup?: boolean; bind?: string; ceo?: string; charterPump?: boolean; taskLimitCents?: number; agentCwd?: string; driverPump?: boolean; help?: boolean; error?: string; }' to type 'ServeArgs' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+  Types of property 'maxBudgetUsd' are incompatible.
+    Type 'undefined' is not comparable to type 'number'.
+packages/hub/test/serve/assemble.test.ts(487,38): error TS2322: Type '{ ok: false; reason: "held_by_other_process"; holder: { pid: number; startedAtMs: number; host: string; who: string; }; }' is not assignable to type 'LockAcquire'.
+  Property 'path' is missing in type '{ ok: false; reason: "held_by_other_process"; holder: { pid: number; startedAtMs: number; host: string; who: string; }; }' but required in type '{ readonly ok: false; readonly path: string; readonly holder: LockHolder | null; readonly reason: LockNotAcquiredReason; }'.
+packages/hub/test/serve/assemble.test.ts(1574,18): error TS2352: Conversion of type 'null' to type 'HubDeps' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+packages/hub/test/serve/assemble.test.ts(1613,52): error TS2554: Expected 2 arguments, but got 0.
+packages/hub/test/serve/assemble.test.ts(1681,52): error TS2322: Type '{ redeemApprovalToken: () => Promise<{ ok: boolean; reason: "expired"; }>; }' is not assignable to type 'ApprovalChannelDeps'.
+  The types returned by 'redeemApprovalToken(...)' are incompatible between these types.
+    Type 'Promise<{ ok: boolean; reason: "expired"; }>' is not assignable to type 'Promise<{ readonly ok: true; readonly taskId: string; } | { readonly ok: false; readonly reason: TokenRejectReason; }>'.
+      Type '{ ok: boolean; reason: "expired"; }' is not assignable to type '{ readonly ok: true; readonly taskId: string; } | { readonly ok: false; readonly reason: TokenRejectReason; }'.
+        Type '{ ok: boolean; reason: "expired"; }' is not assignable to type '{ readonly ok: false; readonly reason: TokenRejectReason; }'.
+          Types of property 'ok' are incompatible.
+            Type 'boolean' is not assignable to type 'false'.
+packages/hub/test/serve/assemble.test.ts(1685,52): error TS2322: Type '{ issueApprovalToken: () => Promise<{ ok: boolean; reason: "approval_missing"; }>; }' is not assignable to type 'ApprovalChannelDeps'.
+  The types returned by 'issueApprovalToken(...)' are incompatible between these types.
+    Type 'Promise<{ ok: boolean; reason: "approval_missing"; }>' is not assignable to type 'Promise<{ readonly ok: true; readonly token: string; readonly expiresAt: number; } | { readonly ok: false; readonly reason: TokenIssueReject; }>'.
+      Type '{ ok: boolean; reason: "approval_missing"; }' is not assignable to type '{ readonly ok: true; readonly token: string; readonly expiresAt: number; } | { readonly ok: false; readonly reason: TokenIssueReject; }'.
+        Type '{ ok: boolean; reason: "approval_missing"; }' is not assignable to type '{ readonly ok: false; readonly reason: TokenIssueReject; }'.
+          Types of property 'ok' are incompatible.
+            Type 'boolean' is not assignable to type 'false'.
+packages/hub/test/serve/assemble.test.ts(1690,47): error TS2322: Type '{ issueApprovalToken: () => Promise<{ ok: boolean; reason: "approval_missing"; }>; redeemApprovalToken: () => Promise<{ ok: boolean; reason: "expired"; }>; }' is not assignable to type 'ApprovalChannelDeps'.
+  The types returned by 'redeemApprovalToken(...)' are incompatible between these types.
+    Type 'Promise<{ ok: boolean; reason: "expired"; }>' is not assignable to type 'Promise<{ readonly ok: true; readonly taskId: string; } | { readonly ok: false; readonly reason: TokenRejectReason; }>'.
+      Type '{ ok: boolean; reason: "expired"; }' is not assignable to type '{ readonly ok: true; readonly taskId: string; } | { readonly ok: false; readonly reason: TokenRejectReason; }'.
+        Type '{ ok: boolean; reason: "expired"; }' is not assignable to type '{ readonly ok: false; readonly reason: TokenRejectReason; }'.
+          Types of property 'ok' are incompatible.
+            Type 'boolean' is not assignable to type 'false'.
+packages/hub/test/serve/charter-pump.test.ts(227,27): error TS2345: Argument of type 'Queue' is not assignable to parameter of type 'HubWriter'.
+  The types returned by 'readConnection()' are incompatible between these types.
+    Type 'Db' is missing the following properties from type 'DatabaseSync': aggregate, close, loadExtension, enableLoadExtension, and 14 more.
+packages/hub/test/serve/charter-pump.test.ts(229,31): error TS2379: Argument of type '{ ok: boolean | undefined; costCents: number | undefined; during: ((taskId: string) => void) | undefined; }' is not assignable to parameter of type '{ readonly ok?: boolean; readonly costCents?: number; readonly during?: (taskId: string) => void; }' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.
+  Types of property 'ok' are incompatible.
+    Type 'boolean | undefined' is not assignable to type 'boolean'.
+      Type 'undefined' is not assignable to type 'boolean'.
+packages/hub/test/serve/charter-pump.test.ts(658,38): error TS2345: Argument of type 'Queue' is not assignable to parameter of type 'HubWriter'.
+  The types returned by 'readConnection()' are incompatible between these types.
+    Type 'Db' is missing the following properties from type 'DatabaseSync': aggregate, close, loadExtension, enableLoadExtension, and 14 more.
+packages/hub/test/serve/charter-pump.test.ts(685,38): error TS2345: Argument of type 'Queue' is not assignable to parameter of type 'HubWriter'.
+  The types returned by 'readConnection()' are incompatible between these types.
+    Type 'Db' is missing the following properties from type 'DatabaseSync': aggregate, close, loadExtension, enableLoadExtension, and 14 more.
+packages/hub/test/serve/charter-pump.test.ts(737,38): error TS2345: Argument of type 'Queue' is not assignable to parameter of type 'HubWriter'.
+  The types returned by 'readConnection()' are incompatible between these types.
+    Type 'Db' is missing the following properties from type 'DatabaseSync': aggregate, close, loadExtension, enableLoadExtension, and 14 more.
+packages/hub/test/serve/charter-pump.test.ts(783,38): error TS2345: Argument of type 'Queue' is not assignable to parameter of type 'HubWriter'.
+  The types returned by 'readConnection()' are incompatible between these types.
+    Type 'Db' is missing the following properties from type 'DatabaseSync': aggregate, close, loadExtension, enableLoadExtension, and 14 more.
+packages/hub/test/serve/charter-pump.test.ts(800,39): error TS2345: Argument of type 'Queue' is not assignable to parameter of type 'HubWriter'.
+  The types returned by 'readConnection()' are incompatible between these types.
+    Type 'Db' is missing the following properties from type 'DatabaseSync': aggregate, close, loadExtension, enableLoadExtension, and 14 more.
+packages/hub/test/serve/charter-pump.test.ts(817,38): error TS2345: Argument of type 'Queue' is not assignable to parameter of type 'HubWriter'.
+  The types returned by 'readConnection()' are incompatible between these types.
+    Type 'Db' is missing the following properties from type 'DatabaseSync': aggregate, close, loadExtension, enableLoadExtension, and 14 more.
+packages/hub/test/serve/charter-pump.test.ts(876,27): error TS2345: Argument of type 'Queue' is not assignable to parameter of type 'HubWriter'.
+  The types returned by 'readConnection()' are incompatible between these types.
+    Type 'Db' is missing the following properties from type 'DatabaseSync': aggregate, close, loadExtension, enableLoadExtension, and 14 more.
+packages/hub/test/serve/charter-pump.test.ts(985,38): error TS2345: Argument of type 'Queue' is not assignable to parameter of type 'HubWriter'.
+  The types returned by 'readConnection()' are incompatible between these types.
+    Type 'Db' is missing the following properties from type 'DatabaseSync': aggregate, close, loadExtension, enableLoadExtension, and 14 more.
+packages/hub/test/serve/driver-pump.test.ts(167,7): error TS2741: Property 'status' is missing in type '{ taskId: string; role: string; moved: true; seat: "agent"; note: string; costCents: number; sessionId: null; stateEventSeq: null; card: null; }' but required in type 'DispatchResult'.
+packages/hub/test/serve/driver-pump.test.ts(217,21): error TS2345: Argument of type 'Queue' is not assignable to parameter of type 'HubWriter'.
+  The types returned by 'readConnection()' are incompatible between these types.
+    Type 'Db' is missing the following properties from type 'DatabaseSync': aggregate, close, loadExtension, enableLoadExtension, and 14 more.
+packages/hub/test/serve/driver-pump.test.ts(230,24): error TS2379: Argument of type '{ stopped: "gone" | "limit" | "stalled" | "human_seat" | undefined; costCents: number; status: string | undefined; }' is not assignable to parameter of type '{ readonly stopped?: "gone" | "limit" | "stalled" | "human_seat"; readonly status?: string; readonly costCents?: number; readonly turns?: number; readonly note?: string; }' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.
+  Types of property 'stopped' are incompatible.
+    Type '"gone" | "limit" | "stalled" | "human_seat" | undefined' is not assignable to type '"gone" | "limit" | "stalled" | "human_seat"'.
+      Type 'undefined' is not assignable to type '"gone" | "limit" | "stalled" | "human_seat"'.
+packages/hub/test/serve/driver-pump.test.ts(738,32): error TS2345: Argument of type 'Queue' is not assignable to parameter of type 'HubWriter'.
+  The types returned by 'readConnection()' are incompatible between these types.
+    Type 'Db' is missing the following properties from type 'DatabaseSync': aggregate, close, loadExtension, enableLoadExtension, and 14 more.
+packages/hub/test/serve/driver-pump.test.ts(761,20): error TS2345: Argument of type 'Queue' is not assignable to parameter of type 'HubWriter'.
+  The types returned by 'readConnection()' are incompatible between these types.
+    Type 'Db' is missing the following properties from type 'DatabaseSync': aggregate, close, loadExtension, enableLoadExtension, and 14 more.
+packages/hub/test/serve/driver-pump.test.ts(780,55): error TS2353: Object literal may only specify known properties, and 'status' does not exist in type '{ readonly nowMs?: number; readonly ok?: boolean; readonly throwWith?: string; readonly moveto?: { status: string; role: string; }; readonly stopped?: "gone" | "limit" | "stalled" | "human_seat"; ... 4 more ...; readonly cwd?: string; } & Pick<...>'.
+packages/hub/test/serve/driver-pump.test.ts(802,32): error TS2345: Argument of type 'Queue' is not assignable to parameter of type 'HubWriter'.
+  The types returned by 'readConnection()' are incompatible between these types.
+    Type 'Db' is missing the following properties from type 'DatabaseSync': aggregate, close, loadExtension, enableLoadExtension, and 14 more.
+packages/hub/test/serve/driver-pump.test.ts(835,28): error TS2345: Argument of type 'Db' is not assignable to parameter of type 'PatrolDb'.
+  The types returned by 'prepare(...)' are incompatible between these types.
+    Type '{ all: (...a: unknown[]) => Row[]; get: (...a: unknown[]) => Row | undefined; run: (...a: unknown[]) => unknown; }' is missing the following properties from type 'StatementSync': columns, expandedSQL, iterate, setAllowBareNamedParameters, and 4 more.
+packages/hub/test/serve/im-channels.test.ts(875,21): error TS2345: Argument of type '{ senderId: string; }' is not assignable to parameter of type 'ChannelActor'.
+  Property 'channelId' is missing in type '{ senderId: string; }' but required in type 'ChannelActor'.
+packages/hub/test/serve/im-channels.test.ts(876,28): error TS2345: Argument of type '{ senderId: string; }' is not assignable to parameter of type 'ChannelActor'.
+  Property 'channelId' is missing in type '{ senderId: string; }' but required in type 'ChannelActor'.
+packages/hub/test/serve/im-channels.test.ts(891,16): error TS2352: Conversion of type 'ChannelRuntime' to type '{ pollAll(): Promise<never>; }' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+  The types returned by 'pollAll()' are incompatible between these types.
+    Type 'Promise<readonly ChannelPollRound[]>' is not comparable to type 'Promise<never>'.
+      Type 'readonly ChannelPollRound[]' is not comparable to type 'never'.
+packages/hub/test/serve/timer.test.ts(450,5): error TS2349: This expression is not callable.
+  Type 'never' has no call signatures.
+packages/hub/test/serve/timer.test.ts(483,5): error TS2349: This expression is not callable.
+  Type 'never' has no call signatures.
+test/desktop/ipc-surface.test.ts(90,29): error TS7053: Element implicitly has an 'any' type because expression of type 'string' can't be used to index type '{ dbQuery: (sql: string) => string; }'.
+  No index signature with a parameter of type 'string' was found on type '{ dbQuery: (sql: string) => string; }'.
+test/desktop/wire.test.ts(198,5): error TS2322: Type '(event: string, data: string, id: string) => void' is not assignable to type '(_e: string, _d: string, _i: string) => never'.
+  Type 'void' is not assignable to type 'never'.
+test/desktop/wire.test.ts(201,5): error TS2322: Type '() => void' is not assignable to type '() => never'.
+  Type 'void' is not assignable to type 'never'.
+test/org/validate.test.ts(187,5): error TS18048: 'org.nodes.tech' is possibly 'undefined'.
+test/org/validate.test.ts(196,5): error TS18048: 'org.nodes.dev' is possibly 'undefined'.
+test/org/validate.test.ts(373,5): error TS18048: 'org.nodes.dev' is possibly 'undefined'.
+test/org/validate.test.ts(386,12): error TS18048: 'org.nodes.dev' is possibly 'undefined'.
+test/org/validate.test.ts(392,5): error TS18048: 'org.nodes.dev' is possibly 'undefined'.
+test/org/validate.test.ts(722,5): error TS18048: 'org.nodes.tech' is possibly 'undefined'.
+test/org/validate.test.ts(730,5): error TS18048: 'org.nodes.tech' is possibly 'undefined'.
+test/org/versioning.test.ts(183,38): error TS2345: Argument of type 'Db' is not assignable to parameter of type 'DbLike'.
+  The types returned by 'prepare(...)' are incompatible between these types.
+    Type '{ all: (...a: unknown[]) => Row[]; get: (...a: unknown[]) => Row | undefined; run: (...a: unknown[]) => unknown; }' is missing the following properties from type 'StatementSync': columns, expandedSQL, iterate, setAllowBareNamedParameters, and 4 more.
+test/org/versioning.test.ts(187,31): error TS2345: Argument of type 'Db' is not assignable to parameter of type 'DbLike'.
+  The types returned by 'prepare(...)' are incompatible between these types.
+    Type '{ all: (...a: unknown[]) => Row[]; get: (...a: unknown[]) => Row | undefined; run: (...a: unknown[]) => unknown; }' is missing the following properties from type 'StatementSync': columns, expandedSQL, iterate, setAllowBareNamedParameters, and 4 more.
+test/org/versioning.test.ts(188,31): error TS2345: Argument of type 'Db' is not assignable to parameter of type 'DbLike'.
+  The types returned by 'prepare(...)' are incompatible between these types.
+    Type '{ all: (...a: unknown[]) => Row[]; get: (...a: unknown[]) => Row | undefined; run: (...a: unknown[]) => unknown; }' is missing the following properties from type 'StatementSync': columns, expandedSQL, iterate, setAllowBareNamedParameters, and 4 more.
+test/org/versioning.test.ts(239,41): error TS2345: Argument of type 'Db' is not assignable to parameter of type 'DbLike'.
+  The types returned by 'prepare(...)' are incompatible between these types.
+    Type '{ all: (...a: unknown[]) => Row[]; get: (...a: unknown[]) => Row | undefined; run: (...a: unknown[]) => unknown; }' is missing the following properties from type 'StatementSync': columns, expandedSQL, iterate, setAllowBareNamedParameters, and 4 more.
+test/org/versioning.test.ts(446,31): error TS2345: Argument of type 'Db' is not assignable to parameter of type 'DbLike'.
+  The types returned by 'prepare(...)' are incompatible between these types.
+    Type '{ all: (...a: unknown[]) => Row[]; get: (...a: unknown[]) => Row | undefined; run: (...a: unknown[]) => unknown; }' is missing the following properties from type 'StatementSync': columns, expandedSQL, iterate, setAllowBareNamedParameters, and 4 more.
+test/org/versioning.test.ts(637,35): error TS2345: Argument of type 'Db' is not assignable to parameter of type 'DbLike'.
+  The types returned by 'prepare(...)' are incompatible between these types.
+    Type '{ all: (...a: unknown[]) => Row[]; get: (...a: unknown[]) => Row | undefined; run: (...a: unknown[]) => unknown; }' is missing the following properties from type 'StatementSync': columns, expandedSQL, iterate, setAllowBareNamedParameters, and 4 more.
+test/org/versioning.test.ts(638,35): error TS2345: Argument of type 'Db' is not assignable to parameter of type 'DbLike'.
+  The types returned by 'prepare(...)' are incompatible between these types.
+    Type '{ all: (...a: unknown[]) => Row[]; get: (...a: unknown[]) => Row | undefined; run: (...a: unknown[]) => unknown; }' is missing the following properties from type 'StatementSync': columns, expandedSQL, iterate, setAllowBareNamedParameters, and 4 more.
+test/org/versioning.test.ts(647,37): error TS2345: Argument of type 'Db' is not assignable to parameter of type 'DbLike'.
+  The types returned by 'prepare(...)' are incompatible between these types.
+    Type '{ all: (...a: unknown[]) => Row[]; get: (...a: unknown[]) => Row | undefined; run: (...a: unknown[]) => unknown; }' is missing the following properties from type 'StatementSync': columns, expandedSQL, iterate, setAllowBareNamedParameters, and 4 more.
+test/web/app-pure.test.ts(331,35): error TS2339: Property 'label' does not exist on type '{ items: unknown[]; }'.
+test/web/dev-server-sign.test.ts(110,18): error TS2322: Type 'string | undefined' is not assignable to type 'string'.
+  Type 'undefined' is not assignable to type 'string'.
+test/web/hub-projection.test.ts(182,31): error TS2698: Spread types may only be created from object types.

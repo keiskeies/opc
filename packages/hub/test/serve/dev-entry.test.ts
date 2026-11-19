@@ -127,9 +127,11 @@ function harness(
     webPort: DEV_WEB_PORT,
     token: "tok-来自-环境变量",
     tokenGenerated: false,
+    orgBackupDir: ROOT + "/.opc-os/backups",
   };
   const deps: DevDeps = {
     io,
+    ensureDir: () => {},
     bootHub: (args, _io, ov) => {
       booted.push(args);
       bootOverrides.push(ov as Record<string, unknown>);
@@ -296,6 +298,7 @@ describe("runDev：装配顺序与收尾", () => {
       webPort: DEV_WEB_PORT,
       token: "GEN-abc",
       tokenGenerated: true,
+      orgBackupDir: "/tmp/dev-backups",
     };
     // 横幅在 spawn 之后同步打，而退出由这一发的 exit 事件驱动 —— 下一宏任务发，
     // 保证「先打完横幅再退」的次序与真进程一致。
@@ -304,6 +307,7 @@ describe("runDev：装配顺序与收尾", () => {
       p,
       {
         io,
+        ensureDir: () => {},
         bootHub: async () => fakeBootOk(),
         spawnWeb: () => web.child,
         runMigrate: () => ({ code: 0 }),
@@ -341,9 +345,11 @@ describe("runDev：装配顺序与收尾", () => {
         webPort: 2,
         token: "t",
         tokenGenerated: false,
+        orgBackupDir: "/tmp/d-backups",
       },
       {
         io: { log: (m) => logs.push(m), warn: (m) => warns.push(m) },
+        ensureDir: () => {},
         bootHub: async () => fakeBootOk(),
         spawnWeb: () => {
           // 下一个宏任务再报 error：真 spawn 的 ENOENT 就是这样异步来的。

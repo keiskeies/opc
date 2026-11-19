@@ -24,13 +24,20 @@
  *    （缓冲一份未送达队列 = 主进程里多出一个业务状态，而 Task 2.3 的验收
  *    标准正是"渲染进程内不存在任何业务状态机"，主进程更不该有）。
  *    它靠 §5.8 那条纪律闭环：渲染进程起来先拉快照、按 seq 幂等应用。
- *    ⚠ 彻底闭合需要一条 `hub:eventsReady` 的 invoke 通道（渲染进程说"我挂上监听了"
- *    再起流）。那是一次【白名单变更】，必须与渲染侧投影同一次落地 ——
- *    单独先加通道会造出一个"能调而没人应答"的入口。记在 0052 §7 第 3 条。
+ *    握手那一半【现在在这文件里了】：`hub:eventsReady`（EVENTS_READY_CHANNEL）
+ *    由 wireMain 注册成 invoke handler，渲染进程（preload 的 notifyEventsReady）
+ *    【挂好监听之后】调它，handler 被调【那一刻】才开流 —— 于是"主进程何时
+ *    可以开流"从一句注释约定变成了 test/desktop/events-ready.test.ts 钉住的东西。
+ *    它还【不进】CHANNEL_SPECS：那张表每条都映射一个 Hub 端点并由 dispatch 转成
+ *    HTTP 请求，而这条握手从不出进程（登记进去会得到一次 dispatch 拼不出 URL 的抛，
+ *    或更糟：有人给它编一个假端点）。
+ *    剩下没闭的仍只有【壳跑起来才有】的那半：electron 胶水 + 渲染页面真的去调
+ *    notifyEventsReady（0052 §7 第 1、3 条）。且 ready 只保【首次】开流 ——
+ *    页面重载会摘掉监听，那一段靠的仍是 §5.8 的快照 + seq 幂等，不是这条通道。
  */
 import { request } from "node:http";
 import type { HubEventPayload } from "../preload/api.js";
-import { EVENT_CHANNEL } from "../preload/api.js";
+import { EVENT_CHANNEL, EVENTS_READY_CHANNEL } from "../preload/api.js";
 import { CHANNEL_SPECS } from "../ipc-surface.js";
 import { type IpcError, dispatch } from "./channels.js";
 import { type EventStreamHandle, openEventStream } from "./event-stream.js";
@@ -71,7 +78,12 @@ export interface WireOptions {
 }
 
 export interface WireHandle {
-  /** 起事件流。窗口【加载完成之后】调，理由见文件头时序 ②。可重复调（幂等）。 */
+  /**
+   * 起事件流。可重复调（幂等），stop() 之后再调 = 重新开流（页面重载后的重启）。
+   * 壳里的【正常入口】是 hub:eventsReady 握手（渲染进程挂好监听后 invoke，
+   * handler 调的就是这个 start）；直接暴露这一格是给装配胶水与测试的旁路，
+   * 用它【绕过的正是】"监听先于开流"那道闸门 —— 绕之前请读 wire.ts 文件头时序 ②。
+   */
   start(): void;
   /** 停事件流。窗口关闭时调。可重复调。 */
   stop(): void;
@@ -110,9 +122,34 @@ export function wireMain(o: WireOptions): WireHandle {
     });
   }
 
+  // 握手通道：渲染进程（preload 的 notifyEventsReady）挂好监听后 invoke 这一发，
+  // 它被调【那一刻】才开流 —— 「主进程何时可以开流」从此由这条 handler 的存在性
+  // 与这一次调用决定，不再由「胶水在 load 完后手动调 start()」那句注释保证。
+  // 刻意【不进】CHANNEL_SPECS / dispatch：那条路上每个通道都要映射一个 Hub 端点，
+  // 而这一发从不出进程；登记进去会诱使后来人给它编一个假端点。
+  // 也不走 destroy 闸门返回错误那一支：ready 到达而窗口已死 ⇒ 不开流就是全部
+  // 正确行为，这里若返回 unreachable 报错反而是渲染进程一条永远该忽略的分支。
+  registered.push(EVENTS_READY_CHANNEL);
+  o.ipcMain.handle(EVENTS_READY_CHANNEL, async () => {
+    if (!o.sender.isDestroyed()) open();
+    // 返回值是结构而不是布尔：渲染进程拿到的是 { ok }，将来加维度不改形状。
+    return { ok: true };
+  });
+
   // signedFetch 只造一次：token 与地址都不变，而 MainDeps 的形状就是那一个字段。
   // 每次 invoke 重建一个不会算错，只是把「它有没有可变状态」这件事留给读者去查。
   const deps = makeDeps(o);
+
+  const open = (): void => {
+    if (stream !== null) return; // 幂等：重挂窗口 / 重复 ready 都别造出第二条活流
+    stream = openEventStream({
+      token: o.token,
+      hubAddress: o.hubAddress,
+      push,
+      ...(o.initialCursor === undefined ? {} : { initialCursor: o.initialCursor }),
+      ...(o.setTimeoutImpl === undefined ? {} : { setTimeoutImpl: o.setTimeoutImpl }),
+    });
+  };
 
   const push = (payload: HubEventPayload): void => {
     if (o.sender.isDestroyed()) {
@@ -125,16 +162,7 @@ export function wireMain(o: WireOptions): WireHandle {
   };
 
   return {
-    start: () => {
-      if (stream !== null) return; // 幂等：重挂窗口时别造出第二条活流
-      stream = openEventStream({
-        token: o.token,
-        hubAddress: o.hubAddress,
-        push,
-        ...(o.initialCursor === undefined ? {} : { initialCursor: o.initialCursor }),
-        ...(o.setTimeoutImpl === undefined ? {} : { setTimeoutImpl: o.setTimeoutImpl }),
-      });
-    },
+    start: open,
     stop: () => {
       stream?.close();
       stream = null;

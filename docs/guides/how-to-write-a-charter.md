@@ -22,9 +22,9 @@
 | `role_id` / `reports_to` | 委派图与组织图校验（`packages/contracts/src/org/`） | 委派边指向不存在的节点 ⇒ `unknown_role` 拒绝保存 |
 | `model_tier` | `graph/company.ts` 用它选节点模型；`roles/preset.ts` 从模板取 | 节点跑错档位 |
 | `budget` | `charter/budget-sync.ts` 把它同步进 `budgets` 表（`saveCharterVersion` 内的一步），执行侧 `BudgetTracker` **只读 `budgets`、从不读岗位书** | 屏幕上是新数字、判超限还是老数字。所以这条同步是那条通道的全部要点（0015）。⚠ 入口今天是 `hub charter seed`（`charter/seed.ts`，0065 §6 更正过本行旧口径），配置页那条通路仍未接，见 §6 第 6 条 |
-| `forbidden_actions` / `tool_permissions` | **运行时零读者**。`decision_scope.forbidden` 的唯一读者是 `roles/loader.ts` 的 `mergeForbiddenForRun`，而它自己也零生产调用方（0064 删掉了 author-reviewer 里那个曾经想读它的 `forbiddenRemovalAttempt`——黑名单删除的生产输入路径不存在，那条 `unauthorized_attempt` 审计无处可接）—— 所以准确说法是「判据写好了、等着接」 | 今天写了不生效，但**必须写**：它声明的是意图，权限单调性（规格 §20.2）要求黑名单只能变长，那份合并逻辑读的就是这份声明 |
-| `escalation_triggers` | **运行时零读者**：升级路由 `packages/hub/src/routing/escalation.ts` 用的是它自己那组触发条件，不读岗位书 | 写在这里今天等于注释；别指望它触发任何东西 |
-| `honesty_boundaries` / `decision_scope.autonomous` / `judgment_mode` / `untrusted_inputs` | **零机器判定点**，而且比我原先想的更空：`honestyBoundaries` / `judgmentMode` / `untrustedInputs` 三个 camelCase 字段在 `packages/*/src` 里除了 transform 那一行**再无任何命中** —— 没有哪个 prompt 拼装处读它们 | 主观约束只能靠这里表达 —— 这是它该待的地方，见 §3 那条「承认只能人判」的修法。但要知道它此刻**连进 prompt 都没做到**，所以它是一句**写给人看的声明**，不是一条约束 |
+| `forbidden_actions` / `tool_permissions` | **运行时执行器零读者**（这半句仍真）。~~`decision_scope.forbidden` 的唯一读者是 `roles/loader.ts` 的 `mergeForbiddenForRun`，而它自己也零生产调用方~~【2026-11-19 改口：提示词渲染读它 —— `charter/prompt.ts` 逐字段取 `forbiddenActions` 与 `decisionScope.forbidden` 拼进执行者系统提示，这一格由主张 r9 判（渲染在场 + runtime 真调渲染器）；`mergeForbiddenForRun` 那句本身仍真：0064 删掉了 author-reviewer 里那个曾经想读它的 `forbiddenRemovalAttempt`——黑名单删除的生产输入路径不存在，那条 `unauthorized_attempt` 审计无处可接】—— 所以准确说法是「**进提示词，但执行器不拿它拦**」 | 今天写了不拦动作，但员工**读得到**；且**必须写**：它声明的是意图，权限单调性（规格 §20.2）要求黑名单只能变长，那份合并逻辑（待接的那一侧）读的就是这份声明 |
+| `escalation_triggers` | ~~**运行时零读者**~~【2026-11-19 改口：提示词渲染读它（`charter/prompt.ts` 的 `escalationTriggers.map(triggerText)`，r9 判在场）】；升级路由 `packages/hub/src/routing/escalation.ts` 用的是它自己那组触发条件，不读岗位书 —— 这半句仍真 | 员工在提示词里**读得到**这句承诺，但路由不会因此触发任何东西；要它真的改变行为，等的是路由接岗位书那一天 |
+| `honesty_boundaries` / `decision_scope.autonomous` / `judgment_mode` / `untrusted_inputs` | ~~**零机器判定点**，而且比我原先想的更空：三个 camelCase 字段在 `packages/*/src` 里除了 transform 那一行再无任何命中 —— 没有哪个 prompt 拼装处读它们~~【2026-11-19 改口：那句过期了。`charter/prompt.ts` 今天逐字段渲染它们四个（`honestyBoundaries` / `decisionScope.autonomous` / `judgmentMode` 三档 / `untrustedInputs`），而 `engine/runtime.ts` 的 `rolePrompt` 真调渲染器 —— 主张 r9 判的就是这两半，摘掉任一半会红】 | 仍然**没有机器判定**：渲染进提示词≠有人按它拦动作。所以它是**写给人和员工看的约束**，不是一条执行层约束 —— 这个区别现在靠「渲染在场、拦截缺席」两句话一起说，别再合并成「零读者」 |
 
 复核命令（想自己确认，不要信本表）：
 
@@ -87,7 +87,7 @@ acceptance_criteria:
 > 这一条**没有**看起来那么糟：它吵，而吵是能修的吵。真正的危险是反例 ②③④，它们不吵。
 
 如果这条约束本来就只能人判（「无明显缺陷」确实是），正确处置是**别把它写成门控标准**：
-挪到 `honesty_boundaries`（按 §1 那张表，它今天连进 prompt 都还没做到 —— 挪过去是
+挪到 `honesty_boundaries`（按 §1 那张表：它今天**进得了提示词、不产生机器判定** —— 挪过去是
 **把声明放对位置**，不是让它生效）或者干脆写成一项人工审批。
 §2 末尾那段返回给 CEO 的修法提示写的就是这个二选一。
 
@@ -105,7 +105,9 @@ acceptance_criteria:
 
 **而此刻的真实状态比「要记得填」更糟**，两件事叠在一起：
 
-1. `packages/hub/src` 里没有任何生产代码往 `metrics` 写值 —— 唯一的写入方是测试夹具
+1. `packages/hub/src` 里没有**活着的**生产代码往 `metrics` 写值 —— `harness/verifier.ts`
+   的 `made.metrics` 是唯一写入点，但它的入口 `verifyFix` 零生产调用方（见 §6 第 1 条，
+   同样未接线）。除此之外的写入方只有测试夹具
    （`packages/hub/test/charter/store.test.ts` 那种手搓 bundle）。
 2. ~~**`metrics` 根本没有落库的位置。**~~ ⚠ **本条已被 0065 / 迁移 0007 修掉一半，原文保留**：
    当时 `evidence_bundles` 的列（0001 + 0002）里确实没有 `metrics`，契约允许一个内存对象
@@ -210,6 +212,12 @@ acceptance_criteria:
 - **写法**：YAML，snake_case；zod 是 `.strict()`，**未知键一律拒绝**。
   所以 `model_tier_typo:` 这种拼错会直接报错（这是刻意的：被静默忽略的约束等于没写）。
   校验后的对象是 camelCase（映射写在 transform 里，所以字段只有一处定义）。
+- ⚠ `harness_defaults` 那一格的**键名也被判**，而且两处都判（round331 补的）：合法键只有
+  `claude-code` / `claude_code` / `codex` / `qoder`；写 `claudecode`（少一个下划线）或给同一家
+  写两种写法，**加载期拒（422）、读取期抛**。理由不是洁癖：那一格装的是**沙箱档位与
+  绝对禁止项**，而它原先的缺省是 `forbidden_flags: []` —— 一个拼错的键会让岗位书写明的
+  禁令一条都不生效，而审计与看板全绿。合法键集派生自读取侧那张别名表，所以「能写的」
+  与「有人读的」是同一份名单（接第四家时自动跟上）。详见 contracts 的 `harnessDefaultsKeyProblem`。
 - **必填**：`version`、`honesty_boundaries`（缺即拒绝加载）。`decision_scope` 三个子键都必须出现，
   可以为空数组但不能省。
 - **存放**：运行时的权威位置是 `role_charters` 表，不是仓库里的 YAML。
@@ -237,9 +245,9 @@ acceptance_criteria:
 列在这里是因为**这些缺口会让 §4 那个「正例」今天也判不成**。它们不是本篇能修的，
 但把它们留在文档里比留一个「照这篇写就能跑通」的假承诺好：
 
-1. **`evaluateGate` 至今零生产调用方。** 图里没有节点调用它，门控结论目前不会真的拦下任何一次交接。
-   所以「门控会拒」在今天的运行里是一句**关于代码的陈述，不是关于系统的陈述**。
-2. **没有任何生产代码写 `evidence_bundles.metrics`**（§3 反例 ②）。
+1. ~~**`evaluateGate` 至今零生产调用方。**~~【2026-11-19 改口：src 里有调用点，但入口仍死】
+   `harness/verifier.ts` 调它，而 verifier 的入口 `verifyFix` 自己零生产调用方 ⇒ 结论不变：门控今天仍不会真的拦下任何一次交接。
+2. **没有任何【活的】生产路径写 `evidence_bundles.metrics`**（§3 反例 ②；2026-11-19 限定：src 里存在写入方 verifier:618 经 assemble 产出，但那入口未接线，见第 1 条）。
 3. **`dev_to_test` 这一闸收任何 `bundle_type` 都照收。** 这一条要说准，否则会被读成「类型这一维没在判」——
    它**在判**：`HANDOFF_BUNDLE_TYPES` 这张表就在 `evaluateGate` 里，类型不符直接进 `reasons`（⇒ reject），
    未知方向则记 `unresolved` 而不是抛错（抛错会让整闸跳过）。
@@ -249,10 +257,10 @@ acceptance_criteria:
    类型这一维就过了。
    ⚠ 这一条**不是**「再加一层 bundle_type 校验就能修」：那只会让 agent 改填 `test_report`。
    真正缺的是「指标与制品由 harness 产出、不由 agent 自述」那条对账接上（规格 §14.4 红线二）。
-   （上面那句「这张表躺了很久却没有一个生产调用方」是 `evaluateGate` 文件头自己的原话，
-   它指的是**整函数**零调用方，不是指那张表没被读。）
-4. **`judgeCriteria`（`packages/contracts/src/charter.ts`）是死代码**，零调用方。
-   判据只有一份生效，就是 §2 那个 `metricCriteriaEvaluator`。别照着它推行为。
+   （~~「这张表躺了很久却没有一个生产调用方」是 `evaluateGate` 文件头自己的原话~~
+   【2026-11-19：那句话过期了 —— verifier.ts:640 在调；「调用方不存在」按第 1 条读成「活入口不存在」】。）
+4. ~~**`judgeCriteria`（`packages/contracts/src/charter.ts`）是死代码**，零调用方。~~
+   【2026-11-19 改口：这个标识符在全仓（含 contracts/charter.ts）grep 零命中，连定义都不存在——「死代码」比「不存在」说得客气了。别照一个不存在的符号推行为。】
 5. **`role_id` 与文件名强制一致，而短名 vs 语义名尚未拍板**（计划 §10.2 D11）。
    模板用短名（`dev` / `test` / `tech`），规格附录 B 用语义名（`test_engineer` / `tech_director`）。
    改任何一份而不同时改委派图，委派边就会指向不存在的节点（`unknown_role`）。
@@ -260,10 +268,12 @@ acceptance_criteria:
 6. ~~**`saveCharterVersion` 零生产调用方。**~~ ⚠ **本条已被 O2 动作 2 修掉一半，原文保留**（0065 §6 更正）：
    入口是 `hub charter seed`（`charter/seed.ts`，根 package.json 的 `hub:charter` script），
    它逐份把模板经 `saveCharterVersion` 装进 `role_charters`。
-   **但「配置页存版本」那条通路仍未接上**，而且 seed 装的是【模板原文】——
+   ~~**但「配置页存版本」那条通路仍未接上**~~【2026-11-19 改口：接上了 —— 看板 #/charter
+   编辑器经 `POST /charter/:roleId`（回环 + HMAC）存版本，`app.js` 真发这一发，
+   `charter-route.test.ts` 与 O8 那份新验收各自判过】，而且 seed 装的是【模板原文】——
    七份模板的 `acceptance_criteria` 今天仍是占位串，所以「入库」≠「入库了能判的标准」。
-   §5 说的「改完 YAML 要存进 `role_charters` 才生效」今天成立的形态是【跑一次 seed】，
-   不是【在页面上编辑】。
+   §5 说的「改完 YAML 要存进 `role_charters` 才生效」今天成立的形态是【跑一次 seed】
+   【或 2026-11-19 起：在页面上编辑并 POST 存版本】。
    另一半旧账要留着：CLI 的 `hub run` / `hub resume` 在装配时仍调 `loadPresetRoles()`
    直接把 YAML 读成内存里的预设表（`cli.ts` 的 `withHub`），供 `buildCompanyGraph` 选节点模型 ——
    **跑图用的档位来自 YAML，门控（如果它被接上）要读的标准来自 `role_charters`**。
@@ -284,4 +294,6 @@ acceptance_criteria:
    §1 那张表里所有「零读者」都是 grep 出来的，属于**较弱**的一档：grep 命中不了
    「某个用例之所以能过，是因为某字段没被读」这层因果。凡是本篇说「不生效」的字段，
    真正强的证据是改它而测试不红 —— 本篇没做那批变异，所以那些结论的地位是
-   「我没找到读者」，不是「证明没有读者」。
+   「我没找到读者」，不是「证明没有读者」。⚠【2026-11-19 记账：这段话自己就被它预言的那件事
+   击中了 —— 表里几行「零读者」后来被 `charter/prompt.ts` 的渲染接上而没人回头改，
+   现在那几行按 r9（有判据也有变异）改口。剩下的「执行器不拦」仍按上面这个较弱档读。】

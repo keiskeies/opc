@@ -33,43 +33,46 @@
  */
 import { createHash } from "node:crypto";
 import {
+  closeSync,
   copyFileSync,
   existsSync,
   ftruncateSync,
   mkdirSync,
   openSync,
-  readFileSync,
   readdirSync,
+  readFileSync,
   rmSync,
   statSync,
   writeFileSync,
-  closeSync,
 } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { fixtureTmp } from "../fixtures/fixture-dir.js";
-import { openDb } from "../../src/db/driver.js";
-import { openReadonlyDb, openSnapshotReadonlyDb } from "../../src/db/pragmas.js";
-import { migrate } from "../../src/db/migrate.js";
 import {
   BACKUP_FAILURE_REASONS,
   BACKUP_PREFIX,
   BACKUP_SUFFIX,
   BACKUP_WORKER_FAILURES,
-  KEEP_BACKUPS,
   BackupWorkerThrewError,
   backupName,
   createBackup,
   createBackupOffLoop,
   isBackupName,
   isSamePath,
+  KEEP_BACKUPS,
   listBackups,
   pruneBackups,
   restoreBackup,
   restoreDrill,
 } from "../../src/db/backup.js";
+import { openDb } from "../../src/db/driver.js";
+import { migrate } from "../../src/db/migrate.js";
+import {
+  openReadonlyDb,
+  openSnapshotReadonlyDb,
+} from "../../src/db/pragmas.js";
 import { WriteQueue } from "../../src/db/write-queue.js";
+import { fixtureTmp } from "../fixtures/fixture-dir.js";
 
 const HUB = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const TMP = fixtureTmp("backup", import.meta.url);
@@ -102,7 +105,10 @@ function migratedDb(events: number): string {
       "VALUES ('T-1', 'system', 'hub', 'state_change', NULL, ?, '{}', ?)",
   );
   for (let i = 0; i < events; i++) {
-    ins.run(JSON.stringify({ i, text: "覆盖率达标，第 " + i + " 条" }), 1_700_000_000_000 + i);
+    ins.run(
+      JSON.stringify({ i, text: "覆盖率达标，第 " + i + " 条" }),
+      1_700_000_000_000 + i,
+    );
   }
   return path;
 }
@@ -189,10 +195,14 @@ describe("① 备份文件名的三条性质（保留策略建立在这三条上
     expect(backupName(at("2026-08-30T23:59:59.000Z"))).toContain("-08-30");
     // 反向对照：这一发不是恒真。毫秒差 1 的两个名字必须【不同】且顺序正确，
     // 否则「sort() 等于时间序」可能只是在证「所有名字都相等」。
-    expect(backupName(1_700_000_000_000)).not.toBe(backupName(1_700_000_000_001));
-    expect([...[backupName(1_700_000_000_001), backupName(1_700_000_000_000)]].sort()[0]).toBe(
-      backupName(1_700_000_000_000),
+    expect(backupName(1_700_000_000_000)).not.toBe(
+      backupName(1_700_000_000_001),
     );
+    expect(
+      [
+        ...[backupName(1_700_000_000_001), backupName(1_700_000_000_000)],
+      ].sort()[0],
+    ).toBe(backupName(1_700_000_000_000));
   });
 
   it("形状：前缀后缀照规格 §6.5，中间不含冒号与点", () => {
@@ -245,7 +255,9 @@ describe("② 一次备份：产物必须能用另一条连接打开并通过 in
     if (!res.ok) return; // 让类型收窄；上面已经红过了
     expect(res.pruned).toEqual([]);
     expect(existsSync(res.path)).toBe(true);
-    expect(res.path).toBe(join(dir, "opc-2026-11-12T03-04-05-000Z" + BACKUP_SUFFIX));
+    expect(res.path).toBe(
+      join(dir, "opc-2026-11-12T03-04-05-000Z" + BACKUP_SUFFIX),
+    );
     expect(res.eventsInBackup).toBe(50);
     expect(res.bytes).toBe(statSync(res.path).size);
     expect(res.bytes).toBeGreaterThan(0);
@@ -265,7 +277,9 @@ describe("② 一次备份：产物必须能用另一条连接打开并通过 in
     if (!res.ok) return;
     const probe = openSnapshotReadonlyDb(res.path);
     try {
-      const mode = probe.prepare("PRAGMA journal_mode").all() as { journal_mode: string }[];
+      const mode = probe.prepare("PRAGMA journal_mode").all() as {
+        journal_mode: string;
+      }[];
       expect(mode[0]?.journal_mode).toBe("delete");
     } finally {
       probe.close();
@@ -285,7 +299,11 @@ describe("② 一次备份：产物必须能用另一条连接打开并通过 in
     const b = openSnapshotReadonlyDb(res.path);
     try {
       const names = (
-        b.prepare("SELECT name FROM sqlite_master WHERE name IN ('events_no_update','events_no_delete','events_fts')").all() as {
+        b
+          .prepare(
+            "SELECT name FROM sqlite_master WHERE name IN ('events_no_update','events_no_delete','events_fts')",
+          )
+          .all() as {
           name: string;
         }[]
       ).map((r) => r.name);
@@ -294,14 +312,20 @@ describe("② 一次备份：产物必须能用另一条连接打开并通过 in
       expect(names.includes("events_fts")).toBe(true);
       // FTS 在产物上【可查】。VACUUM INTO 会带上 shadow 表，所以恢复后不需要重建索引。
       const hits = b
-        .prepare("SELECT count(*) AS c FROM events_fts WHERE events_fts MATCH ?")
+        .prepare(
+          "SELECT count(*) AS c FROM events_fts WHERE events_fts MATCH ?",
+        )
         .all('"覆盖率"') as { c: number | bigint }[];
       expect(Number(hits[0]?.c ?? 0)).toBe(5);
       // 反向对照：MATCH 这一发必须有分辨力 —— 一个不可能的关键词必须命中 0。
       expect(
         Number(
           (
-            b.prepare("SELECT count(*) AS c FROM events_fts WHERE events_fts MATCH ?").all('"绝不可能出现的词组"') as {
+            b
+              .prepare(
+                "SELECT count(*) AS c FROM events_fts WHERE events_fts MATCH ?",
+              )
+              .all('"绝不可能出现的词组"') as {
               c: number | bigint;
             }[]
           )[0]?.c ?? -1,
@@ -319,7 +343,9 @@ describe("② 一次备份：产物必须能用另一条连接打开并通过 in
     const rw = openDb(res.path);
     opened.push(rw);
     try {
-      expect(() => rw.prepare("DELETE FROM events WHERE id = 1").run()).toThrow(/append-only/u);
+      expect(() => rw.prepare("DELETE FROM events WHERE id = 1").run()).toThrow(
+        /append-only/u,
+      );
       expect(() =>
         rw.prepare("UPDATE events SET payload = 'x' WHERE id = 1").run(),
       ).toThrow(/append-only/u);
@@ -329,7 +355,9 @@ describe("② 一次备份：产物必须能用另一条连接打开并通过 in
         "INSERT INTO events (task_id, actor_type, actor_id, action, payload, state_snapshot, created_at) " +
           "VALUES ('T-1','system','hub','state_change','{}','{}',?)",
       ).run(1_700_000_000_999);
-      expect(() => rw.prepare("DELETE FROM events WHERE id = 1").run()).toThrow(/append-only/u);
+      expect(() => rw.prepare("DELETE FROM events WHERE id = 1").run()).toThrow(
+        /append-only/u,
+      );
     } finally {
       rw.close();
     }
@@ -366,7 +394,11 @@ describe("② 一次备份：产物必须能用另一条连接打开并通过 in
           "VALUES ('T-1','system','hub','state_change',?,?,?)",
       );
       for (let i = 0; i < 20; i++) {
-        ins.run(JSON.stringify({ uncommitted: i }), "{}", 1_800_000_000_000 + i);
+        ins.run(
+          JSON.stringify({ uncommitted: i }),
+          "{}",
+          1_800_000_000_000 + i,
+        );
       }
       await gate; // 让出主线程，备份在此期间跑
     });
@@ -385,7 +417,13 @@ describe("② 一次备份：产物必须能用另一条连接打开并通过 in
     opened.push(live);
     try {
       expect(
-        Number((live.prepare("SELECT count(*) AS c FROM events").get() as { c: number | bigint }).c),
+        Number(
+          (
+            live.prepare("SELECT count(*) AS c FROM events").get() as {
+              c: number | bigint;
+            }
+          ).c,
+        ),
       ).toBe(220);
     } finally {
       live.close();
@@ -397,8 +435,18 @@ describe("② 一次备份：产物必须能用另一条连接打开并通过 in
     const src = migratedDb(3);
     const dir = freshDir("collision");
     const fixed = Date.UTC(2026, 10, 12, 3, 4, 5, 100);
-    const a = createBackup({ dbPath: src, backupDir: dir, now: () => fixed, onWarning: warn });
-    const b = createBackup({ dbPath: src, backupDir: dir, now: () => fixed, onWarning: warn });
+    const a = createBackup({
+      dbPath: src,
+      backupDir: dir,
+      now: () => fixed,
+      onWarning: warn,
+    });
+    const b = createBackup({
+      dbPath: src,
+      backupDir: dir,
+      now: () => fixed,
+      onWarning: warn,
+    });
     expect(a.ok).toBe(true);
     expect(b.ok).toBe(true);
     if (!a.ok || !b.ok) return;
@@ -425,7 +473,11 @@ describe("③ 失败必须告警（备份静默失败等于没有备份）", () 
 
   it("ok:false 的每一种失败都恰好叫一次 onWarning", () => {
     const before = warnings.length;
-    createBackup({ dbPath: join(TMP, "也没有.db"), backupDir: freshDir("w"), onWarning: warn });
+    createBackup({
+      dbPath: join(TMP, "也没有.db"),
+      backupDir: freshDir("w"),
+      onWarning: warn,
+    });
     expect(warnings.length).toBe(before + 1);
   });
 
@@ -437,7 +489,11 @@ describe("③ 失败必须告警（备份静默失败等于没有备份）", () 
     const dir = freshDir("partial");
     const notADB = join(TMP, "不是库-" + ++seq + ".bin");
     writeFileSync(notADB, "这是一段纯文本，不是 SQLite 文件");
-    const res = createBackup({ dbPath: notADB, backupDir: dir, onWarning: warn });
+    const res = createBackup({
+      dbPath: notADB,
+      backupDir: dir,
+      onWarning: warn,
+    });
     expect(res.ok).toBe(false);
     if (res.ok) return;
     expect(res.reason).toBe("vacuum_failed");
@@ -483,7 +539,9 @@ describe("④ 保留策略", () => {
     const left = listBackups(dir);
     expect(left).toHaveLength(KEEP_BACKUPS);
     // 【最新那份必须在】：删错方向（每备份一次删掉最新）是这里最贵的错。
-    expect(left[left.length - 1]).toBe(join(dir, backupName(base + (KEEP_BACKUPS + 2) * 60_000)));
+    expect(left[left.length - 1]).toBe(
+      join(dir, backupName(base + (KEEP_BACKUPS + 2) * 60_000)),
+    );
     // 删掉的必须是最旧的三份。
     expect(left[0]).toBe(join(dir, backupName(base + 3 * 60_000)));
     expect(warnings).toEqual([]);
@@ -491,7 +549,12 @@ describe("④ 保留策略", () => {
 
   it("清理不碰备份目录里【不是备份】的文件", () => {
     const dir = freshDir("foreign");
-    const foreign = ["notes.txt", "opc-2026-11-12.db", "old.db-wal", "手动拷的库.db"];
+    const foreign = [
+      "notes.txt",
+      "opc-2026-11-12.db",
+      "old.db-wal",
+      "手动拷的库.db",
+    ];
     for (const f of foreign) writeFileSync(join(dir, f), "x");
     const src = migratedDb(1);
     for (let i = 0; i < 4; i++) {
@@ -512,9 +575,16 @@ describe("④ 保留策略", () => {
   it("keep 必须是 >= 1：keep = 0 意味着每备份完都以为留了一份", () => {
     const src = migratedDb(1);
     expect(() =>
-      createBackup({ dbPath: src, backupDir: freshDir("keep0"), onWarning: warn, keep: 0 }),
+      createBackup({
+        dbPath: src,
+        backupDir: freshDir("keep0"),
+        onWarning: warn,
+        keep: 0,
+      }),
     ).toThrow();
-    expect(() => pruneBackups({ backupDir: freshDir("keep0b"), keep: 0 })).toThrow();
+    expect(() =>
+      pruneBackups({ backupDir: freshDir("keep0b"), keep: 0 }),
+    ).toThrow();
   });
 });
 
@@ -536,25 +606,49 @@ describe("⑤ 恢复：形状合法 ≠ 可以拿来覆盖现网库", () => {
     const prod = openDb(target);
     opened.push(prod);
     try {
-      expect(Number((prod.prepare("PRAGMA journal_mode").get() as { journal_mode: string | number }).journal_mode === "wal" ? 1 : 0)).toBe(1);
-      expect(Number((prod.prepare("SELECT count(*) AS c FROM events").get() as { c: number | bigint }).c)).toBe(25);
+      expect(
+        Number(
+          (
+            prod.prepare("PRAGMA journal_mode").get() as {
+              journal_mode: string | number;
+            }
+          ).journal_mode === "wal"
+            ? 1
+            : 0,
+        ),
+      ).toBe(1);
+      expect(
+        Number(
+          (
+            prod.prepare("SELECT count(*) AS c FROM events").get() as {
+              c: number | bigint;
+            }
+          ).c,
+        ),
+      ).toBe(25);
       // 触发器必须在【恢复出来的这一份】上真的挡住，而不是只在 sqlite_master 里有个名字。
       // 挂在 prod（可写）上而不是只读连接上：② 节记过的那条 —— 只读连接上的 DELETE
       // 先以 "attempt to write a readonly database" 失败，走不到触发器。
       // 第一版就是挂错的连接上，红在那句只读报错上，而恢复其实是好的。
-      expect(() => prod.prepare("DELETE FROM events WHERE id = 1").run()).toThrow(/append-only/u);
+      expect(() =>
+        prod.prepare("DELETE FROM events WHERE id = 1").run(),
+      ).toThrow(/append-only/u);
       expect(() =>
         prod.prepare("UPDATE events SET payload = 'x' WHERE id = 1").run(),
       ).toThrow(/append-only/u);
       // 反向对照：这一份仍然【可以 INSERT】，否则上面两条只证「这张表写不进」。
-      prod.prepare(
-        "INSERT INTO events (task_id, actor_type, actor_id, action, payload, state_snapshot, created_at) " +
-          "VALUES ('T-1','system','hub','state_change','{}','{}',?)",
-      ).run(1_700_000_000_888);
+      prod
+        .prepare(
+          "INSERT INTO events (task_id, actor_type, actor_id, action, payload, state_snapshot, created_at) " +
+            "VALUES ('T-1','system','hub','state_change','{}','{}',?)",
+        )
+        .run(1_700_000_000_888);
       expect(countEvents(target)).toBe(26);
       // FTS 也必须活着（回放与检索靠它；恢复出一个 FTS 坏掉的库是静默失效）。
       const hit = prod
-        .prepare("SELECT count(*) AS c FROM events_fts WHERE events_fts MATCH ?")
+        .prepare(
+          "SELECT count(*) AS c FROM events_fts WHERE events_fts MATCH ?",
+        )
         .all('"覆盖率达标"') as { c: number | bigint }[];
       expect(Number(hit[0]?.c ?? 0)).toBe(25);
     } finally {
@@ -581,7 +675,11 @@ describe("⑤ 恢复：形状合法 ≠ 可以拿来覆盖现网库", () => {
     expect(statSync(target).size).toBe(before);
     keep.close();
     // 正向：给了确认就真覆盖。少了这一发，上面那条可能只是在证「恢复从不生效」。
-    const ok = restoreBackup({ backupPath: res.path, targetPath: target, confirmOverwrite: true });
+    const ok = restoreBackup({
+      backupPath: res.path,
+      targetPath: target,
+      confirmOverwrite: true,
+    });
     expect(ok.ok).toBe(true);
     expect(countEvents(target)).toBe(7);
   });
@@ -594,7 +692,10 @@ describe("⑤ 恢复：形状合法 ≠ 可以拿来覆盖现网库", () => {
     if (!res.ok) return;
     const hand = join(dir, "手工拷的.db");
     copyFileSync(res.path, hand);
-    const r = restoreBackup({ backupPath: hand, targetPath: join(dir, "t.db") });
+    const r = restoreBackup({
+      backupPath: hand,
+      targetPath: join(dir, "t.db"),
+    });
     expect(r.ok).toBe(false);
     if (r.ok) return;
     expect(r.reason).toBe("backup_unverified");
@@ -603,7 +704,9 @@ describe("⑤ 恢复：形状合法 ≠ 可以拿来覆盖现网库", () => {
     // 少了它，「恢复永远拒绝」也能让上一条绿。
     const renamed = join(dir, backupName(Date.UTC(2026, 10, 12)));
     copyFileSync(res.path, renamed);
-    expect(restoreBackup({ backupPath: renamed, targetPath: join(dir, "t2.db") }).ok).toBe(true);
+    expect(
+      restoreBackup({ backupPath: renamed, targetPath: join(dir, "t2.db") }).ok,
+    ).toBe(true);
   });
 
   it("目标旁边留着【别的库的】-wal ⇒ 必须被清掉，内容必须等于备份", () => {
@@ -629,7 +732,9 @@ describe("⑤ 恢复：形状合法 ≠ 可以拿来覆盖现网库", () => {
       ins.run(JSON.stringify({ poison: i }), 1_900_000_000_000 + i);
     }
     const otherWal = other + "-wal";
-    expect(existsSync(otherWal), "夹具没能造出 -wal，这一发测不到东西").toBe(true);
+    expect(existsSync(otherWal), "夹具没能造出 -wal，这一发测不到东西").toBe(
+      true,
+    );
 
     const target = join(TMP, "被污染的目标-" + ++seq + ".db");
     // 先放一份【旧内容】当目标，再把别的库的 -wal 挂到它旁边。
@@ -681,7 +786,9 @@ describe("⑤ 恢复：形状合法 ≠ 可以拿来覆盖现网库", () => {
     expect(code.includes("@langchain")).toBe(false);
     // 这条是接线那天真正会红的：一旦有人把 hub resume 接进恢复路径，
     // backup.ts（或它直接 import 的模块）就会碰 graph / checkpoint。
-    const imported = [...code.matchAll(/from\s+"([^"]+)"/gu)].map((m) => m[1] ?? "");
+    const imported = [...code.matchAll(/from\s+"([^"]+)"/gu)].map(
+      (m) => m[1] ?? "",
+    );
     expect(imported.length).toBeGreaterThan(3);
     expect(imported.filter((m) => m.startsWith("../"))).toEqual([]);
   });
@@ -781,7 +888,12 @@ describe("⑥ 恢复演练：备份成功 ≠ 恢复可用", () => {
 
     // ① 同一个字符串
     expect(() =>
-      restoreDrill({ dbPath: src, backupDir: dir, drillTargetPath: src, onWarning: warn }),
+      restoreDrill({
+        dbPath: src,
+        backupDir: dir,
+        drillTargetPath: src,
+        onWarning: warn,
+      }),
     ).toThrow(TypeError);
     expect(existsSync(src)).toBe(true);
     expect(countEvents(src)).toBe(9);
@@ -803,15 +915,19 @@ describe("⑥ 恢复演练：备份成功 ≠ 恢复可用", () => {
     expect(viaDotDot).not.toBe(src); // 字符串确实不同 —— 所以这条测的是归一化本身
     expect(isSamePath(src, viaDotDot)).toBe(true);
     expect(() =>
-      restoreDrill({ dbPath: src, backupDir: dir, drillTargetPath: viaDotDot, onWarning: warn }),
+      restoreDrill({
+        dbPath: src,
+        backupDir: dir,
+        drillTargetPath: viaDotDot,
+        onWarning: warn,
+      }),
     ).toThrow(TypeError);
     expect(countEvents(src)).toBe(9);
 
     // ③ 反向对照：同名、另一个目录 ⇒ 不是同一个文件，必须照常演练
     const other = freshDir("drill-selfguard-other");
     const sameNameElsewhere = join(other, src.slice(TMP.length + 1));
-    expect(basename(sameNameElsewhere))
-      .toBe(basename(src));
+    expect(basename(sameNameElsewhere)).toBe(basename(src));
     expect(isSamePath(src, sameNameElsewhere)).toBe(false);
     const d = restoreDrill({
       dbPath: src,
@@ -846,7 +962,12 @@ describe("⑥ 恢复演练：备份成功 ≠ 恢复可用", () => {
     const target = join(dir, "drill-target.db");
     mkdirSync(target);
 
-    const d = restoreDrill({ dbPath: src, backupDir: dir, drillTargetPath: target, onWarning: warn });
+    const d = restoreDrill({
+      dbPath: src,
+      backupDir: dir,
+      drillTargetPath: target,
+      onWarning: warn,
+    });
     expect(d.ok).toBe(false);
     expect(d.backup.ok).toBe(true); // 备份那一步真的成功了 —— 这一格必须如实，不能顺势报 false
     expect(d.restore.ok).toBe(false);
@@ -874,13 +995,20 @@ describe("⑥ 恢复演练：备份成功 ≠ 恢复可用", () => {
     const target = join(dir, "不是文件");
     mkdirSync(target);
     // 传了 confirmOverwrite 也一样拒 —— 这一格防的就是「照 target_exists 那句去做会二次失败」
-    const r = restoreBackup({ backupPath: b.path, targetPath: target, confirmOverwrite: true });
+    const r = restoreBackup({
+      backupPath: b.path,
+      targetPath: target,
+      confirmOverwrite: true,
+    });
     expect(r.ok).toBe(false);
     if (r.ok) return;
     expect(r.reason).toBe("target_not_writable");
     expect(r.message).toContain("不是普通文件");
     // 反向对照：换一个新路径就能恢复，否则这条判据可以是「恢复恒失败」
-    const ok2 = restoreBackup({ backupPath: b.path, targetPath: join(dir, "ok-target.db") });
+    const ok2 = restoreBackup({
+      backupPath: b.path,
+      targetPath: join(dir, "ok-target.db"),
+    });
     expect(ok2.ok).toBe(true);
   });
 
@@ -893,7 +1021,9 @@ describe("⑥ 恢复演练：备份成功 ≠ 恢复可用", () => {
   it("isSamePath：归一化后才可比，而它不许退化成「永远 false」", () => {
     expect(isSamePath("/a/b.db", "/a/b.db")).toBe(true);
     expect(isSamePath("/a/b.db", "/a/x/../b.db")).toBe(true);
-    expect(isSamePath("rel/b.db", join(process.cwd(), "rel", "b.db"))).toBe(true);
+    expect(isSamePath("rel/b.db", join(process.cwd(), "rel", "b.db"))).toBe(
+      true,
+    );
     // 反向对照三对，缺一对这条判据就可以是「恒 true」：
     expect(isSamePath("/a/b.db", "/a/c.db")).toBe(false);
     expect(isSamePath("/a/b.db", "/a/x/b.db")).toBe(false);
@@ -976,7 +1106,10 @@ describe("⑦ 备份在 worker 里跑（0036）", () => {
     };
 
     const offLoop = await probe(async () => {
-      const r = await createBackupOffLoop({ dbPath: path, backupDir: join(dir, "w") });
+      const r = await createBackupOffLoop({
+        dbPath: path,
+        backupDir: join(dir, "w"),
+      });
       expect(r.ran).toBe(true);
       if (r.ran) expect(r.result.ok).toBe(true);
     });
@@ -1009,8 +1142,8 @@ describe("⑦ 备份在 worker 里跑（0036）", () => {
     ).toBeGreaterThan(0);
     expect(
       offLoop.ticks,
-      "异步版的 ticks 不比同步版多 ⇒ 库不够大，同步那一次根本没停住主线程 ⇒ 这一发白绿"
-      ).toBeGreaterThan(sync.ticks);
+      "异步版的 ticks 不比同步版多 ⇒ 库不够大，同步那一次根本没停住主线程 ⇒ 这一发白绿",
+    ).toBeGreaterThan(sync.ticks);
   });
 
   it("worker 备出来的那份【不是二等备份】：另一条连接打得开、integrity_check 过、行数一致", async () => {
@@ -1035,7 +1168,10 @@ describe("⑦ 备份在 worker 里跑（0036）", () => {
     }
     // 而且它能【真的被恢复】—— 走的是上面 ⑤ 那一节同一条路径，不是另搓一份。
     const target = join(dir, "restored.db");
-    const back = restoreBackup({ backupPath: r.result.path, targetPath: target });
+    const back = restoreBackup({
+      backupPath: r.result.path,
+      targetPath: target,
+    });
     expect(back.ok).toBe(true);
   });
 
@@ -1054,14 +1190,21 @@ describe("⑦ 备份在 worker 里跑（0036）", () => {
     const path = migratedDb(5);
     const dir = join(TMP, "offloop-now-" + ++seq);
     const injectedMs = Date.UTC(2026, 2, 10, 1, 2, 3, 4);
-    const r = await createBackupOffLoop({ dbPath: path, backupDir: dir, nowMs: injectedMs });
+    const r = await createBackupOffLoop({
+      dbPath: path,
+      backupDir: dir,
+      nowMs: injectedMs,
+    });
     expect(r.ran).toBe(true);
     if (!r.ran) return;
     expect(r.result.ok).toBe(true);
     if (!r.result.ok) return;
     expect(r.result.path.endsWith(backupName(injectedMs))).toBe(true);
     // 反向对照：不注入时【不该】是这个时刻（否则上面那发可能只是恒成立）。
-    const plain = await createBackupOffLoop({ dbPath: path, backupDir: join(dir, "plain") });
+    const plain = await createBackupOffLoop({
+      dbPath: path,
+      backupDir: join(dir, "plain"),
+    });
     expect(plain.ran).toBe(true);
     if (!plain.ran) return;
     if (plain.result.ok) {
@@ -1074,7 +1217,11 @@ describe("⑦ 备份在 worker 里跑（0036）", () => {
     // 与 §4 那条「传了函数被悄悄丢掉」同族，只是入口换成了「传了个坏值」。
     for (const bad of [1.5, -1, Number.NaN, "1700000000000"]) {
       await expect(
-        createBackupOffLoop({ dbPath: "/nope.db", backupDir: TMP, nowMs: bad as never }),
+        createBackupOffLoop({
+          dbPath: "/nope.db",
+          backupDir: TMP,
+          nowMs: bad as never,
+        }),
       ).rejects.toThrow(TypeError);
     }
   });
@@ -1086,7 +1233,14 @@ describe("⑦ 备份在 worker 里跑（0036）", () => {
     const dir = join(TMP, "offloop-fn-" + ++seq);
     for (const extra of [{ now: () => 1 }, { onWarning: () => {} }]) {
       await expect(
-        createBackupOffLoop({ dbPath: path, backupDir: dir, ...(extra as never) }),
+        // 整对象一次性 as never（本文件下方"两个都传"那一发同款先例）：
+        // 原先写在 spread 括号里的 `...(extra as never)` 是 TS2698 的直接病灶
+        // —— spread 不接受 never。整对象断言与它逐字等价，只挪了 cast 的位置。
+        createBackupOffLoop({
+          dbPath: path,
+          backupDir: dir,
+          ...extra,
+        } as never),
       ).rejects.toThrow(/函数不能过 worker 边界/u);
     }
     // 两个都传 ⇒ 两个都要在报错里点名（只报第一个会让人改完一个再撞第二个）。
@@ -1115,8 +1269,12 @@ describe("⑦ 备份在 worker 里跑（0036）", () => {
     expect(r.warnings).toEqual([]);
     // 反向对照：worker_timeout 必须【不在】createBackup 自己的失败枚举里 ——
     // 两个维度混用会让人以为同步版也可能返回它（它结构上不可能）。
-    expect(BACKUP_FAILURE_REASONS as readonly string[]).not.toContain("worker_timeout");
-    expect(BACKUP_WORKER_FAILURES as readonly string[]).toContain("worker_timeout");
+    expect(BACKUP_FAILURE_REASONS as readonly string[]).not.toContain(
+      "worker_timeout",
+    );
+    expect(BACKUP_WORKER_FAILURES as readonly string[]).toContain(
+      "worker_timeout",
+    );
   });
 
   it("keep 非法 ⇒ reject 且【保留原文】，不压成一条 reason", async () => {
@@ -1161,7 +1319,11 @@ describe("⑦ 备份在 worker 里跑（0036）", () => {
     mkdirSync(dir, { recursive: true });
     const squatter = join(dir, backupName(Date.UTC(2026, 0, 1)));
     mkdirSync(squatter); // 一个占着备份名的目录 = prune 删不掉它
-    const r = await createBackupOffLoop({ dbPath: path, backupDir: dir, keep: 1 });
+    const r = await createBackupOffLoop({
+      dbPath: path,
+      backupDir: dir,
+      keep: 1,
+    });
     expect(r.ran).toBe(true);
     if (!r.ran) return;
     // ⭐ 结论必须是【成功】。把它报成失败就是本篇第一版那个缺陷本体。
@@ -1177,12 +1339,17 @@ describe("⑦ 备份在 worker 里跑（0036）", () => {
     // 那里是「业务上不许继续」，这里是「这一轮没跑成，下一轮再试」。
     // 两批发酵成不同的形状，是因为调用方的处置动作不同（改代码 vs 等下一次）。
     const dir = join(TMP, "offloop-werr-" + ++seq);
-    const r = await createBackupOffLoop({ dbPath: 42 as never, backupDir: dir });
+    const r = await createBackupOffLoop({
+      dbPath: 42 as never,
+      backupDir: dir,
+    });
     expect(r.ran).toBe(false);
     if (r.ran) return;
     expect(r.failure).toBe("worker_error");
     expect(r.message).toContain("backup.worker 没收到 dbPath");
-    expect(BACKUP_WORKER_FAILURES as readonly string[]).toContain("worker_error");
+    expect(BACKUP_WORKER_FAILURES as readonly string[]).toContain(
+      "worker_error",
+    );
   });
 
   it("⚠ worker 入口【被主线程 import】时必须抛（不得静默什么都不做）", async () => {
@@ -1213,16 +1380,20 @@ describe("⑦ 备份在 worker 里跑（0036）", () => {
       .filter((l) => l.startsWith("import "))
       .join("\n");
     for (const bad of ["@langchain", "graph/", "http/app", "roles/"]) {
-      expect(imports, "backup.ts import 了 " + bad + " ⇒ worker 入口会变重到加载不了").not.toContain(
-        bad,
-      );
+      expect(
+        imports,
+        "backup.ts import 了 " + bad + " ⇒ worker 入口会变重到加载不了",
+      ).not.toContain(bad);
     }
     // 反向对照：这条扫描必须真的【看得见】import 行，否则「不含 X」可能只是
     // 「我把过滤条件写错了，一条都没捞到」。node:sqlite 是 backup.ts 一定有的依赖。
     expect(imports).toContain("node:sqlite");
     // worker 入口自己的运行时 import 也钉住：它【只】能要 worker_threads 与 backup.js。
     // 那两个之外的每一个（哪怕看起来无害）都让入口在缺包时加载不了。
-    const wtext = readFileSync(join(HUB, "src", "db", "backup.worker.ts"), "utf8");
+    const wtext = readFileSync(
+      join(HUB, "src", "db", "backup.worker.ts"),
+      "utf8",
+    );
     const runtimeImports = wtext
       .split("\n")
       .map((l) => l.trim())

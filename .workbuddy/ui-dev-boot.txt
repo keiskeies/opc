@@ -1,0 +1,26 @@
+数据库已是最新（9 个迁移均已应用）
+库文件：D:\item\opc\.opc-os\dev.db
+迁移目录：D:\item\opc\packages\hub\resources\migrations
+(node:60828) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+未指定 --ceo <名字> ⇒ POST /bindings/verify 会回 501。
+IM 身份绑定的读侧（GET /bindings）与申请（POST /bindings）不受影响。
+校验一个身份必须交出「谁验的」，而这个名字只能由启动命令给出（不给默认值）。
+决策写路径 = 【引擎那一条】：CEO 点批准 ⇒ 认领卡片 + 状态边 + 审计，一个事务，
+任务真的往前一格（例如 CHARTER_PENDING → CHARTER_APPROVED）。不需要图运行时。
+本入口【不跑角色也不起草章程卡】：CHARTER_APPROVED 之后的每一步都要有人跑
+  pnpm hub:engine work --db D:\item\opc\.opc-os\dev.db --task <id> \
+      --max-budget-usd <每轮美元硬顶> --task-limit-cents <任务上限美分>
+那【两个参数是必填的】（0041 §8：花钱的上限不给默认值），所以这一行不能整行照抄 —— 少抄一个拿到的是「缺参数」，而它会让人以为是命令写错了。
+⚠ 那条命令要 tsx，本机装不上（0039 量的那半）：装不上就是跑不了，这一句提示替你解决不了，它只保证【不说一句照抄会挂的补救命令】。
+IM 审批通道【没接】：env 里缺 OPC_FEISHU_APP_ID、OPC_FEISHU_APP_SECRET、OPC_FEISHU_APPROVER_OPEN_ID。
+  · 现在：审批人在手机上收不到卡，审批请在桌面端做。其余一切照常。
+  · 要接：设齐 OPC_FEISHU_APP_ID / OPC_FEISHU_APP_SECRET / OPC_FEISHU_APPROVER_OPEN_ID（可选 OPC_FEISHU_APPROVER_CHAT_ID、OPC_FEISHU_CHANNEL_ID、OPC_FEISHU_ORIGIN）之后重启。
+dev 已就绪：
+  · 看板      http://127.0.0.1:9797
+  · Hub API   http://127.0.0.1:8899（只绑回环）
+  · 库        D:\item\opc\.opc-os\dev.db（dev 库，不做自动备份）
+  · 直连 token（本次生成，进程退出即失效）：MjsVej31dPquqRepEF7AOAMgfLCCDzfIszqutBpwLgs
+运营看板已在 http://127.0.0.1:9797 启动（Hub=8899，token 已配置=true）
+(node:17856) ExperimentalWarning: stripTypeScriptTypes is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)

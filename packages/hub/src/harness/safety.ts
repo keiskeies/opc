@@ -1,21 +1,21 @@
 /**
- * ⚠⚠ 今天【一行都不执行】：harness/safety.ts 对外零 import，生产路线不经过这里 ⚠⚠
+ * ~~⚠⚠ 今天【一行都不执行】：harness/safety.ts 对外零 import，生产路线不经过这里 ⚠⚠~~
+ * 【round312 已解，按本横幅自己那句「接线那天方向 B 会红并点名这一行，于是这句横幅自删」执行】：
+ * 真员工现在【每一轮】都经过这里 —— `engine/runtime.ts` 的 `runTurn` 经
+ * `harness/gateway-runner.ts` 走 `harness/gateway.ts` 的 `callHarness`，
+ * 而网关的三层判据（forbidden_flags / 沙箱档位 / workspace 绝对性）判的就是本文件的输出。
  *
- * 这不是谦虚，是一条会被机器核对的主张，措辞是照着判据写的（要提模块名 + 否定词，
- * 只写「本文件」「harness/ 整目录」那些 `test/arch/dead-modules.ts` 的 claimSites
- * 认不出来 —— 实测过，见本轮记录）。接线那天 `checkBaseline` 方向 B 会红并点名这一行，
- * 于是这句横幅【自删】，不需要谁记得来改文档。
- *
- * 为什么值得单独放在文件头第一句：本文件那四层预防（白名单 / 沙箱档位 / 高风险暂停 /
- * 绝对禁止项）下面每一段都写得像「已经在跑」，而真的员工（`engine/claude.ts` 起的
- * `claude -p`）今天实际经过的只有 CLI 那两个参数（`--permission-mode plan` +
- * `--max-budget-usd`）加一句 `env: process.env` 原样透传。
- * ⇒ 「3300 行看起来像防线的死代码」比「根本没有防线」更危险：下一个人会以为已经防住了。
- * ⇒ **顺序硬约束**：真要放开写权限，必须先接本文件，不能反过来。
+ * ⚠ 「接上了」与「四层全在拦」是两件事，这一段要说清哪一层今天真的有输入：
+ *  · 白名单（allowed_tools）：契约里从岗位书带进来，但 CLI 适配器跑
+ *    `--permission-mode plan`，那个模式下【没有工具调用】⇒ 没有真 sighting 喂它；
+ *  · 沙箱档位 / 高风险暂停 / 绝对禁止项：这三条每轮真的被问，判不过就整轮不调。
+ * ⇒ 原来那句「3300 行看起来像防线的死代码」现在只对【路由与验证】两个模块成立
+ *   （`harness/routing.ts`、`harness/verifier.ts` 仍零生产调用方，横幅还在）。
+ * ⇒ **顺序硬约束仍然有效**：真要放开写权限，必须先接 `harness/routing.ts`，不能反过来。
  * 缺口与接线顺序登记在 docs/OPC-OS-功能优化设计.md 的 O6。
  *
  * ─────────────────────────────────────────────────────────────────────
- * 以下是本模块【接上之后】的判据。
+ * 以下是本模块的判据。
  *
  * Harness 的四层安全防护（计划 Task 5.2，规格 §12.7 + §4.1.3 + §20.2）。
  *
@@ -402,6 +402,29 @@ export function isInsideWorkspace(workspace: string, target: string): boolean {
   };
   // 两种读法【都】说在里面，才算在里面（见上面 ①②）。
   return insideUnder(false) && insideUnder(true);
+}
+
+/**
+ * 「这个工作区字符串是绝对路径吗」—— gateway 第 3 层的形状判据（调用前那一半）。
+ *
+ * 判两种分隔符读法下的绝对形状：POSIX 的 `/x`，与 Windows 的盘符 `X:\` / `X:/`。
+ * 不认的形状【一律答否】（fail-closed，与 sandboxTierBlock 对陌生档位同一个方向）：
+ *  - 相对路径（`repo`）⇒ 否 —— 这是本判据存在的本来理由（会随进程 cwd 变）；
+ *  - `D:x` / `D:` 这种驱动器相对形 ⇒ 否 —— 它在 Windows 语义里是「该盘当前目录下的
+ *    相对路径」，歧义正是第 3 层要拒的东西；
+ *  - UNC（`\\server\share`）⇒ 否 —— 今天没有任何装配方交得出这种形状，
+ *    放到真有那天再按【测过的形状】放行，不预先放行没量过的东西。
+ *
+ * ⚠ 这一格为什么存在（round312）：gateway 第 3 层旧写法只判 `startsWith("/")`，
+ * 于是 Windows 上真绝对路径 `D:\item\opc` 被当相对路径拒掉 —— hub 真跑在 Windows 上时
+ * d.cwd 恰是那一形状 ⇒ 那一层变成「只在 Unix 上存在的一层」。
+ * 只读一种分隔符的绝对性判定，与 round303 在 isInsideWorkspace 里修掉的是【同一族缺陷】
+ * 的另一半：那里修的是「 containment 把 \ 不当分隔符 ⇒ 越界被放行（fail-OPEN）」，
+ * 这里修的是「绝对性把 \ 开头的盘符不当绝对 ⇒ 合法工作区被拒（fail-CLOSED，方向安全
+ * 但把整个运行时挡在门外）」。两处都必须两种读法都认，方向不同而已。
+ */
+export function isAbsoluteWorkspacePath(p: string): boolean {
+  return p.startsWith("/") || /^[A-Za-z]:[\\/]/u.test(p);
 }
 
 /**

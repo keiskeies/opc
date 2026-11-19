@@ -118,7 +118,7 @@
    `channels/abstraction` 那一行在写这篇时对，round281 起**不再成立**：`channels/feishu.ts` 与
    `serve/im-channels.ts` 都 import 它，它已经不在「零 importer」名单里了（dead-modules 基线里
    那两条如约变红并已摘除）。上面那句「缺真适配器与 `act` 落库点」两半都已兑现，而**发卡
-   （`deliverCard`）仍然零生产调用方** ⇒ 那一行今天若重写，缺的是「投递台账」那张表，不是适配器。旧行按口径留着，不改数字：这张表是【那一次脚本跑出来的读数】，改数就等于伪造那次测量。⚡ round283：那张表真的建了（`0009_card_delivery_ledger.sql`），动作 4 落地，读 O12 那一段与 r17 —— 上面那句"仍然零生产调用方"随之日后翻向，别把它当现状读。⚡ round305：`heartbeat/retry` 这一行同样翻向了 —— `engine/turn-retry.ts` import 了 `withRetry`，而它由 `engine/runtime.ts` 的 `runTurn` 每轮调一次，所以它【已不在】对外零 import 名单里（dead-modules 基线那一条如约变红并摘除，基线下界随之 14→13）。⚠ 但【模块可达不等于重试放过行】：那条判据今天一次都不放行（本机可复现的 `started:false` 全是确定性的 ENOENT，被瞬时 errno 白名单挡掉），台账 round305 §② 记着这件事与「白名单五个名字一个真样本都没有」。别拿这一行的翻向去宣布重试在真机上自愈过。
+   （`deliverCard`）仍然零生产调用方** ⇒ 那一行今天若重写，缺的是「投递台账」那张表，不是适配器。旧行按口径留着，不改数字：这张表是【那一次脚本跑出来的读数】，改数就等于伪造那次测量。⚡ round283：那张表真的建了（`0009_card_delivery_ledger.sql`），动作 4 落地，读 O12 那一段与 r17 —— 上面那句"仍然零生产调用方"随之日后翻向，别把它当现状读。⚡ round305：`heartbeat/retry` 这一行同样翻向了 —— `engine/turn-retry.ts` import 了 `withRetry`，而它由 `engine/runtime.ts` 的 `runTurn` 每轮调一次，所以它【已不在】对外零 import 名单里（dead-modules 基线那一条如约变红并摘除，基线下界随之 14→13）。⚠ 但【模块可达不等于重试放过行】：那条判据今天一次都不放行（本机可复现的 `started:false` 全是确定性的 ENOENT，被瞬时 errno 白名单挡掉），台账 round305 §② 记着这件事与「白名单五个名字一个真样本都没有」。别拿这一行的翻向去宣布重试在真机上自愈过。 ⚡ round312：`harness/gateway` 与 `harness/safety` 这两行也翻向了 —— `engine/runtime.ts` 的 `runTurn` 经 `harness/gateway-runner.ts` 每轮调 `callHarness`（O6 动作 2），上面第 2 条那句【整个目录对外零 import】从今天起为假：目录对外有了真边。但这一条坑的教训【原样有效】：`routing` 与 `verifier` 仍互相 import 且对外零边，还躺在死模块基线里；而「对外有边」说的是 gateway/safety 这【两个】模块，不是整目录（dead-modules 基线那两条如约变红并摘除，基线下界 13→8 —— 同轮还摘了 search/ 三条，那是 gateway 一条 type-only import 带出来的传递可达，见该文件注释）。
 
 真正要接的簇，按这个口径是这样（对外零 import 的目录/模块）：
 
@@ -179,7 +179,7 @@ pnpm 把包装在 workspace 包下面，不在根 `node_modules`。
 | `acceptance_criteria`（岗位书验收标准） | 有（模板里是 `CEO-PLACEHOLDER-ACCEPTANCE` 占位串） | `evaluateGate` 有，而 `evaluateGate` 唯一调用方在无入口簇里 |
 | `forbidden_actions` / `decision_scope` / `honesty_boundaries` | 有（契约 `.strict()` 校验通过） | ~~**无**：`engine/` 目录里对这些字段名的引用为 0~~ 【round272 复测：结论错，证据那句到今天仍然对】`grep` 遍 `engine/` 确实 0 引用（今天也 0，只有 `outside_decision_scope` 那个枚举字符串字面量，它不读字段）。错的是从「engine/ 里没有」跳到「没有读者」：读者在 `charter/prompt.ts`（`c.forbiddenActions` / `c.decisionScope` / `c.honestyBoundaries` 逐字段渲染），而渲染结果就是 `engine/claude.ts` 的 `--append-system-prompt` ⇒ **有读者，但读者是提示词，不是执行器**——它影响模型写什么，不拦模型已经写下的东西。这两件事的差距才是这一格真正该说的话，而原句用「无」把它抹平了。主张改登记见 O14 表 r9（含一条能红的判据）。**⚠ 同一族错 O2 落地块第 2 条早写过一次**（「引用是 0」是真的，但读者在 `charter/prompt.ts` 的 camelCase 字段访问里，一个数不能替一次实验）—— 那条只改了 O2 那一节，§2 这张表没跟着改，于是同一个错在一份文档里活了两个住址 |
 | `escalation_triggers` | 有 | ~~**无**（见 `guides/delegation-rules.md` §6）~~ 【round272 复测：同上一行，同一个错】`charter/prompt.ts` 的 `c.escalationTriggers.map(triggerText)` 就是读者 ⇒ 有读者（提示词），无执行器。见 O14 表 r9 |
-| `budgets.hard_stop` | **恒为 1**：~~全仓三条 `INSERT INTO budgets` 都写字面量 `1`~~【round272 复测】带 hard_stop 的 INSERT 全 src 只剩【一条 DO NOTHING 语句 + `charter/budget-sync.ts` 的 DO UPDATE】—— 引擎路线 `onCost` 那份手抄副本已删（改成 import tracker 那条、scope/period 走绑参）。**「写字面量 1」这件事没变**，变的只是副本数；主张改登记见 O14 表 r1 | 无 —— 而且 `serve/charter-pump.ts` **故意不看它**：看它就会得到一条「造不出红的判据」 |
+| `budgets.hard_stop` | **恒为 1**：~~全仓三条 `INSERT INTO budgets` 都写字面量 `1`~~【round272 复测】带 hard_stop 的 INSERT 全 src 只剩【一条 DO NOTHING 语句 + `charter/budget-sync.ts` 的 DO UPDATE】—— 引擎路线 `onCost` 那份手抄副本已删（改成 import tracker 那条、scope/period 走绑参）。**「写字面量 1」这件事没变**，变的只是副本数；主张改登记见 O14 表 r1 | ~~无~~ 【2026-11-19 改口：有读者了】`serve/charter-pump.ts` 的 `underTaskBudgetSql` 现在读它 —— `hard_stop = 0` 的那一格超预算**不禁 spawn**。~~而 `serve/charter-pump.ts` **故意不看它**：看它就会得到一条「造不出红的判据」~~ 那句【当时对】，它过期不是因为想法变了，是因为**这一格多了一个写入口**：`PUT /budget` 能把那列写成 0（见 r1），于是「看了就是造一条恒真的东西」这个前提没了。**五条 SQL 共用【同一个函数】**（`charter-pump` 的候选与 blocked、`driver-pump` 的候选与 blocked、`overview/driver-status` 的 stopped）而不是五份抄件；能红的那一发在 `packages/hub/test/budget/hard-stop-gate.test.ts`，含一条【摘掉外层括号就红】的优先级判据——那一条是全仓唯一看得见这件事的 |
 | `approvals.timeout_at` / `timeout_behavior` | 有（默认 8 小时） | ~~只被 `GET /approvals` 读出去**展示**；到期**什么都不发生**~~ 【round265 过期】执行者已有（`approvals/timeout.ts` 的 `runTimeoutPass`，见 O10 落地块）【round268 接线】心跳每一跳调它，到期卡真的动 ⇒ 这一行**整行过期**：现在【有值也有读者】。主张改登记见 O14 表 r2 |
 
 `hard_stop` 那一格是这一族最干净的样本：一个名字叫「硬停」的布尔列，
@@ -235,10 +235,15 @@ pnpm 把包装在 workspace 包下面，不在根 `node_modules`。
    `ops.yaml` 在其中（判据 A 让它整次拒绝、零写入，但那是「读了并拒了」，不是「读不到」）。
    ⇒ 现在的准确说法是：**它有一份没签的岗位书，而装配表里没有它的位置**。
    这一格与 §2 那一格（O2 动作 4 的修正块）本来就是同一件事的两处抄本，而它们不同步了。
+   ⚠ 【round314 复核】这句「它们不同步了」已过期：两处抄本今天同口径 ——
+   §O2 动作 4 修正块（验收第 5 条）写「它读起来是『有一份没签的运营岗位书』」，
+   与本格的「有一份没签的岗位书，而装配表里没有它的位置」是同一件事的两种写法；
+   钉住【事实】的守卫是 `roles/charter.test.ts:588`（孤儿集合 `== ["ops"]` +
+   播种命令目录 glob 读得到它）。同步的凭据在守卫，不在散文。
    ⚠ 「不同步了【多久】」我**说不出**：`seed.ts` 与本文档今天都还是未跟踪文件
    （`git status` 实测两格都是 `??`），没有提交历史可查 ⇒ 只能说「播种落地之后这一格没跟着改」，
    不能说漂了几轮（round286 台账记的「归因不可考」同一个规矩：查不出来的时间量就不写）。
-   唯一相关的钉子是 `roles/charter.test.ts:439` 那一发（孤儿集合 `== ["ops"]`），
+   唯一相关的钉子是 `roles/charter.test.ts:588` 那一发（孤儿集合 `== ["ops"]`），
    它判的是**装配表**维度的孤儿，所以它对这一句过期【全程是绿的】：
    守卫抓不到散文里的过期现状，这件事本轮又多一个实例。
    ⇒ 这条同时说明：**改组织 = 改这个常量 + 改图 + 重编译**。而 `POST /org`
@@ -401,11 +406,19 @@ packages/hub/resources/charter-templates/*.yaml   ← 真内容，带 CEO-PLACEH
 
 role_charters 表                                  ← 规格说该由它决定
                 ↓ 唯一的生产写入方是 org/commit.ts 的 bumpCharter
+        ⚠ 【round314 复核】「唯一」已过期：播种路（charter/seed.ts）也是生产写入方。
         而它开头就是 `if (prev === undefined) continue;`  ⇒ 新角色直接跳过
                 ↓
 charter/store.ts 的 saveCharterVersion            ← 真正的写入方，零调用方
+⚠ 【round314 复核】这一格的「零调用方」已过期：`charter/seed.ts`（O2 动作 2 落地，
+`pnpm hub:charter seed`）是它的第一个生产调用方 —— seed.ts 文件头自述这条翻向。
+本图描述的是本篇写就时的现状；播种路落地后写入口存在，缺的换成「没有人签七个模板」
+（见下 landing block 第 3 条）。
 
 engine/runtime.ts 的 rolePrompt                    ← 真的提示词，只有两句话
+⚠ 【round314 复核】「只有两句话」已过期：O2 动作 1（rolePrompt 接 charter/store）
++ O3 动作 1（memoryPromptSections）落地后，提示词含岗位书渲染块与记忆块；
+「只有两句话」是本篇写就时（两者都缺）的现状。
 ```
 
 真的 agent 每一轮拿到的全部内容是：**「你在一人公司里担任角色 [X]，你的汇报对象由 hub
@@ -446,7 +459,7 @@ engine/runtime.ts 的 rolePrompt                    ← 真的提示词，只有
       全量 `4 failed | 2461 passed | 6 skipped` ⇒ 至少一发红，达成。
       但四发里**有一发的红不来自它自己的主断言**：「库里一个版本都没有 ⇒ 明说没有岗位书」
       那一发的主断言在变异体下**成立**（一个"永远产出没有岗位书"的变异体，使"你没有岗位书"
-      这句话为真），红的是它旁边那条**反向对照** `runtime.test.ts:490`（round305 按语义重指；原写 `:465` 从写下起就没对得上任何一次提交，口径与归因记在 `doc-refs.test.ts` 对应那一格）。
+      这句话为真），红的是它旁边那条**反向对照** `runtime.test.ts:598`（round305 按语义重指；round312 同一轮内被顶漂两次 —— `seedCharter` 上提、随后 `biome check --write` 整份重排。原写 `:465` 从写下起就没对得上任何一次提交，口径与归因记在 `doc-refs.test.ts` 对应那一格）。
       ⇒ 写反向对照是有价格的：它把一条本来会恒绿的断言变成一条**只有附录才杀得死**的断言。
       这条价格必须付，但**要知道是谁杀的** —— 否则下一次有人把"重复的"附录精简掉，
       主断言仍绿而杀掉变异的没了（0058 §4 那张死因表）。
@@ -469,8 +482,8 @@ engine/runtime.ts 的 rolePrompt                    ← 真的提示词，只有
       【后续修正，原文保留】**"没有任何生产路径"这一句已被动作 2 推翻一半**：
       `charter/seed.ts` 现在经 `saveCharterVersion` 写这张表。而**结论强度没变** ——
       播种对 shipped 模板恒拒（七份 0 份签过字），实测跑它 ⇒ 退出 1 且**零写入**，
-      那张表**今天仍然是 0 行**，每一轮仍然走 `NO_CHARTER_LINE`。
-      缺的一环从「没有写入口」变成「没有人签七个文件」：**执行方从代码换成了人**。
+      那张表**【2026-11-19 限定】只经迁移+播种的库恒 0 行；本机 dev.db 实测 1 行（UI 走查经 POST /charter 写入，见 round311 台账），每一轮仍然走 `NO_CHARTER_LINE`**。
+      缺的一环从「没有写入口」变成「没有人签七个文件」：**执行方从代码换成了人**（限定同：签模板只是播种路的条件）。
       钉这一格的是 `store.test.ts` ④（期望值已从 `[]` 改成 `["charter/seed.ts"]`，
       改之前先按 `phase3.test.ts` 的 verifyFix 规矩问过"缺口真的消了吗"，答否）。
    4. **门控那一半比正文假设的更远**：本节的「目标」写的是"那一份**当场进提示词、当场进门控**"，
@@ -687,6 +700,17 @@ engine/runtime.ts 的 rolePrompt                    ← 真的提示词，只有
 | `graph/gates/author-reviewer.ts` | `gateConfigBlock` / `selfReviewEdgeBlock` / `independentReviewerPath`（`forbiddenRemovalAttempt` / `unauthorizedAttemptPayload` 已于 0064 删除） | **不在**：只被 `harness/verifier.ts` 用，而 verifier 对外零 import |
 | `graph/gates/evaluate.ts` | 同角色 ⇒ `escalate` | **不在**：唯一调用方在无入口簇里 |
 
+⚠⚡ **round334 复测：第 3 行「只被 `harness/verifier.ts` 用」是句假话 —— 那三个名字在
+`verifier.ts` 的【全部 git 历史】里一次也没出现过（`git log --all -S` 三个名字 × 该文件 = 0 命中，
+阳性对照 `sameFamilyReviewBlock` 同法命中 1 发 ⇒ 搜索形状有效）。今天的准确形状：
+`sameFamilyReviewBlock` 唯一的跨文件调用方是 verifier；`gateConfigBlock` **全仓零调用方**；
+`selfReviewEdgeBlock` / `independentReviewerPath` 的唯一调用方是 `gateConfigBlock`（它自己没人调）。
+「不在活路径上」的结论不变，但错的方向是**高估了覆盖面**：原句让这三个听着有一个运行期消费者，
+实际上一个都没有。**行号表能骗人的第二种方式不是数错，是口径没写**——0062 §2 那张表把
+`selfReviewEdgeBlock` / `independentReviewerPath` 记成 0 调用点，量的其实是【跨文件】口径，
+它们在同文件被 `gateConfigBlock` 调的两处（组合点，`0e2f2c9` 就在）没被数进去；表没错，
+没写尺子才是错。同一条复算机器：`.workbuddy/round334-o4-callsites.probe.mts`。
+
 ⇒ 结构上真的拦住了两件事（同族审阅必须先点一次卡片；被注入的角色无法自我交付），
 但配置层的审阅规则（哪条委派边算审阅、哪些删除动作是越权）**今天一条都不生效**。
 
@@ -745,7 +769,7 @@ engine/runtime.ts 的 rolePrompt                    ← 真的提示词，只有
   reject 的前提下一圈圈烧键）。两维各一发变异确认（round262-o4-mutate-identity.mjs /
   round262-o4-mutate-waiver-note.mjs），删掉即 1 红。原话的 `sameFamilyReviewBlock`↔`reviewGate`
   合并按上面那个实测的前提不再适用；动作 1 的**验收句（删调用点 ⇒ 一发红）对那 5 个函数
-  仍然 0 红可删，未动** —— 那是另一件事，别把它当 0061/0062 的证据读。
+  仍然 0 红可删，未动** —— 那是另一件事，别把它当 0061/0062 的证据读。 ⚡ **round334 现场：这半句与同表下方【验收】行的「round271 复测：达成」是同一发 ffae248 一起落库的** —— 一张表的两行对同一句话读成「0 红可删」/「每处 ≥1 红」，矛盾从落库那一分钟就在全仓同时存在；round271 改口只改了验收行，没扫【共享同一读数的其他格】，这正是 O14 整篇要治的形状在本篇自家身上的复发。复跑（`.workbuddy/round334-mutate-o4.mjs`，判卷换全 hub 套件）：那五处调用点删除各 4 / 2 / 2 / 1 / 11 红 ⇒ 「0 红可删」对当下代码不成立；**「那是另一件事」的区分（闸门收紧 ≠ 调用点接线）仍然成立**，翻掉的只是那个 0。
 | 动作 2 `independentReviewerPath` | **保留为纯判据，标注覆盖关系（0064）。** 这一格在写 O4 时
   假设「运行时 dispatch 会遇到无门控委派边，需要记 unresolved」。实测：无门控边在保存期就被
   `contracts/org/validate.ts` 的 `validateNewEdge`（`missing_review_gate`）拒掉，且同族/自审/
@@ -781,6 +805,15 @@ engine/runtime.ts 的 rolePrompt                    ← 真的提示词，只有
   （verifier / author-reviewer），「测试绿着而调用点是删掉的」这一族今天有变异可抓，
   但「防线在活路径上跑」仍未兑现（那等的是 O6 接线与真员工）。
   **别把它当成 0061/0062 任何一篇的证据读**——那两个变异组打的仍是闸门与去重键。
+  ⚡ **round334 第三次复测**（`.workbuddy/round334-mutate-o4.mjs`，同五锚点逐字复用，
+  判卷换成【全 hub 套件】102 文件 / 2366 发全绿基线，每发施加变异后先过 `tsc -b`）：
+  M1=4 红 / M2=2 红 / M3=2 红 / M4=1 红 / **M5=11 红（2 文件）**，五发 tsc 全部看不见，
+  控制组与回滚后基线各复跑一次自证 ⇒ 「达成」在今天成立，且 M5 比 round271 多红的那两发在
+  `phase3.test.ts`（门禁诚实口径 + ①重跑无路可跑）。**判卷面的差异这轮才看得见**：
+  round271 台账明写判卷 = verifier.test + author-reviewer.test 共 61 发（当时挑文件跑），
+  而 phase3.test.ts 在 round271 当天【已经存在】（77c2f81，11-15）且那两发也已在 ——
+  9→11 的差是【挑文件 vs 全 hub】的尺子差，不是代码变了形状。一条验收句的「达成」二字
+  必须带判卷面，否则换一把尺子读出来的数会被当成代码漂了。
 
 顺带一条与动作 1 直接相关的读数（0061 §5）：索引收窄之后 `countSimilarApprovals`
 **变好**了 —— 它按 status 分桶聚合「同类审批被拒过几次」，而旧索引把一个键上的行数压成
@@ -861,13 +894,22 @@ engine/runtime.ts 的 rolePrompt                    ← 真的提示词，只有
 
 #### O6 `harness/` 那 3300 行：现在真的员工在安全层外面 🔴
 
-**现状。** `engine/claude.ts` 起子进程时传的是 `env: process.env`，
+**现状。** ~~`engine/claude.ts` 起子进程时传的是 `env: process.env`，
 参数只有 `--output-format json`、`--permission-mode plan`（加上可选 `--resume`）。
 这是**真员工今天实际经过的唯一一层**：四层预防（`harness/safety.ts`）、
 路由（`harness/routing.ts`）、预算门（`harness/gateway.ts` 的 `checkBudget` / `settle`）、
 独立复核（`harness/verifier.ts`）——**`harness/` 整目录对外零 import**。
 今天的实际状态是：**靠 `--permission-mode plan` 这一发兜住写文件**，
-而那是 CLI 的一个参数，不是本仓实现的四层防线。
+而那是 CLI 的一个参数，不是本仓实现的四层防线。~~
+⚡ **round312 翻向（O6 动作 2 接线落地）**：`engine/runtime.ts` 的 `runTurn` 现在每轮经
+`harness/gateway-runner.ts` → `harness/gateway.ts` 的 `callHarness` →
+`adapters/claude.ts` → `engine/claude.ts` —— 原话里翻掉的是「唯一一层」与「整目录对外零 import」。
+起进程前真的被问的是三层判据（forbidden_flags / 沙箱档位 / workspace 绝对性，
+`harness/safety.ts` 的输出）＋能力声明核对，事后落一行 `harness_call` 审计。
+仍然成立的部分：写文件【还是】靠 `--permission-mode plan` 兜（工具层恒空：plan 模式下
+没有工具调用）；路由与复核（`harness/routing.ts`、`harness/verifier.ts`）零生产调用方；
+预算门（`checkBudget` / `settle`）仍是无人调用的类型槽 —— 钱照旧由 `onCost` 记，
+这是刻意留的装配边界（谁记账要先定，归 O7），不是漏格。
 
 **目标。** 真员工的每一次工具调用经过 `gateway`；`safety` 的预防表要么生效要么删。
 
@@ -882,6 +924,10 @@ engine/runtime.ts 的 rolePrompt                    ← 真的提示词，只有
    【round272 复测：字面这句的前提不成立，动作本体仍未做；真实存在的那半个洞已另行堵上】
    「换成走 gateway」要的是一条【调用路径】，而 `checkBudget` / `settle` 只是两个
    【类型槽】—— `gateway.ts` 里没有一行预算 SQL，`callHarness` 今天零生产调用方。
+   ⚠ 【round314 复核】「`callHarness` 今天零生产调用方」已过期：round312 接线后
+   `runTurn` 每轮经 `harness/gateway-runner.ts` 调它（真员工每一轮都过 gateway）。
+   这一句是 round272 写下的当时现状，round312 翻向块（见下）没有单独点名这半句。
+   判断不受影响——`checkBudget` / `settle` 仍是类型槽（round312 落地块第 4 条原样：装配方留空，钱照旧由 onCost 记）。
    ⇒ 落的是那句话底下真实的那件事：那三条 SQL 和 `budget/tracker.ts` 的两条是
    【同一件事两份手抄】，现在收敛成 tracker 一份、两条路线 import 同一份（见下面落地块）。
    「顺带解 O7-1」另外还有一处前提错，登记在 O7 动作 2 那一段。
@@ -927,10 +973,41 @@ engine/runtime.ts 的 rolePrompt                    ← 真的提示词，只有
       **接线**没动，但它底下那个洞（两份手抄 SQL）单独堵了 —— 见下面的落地块。
       这一句原来整句是绿的，它的问题不是写错，是**粒度**：「动作 2 没动」和
       「动作 2 里那份重复 SQL 没动」在验收上完全不是一件事，而原句把它们合成一格，
-      于是堵住一半之后这一格没法表达。`harness/` 四个模块今天仍在基线里
+      于是堵住一半之后这一格没法表达。~~`harness/` 四个模块今天仍在基线里
       （canary 里那条进度读数判的就是这一格，四格全绿）。O6-2 的接线点仍是
       `engine/runtime.ts` 的 `onCost` 旁边；O6-3 那条硬顺序约束（必须在真员工拿到
-      写权限**之前**）没变。
+      写权限**之前**）没变。~~
+      【round312 再改口】接线【做了】—— 见下面的 round312 落地块：基线里剩
+      `routing` / `verifier` 两格（canary 那条进度读数现在是两格状态① + 两格已离开），
+      接线点也不再是「`onCost` 旁边」而是【每一轮 runTurn 之前】；
+      O6-3 的硬顺序约束【原样有效】，只是它现在指着 `harness/routing.ts`——
+      safety 那一半已经接上，「先接安全层」不再是还没做的事。
+
+   ⚠ **round312 落地块：O6 动作 2 的【接线本体】落地了。**
+   1. **接的形状。** `engine/runtime.ts` 的 `runTurn` 不再直调 `runRole`，改走
+      `harness/gateway-runner.ts` 的 `runViaGateway` → `callHarness` →
+      `ClaudeCliAdapter` → `runRole`。岗位书里的 `harness_defaults` 逐轮翻成
+      `HarnessRequest`（沙箱档位 / allowed_tools / forbidden_flags / approval_policy），
+      没有岗位书的角色拿显式的 read-only + 空表（「这个角色没有章程」是文档过的
+      合法状态，不是「章程功能没装配」——后者才触发装配期抛错）。
+      workspace 用装配级 `cwd`，绝对性判据新立 `isAbsoluteWorkspacePath`
+      （Windows 的 `D:x` 是盘符相对路径，必须拒——round303 那族「同一字符串两种读法」）。
+   2. **审计的异步落法。** `deps.audit` 是同步回调而写库要等事务：每一发尝试先攒进
+      缓冲区，`runTurn` 在【自己的】`writer.node()` 里补写非重试那些行——
+      不搭 `dispatch` 那笔事务（回滚会把留痕一起抹掉），可重试的尝试【永不 flush】
+      （「一次没发生过的调用」必须留在重试的透明性里）。落库失败 console.warn 不上抛，
+      与 `recordTurn` 同一条不冒泡立场。
+   3. **验收第 1 条现在写得出正文了**（0057 说「等接线那天由方向 B 负责喊」，那天到了）：
+      方向 B 那条红如约出现、点了 6 处主张坐标，基线格与横幅【同一轮】摘除；
+      dead-modules 基线下界 13→8（另外 3 条是 gateway 一条 type-only import 把
+      `search/observe` → `mcp`/`policy` 带出的传递可达——本表口径是编译期 import 边）。
+      canary 的进度读数按家规改口成「两格状态① + 两格已离开」，控制组从 gateway
+      换成 routing（对一个已不在基线的格子做「拿掉」是空操作，控制会失效）。
+   4. **没落的两件（刻意）**：`settle` / `checkBudget` 仍留空——同一笔钱两条腿记账
+      比没人记更糟，spawn 前的预算闸已经在 pump 的 `underTaskBudgetSql` 里；
+      工具白名单层今天恒空（plan 模式无工具调用），由契约钉着等 SDK 适配器。
+      动作 3/4（routing / verifier）仍没动——O6-3 的排期语义没变：它们要在
+      「真员工拿到写权限」【之前】接，而写权限还没放开。
 
    ⚠ **round272 落地块：动作 2 的【那半件事】落地了，接线的本体没有。**
    1. **落的是什么。** `engine/runtime.ts` 的 `onCost` 里那三条 SQL 与
@@ -960,6 +1037,10 @@ engine/runtime.ts 的 rolePrompt                    ← 真的提示词，只有
         ⇒ 接过去等于把一条活的记账路线接进一段死代码，症状是「测试全绿而生产没变」。
         `harness/gateway.ts` 顶部那条横幅因此只划掉了「两份 SQL」那一句，
         「今天一行都不执行」原样留着。
+        ⚠ 【round314 复核】这半句的「callHarness 零生产调用方」已过期（round312
+        接线后每轮被调），「checkBudget / settle 是类型槽」仍成立 —— 判断的依据
+        是装配方留空，不是 callHarness 死着；「今天一行都不执行」那句横幅已在
+        round312 翻向时自删（gateway.ts 文件头现在写「真员工每一轮都经过这里」）。
       · **没发 `BudgetPaused`**：归 O7-1（CEO 拍板），且状态机那一格没动；
         另外本轮量到「发了就能被 `today.ts` 读到」这句也是错的，登记在 O7 动作 2。
    6. **顺带被这次改动顶到的坐标**：`tracker.ts` 的 `breached` 那行、`budget-sync.ts`
@@ -1011,6 +1092,15 @@ engine/runtime.ts 的 rolePrompt                    ← 真的提示词，只有
    而那不构成 CEO 看得见的「有一件事发生」。
 3. `hard_stop` 那一列：要么给它一条能写 0 的路（那才是「开关」），
    要么**删掉这一列**。当前形状（恒 1 + 没人读 + 读它就能造出恒真判据）是三种里最坏的。
+   ⚡ **2026-11-19：第一支落地了**（写入口在 round272 之前就有 `PUT /budget`，本轮补的是**读方**）：
+   `underTaskBudgetSql` 现在读它 ⇒ `hard_stop = 0` 的那一格超预算不禁 spawn，五条 SQL 同源共用它。
+   ⚠ 这一发**没有**解动作 1，也**不要**读成「O7 有停了」：动作 1 要的是「任务停在一个明确状态、
+   `GET /today` 那一格不再是恒 0」，那需要状态机（CEO 拍板）；本轮做的恰好是它的反面语义 ——
+   这一列说的是「**不许**停」，今天它真的能说不停了。验收那三条仍全红（一条 `BudgetPaused`
+   都没发过，见动作 2）。能红的判据在 `packages/hub/test/budget/hard-stop-gate.test.ts` 十发，
+   外加 `.workbuddy/round309-mutate-hard-stop.mjs` 六发变异（命中 6/6、逐字节回滚）；
+   其中 M4 那一发**全绿**，量出来的是 `COALESCE(hard_stop, 1)` 那个兜底值今天不是承重的
+   （没有预算行时两条路径都落到 `0 < 上限`）—— 那一格是登记的射程余量，不是判据。
 
 **验收。** 一条端到端：把某任务上限设成低于一次真实开销 ⇒ 断言
 (1) 出现一条 `BudgetPaused` 事件、(2) `GET /today` 的 `blocked` 计数 +1、
@@ -1092,6 +1182,27 @@ engine/runtime.ts 的 rolePrompt                    ← 真的提示词，只有
 > （「提交那条 POST /org【没有】通道：self-escaping CEO 写」），浏览器里真点一次在本机无证据（0039）；
 > 本轮新增那一发钉的是「`api("POST", "/org"` 那一行还在」，是**最接近那格**而不是浏览器证据。
 > 教训与代价见 §7 第 22 格。】
+>
+> 【2026-11-19 补（round310）：本节**验收**那句今天多了一条**走界面真用的那两个写入口**的证据
+> —— `packages/hub/test/acceptance/new-role-via-http-to-its-own-criteria.test.ts`（5 发全绿；
+> 变异 `node .workbuddy/round310-mutate-o8-http.mjs` 命中 5/5）。它补的是**分工缝**：
+> 仓里那份 O8 验收（`new-role-to-its-own-criteria.test.ts`）逐字走了同一句验收，但第一跳提的是
+> `kind: "add_edge"`（新节点随一条无关的边捎带进库，那份文件头自己写着「旁路」）、第二跳是
+> CLI 播种器 `runSeedCli` ⇒ 它证的是「播过种 + 节点在图上 ⇒ 标准进提示词」。而
+> **`POST /org` 的带判据 `add_node` 与 `POST /charter/:roleId` 这两个界面上 CEO 真点的写入口，
+> 此前没有任何一条测试串进同一条 O8 链**。今天串上了（真 WriteQueue / migrate / HMAC /
+> `buildHubDeps` / `commitOrgGraph` / `saveCharterVersion` / engine dispatch），
+> 反向对照同一条链、只差第二签没签：`translator` 那一轮读到它自己那条哨兵标准，
+> `data` 那一轮只有 `NO_CHARTER_LINE`。
+> **射程不含**：CLI 播种（另一份文件判）、前端点击（本机无浏览器/Electron，界面那格停在
+> 「`app.js` 发得出载荷」）、标准被**门控执行**的形状（属 gates 那族）、非回环 401（`charter-route.test.ts` 判）。
+> ⇒ 所以上面 ③ 那句「别读成 O8 第一跳通了」**原样成立**：desktop 侧 `channels.ts` 仍不给那条
+> POST 通道，浏览器里真点一次仍无本机证据。这一发推进的是「链在【旁路 + CLI】下通」→
+> 「链在【HTTP 两个写入口】下通」，**没有**推进到「界面上点过了」。
+> ⚠ 两台读数里如实记下的是**变异机报出来的**，不是推理：① M4 摘掉 `real-deps.ts` 的
+> `charterWriter: o.queue` ⇒ 全仓**只有**这份新文件的正题红 ⇒ 那条装配行此前**零读者**；
+> ② 同一发下，新文件那发「没接 `charterWriter` ⇒ 501 且库里零行」的装配负对照**照样绿** ——
+> 负对照防的是「装配白给成功」，**防不了「装配根本没接」**（已写进那台机器的文件头）。】
 
 
 ---
@@ -1475,7 +1586,7 @@ resolver 有了第一位读者），原文按口径留着。~~**「没有任何�
 
 | 主张 | 判它的方法 | 上次核对时刻 |
 | --- | --- | --- |
-| **r1** budgets.hard_stop 没有任何代码能把它写成 0（带 hard_stop 的 INSERT INTO budgets 全 src 只有一条 DO NOTHING 语句 + budget-sync 的 DO UPDATE，全写字面量 1） | test/arch/claims-registry.test.ts › r1 判据：扫 src 全部 INSERT INTO budgets 的 VALUES；取材非空由同文件真仓库那一发钉住 | 2026-11-17 |
+| **r1** budgets.hard_stop 的【记账路径】写不出 0：记账那几处（tracker 的 DO NOTHING、budget-sync 的 DO UPDATE、dev-seed）hard_stop 全是字面量 1；唯一能写 0 的是 POST /budget 的 upsert（http/budget.ts，绑定参数 = 界面那个「硬停」勾选框），它是登记在 HARD_STOP_BIND_WHITELIST 里的显式软限入口 —— 名单外再多一处绑参写点、或那一处形状变了/没了，判据红。⚡【2026-11-19 补上另一半】那一列今天【有读方】：underTaskBudgetSql 读它，hard_stop = 0 的那一格超预算不禁 spawn（五条 SQL 同源共用那一个函数）。两句合起来才叫开关 —— 写得出一列而没人读是装饰，有人读而写不出是恒真判据。⚠ 射程：它【不判】「读得对」，判的是【那半条字节还在且括号还在】；语义那一格归 packages/hub/test/budget/hard-stop-gate.test.ts 那十发（其中一条【摘掉外层括号就红】，全仓唯一看得见那件事的） | test/arch/claims-registry.test.ts › r1 判据：扫 src 全部 INSERT INTO budgets 的 VALUES（字面量 0 一律红；绑定参数只准名单内那一处，且名单内必须逐字含登记形状；名单外的 upsert 改 hard_stop 也红）；取材非空由同文件真仓库那一发钉住。读侧那一半（hardStopReaderCheck，判【剥掉注释之后】的字节，口径同 r23/r24）：charter-pump.ts 里有 `SELECT b.hard_stop FROM budgets b` ⇒ 没有它红（那一列退回没人读）；收尾那半条 `, 1) = 0)` 逐字在 ⇒ 不在就红（判据方向翻或最外层括号被摘，两种都在这一格响）。外加打在真字节上的变异：写侧四格见 .workbuddy/round309-mutate-hard-stop.mjs（六发、命中 6/6、逐字节回滚；M1b 那一发【只跑旧的三个文件】全绿 = 那三条老测试对 hard_stop 零射程的证据；M4 那一发【全绿】= COALESCE(hard_stop, 1) 的兜底值今天不承重，登记的盲区）。读侧那两格另有合成变异打在【真 charter-pump.ts 文本】上（本文件 r1 读侧那一族，含一发【抹掉代码而只留一句「这里以前读它」的注释】—— 那种形状必须【仍然红】，它是「判剥注释后的字节」与「判原文」两种写法之间唯一的方向证据） | 2026-11-19 |
 | **r2** 超时执行者已接进心跳巡检（serve/assemble.ts 的每一跳调 runTimeoutPass，到期卡真的动） | test/arch/claims-registry.test.ts › r2 判据：serve/assemble.ts 必须含 runTimeoutPass( 调用 | 2026-11-17 |
 | **r3** `makeChannelActorResolver`（把 channelId → 平台 → 角色的那座桥）的读者在场：channels/approval-bridge.ts 的 actorFor 就是它（round280 之前这条是「零调用方」，判据方向随之翻向「读者必须在场」，同 r2 那次的剧本） | test/arch/claims-registry.test.ts › r3 判据：channels/approval-bridge.ts 在场且调用 makeChannelActorResolver( | 2026-11-17 |
 | **r4** BudgetPaused 事件今天零发布点（BudgetTracker 没有 new 点） | test/arch/claims-registry.test.ts › r4 判据：扫 src 里 new BudgetTracker（实例化即发布点） | 2026-11-17 |
@@ -1489,7 +1600,7 @@ resolver 有了第一位读者），原文按口径留着。~~**「没有任何�
 | **r12** 计划每一条【验收行】点名的工件路径逐字存在（或被一行显式豁免标着）；本轮实测三条 Run 行点名的旧住址【逐字不存在而命令今天全绿】—— 因为 vitest 把参数当子串过滤器而不是当路径。⚠ 同样不抄读数：命中与豁免的数目由 plan-gate-paths.test.ts 钉 | test/arch/plan-gate-paths.test.ts › 五发合成变异 + 三发真仓库；外加打在真文档上的 G1–G4（.workbuddy/round276-gate-path-mutate.mjs，自恢复）；本条判据不重跑 existsSync，只核对那份守卫还在、且还在真的查住址 | 2026-11-17 |
 | **r13** `--permission-mode plan` 是今天真的员工身上唯一生效的安全边界，且它由两层独立守卫看着：静态四判据（spawn 点基线 / plan 与 FLAG 的【相邻性】/ 诚实标注在第一行代码之前 / 探针键名单非空）＋一条真起子进程的行为探针【带正向对照】。立它之前的读数：把它改成 bypassPermissions ⇒ 全仓零红。⚠ 三条已知余量写在守卫文件头，不进自动检查：改名 import 的 spawn 扫不出（变异 B5 把它钉成预期绿）、换成 SDK 调用则整条失效、判据只查探针代码在而不重跑探针 | test/arch/role-spawn-boundary.test.ts › 底座一发（好夹具必须【不红】）+ B1–B6 六发合成变异 + 4 发真仓库；外加打在真文件上的五发（.workbuddy/round277-boundary-mutate.mjs，自回滚，含 B5 预期绿）；行为那一发在 packages/hub/test/engine/claude.test.ts，正向对照是它的一半价值；本条判据不重跑子进程，只核对那份守卫还在、相邻判据仍逐格比对、探针键仍逐个核对 | 2026-11-17 |
 | **r14** 本登记表自己那些 `source.line` 有人核，且核它在【门禁里】而不只是一个要靠人想起来跑的脚本 —— 立它之前的读数：往 §5 插一段 ⇒ §7 全体下移 35 行 ⇒ r10–r13 四条同时 STALE 而 test/arch 304 发全绿（`renderMarkdown` 不渲染 line ⇒ 那张表「逐字一致」的守卫对坐标是瞎的）。⚠ 已知余量：锚点取主张首行的前 30 个字符，那一格被改写到 30 字以内不同就判漂；同一句话在文档里多处命中时只要求【登记那一格命中】，不判唯一性 | test/arch/claim-coords.test.ts › 真仓库 3 发（逐条坐标 + 取材非空 + 锚点至少一处命中）+ 5 发合成变异；外加打在【真文档】上的三发（.workbuddy/round278-claim-coords-mutate.mjs，自回滚 + 逐字节核对）：C1 往 §5 插一行 = 本轮真发生的形状 / C2 换掉锚点句 / C3 掏空判据（真仓库那一发【不红】）；本条判据不重跑坐标核对，只核对那份守卫在场、那句比较还在、非空那一发没被摘掉 | 2026-11-17 |
-| **r15** 【round294 撤回本条的标题】原标题「`POST /org` 提交不了一个新角色 —— 契约里没有带判据的 `add_node`，而落库的是【请求体那张图】」—— 现在【提交得了】了，契约里有 add_node，落库前逐条判过（见 r22）。留下这段话是因为它记的是一件比「主张过期」更贵的事：本条的判据在翻转之后【照样全绿】，而它绿的原因换了 —— 它变成了一个假证人。【round292 改口，那时无效的是后半句】原文接着写「`revalidate` 只按 `reparent` 与 `add_edge` 两种 kind 分派 ⇒ 一个新节点随一条与它【无关】的合法 `add_edge` 提交能拿 200 进库，全程没有判据过手它」—— 那句在 round279 那天是真的，round292 起【不再真】：`everyNodeDeclaresModelFamily` 在开事务前逐节点判 after 图。【round294 再改口，那次无效的是①】它们当时写着「① 契约里确实没有带判据的 add_node（形状没变），③ 两个前端零出口（没变）」—— ① 被本轮自己亲手改假了。【round295 再改口，这次无效的是③，而且它不是「过期」是【假证人】】「两个前端零出口」连着六轮【绿着】，而 `packages/web/public/app.js` 从 2026-11-11（`git log -S` 追到 2bcbdb0）就在真发 `kind: "reparent"` —— 那发证据的扫描根只列了 `web/src` 与 `desktop/src`、扩展名只筛 `.ts`/`.tsx`，真控制室【不在它的视野里】。⇒ 现在准确的说法是【界面发得出 reparent】（那发证据③ 已翻成正向点名：{reparent:[app.js], add_edge:[], add_node:[]}）。⚠ 它仍然【不】等于「O8 第一跳通了」：`POST /org` 那条通道在 desktop 侧被明确拒绝（channels.ts 那句「提交那条 POST /org【没有】通道：self-escaping CEO 写」），浏览器里点一次更没有本机证据（0039）。⚠ 现在准确的形状仍然是【旁路还在，但它不再是无判据的旁路】——声明了 model_family 的新节点随一条无关的 add_edge 照样能进库，那发反向 canary 钉的就是这一格。别把它读成 O8 第一跳通了，也别读成「现在不能通过请求体加角色了」（那是让实现层替 CEO 关掉一条产品目标）。 | packages/hub/test/acceptance/new-role-to-its-own-criteria.test.ts › 11 发（① 契约形状【round294 翻向：现在钉的是 add_node 那一支【解析得通】+ 三种捎带形状解析不通】 / ② 旁路现在被拦 + 反向 canary 只差 model_family 就该 200 / ③【round295 翻向：正向点名每种 kind 由谁发 —— reparent 只有 web/public/app.js，另两种为空 + 引号形状 + 扫描器自身的反向 canary + 『构造了载荷』≠『发得出去』那一发】 / 正题三跳 / 加节点成功那一发 / 六种坏形状逐条 code + 零残留 / 缺家族由继承拦 / 反空转对照 / 前提自证 / 占位串因果）；test/org/validate.test.ts › 「everyNodeDeclaresModelFamily」那 6 发（含反向 canary：非边端点也判）+ 本轮新增「L1 validateNewNode：加一个新节点」那 13 发（含⭐重名抢在自环之前 / ⭐森林 / ⭐与 model_family 不重叠 / ⭐空图那条通过不是「永远通过」），另有 schema 那一节的⭐登记一条【没判的】：键 ≠ role_id —— 它记的是【另一维】（形状层放行），不属 L1 那一节，别按 13 发去找它）；test/org/versioning.test.ts › ⑥ 那 3 发（拒绝零残留 / 与 L1 的顺序 / 反面对照）。round279 那六发变异（.workbuddy/round279-o8-acceptance-mutate.mjs）里 M3 打的是【旧世界】，round292 另跑 .workbuddy/round292-mutate-org-node-criterion.mjs 七发：M0 控制 / M1 摘掉提交路径的采纳（红 2 发 2 文件）/ M2 判 before —— 【该绿，变异等价，当时那句话写的是「两种 kind 都不碰 model_family」，round294 起这句话的前提变了，矩阵里留着它就是为了那天它会翻红】/ M3 丢 trim / M4 理由不点名角色 / M5 退回只判边端点 / M6 「只判新增节点」那个看着更精准的恒真版本 —— 命中 7/7；本轮另跑 .workbuddy/round294-mutate-add-node.mjs（打在 add_node 那一族生产字节上）；round295 跑 .workbuddy/round295-mutate-frontend-egress.mjs 六发【打在 app.js 与 web/src 的真字节上】：M0 控制（行尾空注释，该绿）/ M1 reparent→add_edge（红 1 发 1 文件）/ M2 摘掉那次 api("POST","/org") 调用（红）/ M3 kind 改带尾空格 ⇒ 三种 kind 谁都不落（红，只有它能证「空名单会红」）/ M4 注释里写【带引号的】"add_edge"（红 = 射程边界）/ M5 同一位置写【不带引号】的 add_edge（该绿）—— 命中 6/6，证据 .workbuddy/round295-frontend-egress-mutation-evidence.txt。⚠ M4/M5 那一对是本轮【我自己的预期被推翻】的地方：第一版把边界写成「注释里提到 kind 名就红」，跑出来 0 红 —— 真口径是【两侧带引号才算发这个变更】，那发因此是空变异。矩阵里「该红/该绿」的预期也是主张，它没有自证，只有跑出来的红绿分布能打它。⚠ 本条判据【仍然只核对那四格字节】（验收测试在场 + 反空转那一格 + 前提那一格 + 前端取材表【成员点名】），它【不核对】「契约里没有 add_node」—— 一句否定式主张只要留在判据里，被推翻的那天它不会红，它会继续绿着替那句假话作证。本轮就是那一天的现场。「契约里那条路还在、还在真调判据」那一格从此由 r22 负责，口径不同、判据也不同 | 2026-11-17 |
+| **r15** 【round294 撤回本条的标题】原标题「`POST /org` 提交不了一个新角色 —— 契约里没有带判据的 `add_node`，而落库的是【请求体那张图】」—— 现在【提交得了】了，契约里有 add_node，落库前逐条判过（见 r22）。留下这段话是因为它记的是一件比「主张过期」更贵的事：本条的判据在翻转之后【照样全绿】，而它绿的原因换了 —— 它变成了一个假证人。【round292 改口，那时无效的是后半句】原文接着写「`revalidate` 只按 `reparent` 与 `add_edge` 两种 kind 分派 ⇒ 一个新节点随一条与它【无关】的合法 `add_edge` 提交能拿 200 进库，全程没有判据过手它」—— 那句在 round279 那天是真的，round292 起【不再真】：`everyNodeDeclaresModelFamily` 在开事务前逐节点判 after 图。【round294 再改口，那次无效的是①】它们当时写着「① 契约里确实没有带判据的 add_node（形状没变），③ 两个前端零出口（没变）」—— ① 被本轮自己亲手改假了。【round295 再改口，这次无效的是③，而且它不是「过期」是【假证人】】「两个前端零出口」连着六轮【绿着】，而 `packages/web/public/app.js` 从 2026-11-11（`git log -S` 追到 2bcbdb0）就在真发 `kind: "reparent"` —— 那发证据的扫描根只列了 `web/src` 与 `desktop/src`、扩展名只筛 `.ts`/`.tsx`，真控制室【不在它的视野里】。⇒ 【round308 再改口，这次翻的是名单本身】那句「界面发得出 reparent」下面点的两份空名单已经不空了：`{reparent:[app.js], add_edge:[app.js], add_node:[app.js]}`，发的人仍然只有 `packages/web/public/app.js` 一个（round308 实测三种 kind 各只有一份文件写着带引号的字面量）。⚠ 它仍然【不】等于「O8 第一跳通了」：`POST /org` 那条通道在 desktop 侧被明确拒绝（channels.ts 那句「提交那条 POST /org【没有】通道：self-escaping CEO 写」），浏览器里点一次更没有本机证据（0039）。⚠ 现在准确的形状仍然是【旁路还在，但它不再是无判据的旁路】——声明了 model_family 的新节点随一条无关的 add_edge 照样能进库，那发反向 canary 钉的就是这一格。别把它读成 O8 第一跳通了，也别读成「现在不能通过请求体加角色了」（那是让实现层替 CEO 关掉一条产品目标）。 | packages/hub/test/acceptance/new-role-to-its-own-criteria.test.ts › 11 发（① 契约形状【round294 翻向：现在钉的是 add_node 那一支【解析得通】+ 三种捎带形状解析不通】 / ② 旁路现在被拦 + 反向 canary 只差 model_family 就该 200 / ③【round295 翻向、round308 换名单：正向点名每种 kind 由谁发 —— 三种 kind 都只有 web/public/app.js + 引号形状 + 扫描器自身的反向 canary + 『构造了载荷』≠『发得出去』那一发】 / 正题三跳 / 加节点成功那一发 / 六种坏形状逐条 code + 零残留 / 缺家族由继承拦 / 反空转对照 / 前提自证 / 占位串因果）；test/org/validate.test.ts › 「everyNodeDeclaresModelFamily」那 6 发（含反向 canary：非边端点也判）+ 本轮新增「L1 validateNewNode：加一个新节点」那 13 发（含⭐重名抢在自环之前 / ⭐森林 / ⭐与 model_family 不重叠 / ⭐空图那条通过不是「永远通过」），另有 schema 那一节的⭐登记一条【没判的】：键 ≠ role_id —— 它记的是【另一维】（形状层放行），不属 L1 那一节，别按 13 发去找它）；test/org/versioning.test.ts › ⑥ 那 3 发（拒绝零残留 / 与 L1 的顺序 / 反面对照）。round279 那六发变异（.workbuddy/round279-o8-acceptance-mutate.mjs）里 M3 打的是【旧世界】，round292 另跑 .workbuddy/round292-mutate-org-node-criterion.mjs 七发：M0 控制 / M1 摘掉提交路径的采纳（红 2 发 2 文件）/ M2 判 before —— 【该绿，变异等价，当时那句话写的是「两种 kind 都不碰 model_family」，round294 起这句话的前提变了，矩阵里留着它就是为了那天它会翻红】/ M3 丢 trim / M4 理由不点名角色 / M5 退回只判边端点 / M6 「只判新增节点」那个看着更精准的恒真版本 —— 命中 7/7；本轮另跑 .workbuddy/round294-mutate-add-node.mjs（打在 add_node 那一族生产字节上）；round295 跑 .workbuddy/round295-mutate-frontend-egress.mjs 六发【打在 app.js 与 web/src 的真字节上】：M0 控制（行尾空注释，该绿）/ M1 reparent→add_edge（红 1 发 1 文件）/ M2 摘掉那次 api("POST","/org") 调用（红）/ M3 kind 改带尾空格 ⇒ 三种 kind 谁都不落（红，只有它能证「空名单会红」）/ M4 注释里写【带引号的】"add_edge"（红 = 射程边界）/ M5 同一位置写【不带引号】的 add_edge（该绿）—— 命中 6/6，证据 .workbuddy/round295-frontend-egress-mutation-evidence.txt。⚠ M4/M5 那一对是本轮【我自己的预期被推翻】的地方：第一版把边界写成「注释里提到 kind 名就红」，跑出来 0 红 —— 真口径是【两侧带引号才算发这个变更】，那发因此是空变异。矩阵里「该红/该绿」的预期也是主张，它没有自证，只有跑出来的红绿分布能打它。⚠ 本条判据【仍然只核对那五格字节】（验收测试在场 + 反空转那一格 + 前提那一格 + 前端取材表【成员点名】+ 名单那三格【逐字对账】），它【不核对】「契约里没有 add_node」—— 一句否定式主张只要留在判据里，被推翻的那天它不会红，它会继续绿着替那句假话作证。本轮就是那一天的现场。⚠ 第五格是 round308 补的，补的是【同一条坑的另一半】：round295 把主张换成正向清单，却没给那份清单配读者，于是它又绿了六轮才在名单翻向的当天假一次 —— 「把否定式换成正向点名」本身不是修复，点名有人对账才是。round308 的读者三发（之七 放宽成空 / 之七·乙 切片外留诱饵注释 ⇒ 仍红 / 之八 止锚改名 ⇒ 红在边界）外加【顺序】一发（之九：名单坏 + 取材空 ⇒ 红因必须落「不可信」，不许名单抢报）；之九 的供电另打一台（.workbuddy/round308-mutate-r15-order.mjs：把兜底短路成 false ⇒ 之九 翻红且红因=名单抢报，命中 3/3、自回滚逐字节核对）—— 顺序那种缺陷逐格单看全对，只有短路一遍才知道那发是不是恒绿。磁盘侧另有 .workbuddy/round308-mutate-r15-roster.mjs 五发打在【那发验收测试的真字节】上（命中 5/5，证据 .workbuddy/round308-r15-mutation-evidence.txt）；⚠ 那台第一版只读文件名、把「传得进判据」写成了「答不出哪一格」，改成逐条读【用例名】重跑才发现只对了一半：M1/M2 点得到之七本体，M4 只红在控制组上 —— 原因是诱饵抢在 replace 的锚点前面把变异自己中和了。【打在真字节上的矩阵】与【打在合成语料上的】各有一种自我中和的方式，这台要完整分辨率还欠「mustRed 逐条点该红那发」（round300 口径）。【round312 落地】：.workbuddy/round311-mutate-r15-roster-fullres.mjs 已建已跑（机器自证 5/5，打盘 3/5、逐字节回滚；M3/M4 点不到名=点名器读 FAIL 行用例名的可观测面，不是判据失灵 —— 那份机器的文件头与 round312 台账有逐字记录）。「登记未做」不再是今天的形状。「契约里那条路还在、还在真调判据」那一格从此由 r22 负责，口径不同、判据也不同 | 2026-11-19 |
 | **r16** 一次带合法签名的 IM 回信【真的】落成一次决策：卡片 approved，且审计行 actor 是绑定的那个角色。⚠ 射程（round282 改过一次）：桥（channels/approval-bridge.ts）从生产入口【走得到】了 —— boot 每轮心跳经 serve/im-channels.ts 装配真飞书适配器并派发一次入站，dead-modules 基线里那两条（abstraction / approval-bridge）如约变红并已摘除；0030 §0 那句「actorFor 是可选钩子且今天没人传」因此过期。但本条主张的是【这条链接通了】，不是【线上有人在用手机批卡】，两样还缺：① 真飞书接口在本机一次也没打通过（要真凭据），本条全部绿都绿在注入的 fetch 上；② ⚠ round283 更正：这里原本还写着「发卡那半边（deliverCard）仍零生产调用方 ⇒ 今天的形状是回得来、推不过去」—— 那句随 O12 动作 4 落地而【过期】，投递台账见 r17。剩下的缺口换了位置：一条通道以上没有路由依据，且投递台账答不了「到没到人手里」。⚠ round282 顺带修掉一条【本篇之前就在的】真 bug：轮询读到的回传曾被标成 kind:text，运行时第①步把每条批准判成闲聊而 summarize 对它刻意不说 ⇒ 手机上点了批准，Hub 一行日志都不打。那条 bug 说明 r16 此前那句「链通了」只对长连接那一路成立，轮询那一路当时是空转的 | packages/hub/test/acceptance/im-reply-approves-card.test.ts › 12 发（主链路 + 状态边同源 + 广播 seq=events.id + 重投只算一次 / 反空转四发：pending 绑定走运行时、未登记通道、直调 act + pending 绑定、决策前重查被撤权 / 装配形状四发：无身份不落库、不可逆卡直调也拒、loadCard 脏参数、两绑定换角色）；packages/hub/test/serve/im-channels.test.ts › 31 发（装配层唯一分母：缺 env ⇒ absent 而 Hub 照起 / 起不来 ⇒ 每轮真的重试且只说一次 / 读失败后【真的】补读 / 端到端把卡批掉 / 判决翻成人话 / 溢出与关机）；packages/hub/test/channels/feishu.test.ts › 40 发（适配器纯函数与形状：kind、入队闸门、时间窗、渲染三种「不知道」、value 上限、凭据不进错误串）；外加打在【生产代码】上的十发变异：round280 那四发打在桥上（.workbuddy/round280-o12-bridge-mutate.mjs，M1 actorId 退回写死 ceo ⇒ 红 4 发 / M2 角色判据换成裸 SELECT ceo_role ⇒ 红 2 发，且【只有】绕开通道层直调 act 那一发抓得到 / M3 摘掉落库前不可逆 ⇒ 红 1 发 / M4 摘掉决策前重查 ⇒ 红 7 发）+ round282 那六发打在适配器与装配点上（.workbuddy/round282-o12-adapter-mutate.mjs，同自回滚 + 逐字节核对）：M1 kind 退回 text ⇒ 红 8 发 / M2 摘掉入队闸门 ⇒ 红 3 发 / M3 水位无条件提交 ⇒ 红 1 发 / M4 水位只推进被收下的那条 ⇒ 红 1 发（⚠ 第一次跑【全绿】：夹具时间戳顺序让两种写法读数相同，判据因此是补对的）/ M5 错误串带上凭据 ⇒ 红 2 发 / M6 notes 不排空 ⇒ 红 4 发。本条判据不重跑那 83 发，只核对：两份验收/装配测试在场、actor 那三条断言一条不少、桥里那两格（重查角色 + 判可逆）还在生产代码里、装配层测试仍提 actorFor、适配器测试仍正面断言轮询信封的 kind | 2026-11-17 |
 | **r17** 发卡那一路接上了生产入口，且重复投递由【库里那一行】挡：迁移 0009 的 `card_deliveries` 以 (approval_id, channel_id) 为【主键】（不是唯一索引 + 自增 id），`runDeliverPass` 每张卡先 `INSERT OR IGNORE` 抢台账、抢到才发请求，而 `serve/im-channels.ts` 每一轮心跳在【判决之后】调它一次 ⇒ `deliverCard` 从「有定义、零生产调用方」翻向有读者、有幂等键。⚠ 射程三条：① 台账答不了「到没到人手里」—— 抢台账与发送失败都留下同一行，只有日志答得出那一格而日志跨不过重启；② 多于一条通道时【干脆不推】并把理由说出来，因为库里没有任何一列说「这张卡走哪条通道」，路由表是那一天要先补的东西；③ 顺序翻向（先发再插）是这条链最省事的坏写法，代价是每 60 秒给审批人重推一张重复卡 | packages/hub/test/channels/deliver.test.ts › 17 发（真库 + 真迁移：投出去 / 第二轮一行都不重发 / 两通道各一行 / 非 pending 不推 / 发送失败【仍然】留行 / 未注册通道当场抛 / 扫描后删卡 ⇒ 接住 FK 且台账不留行 / 重启后幂等 / 四档计数互斥 / summarizeDeliver 每档都说话）；packages/hub/test/serve/im-channels.test.ts › 装配那一格 4 发（pending 卡真的 POST 出去并落一行台账 / 第二轮一次都不发而屏幕也不重复那句话 / 判决在前⇒同轮刚批掉的卡不推 / 平台拒收时台账那一行【留着】且那一组说清怎么重推）。⚠ `not_routed` 那一档今天【没有活的分母】：装配选项上没有插第二条通道的口（channels 恒为一条），硬凑只能直接调 runDeliverPass 塞两条 = 测函数而不是测装配。所以那一格今天仍只有「三档都必须说话」这条纪律 + 人的复查，别把它读成「有测试守着」。外加打在【装配层生产代码】上的四发（.workbuddy/round283-mutate-imch.mjs，同自回滚 + 逐字节核对）：A1 deliverRound 挪到 pollAll 之前 ⇒ 红 4 / A2 装配层根本不调它 ⇒ 红 6 / A3 摘掉「这一轮没起来就不推」那道门 ⇒ 红 2 / A4 失败那一句不再说怎么重推 ⇒ 红 1。外加打在【生产代码】上的六发（.workbuddy/round283-mutate-deliver.mjs，自回滚 + 逐字节核对）：M1 顺序翻向先发再插 ⇒ 红 10/17 / M2 摘掉 FK 那一支 ⇒ 红 1 / M3 摘掉 OR IGNORE ⇒ 红 3 / M4 未注册通道返回零计数而不抛 ⇒ 红 1 / M5 发送失败抹掉台账行 ⇒ 红 2 / M6 不可逆卡不推 ⇒ 红 1。本条判据不重跑那 21 发，只核对：迁移里那条外键与那一对主键还在、deliver.ts 里【抢台账在发请求之前】这个先后关系成立、INSERT OR IGNORE 没被摘、FK 那一支还在、装配层仍调 runDeliverPass 且排在 pollAll 之后、投递测试在场且仍实测 FK | 2026-11-17 |
 | **r18** 那一发外网 HTTP【一定会结束】：`FeishuChannel` 给每一发（取 token / 读消息 / 发卡）挂一个 `AbortSignal.timeout(fetchTimeoutMs)`，缺省 `FEISHU_FETCH_TIMEOUT_MS` = 10s，而 `FeishuFetchInit.signal` 让注入实现看见【同一个】截止 ⇒ 「一次挂在半路的外网请求把 watch 占到进程退出」那一格翻向「到点就 reject，由原来那三档说出为什么这一轮没读到」。⚠ 射程三条：① 一发有上限 ≠ 一轮有上限 —— 一轮最多 1 次取 token + N 页读 + 1 次发卡，乘积可越过心跳下界 60s，那一格【可接受】只因为入站走派发而不是 await；② 适配器交出信号但【管不住注入实现读不读它】，交一份忽略 `init.signal` 的实现（真接 SDK 那天完全可能）就让这一格在结构上失效而没有任何一发会红（round286 量过它的【反面】：默认实现自己不转发 signal ⇒ 那一格【有】一发会红，所以 ② 只覆盖【外部注入方】，不覆盖仓里这一条路）；③ 畸形值（0 / 负数 / 非有限数）回落到缺省值而【不是】关掉超时 | packages/hub/test/channels/feishu-http.test.ts › 9 发。A 组打在【默认实现】上：一个【接受连接但永不应答】的真本地 socket ⇒ 抛、抛的那句里没有 app_secret、且耗时落在 [100ms, 5s) 这一带（时间下界反空转：「根本没打出去就抛了别的东西」同样满足前两句）；正对照一发证明秒答的服务器一切正常。B 组钉适配器：取 token 与读消息【两发都】带未失效的信号、翻页那三发【各】一个信号（共用一个 = 第二页被第一页的时间杀掉）、注入实现读了信号 ⇒ 到点 reject 而 supportsActionReturn 仍是 false。C 组钉那个数：交 40ms 就到点 / 交 0 与什么都不交都是「信号在而 200ms 内没到点」（两个读数而不是一个布尔，否则「0 = 关掉超时」与「回落到 10s」分不开）/ 负数 NaN Infinity 同样回落。外加打在【生产代码】上的四发（.workbuddy/round284-mutate-timeout.mjs，自回滚 + 逐字节核对）：T1 摘掉取 token 那一发的信号 ⇒ 红 7 / T2 摘掉 #call 那一发的信号 ⇒ 红 3 / T3 一轮共用一个信号 ⇒ 红 1 / T4 把 0 当成关掉超时（畸形值不再回落）⇒ 红 2。外加 round286 打在【真·网络出口】上的一发（.workbuddy/round286-mutate-egress.mjs，自回滚 + 逐字节核对）：E1 让 `defaultFetch` 不再转发 `init.signal` ⇒ 红 1（`feishu-http.test.ts` 那发⭐「挂住的服务器」）—— 这一发是射程 ② 那句【反面】的证据。顺带把「绊线数文件不数调用点」这一格量清了口径：hub/src 里真·网络出口只有一处（`fetch(` 不带接收者），另外两处 `fetch` 是调注入实现 ⇒ 复算见 `.workbuddy/round286-egress.mjs`，别抄这个数。⚠ 那条【通用】绊线的口径：hub/src 里调 `fetch(` 的文件必须自己也构造 `AbortSignal.timeout(` —— 它数的是【文件】不是【调用点】，「同一文件里一发挂了一发没挂」这一格读不出来，那一格由判据点名管住今天这两处。本条判据不重跑上面那些（9 发测试 + 5 发变异），只核对：常量与畸形值判据在场、带截止的调用点不少于两处、契约上有 signal 成员、那份测试在场且仍开真监听并接 init.signal、以及那条通用绊线没有新的 offenders | 2026-11-17 |
@@ -1566,7 +1677,13 @@ O6-2 gateway 接上 ──→ O7 预算停 ─────┘（R1 需要证据 
 
 | 不做 | 理由 |
 | --- | --- |
-| 合并图路线与引擎路线 | 引擎路线的论证今天仍然成立（下一步由那一次执行的产出决定，编译期的边表达不了），而图路线的价值在 checkpoint / interrupt 的语义验证。**合并的成本是重写两条已被测试钉住的东西，收益是没有两份状态表** —— 不划算。**要做的是 §2 轴三那三条具体的账**，不是合并。 |
+| 合并图路线与引擎路线 | 引擎路线的论证今天仍然成立（下一步由那一次执行的产出决定，编译期的边表达不了），而图路线的价值在 checkpoint / interrupt 的语义验证。**合并的成本是重写两条已被测试钉住的东西，收益是没有两份状态表** —— 不划算。**要做的是 §2 轴三那三条具体的账**，不是合并。
+   ⚠ 【round314 复核】「要做的是那三条账」这句已过期：三条账已逐笔收讫 ——
+   账 1（桩写库）经 O1 动作 1（`stub-write-guard.test.ts` 8 发，判据是归属不是行数）；
+   账 2（假审批）经 O1 动作 2（`report` 停在 `ESCALATED_TO_CEO`，charter 直通那半随 O4/O5
+   一并收，已在 `test/arch/stub-terminal-write.ts` 的 `BASELINE` 里登记）；
+   账 3（`ops.yaml`）经 O2 动作 4 修正块（留下 + 孤儿守卫 `== ["ops"]` 钉住）。
+   剩的是拍板（O4/O5 真门控、D11 role_id），不是账。 |
 | 现在做并行分支（Phase 3 的扇出扇入） | `graph/branches.ts` 的合并语义已经做完且框架无关（`worstOfReducer` + 6 个排列的可交换性用例）。**真正没做的是数据形状**：`reports_to` 是**标量**（一个角色只有一个直接上级），契约里没有 `parallel_allowed` 这个键 ⇒ `DecompositionInput.parallelAllowed` **没有生产者**。在补出这个键之前接扇出，等于让代码替 CEO 拍一个规格没拍的决定。 |
 | 做会议 / 辩论会子图 | `MEETING_REQUIRED` 是**死胡同状态**（`[]`），`MeetingSummaryReady` 事件零发布点，`ESCALATED_TO_CEO` 与 `BLOCKED` 同样是死胡同。⇒ 会议子图会**造出一批进去就出不来的任务**。先补这三个状态的出路（这是改状态机，要拍板），再谈会议。 |
 | React / Electron / 移动端重写 | 0009 那六个依赖的账**要先复跑安装再判**（本篇已证明「装不上」这个结论过期了一次）。**在没有复跑之前不据此做任何计划** —— 这正是 O14 要防的那种事。 |

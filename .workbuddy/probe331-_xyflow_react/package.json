@@ -1,0 +1,8 @@
+{
+  "name": "probe331",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@xyflow/react": "^13.0.2"
+  }
+}

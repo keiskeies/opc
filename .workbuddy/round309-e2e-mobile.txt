@@ -1,0 +1,28 @@
+(node:23924) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+Running 2 tests using 1 worker
+
+(node:70608) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+[hub] 未指定 --ceo <名字> ⇒ POST /bindings/verify 会回 501。
+IM 身份绑定的读侧（GET /bindings）与申请（POST /bindings）不受影响。
+校验一个身份必须交出「谁验的」，而这个名字只能由启动命令给出（不给默认值）。
+[hub] 决策写路径 = 【引擎那一条】：CEO 点批准 ⇒ 认领卡片 + 状态边 + 审计，一个事务，
+任务真的往前一格（例如 CHARTER_PENDING → CHARTER_APPROVED）。不需要图运行时。
+本入口【不跑角色也不起草章程卡】：CHARTER_APPROVED 之后的每一步都要有人跑
+  pnpm hub:engine work --db C:\Users\ADMINI~1\AppData\Local\Temp\opc-e2e-mobile-m47cU1\hub.db --task <id> \
+      --max-budget-usd <每轮美元硬顶> --task-limit-cents <任务上限美分>
+那【两个参数是必填的】（0041 §8：花钱的上限不给默认值），所以这一行不能整行照抄 —— 少抄一个拿到的是「缺参数」，而它会让人以为是命令写错了。
+⚠ 那条命令要 tsx、@langchain/langgraph 与一个 claude 可执行文件；跑一轮【真的花钱】，两个上限一个都别省。
+缺哪一样它自己会说 —— 这一句不替它担保「这台机器上装得齐」，也不再说「本机装不上」（那句是过期的假话，缘由见上面那段注释）。
+[hub] ⚠ 监听 0.0.0.0：这台机器【同一网络里的任何设备】都能到达 Hub。
+此刻起生效的是【一次性 token】那套凭据（http/tokens.ts），不是桌面端那个 HMAC 密钥；并且按【规格】§11.4，标记为不可逆的审批在远程一律拒批。
+用完请把 --bind 去掉：这个告警每次启动都会打，是刻意的。
+[hub] IM 审批通道【没接】：env 里缺 OPC_FEISHU_APP_ID、OPC_FEISHU_APP_SECRET、OPC_FEISHU_APPROVER_OPEN_ID。
+  · 现在：审批人在手机上收不到卡，审批请在桌面端做。其余一切照常。
+  · 要接：设齐 OPC_FEISHU_APP_ID / OPC_FEISHU_APP_SECRET / OPC_FEISHU_APPROVER_OPEN_ID（可选 OPC_FEISHU_APPROVER_CHAT_ID、OPC_FEISHU_CHANNEL_ID、OPC_FEISHU_ORIGIN）之后重启。
+  ok 1 test\e2e\mobile-approval.spec.ts:240:1 › ①可逆卡：远程签票→兑换→approved，同一张票第二次用被拒（一次一签） (40ms)
+  ok 2 test\e2e\mobile-approval.spec.ts:278:1 › ②不可逆卡：签发侧 403 签不出票（票没被造出来），兑换侧 403 且票不烧（卡片停 pending） (11ms)
+
+  2 passed (933ms)

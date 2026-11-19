@@ -19,6 +19,7 @@
  * 与本机的桌面 token 是两码事，见 http/auth.ts）。
  */
 import { z } from "zod";
+import { charterSchema } from "./charter.js";
 import { orgChangeSchema, orgGraphSchema } from "./org/graph.js";
 
 /**
@@ -44,6 +45,7 @@ export const API_ENDPOINTS = [
   "GET /today",
   "GET /approvals",
   "POST /approvals/:interruptId",
+  "POST /approvals/batch",
   "POST /approvals/:interruptId/token",
   "GET /events",
   "GET /replay/:taskId",
@@ -53,6 +55,10 @@ export const API_ENDPOINTS = [
   "POST /bindings/rebind",
   "POST /org",
   "GET /org",
+  "GET /charter/:roleId",
+  "POST /charter/:roleId",
+  "GET /budget",
+  "POST /budget",
 ] as const;
 export type ApiEndpoint = (typeof API_ENDPOINTS)[number];
 
@@ -77,6 +83,7 @@ export const IMPLEMENTED_ENDPOINTS: readonly ApiEndpoint[] = [
   "GET /today",
   "GET /approvals",
   "POST /approvals/:interruptId",
+  "POST /approvals/batch",
   "POST /approvals/:interruptId/token",
   "GET /events",
   "GET /replay/:taskId",
@@ -86,6 +93,10 @@ export const IMPLEMENTED_ENDPOINTS: readonly ApiEndpoint[] = [
   "POST /bindings/rebind",
   "POST /org",
   "GET /org",
+  "GET /charter/:roleId",
+  "POST /charter/:roleId",
+  "GET /budget",
+  "POST /budget",
 ];
 
 /**
@@ -171,6 +182,177 @@ export const approvalDecisionRequestSchema = z
 export type ApprovalDecisionRequest = z.infer<
   typeof approvalDecisionRequestSchema
 >;
+
+/**
+ * POST /approvals/batch —— 【规格】§9.4 的批量批准 / 批量打回。
+ *
+ * ── 「同方向」这一半由【形状本身】保证，没有判据 ──────────────────
+ * 一次请求只带一个 resume，所以「这一批里有人批准有人打回」在 JSON 里写不出来。
+ * 这不是省事：判据可以是「漏写一次」的，形状不能（0026 §0 为 kindOf() 立的那条规矩
+ * 同源）。§9.4 那半句因此不需要一条测试去守 —— 它由这个类型守住。
+ *
+ * ── 为什么枚举比单条审批【窄】────
+ * §9.4 的原文只有「批量批准 / 批量打回」。第三个按钮 defer_deep_review
+ * （升级到更深审阅）不在其中，而它不进批量是有实质理由的：升级的对象是
+ * 「这一件事要更多人看」，一次升 20 张卡读起来像批量处理，实际是把
+ * 更深审阅流程当成垃圾桶（§10 那三种会议的入口）。要排除就别让它可表达。
+ *
+ * ── 上限 50 不是拍的 ────────
+ * 每张卡走【一个独立事务 + 一次图恢复】（见 app.ts 那个批量 handler 的理由段：
+ * 审计形状与单条逐字同源是 CEO 定的口径，不为了批量而新造一种事件形状）。
+ * WriteQueue 是全局串行的，所以一批的上限就是「别的写被排住多久」的上限。
+ * 50 张卡对应 CEO 在收件箱里一次勾得过来的量；再多就该是分几次点，
+ * 而不是让一次点击独占写队列。
+ */
+export const BATCH_RESUME_VALUES = [
+  "approve",
+  "reject_with_comment",
+] as const;
+export type BatchResumeValue = (typeof BATCH_RESUME_VALUES)[number];
+
+export const BATCH_MAX_CARDS = 50;
+
+export const approvalBatchRequestSchema = z
+  .object({
+    approval_ids: z
+      .array(z.string().min(1).max(200))
+      .min(1)
+      .max(BATCH_MAX_CARDS),
+    resume: z.enum(BATCH_RESUME_VALUES),
+    note: z.string().trim().min(1).max(4000).optional(),
+  })
+  .strict()
+  .superRefine((data, ctx) => {
+    // 与单条那条 superRefine 同一条判据（reject 必带理由），这里只是把它带进批量。
+    if (
+      data.resume === "reject_with_comment" &&
+      (data.note === undefined || data.note.length === 0)
+    ) {
+      ctx.addIssue({
+        code: "custom",
+        message:
+          "resume=reject_with_comment 必须带非空 note。空理由的打回到了产出方那里不可执行" +
+          "（§8.3；批量不改变这一条，一张卡的不可执行不因 batching 变成可执行）。",
+      });
+    }
+    // 【重复 id 当场拒，不在服务端悄悄去重】。去重会让计数说谎：
+    // { ids: [a, a] } 若变成「去重后批一张」，applied 该报 1 还是 2？报 1 就得解释
+    // 为什么我交了两个 id 只批了一张；报 2 就是假事实。而真正会交出重复 id 的
+    // 只有两种人：脚本写错了，或前端多选状态脏了 —— 两者都该当场听见，
+    // 而不是拿到一个「看起来成功」的 200。
+    const seen = new Set<string>();
+    for (const id of data.approval_ids) {
+      if (seen.has(id)) {
+        ctx.addIssue({
+          code: "custom",
+          message:
+            "approval_ids 里有重复的 id。同一条批量里点两次同一张卡不是幂等（那靠" +
+            "库里 status 判），而是调用方自己不知道交了什么。去重后重试。",
+        });
+        return;
+      }
+      seen.add(id);
+    }
+  });
+export type ApprovalBatchRequest = z.infer<
+  typeof approvalBatchRequestSchema
+>;
+
+/**
+ * 批量那一判的结论（【规格】§9.4「仅限同类型」+ 「不存在的卡整批不写」）。
+ *
+ * 判别式形状与 approvalOutcome 完全同源，理由也同源：两条失败分支
+ * 【类型上没有 plan】⇒ 想循环写就得先证明这批判过了。
+ * 「半批成功」因此写不出来：要么整批通过判据、要么一张都不动。
+ * （CEO 在 0052 §4 第 3 条定的口径就是这个方向：服务端一处判、前端只做选择集。）
+ */
+export type BatchApprovalOutcome =
+  | {
+      status: typeof HTTP_UNPROCESSABLE;
+      reason: string;
+      /** 混类型时给出到底混了哪几种，前端不必自己再算一遍。 */
+      types: readonly string[];
+      plan?: undefined;
+    }
+  | {
+      status: typeof HTTP_NOT_FOUND;
+      reason: string;
+      /** 缺失的 id（按请求里的顺序），整批因此不写。 */
+      missing: readonly string[];
+      plan?: undefined;
+    }
+  | {
+      status: 200;
+      /** 判过了：这一批同类型，且每个 id 都在库里。逐条交给调用方写。 */
+      plan: {
+        readonly approvalId: string;
+        readonly taskId: string;
+        /** 库里已非 pending ⇒ 幂等重放那一张，调用方不该再写。 */
+        readonly alreadyDecided: boolean;
+      }[];
+      /** 整批的类型（判据保证只有一个值），给响应体回显用。 */
+      approvalType: string;
+    };
+
+/**
+ * 「同类型」那一半的判据，以及「不许半批」的那一半。本函数【不查库】，
+ * 与 approvalOutcome 同一条立场：调用方查完把行交给它，于是判据是纯的、可测的，
+ * 而「用哪条连接查」不会被塞进契约层。
+ */
+export function batchApprovalOutcome(o: {
+  readonly requestedIds: readonly string[];
+  readonly found: readonly {
+    readonly approvalId: string;
+    readonly taskId: string;
+    readonly status: string;
+    readonly approvalType: string;
+  }[];
+}): BatchApprovalOutcome {
+  const byId = new Map(o.found.map((c) => [c.approvalId, c]));
+  const missing = o.requestedIds.filter((id) => !byId.has(id));
+  if (missing.length > 0) {
+    return {
+      status: HTTP_NOT_FOUND,
+      reason:
+        `批量里有 ${missing.length} 个 id 在库里不存在，整批一张都没写：` +
+        missing.join(", ") +
+        "。整批不写是刻意的 —— 半批成功在审计里读起来像「CEO 批了这批」，" +
+        "而事实是「这批里有一部分根本不存在」，两种话不能共用一条事件形状。",
+      missing,
+    };
+  }
+  const types = [...new Set(o.found.map((c) => c.approvalType))].sort();
+  if (types.length > 1) {
+    return {
+      status: HTTP_UNPROCESSABLE,
+      reason:
+        "批量必须同类型，这批混了 " +
+        types.length +
+        " 种：" +
+        types.join(", ") +
+        "。（§9.4：仅同类型同方向。混类型的批量会让一次点击的审计跨了职责范围，" +
+        "而不同类型的门控判据本来就不同。）",
+      types,
+    };
+  }
+  return {
+    status: 200,
+    approvalType: types[0] ?? "",
+    plan: o.requestedIds.map((id) => {
+      const card = byId.get(id) as {
+        approvalId: string;
+        taskId: string;
+        status: string;
+        approvalType: string;
+      };
+      return {
+        approvalId: card.approvalId,
+        taskId: card.taskId,
+        alreadyDecided: card.status !== APPROVAL_STATUS_PENDING,
+      };
+    }),
+  };
+}
 
 /* ────────────────────────── 响应形状 ────────────────────────── */
 
@@ -477,6 +659,52 @@ export const HTTP_NOT_FOUND = 404;
 export const HTTP_CONFLICT = 409;
 export const HTTP_NOT_IMPLEMENTED = 501;
 export const HTTP_UNPROCESSABLE = 422;
+
+/* ────────────────────────── 预算与岗位书写入（POST /budget、POST /charter/:roleId） ────────────────────────── */
+
+/**
+ * 预算作用域的两档枚举字面量。契约层这一份与 hub 的 tracker.ts 各住一处
+ * （contracts 不 import hub），由 budget.ts 的编译期对账钉住不漂。
+ */
+export const BUDGET_SCOPE_VALUES = ["company", "role", "task"] as const;
+export const BUDGET_PERIOD_VALUES = ["daily", "monthly", "per_task"] as const;
+
+/**
+ * `POST /budget` 的请求体。
+ *
+ * ✋ 这一段是【round318 重建】：此前一版因一次工作区事故被 checkout 丢回 HEAD，
+ * 形状按消费方（http/budget.ts 的 putBudgetRoute 解析用法 + budget-route.test.ts
+ * 的 okBody 夹具）逐字段恢复，并经全套测试核对。
+ */
+export const putBudgetRequestSchema = z
+  .object({
+    scope_type: z.enum(BUDGET_SCOPE_VALUES),
+    scope_id: z.string().min(1),
+    period: z.enum(BUDGET_PERIOD_VALUES),
+    limit_cents: z.number().int(),
+    hard_stop: z.boolean(),
+  })
+  .strict();
+export type PutBudgetRequest = z.infer<typeof putBudgetRequestSchema>;
+
+/**
+ * `POST /charter/:roleId` 的请求体。
+ *
+ * `config` 用 `charterSchema`（parse 蛇形、transform 出驼峰）：handler 里
+ * `o.config.roleId` 是驼峰读法；而落库前原文（蛇形）从 body 透传给
+ * saveCharterVersion（它内部再过一次 validateCharterDraft）。
+ *
+ * ⚠ 与 commitOrgChangeRequestSchema / bindingVerifyRequestSchema 同族：
+ * 【没有 actor 键】，`.strict()` 挡着 —— 署名只从服务端装配取（CHARTER_ACTOR），
+ * 从不在请求体里接受。
+ */
+export const saveCharterRequestSchema = z
+  .object({
+    config: charterSchema,
+    change_summary: z.string().trim().min(1).max(2000),
+  })
+  .strict();
+export type SaveCharterRequest = z.infer<typeof saveCharterRequestSchema>;
 
 /**
  * 审批决策的判定 —— 【纯函数】，这是本文件存在的主要理由。
