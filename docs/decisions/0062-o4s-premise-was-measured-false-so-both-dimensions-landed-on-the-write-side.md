@@ -140,7 +140,20 @@ ffae248（11-18）**，round334 在 ffae248 的 blob 上按两种口径各数过
    每发先过 `tsc -b`）：五发调用点删除 ⇒ 4 / 2 / 2 / 1 / **11** 红，五发 tsc 全部看不见 ⇒
    「各自必须一发红」在当下代码成立。本篇保留原句的理由同设计文档的老规矩：
    它是「0062 当时怎么读的」的记录。**但「达成」是判据的达成，本条前半句没翻**：
-   这些调用点全在死模块基线里（verifier / author-reviewer 对外零 import 至今），
+   这些调用点全在死模块基线里（verifier / author-reviewer 对外零 import —— ⚠ **这一句
+   round338 起只有一半还成立**：`author-reviewer.ts` 已被 `http/org.ts` 的 `GET /org`
+   经 `graph/gates/review-preview.ts` 带进可达集并已【从基线摘除】，verifier 那半句仍真。
+   ⚠ 而摘除的只是【模块可达】这一格，被接上的只有 `sameFamilyReviewBlock` 一个函数、
+   且接成的是【读数】不是【拦】：它把「这一对会不会被拦」算给界面念，不拦任何东西。
+   那三个函数（`gateConfigBlock` / `selfReviewEdgeBlock` / `independentReviewerPath`）
+   仍然零生产调用方（`gateConfigBlock` src 内 0 个调用点
+   连文件内都没有；`selfReviewEdgeBlock` / `independentReviewerPath` 各 1 个且都在彼此
+   内部 ⇒ 见设计文档 §「作者不能给自己打分」那张表第 3 行本轮的改写）。⇒ 所以本条后半句
+   【没翻】，但【理由换了一个】：防线不在活路径上跑，从今天起不能再拿「整个模块走不到」
+   解释，得逐函数说。⚠ 碎掉的粒度是【本行上面那一句】用的那一种（「…对外零 import」=
+   模块级），而本条自己的主句【一直】是函数级的（「对那 5 个零调用点函数」）⇒ 本条没翻
+   恰恰是因为它写在了正确的粒度上；要防的是【拿模块级的那句话代替函数级读数】这件事
+   重演一遍，而它现在由 dead-modules 基线那段注释逐函数钉着），
    防线在活路径上跑仍未兑现 —— 那等的是 O6 接线，不是变异机器。
    ⚠ 顺带一条只有重跑才看得见的东西：round271 的台账明写判卷面 = verifier.test + author-reviewer.test
    共 61 发（挑文件跑），本轮判卷 = 全 hub ⇒ M5 从它的 9 红变成 11 红，多红的两发在 `phase3.test.ts`

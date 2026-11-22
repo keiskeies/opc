@@ -211,7 +211,17 @@ describe("① matchRoute：batch 是两段里的字面段，不许被 :interrupt
       id: "a-1",
     });
     expect(matchRoute("POST", "/approvals/a-1/token")?.kind).toBe("mint_token");
-    expect(matchRoute("GET", BATCH_PATH)).toBeNull();
+    // ⚠ round337 翻向：app.ts 加了 GET /approvals/:interruptId（§9.2 单卡详情，
+    //   工作区当时未入库）。GET /approvals/batch 从「no such route」变成
+    //   「id=batch 的卡不存在」—— 两种都是 404、都不说「用错方法」，
+    //   与 matchRoute 既有口径（方法不匹配不自动 405）一致，不是新增的坑。
+    //   断言同步到新语义（这发钉的是【batch 不被 POST 吃掉】+【GET 段落到详情】），
+    //   不是放宽：POST 那半边仍各自归位。
+    expect(matchRoute("GET", BATCH_PATH)).toEqual({
+      kind: "get_approval",
+      endpoint: "GET /approvals/:interruptId",
+      id: "batch",
+    });
     expect(matchRoute("POST", "/approvals/batch/x")).toBeNull();
     expect(matchRoute("POST", "/approvals/")).toBeNull();
   });

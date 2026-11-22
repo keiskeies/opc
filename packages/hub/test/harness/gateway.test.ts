@@ -298,7 +298,13 @@ describe("预算闸门（§12.5 调用前拒）", () => {
     const a = fakeAdapter([SESSION, finished()]);
     const real = a.execute.bind(a);
     const g = await callHarness(
-      { ...a, execute: (rq, h) => ((executed = true), real(rq, h)) },
+      {
+        ...a,
+        execute: (rq, h) => {
+          executed = true;
+          return real(rq, h);
+        },
+      },
       req(),
       deps({
         checkBudget: () => ({ over: true, spentCents: 1000, limitCents: 1000 }),
@@ -367,7 +373,7 @@ describe("调用前的四层：越权尝试必须【留下审计】而不只是�
     expect(attempts(d)[0]!.kind).toBe("forbidden_flag");
     // 被移除的两条要逐条点名（只说「缩短了三条里的两条」而不知道是哪两条，没法修）。
     expect(
-      (attempts(d)[0]!.detail?.["removed_flags"] as string[]).sort(),
+      (attempts(d)[0]!.detail["removed_flags"] as string[]).sort(),
     ).toEqual(["dangerously-skip-permissions", "no-sandbox"].sort());
   });
 
@@ -969,13 +975,21 @@ describe("恢复与消耗上报", () => {
     await callHarness(
       fakeAdapter([SESSION, finished()]),
       req(),
-      deps({ settle: () => void (settled += 1) }),
+      deps({
+        settle: () => {
+          settled += 1;
+        },
+      }),
     );
     expect(settled).toBe(0);
     await callHarness(
       fakeAdapter([SESSION, { kind: "usage", cost: COST }, finished()]),
       req(),
-      deps({ settle: () => void (settled += 1) }),
+      deps({
+        settle: () => {
+          settled += 1;
+        },
+      }),
     );
     expect(settled).toBe(1);
   });

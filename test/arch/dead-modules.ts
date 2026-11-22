@@ -429,7 +429,26 @@ export const BASELINE: Baseline = new Map([
   ["harness/routing.ts", "ROUTE_STAGES"],
   ["harness/verifier.ts", "VERIFY_REJECT_CODES"],
   // 簇二：只被上面那簇用的下游（继承性不可达 —— 零 importer 口径一条都抓不到）。
-  ["graph/gates/author-reviewer.ts", "SameFamilyApproval"],
+  // ⚠ 本簇【今天一条都不剩】：唯一那一条 author-reviewer.ts 已摘除（round338，见下）。
+  // 留着这一行标题是因为它标的是【一类坏法】而不是【一份清单】：本守卫存在的理由
+  // 正是"有 importer 却仍走不到"，而那个证据由 dead-modules.test.ts 的
+  // 「口径差异有读数」那一发钉 —— 它现在只有 harness/routing.ts 一个样本（← verifier）。
+  // 哪天这一类又被接光，那发会自己红着要求重推口径，不靠这个标题守。
+  // ⚠ graph/gates/author-reviewer.ts 一条【已摘除】（round338，O4 收尾的另一半）：
+  // 新增的 graph/gates/review-preview.ts 被 http/org.ts 的 orgGraphRoute import，
+  // 而链是 serve/dev-entry.ts → serve/assemble.ts → http/app.ts → http/org.ts →
+  // review-preview.ts → author-reviewer.ts ⇒ 方向 B 那条红如约出现并点了名。
+  // ⚠ 模块活了 ≠ 这一族都活了 —— 本表只判【模块级】可达，下面这些【函数】今天
+  // 仍然零生产调用方（实测：src 内除定义行外零命中）：
+  //  · `gateConfigBlock` —— 0 个调用点，连文件内都没有（0064 动作 3 的同类格）；
+  //  · `selfReviewEdgeBlock` / `independentReviewerPath` —— 各 1 个调用点，
+  //    且都在【彼此内部】（`selfReviewEdgeBlock` :183 调 `independentReviewerPath`），
+  //    外面一层就是 gateConfigBlock ⇒ 这一子簇整体仍然没人调；
+  //  · `sameFamilyReviewBlock` 反过来【真的活了】：src 内 3 个调用点
+  //    （:213 gateConfigBlock 内部 / harness/verifier.ts:251 / review-preview.ts:122），
+  //    其中只有 review-preview.ts 那一处在可达链上 —— 另两处各自在 gateConfigBlock
+  //    与 verifier 里，那两个都还死着。⇒ 「author-reviewer 活了」这句话的准确形状是
+  //    【一个函数被接上了，其余四个仍然没有】，别拿本表那条绿去宣布整族接线完成。
   // ⚠ search/mcp.ts、search/observe.ts、search/policy.ts 三条【已摘除】（round312，同一次接线）：
   // 这一族是【传递可达】的实测样本 —— runtime → gateway-runner → gateway 之后，
   // gateway.ts:81 那条【纯类型】的 `import type { ToolSighting } from "../search/observe.js"`

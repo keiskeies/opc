@@ -46,7 +46,10 @@ import {
 import type { DatabaseSync } from "node:sqlite";
 import type { EventBus } from "../events/bus.js";
 import { legalTransitionsFrom, type TaskState } from "../graph/status.js";
-import { listApprovals as listApprovalsFrom } from "../approvals/query.js";
+import {
+  listApprovals as listApprovalsFrom,
+  readApprovalDetail as readApprovalDetailFrom,
+} from "../approvals/query.js";
 // 今日视图那几个聚合数的【判据】住在这里（不在 handler 里，也不在界面里算）。
 // 分法与 approvals/query.ts、replay/query.ts 同一条：判定住在模块，HTTP 只是一个入口。
 import { readToday } from "../overview/today.js";
@@ -393,6 +396,24 @@ export async function handleRequest(
   try {
     return await route(deps, req);
   } catch (e) {
+    // 0046 §6-2：写路径把「调用方请求不成立」抛成带 statusHint 的错误
+    // （DecisionStatusError：note_required ⇒ 422、stale_card ⇒ 409）。
+    // 按类型名 + 取值双判，只认【写路径那一种】错误：外部依赖若也抛一个带 statusHint
+    // 的对象（更别说一个 422 的假象），会在这里被误折叠成"你应该补理由"——
+    // 断言型折叠越窄越安全（tokens.ts 同一条：错误通道分类越细，误折叠的可能性越低）。
+    const named =
+      e instanceof Error &&
+      e.name === "DecisionStatusError" &&
+      ("statusHint" in e);
+    const hint =
+      named &&
+      ((e as { statusHint?: unknown }).statusHint === 422 ||
+        (e as { statusHint?: unknown }).statusHint === 409)
+        ? (e as { statusHint: 422 | 409 }).statusHint
+        : undefined;
+    if (hint !== undefined) {
+      return json(hint, { error: e instanceof Error ? e.message : String(e) });
+    }
     return json(500, {
       error: e instanceof Error ? e.message : String(e),
     });
@@ -506,6 +527,8 @@ async function dispatch(
       return today(deps, req.query);
     case "list_approvals":
       return listApprovals(deps, req);
+    case "get_approval":
+      return getApproval(deps, routeHit.id);
     case "decide":
       return decide(deps, routeHit.id, req.body);
     case "decide_batch":
@@ -578,6 +601,24 @@ export type Route =
   | { kind: "get_task"; endpoint: "GET /tasks/:id"; id: string }
   | { kind: "today"; endpoint: "GET /today"; id?: undefined }
   | { kind: "list_approvals"; endpoint: "GET /approvals"; id?: undefined }
+  /**
+   * 单张卡片的详情（§9.2 第二行「关键参数快照」的唯一落点）。
+   *
+   * ⚠ 它与 `list_approvals` 靠 segs.length 分得开（1 段 vs 2 段），
+   * 与 `decide` 靠 method 分得开（GET vs POST）⇒ 三条【互不遮蔽】，
+   * 放在 approvals 那一组的哪一条前面都不承重（同 `:id/token` 旁边那句）。
+   *
+   * ⚠ 但有一处【读起来像碰撞】的东西值得写下来：`batch` 是一个【字面量段名】，
+   * 而它现在也落在这一条的 id 位置上 —— `GET /approvals/batch` 以前是
+   * 「no such route」，现在是「id=batch 的卡不存在」。两种都是 404，
+   * 都不说「你用错方法了」，而那正是本文件 matchRoute 注释里明写的既有口径
+   * （「方法不匹配时不自动报 405」）。所以这一格不是新增的坑，是老口径多覆盖了一条路由。
+   */
+  | {
+      kind: "get_approval";
+      endpoint: "GET /approvals/:interruptId";
+      id: string;
+    }
   | { kind: "decide"; endpoint: "POST /approvals/:interruptId"; id: string }
   /**
    * 【规格】§9.4 的批量批准 / 批量打回。没有 id 段：一次批量指的不是某一张现存
@@ -678,6 +719,21 @@ export function matchRoute(method: string, path: string): Route | null {
   }
   if (method === "GET" && segs.length === 1 && segs[0] === "approvals") {
     return { kind: "list_approvals", endpoint: "GET /approvals" };
+  }
+  // 单张卡片的详情。与上面那条列表靠 segs.length 分开（1 vs 2），
+  // 与下面的 decide 靠 method 分开 ⇒ 三条互不遮蔽，本条放在这一组的哪一处都不承重
+  // （与 `:id/token` 旁边那句同一个口径：写在这里是让读的人不必自己数段数）。
+  // ⚠ id 段【必须非空】，同 get_task 那一段的论证：`/approvals/` 要判不匹配（404
+  //   「没有这条路由」），不能匹配成 id="" 再去查库、查不到、报「这张卡不存在」——
+  //   那会把一个 URL 写错伪装成资源不存在。老测试钉着这一条，新代码必须继续钉住它。
+  if (method === "GET" && segs.length === 2 && segs[0] === "approvals") {
+    const a = id(segs[1]);
+    if (a === null) return null;
+    return {
+      kind: "get_approval",
+      endpoint: "GET /approvals/:interruptId",
+      id: a,
+    };
   }
   // ⚠ 这一条【必须】在下面的 `POST /approvals/:interruptId` 之前，顺序承重。
   // 两条同为「approvals + 一段」，segs.length 分不开它们：把这条挪到后面，
@@ -1102,7 +1158,7 @@ function listTasks(deps: HubDeps): HubResponse {
  *
  * ⚠ 这个端点**不返回**卡片参数全文，也不返回证据链接。收件箱是「扫一眼、按一次键」
  * 的地方，而 §9.2 那三行里第一行（summary）与「还有多久过期」够它做决定；
- * 要看参数与证据得进单张卡片的视图 —— 那个视图今天还没有，
+ * 要看参数与证据得进单张卡片的视图（`GET /approvals/:interruptId`，下面那条），
  * 而**它不该被塞进列表接口当作副产品**（一旦列表里有全文，
  * 就永远有人直接渲染它，§19.4 那条「卡片三行、不画框线」的排版口径从此守不住）。
  */
@@ -1122,6 +1178,41 @@ function listApprovals(deps: HubDeps, req: HubRequest): HubResponse {
   // 而拿客户端时钟算这两件事 = 一台时钟不准的机器会让卡片显示「已过期 3 小时」
   // 而服务端根本还没到那个点。时刻一律以服务端为准（同一个理由见 SSE 快照里的 asOfMs）。
   return json(200, { ...result, asOfMs: deps.now() });
+}
+
+/**
+ * `GET /approvals/:interruptId` —— 单张卡片的详情，§9.2 第二行「关键参数快照」的
+ * **唯一**落点（在此之前那一行在任何界面上都显示不出来）。
+ *
+ * ── 判据住在 approvals/query.ts，这一层只做 HTTP 的四件事 ────────────
+ * 读侧（点查、四格视图、参数 JSON 的三种坏法）全在 `readApprovalDetail` 里，
+ * 与 list_approvals / replay / today 同一条分法（0013 §6）。这里剩的是：
+ * id 从 URL 来、404 的形状、`asOfMs`、以及【远程不可达】这一格由谁保证。
+ *
+ * ── 远程拿不到它，而且这件事不由这一层写一行判据 ───────────────────
+ * §20.3 只授权「审批」这一件事出本机，读详情不在其中。挡住它的不是这里的一句
+ * `isLoopbackAddress`，是 `remoteTokenAuth` 顶上那句
+ * 「`hit.kind !== "decide"` ⇒ 带票即 401」—— 也就是说这一条**自动**继承了
+ * 「列表 / 回放 / 看板都不许远程读」那条已经钉住的口径，而不是我新写的一份判据。
+ * 这一处刻意【不加】第二道门，两个理由：
+ *  ① 加了就是把两道独立的门焊成一条（0027 §1 对签票那两道门的论证是反面教材：
+ *    焊起来之后「只放宽远程那道」不再有东西可报）；
+ *  ② 回环这一侧本来就是桌面端的正常路径，加一道回环门只会挡住未来的合法本机读法，
+ *    而它要防的那件事已经被 ① 那一处防住了。
+ * tokens-route.test.ts 里那发「带真签名的票头打在别的端点 ⇒ 401」现在顺带覆盖这一条
+ * （它扫的是 kind 不是路径清单），所以这里不需要新用例来钉远程方向 —— 那会是一份抄件。
+ *
+ * ── 404 的说法 ────────────────────────────────────────────────────
+ * `{ error: "approval not found", id }`，与 mintToken 的 `approval_missing` 同一形状：
+ * 这里的调用方手上有【真实的 id】（他从列表点的这一张），「id 写错了」是他能执行的修法，
+ * 所以 404 是对的状态码（redeem 那一侧刻意不用 404 的理由见 tokenHttpStatus，那边不给 id）。
+ */
+function getApproval(deps: HubDeps, id: string): HubResponse {
+  const detail = readApprovalDetailFrom(deps.db, id);
+  if (detail === null) {
+    return json(HTTP_NOT_FOUND, { error: "approval not found", id });
+  }
+  return json(200, { approval: detail, asOfMs: deps.now() });
 }
 
 function getTask(deps: HubDeps, id: string): HubResponse {

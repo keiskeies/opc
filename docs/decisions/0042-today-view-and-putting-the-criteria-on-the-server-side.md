@@ -46,7 +46,7 @@
 少了它们，界面只能自己抄一份清单，而**那份抄件没有任何测试能发现它和这里不一致**
 （变异测试跑在 hub 侧，看不见 web 侧）。发出判据之后，看板那一页是**拿着服务端给的清单在筛**：
 
-`packages/web/public/app.js:464` —— `attention.includes(tk.status) || overBudget(tk)`，
+`packages/web/public/app.js:739` —— `attention.includes(tk.status) || overBudget(tk)`，
 左边是服务端发的状态集合，右边是两个服务端给的数比一下（算术，不构成状态机判定，所以留在界面）。
 
 **⚠ 这一句在本篇内被修正过一次**：第一版只发**三份**清单，而且把 `active_statuses`
@@ -262,7 +262,7 @@ channelFor(GET /today)    : null      ← 真的没通道
 **一处已埋的假红**（记下来，因为它迟早会响而没人知道为什么）：`callersOf` 是裸 `includes`，
 **不滤注释**（`srcFilesMatching` 滤）。实测往 `real-deps.ts` 追加一行**纯注释**的
 `// insertCard( …` ⇒ 新判据红，报的正是「实到三项」。方向是误报（可接受），
-但 `http/real-deps.ts:587` 那句注释写着「与 insertCard 同事务」，**只差没跟一对括号**才没命中。
+但 `http/real-deps.ts:614` 那句注释写着「与 insertCard 同事务」，**只差没跟一对括号**才没命中。
 
 ## 8. 前端那份签名抄件：边界逼出来的手抄，配了一发逐字节对账
 

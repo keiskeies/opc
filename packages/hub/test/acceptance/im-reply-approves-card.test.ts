@@ -104,7 +104,7 @@ async function seedTask(q: WriteQueue): Promise<void> {
  *    在「读不出参数」那一支一律偏严（误判成可逆的代价是开出一条不该开的通道）。
  * parameters 那五键是 `cards.ts` 的 §9.2 契约要求的，少一键建卡就抛。
  */
-async function seedCard(q: WriteQueue, irreversible = false): Promise<string> {
+async function seedCard(q: WriteQueue, irreversible = false, cardKey?: string): Promise<string> {
   const r = await createCard(
     q,
     {
@@ -120,6 +120,7 @@ async function seedCard(q: WriteQueue, irreversible = false): Promise<string> {
       },
       evidence_refs: ["evidence/burn-down-11.md"],
       buttons: ["approve", "reject_with_comment", "defer_deep_review"],
+      ...(cardKey === undefined ? {} : { cardKey }),
     },
     { nowMs: NOW },
   );
@@ -549,6 +550,92 @@ describe("⭐ 反空转：`verified = 0` 那一行【不算身份】", () => {
       (r2) => r2["action"] === "approval" && r2["actor_id"] !== "hub",
     );
     expect(decided).toEqual([]);
+  });
+
+  /* ═══════════ 0046 §6-2：桥 act 给「请求不成立」带状态码提示 ═══════════ */
+
+  it("⭐ 打回而没给理由 ⇒ {ok:false, statusHint:422}，且什么都没写", async () => {
+    const h = harness("status-hint-note");
+    await seedTask(h.q);
+    const approvalId = await seedCard(h.q);
+    await bindVerified(h.q);
+
+    const r = await h.bridge.act({
+      approvalId,
+      taskId: TASK_ID,
+      resume: "reject_with_comment",
+      actor: { senderId: SENDER, channelId: CHANNEL_ID },
+      viaChannelId: CHANNEL_ID,
+      receivedAtMs: NOW + 5_000,
+      // 刻意不带 note：打回必须带理由（approve.ts 那条 requiresNote）。
+    });
+    expect(r).toEqual({ ok: false, statusHint: 422, why: expect.any(String) });
+    // 没写任何东西：卡片仍 pending、决策审计一条都没有。
+    const card = await cardViaHttp(h, approvalId, "pending");
+    expect(card?.["status"]).toBe("pending");
+  });
+
+  it("⭐ 点到过期卡 ⇒ {ok:false, statusHint:409}", async () => {
+    const h = harness("status-hint-stale");
+    await seedTask(h.q);
+    await bindVerified(h.q);
+    // stale_card 判据（approve.ts:363）是「当前这一格【有】自己的卡，而你点的不是
+    // 那张」：own.length > 0 && !isOwn。所以构造要两张：
+    //   · 当前格的 own 卡（seat:FINAL_REVIEW:…）—— 让 own 非空；
+    //   · 一张旧格的卡（seat:ESCALATED_TO_CEO:…）—— 点它 ⇒ 不是 own ⇒ stale。
+    // 只有一张旧卡（own 空）时反过来【不】 stale：那格没有自己的卡，沿用旧行为
+    // （approve.ts:359 注释：「空 = 这一格没有自己的卡…⇒ 调用方沿用旧行为」）。
+    const ownApproval = await seedCard(h.q, false, "seat:FINAL_REVIEW:1");
+    const staleApproval = await seedCard(h.q, false, "seat:ESCALATED_TO_CEO:2");
+    // 任务当前停在 FINAL_REVIEW（与 own 卡同格，与 stale 卡不同格）。
+    h.q
+      .writeConnection()
+      .prepare("UPDATE tasks SET status = ? WHERE id = ?")
+      .run("FINAL_REVIEW", TASK_ID);
+
+    // 先点 stale 卡：此刻 from=FINAL_REVIEW、own=FINAL_REVIEW 卡、点的是 ESCALATED
+    // 旧卡 ⇒ 不是 own ⇒ stale（先点 own 会推进任务状态，把 from 推走，就测不到了）。
+    const rStale = await h.bridge.act({
+      approvalId: staleApproval,
+      taskId: TASK_ID,
+      resume: "approve",
+      actor: { senderId: SENDER, channelId: CHANNEL_ID },
+      viaChannelId: CHANNEL_ID,
+      receivedAtMs: NOW + 5_000,
+    });
+    expect(rStale).toEqual({
+      ok: false,
+      statusHint: 409,
+      why: expect.any(String),
+    });
+
+    // 分母：当前格的 own 卡能批（证明是「sale 卡批不动」而不是「批什么都不行」）。
+    const rOwn = await h.bridge.act({
+      approvalId: ownApproval,
+      taskId: TASK_ID,
+      resume: "approve",
+      actor: { senderId: SENDER, channelId: CHANNEL_ID },
+      viaChannelId: CHANNEL_ID,
+      receivedAtMs: NOW + 5_000,
+    });
+    expect(rOwn).toEqual({ ok: true });
+  });
+
+  it("⭐ 反向对照：正常批准不带 statusHint（decided 保持 {ok:true}）", async () => {
+    const h = harness("status-hint-ok");
+    await seedTask(h.q);
+    const approvalId = await seedCard(h.q);
+    await bindVerified(h.q);
+
+    const r = await h.bridge.act({
+      approvalId,
+      taskId: TASK_ID,
+      resume: "approve",
+      actor: { senderId: SENDER, channelId: CHANNEL_ID },
+      viaChannelId: CHANNEL_ID,
+      receivedAtMs: NOW + 5_000,
+    });
+    expect(r).toEqual({ ok: true });
   });
 
   it("决策落库前重查角色：rebind 撤掉校验的那一刻，回信批不掉", async () => {

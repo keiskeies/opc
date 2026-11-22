@@ -1,5 +1,5 @@
 /**
- * 审批卡片的**读侧**（`GET /approvals` 的那一条查询）。
+ * 审批卡片的**读侧**（`GET /approvals` 那一条列表查询 + `GET /approvals/:id` 那一条点查）。
  *
  * ── 为什么单独一个文件而不是写进 http/app.ts ────────────────────────
  * app.ts 里 `readTasks` 那条读法只有三行 WHERE 可用，跟着 handler 走没问题。
@@ -38,7 +38,9 @@ import type { DatabaseSync } from "node:sqlite";
 import {
   APPROVAL_STATUS_PENDING,
   APPROVAL_STATUS_VALUES,
+  type ApprovalDetailView,
   type ApprovalView,
+  approvalDetailViewSchema,
   approvalViewSchema,
 } from "@opc/contracts";
 import { assertSingleStatement } from "../db/write-queue.js";
@@ -179,6 +181,48 @@ function explicitIrreversible(parametersJson: string | null): boolean {
   if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed))
     return false;
   return (parsed as Record<string, unknown>)["irreversible"] === true;
+}
+
+/**
+ * `parameters` 那列 → 详情视图要的对象（`GET /approvals/:interruptId` 专用）。
+ *
+ * ── 为什么单独一个函数，不复用上面那两个读 parameters 的东西 ────────
+ * `escalationReasonOf` 与 `explicitIrreversible` 都是【从那段 JSON 里取一格】，
+ * 一个给列表当分组标签、一个给影子判定短路。这一取是【整块给出】，
+ * 因为 §9.2 第二行要的是快照本身而不是某一格。三者读同一列而目的不同，
+ * 合成一个"通用取值函数 + 键名参数"会把三处各自的坏值处置并成一条 ——
+ * 而那三处对坏值的【正确反应恰好不同】（列表：少一个标签；判定：不算不可逆；
+ * 详情：明说读不出来）。
+ *
+ * ── 三种坏法的处置是 null，而 null 在这一格【不是】「没有参数」 ─────
+ * DDL 写的是 `parameters TEXT NOT NULL`（0001_init.sql），约束管的是【有没有值】，
+ * 不管【那串是不是 JSON 对象】。三种都会走到这里：
+ *  ① 列值是 NULL。从库读回来的行到不了这一支（NOT NULL 挡着），
+ *     但本函数的入参是 `unknown` —— 一个没有定义的输入就是一次抛，
+ *     而抛在详情这条路上被翻成 500，500 说的是"服务端坏了"。
+ *     与 `evidenceRefsOf` 同一个形状（那边第一支也是判 null），同一句理由。
+ *  ② 存的是合法 JSON 但【不是对象】（一个数字、一个字符串、一个数组）。
+ *  ③ 整串不是 JSON。
+ * 三种都不该让详情 500：那一页是 CEO 决定要不要花钱的界面，
+ * 「这一段读不出来」是一句可执行的真相，一次 500 是【整张卡看不见】。
+ * 而它也不该被读成「这张卡没带参数」—— 所以契约把这一格命名为可空而不是空对象，
+ * 界面（app.js 的 paramSnapshotLines，由 paramSnapshotHtml 渲染）对 null 写的是
+ * 「参数快照读不出来」那一行。
+ */
+export function parametersObjectOf(
+  raw: unknown,
+): Record<string, unknown> | null {
+  if (raw === null || raw === undefined || raw === "") return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(String(raw));
+  } catch {
+    return null;
+  }
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return null;
+  }
+  return parsed as Record<string, unknown>;
 }
 
 /** 影子判定的对外形状（contracts `approvalViewSchema.policy_shadow` 的同构窄化）。 */
@@ -325,6 +369,96 @@ export function listApprovals(
     limit,
     truncated: countWithStatus(db, status) > rows.length,
   };
+}
+
+/**
+ * 详情用的列 = 列表那十二列【整份重写一遍】+ 那一次决定的三个字段。
+ *
+ * ⚠ 【刻意不写成 `APPROVAL_COLUMNS + ", …"` 的拼接】。拼一份是省十二个字，
+ * 代价是列表那一列将来加什么，详情【自动】跟着发出去，而那一刻没人 review 过它 ——
+ * 这正是 APPROVAL_COLUMNS 上面那段「不许 SELECT *」的论点，只不过这次是
+ * 用拼接把同一扇门开大（`.strict()` 那道 schema 也挡不住：加进 SELECT 的列
+ * 只要同名字段在 schema 里就过得去，而 `parameters` 正是一个【列表为了别的用途
+ * 才带着】、详情又【原样发出去】的键）。两条具名常量各写一遍，加列的人会看见两处。
+ * 重复那一段字符串是本仓一直在买的那种保险（同一立场见 http/app.ts 的
+ * TASK_COLUMNS；本文件里也有一条同款：两条 count SQL 各写一遍而不抽公共函数）。
+ *
+ * ⚠ 这一串必须与 approvalViewSchema + 详情那三格【逐列对齐】，
+ * 由 query.test.ts 那一发「少一列就红」的用例钉住 —— 不是靠我数得对。
+ */
+export const APPROVAL_DETAIL_COLUMNS =
+  "id, task_id, approval_type, summary, recommendation, recommendation_source, " +
+  "timeout_behavior, timeout_at, status, created_at, parameters, evidence_refs, " +
+  "decided_by, decided_at, decision_note";
+
+/**
+ * 一张卡的全部（`GET /approvals/:interruptId` 的读法）。返回 null = 库里没有这一张。
+ *
+ * ── 这一条读路径存在的理由 ─────────────────────────────────────────
+ * `http/app.ts` 的 listApprovals 注释早就写过「要看参数与证据得进单张卡片的视图」，
+ * 后面原本还跟着半句「那个视图今天还没有」—— 那半句在这条路由落地时【已从 app.ts
+ * 摘掉】，留下的「它不该被塞进列表接口当作副产品」一个字没动。
+ * ⚠ 这里曾把那句连同「还没有」一起【引用】着：引用另一份注释就是抄一份抄件，
+ * 而被引文件改了措辞、这边不会红（本仓为 /today 的判据抄件立的同一条账）。
+ * 现在引的是 app.ts 当下真有的那半句，「还没有」那一格按【已经发生的变化】记，
+ * 不按引号里的原文记。
+ * 分母是真的：`parameters` 有活写入方（`cards.ts` 的 INSERT_CARD_SQL 每条卡都写），
+ * 而 §9.2 第二行「关键参数快照」在此之前【没有】任何一个界面能显示它 ——
+ * 列表刻意不带，任务抽屉带的是任务的审计而不是卡的参数。
+ *
+ * ── 与列表那一条的两个差别，都不是巧合 ────────────────────────────
+ *  ① 不按 status 过滤。收件箱默认只列 pending，而详情要能看【已决】的那一张
+ *     （「我上周批的是什么来着」），也要能在批完之后立刻回看同一张。
+ *     详情是「就是这一张卡」的唯一地方，那三个决策字段在这里才有主语。
+ *  ② 走 `WHERE id = ?` 而不带 ORDER / LIMIT：主键点查。仍然过
+ *     `assertSingleStatement`，与这个模块其余读法同一条纪律。
+ */
+export function readApprovalDetail(
+  db: DatabaseSync,
+  id: string,
+): ApprovalDetailView | null {
+  const sql =
+    "SELECT " + APPROVAL_DETAIL_COLUMNS + " FROM approvals WHERE id = ?";
+  assertSingleStatement(sql);
+  const row = db.prepare(sql).get(id) as Record<string, unknown> | undefined;
+  if (row === undefined) return null;
+  return approvalDetailViewOf(row);
+}
+
+/**
+ * 一行 → 详情视图。列表那一格整块复用（`approvalViewOf`），差别只在补四格。
+ *
+ * 为什么不重抄一遍列表那十几行的字段映射：两处各写一遍 `status` 的兜底
+ * （unknown 那一族）迟早会漂，而漂了之后的形状是「列表说这张卡 unknown、
+ * 详情说它 pending」—— 同一张卡在同一个产品的两个界面上给出两种决定权判断，
+ * 而决定权正是琥珀色那一格唯一的意思。先过列表那一份再 spread 出去，
+ * 让「列表的口径是详情的子集」这件事由代码结构保证，而不是由我每次记得同步保证。
+ *
+ * 出参过一次 `approvalDetailViewSchema`，与 approvalView / taskView 同一条纪律：
+ * 改字段必须同时改契约，否则这里编译不过或校验不过。
+ *
+ * ⚠ 我原本在这一格上面写的是「详情那些【内部列】（card_key / state_snapshot 之类）
+ *   万一被谁加进 APPROVAL_DETAIL_COLUMNS，会在 parse 当场抛」。**那句是错的**，
+ *   由 query.test.ts ⑧ 那条内部列的用例实跑否证的：视图是【逐字段映射】出来的
+ *   （`approvalViewOf` 只读它认识的那几格 + 这里补四格），多出来的行键【没人读】，
+ *   所以既不抛也不泄漏 —— 它是被【静默丢掉】。安全结果一样，机制不一样，
+ *   而注释说错机制比不写更坏：下一个人会以为那里有闸门。
+ *   真正的闸门是上面那条「列名逐列对齐」（含「每个名字都必须在真表里」那半）
+ *   加 contracts 那张 `.strict()`。
+ */
+export function approvalDetailViewOf(
+  r: Record<string, unknown>,
+): ApprovalDetailView {
+  const v = {
+    ...approvalViewOf(r),
+    // 参数快照走 parametersObjectOf：读不出来就是 null，界面上那句
+    // 「参数快照读不出来」由它驱动（三种坏法的处置见那个函数的注释）。
+    parameters: parametersObjectOf(r["parameters"]),
+    decided_by: (r["decided_by"] as string | null) ?? null,
+    decided_at: r["decided_at"] == null ? null : Number(r["decided_at"]),
+    decision_note: (r["decision_note"] as string | null) ?? null,
+  };
+  return approvalDetailViewSchema.parse(v);
 }
 
 /**

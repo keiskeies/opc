@@ -86,7 +86,10 @@ describe("IPC 暴露面 = 白名单", () => {
     // 这一条是整个文件的存在理由。没有它，上面那条相等断言与「恒绿的写法」
     // 在绿屏上【看不出区别】—— 而本仓对假绿的态度是一贯的（0006 §7 那一族）。
     const api = createExposedApi(fakeIpc().bridge) as Record<string, unknown>;
-    const withBackdoor = { ...api, dbQuery: (sql: string) => sql };
+    const withBackdoor = { ...api, dbQuery: (sql: string) => sql } as Record<
+      string,
+      unknown
+    >;
     const exposed = Object.keys(withBackdoor)
       .filter((k) => typeof withBackdoor[k] === "function")
       .filter((k) => !NON_INVOKE_METHODS.has(k))

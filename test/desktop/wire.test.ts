@@ -166,7 +166,7 @@ async function startStreamServer(opts: { skipAuth?: boolean } = {}): Promise<{
     connections: 0,
     closed: 0,
     targets: [] as string[],
-    emit: (_e: string, _d: string, _i: string) => {
+    emit: (_e: string, _d: string, _i: string): void => {
       throw new Error("没有活的连接");
     },
     dropCurrent: () => {
@@ -195,7 +195,7 @@ async function startStreamServer(opts: { skipAuth?: boolean } = {}): Promise<{
     api.connections += 1;
     res.writeHead(200, { "content-type": "text/event-stream" });
     current = res;
-    api.emit = (event, data, id) => {
+    api.emit = (event: string, data: string, id: string): void => {
       current?.write(encodeSseFrame({ event, data, id }));
     };
     api.dropCurrent = () => {

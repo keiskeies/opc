@@ -47,6 +47,7 @@ import {
   type CommitOrgChangeRequest,
 } from "@opc/contracts";
 import type { CommitResult } from "../org/commit.js";
+import { reviewIndependencePreview } from "../graph/gates/review-preview.js";
 import { isLoopbackAddress } from "./bind.js";
 import type { HubDeps, HubRequest, HubResponse } from "./app.js";
 
@@ -176,6 +177,10 @@ export function orgGraphRoute(
     });
   }
   const r = deps.readOrgGraph();
+  // 审阅独立性的结构读数（O4 那一格「这一点在界面上必须说出来」）。
+  // 空存那一支【也算】：0 个角色 ⇒ pairs_total 0，界面按「算不出」那一支念，
+  // 与「算出来是零问题」是两句不同的话（见 graph/gates/review-preview.ts 文件头）。
+  const preview = reviewIndependencePreview(r.graph ?? { nodes: {}, edges: [] });
   if (r.versions === 0) {
     // 从没提交过组织图。这不是 404（不是「这个资源不存在」而是「还没有这个资源」），
     // 也不是 500（不是错）。空存：返回空图 + 版本 0，客户端据此显示「尚未建立组织」。
@@ -188,6 +193,7 @@ export function orgGraphRoute(
       graph_version: 0,
       effective_from: null,
       as_of_ms: deps.now(),
+      review_independence: preview,
     });
   }
   return res(200, {
@@ -197,6 +203,10 @@ export function orgGraphRoute(
     effective_from: r.effectiveFromMs ?? null,
     change_summary: r.changeSummary ?? null,
     as_of_ms: deps.now(),
+    // 计算键而不是图的一部分：它不落 graph_json、不参与版本、改它不需要提交新版本。
+    // 放在这里而不是让界面自己比 model_family —— 那份判据在 author-reviewer 里，
+    // 界面自己比就是抄一份会漂而【不会红】的抄件（0042 的论题）。
+    review_independence: preview,
   });
 }
 

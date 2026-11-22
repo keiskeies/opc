@@ -867,7 +867,7 @@ describe("⑥ 关键词过滤：检索接进时间线", () => {
     audit(db, { taskId: "t2", payload: { text: "别的任务的覆盖率" } });
     const view = await buildReplayView(db as never, { taskId: "t1", keyword: "覆盖率" });
     expect(view?.entries).toHaveLength(1);
-    expect((view?.entries[0]?.payload as { text: string }).text).toContain("本任务");
+    expect((view?.entries[0]?.payload as { text: string })?.text).toContain("本任务");
     // 反向对照：不限定任务时两条都在。少了这一半，「只命中一条」可能只是因为
     // 限定条件写成了恒假（那也是一种「隔离生效」的错觉）。
     expect(searchEvents(db as never, { keyword: "覆盖率" })).toHaveLength(2);

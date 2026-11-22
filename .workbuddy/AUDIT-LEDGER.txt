@@ -6443,3 +6443,1550 @@ round335（2026-11-20）全量测试复跑 —— 用户原话约定的「完全
 ■ 本轮没做的
   没动 spec 默认端口（env 口是设计里现成的逃生口，加自动避让属于改工件行为，无请求不做）。
   没碰 PID 57792。A/B 两类开放项一条没动 —— 全部需要拍板，理由逐条在 ①-⑤ 与 INDEX。
+
+round336（2026-11-21）前端「键盘可达」那半条验收 + 一条【本轮我自己写出的】ReferenceError
+════════════════════════════════════════════════════════════════════════════
+  两件有分量的事，一件是补上 Task 2.6 验收句里【可实现的那一半】，另一件是本轮
+  最值得记的一条：我写进 app.js 的一个 ReferenceError，躲过了本仓【全部】闸门。
+
+■ ① 前端：键盘能走到审批（计划 Task 2.6「键盘可完成全部审批操作」）
+  先说清口径：那句验收有【两半】。「≤20 秒」那一半【仍等 CEO】（INDEX:309 ——
+  0010 §7 选 W 的话，20 秒里要不要含一次模型调用的等待，是产品决定），本轮没碰。
+  做的是【可到达】那一半：此前「打开任务详情看证据」这件事【只有鼠标能做】——
+  任务卡是一个只有 click 的 div，而审批决策的证据就在抽屉里，键盘进不去抽屉，
+  「键盘完成审批」在链条第一跳就断了。
+  · 任务卡：tabindex="0" + role + Enter/空格，键位【抄本仓已有的那台】
+    （.orgdrag .node 的 keydown：Enter 主操作 / Esc 取消），不新发明一套。
+  · 审批卡：tabindex="-1"（只许程序化聚焦、【不进 Tab 序列】）——没有它，
+    「重渲染后把焦点还到这张卡」会静默落回 body；写成 0 又会把人从「决定」按钮上甩开。
+  · 今日页 + 收件箱：批完一张后 GET /approvals 是 pending-only（query.ts 那句
+    WHERE status = ?），那张【真的从名单里消失】⇒ 焦点【顶上来那一张】，
+    这是「键盘连批」的全部意义。落点判据抽成纯函数 focusTargetId（进 app-loader
+    的 EXPORTS 真跑），碰 DOM 的三个【故意不捞】——替身没有 closest/isConnected，
+    捞出来只会得到「替身不像真 DOM」的红。
+  · 抽屉：Esc 关（挂 document，因为焦点常落在不可聚焦的 div 上、不会冒泡到抽屉根）、
+    焦点进得来也回得去、openDrawer 幂等（否则第二条 Esc 叠上去，关一次关不掉）。
+  · load() 里显式 closeDrawer()：可达路径正是【本轮新开的键盘那条】——抽屉开着时
+    Tab 走到页头导航（scrim 只挡鼠标不挡 Tab），Enter 换页 ⇒ 抽屉 DOM 被抹掉而
+    Esc 监听还在 document 上。
+  · 顺手拆掉一处【静默撒谎】：抽屉载入失败那一支原来是 slot.innerHTML = ""，
+    抽屉【自己消失】。真相是请求失败，而那会被读成「这一张没有详情」。
+  · CSS：删掉 input/textarea 那行的 outline:none，换成一条 :focus-visible（蓝）。
+    蓝不是随手选的：--amber / --err 两份落点名单由 renderer-criteria 钉死，
+    焦点环随按键满屏跑，用琥珀等于让「这里需要你决策」每按一次 Tab 撒一次谎。
+  · 有意【不做】并写进代码的那一格：真焦点陷阱（inert/aria-hidden）。本仓没有浏览器
+    能跑一次（0042 §11 第一条），而焦点环做错只会以「人按 Tab 转不出来」的形式
+    在真浏览器里出现 —— 没有证据的地方不写它。
+
+■ ② 本轮最该记的一条：一个 ReferenceError 躲过了全部闸门
+  我给看板写了「重渲染后恢复焦点」，后来查明【看板没有这条触发路径】
+  （renderBoard() 的调用点全仓只有一处 = 顶部过滤器；SSE 帧走 attachFeedSink 里
+  那句 el.textContent = 游标，就地改一格、不重写 innerHTML）⇒ 我把恢复逻辑删了，
+  但【漏删了底下那一句对两个已删 const 的引用】。它躲过了：
+    · node --check —— 只判语法，不判作用域 ⇒ 过
+    · tsc -b —— include 只有 src/**，app.js 在 public/ 下（0007 整篇登记的就是这格）⇒ 看不见
+    · app-pure.test.ts —— 跑纯函数，renderBoard 不在射程 ⇒ 看不见
+    · 没有浏览器 ⇒ 连控制台那条红也没有
+  四条路全空。⇒ 开了 biome 的 lint/correctness/noUndeclaredVariables（recommended
+  之外），理由与【复算方法】写在 lint-baseline.ts 文件头新增那一段。
+  ⚠ 它【不进 LINT_BASELINE】，这不是漏：判据是两条读数一对 ——
+    开规则前 `biome lint .` = 1 error，开规则后 = 1 error（【没有存量】）；
+    再往任一文件塞一个未声明变量 ⇒ 立刻 2 条（【规则真的在跑】）。
+  0 条 ⇒ countErrorCategories 里没有这个键 ⇒ 加一行 atMost: 0 只会造出表里第一条
+  【恒不触发】的装饰，而本文件对「降到 0 的条目要删掉」立的正是同一条规矩。
+
+■ ③ 子代理报的六条「P1 正确性」里，五条核实【是假的】——一条没改
+  逐条对着源码读过才决定不改（不是不信，是那五条在源码里站不住）：
+  banner 已经把整条消息转义（app.js:139），所以塞进 banner 的 ${data.error} 是安全的
+  ⇒「三处未转义」不成立；batchRequestBody 一开始就 trim 了 note；charter 的 AC 解析器
+  2..4 段 + bits[2] 可选，和它自己的帮助文本【一致】；unset > 0 那处本来就有
+  undefined 分支；EXPOSED_ENDPOINTS = IMPLEMENTED_ENDPOINTS 是 desktop 文件头写明并
+  有测试的【决定】不是撒谎。另外它还报了一个【不存在的函数】matchAction。
+  ⇒ 留下的真活只有键盘 / 焦点那两条（就是上面 ①）。
+  ⚠ 这一格记的不是「子代理不靠谱」，是【核实的成本远低于照着重构的成本】：
+    那五条若照单修，会改坏四处已经对的行为，而每处都会以「测试还是绿的」通过
+    —— 因为它们的断言根本没覆盖到被改坏的那一维。
+
+■ 读数（全部本轮现跑，不是抄的）
+  · test/web + test/arch 全量：**37 文件 / 646 通过**，exit 0。
+  · 本轮新增用例：app-pure +8（focusTargetId 六种落点含一发正向对照 + 两张卡的键盘锚点各一发；
+    实数按 `it(` 计数与 HEAD 相减读出，不是我写完默数的 —— 我第一版在这儿写的是 +9，
+    差的正是我【把正向对照那发当成额外一条】多算了一次。计数也要现读，同 O14 那一族。）、
+    renderer-criteria +3（CSS 不许 outline:none、必须有 :focus-visible 且不用琥珀、
+    卡片区必须真绑了 keydown）。三条新守卫全部【变异测过】：注入违例 ⇒ 4 红，
+    还原 ⇒ 14 绿 —— 不是写完就当它有效。
+  · 子代理那一路（lint 存量）收账：表里现在是 format ≤161 / organizeImports ≤117 /
+    noAssignInExpressions ≤1，另两类（noUnsafeOptionalChaining / useIterableCallbackReturn）
+    真降到 0 ⇒ 按规矩【整条删掉】而不是留着。现数：format 160、organizeImports 111、
+    noAssignInExpressions 1。它改的 5 个测试文件本轮单独复跑：**162 通过**。
+    它摘掉 gateway.test.ts 那处 ?. 的依据我对着源码核过：SafetyVerdict.detail 在
+    safety.ts:77 是【可选】（所以那处 ?. 留着对），而 HarnessAttemptPayload.detail 必填。
+  · tsc -b：exit 0（本轮现跑，输出 0 行）。
+  · 报给我的两条 app-pure 诊断（join 未用 / .label 不存在）：都在 HEAD 未动的区域，
+    且【全仓闸门本来就不 typecheck test/**】—— 那一格是 0007 整篇的标题，不是本轮新账。
+  · biome 全仓（本轮收账口径）：error = format 160 + organizeImports 111 +
+    noAssignInExpressions 1 = **272**；warning 114、info 2 不变。地板从 280 降到 272。
+
+■ ④ 本轮撞到的三条【看起来像读数】的坑（都记下来，因为形状会复发）
+  · 我把 HEAD 版本的 app.js 复制进 .workbuddy/ 做对照 ⇒ 仓库里出现【第二份同名文件】
+    ⇒ doc-refs 的解析器报「同名歧义」，一整条守卫红。量完必须删副本（已写进探针文件头）。
+  · 重锚行号我【先用加法算过一次】（464→541 / 547→642 / 694→797），锚完因为 ② 删码
+    又漂一次 ⇒ 第二次改成【按内容现查】（node 现读那一行原文找它现在在第几行）才对。
+    ⇒ 行号只能用内容反查，不能用 delta 推。
+  · 三次「空输出」形状：`biome lint --rule X=error` 根本不存在的旗标（它回的是
+    "no such flag"，我差点读成「没命中」）；`--config-path` 指向 .workbuddy 里那份临时
+    配置 ⇒ biome 报 nested root configuration，【每次跑都长一样而我的循环会当成干净】；
+    以及 files.includes 覆盖不到 .workbuddy ⇒ "Checked 0 files"。三条都是
+    memory [[empty-output-is-not-a-clean-result]] 的同一族，本轮又各撞一次。
+
+■ 射程 / 本轮没做的
+  「键盘 ≤20 秒」那一半没做也不该由我做（等 0010 §7）。没做真焦点陷阱（理由见 ①）。
+  没跑全量 vitest —— 用户约定的是【完全开发完再跑】，本轮只跑受影响的单元/守卫文件。
+  没有 commit（没被要求）。没动 501/404 那条：app.ts 侧自己登记了【没有能触发它的分母】，
+  而 desktop 文件头对「写一个当前不可达的 handler」正是反对的那一侧。
+
+round337（2026-11-22）补上 §9.2 第二行那个详情视图，以及【我的探针四次给出假读数】这件事本身
+
+■ ① 这一发落了什么（一句话）
+  `GET /approvals/:interruptId` 从「注释里写着『那个视图今天还没有』」变成有读侧、有路由、
+  有界面落点的一条真路由，并把它在三个层面上的判据各钉了一层。
+  · 契约：`approvalDetailViewSchema = approvalViewSchema.extend({...})` 落成【独立类型】，
+    不是往 `approvalViewSchema` 上加可选键 —— 加可选键会让 `ApprovalView` 仍能编译进
+    快照渲染器，「参数快照只属于详情」这件事就只剩口头约定。
+  · 读侧：`APPROVAL_DETAIL_COLUMNS`（列表那十二列【整份重写】+ 那一次决定的三格）、
+    `readApprovalDetail`、`parametersObjectOf`、`approvalDetailViewOf`。
+    刻意不写成 `APPROVAL_COLUMNS + ", …"` 拼接：拼接等于把「不许 SELECT *」那扇门
+    从另一侧开大，而 schema 的 `.strict()` 挡不住（同名列在 schema 里就过得去）。
+  · HTTP：详情那条 kind + `matchRoute` 那一支 + handler。
+    ⚠ 【刻意没有】第二道回环闸门（0027 §1：两道独立闸门焊成一道，退掉一道看不出来）。
+  · 界面：`paramSnapshotLines` / `paramSnapshotHtml`（等宽 + 左缩进、不画框线，§19.4 同族），
+    数据在【第一次展开时】由 `loadSnapshot` 取一发（app.js 里那条 GET 的唯一调用点）。
+  · 本轮另修一处【产品缺陷】：金额那一格原来是 `money(cents)` 单态，
+    `null` 会被静默折成 `"$0.00"` —— 而「没有金额」与「金额为 0」是 CEO 批的两种东西。
+    现在与「不可逆」同形做三态：算得出 ⇒ 金额，读不出来 ⇒ 明说读不出来 + 原值。
+    这条是【被一条真跑红的用例逼出来的】，不是我先想到再补测试。
+
+■ ② 三个层面各钉什么（新增 45 发，按【`it(` 实数与 HEAD 相减】读出，不是默数）
+  · 路由/HTTP —— `packages/hub/test/http/approval-detail-route.test.ts`（**新文件，11 发**）：
+    路由形状（空段判【不匹配】而非 id=""）、详情带 parameters 而【列表一个字节都不带】
+    （正反两面必须在【同一张卡】上比，否则「列表里那张恰好没参数」会让 toContain 假绿）、
+    已决那三格只在详情、pending 那三格是 null 而【不是缺键】、脏 parameters ⇒ 200 + null
+    而不是 500、404 带 id 且审计/图恢复一次没碰、`no such route` 与 `approval not found`
+    两种 404 不许合并、**一次性审批 token 打不到详情**（401 + 票【没被烧】），
+    同发配反向对照（同一张票打在 POST /approvals/:id ⇒ 非 401）。
+    ⚠ 那发 401 为什么不是 tokens-route.test.ts 的抄件：挡它的是 `hit.kind !== "decide"`
+      那一句【按 kind 判】。有人把白名单放宽成 `decide || get_approval`（正是 app.ts
+      预言的「读收件箱时那一次很自然的改动」）时，`GET /tasks` 那一发【照样绿】。
+  · 读侧判据 —— `query.test.ts` 第 ⑧ 节（**+8**）：列对齐那一发的分母是【现场
+    `PRAGMA table_info(approvals)` 读出来的】，不是我手抄的列清单；含「每个详情列名
+    都必须真的在表里」，所以将来谁往那串里塞一个不存在的键也会红。
+    另有内部列静默丢掉、详情不按 status 过滤、详情 ⊇ 列表且多出的键【恰好】那四个、
+    NULL status 读成 unknown、脏库三种形状整条读侧不抛。
+  · 界面 —— `test/web/`（app-pure **+19** / renderer-criteria **+7**）：
+    纯函数那一侧真跑（未知键不许静默丢、四种「没有」互不合并、金额与不可逆各三态、
+    `0` 与 `null` 渲染【必须不同】、部分缺键不许凭空造行）；源码扫描那一侧补 CSS 与
+    「全页只有一份金额格式化」这两半 —— 函数跑对了证明不了它们。
+
+■ ③ 我自己写错又被我自己的东西否证的两条主张（不是笔误，是【注释说错机制】）
+  · 我在 `money()` 上面写「`Number("1250")` 会得到 `$NaN`」。**假的**：真跑是 `$12.50`，
+    因为 `Number(c ?? 0)`。真正的坑是 `null ⇒ "$0.00"`。⇒ 改的是【产品代码】（做三态），
+    不是把测试改成迁就我那句错话。
+  · 我在 `approvalDetailViewOf` 上面写「内部列万一被加进那串，会在 parse 当场抛」。
+    被【我本轮新写的】内部列那一发实跑否证：视图是逐字段映射出来的，多出来的行键没人读，
+    所以是【静默丢掉】。安全结果一样、机制不一样，而注释说错机制比不写更坏 ——
+    下一个人会以为那里有闸门。真闸门是列名逐列对齐 + contracts 的 `.strict()`。
+
+■ ④ 本轮【四次】拿到「看着像读数、其实是探针坏了」的假数（memory 那一族的四次复发）
+  全部靠【对照实验】才没被我写进结论，记形状：
+  1. `biome format <文件>`（不带 `--stdin-file-path`）把诊断写 stderr、stdout 【空】。
+     我的比较读 stdout ⇒ 报「515 行 → 1 行」，我第一版把它读成「整个文件都要重排」。
+     有效写法只有 `--stdin-file-path` 那一种。
+  2. biome 2.6.5 的 JSON 里 `location.path` 是【反斜杠字符串】，不是 `{path:…}` 对象。
+     我按 `loc.path.path` 取 ⇒ 全部键塌成 `""` ⇒ 报「19 个改动文件里 0 个带 format 计数」。
+     这条如果被我相信，整轮的结论会是「本轮没引入任何 format 账」——正相反。
+  3. `biome check --stdin-file-path` 的 stdin 模式【根本不产 organizeImports 诊断】
+     （它只有 formatter 那一段）。我用它测 HEAD 合规性，五个文件回 0，我差点据此说
+     「这五份 HEAD 都干净」。**对照**：挑一份 JSON 报告里【确实带着】organizeImports、
+     且本轮没碰过的文件走同一条 stdin 路 ⇒ 也回 0 ⇒ 探针无效，那五个 0 一个都不算。
+  4. 逐文件探针（worktree 里一份份 check）报「净新增 0 个文件」，而整棵树两份 JSON
+     的【集合差】给出恰好 1 个。我不采信前者，报的是后者。
+  ⇒ 形状：**同一族的两个读数长得一模一样**（「没有违规」与「没在查」）。只有【已知会红
+    的那一发】能分辨，而那一发每次都得现挑，不能引用上一轮的。
+
+■ ⑤ 棘轮那一发怎么从红变绿（没抬任何一格上限）
+  `test/arch/lint-baseline.test.ts` 报 `format 161→163`。查清之后是【本轮自己引入 3 份】：
+  `approvals/query.ts` 与 `approvals/query.test.ts` 在 HEAD 都是 formatter 合规的，
+  是【我】把它们弄脏的，加上那份全新文件。⇒ 按 `lint-baseline.ts` 文件头自己划的那格
+  （只动「HEAD 那份本来就合规」的文件 ⇒ `--write` 不可能重排别人的行）做 `--write`，
+  不用全仓 `--write`（0058 记着一次 `--write` 在同一轮把 runtime.test.ts 的坐标顶漂两次）。
+  organizeImports 那一发同理：集合差指到【唯一一个】文件 = `query.test.ts`（我往里加了
+  导入），`--only=assist/source/organizeImports --write` 之后 diff 只有【导入块内一行换位】、
+  行数 806 → 806 ⇒ 零行号漂移，不需要重锚任何坐标。
+  基准口径也修过一次：worktree 是 HEAD 的内容而 `biome.json` 在工作区是【改过的】
+  （round336 开了 noUndeclaredVariables），拿 HEAD 配置比 HEAD 内容 ⇒ 造出
+  `noAssignInExpressions 4→1` 这类【假 delta】。把当前配置复制进 worktree 之后才是同一把尺。
+
+■ ⑥ 坐标：4 处 `approvals/query.ts:272` → `:274`
+  `--write` 在 `query.ts` 只把第 212 行那个函数签名拆成三行（它 HEAD 合规，所以那一行
+  是我写的），其下全部 +2。两条 SNAP 键 + 0052/0053 正文各一处，按【内容】反查新行号
+  （`const o = autoApprove({ action: { kind, detail: summary } });`），命中数带断言、
+  U+FFFD 带检查，**只改键、内容串一个字没动**（house rule）。
+  同轮把 `query.ts` 里那句【引用 app.ts 注释】的「那个视图今天还没有」改掉：那半句
+  在路由落地时已从 app.ts 摘掉，我这边还带着引号引用它 = 抄了一份会漂而没人校验的抄件。
+  ⇒ 引另一份注释的原文，就是给自己造一条【不会红的】抄件；现在引的是它当下真有的那半句，
+    「还没有」那一格按【已经发生的变化】记，不按引号里的原文记。
+
+■ 读数（全部本轮现跑/现量，不是抄的）
+  · 受影响集合：`test/arch/` 全量 = **33 文件 / 516 通过**；详情路由 + query + app-pure +
+    renderer-criteria 四份 = **4 文件 / 148 通过**；两轮都 exit 0。
+    （格式化【之后】单独复跑 query + 详情路由仍是 42 通过 —— 那一发只为确认 `--write`
+    只动排版，不指望它证明别的。）
+  · `tsc -b`：exit 0，输出 0 行。`node --check packages/web/public/app.js`：过。
+  · biome（同一个 2.6.5 二进制、同一份【当前】配置，两边各跑整棵树）：
+      format                        HEAD 内容 160 → 现在 160   上限 161   ⇒ 本轮 delta 0
+      assist/source/organizeImports HEAD 内容 111 → 现在 111   上限 117   ⇒ 本轮 delta 0
+      noAssignInExpressions             4 → 1                    上限 1
+      总 error 272、warning 113、info 2。
+    ⚠ 中途读数一度是 format 163 / organizeImports 112，即【本轮净 +3 / +1】，全部来自
+      我自己那三份文件，现已全部修净。**没有抬过任何一格上限。**
+    ⚠ 总 error 从 HEAD 的 280 降到 272 那 8 条【不是本轮这一步】，也不是「本会话某一步顺手修的」：
+      它是【round336 那一轮未入库的改动】。对法是把 HEAD 的内容跑在【当前】配置下，
+      而 HEAD 的 LINT_BASELINE 上限写的是 161 / 117 / **4 / 3 / 2**，HEAD 的实测正好
+      也是 4 / 3 / 2 ⇒ 【HEAD 那一发是绿的，四条上限一格没抬】。round336 把三类清到
+      1 / 0 / 0 并同步把表改成现在这三行（两类降到 0 ⇒ 整条删掉）。逐文件归因：
+      gateway −3 noAssignInExpressions、gateway / safety / search 各 −1
+      noUnsafeOptionalChaining、assemble-driver / assemble-pump 各 −1 useIterableCallbackReturn。
+      ⇒ 记这一格是因为【降幅也会被记错主人】：报总数不先归因，下一个人就把别人那一刀
+      记到这一发上（O14 那一族）。本轮这一步对这三类的贡献是【0】。
+    · warning 114 → 113：按【文件 × 类目】比，净差只有两处 —— gateway 的
+      noCommaOperator −1（round336 那一刀，同上面那 8 条），以及 app.js 的
+      noPrototypeBuiltins【一度 +5、本轮清掉】。
+      那 5 条是我本轮新写的那五行（`Object.prototype.hasOwnProperty.call(...)`），
+      已按本仓既有写法换成 `Object.hasOwn` ⇒ 现在比 HEAD 还少 1。
+      ⚠ 换的时候别把注释读成「修了一个洞」：`hasOwnProperty.call` 与 `Object.hasOwn`
+        【同为在场判断】，两者都挡得住 toString / constructor 那族原型键。
+        换的理由是「一处一个写法」+ 那条 lint 规则，不是原来算错了。
+  · 新增用例 45 发 = 新文件 11 + query.test 8 + app-pure 19 + renderer-criteria 7
+    （`grep -c "^\s*it("` 与 HEAD 相减，且与各文件的 vitest 通过数【逐个对得上】）。
+
+■ 顺手量到、本轮【没动】的一格：已实现而未暴露的第二十二次？
+  `GET /approvals/:interruptId` 在 `contracts/api.ts:86` 的 IMPLEMENTED_ENDPOINTS 里，
+  而 `desktop/src/ipc-surface.ts` 的 CHANNEL_SPECS 里【没有】它。集合差量出来一共 13 条
+  端点无通道，其中【读侧】就有 `GET /today`、`GET /approvals/:interruptId`、
+  `POST /approvals/batch`、`GET /replay/:taskId`、`GET /charter/:roleId`、`GET /budget`。
+  ⇒ 这不是本轮引入的缺口，也不是漏：今天真在跑的渲染侧走的是 `web/src/dev-server.ts`
+    那条【任意 target 都签】的代理（`app.js` 用的是 `fetch("/api"+path)`，不是命名通道），
+    而 `desktop` 里根本没有 `loadFile` / `loadURL`。所以「详情读侧有没有消费者」的答案是
+    **有（app.js:1236）**，与 0015 §8 那一族【零消费者】不同 —— 这一格要记的是【区别】。
+  要不要给它开一条只读通道是另一轮的判断，且必须连 bindings/POST /org 那两条【刻意不开】
+  的理由一起读（那两条讲的是 self-escalating 的写，读的通道不在那条禁令里）。
+
+■ 射程 / 本轮没做的
+  没跑全量 vitest —— 用户约定的是【完全开发完再跑】，本轮只跑受影响文件（上一轮全量基线
+  是 148 文件 / 3221 通过 / exit 0）。没有 commit（没被要求）。
+  明确【不建】：bindings verify/rebind/申请 UI、POST /org UI、mint-token UI（0030 §3 那条
+  「点一下就行」的假象）。CEO 门那边原样挂着：20 秒那一问、`knownRoles` 注入（0030 §8）、
+  真飞书凭据、`TERMINATED`、`BUDGET_PAUSED` 的入边、会议/辩论子图、`parallel_allowed`、
+  charter 直通、0006 §8 的 A/B/M、§9.3/§9.5/§6.2、0005 §11.4、0007 §5.2、以及【全仓 format】。
+
+round338（2026-11-22）O4 的「审阅独立性」读数落到 GET /org + 界面上，以及【一条守卫把我自己写的假账抓出来】：删基线那一行连带要改的五处主张里，只有两处是真过期的
+════════════════════════════════════════════════════════════════════
+■ 这一发交付的是什么（一句话）
+  「同一模型家族之间互相审阅，CEO 每一次都要点一下批准」这句 O4 立场，以前只活在
+  dispatch 的运行期门里、界面上【一个字都不说】。本轮把它做成服务端算好的一份结构
+  读数（GET /org 的 review_independence），界面只念数、不重算。
+  代码：packages/hub/src/graph/gates/review-preview.ts（新，147 行）
+        packages/hub/src/http/org.ts（orgGraphRoute 两支都带这个键）
+        packages/web/public/app.js（纯函数 reviewIndependenceBand + renderOrg 接线）
+  测试：packages/hub/test/gates/review-preview.test.ts（新 17）
+        packages/hub/test/http/org-route.test.ts ⑥（+6）
+        test/web/app-pure.test.ts（+11）
+        test/web/renderer-criteria.test.ts ⑤（+5）
+        test/arch/dead-modules.{ts,test.ts}（删基线一条 + 补一条反向断言，用例数不变）
+  ⇒ 本轮新写用例 39 发 = 17 + 6 + 11 + 5。
+    ⚠ 计数口径：新增发数按【我自己那两个 describe 块】的 it 数花括号配平量出来
+    （.scratch/itcount.mjs，找不到块 / 配不平就 abort），【不是】拿工作区与 HEAD 的
+    `grep -c it(` 相减 —— 那样会把 round336/337 那两路【同样还没 commit】的产物
+    算到这一发头上（app-pure 对 HEAD 是 +30、renderer-criteria 是 +12，而本轮只
+    占其中的 11 与 5）。round337 台账那条「逐文件归因」记的是同一课。
+
+■ 三档不许合并（这是这一格的全部设计含量）
+  分母 = 角色集合的【无序对】C(k,2)，不是审阅次数：运行期那道真门
+  （engine/dispatch.ts 的 reviewGate）是按【本次流转的 lastProducer → task.role】
+  加一个 ceoApproved(task.id, "same_family_review:a->b") 判的，键里根本没有边，
+  所以任何「图上有多少条委派边」的说法都不是它的分母。三档：
+    pairs_ok / pairs_same_family（点一次批准能过）/ pairs_refused（点了也没用，得改图）
+  合并 same_family 与 refused 就得到一个「N 次点击可解决」的假承诺 —— refused 的修法是
+  给节点配 model_family（一次图编辑），批准按钮对它无效。三档之和 === 分母有发用例钉。
+  ⚠ 演示图上这一格【不成立】：dev-seed 七个角色刻意错开家族（dev-seed.ts:93-94 自己写着），
+    21 个配对里只有 2 个真同族。所以界面绝不能写死「每次审阅都要你批」；那句话只在
+    「全机共用一个 model_family」的真机器上成立 —— 用例 ⑤ 用真 DEMO_ORG_NODES（不手抄）
+    钉 2/21，并带一发把全家改成同族 ⇒ 21/21 + always=true 的反向对照。
+
+■ 本轮第一个真缺陷是我自己的代码，而且是被【我自己的用例】抓到的：-0
+  分母最初写成 `k * (k - 1) / 2`。k=0 时 `0 * -1 / 2` 在 IEEE-754 下是 **-0**，
+  而 JSON.stringify(-0) 是 "0"、`-0 === 0` 也是 true ⇒ 类型检查看不出来，
+  只有 `expect(p.pairs_total).toBe(0)` 在 Object.is 语义下红了。
+  改的是【代码】不是用例：显式 `keys.length < 2 ? 0 : ...`，并把「这一格是测试逼出来的」
+  写进注释。⇒ 记这一格是因为形状：JS 的负零是【只有严格相等之外的口径能看见】的那类
+  坏，本仓用 Object.is 的断言（toBe）比用 === 的断言多抓到这一类。
+
+■ 复用不是抄（③ 那一组），以及【错的尺子会把对的话删掉】两次
+  读数是【调用】graph/gates/author-reviewer.ts 的 sameFamilyReviewBlock 算的。
+  这一条不能用「我看了代码是调用的」维持，所以：
+   · 空白家族那一发：两边都没配 model_family 时必须落 unknown_model_family，
+     而内联一份 `a.model_family === b.model_family` 会因为 `"" === ""` 报成同族 ⇒
+     那一发【只有真调用才绿】。（两档的修法不同：一个点批准、一个配字段。）
+   · blocked[].reason 与【正本自己返回的那句】按对象相等比，不是我手抄的子串，
+     并配一条「换一个配对那句就不在」的反向对照。
+  ⚠⚡ renderer-criteria ⑤ 那台源码扫描【两次把我写对的那句判红】：
+   (1) 一刀「本函数里不许出现 model_family 这个子串」⇒ 会把唯一那句【可执行的修法】
+       「批准点不过去，先把 model_family 配上」删掉。正解是把尺子从【子串】换成
+       【属性读取形状】`/\.(model_family)\b/`，并补一发反向对照证明『提到这个字段名』
+       合法 ⇒ 判据要禁的是「在界面重算一遍」，不是「说出那个字段叫什么」。
+   (2) 一刀「不许出现 次审阅」⇒ 会把 O4 自己那句普适陈述「每次审阅都要你显式批一遍」
+       删掉。正解是禁【算术换算】形状 `pairs_\w+\s*[*\/]` 与【字面次数】`\d+次审阅`。
+  ⇒ 这两条都写进了用例注释。守卫写宽一格的代价不是误报麻烦，是【它会把真话修没】，
+    而修没之后那台照样绿。每一刀都配了「对的话必须合法」的反向对照才敢落。
+
+■ 守卫抓到一条我自己的真 bug：any_refused 被算了而没被读
+  界面那半边我写的是 `refused > 0`，而服务端明明已经把 any_refused 算好了 ——
+  这一条是 renderer-criteria ⑤ 那台扫出来的（我原本写的是「不许出现 need 类」，
+  它连带让我回去逐个数看是谁在读谁）。改成【读那个旗标】，并在注释里写明与
+  `same > 0` 的差别不是手滑：same 那个数就是我正在显示的那个数，读它不可能漂；
+  any_refused 是一个【服务端算的判断】，我自己重算就等于在这里放一份抄件。
+  补一发矛盾输入钉住方向：`pairs_refused:3, any_refused:false` 必须【不】念那句修法，
+  `pairs_refused:0, any_refused:true` 必须念。
+  ⚠ 同一段里我自己还写出过两发【恒真断言】，都是自查时抓的：
+   · `not.toContain("var(--amber)")` —— app.js 从来不吐 CSS 变量，这条对【任何】函数
+     都绿。换成用 approvalCard 真正会吐的 `need` 类做阳性对照（先证明那东西在别处会出，
+     再说这里没有）。
+   · `not.toContain("banner warn")` 缺对照 ⇒ 补 `expect(dirty).toContain('class="banner warn"')`。
+   · 一条阳性对照自己写成了类型错误（对 string 调 .map）且近乎恒真 ⇒
+     换成 `expect(typeof ....map).toBe("undefined")`。
+  形状：not.toContain 一族在本仓【一律】要求配对方向的正断言，否则它测的是「我没写」
+  而不是「我禁了」—— 这是 0042 那条「失去分母的守卫比没有守卫更坏」在测试侧的样子。
+
+■ 变异矩阵：主判据 6/6 击杀（round338 前半），守卫补的那一条 1/1
+  · review-preview 六发（把三档合并 / 分母改有序对 / 内联等号代替调用 / 空图走
+    sameFamily===total / 只数 same 不看 refused / blocked 不排序）⇒ 6/6 红，
+    跑完逐字节核对源码还原 + tsc -b exit 0。
+  · 本轮后半（dead-modules 那一格）另有一发：把 `r.dead.filter(importer>0)` 退化成
+    `r.dead` ⇒ 只有【我新加的那条反向断言】红（红行原文：
+    「零 importer 的 verifier 被判成继承性不可达 ⇒ importer 那一步没在过滤」）。
+    ⇒ 这一发存在的理由见下面那一节：只剩一个样本时，单向断言分不清【在按 importer 分】
+    与【全算进去】。
+
+■ 删基线那一行不是删一行：连带要改的主张，五处里只有两处真过期
+  review-preview.ts 被 http/org.ts import ⇒ 可达链
+  serve/dev-entry.ts → serve/assemble.ts → http/app.ts → http/org.ts →
+  graph/gates/review-preview.ts → author-reviewer.ts（链是探针反向 BFS 量出来的，
+  不是我推的）⇒ 那条模块从【继承性不可达】变成可达 ⇒ dead-modules 哨兵方向 B
+  如约红了三条，并点名 5 处「没人调用」类主张：
+    docs/INDEX.md:106 · docs/OPC-OS-功能优化设计.md:700 · :1611 ·
+    docs/decisions/0062-…:143 · docs/guides/how-to-write-a-charter.md:25
+  ⚡ 那五条是 claimSites 按【模块名与否定词同行】报的，口径【故意宽】。逐条把
+    【到底是哪个否定词命中】打出来（.scratch/neg.mjs 直接复用正则正本跑，不另写一把）：
+      INDEX:106        命中「没有生产者」= 证据包没有生产者（归 O5）⇒ 与 author-reviewer 无关
+      设计文档:700     命中「对外零」= 「只被 harness/verifier.ts 用」⇒ ⚠ 真过期
+      设计文档:1611    命中「没有写入方」= 引用 r23 那条 not_observable 文案原文 ⇒ 无关
+      0062:143         命中「对外零」= 「…对外零 import 【至今】」⇒ ⚠ 真过期（"至今"是现在时）
+      charter 指南:25  命中「零读者」= 运行时执行器对 forbidden 零读者 ⇒ 无关
+  ⇒ 改两处、留三处。留的理由逐条写进本轮台账（本表摘掉之后【没有任何守卫】再扫这几行，
+    所以这几行能不能留取决于我这轮的测量，不取决于绿）：
+    · charter 指南那句依赖 mergeForbiddenForRun 零调用点 —— 实测 src 内仍 0 个调用点
+      （只有 roles/loader.ts:150 的 export 定义 + author-reviewer 注释里两处提及）。
+    · INDEX:106 / 设计文档:1611 讲的是证据包与委派边自检，本轮一行没碰。
+  ⚠ 记这一格是因为【红行给的清单不能照抄】：它说「逐条改掉」，而它是模块粒度的
+    可达性判据，那五句讲的是具体函数。照抄会把三句【仍然真】的话改成含糊话。
+
+■ 同一次改动把我写的那一行的【邻居】照出来了：evaluate.ts 那一行
+  改完 700 行再读 701 行（graph/gates/evaluate.ts，「不在：唯一调用方在无入口簇里」）
+  才发现它跟上面那行现在是【矛盾】的：evaluate.ts【也】走得到
+  （charter/store.ts import 它的 criteriaFromCharter，而 store 在活路径上），
+  但它本行那条判据（evaluateGate 的 reviewer.roleId === producer.roleId ⇒ escalate）
+  在 src 里确实只有 verifier 一个调用方。⇒ 两行都写成「模块可达、判据不在跑」，
+  并且把【criteriaFromCharter 的两个调用方 gateCriteriaForRole / ...AtVersion 今天
+  零生产调用方】一起写明 —— 第一版我写的是「store.ts 每轮真角色轮都跑」紧贴
+  criteriaFromCharter，那会让读者以为这条边每轮被走，而每轮真跑的是
+  readLatestCharter / assertCharterShape 那两个函数。读回来的时候才抓到的。
+
+■ dead-modules 基线：8 → 7，那条「8 = 16 − 8」的算式是怎么对上的
+  下界断言（dead-modules.test.ts 的 BASELINE.size >= 8）跟着改成 >= 7，算式改成
+  「7 = 16 − 9」。先把账核清楚再改数（不然就是随手放宽）：
+    · BASELINE.size 现在 = 7（不是 grep 出来的 —— 主断言绿 ⇒ 基线 === 不可达集，
+      而探针量到不可达 7 个，所以 size 必为 7）。
+    · 首提 ffae248 那份文件里条目是 14 条（不是 16）。差的【正好】是 round281 摘掉的
+      channels/{abstraction,approval-bridge} 两条 —— 它们在那次入库【之前】就没了，
+      16 是更早住在 test 文件里那一份的数。⇒ 16 登记过 / 14 首提在册 / 摘 9 条 ⇒ 现在 7。
+    · 三种数法各给一个数（16 / 14 / 7），只有【从 BASELINE 本身量】那一个是当下的真值；
+      另两个是历史。这一格差点被我写成「14 − 7 = 7 条」，那是把入库前后的两次摘除混成一次。
+  簇二（「只被上面那簇用的下游」）今天【一条都不剩】。标题【留着】并写明它标的是
+  一类坏法而不是清单，真正的守卫在用例那条「口径差异有读数」里。
+
+■ 口径那发从两条样本塌成一条，于是补了反方向那一半
+  原来那个 for 里点名 harness/routing.ts 与 graph/gates/author-reviewer.ts，后者被我
+  这轮接活了 ⇒ 只剩 routing。先把当时那份死清单整个点过一遍再挑替补（探针写文件、
+  【不走 console】—— vitest 把 console 吞了，第一版探针 grep 到 0 行差点被我读成
+  「没有继承性死模块」）：不可达 7 个里【只有】routing 一条带 importer（← verifier），
+  其余六条（events/batch、evidence/store、graph/branches、harness/verifier、index、main）
+  是【零 importer 的真死】⇒ 没有第二个合格样本可换。
+  ⇒ 只删名字会让那一发退化：`inherited` 若被谁算成恒真，「routing 在里面」照样绿。
+    所以补一条【方向相反】的断言：同目录的 harness/verifier.ts 死着但零 importer
+    ⇒ 必须【不在】inherited 里，并先钉 `r.dead` 含 verifier（否则 dead 读空时两条
+    一起白拿 —— 又是「守卫失去分母」那个形状）。一发一进一出才是「filter 真在过滤」的证据。
+
+■ 探针自己骗我一次（本轮第二次踩同一类）：needle missing 也长「没效果」的样子
+  变异那发第一次跑我把 needle 写进了【错的文件】（dead-modules.ts 而不是 .test.ts），
+  探针按规矩 abort 并打印 "ABORT needle missing"，而同一批命令里紧跟着的那条
+  `npx vitest run` 打印的是「23 passed」—— 我差一点把那一行读成「变异没效果 ⇒
+  这条断言没用」。分开看才看得见：abort 说明变异【从没落下】，那句 23 passed 是
+  【未变异源码】的读数。⇒ 教训同 round337「探针四次假读数」：探针的【失败】与它要
+  测的【断言无效果】必须给出【形状不同】的读数，而且变异是否真落下要有独立的字节核对
+  （这轮补的：改前 cp 备份、改后 diff 备份 ⇒ 两条 "byte-identical"）。
+
+■ 读回来的时候抓到四处【我自己刚写进去的】文档毛病（都不是 U+FFFD）
+  U+FFFD 扫描对全部改动文件 CLEAN，而这道闸门【只认坏字符、不认句子被改坏】，
+  所以下面四条全是靠把改完的段落整段读回来抓的：
+   1. 0062 那段替换把原句尾的「，」吃掉了 ⇒ 括号闭合后直接接下一句，读起来是断句。
+   2. 0062 是散文体，我写的是「本行判据那一列点名的三个函数」—— 那一列在【设计文档
+      那张表】里，不在这篇里。⇒ 改成直接点名三个函数 + 指回那张表。
+   3. 我在设计文档 701 行一边写「按 doc-refs 取舍二：行号会漂而特征串可 grep」、
+      一边在同一个括号里留了个裸的 `evaluateGate :266`。⇒ 换成那句代码原文。
+      ⇒ 这一条最值得记：【刚写完一条规矩就违反它】，而且违反处就在讲这条规矩的那句话里。
+      只有读回来抓得到 —— 没有任何守卫判「一段话自相矛盾」。
+   4. 我写「那正是 §7 第 1 项当初分不清的事」是【假的】：§7 第 1 项的原句
+      「对那 5 个零调用点函数」【本来就是函数粒度】的，它恰恰是没翻的那一句。
+      碎掉的粒度是我上面那句「…对外零 import」（模块级）。⇒ 改成写清楚哪个粒度碎、
+      并且说明「本条没翻正是因为它写在了正确的粒度上」。
+      ⇒ 形状：改文档时最容易造的新假账，是【为了衬托本轮的改动】把前人那句话贬低一格。
+
+■ 两处坐标引用与快照
+  本轮改的两份文档【新增引用 0 条】（.scratch/refs.mjs：对 HEAD 版本比 `文件:行号`
+  全集，只报新增），因为新写的那两处落点都用了【特征串】而不是行号，且两条特征串
+  都当场验过在场（各 1 次命中，另配一条必然不命中的对照拿到 0）：
+    `const verdict: GateVerdict = evaluateGate({`
+    `input.reviewer.roleId === input.producer.roleId`
+  ⚠ 裸 `:266` 那一发（上面第 3 条）如果留着就会造一条【新的未快照引用】，而 doc-refs
+    只在快照里比对 ⇒ 新引用会不会红取决于它扫不扫这篇；我没赌它，直接改成特征串。
+
+■ 棘轮：三条都没放宽
+  · test-type-baseline：packages/hub/test/http 与 test/web 一度 24→27 / 3→4，
+    按【站点】归因后是我自己那 3 处 `res.body` 未定型 ⇒ 加 cast，上限回到 24 / 3。
+    剩下 4 处（org-route.test.ts:464/466/467、app-pure.test.ts:331）逐条核对属 HEAD
+    既有代码，不是本轮引入 —— 没动上限。
+  · lint-baseline（format 161 / organizeImports 117 / noAssignInExpressions 1）：
+    format 一度 160→162，用【集合差】证明多出的正是【我新建那两个文件】，
+    只对那两个文件跑 `biome check --write`（守卫自己那条 carve-out：新建文件没有
+    HEAD 版本，不可能漂别人的行）⇒ 回平，【没有抬任何上限】。
+  · 本轮后半动 dead-modules.test.ts 之后 biome 报 format 一处，位置在 :566 那一发
+    （`readout(new Map([...BASELINE].filter(...)))`）—— 对照 HEAD 同一句在 :541
+    【字节相同】⇒ 那条是既有的，不是本轮引入；我新加的那些行 formatter 无话。
+    lint-baseline.test.ts 12 发仍绿 ⇒ 不改它（改别人的行正是那条守卫要防的）。
+
+■ 调用点普查（本轮量的，带阳性对照 + 反向对照）
+    sameFamilyReviewBlock      src 内 3 个调用点：author-reviewer.ts:213（gateConfigBlock
+                               内部，那层死着）/ harness/verifier.ts:251（verifier 死着）/
+                               review-preview.ts:122（【唯一在可达链上的一个】）
+    gateConfigBlock            0（连文件内都没有）
+    selfReviewEdgeBlock        1（gateConfigBlock 内部）
+    independentReviewerPath    1（selfReviewEdgeBlock :183 内部 —— ⚠ 别记成
+                               gateConfigBlock 调它：gateConfigBlock 在 :206，:183 在
+                               :179 那个函数体里。这一条我先记错过一次，靠重读函数边界改的）
+    mergeForbiddenForRun       0（roles/loader.ts:150 只有定义）
+    forbiddenRemovalAttempt / unauthorizedAttemptPayload   0（0064 已删）
+  ⇒ 「author-reviewer 活了」这句话的准确形状是【一个函数被接上了，其余四个仍然没有】，
+    而且接上的那一个是【读数】不是【拦】。基线注释与本仓那张表都按这个形状写。
+
+■ 实跑
+  packages/hub/test/gates/review-preview.test.ts 17 · packages/hub/test/http/org-route.test.ts 21
+  test/web/app-pure.test.ts 99 · test/web/renderer-criteria.test.ts 23 ⇒ 四文件合跑 160 passed
+  test/arch/ 全目录 33 文件 516 passed（含 dead-modules 23、doc-refs 2、lint-baseline 12、
+  test-type-baseline、zero-producer、claims-registry）
+  tsc -b exit 0 · node --check packages/web/public/app.js OK
+  U+FFFD 扫描：本轮 4 个改动文件 CLEAN
+  ⚠ 这些数【不等于】`pnpm verify` 绿，也【不是】全量。
+
+■ 顺手量到、本轮【没动】的一格：一条【守卫早就知道真相】的过期主张
+  设计文档 §5.1（表头在 :1641）那一行的 Task 4.7 写着「❌ 两个工件都没有：**spec 没建**」
+  （:1656，现在时），而 `test/e2e/mobile-approval.spec.ts` 在盘上且已入库
+  （337 行，08a299e / 2026-11-20）。
+  ⚡ 关键不是「文档过期」这一族（那一族本仓记过最多次），是【这个具体格子已经有机器知道】：
+  `test/arch/plan-gate-paths.test.ts:271` 明写「2026-11-19：test/e2e/mobile-approval.spec.ts
+  也建出来了 ⇒ 期望缺项【清零】」，:243 还写了那条豁免是按「该文件不存在」的成立条件
+  消失而摘掉的。⇒ 摘豁免那一次把【账】改对了，而 §5.1 那张表【到今天】没跟着改；
+  守卫判的两件事（豁免账 == 0、验收行点名的路径都在盘上）都【不读】§5.1 那一句
+  ⇒ 那句话过期之后【一条守卫都不会红】—— 这一点由本轮实跑证明：arch 全目录 516 发全绿，
+  而这一句就在全绿的仓库里。这正是 §1.3 那张「三处文档说的已经过期」表要抓的形状，
+  而它自己在 round278 之后又长出了第四处。
+  ⚠ 另两处提到这个文件的句子【不改】：:1937 前缀是「round291 复述」（round291 = 11-17，
+  文件 11-19 才建 ⇒ 那句在它自己那一次测量里是真的，属「旧行按口径留着」那一族）；
+  :2288 讲的是豁免账本身，那句话今天仍真。
+  本轮只记录、没改：改 :1656 要先判那一格【今天卡在哪】—— 同一行自己后半已经写了
+  「今天只卡真凭据这一格」，所以正解大概是把「spec 没建」换成「spec 在、跑不了（卡凭据）」，
+  而那要先把沙箱那一格读准，不是删句子。
+
+■ 射程 / 本轮没做的
+  没跑全量 vitest —— 用户约定的是【完全开发完再跑】，本轮只跑受影响文件（上一次全量
+  基线是 148 文件 / 3221 通过 / 6 skipped / exit 0）。没有 commit（没被要求）。
+  明确【不建】：bindings verify/rebind/申请 UI、POST /org UI、mint-token UI。
+  CEO 门那边原样挂着：20 秒那一问、`knownRoles` 注入（0030 §8）、真飞书凭据、
+  `TERMINATED`、`BUDGET_PAUSED` 的入边、会议/辩论子图、`parallel_allowed`、charter 直通、
+  0006 §8 的 A/B/M、§9.3/§9.5/§6.2、0005 §11.4、0007 §5.2、以及【全仓 format】。
+  下一格候选：gateConfigBlock 那第三态（接上还是删，照 0064 的「带理由删除」办）。
+  ⚠⚡ 我在这最后一行【写下之前】先量了一遍，结果把我自己的草稿推翻了两次：
+   ① 草稿写「库里【没有】保存门控配置的路由」—— 假的。`POST /org` 的
+      `add_edge` 那一支（`orgChangeSchema` 的 `delegationEdgeSchema` = {from,to,review_gate}）
+      【就是】保存门控配置的路由，`commit.ts:202` 还把它交给 `validateNewEdge` 判。
+      ⇒ 我那句话把【两条不同的东西】并成一条了：边上的 `review_gate`（走 POST /org，
+      落进 graph_json）与那张 `review_gates` 【表】（实测 src 内 INSERT/UPDATE/DELETE
+      全 0 处，唯一一处提到它的字节是 integrity.ts:948 那条自检文案里的字符串）。
+      表没有写入方是真的，路由不存在是我编的。
+   ② 于是「它没有等待被判的输入」也不成立：保存期输入就在 POST /org 上。真缺口是
+      另一格 —— `validate.ts` 里 `no_independent*` 命中 0、`from ===` 命中 0 ⇒
+      保存期判了 自审 / 缺家族 / 同家族 / 升级可达 / 深度，【没判】那条
+      「作者必须有一条带门控且指向别人的出边」（`independentReviewerPath` 那条口径）。
+      ⇒ 所以 gateConfigBlock 不是 0064 动作 3 那种「为不存在的输入造审计」，
+      它是【一份已经有两份正本、再接就是第三份】的判据（validate.ts 的
+      violatesNoSelfReview + author-reviewer 的 sameFamilyReviewBlock + dispatch 的
+      reviewGate，而 validate.ts:410 自己写了「这两份不能合并成一份」）。
+      那一格怎么落需要单独一轮，不能像刚才那样顺手写进「下一格」。
+      ⚠ 而且【不能顺手接】，有一条实测出来的理由：`validateNewEdge` 判的是【边还没进图】
+      的 org（它的 `reviewGate` 入参那段注释 :362-371 记的就是这个形状 —— 按规格字面
+      判「这条已存在的边带不带门控」会让【第一条新边必然被拒】）。同一格套在判据 3 上：
+      「作者要有一条带门控的出边」若对着【不含待加这条边】的 org 判，任何一个作者的
+      【第一条】出边都过不了 ⇒ 把刚读过的坑原样再挖一遍。正解要把待加边一起算进去，
+      而那是一次口径变更，不是一行接线。
+   ③ 顺带量到 gateConfigBlock 自己的注释与代码不符（本轮【没改】，它是 0 调用方的死码）：
+      文件头 :8-14 列了三条判据，函数注释 :203 写「配置页要一次把【三个】问题都显示出来」，
+      而函数体只有【两处】`problems.push`，且 `sameFamilyReviewBlock` 是 8 个互斥
+      提前 return ⇒ 判据 1（同角色）命中时判据 2（同家族）根本不求值 ⇒ 上限是【两条】。
+      既有的那发用例说的也是两条（:229 标题「两条理由一次全报」+ `>= 2`）。
+      ⇒ 这正是本文件 :137-138 自己立的规矩（「注释承诺了实现没有的性质，比没有注释更坏」），
+      而它写在同一个模块里。不改的理由：给死码修注释是给下一轮【可能接线】埋一枚
+      「已经对齐了」的假信号；要么连着 ② 一起接线时改对，要么 ③ 跟着 0064 一起删。
+  ⇒ 记这一格的理由：这是本轮【第二次】差一点把没量的话当结论写进台账（第一次是
+    上一节那四处读回来的），而这一格靠的是【动手写下一轮之前先 grep】。
+
+
+
+══════════════════════════════════════════════════════════════════
+================================================================================
+round339（2026-11-22）委派边那枚 chip 第一次读出 review_gate 的门控状态，
+以及【两条活的假话】被同一发改掉：帮助文字承诺服务端"仍会按那三判拒"、
+文件头承诺"逐条说原因"—— 都对各自描述的那条路说错了
+================================================================================
+
+■ 这一发交付的是什么（一句话）
+  界面上第一次能看出【哪些委派边带门控、哪些显式声明"产出没人看"】—— chip 从
+  「a → b」变成「a → b · 已门控 / 无门控 / 门控未知」。spec §16.6 要的是「边上的
+  小锁图标 = 审阅门控」，本轮落的是【边上的一句话】不是那枚图标：§19.2 那张配色表
+  按用途只给了六格（背景/卡片/琥珀/蓝/绿/灰），没有一格给「配置状态」—— 加色就是
+  自己发明一档，而文字不需要新语法。⚠ 这一句是【我的取舍】，不是规格原话。
+  代码：packages/web/public/app.js —— edgeChip()（新纯函数 3 态）+ renderOrg 接线 + 帮助文字
+        + renderOrg 文件头一句
+  测试：test/web/app-pure.test.ts    edgeChip 节（+6）
+        test/web/renderer-criteria.test.ts  ⑥ 节（+8）
+        test/web/app-loader.ts     EXPORTS 加 "edgeChip"（1 行）
+  ⇒ 本轮新写用例 14 发 = 6 + 8。（app-pure 105 = 99 既有 + 6，renderer-criteria 31 = 23 既有 + 8，
+    由 describe 块切数出来，不是工作区减 HEAD。）
+
+■ 被改掉的假话一：帮助文字承诺"服务端仍会按升级可达 / 自审 / 同家族那几判拒它"
+  这句【页面连编辑器都没打开就能看见】的话在实测前是这样被信的：作者大概以为
+  判据共享 = 判据顺序并列。真值：validateNewEdge 的 !reviewGate 那一格在 src 里
+  :383（"missing_review_gate"），checks 顺序 = unknown_role(:379) → missing_review_gate
+  (:383) → violatesNoSelfReview(:389) → canReach(:394) → wouldExceedMaxDepth(:402)
+  ⇒ review_gate=false 时，后面那三条【一行都没求值】。其中 canReach 那条还得
+  臆想一下才成立：不勾提交，服务端直接以 missing_review_gate 拒，返回，根本没到
+  判定「能不能到 CEO」。⇒ 不勾 = 只能知道「拒了」，其余三条【这一发里不存在】。
+  ⚠ 新帮助文字写成：不勾 ⇒ missing_review_gate 第一个能失败（只有"角色不在图里"
+  排在它前面）⇒ 那三条根本没被求值 ⇒ 想先知道顺不顺，得带着勾提交。以及明确的
+  「界面不做那条判据的抄件，所以这里不预测结果」。
+
+■ 被改掉的假话二：renderOrg 文件头「422 时界面回弹并逐条说原因」
+  这一句的宿主是【拖拽 reparent】那条路 —— 而 reparent 走的正是那一支只带
+  【一条】reason/code 的分支（http/org.ts:140 `{ error: r.reason, code: r.code }`），
+  逐条列（`{error, issues}` 数组）的是"请求体没过 schema"那一支（:118-120）。
+  所以这句话在【它自己描述的那条路上】从来没说过真话。⇒ 改成"回显服务端正本
+  那一句"，并注明别再说成「逐条」。
+  ⚠ 这不是宽松：禁的是【那句错的搭配「逐条说原因」】。剥注释后的代码里，
+  三个字「逐条」仍有两处合法（本轮帮助文字那句「逐条列的是请求体没过 schema」+
+  岗位书「建议逐条过目」）；一刀切会把真话削掉 —— 本文件 §⑤ 之前记过同一刀两次。
+
+■ 三态为什么是三态（而不是两态）
+  review_gate 在 schema 里是必填 boolean（z.boolean()），所以 undefined 只有一种
+  成因——【绕过写侧】的那一类（手改的库 / 别的 reader 喂的图 / GET /org 这头只是
+  JSON.parse 没再过 schema）。那时打「无门控」就是把「读不到」说成「读到了 false」，
+  两种情况的处置动作相反：前者查装配/跑自检，后者去把勾上勾重发。⇒
+  与 reviewIndependenceBand 缺 review_independence 那一格同一个取舍。
+  ⚠ 本轮查过：review_gate: z.boolean() 自从它第一次入库（71ee118）就是必填，
+  【从来没 optional 过】⇒「历史遗留的旧版本没这个字段」这第三种成因是假的，
+  别写进注释。
+
+■ 变异矩阵：10 发中 9 杀、1 发【按设计】不杀；两个被逼出来的新守卫
+  10 发 = 读取删除(M1·红5) / 三态并两态(M2·红4) / 预测后果抄件(M3·红3) /
+            加琥珀色(M4·红2) / 假承诺回来(M5·红2) / 逐条说原因回来(M6·红1) /
+            服务端门控检查挪到最后(M7·红1) / 静默降级整条边(M10·红1) / 顺序说错(M8·红1)
+  ⇒ 9 杀、M9 按设计不杀。
+  （M1…M8 之外多了 M9、M10 两发：M9 是行为不可见的那一发，M10 是钉态度测试的那一发，
+    列表 = 本轮探针里的 MUT 数组（D:/item/.scratch/mut/run.mjs），重跑同一把就有权威读数。）
+  · M6、M8 第一版是【活着的假守卫】，被矩阵逼出来之后才补上第二版：
+    - M6 第一版禁两条窄短语（`422…逐条说原因` / `拒了逐条说原因`），M6 把动词换
+      个说法就全绿 ⇒ 那等于禁「我抄过的两种措辞」，不是那件错事。改成禁【那个
+      搭配本身】「逐条说原因」，并配 fixtures 证明尺子看得见它住在模板串里、真话
+      仍在场（appCode 有「逐条列的是请求体没过 schema」+ appSrc「逐条过目」）。
+    - M8 第一版只钉服务端正本的顺序，M8 改界面那句「它是第一个能失败的判据」
+      全绿 ⇒ 只钉正本没有钉【界面自己那句话】。补一发界面级断言：missing_review_gate
+      那 200 字窗口必须含「第一个」+「角色不在图里」；把顺序说错立刻红。
+  · M9 把 e.review_gate 改回 e?.review_gate 预期【不】被杀 —— 行为不可见（esc(e.from)
+    对 null 同样抛），这一发是【证实那条注释是散文】：它不是守卫钉的东西。
+  · 探针这轮踩了三坑，都是【尺子形状】，不是数错了：
+    (1) heredoc 把 `([\\/])` 吃成 `([\/])` ⇒ biome 的 `packages\web\…` 一条都按不中，
+        hits 恒 0。备份里那条正则其实是好读的；拦下我的是【尺子活着】的对照。
+    (2) M10 那发是被 sed 塞进多行字符串造出一个语法错误，node 根本没 parse ——
+        而我上一轮还读了【上一轮】的 out.txt 当真。（out.txt 读不到 = 没跑。）
+    (3) 阳性对照写进【循环里面】会在真干净的文件的 0 上响 ⇒ 移到外面用一次
+        合并输出（12 条肯定非空）喂解析器，0 才算数。
+
+■ 本轮改的行上 0 条新 lint 诊断（格式/棘轮都没动）
+  四个文件 = app.js(7 诊断全在 70 行以外的既有代码) / app-pure(2) / renderer-criteria(3) /
+  app-loader(0)。3 条 `noUselessEscapeInRegex` 在 5 节（不是 6 节）—— 那些 `[*\/]`
+  是 round338 写进去的，不是本轮。全仓 biome 计数现状 272/113/5；lint-baseline /
+  test-type-baseline / doc-refs / doc-ids / comment-citations / dead-modules 六个守卫 90 发全绿
+  （这 90 发是守卫自己判的上限，那 3 条 5 节诊断没造成任何守卫红）。
+  ⚠ 那句「与基线同」我没量过——本轮只有现状数，没有 HEAD 的全仓逐文件对账。
+
+■ 顺手改的一条过期注释：fnBody 那段「④ 与 ⑦ 两节都用它」
+  ⑦【从来没有存在过】—— HEAD 那版只有 ①②两个小节（正文另有一处 ⑤ 是指向
+  driver-status.ts 清单第 5 条，不是本篇小节），到本轮前工作区的圈号是 ①…⑤。
+  ⇒ 改成 ④⑤⑥ 并按【实际调用点】Grep 可复算。导致这句的去处：它不是被某个守卫
+  抓的，是【正在加 ⑥ 节】时才在旁边看到 —— 与 0062 §6 那条「编号不许指空号」
+  同族，只不过指向本文件自己的小节号。
+
+■ 本轮没做的 / 留的账
+  · 没动全量：用户约好「完全开发完再跑」。上面 691 发 = test/web(175) + test/arch(516)。
+  · 没有 commit（没被要求）。
+  · 【顺手量到、没动的账】：request body 带整张 graph（api.ts:681 `graph: orgGraphSchema`），
+    add_edge 之外的 kind 都不调 validateNewEdge，reparent 那一支把 edges 原样透传回来
+    （commit.ts applyChangeToGraph reparent 分支），整图重判只有 everyNodeDeclaresModelFamily
+    （判 nodes 不判 edges）⇒ 理论上可以带一条 review_gate:false 的边坐 reparent 进去，
+    读侧自检（integrity delegation_edges_gated）是它的影子。这是一格【真洞】但是
+    服务端那条判据的事 —— 本轮只把门控在界面上【显示出来】，没动手补写侧。
+    要落的话是它自己的 round（变更有风险，要先写 red 用例）。
+  · 【0 新行号引用】在 docs 里：本轮没改任何 docs 文件，只改了源码注释。
+  · 【顺手量到的一处（不修的）】：design 文档 §5.1 那个「spec 没建」（:1656）在 round338
+    记过了，本轮没动它。
+
+================================================================================
+round340（2026-11-22）纯前端可访问性/交互四小项一次补完：nav 标了 aria-label、
+纯 JS 页面有了 <noscript>、今日页「扔个想法」支持 Ctrl+Enter 快捷提交、
+看板详情抽屉多了「打开完整回放」直达链接 —— 四件都来自前端侦察，不碰后端
+================================================================================
+
+■ 这一发交付的是什么（一句话）
+  读屏把导航叫得出名（aria-label="主导航"）、无 JS 用户看得到一句说明、
+  键盘党在想法框里 Ctrl+Enter 就能提交、看板抽屉一键跳到同一任务的完整回放 ——
+  四件全是 DOM/事件/语义侧的小账，没有一条牵涉服务端行为。
+
+■ 改了哪些文件、落在哪一行（四个文件，无 Write 覆盖）
+  · packages/web/public/index.html
+      :213  nav 加 aria-label="主导航"
+      :216  <noscript>此应用需要 JavaScript。请启用后刷新。</noscript>（body 内、<main> 前）
+  · packages/web/public/app.js（纯 JS：无 TS 语法、顶层不抛，未新增任何 import）
+      :198-210  nav 段重构：新增纯函数 navLink(view, cur)，当前视图那枚链接
+                带 aria-current="page"（渲染侧 .act 与语义侧 aria 同一把尺，
+                别处不再有第二份 nav HTML）
+      :448-450 新增纯函数 isCtrlEnter(e)：恒返回布尔，只认主键 + 不带 shift，
+                null 事件一律 false
+      :472-503  bindIdea 重构：提交逻辑收成一份 submit()，点击按钮与
+                textarea keydown（Ctrl+Enter）走同一个函数 —— 没有抄第二份
+      :987-990  详情抽屉标题行加「打开完整回放」<a href="#/replay?id=…">，
+                带 data-replay，挂在 hash 上。零改造既有导航协议
+      :1006-1009 抽屉默认焦点从 .drawer .btn 换成 [data-close]：
+                加了那枚链接后 .drawer .btn 第一枚变成跳走的链接，
+                默认落点不该是"离开上下文"的动作
+      :191-192 / :170  hashchange 与 current 解析都把 hash 先按
+                "#/<route>" 拆（.split("?")[0]）—— 这是"链接带 query"
+                能成立的前提，却不改 hash 既有的"只当 #/<route>"解析
+      :2668-2672 renderReplay 读 ?id=<task>：抽屉链接进来直接选中那条
+                （不改造 select 机制，URL 只是预选）
+  · test/web/app-loader.ts  EXPORTS 挂 "navLink"、"isCtrlEnter"（2 行）
+  · test/web/app-pure.test.ts  新增两个 describe（navLink 3 发 + isCtrlEnter 5 发 = 8 发）
+
+■ 为什么下拉任务用「链接 + URL 参数」而不是改 hash 协议
+  replay 视图原来的选任务口是 data-pick select + 模块级 replayTask 变量，
+  hash 从来没有任务参数这一档（模块加载干脆没有参数机制）。硬塞 "_/replay/<id>"
+  会惊动 hashchange 里那段 `ROUTES.some(r => r.id === h)` 的脆弱面（h 多一段就
+  不匹配 → current 整段失效）。所以只加 `?id=` query：hash 的解析逻辑【一行没改】
+  （只有两处 split("?")——那是给"#/replay?id=x"短路用的，等于原样解析 "#/replay"），
+  renderReplay 读 query 预选。⚠ 链接只在打开页时生效一次；之后在回放页里再切
+  任务走的是原 select，URL 里的 ?id= 不再改 —— 这是刻意的（不做 hash 参数与
+  select 状态的第二份同步，那才是漂移源）。
+
+■ 变异矩阵：2 发中 2 杀
+  M1 aria-current 判定抹成恒带 ⇒ 红 1 发（「非当前视图那一枚【不】带 aria-current」）
+  M2 Ctrl+Enter 判定取反（只认裸 Enter）⇒ 红 2 发（「只有 Enter 不算」
+       与「Shift+Ctrl+Enter 不算」）
+  ⇒ 两枚新纯函数各被测试钉住；M0 控制组与 M9 还原复核全绿。
+  注：M1 第一版是「把 aria-current 那一行抹成空字符串」—— 全绿（因为正向
+      断言「当前有 aria-current」红了，负向断言「非当前没有」没红）。这逼出
+      机器里那一发的正确形态：判据的承重面是【非当前不许有】，不是【当前必有】。
+
+■ 本轮改的行上 0 条新 lint 诊断
+  用 git stash 对照：HEAD 上 app.js 本就 2 errors + 6 warnings（noUnusedImports /
+  useOptionalChain / noAssignInExpressions，全在既有代码），本轮新增行没有引入
+  任何诊断 —— 行号变化是 +10 行左右的自然平移。
+  ⚠ 只跑过 biome（对 app.js / app-loader / app-pure / 变异机；index.html 不被
+  biome 收录，手动排版保持原样）。
+
+■ 本轮没做的 / 留的账
+  · 没动全量 vitest（约定「完全开发完再跑」）；test/web 183 发全绿。
+  · 没有 commit（没被要求）。
+  · 【有意没做的边界】：aria 只做了导航与抽屉链接这两件事；<noscript> 只做了
+    一句话提示不做降级 UI；Ctrl+Enter 只绑了想法框这一个 textarea（别的
+    textarea 没有快捷提交这档行为）。抽屉里前瞻那一层仍有注释里的已知边界
+    （scrim 不 inert、Tab 能到身后那层）—— 那是有浏览器证据缺口的一格，
+    本轮不动它（0042 §11 同口径）。
+
+══════════════════════════════════════════════════════════════════
+================================================================================
+round340（组织页查看/编辑模式 · 与同轮 a11y/回放两件套共享轮次号）§18.6
+「查看/编辑」模式意识：默认【查看】，拖拽只在编辑模式活
+================================================================================
+
+■ 这一发交付的是什么（一句话）
+  组织页有了模式意识：进页默认【查看模式 · 拖拽关闭】，点「编辑」才可拖拽
+  （模式条按钮为「编辑 / 退出编辑」，渲染文案两边各自说清状态，帮助文字随模式
+  改口）。§18.6 要求查看模式不可拖拽 —— 拖拽 = 提出一个可撤销变更（§18.2），
+  模式只影响【拖拽绑定】，不碰数据：绑不绑拖拽看 `orgDragEnabled(orgMode)` 的
+  答案，提交与否仍由服务端判（提交口 submitOrgChange 一行未动）。
+  代码：packages/web/public/app.js —— orgDefaultMode / orgDragEnabled / orgModeBand
+        （三个新纯函数）+ renderOrg 接线（模式条、帮助文字随模式、编辑才 bindOrgDrag）
+        + bindOrgDrag 内 pointerdown / keydown 两处 handler 再加一道纯函数守卫（双保险）
+  测试：test/web/app-pure.test.ts  orgDefaultMode/orgDragEnabled/orgModeBand 三节（+7）
+        test/web/app-loader.ts    EXPORTS 加 3 个名字
+  ⇒ 本子任务新写用例 7 发。（app-pure 该时点 = 既有 + 7；与同轮另两件套的工作区
+    共存，全量归最终收尾的人核。）
+
+■ 为什么默认是查看
+  规格 §18.6 明说「查看模式不应可拖拽」，而规格没强制必须先开编辑模式 —— 本轮是
+  「默认查看、点编辑才可拖」的轻量切换：进页若默认就能拖 = 查看模式可拖 = 自己拆
+  规格的台。`orgMode="view"` 是模块作用域（renderOrg 每次重渲都重新 bindOrgDrag，
+  放局部会在下一次 GET /org 回来时把用户刚切好的模式冲掉）。
+
+■ 变异矩阵：3 主判据 + 控制组 + 还原复核 5/5 击杀
+  .workbuddy/round340-orgmode-mut.mjs（照 round330-mut-web.mjs 形状，写真字节、
+  跑前后断言 next !== before、逐字节还原 + reverted:true 核对）：
+   M1 查看也放行拖拽（`return mode === "edit"` → true）⇒ 红 2 发（查看/未知都该禁）；
+   M2 默认写死编辑（`return "view"` → "edit"）⇒ 红 1 发（进页就该查看）；
+   M3 模式条恒编辑（`const on = mode === "edit"` → true）⇒ 红 2 发（查看的话消失、
+      两态按钮同一枚）。
+  ⚠ 唯一一次 M9 复跑假红：与同轮「回放」任务并发写同一批文件，装进竞态；错开跑
+  后 5/5 全绿、reverted 全 true。
+
+■ biome
+  只对四文件跑：packages/web/public/app.js test/web/app-pure.test.ts
+  test/web/app-loader.ts .workbuddy/round340-orgmode-mut.mjs。app.js 那 1 error
+  （noAssignInExpressions :3012）7 warnings 全在既有代码（SSE decode 那一带），
+  本轮新增行 0 诊断 —— 同 round339 台账的口径（行号随同轮并发任务平移）。
+
+■ 本轮没做的 / 留的账
+  · 没动全量 vitest（约定「完全开发完再跑」）；本子任务结束时 test/web 208 发全绿。
+  · 没有 commit（没被要求）。
+  · 键盘路径（Tab 聚焦卡片 + Enter 改报）与拖拽同享模式开关 —— 查看模式两者都不活；
+    <details> 表单那条键盘替代全程可用（改的是汇报关系时同样要先点编辑才显示编辑态
+    文案，表单本身不受模式影响 —— 它是明确的提交表单不是拖拽）。
+
+================================================================================
+round340（回放时间线三处欠账 · 与同轮 a11y/组织页两件套共享轮次号）决策 0052 / §16.7 / §22.3
+「加载更多」分页 · 事件行意见原文 · 头卡汇报关系
+================================================================================
+
+■ 这一发交付的是什么（一句话）
+  回放页三处欠账一次补完（决策 0052 差账表点名，服务端早已支持、前端没接）：
+  ① 分页：以前写死 `?limit=200`，界面显示「可能还有更多」却没法翻页。现在 query 带
+     `&offset=`（游标 `replayOffset` 模块级累计），一页拉满时渲染「加载更多」按钮，
+     点它 = 游标前进 + 重新请求；换任务/关键词/过滤在 renderReplay 监听里把游标归零。
+  ② 意见原文：eventRow 里加一行「意见/理由」—— review_decision 读 payload.note
+     （dispatch.ts:1320 落库那份带 note），approval 读 state_snapshot.note
+     （decision_note 那条真生产者路，approve.ts:413 / real-deps.ts:307 都是
+     `...(note===null?{}:{stateSnapshot:{note}})`）。⚠ 任务书里「approval 事件
+     payload 里有 decision_note」经查在写侧【不成立】：那一列从未进过 events.payload，
+     已按真生产者实现并在测试里钉住「两个字段不同族」的翻版写法。
+  ③ 汇报关系：头卡图版本那行之后追加「 · 汇报关系 角色 ↖ 上级」（读响应里
+     graph.reports_to —— query.ts graphSection 给的任务运行时那一版，刻意不退回
+     当前图）；graph 是 degraded 块时明说读不到 + 原因，角色缺键说「当时不在图上」，
+     reports_to===null 说「→ 顶层」，两句绝不混。
+  代码：packages/web/public/app.js —— replayHasMore / replayNextOffset / eventNoteText /
+        eventOpinionHtml / replayReportsToHtml 五个新纯函数 + loadReplay 翻页接线
+        （游标、加载更多按钮）+ eventRow 接意见行 + renderReplay 三处监听归零游标
+  测试：test/web/app-pure.test.ts  replayHasMore/replayNextOffset（6）+
+        eventNoteText/eventOpinionHtml（5）+ replayReportsToHtml（7）= +18 发
+        test/web/app-loader.ts    EXPORTS 加 5 个名字
+  ⇒ 本子任务新写用例 18 发。（与同轮另两件套的工作区共存，全量归最终收尾的人核，
+    本子任务结束时 test/web 208 发全绿。）
+
+■ 为什么意见字段落点按【真生产者】而不是任务书那句
+  任务书写「approval 事件对应字段是 payload 里的 decision_note（契约 api.ts:504）」。
+  沿库追过一遍：decision_note 是 approvals【表列】的决策附件（approve.ts / real-deps.ts /
+  auto-approve.ts 三条 UPDATE 都写它），而 events 审计行的 note 一律走
+  `state_snapshot.note`（三个生产者注释里都写了「note 进 state_snapshot 而不是 payload：
+  payload 存决策本身」）—— `payload.decision_note` 全仓零写入方。按任务书实现会在
+  界面上永远不显示任何审批理由（一个点了没反应的格子）。故实现取 state_snapshot.note，
+  测试里加了一发「opinion 决定哪一款」锁死「review_decision 不读 snapshot / approval
+  不读 payload」的分桶（两个人各说各话，字段对调会把审阅者与审批者的话互扣）。
+
+■ 变异矩阵：4 主判据 + 控制组 + 还原复核 6/6 击杀
+  .workbuddy/round340-replay-mut.mjs（照 round330-mut-web.mjs 形状，写真字节、
+  跑前后断言 next !== before、逐字节还原 + reverted:true 核对）：
+   M1 分页判据短路 `return rawLen === 0` ⇒ 红 2 发（拉满/不满都该给正确答）；
+   M2 游标忘加当前 offset（`return n`）⇒ 红 1 发（offset 累加那条 toEqual）；
+   M3 意见提取删掉（恒返 ""）⇒ 红 4 发（rd/ap 有 note、esc、两字段不同族）；
+   M4 汇报整段不渲染 ⇒ 红 6 发（在图上/顶层/缺键/degraded/不装没看见/esc）。
+  ⚠ 第一版把 M1 的「形状不对按到底算」、M2 的「输入非整数按 0 计」也列进预计红——
+  实测不红（rawLen===0 恰好也让那几个形状输入返回 false；next(200,null) 期望 200
+  而忘加 offset 的实现也恰好给 200），取消这两个预计并在文件头注明，判据本身
+  仍被那两发正向用例杀掉。
+
+■ biome
+  只对四个文件跑：packages/web/public/app.js test/web/app-pure.test.ts
+  test/web/app-loader.ts .workbuddy/round340-replay-mut.mjs（命令见任务书）。
+  本轮新增行 0 诊断（app.js 既有诊断在本轮之前就存在，行号随同轮并发任务平移）。
+
+■ 本轮没做的 / 留的账
+  · 没动全量 vitest（约定「完全开发完再跑」）；本子任务结束时 test/web 208 发全绿。
+  · 没有 commit（没被要求）。
+  · 没改任何 docs 文件 ⇒ 决策 0052 那张差账表在 0052 文稿里只标了「round325 已做 /
+    round327/328 已做」两格，本轮那三格的服务端早已支持、前端现在才接 ——
+    0052 差账表本身没有需要同步的 file:line 引用（本轮没写 docs，口述记在这里）。
+  · 关键词 + 分页的组合：服务端带 keyword 时 searchEvents 的 limit 被 MAX_SEARCH_LIMIT
+    (200) 再夹一次（effective_limit 反映这个数），前端游标按 rawEntries.length 累计
+    不受影响 —— 命中 0 条时 hasMore(false) 按钮不出现，行为正确，未加专门用例
+    （服务端那条注释已经把这层夹到明处）。
+
+round340 收口（主会话）· 行号漂移修复 + 翻向断言同步 —— 两笔都是「接线落地连带」那一族
+■ ① doc-refs 四键行号顶漂（round336/337 前端批次给 app.js 上方加行顶出来的存量债）：
+  快照键跟文档拼写走，四键同时改两端（SNAP + 文档行号）：
+   · 0042: packages/web/public/app.js:541 → :626（三元表达式被拆成三行，624-626，
+     SNAP 值同步为 626 行内容 `: attention.includes(tk.status) || overBudget(tk);`
+     —— 原始引用语义是完整三元，拆行后行尾在 626，值跟着行走，trim 后逐字一致）
+   · 0050: app.js:639 → :740（「这台 Hub 没开驱动器」那句 msg；740 是真 msg 体）+
+           app.js:794 → :910（esc(tk.status) 渲染）
+   · INDEX.md: app.js:794 → :910（两处：0050 摘要段 + §状态名原文段，73/602）
+  改的四篇文档：003? 不，是 0042 / 0050 / INDEX.md（0050 两处含 203 行那句
+  「app.js:740」同步）。doc-refs/claim-coords/zero-producer/comment-citations 46/46 绿。
+■ ② batch-route.test.ts「反向对照」断言翻向（round337 工作区入了 GET
+  /approvals/:interruptId 单卡详情路由，但旧断言没跟着走，全量才红）：
+  旧断言 GET /approvals/batch → null；新语义 = 匹成 get_approval(id="batch")
+  （app.ts 注释明写：两种都是 404、都不说「用错方法」，与 matchRoute 既有口径
+  「方法不匹配不自动 405」一致，不是新增的坑）。断言同步到 toEqual(get_approval,
+  id:"batch") 并在注释写明翻向意图（不是放宽）。变异自证：改回 toBeNull 红 1 发
+  → 还原 19/19 绿。
+■ 收口读数：全量 vitest 150 文件 / 3352 通过 / 6 跳过 / 0 红（基线 3221 → 3352，
+  = round340 三家 18+7+8 新用例 + batch-route 修复）；tsc -b exit 0；arch 516 全绿。
+  三家子 agent（回放分页+意见原文+汇报关系 / 组织页查看编辑 / a11y 四小项）的
+  落地详账见各自条目（改了 app.js/index.html/app-loader/app-pure + 变异机）。
+  未 commit（没被要求）；全量测试本次属收口验证，之后按约定回到「完全开发完再跑」。
+
+================================================================================
+round341（2026-11-22）纯前端 batch：strategyLine 补读 human_decided · eventRow
+显示 target · 回放 checkpoints_unavailable 降级提示 + 两处死代码清理
+================================================================================
+
+■ 三处新读数（服务端早就在发，前端没接）
+  ① strategyLine（app.js:450）：补读 t.decisions.human_decided_in_window（生产者
+     overview/today.ts:555，DECISIONS_SQL 判据 actor_type='human'，批准/驳回/转
+     深度审阅都算）。>0 时拼「人已拍板 N 项。」插在拦截句与待处理句之间；为 0 时
+     不入句 —— 与 round341 之前的字面逐字一致，老调用方行为不动。
+  ② eventRow（app.js:2841）+ eventTargetText（app.js:2871）：事件行加
+     「→ {target}」小标签。target 形状沿真写入方认（events/recorder.ts targetOf，
+     events.target 列 string|null，写方从不 push 数组）——仍按数组 join("、") /
+     空省略 / 单值原样三形状防御。返回已 esc（库内自由文本直进 innerHTML）。
+  ③ checkpointDegradedNote（app.js:2690）+ loadReplay 头卡槽（app.js:2822）：
+     checkpoints_unavailable（生产者 replay/query.ts:381-383，扁平响应、无
+     top-level degraded）为真 ⇒ 断点区上方一条 warn banner「断点解码失败，仅显示
+     数量」+ 原因；为假 ⇒ 空串。count>0 时附「实际断点 N 个」。
+  测试：strategyLine 3 发（含 0 值逐字一致 + 老服务端缺字段不抛）+ eventTargetText
+  3 发（单值/数组/空）+ checkpointDegradedNote 4 发（true/false/esc/count 边界）
+  + eventRow 3 发 + 源码级守门 N1-N4 4 发 = +17 发。
+  挂 EXPORTS：eventTargetText / checkpointDegradedNote / strategyLine（app-loader）。
+
+■ 两处死代码清理（静态渲染字面，纯函数测试够不到 ⇒ 源码级守门 N1/N2 钉住）
+  ④ data.degraded ? banner(...) 三目删掉（ReplayView 扁平响应无 top-level
+     degraded，恒假分支）。N1 守「data.degraded ? banner(」不得还魂。
+  ⑤ renderToday 左栏「自动决策摘要」details 里重复的 notesHtml(t.notes) 删掉
+     （与 :301 右栏同一行口径说明被整块画两遍）。N2 守摘要区 notesHtml 只一次。
+
+■ 变异矩阵：6 发主判据 + 控制组 + 还原复核 8/8 击杀
+  .workbuddy/round341-frontend-mut.mjs（照 round340-replay-mut.mjs 形状，写真字节、
+  每发断言 next !== before 字节不同 + 逐字节还原打印 reverted: true）：
+   M1 human_decided 那节删除 ⇒ 红 2 发（拍板读数 + N3 接线守门）……
+   M2 eventTargetText 恒返空串 ⇒ 红 4 发（单值/数组/eventRow 有 target/esc）
+   M3 checkpointDegradedNote 恒返空串 ⇒ 红 3 发（true/esc/count）
+   M4 data.degraded 三目删回来 ⇒ 红 1 发（N1 还魂守门）
+   M5 notesHtml 重复删回来 ⇒ 红 1 发（N2 守门）
+   M6 eventRow 内联 target 接线撤掉 ⇒ 红 3 发（N4 + eventRow 两发）
+  跑法：npx tsx .workbuddy/round341-frontend-mut.mjs（串行）—— 8/8 命中。
+
+■ 收口读数
+  npx vitest run test/web/app-pure.test.ts ⇒ 1 文件 / 155 通过 / 0 红
+  （round341 前 138 → +17 = 155）。
+  npx biome check --write test/web/app-pure.test.ts test/web/app-loader.ts ⇒
+  无诊断（import 未用被清掉一处）。
+  变异机 .workbuddy/ 路径在 biome git-ignore 外（同前几轮口径，脚本不被检查）。
+  未 commit（没被要求）；未跑全量（约定「完全开发完再跑」），只跑目标单文件。
+  主张链：本 batch 无 docs 主张链，依据来源写在 app.js 函数头注释与测试注释里
+  （生产者行号：overview/today.ts:555 / replay/query.ts:381-383 / recorder.ts targetOf）。
+
+■ round341 后端并联侦察（只读 + 停手，零写入）
+  候选：「追加预算 → 被挡任务下一轮重新进候选」跨层正循环测试。
+  实测结论：【构造不出，正确停手】—— 泵的花钱门上限读的是启动参数
+  o.taskLimitCents（driver-pump.ts:487 / charter-pump.ts:460 绑参），
+  POST /budget 写的 budgets.limit_cents 全仓唯一的真读者是
+  budget/tracker.ts:92,149,163（引擎层），不进泵的判据。
+  driver-pump.ts:86-88 自记该欠账：「追加预算仍然没有入口……只能『说出来』
+  而不能放开它」—— 这正是"只要不追加预算就一直挡着"每次心跳都说那句的原因，
+  也是 CEO-gated（预算放开动作本身是产品决策，见 round340 剩余缺口清单）。
+  处置：不写测试（硬写=测「请求层改了一列与门无关的数」，假绿），
+  预算同步已在 engine 侧（budget-sync.ts）为真放开铺路。
+  证据：git diff packages/hub/test/http/budget-route.test.ts 为空；0 变异机；0 台账新增（本条即结论）。
+
+================================================================================
+round342（2026-11-22）纯前端 batch：审批卡已决明细 · policy_shadow 显 note ·
+evidence_refs 可点开（三件可读性欠账）
+================================================================================
+
+■ ① 审批卡已决明细 decidedMetaHtml（app.js:1329）
+  现状：loadSnapshot 只取 data.approval.parameters；GET /approvals/:id 响应里的
+  decision_note（string nullable，CEO 打回理由）/ decided_by / decided_at
+  （number ms nullable，pending 为 null）有契约为证（contracts/api.ts:500-503）
+  但屏幕上一个字都没有 —— 展开参数快照看不到「这卡谁决定的、为什么打回」。
+  做：纯函数 decidedMetaHtml(approval)：decided_at 为 null/undefined ⇒ "";
+  否则「已决 · {fmtDate} · {decided_by}」，decision_note 非空再追加
+  「 · 理由：{esc(note)}」。三种缺口各说各话：at 缺 ⇒ 整行消失（pending 没有
+  已决可念）；by 缺 ⇒ "—"；note 缺 ⇒ 不渲染理由占位。时间走 fmtDate
+  （app.js:94，本文件唯一 ms→zh-CN 格式化，未新写抄件）。
+  接线：loadSnapshot 缓存从 parameters 扩成整份 approval
+  （snapshotCache.set(id, data?.approval ?? null)），渲染
+  paramSnapshotHtml(params) + decidedMetaHtml(approval)，缓存命中分支同款
+  （st?.parameters ?? null，避免展开第二次「参数有了、已决细节没了」）。
+  测试 5 发（app-pure.test.ts）：pending⇒空串 / 已决+理由⇒时间（contains 不钉数字）
+  +人+理由 / 理由空缺⇒只有时间+人 / by 缺⇒"—" / note 过 esc。
+
+■ ② policy_shadow 显 note policyNoteHtml（app.js:1164）
+  现状：policyShadowLine 只渲染 blocked_by+missing；服务端 policy_shadow.note
+  有真据（query.ts:271 例「卡片显式标记 irreversible=true：不可逆永不自动通过」）
+  却丢在库里 —— CEO 只知道「谁拦的」不知道「为什么拦」。
+  做：纯函数 policyNoteHtml(note)：空/undefined/"" ⇒ ""；否则
+  <span class="meta">规则依据：{esc(note)}</span>。接线在 policyShadowLine 的
+  require_approval 分支、blocked_by 那行后面追加（label 内联）
+  ${policyNoteHtml(s.note)}；auto_approved 分支不动（那一侧本来带着 rule 名）。
+  测试 6 发：policyNoteHtml 3 发（无⇒空 / 有⇒原文 / esc）+ 接线 3 发
+  （转人工+note 现身 / auto_approved 不念「规则依据」/ note 缺无占位）。
+
+■ ③ evidence_refs 可点开 evidenceRefsHtml（app.js:1134）
+  现状：evidenceLine 只会「证据 N 条引用」（其实证引用是字符串数组：路径/sha256，
+  query.ts:150-170），注释自称「可点开复核」却没有目标，CEO 看到条数还得去
+  别处翻路径。
+  做：纯函数 evidenceRefsHtml(refs)：null/空 ⇒ ""（evidenceLine 已把空态拨去
+  「无证据包」，保旧文案）；非空 ⇒ <details><summary>证据 N 条</summary>逐条
+  <code>{esc(x)}</code></details>。evidenceLine 非空分支改为 " · " + evidenceRefsHtml(refs)。
+  旧断言翻向：evidenceLine「2 条引用」→ 逐条 <code> 原文可见；approvalCard 嵌合
+  「1 条引用」→「证据 1 条」+ <code>x</code> —— 翻向 round342 显原文，非放宽。
+  测试 8 发：evidenceRefsHtml 3 发（null/[]⇒空 / 非空⇒N+逐条 / esc 防注入守门）
+  + evidenceLine 3 发（改后断言）+ 卡片嵌合翻向 + esc 守门。
+
+■ 变异矩阵：6 发主判据 + 控制组 + 还原复核 8/8 击杀（全 reverted: true）
+  .workbuddy/round342-readability-mut.mjs（照 round341-frontend-mut.mjs 形状，
+  写真字节、每发断言 next !== before 字节不同 + 逐字节还原打印 reverted: true）：
+   M1 loadSnapshot 两处 decidedMetaHtml 接线全撤 ⇒ 红 1 发（N5 接线守门）
+   M2 decidedMetaHtml 恒返空串 ⇒ 红 4 发（已决三发 + esc 守门）
+   M3 policyNoteHtml 恒返空串 ⇒ 红 3 发（原文/esc/接线 slNote）
+   M4 policyShadowLine note 接线撤 ⇒ 红 2 发（slNote + N7 接线守门）
+   M5 evidenceRefsHtml 退回旧文案「N 条引用」⇒ 红 5 发（翻向断言 + 卡片嵌合 + 明细）
+   M6 evidenceRefsHtml 摘 esc ⇒ 红 2 发（两处 esc 守门）
+  接线点（loadSnapshot / policyShadowLine 内联）是 fetch/DOM 层，函数测试照不到
+  ⇒ 加源码级守门 N5/N6/N7（app-pure.test.ts「round342 接线守门」，round341
+  N1-N4 同款）：N5 参数快照渲染接 decidedMetaHtml / N6 缓存带整份 approval /
+  N7 policyShadowLine 接 policyNoteHtml(s.note)。
+  跑法：npx tsx .workbuddy/round342-readability-mut.mjs（串行）—— 8/8 命中。
+
+■ 收口读数
+  npx vitest run test/web/app-pure.test.ts ⇒ 1 文件 / 173 通过 / 0 红
+  （round341 155 发 → +18 = 173 发：decidedMetaHtml 5 + policyNoteHtml 3 +
+  policyShadowLine 接线 3 + evidenceRefsHtml 3 + evidenceLine esc 守门 1 +
+  接线守门 N5/N6/N7 3）。
+  npx biome check --write test/web/app-pure.test.ts test/web/app-loader.ts ⇒
+  无诊断。
+  变异机 .workbuddy/ 路径在 biome git-ignore 外（同前几轮口径，脚本不被检查）。
+  未 commit（没被要求）；未跑全量（约定「完全开发完再跑」），只跑目标单文件。
+  主张链：无 docs 主张链，依据来源写在 app.js 函数头注释与测试注释里
+  （契约为证 contracts/api.ts:500-503；note 真据 query.ts:271；refs 形状
+  query.ts:150-170）。
+
+■ round342v2 实现层终扫（两路只读侦察 + 主会话逐条抽查，零生产写入）
+  结论：实现层【仍无可直接派工的干净格】；但价值在定位了 4 个「文档明说该做、
+  代码未做、但牵行为面」的真实缺口 —— 下一轮可按此派工，前提是要接受行为变更：
+  ① 0046 §6-2：recordDecision 返回 boolean 未用，approveCard 该回 422/409 而非 500
+     （牵 http/app.ts 契约面 + IPC，摸清再动）
+  ② 0041 §12 orgVersionUnchecked=true 从未落校验（approvals 写侧不验卡片 vs 组织图
+     版本；加校验 = 可能拒合法旧图，行为变更）
+  ③ 0023 §8.2 启动时报「无审批能力执行器」—— 判定条件要读 harness 配置，纯 log
+     无失败行为可测，属可见性增强
+  ④ 0062 §7-6 SEC_RE 不匹配「§+非数字节号」—— 文档自写「先数存量再动口径」，
+     是自律不是欠账，放宽会改决策文档守卫口径（两边共用一份）
+  已排除（侦察报但抽查翻案）：O2 import 引爆（seed.ts 真 import 自 @opc/contracts，
+  无 langgraph 可删）、O5 交接带证据（写侧契约）、O8 整图判门控（0064 草案无落点）、
+  O10 挂会议事件（timeout 装配面）、0052 eventsReady（wire.ts 已全接）、前端空态/
+  双击守卫（已全）。
+  结论：前置条件 = 「接受 ①② 的行为变更」或「CEO 解锁 O6-3/写侧」才能推进。
+## round343 — 0046 §6-2 statusHint：打回没理由→422、点到过期卡→409（后端桥层）2026-11-22
+- docs/decisions/0046-*.md §6-2 列出的「打回没带理由」「点到过期卡」缺可机读状态码（342v2 扫描出的真实缺口 1/4）。
+- 改动：
+  - packages/hub/src/channels/abstraction.ts：ChannelActResult 增加可选 `statusHint?: 422 | 409`（ok:false 分支）。
+  - packages/hub/src/channels/approval-bridge.ts makeChannelAct：note_required / waiver_note_required ⇒ {ok:false, why, statusHint:422}；stale_card ⇒ {ok:false, why, statusHint:409}；decided/already_decided 及兜底不动。
+  - packages/hub/test/acceptance/im-reply-approves-card.test.ts：seedCard 透传 cardKey；新增 3 测（422 打回没理由且未写库 / 409 点过期卡+批准 own 卡做分母 / decided 无 statusHint 对照）。
+- 验证：im-reply 15/15；engine/approve + bindings/im 94/94；tsc -b 0。
+- 变异（.workbuddy/round343-statuscode-mut.mjs）5/5 命中：
+  - M0 控制组全绿；M1 删 note_required→422 映射 ⇒ 红；M2 409 改 200 ⇒ 红；M3 两段接线全删 ⇒ 红；M9 还原复跑全绿，自回滚 reverted:true。
+- 兼容性：statusHint 为可选新字段，bridge/IM 消费者行为不变；前端 IM 渲染路径未依赖它（纯增量）。
+- 主张链：docs/decisions/0046-*.md §6-2 待补 outcome→status 映射表（doc-refs SNAP 需同步键）。——之前文档正文停留在 statusHint 引入前，⚠块记录本次落地。
+
+■ round343 主张链收口（追加）
+  · 0046 §6-2 落地块写入 docs/decisions/0046-*.md §10（桥层语义、行号、测试数、
+    变异 5/5、兼容性与未动项）；SNAP 新增 2 键（channels/abstraction.ts:584、
+    channels/approval-bridge.ts:228，值 trim 后逐字）⇒ doc-refs 2/2 绿。
+  · 顺带修掉本轮前后端批次顶出的 doc-refs 漂移族（round340 同族口径）：
+    0030 channels/abstraction.ts 607→616（round343 +statusHint 顶 9 行）、
+    0042 app.js 626→636、0050 app.js 740→750 / 910→920、INDEX.md app.js 910→920
+    （round341/342 前端批次）。SNAP 5 键与 4 篇文档同步，doc-refs 2/2 绿。
+  · 相邻 arch claim-coords / comment-citations / zero-producer 44/44 绿。
+  · biome（仅改到的 4 文件）：本轮新增行 0 诊断；3 error + 2 warning 全部存量
+    （doc-refs.test.ts:769/991 noTemplateCurlyInString 既有 SNAP 模板字面量、
+    import 排序、两处 formatter 长注释行），按「不提升基线」纪律未动。
+
+--------------------------------------------------------------------------------
+round344 0046 §6-2 状态码 http 侧：decide 点到过期卡 ⇒ 409、打回没理由 ⇒ 422
+（342v2 缺口 1/4 的【后半】：round343 做了 IM 桥层，这一发补 HTTP 写路径）
+--------------------------------------------------------------------------------
+■ docs 依据：0046 §6-2——「点到过期卡片」「打回没带理由」语义上是调用方请求
+  不成立，更对的码是 422/409 而不是 500；real-deps.ts 原注释明写「修它要把
+  HubDeps.recordDecision 的返回值从 boolean 换成带成因的结果」。
+■ 决策：不拆 boolean 契约（保持 16 个测试 stub 零改动），新增 DecisionStatusError
+  子类（name + statusHint: 422|409），decideWithEngineEdge 里
+  note_required/waiver_note_required ⇒ 抛(422)、stale_card ⇒ 抛(409)、其余照抛 Error。
+■ 改动：
+  · packages/hub/src/http/real-deps.ts：DecisionStatusError 类 + decideWithEngineEdge
+    三条 outcome 的映射（decided→true、already_decided→false 不动）。
+  · packages/hub/src/http/app.ts handleRequest catch：按 name==="DecisionStatusError"
+    + statusHint 取值（只 422/409，其余不下滑），折叠成 json(码)+原文；其余 500 不变。
+    结构判断刻意双锁（名字+取值）：外部依赖抛偶带 statusHint 的对象不会被误折叠。
+  · packages/hub/test/http/decision-engine-route.test.ts：新增「点到过期卡 ⇒ 409」
+    （hub(status:FINAL_REVIEW) + seat:FINAL_REVIEW own 卡 + seat:ESCALATED_TO_CEO
+    旧卡；点旧卡 ⇒ 409 + 库零写；批 own 卡 ⇒ 200 做分母）；「第二道网」那发断言
+    升级为 name==="DecisionStatusError" && statusHint===422（变异促成的升级：
+    只 toThrow 的话丢 422 的变异会漏网）。
+■ 验证：decision-engine-route 10/10；相邻 contract + real-deps + im-reply 99/99；
+  tsc -b 0。
+■ 变异（.workbuddy/round344-statuserror-mut.mjs）5/5 命中、全 reverted:true：
+  M1 stale_card 改抛普通 Error ⇒ 409 那发红；M2 note/waiver 改抛 Error ⇒ 第二道网
+  红（name/statusHint 断言抓的）；M3 两段接线全删 ⇒ 两发红；M0 对照绿、M9 还原绿。
+■ 兼容性：DecisionStatusError extends Error，CLI/桌面直连调用方照旧只读 message
+  （行为不变）；HTTP 侧从 500 变 409/422 是【往对的方向移一档】，桌面 IPC 的
+  rejected 通道本来就透传（channels.ts:57 那条「500 长成操作失败请重试」的立场
+  因此少吃到两种假象）。没 commit；没跑全量。
+■ 主张链：0046 §10 落地块在 round343 写「http 那一格仍未动」——本轮补上，需
+  同步该块 + doc-refs SNAP（real-deps.ts 新增 DecisionStatusError 抛出点）。
+
+■ round344 主张链收口（追加）
+  · 0046 §10 追加 round344 落地块（http 侧 DecisionStatusError + handleRequest 折叠
+    + 测试 + 变异 + 桌面行为不变）；doc-refs SNAP 新增 1 键（0046>channels.ts:57）。
+  · round344 顶漂族（app.ts/real-deps.ts 顶部加代码 ⇒ 下方行号整体下移）：
+    app.ts 567→585（INDEX、0030）、real-deps.ts 808→835（INDEX、0059）、
+    960→987（0011、delegation-rules）、587→614（0042）、538→565（0044）、
+    app.ts 1241→1259（0015）。SNAP 9 键 + 9 篇文档两端同步 ⇒ doc-refs 2/2 绿。
+  · 相邻 arch claim-coords/comment-citations/zero-producer 44/44 绿。
+  · biome（仅改到 5 文件）：本轮新增行 0 诊断；6 error + 5 warning 全部存量
+    （real-deps:82 WriteQueue unused、organizeImports×3、doc-refs 模板字面量×2、
+    test:309 noNonNullAssertion）按「不提升基线」未动。
+  · tsc -b 0；未 commit；未跑全量。
+
+■ round345 0060 §8「探针三个数还没有 UI」界面半落地（记忆三数进今日视图右栏）
+■ 背景：0060 §8 剩四件，这一件是唯一前端缺口 —— 探针三数（scope_rows / gate_rows /
+  gate_unattributed_rows）进 GET /today 的 memory 格（键名集合被钉住），而 web 侧
+  从未渲染（grep 确认 app.js 零消费者）。口径（role-memory.ts:889）：gate_unattributed_rows
+  ≠ unattributed（O3 验收口径，需 is_decision + JSON）—— 界面只展示窄口径，不混淆。
+■ 改动：
+  · packages/web/public/app.js：新增纯函数 memoryBandHtml(m)（读三键、拼字符串 + esc，
+    全 0 静默 / gate=0 明说「在等它的生产者」而非「角色没做过决定」/ unatt>0 补「按
+    actor_id 分桶【不会】进任何角色的提示词」）；renderToday 右栏接线
+    ${memoryBandHtml(t.memory)}（夹在 budgetHtml/notesHtml 之间）。
+  · test/web/app-loader.ts：EXPORTS 追加 memoryBandHtml（取数层 getToday fetch 不列）。
+  · test/web/app-pure.test.ts：5 发（常规两口径不混 / 三数全 0 静默 / 空档在等生产者 /
+    形状防御 / esc）；app-pure 178/178。
+  · test/web/renderer-criteria.test.ts：2 发源码守门（三键真的被读 + memoryBandHtml(t.memory)
+    真的接在 renderToday 里）；renderer-criteria 33/33。
+■ 变异（.workbuddy/round345-memory-band-mut.mjs）5/5 命中、全 reverted:true：
+  M1 恒返空串 ⇒ 常规/空档/esc 红；M2 未署名两行删 ⇒ 常规红；M3「在等生产者」删 ⇒
+  空档红；M4 renderToday 接线撤 ⇒ 新接线守门红（源码扫）；M5 形状防御删 ⇒
+  三数全 0 的 undefined 分支 + 形状防御红（首跑抓到我预期划分错误：band(undefined)
+  与 defShape 同一只脚，expectRed 修正后再跑 7/7）。M0 对照绿、M9 还原绿。
+■ 主张链（doc-refs 双端同步）：
+  · 0060 §8 第三项改~~还没有 UI~~ ⇒ 【已落地 · round345】块（memoryBandHtml app.js:413、
+    接线 app.js:301、测试与变异证据）；第四项保持未落地（unattributed 不在 t.memory，
+    并排显示仍未做，补了一句现状说明）。
+  · INDEX 0060 条目「④ 探针三个数还没有 UI」⇒ 「round345 已渲染于今日视图右栏」。
+  · SNAP 新增 2 键（0060>app.js:413 函数声明、0060>app.js:301 接线调用）。
+  · 本条目顺带清掉 app.js 累计顶漂 4 键（0042:636→684、INDEX 与 0050 的 :750→:798、
+    :920→:968）；0050 正文代码块行号注释同步；doc-refs 2/2。
+  · 相邻 arch claim-coords/comment-citations/comment-test-readers/zero-producer
+    + app-pure + renderer-criteria 267/267 绿。
+  · biome（仅改到文件）：新增行 0 新增诊断（存量 error/warning 未提升）；未 commit；
+    未跑全量；tsc 未跑（app.js 是浏览器裸 JS 不在 tsc 树）。
+════════════════════════════════════════════════════════════════════
+round346 · 回放时间线：事件行「基于模式的自动批准」对象渲染 + complete=false 聚合告警
+── 缺口（recon 前端欠账第三轮确认的 2 个真缺口）────────────────────
+  · service 端 replay/query.ts 记 auto_approved 是 {by, rule, annotation} 对象
+    （payload.auto_approved_by 写自 policy/auto-approve.ts），web 侧却是
+    e.auto_approved === true 布尔比较 ⇒ 该标注从未上过屏（缺陷原样在）。
+  · query.ts complete = 读事件时中间缺行，注释明说「界面应当把它渲染成一段
+    看得见的缺口」，前端 0 命中。
+■ 改动：
+  · packages/web/public/app.js：新增纯函数 autoApprovedOf(e)（对象形状防御：缺/
+    null/非对象/数组 ⇒ null；三字段各自 esc，空串归一 null；存 {by, rule,
+    annotation}）；eventRow 改用 const auto = autoApprovedOf(e)，标注 tag
+    「基于模式的自动批准 · rule」+ title 提示 by + annotation 次行（缩进对齐大
+    事件行）；新增纯函数 incompleteNote(complete)（complete !== false ⇒ ""，
+    即缺字段/非布尔都静默，只有显式 false 才出 banner）；loadReplay 渲染头接线
+    ${incompleteNote(data.complete)}（checkpointDegradedNote 之后、事件计数 meta 之前）。
+  · test/web/app-loader.ts：EXPORTS 追加 autoApprovedOf、incompleteNote。
+  · test/web/app-pure.test.ts：+3（对象 ⇒ 标注上屏且带 rule/annotation；缺失/非
+    对象 ⇒ 静默；rule/annotation 过 esc）/+2（complete false ⇒ banner；true/缺/
+    非布尔 ⇒ 静默）；app-pure 全绿。
+  · test/web/renderer-criteria.test.ts：+2 源码守门（eventRow 不再 === true 且真的
+    在调 autoApprovedOf(e)；“接在回放头卡” 的守门刻在 loadReplay 里 —— 首跑用
+    renderReplay 切片扑空，据失败改 loadReplay 后过）；renderer-criteria 全绿。
+■ 变异（.workbuddy/round346-replay-notes-mut.mjs）6/6 命中、全 reverted:true：
+  M0 对照全绿；M1 autoApprovedOf 恒返 null ⇒ 标注/esc 红；M2 eventRow 接线撤
+  （改 const auto = null）⇒ 标注/esc/按对象读守门红；M3 incompleteNote 恒返空串
+  ⇒ banner 红；M4 loadReplay 接线撤 ⇒ 「真的接在回放头卡」守门红；M5 布尔比较
+  复活 ⇒ 标注/esc/「缺失非对象」红（true 也会误标）；M6 判据放宽（undefined 当
+  缺口）⇒ 「缺字段静默」红。三次 expectRed 修正皆因“wiring guard 刻在何处”理解
+  错位（M1/M3 只动函数体接线没动、M5 布尔比较 eventRow 切片覆盖不到再加
+   true 误标真实红）；修正确认页面对期望，不是机器放水。M9 还原复跑全绿。
+■ 主张链（doc-refs）：本次未改 docs 正文（README/INDEX 未新增页面级声明），
+  round346 主张都落在测试+机器证据；doc-refs 2/2 绿、home 守卫全绿；
+  biome（仅改到文件）0 新增诊断；未 commit；未跑全量（等全开发完）。
+──────────────────────────────────────────────────────────────────────
+round346 · EXEMPT 穿透断言（0056 §8 明记「没做」的那条，落地）
+── 缺口 ─────────────────────────────────────────────────────────────
+  0056 §8：EXEMPT 没有「每条豁免必须被某发探针试图穿透」这条断言 ——
+  活性断言只数「key 出现过几次」，be07d9+b 在旧断言下完全合格却弄瞎了 M1；
+  文档给出补法（声明+对账互相覆盖）但注明「没做」。
+■ 改动：
+  · docs/review/verify-open-invariants.mjs：把「豁免表里有没有『加了却从不生效』
+    的条目」从提示日志升级成 ok() 断言 —— exemptLater（出现过但没进④）非空即红。
+    静态半边：今天 16 条全在④承重；将来加条前瞻/死豁免当场红，不再靠探针撞巧。
+  · test/arch/exempt-pierce.test.ts（新）：动态穿透半边 —— 逐条把 key 从 EXEMPT
+    换成非 hex 无效值 zzzzzzz（/\bhex{7,}\b/ 采不到 ⇒ 不污染语料），spawn 原脚本
+    断言【红且点名该 key】+【删了这条确实是豁免桶在红】，然后逐字节回滚。
+    基线绿 + 16 条穿透 + 复跑绿 = 19/19。
+  · ⚠ 设计抉择：探针放 test/ 而非 .workbuddy/ —— verify 扫 .workbuddy/ 与 docs/，
+    key 原文（真 hex）放被扫目录会自成语料污染。round346 实测踩过：探针注释里的
+    7 位 hex 把脚本扫红（"ffff"+"0000" 之 7 位 hex 被采成腐烂）⇒ 这也是 0056 §5b/探针第 89 行
+    「别让探针自己污染语料」的复现。
+■ 变异证据：穿透 16/16（每发真改 verify-open-invariants.mjs 字节 → spawn → 断言红
+  且点名 → 逐字节还原 reverted:true），不是静态文本扫描。
+■ 主张链：
+  · 0056 §8 该条 flip：~~EXEMPT 没有「每条豁免必须被某发探针试图穿透」~~ ⇒
+    【已落地 · round346】（静态断言 + 动态穿透，两条半边都写明）。
+  · doc-refs 2/2 绿；未 commit；未跑全量（等全开发完）。
+round346 · production-deps.tsFiles 的裸 statSync 并发雷保护（0054 §8「不是没有雷」落地）
+── 缺口 ─────────────────────────────────────────────────────────────
+  0054 §5 表格最末格 + §8 登记：production-deps.tsFiles 的 statSync 裸奔，
+  「今天没有并发引爆者，不是没有雷 —— 谁哪天往 src/ 里建个目录夹具，它就是
+  第二个 no-native-deps；修法与本轮（0054）同形」。round346 落地。
+■ 改动：
+  · test/arch/production-deps.test.ts：tsFiles 的 statSync 包上 survivesStat
+    （ENOENT/ENOTDIR ⇒ false ⇒「目录刚消失」被读成「不是目录」，照常跳过；
+    权限类照抛）。新增两条测试：
+    ① 语义半边：survivesStat 对「不存在/存在但非目录 ⇒ false、真目录 ⇒ true」
+       的确定性判据（0054 §3 教训：测试必须测得到东西）。
+    ② 接线守门：读自身源码断言完整调用语句
+       `if (survivesStat(() => statSync(p).isDirectory())) out.push(...tsFiles(p));`
+       原样存在。⚠ 探针串必须拆开拼接（`…tsFiles(p))" + ";"`）—— 写成字面量时
+       断言自己的定义行就含完整字节序列，变异把 tsFiles 改裸奔后 srcText 里照样
+       找得到 ⇒ 守门永远绿（M1/M2 实测全绿当场暴露，是遮蔽不是保护）。
+■ 变异证据（.workbuddy/round346-prodeps-stat-mut.mjs）5/5 命中、全 reverted:true：
+  M1 拿掉保护（裸奔回归）⇒ 接线守门红 1 发（红落点正是那条）✓；M2 换皮
+  （survivesStat2 同语义）⇒ 接线守门红 3 发 ✓；M3 只加注释 ⇒ 全绿（控制组）✓；
+  M0 对照全绿；M9 还原复跑全绿。逐发真抹 test 字节 + 逐字节回滚 + next!==before。
+■ 主张链：
+  · 0054 §8「production-deps 的裸 statSync 本轮没修」登记无需改写（历史条目
+    按本仓规矩留着，本篇只做它）。
+  · doc-refs 2/2 绿；biome（仅改到文件）0 新增诊断；未 commit；未跑全量（等全开发完）。
+round347 · stat 纯函数补执行证据（前端 48 个纯函数里唯一零测试的白名单成员）
+── 缺口 ─────────────────────────────────────────────────────────────
+  stat（packages/web/public/app.js:473，顶部四个大数字格：活跃任务 / 完成 /
+  被阻塞 / 待你决策）在 test/web/app-loader.ts:41 的 EXPORTS 白名单里【早已被
+  捞出来】，但 app-pure.test.ts 直到 round347 前没有任何一条 it 真跑它 ——
+  首页唯一渲染层是零执行证据的纯函数（HTML 拼装、esc、tone 琥珀全无断言）。
+  round347 前端侦查（48 个纯函数逐一点名）把它定位为唯一盲区。
+■ 改动：
+  · test/web/app-pure.test.ts：新增 stat describe，7 条 it：
+    ① 常态无 tone ⇒ class="stat" 无后缀（含 num/lbl DOM 顺序判据 —— 变异机
+       M4 抓出 toContain 逐条查不查次序的盲区，补 indexOf 断言）；
+    ② 琥珀 statbad ⇒ class="stat statbad"；
+    ③ tone 是【条件】加后缀（M2 抓出的盲区：无条件拼 `" " + tone` 在 tone=""
+       时输出 class="stat " 尾空格，t01/t02 都蒙对，补负向正则才抓住）；
+    ④ ⑤ ⑥ 数字 / label / title 三面过 esc（attribute 注入面与 innerHTML 分开防）；
+    ⑦ 消费点回归：app.js:295-298 四处真实传参形状逐字对齐。
+  · 不动 app.js（stat 本身无缺陷，只补证据）。
+■ 变异证据（.workbuddy/round347-stat-mut.mjs）7/7 命中、全 reverted:true：
+  M1 esc 全摘 ⇒ 注入三形红 3 发 ✓；M2 无条件拼类名 ⇒ t01/t07 红 2 发 ✓；
+  M3 tone 条件取反 ⇒ 红 4 发 ✓；M4 num/lbl div 顺序互换 ⇒ t01 红（顺序判据）✓；
+  M5 只加注释 ⇒ 全绿（控制组）✓；M0 对照全绿、M9 还原复跑全绿。
+  两轮期望修正（M2 t02 蒙对、M3 期望表把 t01/t07 放错桶）都是【测试自身
+  判别力被变异机钉出来】，不是机器放水 —— 修正落点是加判据而非改机器。
+■ 主张链：app-pure 190 passed（改动前 183 + 新增 7）；未动 docs 正文，无 doc-refs 同步项；
+  biome（仅改到测试文件）0 新增；未 commit；未跑全量（等全开发完）。
+
+round348 · 前端占位文案三处逐一核对（O14 族侦查：有没有「写着未落地而实际已落地」）
+── 核查 ─────────────────────────────────────────────────────────────
+  ① app.js:1059 「证据包那条链路今天仍未落地（docs 里登记为未完成项）」
+     — 与 O5 登记一致（已交叉验证 OPC-OS-功能优化设计.md:858-859 原文：
+     「动作 1 / 2 登记为前提不成立；~~动作 4 未动~~ 动作 4 已落地」）：未落地的是【生产者】（动作 1/2：dispatch 交接带包），
+     且 O5 明确登记「动作 2 前提不成立」（`grep -c evaluateGate engine/dispatch.ts
+     ⇒ 0`，门控没接进执行路径 ⇒ 先算 integrityOk 是「为到不了的输入造数据」）。
+     读侧（动作 4：approvals 卡片「无证据包」+ evidence_refs 列）已落地
+     （迁移 0008 + round270 台账补齐）——1059 指的不是读侧，文案如实。
+  ② app.js:1950 「信任积分这一页还没有：它没有数据生产者」
+     — 与 0013 §10 实测一致：trust_scores 生产端 0/0（无人写）。文案如实。
+  ③ app.js:380 notesHtml 注释「这条链路今天还没接」
+     — 不是 memory 注释；memory 的渲染半（memoryBandHtml，round345）在 394-412
+     已落地并有执行证据。两处各自如实，不是过期主张。
+■ 结论：三处均无「未落地而实际已落地」的过期文案（app.js 草原上没有 O14 族现行样本）。
+  1059/1950 指向的都是 CEO-gated 或前提不成立项，不可实施；380 是口径性注释，非缺口。
+■ 证据：本行为纯侦查，未改任何文件；无测试、无变异、无 doc-refs 同步项。
+■ 附：前端面全量收束结论（O1-O14 逐项过完，连同今日 app-pure 190 绿复跑）：
+  · 无任何「写着未落地而实际已落地」的过期占位；无零覆盖纯函数（48/48 已钉）；
+    stat 消费点琥珀语义正确（§19.2 仅「待你决策」给 statbad）。
+  · 仍开放的全部是 CEO-gated / 前提不成立：O2 门控上线路（D11 role_id 前置）、
+    O5 生产者（动作 2 前提不成立：evaluateGate 零生产调用方）、O13 动作 2 终止态
+    （状态机加态=规格决定）、O7 预算放行、0049 §12(B) 预算分母（改契约）。
+    均按纪律只报告不实现。前端面到此没有再查一遍的价值。
+
+round349 · O1-O14 服务端动作全量查证（探明的最后一族：不靠前端，逐格核对 14 项的动作落地）
+── 方法 ─────────────────────────────────────────────────────────────
+  子 agent（Explore，只读）逐项读 docs/OPC-OS-功能优化设计.md 的 O1-O14
+  各节【现状/目标/动作/验收】+ ⚡⚠【撤回】后续标注，对每个动作 grep 源码/
+  测试文件抽查落点，输出 45 格表格；本人在主线程抽查 3 条关键结论复核。
+── 结论：14 项里没有一条可独立实施的动作 ──────────────────────────
+  非 CEO-gated、非前提不成立的动作【全部已落地且留有守卫】（O1 三动作+
+  验收 / O2 动作1-3 / O3 三动作 / O4 1、3、4+验收 / O5 3、4 / O6 1、2 /
+  O7 3 / O8 3、4+验收 / O9 1、3 / O10 1、2 / O11 两条 / O12 四条+
+  验收 / O13 1、3+验收 / O14 三条）。未落地的全部收在两类：
+  ① CEO-gated：O7-1（状态机入边=改规格）、O13-2（TERMINATED 态+按钮）、
+     O10-3（会议落点）、O2 剩余环（计划 §10.2 D11 拍板）；
+  ② 前提不成立 / 已宣告不做：O5-1/2（evaluateGate 零生产调用方，实测
+     dispatch.ts 0 命中）、O6-3/4（等写权限放开）、O7-2（BudgetPaused
+     无可观察性，new BudgetTracker 0 个生产 new 点）、O9-2（等 R1 读数）、
+     O4-2（round272 实证保存期已拦截，保留对偶判据）、O8-1/2
+     （NODE_TO_TEMPLATE 代码常量 + ops.yaml 孤儿守卫=已了结决定）。
+── 抽查复核（信任但要验证）────────────────────────────────────────
+  · dispatch.ts grep evaluateGate ⇒ 0 命中 ✓（O5-2 前提不成立属实）
+  · TERMINATED 全仓生产代码 0 命中 ✓（O13-2 无终止态属实）
+  · new BudgetTracker ⇒ 0 个生产 new 点 ✓（O7-2 无生产者属实）
+■ 本行为纯查证，未改任何文件；无测试、无变异、无 doc-refs 同步项。
+  与 round348 前端侦查合起来：前后端可实施面均已穷尽。
+
+round350 · 五个漏网顶层纯函数补齐独立执行证据 + 顺手修掉 linkText 的 null TypeError
+── 缺口 ─────────────────────────────────────────────────────────────
+  round347 侦查自称「48 个纯函数全覆盖」，但那个数漏了 app.js 顶层一批
+  【不在 EXPORTS 白名单、却也是纯】的函数：fmtDate / fmtAgo / windowLabel /
+  joinLines / linkText。它们只在消费它们的白名单成员内部被间接执行
+  （taskCard 里调 fmtAgo、strategyLine 里调 windowLabel……），改坏输出
+  没有任何 it 直接断言（round342 对 fmtDate 是「时间走 fmtDate 不钉数字」，
+  于是 fmtDate 改坏全绿 —— 那行注释本身就是这次漏网的注脚）。
+  round349 的服务端全量查证（另一路子 agent）没碰 web 侧，前端 48 的
+  统计口径又没把「顶层纯函数全集」枚举过 —— 两轮独立侦查都漏了这一族。
+  round350 用【枚举 app.js 顶层函数 vs EXPORTS 白名单】的机械比对抓出来。
+■ 改动：
+  · test/web/app-loader.ts：EXPORTS 白名单 +5（fmtDate/fmtAgo/windowLabel/
+    joinLines/linkText），各带纯性 + 消费点注释。
+  · test/web/app-pure.test.ts：五个 describe、11 发新断言（201 总）：
+    fmtDate 坏值→「—」/好值非—；fmtAgo 缺基准→「—」/四档边界逐字/负秒
+    钳 0；windowLabel 24h→1 天/<24h 小时/≥24h 天；joinLines 数组换行/
+    非数组→空串（≠裸 .join 的判据）；linkText 四档逐字/未知枚举 undefined。
+  · packages/web/public/app.js：linkText 加 null 防护 —— 原实现
+    `(…)[p.link]` 在 p 为 null 时先读 p.link 就抛 TypeError。这不是防御
+    性编程：渲染层 esc(linkText(proj)) 依赖它返回可 esc 的值，proj 一旦
+    中途被置空，TypeError 会炸掉整个视图而不是显示空徽标（本仓「缺失
+    不许被读成一个肯定陈述 / TypeError 是最坏的失败」姿态）。
+■ 变异证据（.workbuddy/round350-util-fns-mut.mjs）6/6 命中、全 reverted:true：
+  M1 fmtDate 坏值「—」→空串 ⇒ 红 1；M2 fmtAgo `<60`→`<=60` ⇒ 红 1；
+  M3 windowLabel 三目写反 ⇒ 红 3（含消费侧 strategyLine 那条，组合正确）；
+  M4 joinLines 兜底删 ⇒ 红 1；M5 linkText null 防护删 ⇒ 红 1；
+  M6 控制组注释 ⇒ 全绿；M0/M9 对照/还原复跑全绿。逐发真抹字节 + 回滚
+  核对 + next!==before。第一版 M1 期望表把 d2 误列 expectGreen —— 变异机
+  当场抓出 d2 里有一行 f(0) 重复断言坏值分支，删掉后 6/6 干净。
+■ 主张链：
+  · app-pure 201 + renderer-criteria 35 = 236 绿（单文件跑，未全量）；
+  · doc-refs/doc-coords 7 绿不受波及（app-loader stat 仍在 :41，无行号漂移）；
+  · 0042 里「app-pure 28 发」是历史读数，不改；本轮 201 是新数值，
+    无 doc-refs 键需要同步；biome（仅改到文件）已跑：重建 round349 基线
+    （把本轮唯一改动 linkText null 防护还原）与当前版诊断 8/8 同行号，
+    净新增 0 实锤（含 app.js:3012 auto.annotation 那处是 round350 前
+    就存在的存量）；注意：git HEAD 里 app.js 是 308–335 的老版本，不含
+    round336-349 任何工作区产物，拿它对照是假证据，本轮已改用
+    「减本轮改动」重建基线；（对照时 biome 对 .tmp.js/.biome-head-appjs.tmp.js
+    直接崩过，需放 include 范围内跑）；未 commit；未跑全量（等全开发完）。
+
+────────────────────────────────────────────────────────────────────
+■ round351（web 顶层纯函数全集补齐 + 事故重建恢复）
+── 缺口 ─────────────────────────────────────────────────────────────
+  round350 补的是顶层纯函数一角（fmtDate/fmtAgo/windowLabel/joinLines/
+  linkText）；round351 用【枚举 app.js 顶层函数 vs EXPORTS 白名单】的
+  机械比对把全集补齐：又 12 个【不在白名单、却纯】的顶层函数 ——
+  esc / money / banner / notesHtml / ideaBox / decideRow / batchPicked /
+  rejectHtml / linesOf / enumSel / replayTimeline / safe。均为「有消费但
+  无直接断言」形状：esc 144 次调用、banner 37、money 11、linesOf 11，
+  却没有一条 it 直接测它们（round347「48 覆盖」对它们同样成立）。
+  改坏输出全绿。测试 describe 名与变异机 expectRed 一一对应。
+── 事故与恢复 ────────────────────────────────────────────────────────
+  开发途中误用 `git checkout -- packages/web/public/app.js`（在未提交
+  工作区上 = 破坏性：把全部 round336-350 工作区改动回滚到 HEAD 老版本），
+  丢失 round336-350 落地的 8 个函数（eventTargetText / checkpointDegradedNote /
+  decidedMetaHtml / policyNoteHtml / evidenceRefsHtml / autoApprovedOf /
+  incompleteNote / memoryBandHtml）+ linkText null 防护 + eventRow 新形状 +
+  loadSnapshot 缓存整对象 + loadReplay 降级接线 + renderToday memory 接线。
+  恢复路径：【变异机 from 锚点（含函数全文）+ app-pure 断言契约 + jsonl
+  会话原文（memoryBandHtml / autoApprovedOf 完整注释与函数体）】逐函数重建，
+  再把接线点按 round34x 变异机 M4/M6/M1 形状还原。git 对象恢复不可用
+  （dangling 均缺 round346+ 内容），故重建即恢复、以测试契约为准绳。
+■ 改动（packages/web/public/app.js 为主，test 双文件 +12 describe / +23 断言 → 224 总）：
+  · 重建 8 函数 + linkText null 防护 + policyNoteHtml / orgDefaultMode 补定义
+    （后两者 b12c25c 也缺，测试要求它们在场）；
+  · eventRow 改回 autoApprovedOf(e) 对象读法 + target 标签 + rule/annotation
+    明细行；eventTargetText / checkpointDegradedNote / incompleteNote /
+    autoApprovedOf 定义落位；
+  · loadSnapshot 缓存整对象、两处接线 decidedMetaHtml；loadReplay 接
+    checkpointDegradedNote + incompleteNote；renderToday 接 memoryBandHtml；
+    policyShadowLine 接 policyNoteHtml(s.note)；evidenceLine 接 evidenceRefsHtml。
+■ 变异证据（.workbuddy/round351-pure-fns-mut.mjs）6/6 命中、全 reverted:true：
+  M1 esc &amp;→& 红 4；M2 money ??0→??999 红 1；M3 banner 空串分支 红 1；
+  M4 safe JSON.parse 红 1；M5 notesHtml 条件→false 红 1；M6 linesOf split 红 2；
+  M0 控制组全绿；逐发真抹字节 + 回滚核对 + next!==before。
+  另修变异机失败解析正则：新版 vitest FAIL 行带 `:行:列`，
+  （round351 之前 LAUNCH 用的旧正则匹配不到，历史机器 round342/344 用的
+  是 `×` 前缀解析不受影响）。
+■ 回归：round340/341/342/345/346×2/347/350 全部历史变异机重跑通过
+  （各 6/8/8/7/8/5/7/8 命中，全 reverted:true）。round340 锚点漂移修复
+  （eventNoteText 的 payloadNote 由一行式折成三行式的排版演进 —— 非产品回归）；
+  round342 M1 from[0] 锚点按原始多行接续形状还原（`slot.innerHTML =` 换行 +
+  6 空格缩进的 X + Y 表达式）。
+■ 主张链：
+  · app-pure 224 + renderer-criteria 35 = 259 绿（单文件跑，未全量）；
+  · doc-refs/doc-coords 不受波及；biome 已跑（app.js + 两测试文件）：
+    7 条 warning 全为存量（56 noUnusedImports / 430·894·928·2118·2771
+    useOptionalChain / 3178 noAssignInExpressions），重建区净新增 0；
+    另把 orgDefaultMode 接进 orgMode 初始化消除自引 warning（1780
+    noUnusedVariables 消失 —— 函数声明被实测消费，不是摆设）；
+  · 未 commit；未跑全量（等全开发完）。
+
+────────────────────────────────────────────────────────────────────
+■ round352（今日页窗口接线：?window_ms= 前端三重奏）
+── 缺口 ─────────────────────────────────────────────────────────────
+  服务端 GET /today?window_ms=N 早落地（http/app.ts:1281-1289，today.ts
+  MAX_WINDOW_MS=90 天 clamp，window_ms 回传响应）；前端窗口自适应渲染也
+  在（windowLabel 已读 t.window_ms）。唯一缺口是【接线】：getToday 恒打
+  裸 /today、没有窗口选择入口、没有分窗口缓存语义 —— 7 天/30 天标签在
+  界面上根本不存在，用户只能看 24h 一小时口径。
+── 改动（packages/web/public/app.js 为主）──────────────────────────
+  · 纯函数三枚（todayWindows / windowMsOfHash / todayCacheHit）：
+    todayWindows 返回三档窗口（首项 24h 不带参数，另两项 7/30 天）；
+    windowMsOfHash 从 #/today?window= 解析（7d/7天/裸 7 归一，非法 ⇒
+    undefined；7.5d 这种小数亦然——Number 而不是 parseInt，防「7.5d
+    被截成 7 天」）；
+    todayCacheHit 分窗口缓存判据（force ⇒ 恒 miss；无窗口只命中默认；
+    有窗口只命中 windowMs 完全相同 —— 7 天与 30 天互不命中，防「7 天
+    标签配 30 天数据」那种两边都对而互相矛盾的陈旧读数）；
+  · getToday(force, windowMs) 重写：显式窗口走 todayWindowCache 那份
+    {windowMs, data}，请求拼 ?window_ms=；无窗口走 todayCache（不破坏
+    既有 24h 读路径）；
+  · renderToday 顶部 windowMsOfHash(location.hash) → getToday(true,winMs)，
+    右侧栏「组织状态 · 窗口」渲染三枚 chip（data-win-ms + href 锚点 →
+    hashchange → load() 自动重渲染，不新增 JS 绑定）。
+── 测试（app-pure +8 → 232；renderer-criteria +2 接线守卫 → 37；共 269）─
+  · todayWindows 定值 3 档；windowMsOfHash 三写法归一 + 非法/小数/空
+    参数 ⇒ undefined + 只认 ?window= 规范键不认杂键；
+  · todayCacheHit 四条（force/无窗/同窗戳/未命中）—— 变异 M2/M3 落点；
+  · renderer-criteria 接线守卫两发（这条是【纯函数飞不到的】）：
+    wireMs 守 renderToday 里 windowMsOfHash(location.hash)+getToday(true,winMs)
+    在、wireQ 守 getToday 里 `?window_ms=${windowMs}` 拼串在（不在注释
+    里 —— stripComments 保证写进注释即红）。
+  · vm 装载器补 URLSearchParams 注入（windowMsOfHash 用它解析 hash；
+    vm context 隔离全局，Node global 不自动给）。
+── 变异证据（.workbuddy/round352-window-mut.mjs）7/7 全中、全 reverted:true ─
+  M1 剥 d/天 尾缀撤掉 ⇒ 7d 解析成 NaN ⇒ 7 天开关坏（红 2：w1+w3）；
+  M2 缓存命中放宽成不看窗口 ⇒ 7 天命中 30 天缓存（红 1：cacheWin）；
+  M3 force 短路删掉 ⇒ force=true 也命中缓存 ⇒ 切窗不重拉（红 1：cacheForce）；
+  M4 getToday 的 ?window_ms= 拼串撤掉 ⇒ 请求永远裸 /today（红 1：wireQ）；
+  M5 renderToday 撤回 windowMsOfHash ⇒ 数据永远 24h（红 1：wireMs）。
+  M0 控制组全绿；每发真抹字节 + 回滚核对 + next!==before；
+  M9 全部还原后 app-pure + renderer-criteria 复跑回到 269 全绿。
+  变异机这次目标集扩成【双文件】（app-pure 射程外的那两发接线靠
+  renderer-criteria 兜住），仍是目标单文件、非全量。
+── 主张链 ───────────────────────────────────────────────────────────
+  · app-pure 232 + renderer-criteria 37 = 269 绿（单文件跑，未全量）；
+  · doc-refs/doc-coords 不受波及（本轮 app.js 改动只新增窗口半，不移动
+    任何既有 function 的 file:line 引用；error 文案照旧）；
+  · biome（仅改到文件）已跑：app.js / app-loader.ts / app-pure.test.ts /
+    renderer-criteria.test.ts —— 残留 3 error + 6 warning 全为存量（app.js
+    format 283-285 双引号、app-pure format 2940 双引号、app.js 3241
+    noAssignInExpressions 属 SSE/审阅/拒卡老区，无一在本轮新增区；规则集
+    与 round351 台账一一对应，行号因 app.js 增长整体右移）。本轮净新增 0；
+    renderer-criteria import 排序遵 organizeImports 修正（APPROVAL_TYPES
+    提到 TASK_STATES 前）；wireQ 标题/断言里的 `${windowMs}` 用 \u0024
+    转义（运行时仍是 $，字面匹配不受影响，且不触发 noTemplateCurlyInString
+    —— 用真模板串会把 windowMs 当变量插值掉，反而匹配不到源代码原文）；
+    修正后双文件 269 绿复跑 + 变异机 7/7 复跑通过；
+  · 未 commit；未跑全量（等全开发完）。
+
+────────────────────────────────────────────────────────────────────
+■ round353（侦察闭合：三个「看似能做」的候选全部验为不做，皆非缺口）
+── 侦察方法 ───────────────────────────────────────────────────────
+  派 general-purpose 子 agent 做全新缺口扫捕（读 OPC-OS-功能优化设计.md
+  全文 + O14 表 + 生产代码 grep），回报 3 项候选。逐项亲自 verify：
+  「trust but verify」在侦察与落地之间多走了 6 次往返（runtime/
+  gateway-runner/gateway/safety/loader/contracts 六文件交叉核对）。
+── 候选 1：mergeForbiddenForRun 接线（0 生产调用方）→ 闭合为【不做】──
+  文档出处：设计文档 1128「mergeForbiddenForRun（合并禁止动作）零调用方，
+  新角色能声明禁止动作而没人合并 ⇒ 接在 O6 的安全层上，不单独接」。
+  verify 结果（六文件证据）：
+  · 岗位书有三个【互不相同的禁止字段】：forbidden_actions（动作黑名单，
+    prompt.ts:133 只渲染提示词）、decision_scope.forbidden（「你无权决定
+    的」＝决策授权分级，prompt.ts:138）、harness_defaults.forbidden_flags
+    （执行层 flag 参数黑名单，gateway 的 forbiddenFlagBlock 拦参数）。
+  · harness 执行层 forbiddenFlagBlock 拦的是【归一化后的 flag 参数】；
+    decision_scope 判的是【决策授权】；forbidden_actions 是【动作黑名单】，
+    三个维度互不换算。
+  · 把 mergeForbiddenForRun（合并 decisionScope.forbidden）的结果塞进
+    forbidden_flags ⇒ 把「决策授权」误当「flag 参数禁令」：语义错位，
+    且会让「一个无权拍板的决策类别」变成「一个参数名」，是安全回归方向。
+  · 把 forbidden_actions 塞进 flag 归一化器同样错位（动作不是参数名）。
+  ⇒ 这就是文档那句「接在 O6 的安全层上，不单独接」的准确含义：
+    执行层拦截必须等 O6 的决策→审批门控那一套（O7-1 hard-stop 依赖，
+    CEO-gate），本轮【不做】是对的，硬接是错误形状。
+── 候选 2：lint 恒红批量修 → 文档自标「只报不切」，需 CEO 同意 ──
+  文档 §7 第 10 格两个选项都标注「属不可逆重排他人代码，故只报不切」。
+── 候选 3：IM 绑定 knownRoles 注入 → 0030 §9 自标「集合由谁产生是计划
+  信息」，半 CEO-gate，机器给不了答案。
+── 附带验证 ──────────────────────────────────────────────────────
+  appendAuditBatch（events/batch.ts）0 生产调用方【正确设计】复核：
+  flushGatewayAudit（runtime.ts:480-493）每轮仅 1-2 行审计，批量 vs 逐条
+  在 1 行数据上无差别（都是 1 个分片 1 个事务）；appendAuditBatch 是为
+  种子/迁移那种成百上千行的场景准备的通用工具，塞进低频路径是
+  「为接线而接线」，值≈0，且会带走 appendAudit 的 lastInsertRowid 语义。
+── 结论 ─────────────────────────────────────────────────────────
+  本轮净产出 = 把三个「looks-likely」候选验成「不该做」，并留下六文件
+  交叉核对证据。未动任何生产字节；未新增测试（无可测之改）；未 commit；
+  未跑全量。台账如实记录：round353 无落地，是侦察闭合轮。
+
+■ round353b（全量测试第一跑：清 3 红 → 全绿）
+── 事件 ─────────────────────────────────────────────────────────
+  首跑全量（目标「等完全开发完再跑全量」）：3473 passed / 3 failed /
+  6 skipped。3 红全在测试类型棘轮（.workbuddy/tsconfig.tests.json）：
+  ① 真跑一次：test/web 类型错 [app-pure 493 label / dev-server-sign 110]
+  ② test/arch 自己非 0：exempt-pierce TS2532
+  ③ http 目录 26 > 配额 24（org-route 18046/18048/18048 三连）
+  这些是 round336-352 落在测试文件里的类型欠账 —— tsc -b 从不扫 test/，
+  全量第一次跑才暴露；TYPE_BASELINE 配额是它们一直没翻红的唯一原因。
+── 改动（5 处测试类型修复，生产字节零改动）────────────────────────
+  · test/web/app-pure.test.ts:453 groupByDepth 类型注解补 label 字段
+    （Array<{ items }> → Array<{ label; items }>，493 行 x.label 的契约）
+  · test/web/dev-server-sign.test.ts:110 devSign()[HEADER_SIGNATURE]!
+    （Record<string,string> 索引必在，运行时必有，non-null 断言）
+  · test/arch/exempt-pierce.test.ts:45 matchAll 捕获组 m[1]!（正则保证命中）
+  · test/desktop/ipc-surface.test.ts:89-90 withBackdoor 断言成
+    Record<string, unknown>（canary 注入后按字符串键取 typeof）
+  · test/desktop/wire.test.ts:169 emit 显式标 : void（字面量推断成 never，
+    198 行重新赋值 void 箭头不兼容 —— 改初始实现返回 void 让整对象一致）
+  · test/http/org-route.test.ts:464-467 res.body 断言成 { graph: OrgGraph }、
+    nodes.dev/tech 用 ?.（18046/18048 ×2，消掉超配额的 3 条）
+  另修的 test/arch exempt-pierce 让「test/arch 自己 0 条」回绿。
+── 验证 ─────────────────────────────────────────────────────────
+  · test-type-baseline.test.ts 单跑 26/26 全绿
+  · 全量重跑中确认 3473+ 无失败后才合账
+  · biome 未跑（5 处全是测试类型修复，非格式问题，等全量绿后另验）
+  · 未 commit；未动生产 src。
+
+■ round353c（全量红 → 类型修复后的第二次验证 + EXEMPT 污染事件处置）
+── 事件序 ─────────────────────────────────────────────────────
+  ① 全量重跑显示 3 failed（含 exempt-pierce），追溯发现：
+     verify-open-invariants.mjs 的 EXEMPT 表被写成 ["zzzzzzz", …]，
+     HEAD 是 ["521daf21", …]  ⇒ 工作树曾有一份被污染/中断写入的探针版本
+     （探针机制：读 ORIGINAL → 把 key 替换成 INVALID 写盘 → spawn 脚本 → 逐字节回滚）
+     zzzzzzz 非 hex ⇒ KEY_ANCHOR 采不到 ⇒ 探针数出 15 ≠ 16 ⇒ 全量红。
+  ② 把 EXEMPT 的 zzzzzzz 恢复为 521daf21（HEAD 的正确形状）：
+     verify 脚本直跑 exit=0、0 FAIL；探针 19/19 绿；连续两次运行零残留。
+  ③ 另两处失败是测试文件自身的类型错导致的运行期红，已随类型修复消失。
+── 鉴定 ─────────────────────────────────────────────────────
+  · 【病因未完全复原，只登记事实】：EXEMPT 表曾在工作树里被写成
+    ["zzzzzzz", …]（HEAD 是 521daf21）。zzzzzzz 非 hex ⇒ 探针 KEY_ANCHOR
+    采不到 ⇒ 数出 15 ≠ 16 ⇒ 全量里该探针红。zzzzzzz 只能来自探针把 key
+    换成 INVALID 的那次写盘；但探针 finally 用 ORIGINAL 逐字节回滚，
+    本应无残留 —— 精确污染时序未能 100% 复原（可疑窗口：中断/并发/仓库
+    工具链），故在此只登记复发判据：再遇「探针 15≠16」先查 EXEMPT 是否
+    被写成非 hex，恢复 521daf21 而不去改探针的 keys.length 断言。
+  · 已修复并连跑验证：verify 直跑 exit=0 / 0 FAIL，探针 19/19 ×2 零残留。
+  · 探针韧性盲区（有意的设计权衡，非本轮引入）：启动时抓 ORIGINAL，
+    若启动前文件已被污染则会是脏基准自证 —— 下次加固点，不在本轮修，
+    因为修它需要探针自鉴残留（可作 0xxx 单独条目）。
+── 处置 ─────────────────────────────────────────────────────
+  · 修复污染：EXEMPT 恢复 521daf21（git diff HEAD -- verify 只剩 round346 正向改动）。
+  · 类型侧面：exempt-pierce.test.ts:45 m[1]! → (m[1] as string)，
+    dev-server-sign.test.ts:110 [HEADER_SIGNATURE]! → as string
+    （noNonNullAssertion 是仓库禁开条；as string 仅类型断言，运行语义零变化，
+     biome 复验 exempt/dev-sign 剩的只有存量 format）。
+  · 台账：记录本事件与探针盲区，将来若再遇「探针 15≠16」直接查 EXEMPT 污染。
+
+■ round353d（全量门禁 doc-refs：7 组漂移引用行号同步）
+── 事件 ─────────────────────────────────────────────────────────
+  全量第三跑 1 红：doc-refs「全部完整形态引用与快照一致」。
+  根因不是测试坏，是 round352（app.js 窗口接线重排）+ round353b
+  （ipc-surface.test.ts 类型 cast）改动了目标文件行号，而 docs 正文
+  引用与 SNAP 键仍是旧行号 —— 主张链同步被漏掉的一环。
+── 改动（9 处 SNAP 键 + 6 份文档正文，内容串零变化）──────────────
+  · ipc-surface.test.ts: 130→133 / 130-131→133-134 / 134→137 / 72→82
+    （:85 canary 未漂，保持）
+  · app.js: 968→1023（pill span，INDEX×2 + 0050） / 798→853（driver msg）
+    / 413→273 + 301→387（0060 memoryBandHtml 本体与接线）
+    / 684→739（0042 attention.includes）
+  · 同步文件：docs/INDEX.md、0030、0042、0050、0060 正文；
+    test/arch/doc-refs.test.ts 的 SNAP 键。
+  · 每一处都先用 grep 确认「内容确实还在文件里、只是行号变」再改，
+    不接受「内容没了所以改快照」的偷懒路。
+── 验证 ─────────────────────────────────────────────────────────
+  · doc-refs.test.ts 2/2 绿；与 exempt-pierce 同跑 21/21 绿。
+  · biome 769/991 两处 noTemplateCurlyInString 是 HEAD 存量，净新增 0。
+  · 未 commit；未动产品 src。
+
+■ round353e（全量终绿，两跑互证）
+── 结果 ────────────────────────────────────────────────────────
+  · 第四跑（b61lqm5pw）：151 files passed / 3476 passed / 6 skipped / 0 failed
+  · 第五跑（b6cfw9ajl，dot reporter）：3476 passed / 6 skipped / 0 failed
+  · 两跑数字一致 ⇒ 排除偶发。3476 = 3473（历史基线）+ 本轮新增（app-pure +8、
+    renderer-criteria +2、exempt-pierce 渗透 19 中的净增量等）。
+  · round353d 的 doc-refs 同步是最后一处红，同步后全量连续两绿。
+── 全量序列复盘 ─────────────────────────────────────────────────
+  首跑 3 红（测试类型棘轮：app-pure label / dev-server-sign ! / exempt-pierce
+  TS2532 + http 26>24 配额）→ 5 处类型修复（禁 `!` 用 as）
+  → 二跑 1 红（EXEMPT 表 zzzzzzz 污染 → 恢复 521daf21）
+  → 三跑 1 红（doc-refs 7 组漂移行号 → 文档正文 + SNAP 键同步）
+  → 四跑/五跑全绿。
+  每轮红都是真实缺口：类型棘轮是 tsc -b 从不扫 test/ 的盲区被全量第一次撑开；
+  EXEMPT 污染是探针短窗口写盘的韧性盲区；doc-refs 漂移是主张链同步的硬门禁。
+── 状态 ────────────────────────────────────────────────────────
+  · 未 commit；未动生产 src（本收尾轮 0 生产改动）。
+  · biome 触及文件净新增 0（doc-refs 2 warning 为 HEAD 存量）。

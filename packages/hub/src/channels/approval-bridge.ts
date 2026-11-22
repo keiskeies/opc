@@ -221,6 +221,16 @@ export function makeChannelAct(d: {
     );
     if (r.outcome === "decided") return { ok: true };
     if (r.outcome === "already_decided") return { ok: true, replayed: true };
+    // 0046 §6-2：这两种是【调用方请求不成立】，不是服务端一致性坏 ——
+    // 打回没带理由 / 豁免卡批准没带理由 ⇒ 422，点到过期卡 ⇒ 409。
+    // 其余 outcome（card_missing / task_missing / card_belongs_to_other_task…）
+    // 是服务器状态问题，保持原样（只给 why，不给 statusHint）⇒ 消费方按 500 处理。
+    if (r.outcome === "note_required" || r.outcome === "waiver_note_required") {
+      return { ok: false, why: r.note, statusHint: 422 };
+    }
+    if (r.outcome === "stale_card") {
+      return { ok: false, why: r.note, statusHint: 409 };
+    }
     return { ok: false, why: r.note };
   };
 }

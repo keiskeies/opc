@@ -517,12 +517,23 @@ describe("GET /approvals（收件箱计数的对账源）", () => {
     expect(JSON.stringify(res.body)).not.toContain("SECRET-SCOPE");
   });
 
-  it("路由本身：GET /approvals 匹到 list_approvals，而 /approvals/ 与 POST 不抢它", () => {
+  it("路由本身：approvals 那三条互不遮蔽（列表 / 详情 / 决定）", () => {
     expect(matchRoute("GET", "/approvals")?.kind).toBe("list_approvals");
+    // 空 id 段仍判【不匹配】而不是"id 为空串的详情"：/approvals/ 是 URL 写错，
+    // 让它去查库再报「这张卡不存在」会把一个拼错的 URL 伪装成资源不存在。
     expect(matchRoute("GET", "/approvals/")).toBeNull();
-    // 反向对照：带 id 的那一条仍然是 decide，没被列表分支吞掉。
+    expect(matchRoute("POST", "/approvals/")).toBeNull();
+    // 反向对照：带 id 的那一条按方法分岔，两条各归各的。
+    // ⚠ 这一发原来钉的是 `GET /approvals/a-1` ⇒ null（那时详情路由不存在）。
+    //   GET 那一格现在【必须】匹到 get_approval —— 把它改回 toBeNull 的人会
+    //   在标题那句「三条互不遮蔽」下造出一条永远命不中的路由。
     expect(matchRoute("POST", "/approvals/a-1")?.kind).toBe("decide");
-    expect(matchRoute("GET", "/approvals/a-1")).toBeNull();
+    expect(matchRoute("GET", "/approvals/a-1")?.kind).toBe("get_approval");
+    expect(matchRoute("GET", "/approvals/a-1")?.id).toBe("a-1");
+    // batch 是字面量段名，GET 侧今天会落进详情的 id 位置 ⇒ 明写下来，
+    // 免得下一个人把「GET /approvals/batch 是一张 id=batch 的卡 404」当成新 bug。
+    expect(matchRoute("POST", "/approvals/batch")?.kind).toBe("decide_batch");
+    expect(matchRoute("GET", "/approvals/batch")?.kind).toBe("get_approval");
   });
 });
 

@@ -52,6 +52,23 @@
  * 所以这一发买的是**方向**：error 只许减不许增，且**冒出新种类当场红并报出种类名**。
  * 修的人随时可以往下调数字（那正是它鼓励的事），往上调必须点名。
  *
+ * ── 新【开规则】什么时候不需要往表里加一行 ────────────────────
+ * round336 把 `lint/correctness/noUndeclaredVariables` 从 recommended 之外开成 error，
+ * 而 LINT_BASELINE 里【没有】这一行 —— 那不是漏了，是这一行【不该有】：
+ * 计数按【诊断条数】走，0 条 ⇒ `countErrorCategories` 里根本不出现这个键 ⇒
+ * 加一条 `atMost: 0` 只会变成表里第一条【恒不触发】的装饰，而本文件对
+ * 「降到 0 的条目要删掉」立的正是同一条规矩。
+ * 判据【两条都要读，一条不算】：开规则前后各跑一次 `biome lint .`，
+ * 两边都是同一条既有 error（1 条）⇒ 没有存量；再往任一文件塞一个未声明变量，
+ * 读数立刻变 2 ⇒ 规则真的在跑，那个 0 不是"没跑出来的 0"
+ * （memory [[empty-output-is-not-a-clean-result]] —— 这一族的两个读数长得一样）。
+ * 为什么值得为它开一条规则：本轮我在 `packages/web/public/app.js` 里删掉两个 const
+ * 声明而底下那句还在用它们 —— 一个 ReferenceError，躲过了本仓【全部】闸门：
+ * `node --check` 只判语法不判作用域；`tsc -b` 的 include 只有 `src/**`，而 app.js
+ * 在 `public/` 下（0007 整篇登记的就是 test/ 与这类文件不在类型检查里）；
+ * `app-pure.test.ts` 跑纯函数，`renderBoard` 不在射程；没有浏览器（0042 §11 第一条），
+ * 所以连控制台那条红都没有。四条路全空的时候，这条规则是唯一照得到它的东西。
+ *
  * ── 为什么只判 error ───────────────────────────────────────────
  * 109 条 warning 与 2 条 info **不让 `pnpm lint` 退出码非 0**（biome 默认 errorOnWarnings=false，
  * 实测：292 error 在 ⇒ exit 1；把 error 全消掉就是 exit 0）。判 warning 等于给自己加一条
@@ -87,9 +104,7 @@ export interface BaselineEntry {
 export const LINT_BASELINE: readonly BaselineEntry[] = [
   { category: "format", atMost: 161 },
   { category: "assist/source/organizeImports", atMost: 117 },
-  { category: "lint/suspicious/noAssignInExpressions", atMost: 4 },
-  { category: "lint/correctness/noUnsafeOptionalChaining", atMost: 3 },
-  { category: "lint/suspicious/useIterableCallbackReturn", atMost: 2 },
+  { category: "lint/suspicious/noAssignInExpressions", atMost: 1 },
 ];
 
 /** biome JSON 读数里本守卫要看的那几个字段。 */

@@ -120,7 +120,7 @@ describe("第 4 层：绝对禁止项（计划点名的三条 flag）", () => {
     if (!v.ok) {
       expect(v.code).toBe("forbidden_flag");
       expect(v.reason).toContain("缩短");
-      expect((v.detail?.["removed_flags"] as string[]).sort()).toEqual(
+      expect((v.detail?.["removed_flags"] as string[])?.sort()).toEqual(
         ["dangerously-skip-permissions", "no-sandbox"].sort(),
       );
     }

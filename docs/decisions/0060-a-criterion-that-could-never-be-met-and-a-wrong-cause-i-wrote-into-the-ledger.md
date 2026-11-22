@@ -210,8 +210,19 @@ AssertionError: expected '你在这个 hub 里做过 1 次可参考的决定，�
   「未署名决定」这个数在生产上是 0，而这个 0 的含义是【这条链路没接】
   而不是【没人代做决定】。这句话现在跟着数一起出现在 `memoryCoverage.unattributed`
   的注释与 `GET /today` 的 notes 里 —— 一个裸 0 在这一页永远是假的。
-- **探针那三个数还没有 UI**：它们进响应（`GET /today` 的 `memory` 那一格，
-  键名集合被钉住），而 desktop 侧还没渲染它们。
+- <s>**探针那三个数还没有 UI**：它们进响应（`GET /today` 的 `memory` 那一格，
+  键名集合被钉住），而 desktop 侧还没渲染它们。</s>
+  **【已落地 · round345】** 界面那一半补上了：`memoryBandHtml`
+  （`app.js:273`）读三个键、渲染在今日视图右栏（接线 `app.js:387`），
+  `gate` 为 0 时明说「这一档在等它的生产者」而不是「角色还没做过决定」、
+  `gate_unattributed_rows > 0` 时补「按 actor_id 分桶，【不会】进任何角色的提示词」。
+  测试：`test/web/app-pure.test.ts` 五发（常规 / 三数全 0 / 空档 / 形状防御 / esc、
+  共 178 过）＋ `test/web/renderer-criteria.test.ts` 两发源码守门（三键被读、接线在，
+  共 33 过）；变异机 `.workbuddy/round345-memory-band-mut.mjs` 5/5 命中
+  （恒空 / 未署名两行删 / 空档「在等生产者」删 / 接线撤 / 形状防御删）、逐发
+  `reverted: true`、M0 对照绿、M9 还原绿。
 - **`gate_unattributed_rows` 与 `unattributed` 是两个口径**，
   代码注释里各写了别拿对方去对 O3 验收，但**界面还没有并排显示它们**。
   并排显示之前，"这一格会不会被读错"这件事只能靠注释。
+  （round345 后 `t.memory` 里没有 `unattributed` —— 界面展示的是窄口径
+  `gate_unattributed_rows`，两者并排仍未做，这一条保持未落地。）

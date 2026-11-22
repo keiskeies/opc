@@ -137,7 +137,9 @@ function dbWithWorkingTasks(ids: readonly string[]): string {
     "INSERT INTO tasks (id, title, status, assigned_role, current_node, created_at, updated_at, graph_version) " +
       "VALUES (?, ?, 'IN_PROGRESS', 'manager', 'manager', ?, ?, 1)",
   );
-  ids.forEach((id, i) => ins.run(id, "想法 " + id, NOW + i, NOW + i));
+  ids.forEach((id, i) => {
+    ins.run(id, "想法 " + id, NOW + i, NOW + i);
+  });
   dbh.close();
   return path;
 }

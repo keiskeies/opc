@@ -44,6 +44,7 @@ export const API_ENDPOINTS = [
   "GET /tasks/:id",
   "GET /today",
   "GET /approvals",
+  "GET /approvals/:interruptId",
   "POST /approvals/:interruptId",
   "POST /approvals/batch",
   "POST /approvals/:interruptId/token",
@@ -82,6 +83,7 @@ export const IMPLEMENTED_ENDPOINTS: readonly ApiEndpoint[] = [
   "GET /tasks/:id",
   "GET /today",
   "GET /approvals",
+  "GET /approvals/:interruptId",
   "POST /approvals/:interruptId",
   "POST /approvals/batch",
   "POST /approvals/:interruptId/token",
@@ -465,6 +467,66 @@ export const approvalViewSchema = z
   })
   .strict();
 export type ApprovalView = z.infer<typeof approvalViewSchema>;
+
+/**
+ * `GET /approvals/:interruptId` 的视图 = 列表那一格 + **参数快照全文** + 那一次决定的三个字段。
+ *
+ * ── 为什么要另开一个形状，而不是给 approvalViewSchema 加三个可选键 ────
+ * 加了「可选」就等于宣布【两个端点都可以发它】。而上面那份注释里写的是另一回事：
+ * 列表**不许**带 `parameters` 全文，理由是「一旦列表里有全文，就永远有人直接渲染它」，
+ * §19.4 那条「卡片三行、不画框线」的排版口径从此守不住。可选键挡不住那个人 ——
+ * 他读的是列表响应里那一格，而契约说它合法。另开一个类型让这条边界长在类型上：
+ * 拿 `ApprovalView` 去渲染参数快照，编译期就过不去。
+ *
+ * ── parameters 为什么可以是 null，明明 DDL 写着 NOT NULL ─────────────
+ * `parameters TEXT NOT NULL` 约束的是【有没有这一列的值】，不是【那是不是 JSON】。
+ * 一段被旁路写进去的脏文本（不是合法 JSON）不该让整个详情视图 500：读侧一律
+ * 「坏的照实说」。null 在这一格的意思是**「读不出一个 JSON 对象」**，而它同时盖住
+ * 三种库里的样子 —— 列值为 NULL（显式写 NULL 的旁路插入，见上面 status 那一段同一族）、
+ * 存的是标量或数组而不是对象、整串不是 JSON。三种都不该被伪装成「这张卡没带参数」。
+ * 界面因此对 null 明写「参数快照读不出来」，而不是画一个空区块假装摊开过了。
+ *
+ * ── 那三个决策字段【只有详情有】的理由 ──────────────────────────────
+ * 收件箱默认只列 pending，而 pending 卡上三格全为 null —— 于是「把它做成可选键」
+ * 还会额外造出一个读不出的形状：列表里出现 decided_at 时，人无法知道自己看的是
+ * 「这一档过滤器放行的一张已决卡」还是「字段根本没发」。详情是「就是这一张卡」的
+ * 唯一地方，那三格在那里才有主语。
+ */
+export const approvalDetailViewSchema = approvalViewSchema.extend({
+  /** §9.2 第二行「关键参数快照」的原文形状（落库那段 JSON 的对象面）。见上。 */
+  parameters: z
+    .record(z.string(), z.unknown())
+    .nullable(),
+  /** 谁做的决定（`approvals.decided_by`）。pending 为 null。 */
+  decided_by: z.string().nullable(),
+  decided_at: z.number().int().nullable(),
+  /** 打回时那句理由（`approvals.decision_note`，append-only：写了就改不掉）。 */
+  decision_note: z.string().nullable(),
+});
+export type ApprovalDetailView = z.infer<typeof approvalDetailViewSchema>;
+
+/**
+ * `GET /approvals/:interruptId` 的响应。
+ *
+ * ── 为什么【不】在这一格顺手把金额格式化成 `$12.50` ────────────────
+ * 写这份契约时我先加了一条 `amount_text`，理由是「三端各写一份 `(c/100).toFixed(2)`
+ * 就是三份抄件」。那句话对，而它的前提是错的：**本仓今天已经有**一份
+ * `packages/web/public/app.js` 的 `money()`，正在给任务预算做同一件事。
+ * 再加一条服务端格式化 = 当场造出两份，而我刚用它论证过为什么不该有第二份。
+ * 唯一的活消费方只有一个的时候，服务端格式化是【 speculative 的抽象】——
+ * 计划 Task 4.5 对 channel 抽象立的就是这条规矩（「由一实现验证，不做二实现」）。
+ * 所以金额走原路：详情给 `parameters.amount_cents`（整数美分），渲染由那唯一一份
+ * `money()` 负责。将来真出现第二个消费方（移动端 / 飞书卡片），那时把 money()
+ * 上提到 contracts 才是有分母的一提。
+ */
+export const approvalDetailResponseSchema = z
+  .object({
+    approval: approvalDetailViewSchema,
+    /** 读数时刻，与 GET /approvals 的 asOfMs 同一条理由（客户端时钟不许用来算等待时长）。 */
+    asOfMs: z.number().int(),
+  })
+  .strict();
+export type ApprovalDetailResponse = z.infer<typeof approvalDetailResponseSchema>;
 
 /**
  * `GET /approvals` 的查询参数（白名单，未登记的键忽略而不是拒 —— 与 SSE 的

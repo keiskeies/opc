@@ -50,12 +50,15 @@ $ grep -rn "consumed_cents" --include='*.ts' packages/hub/src
 ```
 
 > **行号与后效（Task 4.1 重测时补；GET /today 那轮又补过一次）**：上面那条 grep 报的 438
-> 是当时的行号，现在那条读在 `http/app.ts:1168`（同一行内容：Task 4.1 那轮顶下去 431 行，
+> 是当时的行号，现在那条读在 `http/app.ts:1259`（同一行内容：Task 4.1 那轮顶下去 431 行，
 > 0031 那轮又顶下去 97 行，`GET /today` 那轮在本函数上方加了 12 行 ⇒ 顶到 1046，
 > 0049 那轮为驱动器状态又顶下去 45 行 ⇒ 顶到 1091，岗位书与预算两组端点从 `dispatch`
 > 拆进 `http/charter.ts` 与 `http/budget.ts` 那一次在其上方净增 59 行 ⇒ 现在 1150，
-> 【规格】§9.4 批量审批那轮给 `Route` 联合加了一条 kind + 一段注释（其上方 +9 行）⇒ 现在 1168。
-> 同一行内容被顶过【六】次而每次都要靠快照守卫才没人把坐标读成事实 —— 这正是它存在的全部理由）。
+> 【规格】§9.4 批量审批那轮给 `Route` 联合加了一条 kind + 一段注释（其上方 +9 行）⇒ 现在 1168，
+> `GET /approvals/:interruptId`（§9.2 第二行那个详情端点）那一轮在其上方加了 73 行
+> （import 3 + 分派 2 + `Route` 联合那条 kind 18 + `matchRoute` 那一支 15 + 详情 handler 35，
+> 五段都由 `git diff -U0` 的 hunk 头读出，不是推算）⇒ 现在 1241。
+> 同一行内容被顶过【七】次而每次都要靠快照守卫才没人把坐标读成事实 —— 这正是它存在的全部理由）。
 > 另外上面那四条测的是**本轮动手之前**的仓库，本轮自己就否掉了其中两条：
 > `INSERT INTO budgets` 现在除了 tracker 那一处还有 `charter/budget-sync.ts` 的一处，
 > `consumed_cents` 的【读】也不止一处（都在 budget-sync 里）。

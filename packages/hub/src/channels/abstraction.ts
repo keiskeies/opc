@@ -573,7 +573,16 @@ export interface ChannelActRequest {
 
 export type ChannelActResult =
   | { readonly ok: true; readonly replayed?: boolean }
-  | { readonly ok: false; readonly why: string };
+  | {
+      readonly ok: false;
+      readonly why: string;
+      /**
+       * 语义上属于「调用方请求不成立」的失败，给出该回的状态码提示
+       * （0046 §6-2：打回没带理由 → 422，点到过期卡 → 409）。
+       * 可选字段：IM 等只关心 why 的渠道可以无视；HTTP 侧接桥时直接用。
+       */
+      readonly statusHint?: 422 | 409;
+    };
 
 /**
  * 通道实例的运行时容器。

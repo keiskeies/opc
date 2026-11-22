@@ -116,7 +116,7 @@ function makeDb(): string {
 /**
  * 不 spawn 的起草回调（本页唯一被换掉的一步）。
  * 文本必须能被 parseCharterDraft 认出来，否则"起草成功"会变成"跑了而没建出卡"，
- * 而本页要断的正是【卡进了收件箱】。文本形状抄自 assemble-pump.test.ts:170 那一份。
+ * 而本页要断的正是【卡进了收件箱】。文本形状抄自 assemble-pump.test.ts:172 那一份。
  */
 function cardDeps(calls: string[]): () => CharterCardDeps {
   return () => ({

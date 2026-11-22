@@ -31,6 +31,11 @@ import { walkFiles } from "./harness-invariants.js";
 import { collect } from "./plan-refs.js";
 import { listSrc } from "./role-spawn-boundary.js";
 import { BOUNDARY_PROBE, isRuntimeFixture } from "./run-fixtures.js";
+// round346（0054 §8 那颗「不是没有雷」的登记）：tsFiles 的 statSync 裸奔，
+// 谁哪天往 src/ 里建目录夹具就是第二个 no-native-deps（并发删目录 ⇒ ENOENT 随机红）。
+// 修法与本轮同形：survivesStat 吞 ENOENT/ENOTDIR ⇒ false（目录消失 = 不是目录）。
+// 语义恰好匹配（单文件存在性判据），不需要再造一个 readdirSurvives 式的函数。
+import { survivesStat } from "./test-inventory.js";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "../..");
 
@@ -85,7 +90,11 @@ function tsFiles(dir: string): string[] {
     // better-sqlite3 import（见 test/arch/run-fixtures.ts）。不排除就是随机红。
     if (isRuntimeFixture(name)) continue;
     const p = join(dir, name);
-    if (statSync(p).isDirectory()) out.push(...tsFiles(p));
+    // round346：裸 statSync 的 ENOENT 在目录夹具并发消失时会随机红（0054 §5/§8 登记
+    // 的那颗雷，修法与本轮同形）。survivesStat 遇到 ENOENT/ENOTDIR ⇒ false ⇒
+    // 「目录刚消失」被读成「不是目录」，照常跳过这一层；权限类错误照抛（零容忍
+    // 扫描器不许静默少扫）。isRuntimeFixture 已在 statSync 之前按名字拦掉夹具。
+    if (survivesStat(() => statSync(p).isDirectory())) out.push(...tsFiles(p));
     else if (name.endsWith(".ts") || name.endsWith(".tsx")) out.push(p);
   }
   return out;
@@ -112,7 +121,8 @@ function packageName(spec: string): string | null {
   const parts = spec.split("/");
   if (spec.startsWith("@")) {
     // scoped 包名必须有前两段；"@scope" 或 "@scope/" 这种残缺写法不算包名
-    if (parts.length < 2 || parts[1] === "" || parts[1] === undefined) return null;
+    if (parts.length < 2 || parts[1] === "" || parts[1] === undefined)
+      return null;
     return (parts as string[]).slice(0, 2).join("/");
   }
   const head = parts[0];
@@ -381,6 +391,65 @@ describe("运行期夹具名单本身", () => {
       notWired,
       "清单里说要排夹具，代码里却没有任何一条接上名单：" + notWired.join(", "),
     ).toEqual([] as string[]);
+  });
+
+  it("tsFiles 的 statSync 被 survivesStat 包着（round346，0054 §8 那颗登记）", () => {
+    // 0054 §5/§8 登记：tsFiles 的裸 statSync(p).isDirectory() 在「目录夹具并行建、
+    // 扫描途中被删」时会随机 ENOENT —— 「不是没有雷，今天没有并发引爆者」。
+    // 修法与 no-native-deps 那族同形：survivesStat 吞 ENOENT/ENOTDIR ⇒ false ⇒
+    // 「目录刚消失」被读成「不是目录」，照常跳过；权限类错误照抛（零容忍扫描器
+    // 不许静默少扫一片）。tsFiles 不接受注入（会话内私有函数，扫描起点由调用方给），
+    // 所以确定性钉法分两半：
+    //  ① survivesStat 的 ENOENT 语义（保层的真身）
+    const gone = join(
+      tmpdir(),
+      "pd-gone-" + process.pid + "-" + Math.random().toString(36).slice(2),
+    );
+    expect(
+      survivesStat(() => statSync(gone).isDirectory()),
+      "目录不存在 ⇒ false（跳过）",
+    ).toBe(false);
+    const file = join(tmpdir(), "pd-file-" + process.pid + ".ts");
+    writeFileSync(file, "export const x = 0;\n");
+    expect(
+      survivesStat(() => statSync(file).isDirectory()),
+      "存在但非目录 ⇒ false",
+    ).toBe(false);
+    // 反向对照：真目录 ⇒ true（不是「什么都跳过」）
+    const realDir = join(tmpdir(), "pd-dir-" + process.pid);
+    mkdirSync(realDir, { recursive: true });
+    expect(
+      survivesStat(() => statSync(realDir).isDirectory()),
+      "真目录 ⇒ true",
+    ).toBe(true);
+    // 权限类照抛：EPERM 不该被吞（拿一个必然 EPERM 的目标 —— 这里是 win32? 跳过，
+    // 语义已由 survivesStat 自身那组用例覆盖（test-inventory.test.ts:298）。不重复。
+    rmSync(gone, { force: true, recursive: true });
+    rmSync(file, { force: true });
+    rmSync(realDir, { force: true, recursive: true });
+
+    //  ② 接线守门：tsFiles 里那句 statSync 真的被 survivesStat 包着（读自身源码）。
+    //     判据用【完整调用语句】：第一版无锚点子串匹配会吞进注释与断言自身的字符串
+    //     字面量（全文件命中 5 处而非 1 处）；固定 600 字节切片则对「函数上方多了
+    //     几行注释」的位移敏感（变异机 M3 控制组只加注释就被推出窗口误红过）。
+    //     ⚠ 探针串必须【拆开拼接】才不自我遮蔽：写成字面量时，断言自己的定义行
+    //     就含完整的 `if (survivesStat(…)) out.push(…tsFiles(p));`，于是变异把
+    //     tsFiles 改裸奔后 srcText 里照样找得到这段字节 ⇒ 守门永远绿（变异机 M1/M2
+    //     当场实证过「全绿」）。拆成 `"…out.push(…tsFiles(p))" + ";"` 后，定义行里
+    //     的字节序列不完整，srcText.includes 只可能命中 tsFiles 那一行。
+    //     镜像局限仍存在（tsFiles 行与探针串同时改坏时静态守门绿）—— 那由变异机
+    //     M1/M2 从外部单侧破坏来补（判别力在那侧）。
+    const srcText = readFileSync(
+      join(import.meta.dirname, "production-deps.test.ts"),
+      "utf8",
+    );
+    const fullCall =
+      "if (survivesStat(() => statSync(p).isDirectory())) out.push(...tsFiles(p))" +
+      ";";
+    expect(
+      srcText.includes(fullCall),
+      "tsFiles 的 statSync 调用必须原样被 survivesStat 包着（M1/M2 变异即红）",
+    ).toBe(true);
   });
 
   it("接了名单的取材函数在【探针真的存在】时不列出它", () => {

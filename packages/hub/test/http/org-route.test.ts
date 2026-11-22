@@ -461,10 +461,10 @@ describe("⑤ GET /org：装配没接 ⇒ 501；空存 ⇒ 200 空图 v0；提�
       change_summary: "dev 直接汇报 CEO",
       effective_from: T0,
     });
-    const g = res.body.graph as OrgGraph;
+    const g = (res.body as { graph: OrgGraph }).graph;
     // delegation_graphs.graph_json 存的是【变更后】的图：dev 已被 reparent 到 ceo。
-    expect(g.nodes.dev.reports_to).toBe("ceo");
-    expect(g.nodes.tech.reports_to).toBe("ceo");
+    expect(g.nodes.dev?.reports_to).toBe("ceo");
+    expect(g.nodes.tech?.reports_to).toBe("ceo");
   });
 
   it("只取当前生效那份：再提交一次，GET 拿 v2 不拿 v1", async () => {
@@ -485,3 +485,163 @@ describe("⑤ GET /org：装配没接 ⇒ 501；空存 ⇒ 200 空图 v0；提�
   });
 });
 
+/* ══════════════════ ⑥ GET /org 的 review_independence ══════════════════ */
+
+describe("⑥ GET /org 带着审阅独立性读数：算出来的、不是抄件、也不是图的一部分", () => {
+  /** 提交一张【家族可配】的图（其余与夹具那张同形），留下同一个 harness 继续 GET。 */
+  async function commitWithFamilies(h: Harness, families: Record<string, string>): Promise<void> {
+    const g = graph();
+    for (const [role, f] of Object.entries(families)) {
+      const node = g.nodes[role];
+      if (node !== undefined) node.model_family = f;
+    }
+    const post = await commitOrgRoute(
+      h.deps,
+      h.req({
+        method: "POST",
+        path: "/org",
+        body: JSON.stringify({
+          graph: g,
+          change: { kind: "reparent", child_role: "dev", new_parent_role: "ceo" },
+          change_summary: "配家族",
+        }),
+      }),
+    );
+    expect(post.status).toBe(200);
+  }
+
+  it("从没提交过（空图）⇒ 200 也带这一格，分母 0、always=false", () => {
+    const { h } = harness({ wired: true });
+    const res = orgGraphRoute(h.deps, h.req({ method: "GET", path: "/org" }));
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({
+      review_independence: {
+        roles: 0,
+        pairs_total: 0,
+        pairs_ok: 0,
+        pairs_same_family: 0,
+        pairs_refused: 0,
+        always_needs_approval: false,
+        any_refused: false,
+        blocked: [],
+      },
+    });
+  });
+
+  it("⭐ 装配没接 readOrgGraph ⇒ 501，正文里【没有半个】review_independence", () => {
+    // 部分对象比没有对象坏：界面读到 `always_needs_approval === undefined` 会当假，
+    // 而真相是「这台 Hub 没接读侧」，不是「这张图上不需要批」。
+    const { h } = harness({ wired: false });
+    const res = orgGraphRoute(h.deps, h.req({ method: "GET", path: "/org" }));
+    expect(res.status).toBe(HTTP_NOT_IMPLEMENTED);
+    expect(JSON.stringify(res.body)).not.toContain("review_independence");
+  });
+
+  it("夹具那张图四个家族两两不同 ⇒ 6 个配对全 ok（界面据此不许说「每次都要批」）", async () => {
+    const { h } = harness({ wired: true });
+    await commitWithFamilies(h, {});
+    const res = orgGraphRoute(h.deps, h.req({ method: "GET", path: "/org" }));
+    expect(res.body).toMatchObject({
+      graph_version: 1,
+      review_independence: {
+        roles: 4,
+        pairs_total: 6,
+        pairs_ok: 6,
+        pairs_same_family: 0,
+        pairs_refused: 0,
+        always_needs_approval: false,
+      },
+    });
+  });
+
+  it("⭐ 反硬编码对照：换一张图 ⇒ 同一格给出【不同的数】（上一发不是恒 ok）", async () => {
+    // 这一发是这一整节的阳性对照。若 handler 那一句是把某个常数塞进响应，
+    // 上一发（全 ok）也会绿 —— 常数恰好写成「不需要批」时它看不出来。
+    const { h } = harness({ wired: true });
+    await commitWithFamilies(h, { tech: "o3", dev: "o3", test: "o3" });
+    const res = orgGraphRoute(h.deps, h.req({ method: "GET", path: "/org" }));
+    // 四个角色全是 o3 ⇒ C(4,2)=6 个配对全同族 ⇒ 「每一次都要 CEO 点」在这一张图上为真。
+    // ⚠ 这里能提交得过，是因为 L2 的自审/同家族判据只在【那条新增的边】上跑
+    //   （validateNewEdge），reparent 不重问存量边；full-graph 那条只判 model_family
+    //   有没有声明（everyNodeDeclaresModelFamily）。所以「全同族的图」是一个合法的
+    //   已提交状态 —— 这正是 O4 说的那台真机器的形状。
+    expect(res.body).toMatchObject({
+      review_independence: {
+        roles: 4,
+        pairs_total: 6,
+        pairs_ok: 0,
+        pairs_same_family: 6,
+        pairs_refused: 0,
+        always_needs_approval: true,
+        any_refused: false,
+      },
+    });
+    const p = (res.body as { review_independence: { blocked: { code: string }[] } })
+      .review_independence;
+    expect(p.blocked).toHaveLength(6);
+    expect(p.blocked.every((b) => b.code === "same_model_family")).toBe(true);
+  });
+
+  it("⭐ 那一格是【计算键】：不在图里，也不在库里那份 graph_json 里", async () => {
+    const { h } = harness({ wired: true });
+    await commitWithFamilies(h, { tech: "o3" });
+    const res = orgGraphRoute(h.deps, h.req({ method: "GET", path: "/org" }));
+    // ① 图本身【不含】这一格 —— 它不是图的属性，是「这张图 + 那条判据」的属性。
+    const g = (res.body as { graph: OrgGraph & { review_independence?: unknown } }).graph;
+    expect(g.review_independence).toBeUndefined();
+    // ② 库里那份 graph_json 里也没有它：它不进版本序列，所以改这条判据的实现
+    //    【不需要】提交一个新的组织图版本（那会把一次读数改动记成一次组织变更）。
+    const row = h.db
+      .prepare("SELECT graph_json FROM delegation_graphs ORDER BY version DESC LIMIT 1")
+      .get() as { graph_json: string } | undefined;
+    expect(row).toBeDefined();
+    expect(row?.graph_json).not.toContain("review_independence");
+    expect(row?.graph_json).not.toContain("always_needs_approval");
+  });
+
+  it("⭐ 存量图里【没配家族】的角色进 refused 而不是 ok（漏配不等于「独立性没问题」）", () => {
+    // ⚠ 这一发【不走 POST】：round292 之后 everyNodeDeclaresModelFamily 会让任何
+    //   缺家族的图在【提交时】就被拒（validate.ts 那个函数头明写「库里已经存在的
+    //   旧版本图」挡不住），所以 refused 这一档的现实来源只有一个 ——
+    //   round292 之前落库的存量行。那正是这一档存在的理由，也是它必须由注入构造、
+    //   构造不出「提交成功」的原因（上一发那种全同族的图才是今天能提交出来的形状）。
+    const stale = graph();
+    delete (stale.nodes.test as { model_family?: string }).model_family;
+    const { h } = harness({ wired: true });
+    const deps: HubDeps = {
+      ...h.deps,
+      readOrgGraph: () => ({
+        versions: 9,
+        version: 9,
+        graph: stale,
+        graphId: "g-stale",
+        effectiveFromMs: T0,
+        changeSummary: "round292 之前提交的那一版",
+      }),
+    };
+    const res = orgGraphRoute(deps, h.req({ method: "GET", path: "/org" }));
+    expect(res.status).toBe(200);
+    const p = (
+      res.body as {
+        review_independence: {
+          pairs_total: number;
+          pairs_ok: number;
+          pairs_refused: number;
+          any_refused: boolean;
+          always_needs_approval: boolean;
+          blocked: { producer: string; reviewer: string; code: string }[];
+        };
+      }
+    ).review_independence;
+    // 含 test 的 3 个配对全 refused，其余 3 个 ok。两个数【都不为 0】，
+    // 所以「三档合并」这类改动会在这一发红，而不是换个数继续绿。
+    expect(p.pairs_total).toBe(6);
+    expect(p.pairs_refused).toBe(3);
+    expect(p.pairs_ok).toBe(3);
+    expect(p.any_refused).toBe(true);
+    // refused 时 always_needs_approval 必须 false：那三次点击【买不到】放行。
+    expect(p.always_needs_approval).toBe(false);
+    expect(p.blocked.filter((b) => b.code === "unknown_model_family")).toHaveLength(3);
+    expect(p.blocked.every((b) => b.producer === "test" || b.reviewer === "test")).toBe(true);
+  });
+});

@@ -321,8 +321,9 @@ describe("死模块哨兵", () => {
      * 这一格是【防退化的下界】，不是棘轮：它只管"核对本身有没有东西可核对"，
      * 判据本体是下面那句 invalidBaselineMarks。
      *
-     * 8 = 16 − 8。摘掉的八条各自兑现了它登记的死法（方向 B 那条红如约出现，
-     * 然后才删行）：
+     * 7 = 16 − 9。登记过 16 条（那份清单搬进 `dead-modules.ts` 之前住在这里，
+     * 首提 ffae248 时表里已是 14 条 —— 下面 round281 那两条在那之前就已摘除），
+     * 摘掉的九条各自兑现了它登记的死法（方向 B 那条红如约出现，然后才删行）：
      *  · round281（O12 动作 2）：`channels/abstraction.ts`
      *  · round281（O12 动作 2）：`channels/approval-bridge.ts`
      *  · round305（Task 6.1 接线）：`heartbeat/retry.ts` —— engine/turn-retry.ts
@@ -339,10 +340,16 @@ describe("死模块哨兵", () => {
      *    `search/policy.ts` —— 靠 gateway.ts 那条【纯类型】的 ToolSighting import
      *    传递可达（本表口径 = 编译期 import 边，`import type` 算一条）。
      *    这三个的运行时【一次都没被调用】：搜的是编译依赖，不是「搜索层接上了」。
+     *  · round338（O4 的 `GET /org` 读数）：`graph/gates/author-reviewer.ts` ——
+     *    新增的 `graph/gates/review-preview.ts` 被 `http/org.ts` import，链是
+     *    dev-entry → assemble → http/app → http/org → review-preview → author-reviewer。
+     *    ⚠ 这是九条里【唯一一条只接上了一个函数】的：同一文件里 `gateConfigBlock`
+     *    仍然 0 调用点，`selfReviewEdgeBlock` / `independentReviewerPath` 各 1 个
+     *    且都在彼此内部 ⇒ 「那一族活了」在今天不成立，逐条读数在基线那一格的注释里。
      * ⚠ 下一次动这个数字之前先问：这两条差额有没有一条登记过的死法对应？
      * 没有就是有人删了基线条目而没接线，那种删法正是这条下界存在的全部理由。
      */
-    expect(BASELINE.size).toBeGreaterThanOrEqual(8);
+    expect(BASELINE.size).toBeGreaterThanOrEqual(7);
     expect(invalidBaselineMarks(BASELINE, collectModules()).join("\n")).toBe(
       "",
     );
@@ -394,17 +401,37 @@ describe("死模块哨兵", () => {
     // round312 换过名单：harness/gateway.ts 与 safety.ts 原来在这一族里，接线之后
     // 它们【真的活了】（runtime → gateway-runner → gateway/safety 都是真 import），
     // 继续列在这里会把一条【进度】写进口径判据里 —— 那条红就再也不能区分
-    // 「口径坏了」和「有人干活了」。挑进来的两条都还死着、且都有 importer：
-    //  · harness/routing.ts ← harness/verifier.ts（那条本身是纯类型 import，
-    //    而 verifier 自己零调用方 ⇒ routing 继承性不可达）
-    //  · graph/gates/author-reviewer.ts ← harness/verifier.ts（同一族）
-    for (const m of ["harness/routing.ts", "graph/gates/author-reviewer.ts"]) {
+    // 「口径坏了」和「有人干活了」。
+    //
+    // ⚠ round338 名单从两条塌成一条：原来陪跑的那条 `graph/gates/author-reviewer.ts`
+    // 被 review-preview → http/org 接活了（同上面 gateway 那个剧本，所以这里删它是
+    // 删【进度】不是删【判据】）。删之前把当时那份死清单整个点过一遍（7 条：
+    // events/batch、evidence/store、graph/branches、harness/routing、harness/verifier、
+    // index、main）⇒ 【只有】routing 一条还带 importer，其余六条是【零 importer 的真死】。
+    // 也就是说这一族的样本今天只剩一个，而只剩一个的时候，只写【该在的在里面】
+    // 这一半会退化：`inherited` 万一被 somebody 算成恒真（比如把 filter 反着写），
+    // 那一发照样绿。所以补一条【方向相反】的：同一个目录里的兄弟 `harness/verifier.ts`
+    // 【死着但零 importer】⇒ 它必须【不在】inherited 里。一发之内一进一出，
+    // 才是"这个 filter 真的在按 importer 分"的证据，而不是"名单里那个人恰好还在"。
+    for (const m of ["harness/routing.ts"]) {
       // 断言方向：它【必须】在 inherited 里（在 = 零 importer 口径会漏判它）。
       // 上一版这里三元写反了，红的是「它没在」—— 正好把这个口径的证据判成了反的。
       expect(
         inherited.includes(m) ? "ok" : m + "：不在漏判族里（口径差异没被测到）",
       ).toBe("ok");
     }
+    // ⭐ 反方向那一半（上面只剩一个样本之后补的，理由见上）：`harness/verifier.ts`
+    // 同目录、同死、但【零 importer】⇒ 它必须【不在】inherited 里。
+    // 把上面那条的 filter 条件删掉（`r.dead.filter(...)` 退化成 `r.dead`）时，
+    // 只有这一发会红 —— 单靠"routing 在里面"分不清【按 importer 分】与【全算进去】。
+    // 先钉它【还死着】：否则「不在 inherited 里」会因为整份语料读空而白拿，
+    // 那是"守卫失去分母"的老形状（dead 为空时这里两条 not/toBe 一起成立）。
+    expect(r.dead).toContain("harness/verifier.ts");
+    expect(
+      inherited.includes("harness/verifier.ts")
+        ? "零 importer 的 verifier 被判成继承性不可达 ⇒ importer 那一步没在过滤"
+        : "ok",
+    ).toBe("ok");
   });
 
   /* ── O6-1 验收：优化设计文档要的那两条，一条不落 ───────────────────── */

@@ -325,6 +325,24 @@ export async function applyDecision(
 }
 
 /**
+ * 一条「调用方请求不成立」的失败，带上 HTTP 侧该回的状态码（0046 §6-2）。
+ *
+ * 语义上不是服务端坏了：打回没带理由 / 批准豁免卡没带理由 ⇒ 422，
+ * 点到的那张卡不是当前格的卡（过期卡）⇒ 409。把它们从"500 + 一行原文"
+ * 里拆出来，让 HTTP 层回对码 —— 与 round343 在 IM 桥层做的
+ * `ChannelActResult.statusHint` 是同一件事的另一侧（那边走判别联合返回，
+ * 这边走抛错：decideWithEngineEdge 的返回契约是 boolean，不动它）。
+ */
+export class DecisionStatusError extends Error {
+  readonly statusHint: 422 | 409;
+  constructor(statusHint: 422 | 409, message: string) {
+    super(message);
+    this.name = "DecisionStatusError";
+    this.statusHint = statusHint;
+  }
+}
+
+/**
  * 引擎路线的决策写路径：把 HubDeps.recordDecision 那道缝接到
  * engine/approve.ts 的 approveCard 上（认领卡片 + 状态边 + 两条审计，【一个】事务）。
  *
@@ -398,6 +416,15 @@ export async function decideWithEngineEdge(
   );
   if (r.outcome === "decided") return true;
   if (r.outcome === "already_decided") return false;
+  // 0046 §6-2：这三条是【调用方请求不成立】，HTTP 侧该回 422 / 409 而不是 500。
+  // 用 DecisionStatusError 把状态码带上去，app.ts 的 catch 认它、回对码；
+  // 直连调用方（CLI / 桌面 IPC）不认它不是 Error，照样只读到 message。
+  if (r.outcome === "note_required" || r.outcome === "waiver_note_required") {
+    throw new DecisionStatusError(422, r.note);
+  }
+  if (r.outcome === "stale_card") {
+    throw new DecisionStatusError(409, r.note);
+  }
   throw new Error(r.note);
 }
 

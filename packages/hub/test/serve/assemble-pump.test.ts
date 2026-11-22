@@ -147,7 +147,9 @@ function dbWithCharterTasks(ids: readonly string[], alsoStalled?: string): strin
     "INSERT INTO tasks (id, title, status, assigned_role, current_node, created_at, updated_at, graph_version) " +
       "VALUES (?, ?, 'CHARTER_PENDING', 'intake', 'intake', ?, ?, 1)",
   );
-  ids.forEach((id, i) => ins.run(id, "想法 " + id, NOW + i, NOW + i));
+  ids.forEach((id, i) => {
+    ins.run(id, "想法 " + id, NOW + i, NOW + i);
+  });
   if (alsoStalled !== undefined) {
     dbh
       .prepare(

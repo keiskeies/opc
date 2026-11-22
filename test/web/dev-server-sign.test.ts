@@ -107,7 +107,7 @@ describe("dev-server 的签名与 hub 的验签逐字节一致", () => {
     const sig = (
       i: Inputs,
       o: { now?: number; nonce?: string; token?: string } = {},
-    ): string => devSign(i.method, i.target, i.body, { now: NOW, nonce: NONCE, token: TOKEN, ...o })[HEADER_SIGNATURE];
+    ): string => devSign(i.method, i.target, i.body, { now: NOW, nonce: NONCE, token: TOKEN, ...o })[HEADER_SIGNATURE] as string;
     const cases: readonly (readonly [string, string])[] = [
       ["body 变一个字符", sig({ ...FIXED, body: "{}" })],
       ["target 多个 query", sig({ ...FIXED, target: "/today?window_ms=1" })],

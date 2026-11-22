@@ -366,13 +366,94 @@ describe("默认装配下 CEO 点批准：任务真的走了一条边（0043）"
     // 咽进 false 会换来一个语义错误但形状正常的答复；抛出来才有人看得见。
     // 走 dep 层而不走 HTTP，是因为上面那条 422 已经把请求挡在写路径之外了 ——
     // CLI 与桌面直连没有 superRefine 兜着，那条分支唯一的使用者在那边。
+    //
+    // round344 起它抛的是 DecisionStatusError(422)：HTTP 层靠类型名 + statusHint
+    // 折叠成 422，所以这两格（name 是那一类、statusHint 是 422）是【契约的一部分】，
+    // 与丢 422 的变异互相锁定 —— 只断 toThrow 的话，一支普通 Error 也能绿，
+    // 接线就没人守了。
     const h = await hub({});
-    await expect(
-      h.deps.recordDecision({ approvalId: h.cardId, taskId: h.taskId, resume: "reject_with_comment" }),
-    ).rejects.toThrow(/--note/);
+    const err = await h.deps
+      .recordDecision({ approvalId: h.cardId, taskId: h.taskId, resume: "reject_with_comment" })
+      .then(
+        () => null,
+        (e: unknown) => e,
+      );
+    expect(err).toBeInstanceOf(Error);
+    expect((err as Error).message).toMatch(/--note/);
+    expect((err as { name?: string }).name).toBe("DecisionStatusError");
+    expect((err as { statusHint?: unknown }).statusHint).toBe(422);
     expect(await cardState(h)).toBe("pending");
     expect(await statusOf(h)).toBe("CHARTER_PENDING");
     const n = await oneRow<Row>(h, "SELECT COUNT(*) AS n FROM events WHERE target = ?", h.cardId);
+    expect(Number(n["n"])).toBe(0);
+  });
+
+  it("⭐ 点到【过期卡】⇒ 409（0046 §6-2：调用方请求不成立，不是 500）", async () => {
+    // pre-check 网（approvalOutcome）只挡「不存在 / 已决策」，【不】看「这一格有没有
+    // 自己的卡」—— 所以过期卡会穿网进写路径。approveCard 判「当前格已有 own 卡
+    // (seat:FINAL_REVIEW)，这张是旧格的」⇒ stale_card。round343 在 IM 桥层折叠成 409，
+    // 这一发钉 http 侧同一件事：decideWithEngineEdge 抛 DecisionStatusError(409)，
+    // handleRequest 的 catch 认它回 409 + 原文，而不是统一 500。
+    const h = await hub({ status: "FINAL_REVIEW" });
+    const cardParams = {
+      impact_scope: "升级裁决",
+      irreversible: true,
+      recommendation: "读完再批",
+      recommendation_is_not_decision: true,
+      timeout_behavior: "escalate",
+    } as const;
+    // 当前格自己的卡（任务停在 FINAL_REVIEW，ownCardsOf 会把它算成 own）。
+    const ownId = await h.queue.node(() =>
+      insertCard(
+        h.queue.writeConnection() as unknown as Parameters<typeof insertCard>[0],
+        {
+          taskId: h.taskId,
+          approvalType: "escalation",
+          cardKey: "seat:FINAL_REVIEW:7",
+          summary: "升级裁决待批（当前格）",
+          parameters: { ...cardParams },
+          evidence_refs: ["events:1"],
+          buttons: ["approve", "reject_with_comment", "defer_deep_review"],
+        },
+        { nowMs: NOW },
+      ).approvalId,
+    );
+    // 过期卡：上一格留的，任务早不在 ESCALATED_TO_CEO 了。
+    const staleId = await h.queue.node(() =>
+      insertCard(
+        h.queue.writeConnection() as unknown as Parameters<typeof insertCard>[0],
+        {
+          taskId: h.taskId,
+          approvalType: "escalation",
+          cardKey: "seat:ESCALATED_TO_CEO:4",
+          summary: "升级裁决待批（已过期）",
+          parameters: { ...cardParams },
+          evidence_refs: ["events:1"],
+          buttons: ["approve", "reject_with_comment", "defer_deep_review"],
+        },
+        { nowMs: NOW },
+      ).approvalId,
+    );
+    expect(ownId !== staleId).toBe(true);
+
+    const res = await handleRequest(
+      h.deps,
+      h.req({ method: "POST", path: "/approvals/" + staleId, body: decideBody("approve") }),
+    );
+    // 409 = 你点晚了 / 这张不是当前格该批的那张，不是"我坏了"（500）。
+    expect(res.status).toBe(409);
+    expect(JSON.stringify(res.body)).toContain("seat:FINAL_REVIEW");
+    // 分母：批【当前格那张】必须成功 —— 这同时证明任务是 FINAL_REVIEW、
+    // own 卡判对了，不是"全被挡了"的假绿。
+    const own = await handleRequest(
+      h.deps,
+      h.req({ method: "POST", path: "/approvals/" + ownId, body: decideBody("approve") }),
+    );
+    expect(own.status).toBe(200);
+    // 过期卡保持 pending（什么都没写），库干净。
+    const st = await oneRow<Row>(h, "SELECT status FROM approvals WHERE id = ?", staleId);
+    expect(String(st["status"])).toBe("pending");
+    const n = await oneRow<Row>(h, "SELECT COUNT(*) AS n FROM events WHERE target = ?", staleId);
     expect(Number(n["n"])).toBe(0);
   });
 

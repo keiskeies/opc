@@ -53,7 +53,22 @@
   .btn.primary { background:var(--blue); border-color:var(--blue); color:#fff; }
   .btn:disabled { opacity:.5; cursor:not-allowed; }
   input[type=text], select, textarea { border:1px solid var(--line); border-radius:6px; padding:7px 10px; font-size:13px; font-family:inherit; background:#141822; color:var(--ink); }
-  input[type=text]:focus, textarea:focus { outline:none; border-color:var(--blue); }
+  input[type=text]:focus, textarea:focus { border-color:var(--blue); }
+  /* ── 焦点可见（Task 2.6 验收句「键盘可完成全部审批操作」的前提）────────────
+   * 上面那一行原来带 `outline:none` —— 键盘走到哪一格【看不出来】，那句验收
+   * 就只剩"控件 tabindex 都在"，没有"人看得见自己在哪"。这条补的是焦点环。
+   * ⚠ 为什么是 :focus-visible 而不是 :focus：鼠标点一下输入框也算 :focus，
+   *   那会在每一次点击之后留一个环 —— 而 §19.1 要的是「控制室，信息密度优先于
+   *   装饰性」。:focus-visible 只在【键盘/程序化】聚焦时出现，正是要的那一半。
+   * ⚠ 为什么用 --blue：§19.2 锁死的是琥珀（=需要 CEO 决策）与那几处红色落点，
+   *   机器可读的落点名单在 test/web/renderer-criteria.test.ts 里，扫的是
+   *   var(--amber) 与 var(--err) 两份 —— 焦点环不是业务状态色，两份都不该动。
+   *   蓝在本页已经是「可交互/进行中」那一档（.btn:hover、.tk:hover、
+   *   .node.pick 都是它），而焦点说的正是"这一格可交互"。
+   *   这里【不许】换成琥珀：焦点环随按键满屏跑，用琥珀等于让「这里需要你决策」
+   *   每按一次 Tab 撒一次谎 —— 那条扫视规则就是这么废掉的。
+   */
+  :focus-visible { outline:2px solid var(--blue); outline-offset:2px; }
   .err { color:var(--err); font-size:13px; }
   .ok { color:var(--green); font-size:13px; }
   .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:14px 16px; margin-bottom:12px; }
@@ -80,6 +95,18 @@
   details { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:10px 14px; }
   summary { cursor:pointer; color:var(--blue); font-size:13px; }
   pre { background:#12141b; color:#b8c0d0; padding:12px; border-radius:8px; font-size:11px; overflow:auto; max-height:260px; }
+  /* 参数快照（§9.2 第二行 + 计划 Task 2.6 那句「等宽字体 + 左缩进（不画框线）」）。
+   *
+   * ⚠ 为什么【不用现成的 pre】：pre 带着 `background` + `border-radius` = 画了一个框，
+   * 而那一格明写不画框线 —— 本仓的层级一律靠缩进与色阶表达（§19.4 同一族，
+   * 看板那三层折叠也刻意不用竖线）。所以这块只有左缩进，别的什么都没有。
+   * ⚠ 等宽【不在这个类里重复一份字体栈】：那格由 `.mono` 提供（元素带两个 class），
+   * 这里再抄一遍栈就是两份会漂的抄件 —— 与本仓对 money() 那句话同一条理由。
+   */
+  .snap { padding-left:18px; margin-top:6px; font-size:12px; }
+  .snap .k { display:inline-block; min-width:196px; color:var(--muted); }
+  /* 读不出来 / 空：同一处缩进，用 .meta 的灰。这一行是这一格的主角，见 paramSnapshotLines。 */
+  .snap-none { padding-left:18px; margin-top:6px; }
   .pill { display:inline-block; border-radius:999px; padding:1px 10px; font-size:11px; font-weight:600; background:var(--chip); color:var(--muted); }
   .pill.s-blue { color:#8fb6d9; }
   .pill.s-green { color:#7fc9a5; }
@@ -183,9 +210,10 @@
 <body>
 <header>
   <h1>OPC</h1>
-  <nav id="nav"></nav>
+  <nav id="nav" aria-label="主导航"></nav>
   <div class="conn"><span class="dot" id="dot"></span><span id="connText">连接中…</span></div>
 </header>
+<noscript>此应用需要 JavaScript。请启用后刷新。</noscript>
 <main id="view"></main>
 </body>
 </html>

@@ -59,6 +59,9 @@
       },
       "complexity": {
         "useLiteralKeys": "off"
+      },
+      "correctness": {
+        "noUndeclaredVariables": "error"
       }
     }
   },

@@ -283,3 +283,53 @@ TEXT 主键，`ORDER BY id` 排的是**字典序**，与插入顺序**无关**�
 凡按它排序的地方都要问一句「排的是哪一种」。同一条也解释了 §5 为什么判据是**成员关系**
 而不是「取最新那张」：`PENDING_CARDS_SQL` 那个 `ORDER BY created_at, id` 里
 `created_at` 同一轮相同、`id` 是 UUID，**那个次序是随机的**，靠它挑一张会得到一条看起来确定、实际随机的判定。
+
+---
+
+## 10. round343 落地块：§6-2 的「该回的状态码」在桥层落地（IM 可机读）
+
+上面 §6-2 把「打回没带理由」「点到过期卡片」归为【调用方的请求不成立】，
+指出**更对的码是 422 / 409 而不是 500**，并在 §6-2 末尾写明它与补卡**不是同一发**，
+排在 §7 之后。round343 把这一发落在了**通道桥层**：`makeChannelAct`（IM 那一路
+`approveCard`）现在把这两条 outcome 折叠成可机读的状态码提示。
+
+- `channels/abstraction.ts:584` —— `ChannelActResult` 的失败支
+  增加可选字段 `readonly statusHint?: 422 | 409`；doc 块写明语义（调用方请求不成立）
+  与场合（打回没理由 → 422，点过期卡 → 409）。
+- `channels/approval-bridge.ts:228-233` —— `makeChannelAct`：
+  `note_required` / `waiver_note_required` ⇒ `{ok:false, why, statusHint:422}`；
+  `stale_card` ⇒ `{ok:false, why, statusHint:409}`；其余 outcome（card_missing 等
+  服务端一致性问题）保持只给 `why`，消费方仍按 500 处理。
+- 测试 `packages/hub/test/acceptance/im-reply-approves-card.test.ts`：
+  seedCard 透传 cardKey；新增 3 条 —— 打回没给理由 ⇒ `{ok:false, statusHint:422}`
+  且未写库 / 点到过期卡 ⇒ `{ok:false, statusHint:409}`（并批准 own 卡做分母）/
+  正常 `decided` ⇒ `{ok:true}` 不带 statusHint。15/15 通过；相邻 engine/approve +
+  bindings/im 94/94；tsc -b 0。
+- 变异（`.workbuddy/round343-statuscode-mut.mjs`）5/5：M1 删 422 映射 ⇒ 红、
+  M2 409 改 200 ⇒ 红、M3 两接线全删 ⇒ 红、M0/M9 对照复跑全绿，真改字节自回滚
+  `reverted:true`、`next !== before`。
+- 兼容性：statusHint 是**可选新字段**，只加不拆；IM 渠道只读 why 的行为不变。
+
+**round344 追加（http 那一格，§6-2 的【后半】）：** 上一格说「HTTP 那一路的
+`recordDecision`→500 折叠仍未动」—— 本轮补上，取法与桥层**同一判据、另一输送方式**：
+
+- 不拆 `recordDecision` 的 boolean 契约（返回值只有 true/false，保持 16 个测试
+  stub 零改动），新增 `DecisionStatusError`（`name` + `statusHint: 422 | 409`）。
+- `decideWithEngineEdge`（`decideWithEngineEdge` 抛错段，`channels` 桥层同款映射）：
+  `note_required` / `waiver_note_required` ⇒ 抛 `DecisionStatusError(422)`；
+  `stale_card` ⇒ 抛 `DecisionStatusError(409)`；其余 outcome（card_missing /
+  task_missing 等一致性问题）照旧抛 `Error`（HTTP 侧回 500）。
+- `handleRequest` 的 catch 按 `name === "DecisionStatusError"` 且 statusHint 只取
+  422/409 折叠成对应状态码 + 原文，其余异常照旧 500。名字 + 取值双锁：外部依赖
+  抛一个偶带 statusHint 字段的对象不会被误折叠成「你该补理由」。
+- 测试 `packages/hub/test/http/decision-engine-route.test.ts`：新增「点到过期卡
+  ⇒ 409」（任务 FINAL_REVIEW + own 卡 seat:FINAL_REVIEW + 旧卡 seat:ESCALATED_TO_CEO；
+  点旧卡 ⇒ 409 + 库里零写；批 own 卡 ⇒ 200 做分母）；「第二道网」那发断言升级为
+  `name === "DecisionStatusError" && statusHint === 422`（变异促成的升级：只
+  `toThrow` 的话，丢 422 的变异会以普通 Error 漏网）。10/10 通过；相邻 contract +
+  real-deps + im-reply 99/99；tsc -b 0。
+- 变异（`.workbuddy/round344-statuserror-mut.mjs`）5/5：M1 stale 改抛普通 Error
+  ⇒ 409 那发红、M2 note/waiver 改抛 Error ⇒ 第二道网红、M3 两段接线全删 ⇒ 两发红、
+  M0/M9 对照复跑全绿，真改字节自回滚 `reverted:true`。
+- 桌面 IPC 的行为不变（`channels.ts:57` 那条「500 长成操作失败请重试」的立场
+  少吃到两种假象：点过期卡 / 打回没理由原来是 500，现在是 409/422）。

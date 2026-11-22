@@ -39,13 +39,18 @@ import { fileURLToPath } from "node:url";
 import { APPROVAL_STATUS_PENDING } from "@opc/contracts";
 import { afterAll, describe, expect, it } from "vitest";
 import {
+  APPROVAL_COLUMNS,
+  APPROVAL_DETAIL_COLUMNS,
   APPROVAL_ORDER,
+  approvalDetailViewOf,
   approvalViewOf,
   clampLimit,
   DEFAULT_APPROVAL_LIMIT,
   escalationReasonOf,
   listApprovals,
   MAX_APPROVAL_LIMIT,
+  parametersObjectOf,
+  readApprovalDetail,
 } from "../../src/approvals/query.js";
 import { openDb } from "../../src/db/driver.js";
 import { migrate } from "../../src/db/migrate.js";
@@ -601,5 +606,201 @@ describe("⑦ policy_shadow：规则判而不下手", () => {
     // 认领卡片 + 署 policy-engine 的那条写路径【今天无人调】：
     // 「存在一条被自动批准的审批」这一发今天必须红（O9 验收第 1 条）。
     expect(recordCallers).toEqual([]);
+  });
+});
+
+/* ───────── ⑧ 详情读侧：readApprovalDetail / parametersObjectOf ─────────
+ * GET /approvals/:id 落地时新加的一节。与 http/approval-detail-route.test.ts 的分工
+ * 写在那边文件头：那边测【判据 → 状态码 → 响应体】与「列表不带 / 详情带」两面，
+ * 这边测【那一串列名与视图】—— 也就是只有进程内读侧能证的事。
+ */
+describe("⑧ 详情读侧：那一串列名、点查、以及 null 的三种来路", () => {
+  /**
+   * 真表有哪些列 —— 由 PRAGMA 现读，【不是】这里手抄一份。
+   *
+   * 手抄一份会造出本仓最讨厌的那种假绿：将来 0010 加一列而这条断言不知道，
+   * 于是「详情少了一列」与「DDL 从来没这列」在测试里长得一样。
+   * 现读的代价是多一次 PRAGMA，换来的是【分母来自库本身】
+   * （同 query.test.ts ③ 那条「排序只有真 SQLite 能验」的立场）。
+   */
+  function realColumns(db: DatabaseSync): string[] {
+    const rows = db.prepare("PRAGMA table_info(approvals)").all() as Array<{
+      name: string;
+    }>;
+    expect(
+      rows.length,
+      "PRAGMA 读不到 approvals 的列 ⇒ 这一发起码要先红在这里",
+    ).toBeGreaterThan(10);
+    return rows.map((r) => r.name);
+  }
+
+  const split = (cols: string): string[] =>
+    cols
+      .split(",")
+      .map((s) => s.trim())
+      .filter((s) => s !== "");
+
+  it("⭐ 详情那串列名：少一列就红，多一个不存在的名字也红", () => {
+    /*
+     * APPROVAL_DETAIL_COLUMNS 那份注释说「这一串必须与视图逐列对齐，由这一发钉住」。
+     * 三条断言各挡一种漂法：
+     *  ① 详情 ⊉ 列表 ⇒ 详情比列表还少一列。这一条最值钱的落点是 `parameters`：
+     *     它【 nullable 】，所以少了它 schema 照样过 —— 症状是详情页安静地写
+     *     「参数快照读不出来」，而这句话在屏幕上是【库里数据坏了】的意思。
+     *     一次删列改动会伪造出一条关于生产库的指控。这就是为什么这一条要单独钉。
+     *  ② 详情独有的三格必须在（那三格是详情存在的理由，不是附带品）。
+     *  ③ 每一个名字必须在真表里存在 ⇒ 挡的是拼错 / DDL 改名，那种改动在
+     *     prepare 时抛的是「no such column」，而抛在详情这条路上被翻成 500。
+     */
+    const db = fresh();
+    const real = realColumns(db);
+    const detail = split(APPROVAL_DETAIL_COLUMNS);
+    const list = split(APPROVAL_COLUMNS);
+    for (const c of list) {
+      expect(detail, `详情少了列表就有的那一列 ${c}`).toContain(c);
+    }
+    for (const c of ["decided_by", "decided_at", "decision_note"]) {
+      expect(detail, `详情少了它存在的理由那一格 ${c}`).toContain(c);
+    }
+    for (const c of detail) {
+      expect(real, `详情 SELECT 了一个真表里【不存在】的列 ${c}`).toContain(c);
+    }
+    // 反向对照（分母）：详情确实【没有】把整表发出去 —— 真表里有而详情不选的列
+    // 必须非空。空的话说明有人把那一串换成了 `SELECT *`，
+    // 而 APPROVAL_COLUMNS 上面那段「不许 SELECT *」的论点就是这么开始失效的。
+    const skipped = real.filter((c) => !detail.includes(c));
+    expect(skipped.length, "详情把整张表都 SELECT 了？").toBeGreaterThan(0);
+    // 重复名列（写重复不会抛，会静默覆盖同名键 ⇒ 视图拿到的值取决于驱动顺序）。
+    expect(detail.length).toBe(new Set(detail).size);
+  });
+
+  it("⭐ 内部列被塞进 SELECT 也【不会】变成对外契约", () => {
+    /*
+     * 这一发原本要钉的是我写在 approvalDetailViewOf 上面那句「内部列万一被加进
+     * APPROVAL_DETAIL_COLUMNS，会在 parse 当场抛」。**实跑证明那句是错的**：
+     * 视图是【逐字段映射】出来的（approvalViewOf 只读它认识的那几格 + 这里补四格），
+     * 多出来的行键根本没人读 ⇒ parse【不会】抛，它是被【静默丢掉】。
+     * 结果仍然是安全的（不泄漏），但机制与注释写的不是同一件事，
+     * 而注释一旦说错机制，下一个人就会以为有闸门。所以这一发钉真实机制：
+     * 多加一列 ⇒ 输出里【没有】那一格，且【不抛】。
+     * 真正的闸门是上面那条列名对齐 + contracts 那张 .strict()。
+     */
+    const db = fresh();
+    card(db, "i-1", { parameters: "{}" });
+    const row = db
+      .prepare("SELECT * FROM approvals WHERE id = 'i-1'")
+      .get() as Record<string, unknown>;
+    // card_key 是真列（0004），而它【不属于】对外视图。
+    expect(Object.keys(row)).toContain("card_key");
+    const v = approvalDetailViewOf({ ...row, card_key: "内部去重键" });
+    expect(JSON.stringify(v)).not.toContain("card_key");
+    expect(JSON.stringify(v)).not.toContain("内部去重键");
+    expect(Object.keys(v)).not.toContain("card_key");
+  });
+
+  it("⭐ 详情【不按 status 过滤】：已决的那一张读得到（「我上周批的是什么来着」）", () => {
+    const db = fresh();
+    card(db, "x-1", { status: "pending" });
+    card(db, "x-2", {
+      status: "approved",
+      note: null,
+    });
+    db.prepare(
+      "UPDATE approvals SET decided_by = 'ceo', decided_at = ? WHERE id = 'x-2'",
+    ).run(T0 + HOUR);
+    const p = readApprovalDetail(db, "x-1");
+    const a = readApprovalDetail(db, "x-2");
+    expect(p?.status).toBe("pending");
+    expect(a?.status).toBe("approved");
+    expect(a?.decided_by).toBe("ceo");
+    expect(a?.decided_at).toBe(T0 + HOUR);
+    // 同一张卡在两个界面上的决定权判断必须一致（列表那一档过滤放行时也读得到）。
+    expect(
+      listApprovals(db, { status: "approved" }).approvals.find(
+        (k) => k.id === "x-2",
+      )?.status,
+    ).toBe(a?.status);
+  });
+
+  it("⭐ 详情是列表的【超集】：同名的每一格两边同值", () => {
+    // approvalDetailViewOf 那份注释说「列表的口径是详情的子集，由代码结构保证」。
+    // 结构保证的事也要有一发测得到：漂了之后的形状是「列表说 unknown、详情说
+    // pending」，而决定权正是界面琥珀色唯一的意思。
+    const db = fresh();
+    card(db, "s-1", {
+      parameters: JSON.stringify({
+        impact_scope: "生产库",
+        irreversible: true,
+      }),
+      evidence_refs: JSON.stringify(["task:t-1/evidence/prd.md"]),
+    });
+    const one = listApprovals(db).approvals.find((k) => k.id === "s-1");
+    const detail = readApprovalDetail(db, "s-1");
+    expect(one).toBeDefined();
+    expect(detail).not.toBeNull();
+    for (const [k, v] of Object.entries(one ?? {})) {
+      expect(detail?.[k as keyof typeof detail], k).toEqual(v);
+    }
+    // 详情多出来的恰好那四格（少一格上面那条循环报不出来 —— 它只比同名格）。
+    expect(
+      Object.keys(detail ?? {})
+        .filter((k) => !(k in (one ?? {})))
+        .sort(),
+    ).toEqual(["decided_at", "decided_by", "decision_note", "parameters"]);
+  });
+
+  it("⭐ parametersObjectOf：null / 空串 / 标量 / 数组 / 坏 JSON ⇒ 一律 null，而 {} 是 {}", () => {
+    // null 在这一格的意思是【读不出一个 JSON 对象】，不是「没有参数」。
+    // 界面据此写「参数快照读不出来」那一句 —— 说成"为空"就等于指这张卡本来没参数。
+    for (const raw of [
+      null,
+      undefined,
+      "",
+      "不是 JSON",
+      '"一个标量"',
+      "42",
+      "true",
+      "[1,2,3]",
+    ]) {
+      expect(parametersObjectOf(raw), JSON.stringify(raw)).toBeNull();
+    }
+    expect(parametersObjectOf("{}")).toEqual({});
+    expect(parametersObjectOf('{"a":1}')).toEqual({ a: 1 });
+    // 空对象与 null 必须是两种答案 —— 这一条是上面两组的合取，单独写出来是因为
+    // 它是这一格里最容易被「统一返回 {} 更省事」改掉的一条。
+    expect(parametersObjectOf("{}")).not.toBe(parametersObjectOf(""));
+  });
+
+  it("⭐ 库里那三种脏 parameters 走完整读侧：详情给 null，卡片其余部分照常", () => {
+    const db = fresh();
+    card(db, "d-1", { parameters: "这不是 JSON" });
+    card(db, "d-2", { parameters: "[1,2,3]" });
+    card(db, "d-3", { parameters: '"标量"' });
+    for (const id of ["d-1", "d-2", "d-3"]) {
+      const v = readApprovalDetail(db, id);
+      expect(v, id).not.toBeNull();
+      expect(v?.parameters, id).toBeNull();
+      expect(v?.id, id).toBe(id);
+      expect(v?.summary, id).toBe("摘要 " + id);
+      // 影子判定与升级原因走的是【同一段脏文本】的另一条解析路径，它们也不许崩。
+      expect(v?.policy_shadow, id).not.toBeNull();
+    }
+  });
+
+  it("⭐ status 为 NULL 的旁路行：详情也读成 unknown，与列表同一口径", () => {
+    // approvalViewOf 那段「宁可显示一个看着不对的值」的立场，在详情里必须同一条。
+    const db = fresh();
+    card(db, "n-9", { status: "pending" });
+    db.prepare("UPDATE approvals SET status = NULL WHERE id = 'n-9'").run();
+    expect(readApprovalDetail(db, "n-9")?.status).toBe("unknown");
+    expect(listApprovals(db).approvals.map((a) => a.id)).toEqual([]);
+  });
+
+  it("id 不存在 ⇒ null，不是抛、不是空对象", () => {
+    const db = fresh();
+    expect(readApprovalDetail(db, "nope")).toBeNull();
+    // 空串 id：详情这一路在【路由层】就被判不匹配（app.ts 那条论证），
+    // 但读侧自己也不许把空串读成"库里有一张 id 为空的卡"。
+    expect(readApprovalDetail(db, "")).toBeNull();
   });
 });
