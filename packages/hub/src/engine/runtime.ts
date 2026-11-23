@@ -29,6 +29,7 @@
 import type { DatabaseSync } from "node:sqlite";
 import { randomUUID } from "node:crypto";
 import {
+  ENGINE_REVIEW_GATE,
   harnessDefaultsFor,
   harnessRequestSchema,
   type HarnessRequest,
@@ -52,7 +53,11 @@ import {
   ENSERT_BUDGET_SQL,
   IDEMPOTENT_INSERT_SQL,
 } from "../budget/tracker.js";
-import { assertCharterShape, readLatestCharter } from "../charter/store.js";
+import {
+  assertCharterShape,
+  gateCriteriaForRoleOrEmpty,
+  readLatestCharter,
+} from "../charter/store.js";
 import { NO_CHARTER_LINE, renderCharterPrompt } from "../charter/prompt.js";
 import { readGraphByVersion } from "../org/commit.js";
 import { isTaskOwnerOf, readRoleMemory } from "../memory/role-memory.js";
@@ -149,6 +154,24 @@ export const REJECTION_COUNT_SQL =
 export const CEO_APPROVED_SQL =
   "SELECT 1 AS hit FROM approvals WHERE task_id = ? AND card_key = ? AND status = 'approved' AND decided_by = 'ceo' LIMIT 1";
 
+/**
+ * 这条任务上【已经被门控判过几轮】—— §8.3「层级审阅轮次上限」的分子。
+ *
+ * 数 `review_gates` 而【不】数 events、也不新开一列，与 REJECTION_COUNT_SQL 同一条理由：
+ * 这一格的【事实源】就是门 4 自己写下的那些行（`turn-bundle.ts` 的 writeGateDecision）。
+ * 数 events 会把两条状态边也算进轮次；新开一列 gate_round_no 则造出两份同一事实。
+ *
+ * ⚠ 必须带 `gate_type = ?`：一张任务上今天只跑引擎方向，但 `review_gates` 的表形状
+ * 允许一条任务有多个方向（0001:110 那列就是为此存在）。漏掉这一维，将来 CEO 审阅方向
+ * 一旦落表就会把【引擎审阅】的轮次撑大 —— §8.3 那条上限会在【第 1 轮真审阅】时
+ * 提前触发，而它的表现是「任务被升级到 CEO」，看着像业务判断，查不到是计数器串了。
+ *
+ * ⚠ 放行轮【也】计数：门 4 对 pass 与不 pass 都落一行（见 dispatch 门 4 的账那一节）。
+ * 只拦不记的话分子恒为 0，那条上限永不触发 —— 与 rejectionCount 默认 0 同一失效形状。
+ */
+export const GATE_ROUND_NO_SQL =
+  "SELECT COUNT(*) AS n FROM review_gates WHERE task_id = ? AND gate_type = ?";
+
 export interface RuntimeDeps {
   /** 写入方。要的是 HubWriter：写走 node()，读走那个物理只读的连接。 */
   readonly writer: HubWriter;
@@ -184,6 +207,16 @@ export interface RuntimeDeps {
   readonly nowMs?: () => number;
   /** 装进 harness_calls.harness_version 的字符串（CLI 版本）。 */
   readonly harnessVersion?: string;
+  /**
+   * 门 4 的证据制品根目录（§5.10）。**必填**，且这里【不给默认值】。
+   *
+   * 为什么不在这层调 `artifactsRoot()` 兜底：那正是 evidence/store.ts:33 量过的失效
+   * 形状 —— 这个包同时被测试与真 Hub 用，装配层一旦自动补默认值，测试就会往真实
+   * 用户的 `~/.opc-os/artifacts/` 里写制品（路径由 bundle_id 决定，写完删不掉）。
+   * 默认值只能出现在【调用方】：生产入口显式写 `artifactsRoot()`，测试显式写临时目录。
+   * 漏传 = 编译不过，这比「运行时发现写错地方」便宜得多。
+   */
+  readonly evidenceRoot: string;
 }
 
 export interface EngineRuntime {
@@ -534,6 +567,27 @@ export function makeRuntime(d: RuntimeDeps): EngineRuntime {
 
     ceoApproved: (taskId, cardKey) =>
       read().prepare(CEO_APPROVED_SQL).get(taskId, cardKey) !== undefined,
+
+    gateCriteria: (roleId) =>
+      // 门 4 的读法（【不是】gateCriteriaForRole 那个「CEO 明确要读某个角色的标准」的口径）：
+      // 0 行岗位书是今天库里的真实状态，门控对它的正当结论是 reject + 一张「去写岗位书」
+      // 的卡，而不是让整轮以异常收场。区分仍在：那一行【存在但读坏了】时这个函数照旧抛
+      // （charter/store.ts 的「两件事就该有两种后果」）。
+      //
+      // 读的是【最新版】而不是任务那一版：岗位书是角色级配置，不是任务快照，
+      // CEO 存了新版就该从下一轮起生效（与 rolePrompt 读 readLatestCharter 同一个口径，
+      // 否则会出现「提示词按 v3 岗位书干活、门控按 v1 岗位书判」的自相矛盾）。
+      gateCriteriaForRoleOrEmpty(read(), roleId),
+
+    gateRoundNo: (taskId) => {
+      // 见 GATE_ROUND_NO_SQL。方向那一维由契约给，不在这里抄字面量。
+      const row = read()
+        .prepare(GATE_ROUND_NO_SQL)
+        .get(taskId, ENGINE_REVIEW_GATE) as { n: number | bigint } | undefined;
+      return row === undefined ? 0 : Number(row.n);
+    },
+
+    evidenceRoot: d.evidenceRoot,
 
     onCost: ((o: Parameters<CostHook>[0]): void => {
       // 记账三句（声明任务级上限 → 幂等插一笔 budget_events → 扣减）。SQL 本体在

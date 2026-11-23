@@ -1,0 +1,83 @@
+-- 中断重放去重的 DDL 级判据（0005 §11 缺陷 A + B 的修复，CEO 拍板 0006 §8.3 的 B）
+--
+-- ── 这一条挡的是什么 ────────────────────────────────────────────────
+-- LangGraph 的 interrupt() 靠【把节点从头重放到 interrupt() 那一行】实现恢复
+-- （0005 §11 实测）。所以中断【之前】写的 events 会被写第二遍，而崩溃重启 N 次
+-- 就写 N 遍。两条实测（本轮补的探针，不是引用旧结论）：
+--
+--   .workbuddy/probe356-crash-child.mts —— 跨进程崩溃恢复（新进程 + invoke(null)）：
+--     第一次 1 行，重启一次 2 行，再重启一次 3 行，三行 payload 【逐字相同】；
+--     而节点看到的 __pregel_task_id 三次都是 aa774be0-f1a8-5b24-…（一模一样）。
+--   .workbuddy/probe356-replay-step.mts —— 同进程 resume：
+--     checkpoint_id 每次【新】（1f1e667d-…6350 → …66a0 → …6f20），metadata.step
+--     从 0 变到 1。⇒ 超步身份在重放时【不稳定】。
+--
+-- ── 为什么键里是 task_id 而不是超步序号 ────────────────────────────
+-- 0005 §11.4 原本建议「(task_id, action, from, to, 超步序号)」。**那一维实测是错的**，
+-- 上面第二个探针就是为它做的：超步序号（以及 checkpoint_id）在重放时会变，
+-- 拿一个会变的值当键 ⇒ 重放行拿到【不同】的键 ⇒ 一条也吞不掉，缺陷原样留着，
+-- 而索引看起来完全正常 —— 那是「守卫存在但不咬人」最难查的一种。
+-- 稳定的是 __pregel_task_id：uuid v5（名字派生、确定性，version nibble = 5），
+-- 由【checkpoint + 节点输入】推导，所以新进程重启也复现同一个值。
+-- 这一维由图侧调用方取出来交给 recorder（见 events/recorder.ts 的 replayKey），
+-- recorder 本身不认识 LangGraph。
+--
+-- ── 为什么键落在【独立一列】而不是 json_extract(payload, '$.replayKey') ──
+-- 表达式索引在这条路上有两个实测/可证的坑，都值得为它单开一列：
+--   ① json_extract 对畸形 payload 是【抛错】而不是返回 NULL —— 这条本仓量过两次
+--      （heartbeat/patrol.ts:116-167，engine/runtime.ts:129 因此先过 json_valid）。
+--      CREATE UNIQUE INDEX ... WHERE json_extract(...) 会【逐行求值表达式】，
+--      于是别人的老库里只要躺着一条 payload 不是合法 JSON 的旧行，这个迁移就
+--      在半路抛错 ⇒ 老库升不上来。而 append-only 触发器挡住了「先把脏行洗干净」：
+--      UPDATE 与 DELETE 都 RAISE(ABORT)（schema-0001.test.ts:79 钉着）。
+--      新写的 payload 当然都是合法 JSON，但迁移要面对的是【已经存在的那张表】。
+--   ② payload 在 events_fts 的 trigram 索引范围里（0001 建表 + events_fts 触发器）。
+--      把去重键塞进 payload 等于把一层内部机制灌进全文检索语料：每一行多一段
+--      uuid 的 trigram，搜「重放」的人搜不到更准，只会让命中里混进键噪声。
+-- 列的形态（ADD COLUMN + 建在其上的部分索引）两个坑都没有：老行取默认 NULL，
+-- 建索引时不求值任何函数，FTS 触发器（AFTER INSERT，只读 payload）不受影响。
+--
+-- ── 为什么索引只覆盖【带 replay_key 的行】（部分索引，不是全表）────────
+-- 两个理由，第二个是硬约束：
+--   ① 老库里【合法地】躺着重复行（缺陷 B 的既有产物）。全表唯一索引会在别人的
+--      老库上 CREATE 失败 ⇒ 迁移失败 ⇒ Hub 起不来。append-only 触发器
+--      （events_no_update / events_no_delete）挡住了事后清理，所以既不能改历史行
+--      也不能删历史行 —— 唯一可行的落地形状就是只约束新写入的那一批。
+--   ② 「新」这件事由 replay_key IS NOT NULL 表达：老行永远是 NULL（SQLite 的
+--      ADD COLUMN 只接受【非确定性】默认值以外的常量默认，NULL 正是常量），
+--      新代码写的行必带键。谓词本身就是「这条由去重代码写的」标记，
+--      所以键、标记、索引三件事共用同一列，没有可以各自漂移的第二份口径。
+--
+-- ── 为什么判据落在 DDL 而不是只落在那次预检查 ──────────────────────
+-- recorder 的 wouldDuplicate 预检查（events/recorder.ts）负责【吞掉】重放：走 SELECT
+-- 而不走失败的 INSERT，实测理由是后者虽然不烧 AUTOINCREMENT id（.workbuddy 实测：
+-- 唯一约束失败后同事务下一条仍拿 2，序列连续），但会把一个可预期的常态变成异常控制流。
+-- 预检查与索引不是冗余：预检查漏了（将来有人在别处直接 INSERT、或改了键的算法）
+-- 时，索引让它【炸】而不是【静默多一行】。同一条立场见 0024 / 0025 / 0005 文件头：
+-- 注释与校验拦不住的东西，不要只用注释与校验拦。
+--
+-- ── 键的三个维度，各自挡的是哪一种误吞 ────────────────────────────
+--   action     —— 同一张卡片的 ApprovalRequired 与 ApprovalDecided 都是 target=interruptId，
+--                 少了这一维会把自己的「决定」当成「要求批准」的重放吞掉。
+--   target     —— 同一个节点任务里写的多条不同边（dev 一次执行写 REJECTED_DOWNWARD→IN_PROGRESS
+--                 与 IN_PROGRESS→EVIDENCE_SUBMITTED）共享 replayKey，少了这一维第二条会被吞。
+--   replay_key —— 重放不变量本身（节点 = 那次 task_id；审批 = kind + interruptId）。
+-- 合法重复不受影响：A→B→A→B 四次跃迁来自四次节点执行 ⇒ 四个不同 task_id；
+-- 同一张卡重新要求批准 ⇒ 一个新的 interruptId。
+--
+-- ── 为什么用 ALTER TABLE ADD COLUMN ────────────────────────────────
+-- 本仓既有惯例：0002 / 0004 / 0005 都往既有表上加过列，没有一次重建表。
+-- 重建表在 events 上根本不可行（append-only 触发器挡 DELETE）。
+-- 代价是 recorder 的 INSERT 分两条：INSERT_EVENT_SQL 保持【8 列】不动
+-- （recorder.test.ts:233 钉着它的占位符个数，且 8 个调用方共用它），
+-- 带 replay_key 的写入走 EVENTS_INSERT_WITH_REPLAY_KEY_SQL。分开写而不是改 8→9：
+-- 不带键的行（绝大多数审计行）没有理由被迫多传一个 null。
+--
+-- 不含 DROP / RENAME，不含 PRAGMA（同 0002–0005 的立场）。
+-- 本文件没有触发器体，可以整文件一次 exec（migrate.ts 的 applyOne 就是这么做的）。
+
+ALTER TABLE events ADD COLUMN replay_key TEXT;
+
+CREATE UNIQUE INDEX idx_events_replay_key_once
+  ON events (action, target, replay_key)
+  WHERE replay_key IS NOT NULL;

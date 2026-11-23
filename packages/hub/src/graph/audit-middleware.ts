@@ -82,15 +82,32 @@ export async function auditedInvoke<T>(o: {
   // 两条路径，差别只在【谁负责 COMMIT】；写进去的内容完全相同，所以抽成一个函数，
   // 避免复制粘贴后两条路径的语义各自漂移。
   const writeApprovals = async (): Promise<void> => {
+    // 规格 §6.3 第二条要的「决定时的完整任务状态 JSON」。invoke 的返回值就是
+    // 图这一轮的完整通道值，唯一要摘掉的是 __interrupt__ —— 它不是状态通道，
+    // 是框架用来捎带中断的包装（摘掉它也让「快照 = 状态」这件事在库里成立）。
+    const state = { ...(result as Record<string, unknown>) };
+    delete state.__interrupt__;
     for (const hit of interrupts) {
       // 系统事件：没有人做过这个动作，是图停下来了。actor 用 recorder 的
       // 默认 { system, hub } —— 伪造一个 agent 身份是审计污染。
-      await o.recorder.record({
-        kind: "ApprovalRequired",
-        taskId: o.taskId,
-        interruptId: hit.id,
-        payload: hit.value,
-      } satisfies DomainEvent);
+      await o.recorder.record(
+        {
+          kind: "ApprovalRequired",
+          taskId: o.taskId,
+          interruptId: hit.id,
+          payload: hit.value,
+        } satisfies DomainEvent,
+        {
+          stateSnapshot: state,
+          // 中断 id 就是这张卡在库里的身份（0004 的 card_key 同源），而它
+          // 【实测跨进程稳定】：.workbuddy/probe356-approval-replay-child.mts
+          // 三次不同 PID 跑同一个未决中断，target 三次都是 33b8563688f815e1…，
+          // 而 approval 行数 1 → 2 → 3。也就是说不给审批加键，
+          // 「崩溃一次多一张待批卡片」这条会一直留着 —— 它比多一条状态边更糟，
+          // 因为待批数直接进 CEO 的收件箱角标。
+          replayKey: hit.id,
+        },
+      );
     }
   };
 

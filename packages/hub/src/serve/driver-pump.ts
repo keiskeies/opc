@@ -413,6 +413,8 @@ export interface DriveOptions {
   readonly taskLimitCents: number;
   /** agent 工作目录（§12 那一维）。必填 —— 猜一个目录等于猜它能看见哪些文件。 */
   readonly cwd: string;
+  /** 证据制品根目录（§5.10）。必填，理由与 PumpOptions.evidenceRoot 同一条。 */
+  readonly evidenceRoot: string;
   readonly bin?: string;
   readonly maxAttempts?: number;
   readonly taskLimit?: number;
@@ -764,6 +766,7 @@ function defaultDriver(o: DriveOptions, w: HubWriter, bus: EventBus): DriveTaskF
         maxBudgetUsd: o.maxBudgetUsd,
         taskLimitCents: o.taskLimitCents,
         cwd: o.cwd,
+        evidenceRoot: o.evidenceRoot,
         ...(o.bin === undefined ? {} : { bin: o.bin }),
         ...(o.ceoRoleId === undefined ? {} : { ceoRoleId: o.ceoRoleId }),
         nowMs: () => o.nowMs,

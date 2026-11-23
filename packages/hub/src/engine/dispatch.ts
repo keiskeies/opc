@@ -30,8 +30,20 @@
  *  · 「终止任务」：§7.4 给了这个按钮，而 §7.1 的 15 个状态里【没有终止态】，
  *    所以那个按钮在全仓任何一张边表里都落不了地（不是没写，是没有合法的目的地）。
  *  · 自动批准 / 策略引擎 / 会议子图 / 心跳：未接。
+ *
+ * ⚡【round358 过期声明】上面那一格「证据包（§8.1）：交接只带一句 summary，没有
+ * bundle ⇒ §8.2 第 2 条现在【无处可满足】」已经【不再成立】，两半都补了：
+ *  · 生产者 → `evidence/turn-bundle.ts`（字节落文件系统 + 与磁盘上的 sha256 对账）；
+ *  · 消费者 → 下面那条【门 4】，它在【建事件之前】算出 `integrityOk` 再交给
+ *    `evaluateGate`（§O5 动作 2 逐字要求的就是这个位置：先对账，后落审计）。
+ * 那段论证留下是有用的：它说对了「缺生产者时喂门控只会喂到空包」这件事。
+ * 今天【仍未满足】的是另一半 —— 包里没有独立核验过的事实，只有产出方自报的
+ * 一句话（turn-bundle.ts 文件头第 ② 条）。所以 §8.2 第 2 条的「内容可信」那一半
+ * 靠岗位书标准（`metric:` 那些）撑，而 role_charters 今天 0 行 ⇒ 每一轮审阅都会在
+ * 门 4 上被拦成一张卡。那是 CEO 拍的「全量拦」（0 标准不放行），不是这一格漏了。
  */
 import type { OrgGraph } from "@opc/contracts";
+import { ENGINE_REVIEW_GATE, HANDOFF_BUNDLE_TYPES } from "@opc/contracts";
 import type { Writer } from "../db/write-queue.js";
 import { requireScopeDb } from "../checkpoint/tx-scope.js";
 import { appendAudit, KIND_TO_ACTION } from "../events/recorder.js";
@@ -39,6 +51,8 @@ import type { DomainEvent } from "../events/bus.js";
 import {
   approvalRequiredEvent,
   insertCard,
+  GATE_BLOCK_KEY_PREFIX,
+  REVIEW_BLOCK_KEY_PREFIX,
   SAME_FAMILY_REVIEW_KEY_PREFIX,
   type ApprovalRequiredEvent,
   type NewCardDraft,
@@ -48,6 +62,42 @@ import { readGraphByVersion } from "../org/commit.js";
 import { assertTaskTransition, legalTransitionsFrom, type TaskState } from "../graph/status.js";
 import { DECISION_MARK, parseDecision, type RoleAction, type RoleDecision } from "./claude.js";
 import { mintSeatCard, needsSeatCard } from "./seat-card.js";
+import {
+  selfReviewEdgeBlock,
+  type DelegationEdge as ReviewEdge,
+} from "../graph/gates/author-reviewer.js";
+import {
+  evaluateGate,
+  type GateCriterion,
+  type GateVerdict,
+} from "../graph/gates/evaluate.js";
+import {
+  integrityCondition,
+  produceTurnArtifact,
+  registerTurnEvidence,
+  shortHash,
+  writeGateDecision,
+  type TurnEvidence,
+} from "../evidence/turn-bundle.js";
+
+/**
+ * 委派边 → 「谁审谁」判据要的那一份边。
+ *
+ * 为什么要一个显式的映射函数而不是直接把 `graph.edges` 递过去：两张表的字段名不同
+ * （落库/契约那侧叫 `review_gate`，判据那侧叫 `gate`，见 contracts `delegationEdgeSchema`
+ * 与 author-reviewer 的 `DelegationEdge`），而 `gate?: boolean` 是**可选**的 ——
+ * 直接把 `review_gate` 的图递进去，字段名写错的一侧【不会报错】，只会得到
+ * 「每一条边都被判成没有门控」⇒ 每一个产出角色都被判「无独立审阅者」。
+ * 那种失效的方向是收紧，所以它不会以故障的面目出现，只会让组织图忽然全都不可用。
+ * 显式映射让这一格只有一种写法。
+ */
+function reviewerEdges(graph: OrgGraph): ReviewEdge[] {
+  return graph.edges.map((e) => ({
+    from: e.from,
+    to: e.to,
+    gate: e.review_gate,
+  }));
+}
 
 /** 一轮执行的账单：CLI 报美元浮点，账上一律整数美分（§6.1）。 */
 export function usdToCents(usd: number): number {
@@ -322,7 +372,26 @@ export function handoffGate(o: {
  * 宁可CEO多点一次「同源可以」，也不让「两个不同 agent」的表象冒充独立性。
  * 代价与撤除条件记在 0041 §5。
  */
-export type ReviewGate = { readonly ok: true } | { readonly ok: false; readonly reason: string };
+/**
+ * round357 起拒绝带 `code`。这一格存在的全部理由是【修法不同】：
+ * `same_model_family` 点一张卡就能过（§5.9），而 `no_independent_reviewer_path`
+ * 点多少次都没用 —— 缺的是组织图上那条带门控的出边，不是批准。
+ * 原来只有 `{ok:false, reason}`，调用方无从区分，于是卡片只能按同一种话术写。
+ * 把 code 设成【必填】而不是可选：可选的 code 会在下一个分支被忘掉，
+ * 而忘了的那一支的表现是「把改图的事写成点批准」，CEO 点完发现还在原地。
+ * 词表与 `graph/gates/author-reviewer.ts` 的 `BlockCode` 对齐，只有
+ * `unknown_producer` 是这里独有的（那一维要查 events，保存期没有 events 可查）。
+ */
+export type ReviewBlockCode =
+  | "unknown_producer"
+  | "self_review"
+  | "unknown_model_family"
+  | "same_model_family"
+  | "no_independent_reviewer_path";
+
+export type ReviewGate =
+  | { readonly ok: true }
+  | { readonly ok: false; readonly code: ReviewBlockCode; readonly reason: string };
 
 export function reviewGate(o: {
   readonly producerRole: string | null;
@@ -332,20 +401,32 @@ export function reviewGate(o: {
   readonly approvedByCeo: boolean;
 }): ReviewGate {
   if (o.producerRole === null) {
-    return { ok: false, reason: "查不到这条产出是谁交的（events 里没有产出方），无法判定审阅独立性。缺信息不放行。" };
+    return {
+      ok: false,
+      code: "unknown_producer",
+      reason:
+        "查不到这条产出是谁交的（events 里没有产出方），无法判定审阅独立性。缺信息不放行。",
+    };
   }
   if (o.producerRole === o.reviewerRole) {
     return {
       ok: false,
+      code: "self_review",
       reason: "审阅者 [" + o.reviewerRole + "] 与产出者是同一角色 —— §8.2 第 1 条，图结构上的硬约束，不接受运行时豁免。",
     };
   }
   if (o.producerFamily.trim() === "" || o.reviewerFamily.trim() === "") {
-    return { ok: false, reason: "产出方或审阅方的 model_family 未声明，无法判定是否同源（§5.9），不放行。" };
+    return {
+      ok: false,
+      code: "unknown_model_family",
+      reason:
+        "产出方或审阅方的 model_family 未声明，无法判定是否同源（§5.9），不放行。",
+    };
   }
   if (o.producerFamily === o.reviewerFamily && !o.approvedByCeo) {
     return {
       ok: false,
+      code: "same_model_family",
       reason:
         "产出方 [" + o.producerRole + "] 与审阅者 [" + o.reviewerRole + "] 同属模型家族 [" +
         o.producerFamily + "]（§24 风险 1）：同家族判断高度相关，「两个不同 agent」只是表象。" +
@@ -856,6 +937,93 @@ function card(o: {
   };
 }
 
+/**
+ * 门控结论 → `review_gates.decision` 那一列的词表（round358 / O5）。
+ *
+ * 写成【按判别式穷尽的表】而不是 `decision === "pass" ? "approved" : ...`：
+ * `GateVerdict` 将来加第四种结论（比如 `conditional`，那一格 0001 的词表里已经有了），
+ * 三元链会把它安静地折进"否则"那一支，而表会让 tsc 停在缺键的这一格上。
+ * 映射住在 dispatch 而不是 turn-bundle.ts：那一层只负责"写一行什么形状的行"，
+ * 「门控的三种结论怎么对上审计词表」是执行路径的判断。
+ */
+const GATE_DECISION_WORD: Record<GateVerdict["decision"], "approved" | "rejected" | "escalated"> = {
+  pass: "approved",
+  reject: "rejected",
+  escalate: "escalated",
+};
+
+/**
+ * 门控结论 → 一句能落 `decision_reason`、也能进卡片摘要的人话。
+ *
+ * ⚠ 对【三条 reject 分支都写理由】这件事不写断言、只兜底一句人话：
+ * `reasons[0]` 在类型上是 `string | undefined`（`noUncheckedIndexedAccess`），
+ * 兜底那句的方向必须是"读起来不像有理由"，不能是空串 —— 空串会让那一行
+ * `decision_reason` 看起来像"批了但没写为什么"，而 §24 风险 2 要的就是这一格。
+ */
+export function gateReasonText(v: GateVerdict): string {
+  if (v.decision === "escalate") return v.reason;
+  if (v.decision === "pass") return "门控放行：验收标准逐条判过，没有不合格项。";
+  const first = v.reasons[0];
+  return v.reasons.length === 0
+    ? "门控判为不放行，但没有给出理由（内核的三条 reject 分支都写理由 —— 见到这行说明内核改坏了）"
+    : first + (v.reasons.length > 1 ? "（另有 " + String(v.reasons.length - 1) + " 条，见 conditions）" : "");
+}
+
+/**
+ * 被门控拦下时的那句停留理由（回放里「任务为什么停着」读的就是它）。
+ *
+ * 开头六个字【「审阅被门控」】是这一族的指纹，不是措辞偏好：`review-blocked:` 那一族的
+ * note 长这样 ——「审阅通过但无法推进：…（已建卡）」（planEdge 里那条 stay 分支）。
+ * 两族的修法完全相反（一个去写岗位书，一个去改组织图），所以两族的话必须一眼分得开。
+ */
+export function gateBlockedNote(v: GateVerdict, producer: string, roundNo: number): string {
+  const round = "第 " + String(roundNo + 1) + " 轮";
+  if (v.decision === "escalate") {
+    return "审阅被门控内核拦下（" + round + "，需你裁决）：" + v.reason + "（已建卡）";
+  }
+  if (v.decision === "pass") {
+    // 门 4 只在 verdict !== "pass" 时调本函数（dispatch 里那发 if 就是这条不变量的家）。
+    // 这里【不】返回一句「这一轮没被拦」的漂亮话：那会把一次调用方判错分支
+    // 伪装成一条正常的停留理由，落进 append-only 的 note 列，
+    // 而回放会把那句当成「任务停着的原因」读很多年。抛 = 整轮不写。
+    throw new Error(
+      "gateBlockedNote 收到了 pass：这一族 note 只描述【被拦下的那一轮】，" +
+        "放行轮没有停留理由可写。",
+    );
+  }
+  const fix = v.required_fixes[0];
+  return (
+    "审阅被门控内核拦下（" + round + "）：[" + producer + "] 的产出没有通过 §8.2 门控 —— " +
+    gateReasonText(v) + "。修法：" + (fix ?? "为该角色补上至少一条可机械判定的 acceptance_criteria（Task 0.9）") +
+    "（已建卡）"
+  );
+}
+
+/**
+ * 门控那一行 `conditions` 的内容（JSON 数组落库，回放与巡检都按前缀取）。
+ *
+ * ⚠ 这里【不写】下面那两条装配自检的结论。自检抛错时整轮已经回滚、那行根本不存在；
+ * 自检通过时"通过"不是一条判据。把自检结果写进 append-only 的账，等于给一列
+ * 本来只装【门控判据】的地方混进【引擎自己的体检结果】—— 读 conditions 的巡检
+ * 就得分清哪几条是给人看的（0065 那本账的形状：一列两种语义，第三种用法必然误读）。
+ */
+function gateConditions(te: TurnEvidence, v: GateVerdict, criteriaNo: number): string[] {
+  const out: string[] = [
+    integrityCondition(te.integrityOk),
+    // 门控【实际收到】几条标准。0 与 3 在这一列上必须看得出区别：0 标准时内核
+    // 在第 1 步就 return，第 2 步那条「包类型对不上 / 方向未登记」的维度根本不会算，
+    // 读这行的人若不知道标准是 0 条，会把"conditions 里没有包类型那一维"读成"核对过了"。
+    "criteria:" + String(criteriaNo),
+  ];
+  for (const r of te.integrityReasons) out.push("integrity-note:" + r);
+  if (te.skippedExternal > 0) out.push("external-skipped:" + String(te.skippedExternal));
+  const sha = te.bundle.artifacts[0]?.sha256;
+  if (sha !== undefined) out.push("sha256:" + sha);
+  for (const u of v.unresolved) out.push("unresolved:" + u);
+  if (v.decision === "reject") for (const f of v.required_fixes) out.push("fix:" + f);
+  return out;
+}
+
 /* ───────────────────────── 调度器 ───────────────────────── */
 
 export interface DispatchTask {
@@ -982,6 +1150,39 @@ export interface DispatchDeps {
   readonly rejectionCount: (taskId: string) => number;
   /** 同一件事是否已被 CEO 批过（同源审阅放行凭据）。 */
   readonly ceoApproved: (taskId: string, cardKey: string) => boolean;
+  /**
+   * 门 4（§8.2 门控内核）要的【验收标准】—— 按【产出方角色】取，取不到 ⇒ 空数组。
+   *
+   * 为什么必填而【不是】可选带默认 `[]`：默认空数组 = 忘了接线时每一轮都被门控
+   * 判成「没有任何验收标准可判」而 reject。那看起来【像】CEO 拍的「全量拦」在生效，
+   * 真相是装配漏了一格 —— 与 `rejectionCount` / `lastProducer` 同一条立场
+   * （读错的那一侧不会崩，只会安静地改变所有结论）。
+   *
+   * 为什么返回【空数组】而不是抛：`charter/store.ts` 的 `gateCriteriaForRole` 对
+   * 「库里没这个角色任何一版岗位书」是抛的，而那个口径属于「CEO explicitly 要读标准」
+   * 的入口（读不到就该炸）。门控这一侧相反：0 行岗位书是【今天数据库的真实状态】
+   * （实测 0 行，0015 §1），门控对它的正当结论就是 reject + 一张「去写岗位书」的卡，
+   * 而不是让一整轮执行以异常收场。区分仍然保留：那一行【存在但读坏了】时
+   * `gateCriteriaForRoleOrEmpty` 照旧抛（见 charter/store.ts 那条「两件事就该有两种后果」）。
+   */
+  readonly gateCriteria: (roleId: string) => readonly GateCriterion[];
+  /**
+   * 这条任务上【已经被门控判过几轮】—— `review_gates.round_no` 的分子，也是
+   * `evaluateGate` 那条 §8.3「层级审阅轮次上限」的输入。首轮返回 0。
+   *
+   * 必填的理由与上面两条同族：拿不到真实轮次而默认 1，会让那条上限【永不触发】。
+   * 口径是 `review_gates` 里这条任务、这个方向（ENGINE_REVIEW_GATE）的行数，
+   * 也就是「本模块自己写下的那些行」—— 定义与写入方同源，不需要再发明一套计数器。
+   */
+  readonly gateRoundNo: (taskId: string) => number;
+  /**
+   * 证据制品的根目录（§5.10）。必填，且【不在 dispatch 里算默认值】。
+   *
+   * 这条纪律不是抄 store.ts 的注释，是它量过的事故：这个包同时被测试与真 Hub 用，
+   * 默认值会让测试往真实用户的 `~/.opc-os/artifacts/` 里写制品，而路径由 bundle_id
+   * 决定 ⇒ 写完删不掉。让「写到哪」成为编译期必填，是唯一便宜的拦法。
+   */
+  readonly evidenceRoot: string;
   readonly ceoRoleId?: string;
   readonly onCost?: CostHook;
   /**
@@ -1163,8 +1364,47 @@ export function makeDispatch(deps: DispatchDeps): (o: DispatchOptions) => Promis
     const reviewSubject = deps.lastProducer(task.id);
 
     // ── 门 3：审阅独立性（只在 IN_REVIEW 的 pass 上判）─────────────────
+    //
+    // 这一门今天有【两个】相互独立的判据，各自一张卡：
+    //  ① 同源判定（`reviewGate`，本文件）—— 家族相同、家族没配、审自己、查不到产出方。
+    //     卡片键在 `same-family-review:` 那一族，批准 + 理由就是凭据（§5.9）。
+    //  ② 判据 3（`selfReviewEdgeBlock`，`graph/gates/author-reviewer.ts`）—— 产出方没有
+    //     一条【带门控且指向别人】的委派出边。缺的是图结构，不是同意，所以卡片键
+    //     刻意落在另一族（见 `REVIEW_BLOCK_KEY_PREFIX` 那条）。
     let review: ReviewGate | null = null;
+    /**
+     * 同源那一维【自己】的结论，永不被判据 3 改写。
+     *
+     * 它存在的唯一理由：下面建 `same-family-review:` 那张卡时，判据必须是
+     * 「同源这一维红不红」，而不是「`review` 综不综合红」。两者在【只有判据 3 红】时
+     * 分家 —— 那时 `review` 因为下面那次覆写而变成拒绝，但家族其实【不同源】。
+     * 拿综合结论去建那张卡的后果不是多一张卡：那张卡的摘要会写着「审的人和生产的
+     * 人同源」（一句假话），而它的修法是「点批准 + 写理由」（对本格完全无效，
+     * 因为缺的是一条边）。CEO 照卡片说的做，任务照样不动，而审计里写着她已经批过
+     * 一次同源豁免 —— 这正是上面那段说「最贵的错法」的形状，只是这次由我自己的
+     * 覆写造成的。用第二个变量而不是在这里比 `review.code` 的字符串：后者等于把
+     * `BlockCode` 词表在本模块抄第二份（author-reviewer.ts 文件末那条同源理由）。
+     */
+    let familyVerdict: ReviewGate | null = null;
     let sameFamilyKey: string | null = null;
+    /**
+     * 判据 3 拦下来的那一格。null = 那一维过了，或根本无从判（还不知道产出方是谁）。
+     *
+     * 为什么它是【独立的第二个判定】而不是并进 `review` 那一个：并进去之后只剩一个
+     * `code`，而这两维的修法不同 —— 一个是【点一次批准】，一个是【改组织图】。合成一个
+     * 就得挑一句话术，而「按同族那句写、实际要改图」恰恰是这一格最贵的错法：CEO 点完
+     * 批准发现任务还在原地，而审计写着她已经批过了。
+     *
+     * ⚠ `review` 那一个字段仍然只装【一个结论】，且优先级是同源判定 —— 它决定的是
+     *   `planEdge` 那句 stay note（回放里「为什么停着」的那一行）。两维同时红时 note
+     *   只说其一，而【两张卡都建】：停留原因可以只读一条，修法不能只给一个。
+     */
+    let reviewerBlocker: {
+      readonly producer: string;
+      readonly cardKey: string;
+      readonly code: ReviewBlockCode;
+      readonly reason: string;
+    } | null = null;
     if (failure === null && decision?.action === "pass" && task.status === "IN_REVIEW") {
       const key = SAME_FAMILY_REVIEW_KEY_PREFIX + (reviewSubject ?? "?") + "->" + task.role;
       sameFamilyKey = key;
@@ -1175,6 +1415,40 @@ export function makeDispatch(deps: DispatchDeps): (o: DispatchOptions) => Promis
         reviewerFamily: deps.modelFamily(task.role),
         approvedByCeo: deps.ceoApproved(task.id, key),
       });
+      familyVerdict = review;
+      /**
+       * 判据 3：【离开产出方那一条边】必须带门控（§8.2 第 1 + 第 4 条）。
+       *
+       * 复用保存期那一份判据而不是在这里重写一遍 `edges.some(...)`：口径只能有一份
+       * （两份的时候总有一份先改，而「保存时说合法、运行时说不合法」这种矛盾正是
+       * 0062/0063 那本账里反复出现的形状）。字段名的差异由 `reviewerEdges` 收敛。
+       *
+       * ⚠ `reviewSubject === null` 时【不判这一维】：还不知道该问谁的出边，而那件事
+       *   已经由上面的 `unknown_producer` 拦下了。给 null 编一个角色去查出边，会得到
+       *   一张「[某角色] 没有独立审阅者」的卡 —— 那句话没有指认对象，而修法会把人往
+       *   错的地方带（去给一个不存在的角色加边）。
+       */
+      if (reviewSubject !== null) {
+        const edgeBlock = selfReviewEdgeBlock(reviewSubject, reviewerEdges(graph));
+        if (!edgeBlock.ok) {
+          reviewerBlocker = {
+            producer: reviewSubject,
+            cardKey:
+              REVIEW_BLOCK_KEY_PREFIX +
+              reviewSubject +
+              "->" +
+              task.role +
+              ":" +
+              edgeBlock.code,
+            code: edgeBlock.code,
+            reason: edgeBlock.reason,
+          };
+          // 同源那一维过了而这一维没过 ⇒ `review` 必须变成拒绝。遗漏这一行的后果
+          // 不是「少一张卡」，是【卡建了而任务照样跃迁】—— 那是本仓定义的「接了
+          // 但没接上」（判据算出来了，没人据它做决定），比完全没接更贵。
+          if (review.ok) review = { ok: false, code: edgeBlock.code, reason: edgeBlock.reason };
+        }
+      }
     }
 
     // ── 门 1：状态机（跃迁合法性在【写入之前】判）──────────────────────
@@ -1191,7 +1465,8 @@ export function makeDispatch(deps: DispatchDeps): (o: DispatchOptions) => Promis
      * 正是这一格要消灭的形状。一次 COUNT 走只读连接，比这个风险便宜。
      */
     const rejections = deps.rejectionCount(task.id);
-    const plan = planEdge({
+    // `let` 而不是 `const`：门 4 会把已经算好的 `move:true` 改成停留（见那一格）。
+    let plan = planEdge({
       status: task.status,
       role: task.role,
       graph,
@@ -1203,6 +1478,155 @@ export function makeDispatch(deps: DispatchDeps): (o: DispatchOptions) => Promis
       failure,
       rejections,
     });
+
+    // ── 门 4：§8.2 门控内核（CEO 拍的「全量拦」，round358 / O4 + O5）────────────
+    /**
+     * 位置判据（这一发排在 planEdge 【之后】不是之前）：
+     *  · 门 1（状态机）、门 2（组织边界）、门 3（审阅独立性）都已经否决过了。门控
+     *    判的是【这份内容合不合格】，让一个"机器根本不认这次动作"的轮次去烧一次
+     *    证据包生产 + 一次标准评估，会把配置错误伪装成内容缺陷（卡片会写着"去写岗位书"，
+     *    而真正缺的是那条委派边）。
+     *  · 所以判据必须含 `plan.move`：planEdge 已经把 wait、执行失败、动作不合法、
+     *    越权交接、同源审阅、判据 3 全折成了 `move:false`。在那些轮次跑门控的失败方向
+     *    是【两张卡讲两件不同的事，而其中一件是假的】。
+     *  · `reviewSubject !== null` 与门 3 同条立场：不知道审的是谁的产出，就不许
+     *    替那个"谁"生成一份包（那会造出一份 produced_by_role 指向不存在角色的账）。
+     *
+     * ── 这一格真的接上了什么（§O5 那条断言的落点）────────────────────────
+     *  ① `produceTurnArtifact` 落字节并对账 ⇒ 门控收到的 `integrityOk` 是【布尔】，
+     *     不再是 `undefined`（§O5 验收：「若在生产路径上仍可取 undefined ⇒ 红」）。
+     *     家族非空这件事由门 3 保证（`reviewGate` 的 `unknown_model_family` 那一支
+     *     在家族为空串时判不放行），所以 produceTurnArtifact 那条"没家族就抛"
+     *     在这一条路径上是【不可达】的 —— 不为此加防御分支：加一条永不执行的分支
+     *     就是给下一位读的人留一个"这里会抛"的假线索。
+     *  ② `review_gates` 那张表第一次有了写入方（`writeGateDecision`）。§22.4 那句
+     *     「每个门控决定都有证据包引用」从今天起【可校验】了。
+     *  ③ 结论不是 pass ⇒ 这一轮【不跃迁】+ 一张 `gate-blocked:` 卡（CEO 口径：
+     *     「看得见、进审计，不静默死锁」）。
+     *
+     * ── 已接受的代价（不是遗漏，是拍板）────────────────────────────────
+     * `role_charters` 今天 0 行（实测），而内核的第 1 步是「0 条标准 ⇒ reject」。
+     * 于是每一轮 IN_REVIEW 的 pass 都会被拦下来。CEO 口径「全量拦（最严）」原话：
+     * 「修法：你给每个角色写岗位书（hub charter save），否则任务永久停在 IN_REVIEW」。
+     * 驱动侧因此会在每一次心跳上多烧一轮真钱（`driverCandidatesSql` 没有待批卡过滤器），
+     * 直到 attempt 上限 —— 这一条写在台账里，不靠这里加提示。
+     *
+     * ⚠ 但「写了岗位书就能放行」这句【今天不成立】，而那正是上面那句修法会被读成的意思：
+     *   没注入 criteriaEvaluator 时内核用 metricCriteriaEvaluator（evaluate.ts:294），
+     *   它只认 `metric:<名> <op> <数>` 一种形状；而这里的包【恒不带 metrics】—— 那是
+     *   turn-bundle.ts 文件头第 ② 条的诚实边界（写一个假的 0 比没证据更贵）。两条合起来
+     *   ⇒ 生产路径上任何岗位书标准都落到 unresolved ⇒ escalate。所以门 4 今天的天花板是
+     *   escalate（永远拦），不是「写了岗位书就开」。全仓唯一的注入口是 search/policy.ts
+     *   那个 makeSearchCriteriaEvaluator，挂在 test_upward 上，读的是【搜索计数】这份
+     *   引擎审阅没有的事实。我不在这里加一个没人装配的注入格（那是「写了但没人调」形状），
+     *   也不造一个读不到事实却返回 satisfied 的评估器（那是把断言改成放行）。真实修法因此
+     *   是两步、都在 CEO 手里：① 写岗位书；② 给引擎审阅接一个读【这一轮真实核验】的评估器。
+     *
+     * ⚠ 那条「方向未登记」的维度【不在这条路径上出结论】，而这不是漏写：内核第 1 步
+     *   空标准是【直接 return】的，第 2 步（§8.1 包类型对账 / 方向未登记 ⇒ unresolved）
+     *   压根不会算。所以 ENGINE_REVIEW_GATE 有没有登记进 HANDOFF_BUNDLE_TYPES，
+     *   只能由下面那句装配自检断言保证，不能等门控 verdict 来说。
+     */
+    let gateVerdict: GateVerdict | null = null;
+    let turnEvidence: TurnEvidence | null = null;
+    let gateCardKey: string | null = null;
+    let gateRoundNo = 0;
+    /**
+     * 【内核实际收到的】标准条数，落账时写进 conditions。
+     *
+     * 不在写账那里再调一次 `deps.gateCriteria(...).length`：那一格读的是只读连接
+     * （runtime.ts 文件头那条边界），而 CEO 在这一轮中间存岗位书是完全可能的。
+     * 读第二次就会得到「conditions 说 criteria:5，而 verdict 是按 4 条判的」——
+     * 那一格的作用正是让巡检从账面上复原当时判了什么，指错数等于把这条审计写脏。
+     */
+    let gateCriteriaCount = 0;
+    if (
+      plan.move &&
+      failure === null &&
+      decision?.action === "pass" &&
+      task.status === "IN_REVIEW" &&
+      review?.ok &&
+      reviewerBlocker === null &&
+      reviewSubject !== null
+    ) {
+      const producerFamily = deps.modelFamily(reviewSubject);
+      const reviewerFamily = deps.modelFamily(task.role);
+      gateRoundNo = deps.gateRoundNo(task.id);
+      const criteria = deps.gateCriteria(reviewSubject);
+      gateCriteriaCount = criteria.length;
+      turnEvidence = produceTurnArtifact({
+        taskId: task.id,
+        producerRole: reviewSubject,
+        producerModelFamily: producerFamily,
+        reviewerRole: task.role,
+        // 产出方原话，不改写（turn-bundle.ts 文件头第 ② 条：包里的【主张】只有它自己
+        // 说过的那一句）。审阅者自己那句 summary 不进包 —— 那会被读成产出方的话。
+        summary: decision.summary,
+        root: deps.evidenceRoot,
+      });
+      const input = {
+        gate: ENGINE_REVIEW_GATE,
+        producer: { roleId: reviewSubject, modelFamily: producerFamily },
+        bundle: turnEvidence.bundle,
+        criteria,
+        reviewer: { roleId: task.role, modelFamily: reviewerFamily },
+        roundNo: gateRoundNo,
+        // §O5 的那一格：这里传的是【算出来的布尔】。类型上它是必填布尔，
+        // 少传一句就编译不过 —— 那条"生产路径上仍可取 undefined ⇒ 红"的验收
+        // 因此同时有编译期与测试期两道。
+        integrityOk: turnEvidence.integrityOk,
+      };
+      // 装配自检 ①：这个方向必须登记过应有的包类型。抛 = 整轮不写（还没进事务）。
+      // 判据来自【契约那张表本身】，不在这里抄一份方向名清单。
+      if (!Object.hasOwn(HANDOFF_BUNDLE_TYPES, ENGINE_REVIEW_GATE)) {
+        throw new Error(
+          "门 4 装配自检失败：方向 [" + ENGINE_REVIEW_GATE + "] 没有登记进 contracts 的 " +
+            "HANDOFF_BUNDLE_TYPES（§8.1）。内核第 2 步对未登记方向只记 unresolved，而今天" +
+            "空标准会让第 1 步先 return ⇒ 这一维【永远无人核对】。要么登记方向，" +
+            "要么把这条引擎审阅接进 §8.1 词表，不能留着让文档上存在而库里无从校验。",
+        );
+      }
+      // 装配自检 ②：生产者没有把标准吃掉或改写。两条判据同源，所以只能在这里断言
+      // （内核收到的数组长度若与 gateCriteria 给的不是同一份，reject/ pass 全都失真，
+      // 而症状是「拦得比配置的少」—— 静默少拦，本仓最贵的那一族）。
+      if (input.criteria.length !== criteria.length) {
+        throw new Error(
+          "门 4 装配自检失败：交给 evaluateGate 的标准条数是 " + String(input.criteria.length) +
+            "，而 gateCriteria 给的是 " + String(criteria.length) + " —— 中间有人改了这份数组。",
+        );
+      }
+      gateVerdict = evaluateGate(input);
+      if (gateVerdict.decision !== "pass") {
+        // 把已经算好的 move:true 改回停留。这里【刻意不 spread 原 plan】：
+        // move:true 那一支带着 producerRole / thenEscalateToCeo / review，而
+        // EdgePlan 的 move:false 分支类型里压根没有它们（dispatch.ts:574）。
+        // spread 会把三个多余键塞进去 —— TS 在字面量上会报 excess property，
+        // 但一旦 plan 是变量（这里就是），多余字段会安静留着并被下面
+        // `plan.move && plan.review !== undefined` 那一段读成「这一轮判成了」，
+        // 于是拦下来的那一轮反而写出 ReviewDecided = 【审计里多了一条没做成的审阅】。
+        // 重造四个必填字段才是这一支的正确形状；被拦的一轮本就不该带审阅标记。
+        plan = {
+          move: false,
+          to: task.status,
+          role: task.role,
+          note: gateBlockedNote(gateVerdict, reviewSubject, gateRoundNo),
+        };
+        // 键里带【轮次】，理由与 `review-blocked:` 把 code 写进键同族：
+        // approvals 上那条 partial unique index 只按 (task_id, card_key) 去重，
+        // 键里不含轮次时第 2 轮的新问题会被判成「已经有一张待批的卡」而永不重现。
+        // 结论（reject / escalate）也在键里：同一个角色可以先因"没标准"被拦、
+        // 后因"轮次超限"升级，那是两件要分别被看见的事。
+        gateCardKey =
+          GATE_BLOCK_KEY_PREFIX +
+          reviewSubject +
+          "->" +
+          task.role +
+          "#r" +
+          String(gateRoundNo) +
+          ":" +
+          gateVerdict.decision;
+      }
+    }
 
     // 需要建卡的两类拦截（越权交接 / 同源审阅）。判在事务外，写在里面。
     //
@@ -1233,7 +1657,7 @@ export function makeDispatch(deps: DispatchDeps): (o: DispatchOptions) => Promis
         attempt: { from: task.role, attempted: "handoff->" + handoffTarget, verdict: blockedHandoff },
       });
     }
-    if (review !== null && !review.ok && sameFamilyKey !== null) {
+    if (familyVerdict !== null && !familyVerdict.ok && sameFamilyKey !== null) {
       pending.push({
         draft: card({
           taskId: task.id,
@@ -1251,6 +1675,75 @@ export function makeDispatch(deps: DispatchDeps): (o: DispatchOptions) => Promis
         attempt: null,
       });
     }
+    /**
+     * 判据 3 的那张卡（【与上面那族不同的前缀】）。
+     *
+     * 键里带 `producer->reviewer:code`：producer 是「谁缺一条带门控的出边」—— 那正是
+     * CEO 要去组织图里改的那个角色，摘要里没它就不可操作；code 进来是因为修法由它决定，
+     * 而【撞键去重不能跨 code】：今天缺出边、将来家族又没配，那是两个要分别被看见的
+     * 问题（`approvals` 上那条 partial unique index 只按 (task_id, card_key) 去重，
+     * 键里不含 code 时第二个问题会被判成「已经有一张待批的卡」而永远不再出现）。
+     *
+     * ⚠ 前缀【不是】`same-family-review:`，这一格整篇的落点就在这一行：
+     * `engine/approve.ts` 那条「批准 + 空理由 = 一次合法豁免」只认那一个前缀，
+     * 撞上去就等于把「改组织图」降级成「点一下」。这里刻意让它走不进那条判据。
+     *
+     * `attempt: null` 的理由与上面那张卡完全同源（拦的是资格，不是一次越权尝试），
+     * 所以不另写一遍。
+     */
+    if (reviewerBlocker !== null) {
+      pending.push({
+        draft: card({
+          taskId: task.id,
+          cardKey: reviewerBlocker.cardKey,
+          summary:
+            "审阅推不动：产出方 [" + reviewerBlocker.producer + "] 在组织图上没有独立审阅者，缺的是一条边、不是一次批准",
+          impact: "审阅独立性：§8.2 第 1 条 + 第 4 条（门控绑在边上）",
+          recommendation:
+            "给 [" + reviewerBlocker.producer + "] 加一条 review_gate=true、指向别的角色的委派边（POST /org）。" +
+            "批准这张卡不会推进任务 —— 这一族卡片的按钮只是把它记下来。",
+          evidence: "dispatch:" + task.id + ":" + reviewerBlocker.cardKey,
+        }),
+        attempt: null,
+      });
+    }
+
+
+    /**
+     * 门 4 拦下来的那张卡（第三个前缀 `gate-blocked:`）。
+     *
+     * 三族卡片刻意用三个前缀，因为【批准它们的作用完全不同】：
+     *  · `same-family-review:` —— 批准 + 理由 = 一次合法豁免（`engine/approve.ts` 只认这一族）；
+     *  · `review-blocked:`     —— 批准也不推进（缺的是边），那一族文件头写着「批准这一族
+     *    卡片也不会推进任务」；
+     *  · `gate-blocked:`       —— 同样不推进，但缺的东西换了：不是边、不是豁免，
+     *    是【那个角色的岗位书 acceptance_criteria】。
+     * 把第三族并进第二族的话术写成，CEO 会去改组织图（本来就有边）；并进第一族更糟 ——
+     * 一次点击就能绕过 §8.2 的门控内核，那是 §8.2 第 4 条「不可绕过」的直接违反。
+     *
+     * 摘要里【必须】出现产出方角色名（要去写岗位书的那个角色）与 sha 前 12 位
+     * （能指认是哪一份包，而磁盘上那份是人可以点开的）。
+     */
+    if (gateCardKey !== null && gateVerdict !== null && turnEvidence !== null && reviewSubject !== null) {
+      const sha = shortHash(turnEvidence.bundle.artifacts[0]?.sha256 ?? "");
+      pending.push({
+        draft: card({
+          taskId: task.id,
+          cardKey: gateCardKey,
+          summary:
+            "第 " + String(gateRoundNo + 1) + " 轮审阅被门控内核拦下：[" + reviewSubject +
+            "] 的产出没有通过 §8.2 门控（证据包 sha " + sha + "）",
+          impact: "验收标准：§8.2 第 2 条 / Task 0.9（岗位书 acceptance_criteria）",
+          recommendation:
+            "给 [" + reviewSubject + "] 写岗位书并保存（hub charter save）——" +
+            gateReasonText(gateVerdict) + "。批准这张卡不会推进任务：这一族卡片的按钮只是把它记下来。",
+          evidence: "dispatch:" + task.id + ":" + gateCardKey,
+        }),
+        // 与上面两族同条立场：拦的是【资格/内容】，不是一次越权尝试，不该污染
+        // 按 action 统计越权次数那个数（§4.5 读它）。
+        attempt: null,
+      });
+    }
 
     /**
      * ── 这一轮做成的那次审阅判定（`ReviewDecided` 唯一的生产者）─────────────
@@ -1265,8 +1758,9 @@ export function makeDispatch(deps: DispatchDeps): (o: DispatchOptions) => Promis
      * 那是规格附录按【固定阶段名】给的，而引擎路线上没有阶段，只有组织图上的角色
      * （0041 换路线的连带后果，与 `tasks.current_node` 那次语义变更同一族）。
      * 这里给的是「哪一次审阅」的可指认证据：`in_review:<产出方>-><审阅方>`。
-     * ⚠ `review_gates` 那张表【仍然零写入方】—— 本条写的是 `events`，不是那张表，
-     *   所以 §22.4 那句「每个门控决定都有证据包引用」今天【依旧无从校验】。
+     * ⚠ round358 之前这一格下面还写着「`review_gates` 那张表仍然零写入方」—— 那句话
+     *   【今天过期了】：门 4 是那张表的第一个写入方（`writeGateDecision`，见下面
+     *   「门 4 的账」那一格），§22.4 那句「每个门控决定都有证据包引用」从此【可校验】。
      */
     const outgoing: { event: DomainEvent; seq: number }[] = [];
     const wrote = await deps.writer.node(() => {
@@ -1274,6 +1768,92 @@ export function makeDispatch(deps: DispatchDeps): (o: DispatchOptions) => Promis
       let stateEventSeq: number | null = null;
       // 落库后的最终状态：不跃迁时就是原状态，跃迁时由链的最后一格决定（含自动那一格）。
       let finalStatus: TaskState = task.status;
+
+      /**
+       * ── 门 4 的账（`evidence_bundles` + `review_gates`，两张表第一次有生产写入方）──
+       *
+       * 【顺序是被外键定的，不是风格】：`review_gates.evidence_bundle_id` 外键指向
+       * `evidence_bundles(id)`（0001_init.sql:116），而 `db/pragmas.ts` 开着
+       * `PRAGMA foreign_keys = ON` —— 反过来写会在同一笔事务里被外键当场拒绝。
+       *
+       * 【无论 pass 还是被拦都写这两行】，这一点需要理由：门控的结论本身就是这一篇要留的
+       * 那条账（§22.4「每个门控决定都有证据包引用」）。只在被拦时写，库里就只剩
+       * 「拦了几次」而没有「放行了几次」，于是那条 §8.3 的轮次上限分子（`gateRoundNo`
+       * 数的是这张表的行数）也跟着失真 —— 放行轮不计数 ⇒ 上限永远到不了 ⇒
+       * 配置写了而没生效，正是本仓反复在消灭的那一族。
+       *
+       * ⚠ `changes !== 1` 必须抛，与上面状态边同一条纪律：这一行没落库而事务照样提交，
+       *   症状是「界面上这一轮判过了、库里查不到这个决定」，而 events 已经有那一条
+       *   `RoleTurnReported` —— 两本账对不上而全绿。
+       */
+      if (turnEvidence !== null && gateVerdict !== null && reviewSubject !== null) {
+        registerTurnEvidence(db, turnEvidence.bundle, o.nowMs);
+        const changes = writeGateDecision(
+          db,
+          {
+            bundleId: turnEvidence.bundle.bundle_id,
+            taskId: task.id,
+            gateType: ENGINE_REVIEW_GATE,
+            reviewerRole: task.role,
+            reviewerModelFamily: deps.modelFamily(task.role),
+            decision: GATE_DECISION_WORD[gateVerdict.decision],
+            reason: gateReasonText(gateVerdict),
+            conditions: gateConditions(turnEvidence, gateVerdict, gateCriteriaCount),
+            roundNo: gateRoundNo,
+          },
+          o.nowMs,
+        );
+        if (changes !== 1) {
+          throw new Error(
+            "门 4 的门控决定没落库（review_gates 实到 changes=" + String(changes) + "，期望 1）：" +
+              "任务 [" + task.id + "] 方向 [" + ENGINE_REVIEW_GATE + "] 第 " + String(gateRoundNo) +
+              " 轮。整笔回滚 —— 一轮判过了而库里没有这一行，比不判更贵。",
+          );
+        }
+        /**
+         * 这一轮的审计行。借【RoleTurnReported】而不是新造一个 kind：§5.8 那张六行表
+         * 里没有「门控决定」这一类，而加第 7 个 kind 要同时改契约、KIND_TO_ACTION、
+         * recorder.targetOf、SSE 投影与 web 那一侧的判别式（0009 §2 的口径：
+         * 新 kind 是契约变更）。payload 是事件的【超集】（多带门控那几格），
+         * 与本文件状态边 / 越权那一行「线上形状窄、回放 payload 宽」同一取向；
+         * actor 用 system/hub：这一行说的正是「机器判的」，署 agent 会把 §24 风险 2
+         * 要的"谁判的"指认给一个没做这个决定的人。
+         */
+        const evt: DomainEvent = {
+          kind: "RoleTurnReported",
+          taskId: task.id,
+          role: reviewSubject,
+          state: task.status,
+          note: gateReasonText(gateVerdict),
+          // 0：本轮的账挂在状态行 / 本轮那一行上，这里再写就是同一轮记两次钱
+          // （与 writeAttempt 里那条同源理由）。
+          costCents: 0,
+        };
+        const sha = turnEvidence.bundle.artifacts[0]?.sha256 ?? "";
+        const seq = appendAudit(
+          db,
+          {
+            taskId: task.id,
+            actorType: "system",
+            actorId: "hub",
+            action: KIND_TO_ACTION.RoleTurnReported,
+            target: reviewGateId(reviewSubject, task.role),
+            payload: {
+              ...evt,
+              // 与 `review_gates` 那一行【互相指认】的三格：包 id、结论、完整性。
+              // 抄一份进 payload 不是冗余：events 是 append-only 的读法（回放、
+              // role-memory 的记忆档），而 review_gates 将来可以被修订版覆盖。
+              gate_decision: gateVerdict.decision,
+              gate_bundle_id: turnEvidence.bundle.bundle_id,
+              gate_round_no: gateRoundNo,
+              gate_integrity_ok: turnEvidence.integrityOk,
+              gate_sha256: sha,
+            },
+          },
+          () => o.nowMs,
+        );
+        outgoing.push({ event: evt, seq });
+      }
 
       /**
        * 审阅判定那条审计排在状态边【之前】，两件事都为真才排在这儿：

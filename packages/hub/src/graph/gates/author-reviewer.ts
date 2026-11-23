@@ -175,16 +175,28 @@ export function independentReviewerPath(
   return { reachable: false, path: [] };
 }
 
-/** 判据 3 的包装：缺独立审阅者即拒绝，并把「为什么」写进原因（报错要可操作）。 */
+/**
+ * 判据 3 的包装：缺独立审阅者即拒绝，并把「为什么」写进原因（报错要可操作）。
+ *
+ * 返回类型【收窄】到那一个 code，而不是宽宽地写 `BlockResult`。这不是排版偏好：
+ * `selfReviewEdgeBlock` 的函数体只可能产出 `no_independent_reviewer_path`，而调用方
+ * 需要把 code 原样带到运行时的判别式里去。类型写宽时调用方只有两条烂路 ——
+ * `as` 一道转换（门控层将来多给一个 code 时静默通过），或在调用点【重抄一遍那个字符串】
+ * （造出第二份词表，改名时两端失配，而失配的表现是卡片文案指向错误的修法）。
+ * 收窄之后调用点既不用转也不用抄。⚠ 代价是这里不能用 `block()` 那个辅助函数
+ * （它的返回是宽 `Block`），所以字面量直接摊开 —— 词表只在本模块这一处出现。
+ */
 export function selfReviewEdgeBlock(
   author: string,
   edges: readonly DelegationEdge[],
-): BlockResult {
+): Allow | { ok: false; reason: string; code: "no_independent_reviewer_path" } {
   const r = independentReviewerPath(author, edges);
   if (r.reachable) return { ok: true };
-  return block(
-    "no_independent_reviewer_path",
-    "角色 [" +
+  return {
+    ok: false,
+    code: "no_independent_reviewer_path",
+    reason:
+      "角色 [" +
       author +
       "] 没有任何【带门控且指向别的角色】的出边，即没有独立审阅者。" +
       "§8.2 第 1 条要求产出必须经过至少一个独立审阅节点，第 4 条把门控绑在边上 —— " +
@@ -194,7 +206,7 @@ export function selfReviewEdgeBlock(
       " 加一条 gate=true、to≠" +
       author +
       " 的委派边。",
-  );
+  };
 }
 
 /**

@@ -1031,6 +1031,17 @@ export async function boot(
       };
     }
     /**
+     * 这一台 Hub 的证据制品根目录（§5.10，门 4 每轮那份包落盘的根）。
+     *
+     * 判据本体抽在 evidenceRootFor（纯函数，直接可测），这里只剩「取出来交给两个泵」。
+     * ⚠ 取在【boot 这一层】而不在 pumpBoundsOf 里算：那三格上限是「花钱的门」，
+     * 它们的判据是形状（有限数 / 整数 / 非空目录），而这一格的默认值要吃 dbPath ——
+     * pumpBoundsOf 拿到的 args 里 dbPath 是可选的，把它拉进去会让那条【纯形状判据】
+     * 变成一条要看库位置的判据，而它今天测的每一发都不建库。
+     * 到这里 dbPath 已经在第 453 行判过必填（缺 ⇒ 早退 2），所以这一格【永远取得出】。
+     */
+    const evidenceRoot = evidenceRootFor(args, dbPath);
+    /**
      * ⭐ 0048 起这里【不再是一个 pumpOn 而是两个】，而那不是一个审美决定。
      *
      * 原来那一句 `const pumpOn = bounds.ok === true` 把【两个不同的问题】合成一个布尔：
@@ -1071,7 +1082,7 @@ export async function boot(
         io.warn(
           "章程泵【已开】（--charter-pump）：每隔一个心跳，停在「等章程」而收件箱里没有卡的任务，\n" +
             "会由 assigned_role 那个角色【自己起草一份章程提案】放进 CEO 收件箱。\n" +
-            boundsLine(bounds) +
+            boundsLine(bounds, evidenceRoot) +
             "\n这是【真起子进程、真花钱】的一件事，而它现在由这台常驻进程自动做。" +
             "泵只【起草】—— 那张卡仍然要 CEO 点，没有任何一条边被自动批掉。",
         );
@@ -1091,7 +1102,7 @@ export async function boot(
         io.warn(
           "驱动器【已开】（--driver-pump）：每隔一个心跳，停在 agent 那一格（拆解 / 干活 / 审阅）的任务\n" +
             "会被 assigned_role 那个角色【自己推一轮】，一路走到需要你的那一格才停。\n" +
-            boundsLine(bounds) +
+            boundsLine(bounds, evidenceRoot) +
             "\n这是【真起子进程、真花钱】的一件事：一条想法可能连着烧掉好几轮。" +
             "走到人席（等章程 / 等你裁决 / 等终审）它就【停下等你点】—— " +
             "没有任何一条人类边被自动批掉。\n" +
@@ -1323,6 +1334,7 @@ export async function boot(
             maxBudgetUsd: bounds.bounds.maxBudgetUsd,
             taskLimitCents: bounds.bounds.taskLimitCents,
             cwd: bounds.bounds.cwd,
+            evidenceRoot,
             ...(o.pumpCardDeps === undefined
               ? {}
               : { cardDeps: o.pumpCardDeps }),
@@ -1361,6 +1373,10 @@ export async function boot(
             maxBudgetUsd: bounds.bounds.maxBudgetUsd,
             taskLimitCents: bounds.bounds.taskLimitCents,
             cwd: bounds.bounds.cwd,
+            // 与章程泵【同一个根】：制品按 {task_id}/{bundle_type}/{bundle_id} 寻址，
+            // 两条泵写进两个根的话，verify() 拿库里那一行相对路径去对盘会指错目录
+            //（库里存的 declared 是 root 相对的，root 本身不在账上）。
+            evidenceRoot,
             ...(o.driveTask === undefined ? {} : { driveTask: o.driveTask }),
             ...(o.driverMaxAttempts === undefined
               ? {}
@@ -1923,6 +1939,45 @@ export function pumpBoundsOf(args: ServeArgs): PumpBounds {
   };
 }
 
+/**
+ * 这一台 Hub 的证据制品根目录怎么定（§5.10，`--evidence-root`）。纯函数，不碰 fs。
+ *
+ * ── 为什么【可选】而上面三格上限必填 ──────────────────────────────────
+ * 区别不在重要性，在【缺省能不能安全地猜】：
+ *  · --max-budget-usd 缺省无法猜 —— 给一个数就等于替 CEO 决定「一轮花多少算多」，
+ *    而不给 ⇒ makeRuntime 那一轮压根不带这个参数 = 花钱没顶。所以只能必填。
+ *  · 这一格缺省【可以】猜，因为猜错的方向是「制品落错目录」而不是「钱花出去了」：
+ *    门 4 那一轮照样出布尔、照样落 review_gates，只是磁盘上那份字节在别处。
+ *
+ * ── 缺省为什么取 <db 文件名>.artifacts，而不是 artifactsRoot() ─────────
+ * 与锁文件 <db>.lock 同一条命名（serve/lock.ts 的 LOCK_SUFFIX），所以库旁边
+ * 一眼看得出这一堆字节归谁。跟着库走换来的是三条同时成立：
+ *  ① dev 库（.opc-os/dev.db）的制品落在 .opc-os/ 下 —— 仓库自己声明过、
+ *    被 .gitignore 挡着的运行时目录，与 dev-entry.ts 给 dbPath / orgBackupDir 同一条纪律；
+ *  ② 每一发把库开在临时目录里的泵测试，制品自然进那个临时目录 ——
+ *    【不需要测试自己记着传一个根目录】，而这正是 evidence/store.ts:33 量过的那格：
+ *    缺省若住在装配层，忘传的测试会往真实用户的 ~/.opc-os/artifacts/ 里写
+ *    内容寻址、删不干净的制品。这里回落到 artifactsRoot() 就会把那格失效请回来。
+ *  ③ 备份/换机时制品与库同进同出（§5.10 的 PG 迁移按 declared 相对路径重定位）。
+ * 代价照记：一个库目录下所有任务的制品集中在一处，删库不会删制品
+ * —— 那是【append-only 审计】想要的方向（库扔了，证据还在），
+ * 但磁盘回收要人管，登记在 docs/OPC-OS-功能优化设计.md §O5。
+ *
+ * ⚠ 【不读 env】：与 --bind / --ceo / --charter-pump 同一条立场。
+ */
+export function evidenceRootFor(
+  args: Pick<ServeArgs, "evidenceRoot">,
+  dbPath: string,
+): string {
+  const given = args.evidenceRoot;
+  if (given !== undefined && given.trim() !== "") return given;
+  // 与锁文件同一条拼法（dbPath + 后缀），因此不需要 dirname / basename。
+  return dbPath + ARTIFACTS_SUFFIX;
+}
+
+/** 制品根相对库文件的名字。与 serve/lock.ts 的 LOCK_SUFFIX 同一手法。 */
+const ARTIFACTS_SUFFIX = ".artifacts";
+
 /** bounds 里【成立那一支】的形状，给 boundsLine 当参数类型用。 */
 type PumpBoundsOk = Extract<PumpBounds, { readonly ok: true }>;
 
@@ -1942,7 +1997,7 @@ type PumpBoundsOk = Extract<PumpBounds, { readonly ok: true }>;
  * 常量漂了没人红，值漂了会让人觉得审计在骗他。驱动器那条横幅因此只说「试到上限就停并说出来」，
  * 具体次数在审计行的 payload 里（attempt / max_attempts），那儿是【逐条记录】而不是复述。
  */
-function boundsLine(bounds: PumpBoundsOk): string {
+function boundsLine(bounds: PumpBoundsOk, evidenceRoot: string): string {
   const b = bounds.bounds;
   return (
     "  · 一轮美元硬顶 " +
@@ -1952,6 +2007,14 @@ function boundsLine(bounds: PumpBoundsOk): string {
     " 美分\n" +
     "  · 角色能读到的目录（--agent-cwd）" +
     b.cwd +
+    "\n" +
+    // 制品根必须【打在屏幕上】而不是只在装配层算完：--evidence-root 没生效的形状是
+    // 「配置写了而没生效」，症状（盘上找不到制品）在几周后才发现，
+    // 而那时已经分不清是没传还是写错了。路径是【这台机器实际用的值】，
+    // 与上面那句「不抄尝试次数」不冲突 —— 那一句禁的是【会漂的数字】，
+    // 这一格是启动时算一次、整台 Hub 只此一份的坐标。
+    "  · 证据制品落盘（--evidence-root）" +
+    evidenceRoot +
     "\n"
   );
 }

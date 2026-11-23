@@ -136,6 +136,23 @@ export interface ServeArgs {
    */
   readonly agentCwd?: string;
   /**
+   * 证据制品根目录（§5.10，`--evidence-root`）：门 4 每轮那份证据包落盘的根。
+   *
+   * 与上面三格【不同一条立场】的地方是它可选，而区别不在「重要性」而在【写坏代价的方向】：
+   * 上限缺失 ⇒ 子进程不带 --max-budget-usd（花钱没顶），缺省无法安全地猜；
+   * 这一格缺失 ⇒ 只是制品落到一个【由库文件位置决定】的目录，钱不花、路不断。
+   * 所以缺省住在装配层，取 `join(<db 文件名>.artifacts)` —— 跟着库走，
+   * 于是 dev 库的制品在 .opc-os/ 下（仓库自己声明过、被 .gitignore 挡着的运行时目录），
+   * 每一个把库开在临时目录里的测试也自然把制品写进那个临时目录。
+   * 这里【不】回落到 `artifactsRoot()`（~/.opc-os/artifacts/）：那会让每一发
+   * 开着泵的测试往真实用户的 HOME 里写内容寻址、删不干净的制品，
+   * 正是 evidence/store.ts:33 量过的那一格失效。
+   *
+   * 与 --bind / --ceo / --charter-pump 同一立场：**刻意没有 OPC_EVIDENCE_ROOT**，
+   * 也不给 parseServeArgs 任何 env 缺省源。
+   */
+  readonly evidenceRoot?: string;
+  /**
    * 「让常驻 Hub 自己去推 agent 那一格」（0048）。不给 ⇒ 这一整块【不存在】。
    *
    * 与 `--charter-pump` 是同一条立场而代价更大：章程泵起的是【一次起草】，
@@ -227,6 +244,7 @@ export function parseServeArgs(
   let maxBudgetUsd: number | undefined;
   let taskLimitCents: number | undefined;
   let agentCwd: string | undefined;
+  let evidenceRoot: string | undefined;
 
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -339,6 +357,20 @@ export function parseServeArgs(
           };
         }
         agentCwd = v;
+        break;
+      }
+      case "--evidence-root": {
+        const v = takeValue(argv, i + 1, "--evidence-root");
+        if (typeof v === "object") return v;
+        i++;
+        if (v.trim() === "") {
+          return {
+            error:
+              "--evidence-root 后面是一个空值。这一格决定【审计制品落在哪个目录】，" +
+              "空串不是一个路径：给一个目录，或者整个参数不要给（那就跟着库文件走）。",
+          };
+        }
+        evidenceRoot = v;
         break;
       }
       default:
@@ -481,11 +513,16 @@ export function parseServeArgs(
    */
   if (
     pumpFlags.length === 0 &&
-    (maxBudgetUsd !== undefined || taskLimitCents !== undefined || agentCwd !== undefined)
+    (
+      maxBudgetUsd !== undefined ||
+      taskLimitCents !== undefined ||
+      agentCwd !== undefined ||
+      evidenceRoot !== undefined
+    )
   ) {
     return {
       error:
-        "给了预算/工作目录而没给 --charter-pump 或 --driver-pump：两个开关都关着的时候那三个参数【一个都不生效】。\n" +
+        "给了预算/工作目录/制品目录而没给 --charter-pump 或 --driver-pump：两个开关都关着的时候那几个参数【一个都不生效】。\n" +
         "  · 想让 Hub 自己补章程卡 ⇒ 补 --charter-pump\n" +
         "  · 想让 Hub 自己推 agent 那一格 ⇒ 补 --driver-pump（0048：CEO 批完之后不再需要有人敲 hub work）\n" +
         "  两者打开的都是「每隔一个心跳自己起子进程花钱」，所以必须显式。\n" +
@@ -507,6 +544,7 @@ export function parseServeArgs(
     ...(maxBudgetUsd === undefined ? {} : { maxBudgetUsd }),
     ...(taskLimitCents === undefined ? {} : { taskLimitCents }),
     ...(agentCwd === undefined ? {} : { agentCwd }),
+    ...(evidenceRoot === undefined ? {} : { evidenceRoot }),
   };
 }
 

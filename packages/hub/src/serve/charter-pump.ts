@@ -362,6 +362,17 @@ export interface PumpOptions {
   readonly taskLimitCents: number;
   /** agent 的工作目录（§12 沙箱那一维）。必填 —— 猜一个目录等于猜它能看见哪些文件。 */
   readonly cwd: string;
+  /**
+   * 证据制品根目录（§5.10），透传给 makeRuntime 的 evidenceRoot。
+   *
+   * 【必填而不给缺省】与 evidence/store.ts 那条同一条纪律：制品路径由 bundle_id 决定
+   * 且写进 append-only 的 evidence_bundles，【删不干净】。缺省若住在这里，
+   * 每一发注入假起草的泵测试都会不小心把制品写进真实用户的 HOME，
+   * 而那一格漂了的表征是「审计说制品在，磁盘上找不到」。
+   * 唯一的缺省家在 CLI 参数解析（hub work / hub serve），因为只有那里
+   * 站着的是【人在敲命令】。
+   */
+  readonly evidenceRoot: string;
   /** claude 二进制名/路径。测试注入桩 CLI 走这一格。 */
   readonly bin?: string;
   readonly maxAttempts?: number;
@@ -724,6 +735,7 @@ function engineOf(
         maxBudgetUsd: o.maxBudgetUsd,
         taskLimitCents: o.taskLimitCents,
         cwd: o.cwd,
+        evidenceRoot: o.evidenceRoot,
         ...(o.bin === undefined ? {} : { bin: o.bin }),
         ...(o.ceoRoleId === undefined ? {} : { ceoRoleId: o.ceoRoleId }),
         nowMs: () => o.nowMs,

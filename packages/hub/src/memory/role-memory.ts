@@ -21,7 +21,8 @@
  *     它署的是 **`agent` + 审阅者本人的角色名**（不是 system/hub），
  *     而「它只有一个生产者、且没有一个地方硬写这个 action」被钉成断言
  *     （`test/memory/role-memory.test.ts` ⑦ 节两发：枚举表交集 + 全仓扫硬写）。
- *     ⚠ `review_gates` 表**仍然零写入方**（`db/integrity.ts` 那条自检念的就是这件事）
+ *     ⚠ `review_gates` 表曾经零写入方（`db/integrity.ts` 那条自检当年念的就是这件事；
+ *     round358 之后 turn-bundle.ts 成为第一个写入方，那句【已经过期】）
  *     —— 本条被推翻的是 `events` 那一半，不是那张表。所以 §22.4 那句
  *     「每个门控决定都有证据包引用」今天**依旧无从校验**：判定有审计行，
  *     而审计行里没有指向证据包的引用。
@@ -490,7 +491,7 @@ export function classifyMemoryRow(
      * ⚠ 这一档的【写入方今天有了】，而它来得很晚、只覆盖一部分：
      *   `engine/dispatch.ts` 在审阅那一轮落一条 `ReviewDecided`（0060）。
      *   【没有】覆盖的是：旧的 langgraph 路线（`graph/audit-middleware.ts` 那条）
-     *   仍然不发，`review_gates` 那张表仍然零写入方。所以 coverage 那一节
+     *   仍然不发，当时 `review_gates` 那张表还是零写入方。而 coverage 那一节
      *   「跑完全部迁移的库里 review_decision 一条都没有」仍然是真的（那是一份空库），
      *   而「生产里跑过几轮的库里也没有」已经不是真的了。
      *
@@ -500,7 +501,7 @@ export function classifyMemoryRow(
     if (actorId !== owner) return { skip: "审阅决定的署名不是该角色" };
     /*
      * 「理由」这一格有过一段【库里根本没有】的长期历史：规格 §22.1 给那条事件的形状
-     * 只有 {gate, decision}，`review_gates.decision_reason` 那一列也零写入方，
+     * 只有 {gate, decision}，`review_gates.decision_reason` 那一列当年零写入方，
      * 所以本模块长期以来把 reason 恒置 null 并在 basis 里明说"不在库里"。
      * 0060 接上写入方时把审阅者当轮写的那句 summary 放进了 `payload.note`
      * —— 线上那个 `ReviewDecided` 形状仍不带它（SSE 契约），落库那份带。

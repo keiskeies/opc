@@ -163,12 +163,51 @@ export { APPROVAL_STATUS_PENDING };
  * 同源审阅豁免卡的 `card_key` 前缀。
  *
  * 建在【卡片这一层】而不是 dispatch 或 approve 里：两个方向都要认它 ——
- * `dispatch.ts:1160` 用它拼键（生产者），`engine/approve.ts` 要按它识别
+ * `dispatch.ts:1263` 用它拼键（生产者），`engine/approve.ts` 要按它识别
  * 「这张卡批准必须带理由」（写下理由 = 承担同源审阅风险的凭据，§8.2 第 1 条）。
  * 前缀只写这里一份，两侧 import 它；谁再手拼一份就会漂移
  * （一个键两端拼法失配时，卡片建出来而批准侧认不出来）。
  */
 export const SAME_FAMILY_REVIEW_KEY_PREFIX = "same-family-review:";
+
+/**
+ * 「这道门拦下的那次审阅**点批准也没用**」那一族卡片的 `card_key` 前缀。
+ *
+ * 存在的全部理由是【它与上面那个前缀的差别】：`engine/approve.ts` 的空理由豁免只认
+ * `same-family-review:`（原话：「批准 + 这张卡的键是 `same-family-review:`」），
+ * 于是凡是不该被「点一下 + 一句理由」放行的拦截，都必须【避开】那个前缀才能建卡。
+ * 反过来说：如果这一族也建成 same-family-review: 开头，CEO 空理由点一次批准，
+ * 系统就把「组织图上缺一条带门控的出边」当成「已接受同源审阅」放过去了 ——
+ * 那是 §8.2 第 1/4 条的直接绕过，而审计里写着「CEO 批准了」。
+ *
+ * 落在这个前缀上的 code（`engine/dispatch.ts` 的 `ReviewBlockCode`）：
+ *  · `no_independent_reviewer_path`  产出方没有带门控的出边 ⇒ 修法是【加一条边】；
+ *  · `unknown_model_family`          家族没配 ⇒ 修法是【配上 model_family】；
+ *  · `self_review`                   审阅者与产出者同角色 ⇒ 修法是【换审阅者】；
+ *  · `unknown_producer`              events 里查不到产出方 ⇒ 修法是先让产出被审计记下来。
+ * 共同点：要改的都是【图 / 配置 / 审计】，不是【点一次批准】。批准这一族卡片也不会
+ * 推进任务（任务停在 IN_REVIEW，而 HUMAN_EDGES 从 IN_REVIEW 没有出边），
+ * 这张卡的作用是【把这件事摆到 CEO 面前并留下审计】，不是一道可以点头的豁免。
+ */
+export const REVIEW_BLOCK_KEY_PREFIX = "review-blocked:";
+
+/**
+ * 「这一轮审阅被【门控内核】拦下」那一族卡片的 `card_key` 前缀（round358）。
+ *
+ * 它和上面那个前缀【必须分开】，分开的理由与 `REVIEW_BLOCK_KEY_PREFIX` 自己被分开时
+ * 同一条：`engine/approve.ts` 的空理由豁免只认 `same-family-review:`，而这里要挡的
+ * 也不是一次批准。但两者的【修法】完全不同，合成一族就会有一族卡片的话术是假的：
+ *  · `review-blocked:`  缺的是【图结构 / 配置 / 审计】—— 加一条边、配 model_family；
+ *  · `gate-blocked:`    缺的是【岗位书】—— 给那个角色写 acceptance_criteria（Task 0.9）。
+ * 把「给角色写标准」写成「改组织图」，CEO 照卡片做一轮，任务照样停在 IN_REVIEW，
+ * 而审计里已经留下一张她处理过的卡 —— 这正是 0062/0063 那本账反复记的那一格。
+ *
+ * 键的形状：`gate-blocked:<产出方>-><审阅方>#r<轮次>:<结论>`。
+ * 轮次进来是因为同一对角色在第 1 轮与第 3 轮拦下的原因通常不同（缺标准 vs 超轮次上限），
+ * 而 `approvals` 上那条 partial unique index 只按 (task_id, card_key) 去重 —— 键里
+ * 不含轮次时，第二轮的问题会被判成「已有一张待批的卡」而永远不再出现。
+ */
+export const GATE_BLOCK_KEY_PREFIX = "gate-blocked:";
 
 /**
  * ⚠⭐ **本篇唯一一处我替 CEO 拍的产品决定：`timeout_at` 有值，而没有任何执行者。**

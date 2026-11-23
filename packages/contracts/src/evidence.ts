@@ -158,13 +158,41 @@ export function unresolvableClaimIndexes(
   return out;
 }
 
-/** 交接方向 → 该方向必须出现的包类型（规格 §8.1 那张表的机器可读形态）。 */
+/**
+ * 引擎路线上那一次审阅的【方向名】。
+ *
+ * 为什么要有这么一个常量而不是让 dispatch 手写 `"engine_review"`：这张表是方向的
+ * 唯一登记表（下面 `requiredBundleType` 的报错也是拿它的键当"已知方向"清单），
+ * 而门控对【没登记的方向】只 push unresolved（ escalate ），不 reject。
+ * 两边各写一份字符串的后果是：登记表改了名，引擎还在用旧名 ⇒ 每一轮审阅都因为
+ * 「方向未登记」升级人工，而这条失败在测试里的形状和「岗位书没写标准」一模一样。
+ */
+export const ENGINE_REVIEW_GATE = "engine_review";
+
+/**
+ * 交接方向 → 该方向必须出现的包类型（规格 §8.1 那张表的机器可读形态）。
+ *
+ * ⚠ `engine_review` 这一格是【引擎补上去的】，不是 §8.1 原本画的那五条阶段名
+ * 之一。理由（0041 换路线的连带后果）：规格那张表按【固定阶段】给方向
+ * （产品→技术、技术→开发…），而引擎路线上没有阶段，只有组织图上的角色 ——
+ * 引擎里真实发生的交接只有一种形状：「上一轮的产出方 → 这一轮的审阅方」。
+ * 不登记这一格会怎样：`evaluateGate` 对未登记方向 push unresolved ⇒ 每一轮审阅
+ * 都 escalate，而且报的是「方向未登记」——那会把「缺岗位书」这个真修法（§O5 的
+ * 正题）掩盖成第二个假修法。登记它 = 承认引擎方向也需要被核对「该交什么证据」。
+ *
+ * 包类型取 `approval_card`：引擎那一轮交出去的是「这一次产出 + 一句话结论」，
+ * 六个类型里最贴的就是它（`spec`/`design`/`code_diff`/`test_report`/`ops_plan`
+ * 都是按阶段产物命名的，引擎没有阶段）。刻意【不新增】第七个包类型：那会牵动
+ * `BUNDLE_TYPES` 与已落库的 `evidence_bundles`（decisions/0004：迁移不可改），
+ * 而 §5.11 说 zod schema 是唯一 schema 来源 —— 能不动数据形状就不动。
+ */
 export const HANDOFF_BUNDLE_TYPES: Readonly<Record<string, BundleType>> = {
   "product_to_tech": "spec",
   "tech_to_dev": "design",
   "dev_to_test": "code_diff",
   "test_upward": "test_report",
   "ops_to_ceo": "ops_plan",
+  [ENGINE_REVIEW_GATE]: "approval_card",
 };
 
 /**

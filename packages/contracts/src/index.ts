@@ -27,6 +27,7 @@ export {
   type EvidenceBundle,
   type EvidenceClaim,
   evidenceBundleSchema,
+  ENGINE_REVIEW_GATE,
   HANDOFF_BUNDLE_TYPES,
   isExternalSourceRef,
   requiredBundleType,

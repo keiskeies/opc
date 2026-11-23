@@ -57,6 +57,27 @@ export const INSERT_EVENT_SQL =
   "INSERT INTO events (task_id, actor_type, actor_id, action, target, payload, " +
   "state_snapshot, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
 
+/**
+ * 带重放键的那一条：与上面只差最后一列，前 8 列的【列序逐字相同】。
+ *
+ * 为什么不把 INSERT_EVENT_SQL 直接改成 9 列：那 8 列版本有 26 个生产调用方
+ * （approvals/、engine/、heartbeat/、http/、org/、policy/、serve/…），全都不涉及重放，
+ * 让它们每人多传一个字面 null 是【把新机制的税摊给所有人】；而 recorder.test.ts:233
+ * 钉着它的占位符个数正是为了让「少绑参数写成 NULL」当场可见 —— 动它等于同时改判据。
+ * 分成两条 SQL 的代价是列序有两份，所以两份都由 assertParamCount 各自自检，
+ * 且下面的 eventParams 是两条共用的同一个参数来源（列序漂移会在参数拼装处就炸）。
+ */
+export const INSERT_EVENT_WITH_REPLAY_KEY_SQL =
+  "INSERT INTO events (task_id, actor_type, actor_id, action, target, payload, " +
+  "state_snapshot, created_at, replay_key) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)";
+
+/**
+ * 重放预检查：这一行是否已经存在。三个条件正是 0010 那条部分唯一索引的三列，
+ * 所以这条 SELECT 走的就是那个索引（同一个口径，不存在「索引改了预检查没改」）。
+ */
+export const REPLAY_KEY_EXISTS_SQL =
+  "SELECT id FROM events WHERE action = ? AND target = ? AND replay_key = ? LIMIT 1";
+
 export interface AuditRow {
   readonly taskId: string | null;
   readonly actorType: "agent" | "human" | "system";
@@ -66,7 +87,25 @@ export interface AuditRow {
   readonly payload: unknown;
   readonly stateSnapshot?: unknown;
   readonly createdAt?: number;
+  /**
+   * 重放不变量：同一次「节点执行 / 中断」重复执行时【算得出同一个值】的东西。
+   *
+   * 有值 ⇒ 这一行可去重（重复写就吞掉）；不传 ⇒ 与从前完全一致地插一行。
+   * 键本身从哪来不认识（recorder 不认识 LangGraph，见本文件头），由图侧算好交进来。
+   * 判据在库那边：0010 的 (action, target, replay_key) 部分唯一索引。
+   */
+  readonly replayKey?: string;
 }
+
+/**
+ * target 列的规范值：没给就落 SQL NULL。
+ *
+ * 单独成一个函数只为了一个理由：预检查与 INSERT 必须用【同一个】口径。
+ * 各写一份 `row.target ?? null` 的话，将来谁改成 `?? ""`，预检查就会去查一个
+ * 库里不存在的值 ⇒ 查不到 ⇒ 照常 INSERT ⇒ 唯一索引把整个超步事务打回
+ * （不是「多一行」而是「这一超步全丢」）。
+ */
+const targetColumn = (row: AuditRow): string | null => row.target ?? null;
 
 /**
  * 落成 events.payload / state_snapshot 的 JSON 文本。
@@ -135,7 +174,7 @@ export function eventParams(row: AuditRow, now: () => number): unknown[] {
     row.actorType, // actor_type
     row.actorId, // actor_id
     row.action, // action
-    row.target ?? null, // target
+    targetColumn(row), // target
     serializePayload(row.payload), // payload
     row.stateSnapshot === undefined
       ? null
@@ -144,18 +183,65 @@ export function eventParams(row: AuditRow, now: () => number): unknown[] {
   ];
 }
 
-/** 在【当前事务】里插一行，返回 events.id（= 总线 seq）。 */
-export function appendAudit(
+/**
+ * 在【当前事务】里插一行，返回 events.id（= 总线 seq）。
+ *
+ * 带 replayKey 且库里已有同键行时【不写第二行】，返回【已有那一行的 id】：
+ * seq 的唯一真相是 events.id（bus.ts 文件头），而这一行确实已经存在，
+ * 所以「这一条审计的 seq 是几」的诚实答案就是那个 id —— 返回 0 会和
+ * 「尚无事件」的游标哨兵撞车（下面 id 校验那段记的就是这个坑）。
+ * 也不重新广播：那一行提交时广播过一次（或由崩掉的那个进程广播过），
+ * 再发一遍是给投影喂重复 seq。
+ *
+ * ⚠ 键相同而内容不同 ⇒ 第二行【写不进去】（0010 的唯一索引本就禁止）。
+ * 这对节点审计是对的：重放的【输入】按构造与第一次相同（LangGraph 用同一份
+ * checkpoint + 同一份 task input 重跑），所以「同键 ⇒ 同一条记录」成立。
+ * 若哪天有人给一个【输入会变】的事件加 replayKey，他会看到内容静默停在第一次 ——
+ * 那属于「键选错了」，判据在键的算法那边，不在这里。
+ */
+function appendAuditRow(
   db: DatabaseSync,
   row: AuditRow,
-  now?: () => number,
-): number {
+  now: () => number,
+): { readonly seq: number; readonly deduplicated: boolean } {
   // 两条自检是 0.5 留下的现成工具，这里必须复用而不是另写一份：
   // 少绑参数在可空列上【不报错】，直接写 NULL —— 审计库最危险的失效方向。
-  assertSingleStatement(INSERT_EVENT_SQL);
-  const params = eventParams(row, now ?? Date.now);
-  assertParamCount(INSERT_EVENT_SQL, params);
-  const info = db.prepare(INSERT_EVENT_SQL).run(...(params as never[]));
+  const sql =
+    row.replayKey === undefined
+      ? INSERT_EVENT_SQL
+      : INSERT_EVENT_WITH_REPLAY_KEY_SQL;
+  assertSingleStatement(sql);
+  const params = eventParams(row, now);
+  if (row.replayKey !== undefined) {
+    params.push(row.replayKey);
+    // 预检查走 SELECT 而不是「靠 INSERT 撞唯一索引再 catch」：撞索引虽然实测不烧
+    // AUTOINCREMENT id（不留 seq 空洞，.workbuddy 实测），但把一件【每次恢复都会发生】
+    // 的常态做成异常控制流，会让真正该冒泡的约束冲突变得需要分辨 —— 而分辨不出来时
+    // 表现是「整超步回滚」而不是「少写一行」。预检查与索引不是冗余：预检查漏了，
+    // 索引让它炸而不是静默多一行（0010 文件头同一条立场）。
+    const hit = db
+      .prepare(REPLAY_KEY_EXISTS_SQL)
+      .get(row.action, targetColumn(row), row.replayKey) as
+      | { id: number | bigint | null }
+      | undefined;
+    if (hit !== undefined) {
+      const existing = Number(hit.id);
+      if (!Number.isSafeInteger(existing) || existing <= 0) {
+        // 撞见一行 id 取不出来的行：宁可不吞，也不要返回一个假的 seq
+        //（吞掉 + 假 seq = 审计少了且游标错，两件事叠一起最难查）。
+        throw new Error(
+          "重放预检查命中了一行取不到 id 的 events（得到 " +
+            String(hit.id) +
+            "），replayKey=" +
+            row.replayKey +
+            "。无法回答「这条审计的 seq 是几」，宁可抛错。",
+        );
+      }
+      return { seq: existing, deduplicated: true };
+    }
+  }
+  assertParamCount(sql, params);
+  const info = db.prepare(sql).run(...(params as never[]));
   const id = Number(info.lastInsertRowid);
   if (!Number.isSafeInteger(id) || id <= 0) {
     // 拿不到 id 就绝不能返回 0：0 是「尚无事件」的游标哨兵，返回 0 会让订阅者
@@ -166,7 +252,19 @@ export function appendAudit(
         "）。seq 直接采用 events.id，取不到就没有可信游标 —— 宁可抛错。",
     );
   }
-  return id;
+  return { seq: id, deduplicated: false };
+}
+
+/**
+ * 公开入口：签名与返回值与从前【逐字不变】（26 个生产调用方一个都不动）。
+ * 去重那层的「有没有真写」由 record() 直接用 appendAuditRow 拿，不从这里的返回值里猜。
+ */
+export function appendAudit(
+  db: DatabaseSync,
+  row: AuditRow,
+  now?: () => number,
+): number {
+  return appendAuditRow(db, row, now ?? Date.now).seq;
 }
 
 /** 由 hub 侧用 WriteQueue 实现：一次事务的生命周期 + ALS 作用域。 */
@@ -320,6 +418,7 @@ export class AuditRecorder {
       ...(extra?.stateSnapshot === undefined
         ? {}
         : { stateSnapshot: extra.stateSnapshot }),
+      ...(extra?.replayKey === undefined ? {} : { replayKey: extra.replayKey }),
       ...(extra?.createdAt === undefined ? {} : { createdAt: extra.createdAt }),
     };
     // 第二道守卫：事务是活动的，但没有作用域（run() 收尾阶段、或在 scope() 之外
@@ -335,10 +434,16 @@ export class AuditRecorder {
           (e instanceof Error ? e.message : String(e)),
       );
     }
-    const id = appendAudit(db, row, this.#now);
+    const { seq, deduplicated } = appendAuditRow(db, row, this.#now);
+    if (deduplicated) {
+      // 这一行库里已经有了：不 ++writtenInTx（本超步确实【没写】任何新行，
+      // 那个计数是「空事务可以跳过 commit 往返」的依据，虚增它会让空事务白提交一次），
+      // 也不 push pending（那一行提交时已广播过，重发等于给投影喂重复 seq）。
+      return seq;
+    }
     this.#writtenInTx += 1;
-    this.#pending.push({ event: e, seq: id });
-    return id;
+    this.#pending.push({ event: e, seq });
+    return seq;
   }
 
   /**

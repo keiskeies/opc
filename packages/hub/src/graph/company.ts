@@ -26,6 +26,7 @@ import type { BaseCheckpointSaver } from "@langchain/langgraph-checkpoint";
 import type { ModelTier } from "@opc/contracts";
 import type { AuditRecorder } from "../events/recorder.js";
 import { currentGraphVersion } from "../org/commit.js";
+import { nodeReplayKey } from "./replay-key.js";
 import { assertTaskTransition, type TaskState } from "./status.js";
 
 export const COMPANY_NODES = [
@@ -153,20 +154,35 @@ export function buildCompanyGraph(o: CompanyGraphOptions) {
    * tasks 更新【必须】用同一个 db 连接：超步事务就是这条连接上的 BEGIN，
    * 换连接就跳出了事务（实测：崩溃后 events 与 tasks.status 一起回滚，两者停在
    * 同一个超步之前）。
+   *
+   * stateSnapshot = 规格 §6.3 第二条逐字要的「决定时的完整任务状态 JSON」。
+   * 「决定时」落在这个时刻：本条边【尚未】写进 tasks 行，所以完整状态是
+   * 节点入口那份 state 把 current 换成本条边的 from（同一个节点写第二条边时，
+   * 第一条的效果就是靠这个替换体现的 —— body() 返回的 patch 那时还没并进通道）。
+   * 快照里只有五个通道，没有模型回复：模型输出进快照会把 foreign-model-loop
+   * 那条「跨次运行 events 逐字相同」的断言打成靠运气（桩模型稳定所以侥幸绿过），
+   * 而 §6.3 那句话要的是【状态】，不是【模型说了什么】。
    */
   async function edge(
     node: CompanyNode,
     from: TaskState,
     to: TaskState,
+    state: CompanyStateType,
   ): Promise<TaskState> {
     // 实现侧守卫：非法跃迁当场炸，而不是把脏轨迹写进审计日志等验收 ④ 去发现
     assertTaskTransition(from, to);
-    await recorder.record({
-      kind: "TaskStateChanged",
-      taskId,
-      from,
-      to,
-    });
+    await recorder.record(
+      {
+        kind: "TaskStateChanged",
+        taskId,
+        from,
+        to,
+      },
+      {
+        stateSnapshot: { ...state, current: from },
+        replayKey: nodeReplayKey(),
+      },
+    );
     db.prepare(UPDATE_TASK_SQL).run(to, node, Date.now(), taskId);
     observe.onStatusEdge?.(from, to);
     return to;
@@ -203,7 +219,7 @@ export function buildCompanyGraph(o: CompanyGraphOptions) {
       await askModel(name, state.idea);
       let current = state.current;
       const patch = await body(state, async (to) => {
-        current = await edge(name, current, to);
+        current = await edge(name, current, to, state);
         return current;
       });
       observe.onNodeExit?.(name);

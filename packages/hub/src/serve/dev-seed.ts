@@ -43,6 +43,7 @@ import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   CEO_ROLE_ID,
+  type DelegationEdge,
   type OrgActor,
   type OrgGraph,
   type OrgGraphNode,
@@ -91,7 +92,10 @@ export interface SeedResult {
  * model_family 的取值没有枚举约束（orgNodeSchema 只要求非空串），
  * 取的是仓内测试夹具一直在用的家族名（opus / sonnet / gpt / gemini / claude），
  * 且审阅门控的 same_model_family 判据在【家族】粒度比 —— 父子刻意错开，
- * 让将来加委派边演示时门控不会一上来就红。
+ * 让 DEMO_ORG_EDGES 那几条门控边不会一上来就红。这件事在【保存期】是硬约束：
+ * validateNewEdge 的 violatesNoSelfReview 对同家族直接拒，因为提交组织变更时
+ * 手上没有任何审批凭据（commitOrgChangeRequestSchema 不带批准字段），
+ * 「CEO 批过了所以可以让同家族互审」这条豁免在保存那一刻表达不出来。
  */
 export const DEMO_ORG_NODES: readonly OrgGraphNode[] = [
   {
@@ -136,6 +140,42 @@ export const DEMO_ORG_NODES: readonly OrgGraphNode[] = [
     reports_to: "architect",
     model_family: "gemini",
   },
+];
+
+/**
+ * 演示委派边：`from` 产出，`to` 审阅，且【全部 review_gate=true】。
+ *
+ * ── 为什么种子必须有边（这一格以前是空的）─────────────────────────────
+ * §8.2 第 3 条的审阅独立性判据（hub 的 independentReviewerPath）读的就是这张图的边：
+ * 「产出方有没有一条 review_gate=true、指向别的角色的出边」。旧种子【一条边都没有】，
+ * 于是判据 3 接进 dispatch 之后的演示形状是固定的：每一次审阅都判「没有独立审阅者」，
+ * 而那条阻断的修法是「去 POST /org 加一条边」—— 可 CEO 在演示库里看不到任何一条边做样例，
+ * 界面也就演示不出「带门控的委派边长什么样」。补边不是让演示变绿的手段，
+ * 是演示本来就该带上这个不变量的载体。
+ *
+ * ── 为什么边只能长这个形状（不是审美，是 save 期判据逼出来的）──────────
+ * commitOrgGraph 走 validateNewEdge，里面有两条先把别的形状拒了：
+ *  ① escalation_unreachable：`to` 必须【沿委派边】能走到 CEO（canReach 只走 edges，
+ *     不走 reports_to）。空图上第一条边若是 X → Y（Y 非 CEO），那条边自己就不可达 CEO ⇒ 拒。
+ *     所以空图上的第一批带门控的边只能指向 ceo。
+ *  ② violatesNoSelfReview：保存期没有审批凭据，同家族直接拒 —— 所以两端家族必须不同。
+ *     ceo=opus ⇒ 另一端不能是 opus，于是 tech_director(opus) 与 ceo 之间【加不出】门控边。
+ * depth 那一维不构成约束：委派边此前为空，`longestChainTo/From` 都返回 0，总长 1。
+ * 加完两条指向 ceo 的边之后 qa_engineer 才有合法出边（qa→dev 的账是
+ * longestChainTo(dev)=0 + 边 1 + longestChainFrom(dev)=1 ⇒ 2 ≤ ORG_MAX_DEPTH=5）。
+ *
+ * ⚠ 数组顺序同样是正确性的一部分：qa→dev 依赖 dev→ceo 已在图上
+ * （否则 canReach(dev, ceo) 走不通 ⇒ escalation_unreachable），别把它挪到前头。
+ *
+ * ⚠ 这两条边【只满足 structure 那一维】。运行期 reviewGate 还要比 model_family，
+ * 所以 ceo(opus) 审 architect(sonnet) 判得过，而同一张图上 ceo 审 tech_director(opus)
+ * 仍然要 CEO 点一次批准 —— 那正是 review-preview.ts 那个读数在演示图上要说的事，
+ * 补边不会、也不该把它抹平。
+ */
+export const DEMO_ORG_EDGES: readonly DelegationEdge[] = [
+  { from: "architect", to: CEO_ROLE_ID, review_gate: true },
+  { from: "dev_engineer", to: CEO_ROLE_ID, review_gate: true },
+  { from: "qa_engineer", to: "dev_engineer", review_gate: true },
 ];
 
 /**
@@ -368,6 +408,35 @@ export async function seedDemoOrg(
     }
     graph = applyChangeToGraph(graph, change);
     roles.push(node.role_id);
+  }
+
+  // ①b 委派边。一个 change 一次 commitOrgGraph —— 边若直接塞进 graph 对象再落库，
+  //    演示到的就是「绕过了 validateNewEdge 的边」，而 §8.2 第 4 条「门控绑在边上」
+  //    这件事的全部意义就在这道校验（不可绕过）。顺序见 DEMO_ORG_EDGES 的注释：
+  //    qa→dev 依赖 dev→ceo 先落图。
+  for (const edge of DEMO_ORG_EDGES) {
+    const change = { kind: "add_edge" as const, edge };
+    const r = await commitOrgGraph(w, {
+      graph,
+      change,
+      actor: SEED_ACTOR,
+      runningTasks: SEED_RUNNING_TASKS,
+      nowMs: o.nowMs,
+      changeSummary: "dev 种子：加委派边边 " + edge.from + " → " + edge.to,
+    });
+    if (!r.ok) {
+      throw new Error(
+        "dev-seed：add_edge [" +
+          edge.from +
+          " → " +
+          edge.to +
+          "] 被拒（" +
+          r.code +
+          "）：" +
+          r.reason,
+      );
+    }
+    graph = applyChangeToGraph(graph, change);
   }
 
   // ② 任务。graph_version 在事务内取 currentGraphVersion —— 与 real-deps 的

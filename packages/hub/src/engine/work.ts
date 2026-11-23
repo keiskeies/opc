@@ -37,6 +37,7 @@ import { makeDispatch } from "./dispatch.js";
 import { makeRuntime } from "./runtime.js";
 import { advance, describeAdvance, type AdvanceResult } from "./driver.js";
 import { ensureCharterCard } from "./charter.js";
+import { artifactsRoot } from "../evidence/store.js";
 import {
   approveCard,
   pendingCards,
@@ -62,6 +63,18 @@ export interface WorkArgs {
   readonly maxBudgetUsd: number;
   readonly taskLimitCents: number;
   readonly cwd: string;
+  /**
+   * 证据制品根目录（§5.10）。缺省 = `artifactsRoot()`（`~/.opc-os/artifacts/`）。
+   *
+   * 为什么这里【可以】给默认值而 runtime.ts 的 `evidenceRoot` 是必填：默认值必须有
+   * 一个「只在人敲命令时才会走到」的家。放在装配层（makeRuntime / makeDispatch）
+   * 就等于让每一个调用方——包括每一条测试——都不小心写进真实用户的 HOME；
+   * 放在这一发参数解析里，则只有【人在终端敲 hub work】才会吃到它，
+   * 而那个人要的本来就是规格写的那个目录。与本文件 `cwd: cwd ?? process.cwd()`
+   * 同一条纪律（0041 §8 的「必填的是上限，不是路径」：路径错了看得见，钱花了看不见）。
+   * 测试因此【必须】显式传 `--evidence-root <临时目录>`（work.test.ts 的 workArgv 钉着）。
+   */
+  readonly evidenceRoot: string;
   readonly bin?: string;
 }
 
@@ -88,6 +101,7 @@ export function parseWorkArgs(argv: readonly string[]): ParsedArgs<WorkArgs> {
   let budget: number | undefined;
   let limit: number | undefined;
   let cwd: string | undefined;
+  let evidenceRoot: string | undefined;
   let bin: string | undefined;
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i] as string;
@@ -109,6 +123,7 @@ export function parseWorkArgs(argv: readonly string[]): ParsedArgs<WorkArgs> {
     };
     if (a === "--db") db = val();
     else if (a === "--task") task = val();
+    else if (a === "--evidence-root") evidenceRoot = val();
     else if (a === "--max-turns") {
       const raw = val();
       // 空串【不能】交给 Number：Number("") === 0，于是「写了 --max-turns 但忘了填值」
@@ -146,6 +161,22 @@ export function parseWorkArgs(argv: readonly string[]): ParsedArgs<WorkArgs> {
   if (!Number.isSafeInteger(limit)) {
     return { ok: false, error: "--task-limit-cents 必须是整数美分（§6.1 禁浮点金额），实到 " + String(limit) };
   }
+  if (evidenceRoot === undefined || evidenceRoot === "") {
+    // 缺省目录要在【这里】算而不是在 cmdWork 里：WorkArgs 的 `evidenceRoot` 是必填，
+    // 解析器不填就等于让 cmdWork 去猜（那才是"默认值住在装配层"那一格）。
+    // artifactsRoot() 在取不到 HOME 时抛的是【一句人话】（evidence/store.ts:45），
+    // 这里把它折成 ok:false ⇒ 退出码 2「前置不成立」，而不是 1 + 一条 stack
+    // （本文件上面 ParsedArgs 那段论证的就是这件事）。
+    try {
+      evidenceRoot = artifactsRoot();
+    } catch (error) {
+      return {
+        ok: false,
+        error: "算不出证据制品根目录的缺省值：" + String(error instanceof Error ? error.message : error) +
+          "\n→ 显式给一个 --evidence-root <目录> 就能跑。",
+      };
+    }
+  }
   return {
     ok: true,
     args: {
@@ -155,6 +186,7 @@ export function parseWorkArgs(argv: readonly string[]): ParsedArgs<WorkArgs> {
       maxBudgetUsd: budget as number,
       taskLimitCents: limit as number,
       cwd: cwd ?? process.cwd(),
+      evidenceRoot,
       ...(bin === undefined ? {} : { bin }),
     },
   };
@@ -178,7 +210,8 @@ export const DECIDE_USAGE = [
  */
 export const WORK_USAGE = [
   "用法：hub work --db <path> --task <id> --max-budget-usd <每轮美元硬顶>",
-  "             --task-limit-cents <任务预算上限（美分）> [--max-turns 12] [--cwd <目录>] [--bin claude]",
+  "             --task-limit-cents <任务预算上限（美分）> [--max-turns 12] [--cwd <目录>]",
+  "             [--evidence-root <目录>] [--bin claude]",
   "",
   "  · 这一条走【引擎路线】：一个角色 = 一次 claude -p，下一步找谁由它自己说，",
   "    而能不能推进这一步由 hub 判（docs/decisions/0041）。",
@@ -396,6 +429,7 @@ export async function cmdWork(a: WorkArgs, io: WorkIo): Promise<WorkResult> {
       maxBudgetUsd: a.maxBudgetUsd,
       taskLimitCents: a.taskLimitCents,
       cwd: a.cwd,
+      evidenceRoot: a.evidenceRoot,
       ...(a.bin === undefined ? {} : { bin: a.bin }),
     });
     const task = rt.deps.loadTask(a.task);

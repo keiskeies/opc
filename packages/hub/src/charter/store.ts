@@ -35,6 +35,10 @@
  *     `criteriaForRoleAtVersion()`：把「库里这一版岗位书」接成「门控的那份输入」。
  *     同一条「产物没有消费者」的病已经记了五次（0011 §8 / 0012 §7 / 0013 §7 /
  *     0013 §10.1 / 0014 §3），这次**先把消费口做出来再交付**。
+ *     【本条已被 round358 推翻，原文保留】O4/O5 接线把门控内核接进了 `engine/dispatch.ts`
+ *     的门 4，标准读法走本文件的 `gateCriteriaForRoleOrEmpty` ⇒
+ *     `criteriaFromCharter` 现在有【一条生产调用路径】（每轮 IN_REVIEW 的 pass 一次）。
+ *     钉这一格的断言在 test/arch/zero-producer.test.ts（`review_gates` 由 zero 转 has）。
  *
  * ── 三条判据 ────────────────────────────────────────────────────────────
  *  A. **只有 CEO 能改岗位书**（规格 §4.4.3 原话：「Agent…不能修改自己的岗位书」，
@@ -591,5 +595,37 @@ export function gateCriteriaForRoleAtVersion(
         "与 0012 / 0013 里「不兜底成当前图」是同一条判据。",
     );
   }
+  return criteriaFromCharter(assertCharterShape(roleId, c));
+}
+
+/**
+ * **门 4 消费口**：和 `gateCriteriaForRole` 同一份读法，但「库里没这个角色的岗位书」
+ * 返回【空数组】而不是抛。
+ *
+ * ── 为什么要有第二个入口，而不是给第一个加个 `?? []` ────────────────────
+ * 两个读者对「库里 0 行」这件事实的**正当后果**不同，而那是判据差异，不是口味差异：
+ *  · `gateCriteriaForRole` 的读者是「CEO / 测试 explicitly 要读某个角色的标准」。
+ *    那里读不到就是有人少调了一次 `saveCharterVersion` —— 一次装配错误，**该炸**。
+ *  · 门 4 的读者是【每一轮审阅】。0 行岗位书是这张表今天的真实状态（文件头 ①：
+ *    实测 0 行，缺的是「有人签字」而不是「写入口」），而门控内核第 1 步对空标准的
+ *    正当结论是 `reject` + 一张「去写岗位书」的卡（evaluate.ts 那段：空标准不放行）。
+ *    让一整轮真金白银的执行以异常收场，换来的是同一个「没标准」的事实少一种表达方式。
+ *
+ * ⚠ 只把【没这一行】降级。那一行**存在但读坏了**（缺格）时 `assertCharterShape`
+ *   照旧抛 —— 「库里没写」与「库里写坏了」是两件事，就该有两种后果；
+ *   把后者也吞成空数组，症状会变成「一份坏岗位书让该角色永久停在'去写岗位书'」，
+ *   而那句提示会把人往错的方向带（他去写新的，而该修的是坏的那一版）。
+ *
+ * 返回空数组而【不是 null】：调用方（`DispatchDeps.gateCriteria`）的类型就是
+ * `readonly GateCriterion[]`，那里没有"没读到"这一支 —— 有就是把判断推给下游，
+ * 而下游（门控内核）已经用空数组表达了同一件事。函数名里的 `OrEmpty` 写的就是
+ * 这一格：与上面那个函数的【唯一】区别是空的那一支。
+ */
+export function gateCriteriaForRoleOrEmpty(
+  db: DatabaseSync,
+  roleId: string,
+): readonly GateCriterion[] {
+  const c = readLatestCharter(db, roleId);
+  if (c === undefined) return [];
   return criteriaFromCharter(assertCharterShape(roleId, c));
 }

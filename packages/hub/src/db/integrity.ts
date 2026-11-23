@@ -30,7 +30,9 @@
  * 由 `engine/driver.ts` 与 `serve/charter-pump.ts` 在生产路径上调（0018 §9 当年量的
  * 「零 INSERT」是那张表【还没被复用为会话存储】时的读数，`engine/runtime.ts` 文件头
  * 写的正是"复用顺带把这条自检从恒 not_observable 变成有对象可查"）；
- * 只有 `review_gates` 的 INSERT 仍是【零】（0016 §1 第 1 条那半句照旧成立）。
+ * 只有 `review_gates` 的 INSERT 曾是【零】（0016 §1 第 1 条那半句当年成立；
+ * round358 门 4 接线后 `evidence/turn-bundle.ts` 的 writeGateDecision 是它的
+ * 第一个写入方 —— 那句话已经过期，见 §22.4「每个门控决定都有证据包引用」）。
  * ⇒ 所以每条规则有 `violated`（查出对不上）/ `ok`（查过且对得上）/
  * `not_observable`（库里这一类是空的，【没有东西可查】）三种。
  * 把 not_observable 混进 ok，会得到一张「全部通过」的报告而它证的是一句零断言 ——
@@ -758,9 +760,11 @@ export type CoherenceInput = {
 
 /**
  * ④ 的全部规则。三条 not_observable 不是兜底文案，是实测的写入方状态
- * （0063 重数：`review_gates` 的 INSERT 在 src 里仍是零 —— 0016 §1 第 1 条那半句；
- * `harness_calls` 【不再是】—— 见本文件头 ④ 那一节。两条的 not_observable 因此
- * 是两种不同的事：那张表【没有生产者】，vs 生产者在而这一份库还没跑过。）
+ * （0063 重数：`review_gates` 的 INSERT 当年在 src 里是零 —— 0016 §1 第 1 条那半句
+ * 当时成立；round358 之后 evidence/turn-bundle.ts 的 writeGateDecision 成为它的
+ * 写入方 —— 那张表今天【不再是零写入方】。
+ * `harness_calls` 也早已不是（见本文件头 ④ 那一节）。两条的 not_observable 因此
+ * 是同一件事：生产者在，而这一份库还没跑过。）
  */
 export function auditCoherenceReport(o: CoherenceInput): readonly CheckResult[] {
   const sample = o.ftsSample ?? DEFAULT_FTS_SAMPLE;
@@ -945,12 +949,14 @@ function gateEvidenceCheck(db: DatabaseSync): CheckResult {
       name,
       verdict: "not_observable",
       detail:
-        "review_gates 是空的。src 里【没有任何 INSERT INTO review_gates】" +
-        "（0016 §1 第 1 条复算过，0063 再复算一遍仍是零），所以「每个门控决定都有证据包引用」" +
-        "在生产运行期【无从校验】。不是通过。" +
-        "⚠ 这一条与 harness_call_recorded 的空【不是一回事】：那条的 SQL 已存在、只是这份库没跑过；" +
-        "这一条是【全仓没有写它的代码】—— 审阅判定今天写在 events 里（dispatch 那条 " +
-        "ReviewDecided）。而这张表是【预留，非缺陷】（0064 / O4 动作 4）：它的行要求 " +
+        "review_gates 是空的。src 里【曾经没有任何 INSERT INTO review_gates】" +
+        "（0016 §1 第 1 条当年复算过：0063 重数时仍是零；round358 门 4 接线后" +
+        "evidence/turn-bundle.ts 的 writeGateDecision 是第一个写入方），所以" +
+        "「每个门控决定都有证据包引用」在这一份库上【无从校验】：写入方刚接上、" +
+        "这一份库还没跑过。不是通过。" +
+        "⚠ 这一条与 harness_call_recorded 的空现在是同一种事：SQL 存在、只是没跑过；" +
+        "它不是【全仓没有写它的代码】那种空了 —— 写那半句的自检见文件头 ④。" +
+        "而这张表是【预留，非缺陷】（0064 / O4 动作 4）：它的行要求 " +
         "evidence_bundle_id 指向存在的证据包，而生产里还没有东西往证据包里装内容（O5），" +
         "先喂一行 NULL 只会把这一条从 not_observable 换成恒 violated —— evidence_bundles 那张表" +
         "自己也要等 O5 接上才有东西可指。",
