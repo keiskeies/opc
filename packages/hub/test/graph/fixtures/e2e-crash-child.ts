@@ -24,6 +24,7 @@ import { migrate } from "../../../src/db/migrate.js";
 import type { DomainEvent, EventBus } from "../../../src/events/bus.js";
 import { SuperStepAuditor } from "../../../src/graph/audit-middleware.js";
 import { buildCompanyGraph } from "../../../src/graph/company.js";
+import type { TaskState } from "../../../src/graph/status.js";
 import { StubRegistry } from "../../../src/graph/stub-model.js";
 import { loadPresetRoles } from "../../../src/roles/preset.js";
 
@@ -148,7 +149,9 @@ const resumed = killAfterNodes === null && killEventIndex === null;
  * 名字尤其容易误会：tasks 表确实有 current_node 列（hub status 靠它显示"当前节点"），
  * 但那是节点自己 UPDATE 出来的，不是图传进来的。
  */
-const input = resumed ? null : { idea, current: "CHARTER_PENDING" };
+const input: { idea: string; current: TaskState } | null = resumed
+  ? null
+  : { idea, current: "CHARTER_PENDING" };
 
 /**
  * 装配要点（实测得来，两处都是【静默失效】的坑，改回去不会报错、只会让测试假绿）：

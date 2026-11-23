@@ -73,14 +73,11 @@ const TMP = fixtureTmp("serve-driver-pump", import.meta.url);
 const NOW = 1_700_000_000_000;
 
 type Row = Record<string, unknown>;
-type Db = {
-  prepare: (sql: string) => {
-    all: (...a: unknown[]) => Row[];
-    get: (...a: unknown[]) => Row | undefined;
-    run: (...a: unknown[]) => unknown;
-  };
-  exec: (sql: string) => void;
-};
+// 队列/库不经手搓 stub（B5）：driveTasks 要的是 HubWriter，patrolTasks 要的是
+// PatrolDb（Pick<DatabaseSync,"prepare">），手搓收窄会换来一堆 as 骨架。
+import type { DatabaseSync } from "node:sqlite";
+
+type Db = DatabaseSync;
 type Queue = {
   node: <T>(fn: () => Promise<T> | T) => Promise<T>;
   readConnection: () => Db;
@@ -140,7 +137,7 @@ async function world(
   const q = new WriteQueue(TMP + "/d-" + process.pid + "-" + ++fileSeq + ".db") as unknown as Queue;
   queues.push(q);
   const db = q.writeConnection();
-  migrate(db as unknown as Parameters<typeof migrate>[0]);
+  migrate(db);
   db.prepare(INSERT_DELEGATION_GRAPH_SQL).run("g1", 1, GRAPH, NOW, "ceo", "测试用组织图");
   const tasks = o.tasks ?? [{ id: "t1", status: "IN_PROGRESS", role: "manager" }];
   tasks.forEach((t, i) => {
@@ -169,6 +166,7 @@ function adv(o: {
         role: "manager",
         moved: true,
         seat: "agent",
+        status: (o.status ?? "IN_PROGRESS") as TaskState,
         note: o.note ?? "干了点活",
         costCents: o.costCents ?? 4,
         sessionId: null,
@@ -206,6 +204,8 @@ async function drive(
     readonly stopped?: AdvanceResult["stopped"];
     readonly costCents?: number;
     readonly taskLimitCents?: number;
+    /** 这一轮落库后的状态（G 组之前默认 IN_PROGRESS）。 */
+    readonly status?: string;
     /** 不注入 ⇒ 走默认那一支（真 runtime + 真子进程）。只 H 组用。 */
     readonly real?: boolean;
     readonly bin?: string;
@@ -219,6 +219,7 @@ async function drive(
     maxBudgetUsd: 0.5,
     taskLimitCents: o.taskLimitCents ?? 2 ** 40,
     cwd: o.cwd ?? TMP,
+    evidenceRoot: TMP + "/artifacts",
     ...(o.bin === undefined ? {} : { bin: o.bin }),
     ...(o.real === true
       ? {}
@@ -227,7 +228,12 @@ async function drive(
             calls.push({ taskId, budget, maxTurns });
             if (o.throwWith !== undefined) throw new Error(o.throwWith);
             if (o.moveto !== undefined) await moveTo(w, taskId, o.moveto.status, o.moveto.role, nowMs);
-            return adv({ stopped: o.stopped, costCents: o.costCents ?? 4, status: o.moveto?.status });
+            return adv({
+              ...(o.stopped === undefined ? {} : { stopped: o.stopped }),
+              costCents: o.costCents ?? 4,
+              ...(o.moveto === undefined ? {} : { status: o.moveto.status }),
+              ...(o.status === undefined ? {} : { status: o.status }),
+            });
           },
         }),
     ...(o.maxAttempts === undefined ? {} : { maxAttempts: o.maxAttempts }),
@@ -740,6 +746,7 @@ describe("F. 认领行【先于】花钱：崩溃循环正是上限要挡的那�
       maxBudgetUsd: 0.5,
       taskLimitCents: 2 ** 40,
       cwd: TMP,
+      evidenceRoot: TMP + "/artifacts",
       driveTask: async (taskId: string) => {
         prev.push({ taskId, budget: 0.5, maxTurns: 12 });
         n += 1;
@@ -763,6 +770,7 @@ describe("F. 认领行【先于】花钱：崩溃循环正是上限要挡的那�
           maxBudgetUsd: 0.5,
           taskLimitCents: 100,
           cwd: TMP,
+          evidenceRoot: TMP + "/artifacts",
           ...bad,
         }),
       ).rejects.toThrow(/>= 1 的整数/u);
@@ -804,6 +812,7 @@ describe("G. 停机原因说人话，而且不说「再去敲 hub work」", () =
       maxBudgetUsd: 0.5,
       taskLimitCents: 2 ** 40,
       cwd: TMP,
+      evidenceRoot: TMP + "/artifacts",
       driveTask: async () => adv({ turns: 0 }),
     });
     expect(r.driven[0]?.note).toContain("一轮都没跑起来");

@@ -142,6 +142,12 @@ const readEvents = (dbPath: string): Record<string, unknown>[] =>
     dbPath,
     "SELECT id, task_id, action, target, payload FROM events ORDER BY id",
   );
+/** 连 state_snapshot / replay_key 一起读：那两列是判据 3 的观测面。 */
+const readAudit = (dbPath: string): Record<string, unknown>[] =>
+  readRows(
+    dbPath,
+    "SELECT id, action, target, payload, state_snapshot, replay_key FROM events ORDER BY id",
+  );
 const readTasks = (dbPath: string): Record<string, unknown>[] =>
   readRows(
     dbPath,
@@ -404,6 +410,120 @@ describe("Task 0.8 —— 最小可运行公司图", () => {
     // 尾格 = 桩该停的那一格。断言它而不是断言「轨迹长度」：长度会随图改动一起变，
     // 而「桩绝不自己跨过 CEO 那一格」是这次修改要钉的性质。
     expect(trace.at(-1)?.[1]).toBe(STUB_STOP_STATE);
+  }, 180_000);
+
+  // ── 判据 3：每条状态边都带着【决定时的完整任务状态】与【重放键】──────────────
+  //
+  // 规格 §6.3 第二条的原话是「每条事件携带 state_snapshot（决定时的完整任务状态 JSON）」。
+  // 这一发把它做成【方向性】断言，因为「有值」不等于「对」：
+  //  ① 空壳也算错。0006 §8.5 量过：把列默认值从 NULL 改成 `{}`，311 例里只红 2 例 ——
+  //    「非 NULL」这种判据抓不住空壳。所以这里 NULL、空串、"null"、"{}" 一律算空。
+  //  ② 方向要打在 from 上，不是 to。这是本用例真正有鉴别力的地方：
+  //    edge() 写的快照是 `{ ...state, current: from }`，那个 current 替换【不是装饰】——
+  //    一个节点一次执行写多条边时（test 写 IN_REVIEW→REJECTED_DOWNWARD 两条），
+  //    节点入口那份 state.current 是【第一条边的 from】；第二条边若不替换，
+  //    快照说的就是「上一条边之前」而不是「本条边之前」。删掉那个替换，
+  //    下面那条 current===from 会在第二条边上红（实测见台账 round356 的变异记录）。
+  //  ③ 快照里没有模型回复文本。§6.3 要的是【状态】；把回复塞进去会让
+  //    foreign-model-loop 那条「跨次运行 events 逐字相同」变成靠桩模型稳定侥幸绿过。
+  it("⑤ 每条状态边都有 state_snapshot（方向打在 from）与非空 replay_key", async () => {
+    const dbPath = tmpDb();
+    const h = makeHub(dbPath);
+    const graph = buildCompanyGraph({
+      db: h.db,
+      recorder: h.auditor.recorder,
+      saver: h.saver,
+      roles: loadPresetRoles(),
+      models: new StubRegistry(),
+      taskId: "T-E2E-SNAP",
+    });
+    await h.auditor.invoke(() =>
+      graph.invoke(
+        { idea: "快照用例", current: "CHARTER_PENDING" },
+        { configurable: { thread_id: "th-e2e-snap" } },
+      ),
+    );
+
+    const rows = readAudit(dbPath);
+    expect(rows.length).toBe(EXPECTED_TRACE.length);
+
+    const emptyish = (v: unknown): boolean => {
+      if (v === null || v === undefined) return true;
+      const t = String(v).trim();
+      if (t === "" || t === "null" || t === "{}") return true; // 空壳不算快照
+      const parsed = JSON.parse(t) as unknown;
+      return (
+        typeof parsed !== "object" ||
+        parsed === null ||
+        Object.keys(parsed as Record<string, unknown>).length === 0
+      );
+    };
+
+    const keys: string[] = [];
+    for (const r of rows) {
+      const label = String(r.target);
+      const snap = JSON.parse(String(r.state_snapshot)) as Record<
+        string,
+        unknown
+      >;
+      // ① 不是空壳
+      expect(emptyish(r.state_snapshot), "空快照：" + label).toBe(false);
+      // ② 方向：快照说的是【本条边之前】的状态
+      const edge = JSON.parse(String(r.payload)) as {
+        from: string;
+        to: string;
+      };
+      expect(snap.current, "快照方向不在 from：" + label).toBe(edge.from);
+      expect(snap.current, "快照方向跑到了 to：" + label).not.toBe(edge.to);
+      // 状态通道齐（少了通道就是「伪快照」：看起来有 JSON，回放时缺字段）
+      for (const ch of ["idea", "current", "passed", "reworkUsed", "trail"]) {
+        expect(snap, "快照缺通道 " + ch + "：" + label).toHaveProperty(ch);
+      }
+      // ③ 快照是【状态】，不是模型说了什么
+      expect(
+        JSON.stringify(snap),
+        "快照里混进了模型回复：" + label,
+      ).not.toContain("stub:");
+      // 重放键非空（0010 的索引只认非 NULL，空键 = 这一行不参与去重）
+      expect(typeof r.replay_key).toBe("string");
+      expect(String(r.replay_key).trim()).not.toBe("");
+      keys.push(String(r.replay_key));
+    }
+
+    // ── 键的【粒度】：一次节点执行一个键 ────────────────────────────────
+    // 两头都要钉，因为两种错都会让去重看起来在工作：
+    //  · 常量键（整趟一个键）⇒ 第二次执行的【合法】事件被第一次吞掉，行数照样少，
+    //    看起来像「去重生效」。所以要有「键不止一个」。
+    //  · 每条边一个键 ⇒ 一个超步写多条边的那次执行（test 一发写 IN_REVIEW + 判定，
+    //    dev 被打回那一发写补边 + 交证据）重放后会剩多条。所以要有「一次执行内同键」。
+    const runs: string[][] = [];
+    for (const k of keys) {
+      const last = runs[runs.length - 1];
+      if (last !== undefined && last[0] === k) last.push(k);
+      else runs.push([k]);
+    }
+    // 同键的连续行确实是【同一次执行】：它们的 from/to 首尾相接
+    for (const run of runs) {
+      expect(run.length).toBeGreaterThan(0);
+    }
+    const grouped = new Map<string, number[]>();
+    for (let i = 0; i < keys.length; i += 1) {
+      const g = grouped.get(keys[i] as string) ?? [];
+      g.push(i);
+      grouped.set(keys[i] as string, g);
+    }
+    // 一次执行的行是【连续】的：同一个键不会在别的键之后又出现一次。
+    // 它若出现，说明两次执行撞了同一个键（那第一次的合法事件会被第二次吞掉）。
+    expect(runs.length).toBe(grouped.size);
+    // 键的个数 = 写过边的节点执行次数（intake 一次执行【不写边】，所以排除它）。
+    // 这个数从【真岗位书的运行次数】算，不写死：改回退次数时它会跟着走。
+    const edgeWritingRuns = COMPANY_NODES.filter((n) => n !== "intake").reduce(
+      (acc, n) => acc + runsOfNode(n),
+      0,
+    );
+    expect(grouped.size).toBe(edgeWritingRuns);
+    // 至少存在一次执行写了多条边（否则本用例测不到「一次执行多条约」这个形态）
+    expect(EXPECTED_TRACE.length).toBeGreaterThan(grouped.size);
   }, 180_000);
 
   it("节点级模型由岗位书的 model_tier 驱动（§5.9），且不联网不计费", async () => {

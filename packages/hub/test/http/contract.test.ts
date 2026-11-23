@@ -52,16 +52,7 @@ import { reconnectDelayMs, ResumeStream, shouldGiveUp } from "../../src/http/sse
 
 const TMP = fixtureTmp("http", import.meta.url);
 
-type Row = Record<string, unknown>;
-type Db = {
-  prepare: (sql: string) => {
-    all: (...a: unknown[]) => Row[];
-    get: (...a: unknown[]) => Row | undefined;
-    run: (...a: unknown[]) => unknown;
-  };
-  exec: (sql: string) => void;
-  close: () => void;
-};
+type Db = DatabaseSync;
 
 const opened: Db[] = [];
 let fileSeq = 0;
@@ -69,7 +60,7 @@ let fileSeq = 0;
 /** 每个用例一个【独立库文件】：脏行那条用例要往库里写坏数据，共享会串味。 */
 async function newDb(taskId = "task-1"): Promise<Db> {
   const { openDb } = await import("../../src/db/driver.js");
-  const db = openDb(join(TMP, "h-" + process.pid + "-" + ++fileSeq + ".db")) as unknown as Db;
+  const db = openDb(join(TMP, "h-" + process.pid + "-" + ++fileSeq + ".db")) ;
   opened.push(db);
   migrate(db);
   db.prepare(
@@ -111,7 +102,7 @@ const TOKEN = newLocalToken();
  * 在整个 Phase 2 里【没有任何代码承载】，也没有任何测试红过 ——
  * 决策落库之后什么都不发生，而 200 照回。现在这条计数器能红。
  */
-async function harness(taskId = "task-1"): {
+async function harness(taskId = "task-1"): Promise<{
   deps: HubDeps;
   db: Db;
   bus: InMemoryEventBus;
@@ -119,7 +110,7 @@ async function harness(taskId = "task-1"): {
   sign: (method: string, path: string, body?: string) => Record<string, string>;
   req: (o: Partial<HubRequest> & { method: string; path: string }) => HubRequest;
   approvals: (id: string, status?: string) => void;
-} {
+}> {
   const db = await newDb(taskId);
   const bus = new InMemoryEventBus();
   const calls = { decision: 0, created: 0, resumed: [] as string[] };
@@ -262,12 +253,15 @@ describe("② 鉴权：无 token 请求 401", () => {
     // 只读端点上取到的合法签名，拿去 POST 审批。若规范串里不带 method+path，
     // 这一枪就能打中 —— 这类实现最常漏，而漏了的后果是「读一次就能写」。
     const stolen = h.sign("GET", "/tasks");
+    // 先取一个 GET 签名（行为：签名栈里多压了一次 GET），再把它【复合进】请求：
+    // 逗号表达式的写法 biome 禁（noCommaOperator），改为两行等价写法。
+    h.sign("GET", "/tasks");
     const res = await handleRequest(
       h.deps,
       h.req({
         method: "POST",
         path: "/approvals/a-1",
-        headers: { ...stolen, ...(h.sign("GET", "/tasks"), {}) },
+        headers: { ...stolen },
         body: JSON.stringify({ resume: "approve" }),
       }),
     );
@@ -613,7 +607,11 @@ describe("③ POST /approvals/:id", () => {
       approvalId: "a",
       request: { resume: "approve" },
     });
-    expect(replayed.replayed).toBe(true);
+    expect(replayed.status).toBe(200);
+    // 这一支的判别是 alreadyDecided === true ⇒ 返回里没有 audit（与 404 支同构：
+    // 两种「这次点击不该写审计」都拿不出可写的东西）。用 in 而非直读属性，
+    // 是为了跟 missing 支保持同一形状 —— 直读判别属性会让 TS 在这行报错。
+    expect("audit" in replayed).toBe(false);
     // 这条是【运行期】的钉子，配的是编译期那一条：判别式收窄让 TS 在 replayed:true
     // 这一支读不到 audit（改一下试试就知道），而这条断言保证将来有人
     // 「顺手把 audit 加回去」时这里会红 —— 类型约束没有测试配套的话，
@@ -774,12 +772,15 @@ describe("③ POST /approvals/:id", () => {
     // 写在 real-deps.ts 的 makeResumeGraph 注释里（不在这里重述一遍，两处会漂移）。
     const h = await harness();
     h.approvals("r-4");
-    h.deps.resumeGraph = async () => {
-      throw new Error("图起不来");
+    const deps: HubDeps = {
+      ...h.deps,
+      resumeGraph: async () => {
+        throw new Error("图起不来");
+      },
     };
     const body = decideBody({ resume: "approve" });
     const res = await handleRequest(
-      h.deps,
+      deps,
       h.req({
         method: "POST",
         path: "/approvals/r-4",

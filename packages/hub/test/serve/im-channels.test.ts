@@ -872,8 +872,8 @@ describe("④ 装配通了：env → 通道 → 一轮入站 → 桥 → 库里�
     const h = await harness("can-act");
     const c = h.bundle.channels[0];
     if (c === undefined) throw new Error("夹具装配出来的通道表是空的");
-    expect(c.canAct({ senderId: APPROVER }).ok).toBe(true);
-    const other = c.canAct({ senderId: "ou_stranger" });
+    expect(c.canAct({ senderId: APPROVER, channelId: c.id }).ok).toBe(true);
+    const other = c.canAct({ senderId: "ou_stranger", channelId: c.id });
     expect(other.ok).toBe(false);
     if (other.ok) throw new Error("上面那句已经判过 false，不该走到这里");
     // 那句人话是给用户看的，必须说清「为什么点不动」而不是笼统一句「没权限」。
@@ -888,7 +888,7 @@ describe("⑤ 一轮判决 → 人话", () => {
     const h = await harness("destroy-cert");
     // 伪造 pollAll 的产出：取走 3 条只判决 1 条。运行时一行代码都不用动 ——
     // 装配层读的是它的【产出】，而「一个数量正确的销毁证明」在日志上本来什么都不写。
-    const rt = h.bundle.runtime as { pollAll(): Promise<never> };
+    const rt = h.bundle.runtime as unknown as { pollAll(): Promise<never> };
     rt.pollAll = async () =>
       [
         {

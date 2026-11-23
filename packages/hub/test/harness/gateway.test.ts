@@ -18,6 +18,7 @@
  * 但真实 harness 会不会在被问之后就停下来，是它那侧的语义，离线状态无从核验。
  */
 import type {
+  ApprovalHandler,
   CostReport,
   HarnessAdapter,
   HarnessCapabilities,
@@ -25,7 +26,6 @@ import type {
   HarnessId,
   HarnessRequest,
   HarnessRequestInput,
-  ToolApprovalDecision,
   ToolApprovalRequest,
 } from "@opc/contracts";
 import { harnessRequestSchema } from "@opc/contracts";
@@ -88,6 +88,7 @@ function finished(exitCode: number | null = 0): HarnessEvent {
       modelFamily: "claude",
       output: "改完了",
       diffHash: "a".repeat(64),
+      structured: undefined,
     },
   };
 }
@@ -134,7 +135,7 @@ function fakeAdapter(
 
 async function* stream(
   events: HarnessEvent[],
-  onApproval: (r: ToolApprovalRequest) => Promise<ToolApprovalDecision>,
+  onApproval: ApprovalHandler,
   o: { asked?: ToolApprovalRequest[]; proceedAfterDenial?: boolean },
 ): AsyncGenerator<HarnessEvent> {
   for (const ev of events) {
@@ -932,6 +933,7 @@ describe("适配器异常 ⇒ 拒而不编一个看起来合法的结果", () =>
             output: "x",
             diffHash: null,
             harnessVersion: "", // 自报版本为空串，过不了 executionResultSchema 的 min(1)
+            structured: undefined,
           },
         },
       ]),

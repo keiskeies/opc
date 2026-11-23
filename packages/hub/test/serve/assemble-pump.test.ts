@@ -277,6 +277,16 @@ const pumpArgs = (path: string, extra: Partial<ServeArgs> = {}): ServeArgs =>
     ...extra,
   }) as ServeArgs;
 
+/**
+ * pumpArgs 之后【删掉】几格：exactOptionalPropertyTypes 下显式写
+ * `charterPump: undefined` 在字面量里非法，覆盖已设的开关/上限只能删了再说。
+ */
+const pumpArgsWithout = (path: string, keys: readonly ("charterPump" | "maxBudgetUsd" | "taskLimitCents")[]): ServeArgs => {
+  const a = { ...pumpArgs(path) } as Record<string, unknown>;
+  for (const k of keys) delete a[k];
+  return a as ServeArgs;
+};
+
 describe("A 组：默认不开 = 一分钱不花", () => {
   it("⭐ 库里有条卡在等章程的任务而【没开泵】⇒ 三个心跳之后 runTurn 零次", async () => {
     const path = dbWithCharterTasks(["t1"]);
@@ -285,7 +295,7 @@ describe("A 组：默认不开 = 一分钱不花", () => {
     const { io } = ioOf();
     const r = needOk(
       await boot(
-        { ...pumpArgs(path), charterPump: undefined, maxBudgetUsd: undefined } as ServeArgs,
+        pumpArgsWithout(path, ["charterPump", "maxBudgetUsd"]),
         io,
         { acquire: () => OK_LOCK, serve: fakeServer().serve, scheduler: s, now: () => s.now(), pumpCardDeps: cardDeps(calls) },
       ),
@@ -307,7 +317,7 @@ describe("A 组：默认不开 = 一分钱不花", () => {
     const s = createFakeScheduler(NOW);
     const { io, warn } = ioOf();
     const r = needOk(
-      await boot({ ...pumpArgs(path), charterPump: undefined } as ServeArgs, io, {
+      await boot(pumpArgsWithout(path, ["charterPump"]), io, {
         acquire: () => OK_LOCK,
         serve: fakeServer().serve,
         scheduler: s,
@@ -444,10 +454,13 @@ describe("C 组：一次起草不得让巡检停摆（本篇最容易被【改�
     const path = dbWithCharterTasks(["t1"]);
     const s = createFakeScheduler(NOW);
     const { io, warn } = ioOf();
-    let release: (() => void) | null = null;
+    // TS 对「在闭包里赋值」的 let 会丢掉全部收窄（B5 在 assemble-driver 踩过，
+    // 有 probe 验证）：`let release: (() => void) | null` 在闭包赋值后又 ?.
+    // 调用会得到 TS2349。换成对象属性的释放闸，属性收窄是保留的。
+    const releaseGate: { fn: (() => void) | null } = { fn: null };
     let calls = 0;
     const held = new Promise<void>((res) => {
-      release = () => {
+      releaseGate.fn = () => {
         res();
       };
     });
@@ -459,7 +472,7 @@ describe("C 组：一次起草不得让巡检停摆（本篇最容易被【改�
         now: () => s.now(),
         charterPumpVia: (): Promise<PumpRoundResult> => {
           calls++;
-          return held.then(() => ({ cards: [], costCents: 0, abandoned: [], turns: [] }));
+          return held.then(() => ({ cards: [], costCents: 0, abandoned: [], turns: [], blocked: [] }));
         },
       }),
     );
@@ -493,7 +506,7 @@ describe("C 组：一次起草不得让巡检停摆（本篇最容易被【改�
     // 而泵那一侧给出的是【在飞】那一道门，不是"又派了一份"。
     expect(calls).toBe(1);
     expect(warn.join(" ")).toContain("上一轮起草还在飞");
-    release?.();
+    releaseGate.fn?.();
     await r.shutdown();
   });
 
@@ -634,7 +647,8 @@ describe("D 组：关机等到起草落地", () => {
     const path = dbWithCharterTasks(["t1"]);
     const s = createFakeScheduler(NOW);
     const { io, warn } = ioOf();
-    let release: (() => void) | null = null;
+    // 同上：闭包里赋值的 let 收窄会丢（TS2349）。释放闸对象。
+    const releaseGate: { fn: (() => void) | null } = { fn: null };
     let calls = 0;
     let closed = false;
     const real = new WriteQueue(path);
@@ -654,8 +668,8 @@ describe("D 组：关机等到起草落地", () => {
         charterPumpVia: (): Promise<PumpRoundResult> => {
           calls++;
           return new Promise<PumpRoundResult>((res) => {
-            release = () => {
-              res({ cards: [], costCents: 0, abandoned: [], turns: [] });
+            releaseGate.fn = () => {
+              res({ cards: [], costCents: 0, abandoned: [], turns: [], blocked: [] });
             };
           });
         },
@@ -672,7 +686,7 @@ describe("D 组：关机等到起草落地", () => {
     // 起草还没放行 ⇒ 队列【不许】被关。
     await new Promise((res) => setTimeout(res, 20));
     expect(closed).toBe(false);
-    release?.();
+    releaseGate.fn?.();
     await shutting;
     expect(closed).toBe(true);
   });
@@ -682,7 +696,7 @@ describe("E 组 / 纯函数：上限缺失时不能起", () => {
   it("⭐ pumpBoundsOf：没开泵与开了而配置坏是【两种结论】", () => {
     // 合成一种（比如 `Pick<...> | null`）之后调用方得自己再判一次 charterPump，
     // 那就是【两个来源判同一件事】—— 本文件与 0043 §4 都为此付过钱。
-    const off = pumpBoundsOf({ charterPump: undefined } as ServeArgs);
+    const off = pumpBoundsOf({} as ServeArgs);
     expect(off).toEqual({ ok: false, reason: "not_pumped" });
     const bad = pumpBoundsOf({ charterPump: true } as ServeArgs);
     expect(bad.ok).toBe(false);
@@ -724,7 +738,7 @@ describe("E 组 / 纯函数：上限缺失时不能起", () => {
     const srv = fakeServer();
     const r = needErr(
       await boot(
-        { ...pumpArgs(path), maxBudgetUsd: undefined } as ServeArgs,
+        pumpArgsWithout(path, ["maxBudgetUsd"]),
         io,
         { acquire: () => OK_LOCK, serve: srv.serve },
       ),

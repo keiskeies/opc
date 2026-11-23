@@ -48,7 +48,7 @@ import type { LockAcquire } from "../../src/serve/lock.js";
 import { INSERT_DELEGATION_GRAPH_SQL } from "../../src/org/commit.js";
 import type { AdvanceResult, AdvanceTurnLog } from "../../src/engine/driver.js";
 import type { PumpRoundResult } from "../../src/serve/charter-pump.js";
-import type { DriveOptions, DriveRoundResult } from "../../src/serve/driver-pump.js";
+import type { DriveRoundResult, DriveTaskFn } from "../../src/serve/driver-pump.js";
 import { boot, shutdownOrderLine, type BootResult, type ServeIo } from "../../src/serve/assemble.js";
 import type { ServeArgs } from "../../src/serve/config.js";
 import { createFakeScheduler } from "../../src/serve/timer.js";
@@ -211,6 +211,7 @@ function stalledAdvance(taskId: string): AdvanceResult {
     turn: 1,
     res: {
       taskId,
+      status: "IN_PROGRESS",
       role: "manager",
       moved: false,
       seat: "agent",
@@ -260,12 +261,33 @@ const driverArgs = (path: string, extra: Partial<ServeArgs> = {}): ServeArgs =>
     ...extra,
   }) as ServeArgs;
 
+/**
+ * 同一份 args 但【没有】driverPump 那行。
+ *
+ * exactOptionalPropertyTypes 下把 `driverPump: undefined` 写进 Partial<ServeArgs>
+ * 是类型错误（显式 undefined 不算"省略"），而"省略"才是"没开"的合法表达 ——
+ * assemble.ts 读的是 `args.driverPump === true`，少一行就是关着的。
+ */
+const driverArgsNoPump = (path: string, extra: Partial<ServeArgs> = {}): ServeArgs =>
+  ({
+    dbPath: path,
+    port: 8787,
+    heartbeatMs: 60_000,
+    noBackup: true,
+    maxBudgetUsd: 0.5,
+    taskLimitCents: 500,
+    agentCwd: tmp(),
+    ...extra,
+  }) as ServeArgs;
+
 /** 只记【被推的是哪条、给的是哪个时刻】的假推法。 */
 function spyDrive(
   calls: { taskId: string; nowMs: number }[],
   o: { readonly throwFor?: string } = {},
-): DriveOptions["driveTask"] {
-  return async (taskId: string): Promise<AdvanceResult> => {
+): DriveTaskFn {
+  return async (taskId: string, maxBudgetUsd: number, maxTurns: number): Promise<AdvanceResult> => {
+    void maxBudgetUsd;
+    void maxTurns;
     // nowMs 不在 DriveTaskFn 的签名里（它是 DriveOptions 的一格），
     // 所以 B 组要的那个值只能从【认领行】读回来 —— 见 claimTimes。
     // 这里记 taskId 是为了让"推了哪几条"这一判据不依赖读库。
@@ -282,7 +304,7 @@ describe("A 组：默认不开 = 一分钱不花", () => {
     const s = createFakeScheduler(NOW);
     const { io } = ioOf();
     const r = needOk(
-      await boot({ ...driverArgs(path), driverPump: undefined } as ServeArgs, io, {
+      await boot(driverArgsNoPump(path), io, {
         acquire: () => OK_LOCK,
         serve: fakeServer().serve,
         scheduler: s,
@@ -306,7 +328,7 @@ describe("A 组：默认不开 = 一分钱不花", () => {
     const s = createFakeScheduler(NOW);
     const { io, warn } = ioOf();
     const r = needOk(
-      await boot({ ...driverArgs(path), driverPump: undefined } as ServeArgs, io, {
+      await boot(driverArgsNoPump(path), io, {
         acquire: () => OK_LOCK,
         serve: fakeServer().serve,
         scheduler: s,
@@ -346,7 +368,7 @@ describe("A 组：默认不开 = 一分钱不花", () => {
     const { io, warn } = ioOf();
     const r = needOk(
       await boot(
-        driverArgs(path, { driverPump: undefined, charterPump: true }) as ServeArgs,
+        driverArgsNoPump(path, { charterPump: true }),
         io,
         {
           acquire: () => OK_LOCK,
@@ -360,7 +382,13 @@ describe("A 组：默认不开 = 一分钱不花", () => {
           // 不是"心跳什么都没干"造成的（0044 §9.2 那条：空断言必须先有分母）。
           charterPumpVia: (): Promise<PumpRoundResult> => {
             pumpCalls.push(1);
-            return Promise.resolve({ cards: [], costCents: 0, abandoned: [], turns: [] });
+            return Promise.resolve({
+              cards: [],
+              costCents: 0,
+              abandoned: [],
+              turns: [],
+              blocked: [],
+            });
           },
         },
       ),
@@ -468,10 +496,12 @@ describe("C 组：一趟驱动不得让巡检停摆（本篇最容易被【改�
     const path = dbWithWorkingTasks(["t1"]);
     const s = createFakeScheduler(NOW);
     const { io, warn } = ioOf();
-    let release: (() => void) | null = null;
     let calls = 0;
+    // ⚠ 为什么是对象属性而不是 let + 闭包写：TS 对【在闭包里被赋值过的 let 变量】
+    // 放弃一切窄化（可选链与 if 收窄都失效 ⇒ TS2349）。属性窄化不受这条规则影响。
+    const releaseGate: { fn: (() => void) | null } = { fn: null };
     const held = new Promise<DriveRoundResult>((res) => {
-      release = () => {
+      releaseGate.fn = () => {
         res({ driven: [], costCents: 0, abandoned: [], blocked: [] });
       };
     });
@@ -501,7 +531,7 @@ describe("C 组：一趟驱动不得让巡检停摆（本篇最容易被【改�
     expect(warn.join(" ")).not.toContain("上一轮心跳还没结束");
     expect(calls).toBe(1);
     expect(warn.join(" ")).toContain("上一轮驱动还在飞");
-    release?.();
+    releaseGate.fn?.();
     await r.shutdown();
   });
 });
@@ -515,9 +545,9 @@ describe("D 组：关机等到落地，而等待时长【从配置算】", () =>
     const path = dbWithWorkingTasks(["t1"]);
     const s = createFakeScheduler(NOW);
     const { io, warn } = ioOf();
-    let release: (() => void) | null = null;
     let calls = 0;
     let closed = false;
+    const releaseGate: { fn: (() => void) | null } = { fn: null };
     const real = new WriteQueue(path);
     const orig = real.close.bind(real);
     real.close = (async (): Promise<void> => {
@@ -534,7 +564,7 @@ describe("D 组：关机等到落地，而等待时长【从配置算】", () =>
         driverPumpVia: (): Promise<DriveRoundResult> => {
           calls++;
           return new Promise<DriveRoundResult>((res) => {
-            release = () => {
+            releaseGate.fn = () => {
               res({ driven: [], costCents: 0, abandoned: [], blocked: [] });
             };
           });
@@ -561,7 +591,7 @@ describe("D 组：关机等到落地，而等待时长【从配置算】", () =>
       setTimeout(res, 20);
     });
     expect(closed).toBe(false);
-    release?.();
+    releaseGate.fn?.();
     await shutting;
     expect(closed).toBe(true);
   });
@@ -618,13 +648,25 @@ describe("E 组：横幅按【各自的开关】说话", () => {
 
   it("⭐ 只开驱动器而【缺三格上限】⇒ 退 2 且不监听（bounds 吃两个开关）", async () => {
     const path = dbWithWorkingTasks(["t1"]);
-    const { io, warn } = ioOf();
+    const { io } = ioOf();
     const srv = fakeServer();
     const r = needErr(
-      await boot({ ...driverArgs(path), taskLimitCents: undefined } as ServeArgs, io, {
-        acquire: () => OK_LOCK,
-        serve: srv.serve,
-      }),
+      await boot(
+        {
+          dbPath: path,
+          port: 8787,
+          heartbeatMs: 60_000,
+          noBackup: true,
+          driverPump: true,
+          maxBudgetUsd: 0.5,
+          agentCwd: tmp(),
+        } as ServeArgs,
+        io,
+        {
+          acquire: () => OK_LOCK,
+          serve: srv.serve,
+        },
+      ),
     );
     expect(r.code).toBe(EXIT_USAGE);
     // 判返回值而不是 io.warn（boot 的契约，assemble-pump E 组那条同一条）。
@@ -643,7 +685,7 @@ describe("E 组：横幅按【各自的开关】说话", () => {
     // 那条既有先例把它抽成 shutdownOrderLine，两个分支就有了分母。
     // 【这一发证不了】runServeCli 真的把这句话打出来了 —— 那一格本机没有覆盖度，
     // 与 serveBannerOf 文件头自己写的那句取舍同一条，不假装它被覆盖了。
-    const driverOn = shutdownOrderLine({ driverPump: true } as ServeArgs);
+    const driverOn = shutdownOrderLine({ driverPump: true } as ServeArgs, false);
     expect(driverOn).toContain("在飞的驱动轮");
     expect(driverOn).toContain("不要 kill -9");
     // 驱动开着时【不给具体秒数】：那句等待时长由横幅按配置算，这里指回它。
@@ -655,13 +697,13 @@ describe("E 组：横幅按【各自的开关】说话", () => {
     expect(driverOn).toContain("上面那条驱动器横幅");
     expect(driverOn).toContain("这里不重算一份");
     // 反向对照：只开章程泵时那句【不该】提驱动轮，也【不该】指回一条不存在的横幅。
-    const charterOnly = shutdownOrderLine({ charterPump: true } as ServeArgs);
+    const charterOnly = shutdownOrderLine({ charterPump: true } as ServeArgs, false);
     expect(charterOnly).not.toContain("在飞的驱动轮");
     expect(charterOnly).toContain("最坏等 180 秒");
     expect(charterOnly).not.toContain("上面那条驱动器横幅");
 
     // 两个都关着：与只开章程泵同一支（那一步真的什么都不等）。
-    expect(shutdownOrderLine({} as ServeArgs)).not.toContain("在飞的驱动轮");
+    expect(shutdownOrderLine({} as ServeArgs, false)).not.toContain("在飞的驱动轮");
     // 只开驱动器：顺序里有驱动那一格，而那句 180 秒仍然只属于章程那一格。
     expect(driverOn).toContain("章程起草在飞最坏等 180 秒");
   });

@@ -799,16 +799,28 @@ describe("④ 两条验收各自【不可测的那一半】（登记，不写成
      *
      * ⚠ 这条断言**曾经**是 `toEqual([])`，而它在 Task 5.4 变红了 —— 那是它设计出来
      * 要做的事（下面那段注释写的就是「有人消掉一条缺口，callersOf 那两发就会红」）。
-     * 变红之后不能直接改成新值收工，得先问一句：**缺口真的消了吗**？
-     * 实测没有：`harness/verifier.ts` 开始调 evaluateGate，而 `verifyFix` 自己
-     * 在生产里零调用方。所以缺口**上移了一环**而不是被填上：
-     *   以前是「门控对，但没人对门的时机调它」；
-     *   现在是「有一个正确的调用方，但没人调它」。
-     * 结论强度因此**没有变化**：① 现在成立的仍然是「门控会按新标准变」，
-     * 不是「任务重跑时会变」。改断言的同时把这一格写清楚，
-     * 否则「多了一环」会被读成「前进了一步」，而这一环在接线之前不产生任何行为。
+     * 变红之后不能直接改成新值收工，得先问一句：**缺口真的消了吗？**
+     *
+     * 【round358 之后的新事实】门 4（§8.2 门控内核，B9 全量拦）把 evaluateGate 接进了
+     * 生产链路 —— dispatch 每一轮 IN_REVIEW + pass 都真调它（dispatch.ts:1599）。
+     * 名单因此从 [verifier.ts] 长成 [dispatch.ts, verifier.ts]。这算「缺口消了」吗？
+     * 不算，而且原因值得单独量一遍：
+     *   ① verifier.ts 那条 harness 路线【依然没有跑者】：verifyFix 零调用方（下一条当场判），
+     *      「改标准 ⇒ 重跑」的 harness 那一半还是没人按回车；
+     *   ② dispatch 那条路线【跑得动但无法通过】：bundle 恒不带 metrics（turn-bundle.ts
+     *      文件头第 ② 条的诚实边界），而内核只认 `metric:<名> <op> <数>` 这一种形状
+     *      （evaluate.ts:294 的 metricCriteriaEvaluator）⇒ 任何岗位书标准都落 unresolved
+     *      ⇒ escalate ⇒ 门 4 的天花板是 escalate（dispatch.ts 门 4 那一格明写）。
+     *      于是「CEO 写了岗位书 ⇒ 任务重跑 ⇒ 门控按新标准放行/拦截」这条链
+     *      【结构性不可能】在今天的装配下成立 —— 缺「给引擎审阅接一个读真实核验的评估器」
+     *      那一环（dispatch.ts 明说的两步修法之 ②）。
+     * 结论：① 现在成立的是「门控会按新标准变」+「门 4 在生产里真调门控」，
+     * **不**是「任务重跑时会变」。缺口从「没人调门控」上移成「调用链两端各断一环」。
+     * 名单钉死成只有这两个名字：第三个名字出现 ⇒ 红 ⇒ 回来分清那一次
+     * 是补上了「真实核验的评估器」（真前进）还是又一条演示/测试写方。
      */
     expect(callersOf("evaluateGate", "graph/gates/evaluate.ts")).toEqual([
+      SRC + "/engine/dispatch.ts",
       SRC + "/harness/verifier.ts",
     ]);
     // 上面那条**只有在配上下面这条时**才不是一句好消息：
@@ -866,7 +878,7 @@ describe("④ 两条验收各自【不可测的那一半】（登记，不写成
      * 逼他同时改这份清单 —— 而不是让「门禁没通过」这句话悄悄变成一条假的实话。
      */
     const blockers = [
-      "① 的第三个动词仍然没有实现：verifier.ts 开始调 evaluateGate（Task 5.4），但 verifyFix 自己零调用方 —— 缺口上移一环，没被填上（上一条当场判的）",
+      "① 的第三个动词仍然没有实现：evaluateGate 的调用方从 verifier 一个长成 dispatch + verifier 两个（round358 门 4 生产接线，本条当场判）—— 而两条路各自断一环：verifier.ts 自己零调用方（上一条当场判）、dispatch 那条路 bundle 恒无 metrics ⇒ 任何标准都 escalate ⇒ 结构性到不了按新标准放行/拦截（dispatch.ts 门 4 那一格）」这条链【仍然】没有「重跑同类任务」",
       "② 的『日报』只有数据面：readAutoApprovalReport 零调用方（上一条当场判的）",
       "② 的自动批准在生产运行期零生产者（0014 §3；本文件②段那些 recordAutoApproval 全由测试自己调）",
       "pnpm verify 未跑：本机装不上依赖（0009 §2）",
@@ -918,8 +930,10 @@ describe("④ 两条验收各自【不可测的那一半】（登记，不写成
     // ⚠ 原来这两发是 `toHaveLength(0)`，Task 5.4 让第一发红了一次（verifier.ts 成了
     // evaluateGate 的调用方）。改法是**换成那条链的真实形状**而不是删掉：
     // 「门控有人调」这句话本身不推进 ① —— 只有当**链的末端**也有人调时才算。
-    // 所以这里配对判：门控的调用方是 verifier，而 verifier 的调用方是空。
+    // 所以这里配对判：门控的调用方是 verifier + dispatch（round358 门 4 生产接线），
+    // 而 verifier 的调用方是空 —— dispatch 那一环接的是【引擎审阅】而非【重跑同类任务】。
     expect(callersOf("evaluateGate", "graph/gates/evaluate.ts")).toEqual([
+      SRC + "/engine/dispatch.ts",
       SRC + "/harness/verifier.ts",
     ]);
     expect(callersOf("verifyFix", "harness/verifier.ts")).toHaveLength(0);

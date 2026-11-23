@@ -276,6 +276,7 @@ async function pump(
     maxBudgetUsd: 0.5,
     taskLimitCents,
     cwd: TMP,
+    evidenceRoot: TMP + "/artifacts",
   });
 }
 

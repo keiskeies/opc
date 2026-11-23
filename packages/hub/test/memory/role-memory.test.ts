@@ -340,9 +340,8 @@ describe("① 计划点名的那条 Test：开发角色读不到 CEO 战略记�
       /!NON_STRATEGIC_APPROVAL_TYPES\.includes\(approvalType\)/u,
     );
     // 反向：白名单写法一旦回来，这一发红。
-    expect(code).not.toMatch(
+    expect(code, "判据退回了白名单写法（新增值会被默认放行）").not.toMatch(
       /approvalType === "strategic"\s*\|\|/,
-      "判据退回了白名单写法（新增值会被默认放行）",
     );
     // 排除表必须【短】。它变长意味着有人在往里加放行项，而每一次加都该过一次 review。
     expect(NON_STRATEGIC_APPROVAL_TYPES.length).toBeLessThanOrEqual(3);

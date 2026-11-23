@@ -11,6 +11,7 @@
  */
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import type { DatabaseSync } from "node:sqlite";
 import {
   type EvidenceBundle,
   evidenceBundleSchema,
@@ -30,15 +31,7 @@ import {
 
 const TMP = fixtureTmp("evidence", import.meta.url);
 
-type Db = {
-  prepare: (sql: string) => {
-    all: (...a: unknown[]) => Record<string, unknown>[];
-    get: (...a: unknown[]) => Record<string, unknown> | undefined;
-    run: (...a: unknown[]) => { changes: number | bigint };
-  };
-  exec: (sql: string) => void;
-  close: () => void;
-};
+type Db = DatabaseSync;
 
 const opened: Db[] = [];
 let seq = 0;
@@ -47,7 +40,7 @@ async function migrated(): Promise<Db> {
   const { openDb } = await import("../../src/db/driver.js");
   const db = openDb(
     join(TMP, "ev-" + process.pid + "-" + ++seq + ".db"),
-  ) as unknown as Db;
+  ) ;
   opened.push(db);
   migrate(db);
   return db;

@@ -60,8 +60,10 @@ function criterion(over: Partial<GateCriterion> = {}): GateCriterion {
   };
 }
 
-function input(over: Partial<GateInput> = {}): GateInput {
-  return {
+/** 每格允许【显式传 undefined】：exactOptionalPropertyTypes 下 Partial 不许 integrityOk?: boolean 塞 undefined。 */
+type GateInputOverride = { [K in keyof GateInput]?: GateInput[K] | undefined };
+function input(over: GateInputOverride = {}): GateInput {
+  const base = {
     gate: "dev_to_test",
     producer: { roleId: "dev", modelFamily: "claude" },
     bundle: bundle(),
@@ -69,6 +71,13 @@ function input(over: Partial<GateInput> = {}): GateInput {
     integrityOk: true,
     ...over,
   };
+  // 「没核对过」的正确形状是把那格【删掉】（undefined 不是合法的字面量值）。
+  for (const k of Object.keys(base)) {
+    if ((base as Record<string, unknown>)[k] === undefined) {
+      delete (base as Record<string, unknown>)[k];
+    }
+  }
+  return base as GateInput;
 }
 
 /* ------------------------ 静态一面的取材 ------------------------ */

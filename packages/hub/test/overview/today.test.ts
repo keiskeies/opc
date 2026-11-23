@@ -17,6 +17,7 @@
  */
 import { mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
+import type { DatabaseSync } from "node:sqlite";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { fixtureTmp } from "../fixtures/fixture-dir.js";
 import { DRIVER_ON } from "../fixtures/driver-state.js";
@@ -37,15 +38,7 @@ const HOUR = 60 * 60 * 1000;
 const UNAUTHORIZED = 401;
 const LAN_PEER = "192.168.1.7";
 
-type Row = Record<string, unknown>;
-type Db = {
-  prepare: (sql: string) => {
-    all: (...a: unknown[]) => Row[];
-    get: (...a: unknown[]) => Row | undefined;
-    run: (...a: unknown[]) => unknown;
-  };
-  exec: (sql: string) => void;
-};
+type Db = DatabaseSync;
 
 interface World {
   readonly db: Db;
@@ -66,9 +59,9 @@ async function world(): Promise<World> {
   const path = join(TMP, "today-" + process.pid + "-" + ++fileSeq + ".db");
   const q = new WriteQueue(path);
   queues.push(q);
-  const write = q.writeConnection() as unknown as Db;
-  migrate(write as never);
-  const read = q.readConnection() as unknown as Db;
+  const write = q.writeConnection();
+  migrate(write);
+  const read = q.readConnection();
   const token = newLocalToken();
   /**
    * ⚠ `now` 收的是【一个时刻】不是【一个取值函数】。
@@ -79,7 +72,7 @@ async function world(): Promise<World> {
    */
   const sign = (m: string, t: string, b = "") => signedHeaders(token, { method: m, target: t, body: b, now: T0 });
   const deps: HubDeps = {
-    db: read as never,
+    db: read,
     bus: new InMemoryEventBus(),
     token,
     now: () => T0,
@@ -366,8 +359,7 @@ describe("② blocked_tasks：用【当前状态】而不是窗口内发生", ()
   });
 
   it("界面那份「阻塞」清单与边表里的死路【不冲突也不越界】", async () => {
-    const { BLOCKED, legalTransitionsFrom, TASK_STATES } = await import("../../src/graph/status.js");
-    void BLOCKED;
+    const { legalTransitionsFrom, TASK_STATES } = await import("../../src/graph/status.js");
     const deadEnds = TASK_STATES.filter((s) => legalTransitionsFrom(s).length === 0);
     // BLOCKED_STATUSES 里每个状态都必须真实存在（拼错一个枚举值不会编译期响，
     // 只会让那一格永远数到 0 —— 界面于是显示「没有阻塞的事」）。

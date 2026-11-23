@@ -44,6 +44,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { ResumeValue } from "@opc/contracts";
 import { fixtureTmp } from "../fixtures/fixture-dir.js";
 import { migrate } from "../../src/db/migrate.js";
+import type { WriteQueue } from "../../src/db/write-queue.js";
 import { InMemoryEventBus, type DomainEvent } from "../../src/events/bus.js";
 import { insertCard } from "../../src/approvals/cards.js";
 import { INSERT_DELEGATION_GRAPH_SQL } from "../../src/org/commit.js";
@@ -51,7 +52,7 @@ import { newLocalToken, signedHeaders, NonceGuard } from "../../src/http/auth.js
 import { LOOPBACK_HOST } from "../../src/http/bind.js";
 import { handleRequest, type HubDeps, type HubRequest } from "../../src/http/app.js";
 import { DRIVER_OFF } from "../fixtures/driver-state.js";
-import { buildHubDeps, insertTask, type HubWriter } from "../../src/http/real-deps.js";
+import { buildHubDeps, insertTask } from "../../src/http/real-deps.js";
 
 const TMP = fixtureTmp("decision-engine-route", import.meta.url);
 const NOW = 1_700_000_000_000;
@@ -59,7 +60,7 @@ const TOKEN = newLocalToken();
 
 type Row = Record<string, unknown>;
 
-const queues: HubWriter[] = [];
+const queues: WriteQueue[] = [];
 let fileSeq = 0;
 
 beforeAll(() => {
@@ -102,7 +103,7 @@ async function feed(bus: InMemoryEventBus): Promise<DomainEvent[]> {
 
 type Harness = {
   deps: HubDeps;
-  queue: HubWriter;
+  queue: WriteQueue;
   bus: InMemoryEventBus;
   db: DatabaseSync;
   taskId: string;
@@ -129,14 +130,14 @@ async function hub(opts: {
 }): Promise<Harness> {
   const { WriteQueue } = await import("../../src/db/write-queue.js");
   const path = join(TMP, "d-" + process.pid + "-" + ++fileSeq + ".db");
-  const q = new WriteQueue(path) as unknown as HubWriter;
+  const q = new WriteQueue(path);
   queues.push(q);
-  migrate(q.writeConnection() as unknown as Parameters<typeof migrate>[0]);
+  migrate(q.writeConnection());
 
   // 一张最简组织图（ceo + intake）。approveCard 自己不查图，带上它是因为真库里
   // graph_version 指向一个真实存在的版本 —— 夹具与生产的差别只该是被测那一处。
   await q.node(() => {
-    (q.writeConnection() as unknown as DatabaseSync)
+    q.writeConnection()
       .prepare(INSERT_DELEGATION_GRAPH_SQL)
       .run(
         "g-" + fileSeq,
@@ -155,11 +156,13 @@ async function hub(opts: {
 
   const taskId = "task-" + fileSeq;
   await insertTask(q, { id: taskId, title: "做一个登录模块", assignedRole: "intake", nowMs: NOW });
-  if (opts.status !== undefined && opts.status !== "CHARTER_PENDING") {
+  // readonly 属性的收窄在闭包里会被丢掉（closure-narrowing loss），先提成常量再判。
+  const status = opts.status;
+  if (status !== undefined && status !== "CHARTER_PENDING") {
     await q.node(() => {
-      (q.writeConnection() as unknown as DatabaseSync)
+      q.writeConnection()
         .prepare("UPDATE tasks SET status = ? WHERE id = ?")
-        .run(opts.status, taskId);
+        .run(status, taskId);
     });
   }
 
@@ -167,7 +170,7 @@ async function hub(opts: {
   // 于是「这张卡长得像收件箱会显示的那张」这件事没人证明（cards.ts 文件头第 ② 条）。
   const cardId = await q.node(() =>
     insertCard(
-      q.writeConnection() as unknown as Parameters<typeof insertCard>[0],
+      q.writeConnection(),
       {
         taskId,
         approvalType: "charter",
@@ -216,7 +219,7 @@ async function hub(opts: {
 
 const statusOf = async (h: Harness): Promise<string> => {
   const r = await h.queue.node(() =>
-    (h.queue.readConnection() as unknown as DatabaseSync)
+    h.queue.readConnection()
       .prepare("SELECT status FROM tasks WHERE id = ?")
       .get(h.taskId),
   );
@@ -224,7 +227,7 @@ const statusOf = async (h: Harness): Promise<string> => {
 };
 const cardState = async (h: Harness): Promise<string> => {
   const r = await h.queue.node(() =>
-    (h.queue.readConnection() as unknown as DatabaseSync)
+    h.queue.readConnection()
       .prepare("SELECT status FROM approvals WHERE id = ?")
       .get(h.cardId),
   );
@@ -232,7 +235,7 @@ const cardState = async (h: Harness): Promise<string> => {
 };
 const oneRow = async <T,>(h: Harness, sql: string, ...p: unknown[]): Promise<T> =>
   (await h.queue.node(() =>
-    (h.queue.readConnection() as unknown as DatabaseSync).prepare(sql).get(...p),
+    h.queue.readConnection().prepare(sql).get(...(p as never[])),
   )) as T;
 
 const decideBody = (resume: ResumeValue, note?: string): string =>
@@ -405,7 +408,7 @@ describe("默认装配下 CEO 点批准：任务真的走了一条边（0043）"
     // 当前格自己的卡（任务停在 FINAL_REVIEW，ownCardsOf 会把它算成 own）。
     const ownId = await h.queue.node(() =>
       insertCard(
-        h.queue.writeConnection() as unknown as Parameters<typeof insertCard>[0],
+        h.queue.writeConnection(),
         {
           taskId: h.taskId,
           approvalType: "escalation",
@@ -421,7 +424,7 @@ describe("默认装配下 CEO 点批准：任务真的走了一条边（0043）"
     // 过期卡：上一格留的，任务早不在 ESCALATED_TO_CEO 了。
     const staleId = await h.queue.node(() =>
       insertCard(
-        h.queue.writeConnection() as unknown as Parameters<typeof insertCard>[0],
+        h.queue.writeConnection(),
         {
           taskId: h.taskId,
           approvalType: "escalation",

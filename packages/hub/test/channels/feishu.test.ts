@@ -28,7 +28,10 @@
  *   npx vitest run packages/hub/test/channels/feishu.test.ts
  */
 import { describe, expect, it } from "vitest";
-import type { OutboundApprovalCard } from "../../src/channels/abstraction.js";
+import type {
+  NormalizedMessage,
+  OutboundApprovalCard,
+} from "../../src/channels/abstraction.js";
 import {
   encodeCardAction,
   parseCardAction,
@@ -43,6 +46,7 @@ import {
   FEISHU_VALUE_LIMIT,
   FeishuChannel,
   type FeishuFetch,
+  type FeishuMessageItem,
   feishuChannelId,
   feishuEnvMissing,
   feishuError,
@@ -135,10 +139,19 @@ function card(over: Partial<OutboundApprovalCard> = {}): OutboundApprovalCard {
 }
 
 /** 一条列表项夹具：`body.content` 是【JSON 串套 JSON】，不是裸文本。 */
+/**
+ * FeishuMessageItem 的 override：每格都允许【显式传 undefined】。
+ * 普通 Partial 在 exactOptionalPropertyTypes 下不许 sender?: {…} 里塞 undefined，
+ * 而这一篇的用例恰恰要造「缺发送者」这种形状（item({ sender: undefined })）。
+ */
+type ItemOverride = {
+  [K in keyof FeishuMessageItem]?: FeishuMessageItem[K] | undefined;
+};
+
 function item(
-  over: Partial<Parameters<typeof messageToEnvelope>[1]> = {},
+  over: ItemOverride = {},
 ): Parameters<typeof messageToEnvelope>[1] {
-  return {
+  const base = {
     message_id: "om_1",
     msg_type: "text",
     create_time: String(SEC),
@@ -146,6 +159,14 @@ function item(
     body: { content: JSON.stringify({ text: PAYLOAD }) },
     ...over,
   };
+  // exactOptionalPropertyTypes：显式 undefined 的 override 不能留在字面量里
+  // （{ sender: undefined } 不是 FeishuMessageItem）。把它【删掉】才是「缺发送者」的正确形状。
+  for (const k of Object.keys(base)) {
+    if ((base as Record<string, unknown>)[k] === undefined) {
+      delete (base as Record<string, unknown>)[k];
+    }
+  }
+  return base as Parameters<typeof messageToEnvelope>[1];
 }
 
 /**
@@ -230,7 +251,7 @@ describe("⭐ 轮询读到的回传必须标成 card_action（曾经标成 text�
     expect(en?.message.kind).toBe("card_action");
     // 只断 kind 还不够：kind 与载荷【两边都得成立】，否则「标了 card_action 而
     // 载荷解不出」会绿在这一发上，而运行时第②步判的是 failed。
-    expect(parseCardAction(en?.message)).toEqual({
+    expect(parseCardAction(en?.message as NormalizedMessage)).toEqual({
       approvalId: APPROVAL_ID,
       resume: "approve",
     });
@@ -254,7 +275,7 @@ describe("⭐ 轮询读到的回传必须标成 card_action（曾经标成 text�
       item({ body: { content: JSON.stringify({ text }) } }),
       { receivedAtMs: NOW },
     );
-    expect(parseCardAction(en?.message)).toEqual({
+    expect(parseCardAction(en?.message as NormalizedMessage)).toEqual({
       approvalId: APPROVAL_ID,
       resume: "reject_with_comment",
       note: "先问财务|再确认",
@@ -324,7 +345,9 @@ describe("cardActionToEnvelope：与轮询共用同一条「什么叫合法」",
     expect(en?.message.kind).toBe("card_action");
     expect(en?.deliveryId).toBe("evt-9");
     expect(en?.message.conversationId).toBe("oc_7");
-    expect(parseCardAction(en?.message)?.resume).toBe("approve");
+    expect(parseCardAction(en?.message as NormalizedMessage)?.resume).toBe(
+      "approve",
+    );
   });
 
   it("没有 event_id ⇒ deliveryId 是 null（退化成 approvalId+resume 去重，仍然安全）", () => {

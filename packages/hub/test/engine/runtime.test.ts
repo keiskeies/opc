@@ -181,6 +181,7 @@ async function world(o: {
     maxBudgetUsd: 0.5,
     taskLimitCents: 1000,
     cwd: TMP,
+    evidenceRoot: TMP + "/artifacts",
     bin: o.bin ?? FAKE_CLI,
     ...(o.ceoRoleId === null ? {} : { ceoRoleId: o.ceoRoleId ?? "ceo" }),
     ...(o.sleep === undefined ? {} : { sleep: o.sleep }),

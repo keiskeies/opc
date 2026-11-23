@@ -15,6 +15,7 @@ import {
   auditedInvoke,
   SuperStepAuditor,
 } from "../../src/graph/audit-middleware.js";
+import { EVENTS_DDL_WITH_REPLAY } from "../fixtures/events-ddl.js";
 
 const dirs: string[] = [];
 const dbs: DatabaseSync[] = [];
@@ -24,27 +25,13 @@ afterAll(() => {
     rmSync(d, { recursive: true, maxRetries: 40, retryDelay: 50 });
 });
 
-const EVENTS_DDL = [
-  "CREATE TABLE events (",
-  "  id INTEGER PRIMARY KEY AUTOINCREMENT,",
-  "  task_id TEXT,",
-  "  actor_type TEXT NOT NULL,",
-  "  actor_id TEXT NOT NULL,",
-  "  action TEXT NOT NULL,",
-  "  target TEXT,",
-  "  payload TEXT NOT NULL,",
-  "  state_snapshot TEXT,",
-  "  created_at INTEGER NOT NULL",
-  ")",
-].join("\n");
-
 function openDb(): DatabaseSync {
   const dir = mkdtempSync(join(tmpdir(), "opc-step-"));
   dirs.push(dir);
   const db = new DatabaseSync(join(dir, "s.db"));
   db.exec("PRAGMA journal_mode = WAL;");
   db.exec("PRAGMA foreign_keys = ON;");
-  db.exec(EVENTS_DDL);
+  db.exec(EVENTS_DDL_WITH_REPLAY);
   for (const ddl of CHECKPOINT_TABLES) db.exec(ddl);
   dbs.push(db);
   return db;

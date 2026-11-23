@@ -166,6 +166,9 @@ it("schema_migrations 记录版本与 Unix 毫秒时间戳", async () => {
     "0007_evidence_metrics",
     "0008_approval_evidence_refs",
     "0009_card_delivery_ledger",
+    // 0010：中断重放去重（0005 §11 缺陷 A/B 的修复落点）。这条必须与上面那句
+    // 「加新迁移时必须同时改这一行」一起改 —— 它就是那道刻意摩擦。
+    "0010_interrupt_replay_dedup",
   ]);
   // applied_at 必须是 Unix 毫秒整数：审计要能还原「这张表什么时候建的」
   for (const r of rows) {

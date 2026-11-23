@@ -35,6 +35,7 @@
 import { mkdirSync, realpathSync, rmSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import type { DatabaseSync } from "node:sqlite";
 
 import { fixtureTmp } from "../fixtures/fixture-dir.js";
 import { migrate } from "../../src/db/migrate.js";
@@ -62,18 +63,11 @@ const TMP = fixtureTmp("serve-charter-pump", import.meta.url);
 const NOW = 1_700_000_000_000;
 
 type Row = Record<string, unknown>;
-type Db = {
-  prepare: (sql: string) => {
-    all: (...a: unknown[]) => Row[];
-    get: (...a: unknown[]) => Row | undefined;
-    run: (...a: unknown[]) => unknown;
-  };
-  exec: (sql: string) => void;
-};
+type Db = DatabaseSync;
 type Queue = {
   node: <T>(fn: () => Promise<T> | T) => Promise<T>;
-  readConnection: () => Db;
-  writeConnection: () => Db;
+  readConnection: () => DatabaseSync;
+  writeConnection: () => DatabaseSync;
   close: () => Promise<void>;
 };
 
@@ -224,12 +218,19 @@ async function pump(
     readonly during?: (taskId: string) => void;
   } & Pick<PumpOptions, "maxAttempts" | "taskLimit"> = {},
 ): Promise<PumpRoundResult> {
+  // exactOptionalPropertyTypes：o.{ok,costCents,during} 是可选属性，这里不能把
+  // 显式 undefined 塞进对象字面量 —— 条件性的"只带定义了的格"。
   return pumpCharterCards(w.q, w.bus, {
     nowMs: NOW + 1000,
-    cardDeps: fakeCardDeps(w, { ok: o.ok, costCents: o.costCents, during: o.during }),
+    cardDeps: fakeCardDeps(w, {
+      ...(o.ok === undefined ? {} : { ok: o.ok }),
+      ...(o.costCents === undefined ? {} : { costCents: o.costCents }),
+      ...(o.during === undefined ? {} : { during: o.during }),
+    }),
     maxBudgetUsd: 0.5,
     taskLimitCents: o.taskLimitCents ?? 2 ** 40,
     cwd: TMP,
+    evidenceRoot: TMP + "/artifacts",
     ...(o.maxAttempts === undefined ? {} : { maxAttempts: o.maxAttempts }),
     ...(o.taskLimit === undefined ? {} : { taskLimit: o.taskLimit }),
   });
@@ -661,6 +662,7 @@ describe("E. 不牵连：一张坏了不影响同轮另外几张", () => {
       maxBudgetUsd: 0.5,
       taskLimitCents: 1000,
       cwd: TMP,
+      evidenceRoot: TMP + "/artifacts",
     });
     expect(r.cards).toHaveLength(2);
     expect(r.cards[0]?.outcome).toBe("attempted");
@@ -692,6 +694,7 @@ describe("E. 不牵连：一张坏了不影响同轮另外几张", () => {
       maxBudgetUsd: 0.5,
       taskLimitCents: 1000,
       cwd: TMP,
+      evidenceRoot: TMP + "/artifacts",
       maxAttempts: 1,
     });
     expect(r.cards.map((c) => c.outcome)).toEqual(["skipped"]);
@@ -744,6 +747,7 @@ describe("E. 不牵连：一张坏了不影响同轮另外几张", () => {
       maxBudgetUsd: 0.5,
       taskLimitCents: 1000,
       cwd: TMP,
+      evidenceRoot: TMP + "/artifacts",
     });
     expect(r.cards.map((c) => c.outcome)).toEqual(["skipped"]);
     // 只有一张卡：唯一索引挡住了第二张（0014 §3：那张错的卡片删不掉，所以只能挡住）
@@ -790,6 +794,7 @@ describe("G. 执行日志（recordTurn）", () => {
       maxBudgetUsd: 0.5,
       taskLimitCents: 1000,
       cwd: TMP,
+      evidenceRoot: TMP + "/artifacts",
     });
     expect(seen).toEqual([{ taskId: "t1", ok: true, costCents: 6, role: "intake" }]);
     expect(r.turns).toEqual([{ taskId: "t1", recorded: true, why: "" }]);
@@ -807,6 +812,7 @@ describe("G. 执行日志（recordTurn）", () => {
       maxBudgetUsd: 0.5,
       taskLimitCents: 1000,
       cwd: TMP,
+      evidenceRoot: TMP + "/artifacts",
     });
     expect(seen).toHaveLength(1);
     expect(r2.turns).toHaveLength(0);
@@ -823,6 +829,7 @@ describe("G. 执行日志（recordTurn）", () => {
       maxBudgetUsd: 0.5,
       taskLimitCents: 1000,
       cwd: TMP,
+      evidenceRoot: TMP + "/artifacts",
     });
     expect(r.cards).toHaveLength(1);
     expect(r.cards[0]?.outcome).toBe("drafted");
@@ -878,6 +885,7 @@ async function pumpReal(w: World, o: { readonly maxAttempts?: number } = {}): Pr
     maxBudgetUsd: 0.5,
     taskLimitCents: 1000,
     cwd: TMP,
+    evidenceRoot: TMP + "/artifacts",
     bin: FAKE_CLI,
     ...(o.maxAttempts === undefined ? {} : { maxAttempts: o.maxAttempts }),
   });
@@ -990,6 +998,7 @@ describe("H. 默认那一支（makeRuntime + 真子进程 + 真执行日志）",
       maxBudgetUsd: 0.5,
       taskLimitCents: 1000,
       cwd: agentCwd,
+      evidenceRoot: TMP + "/artifacts",
       bin: FAKE_CLI,
     });
     expect(r.cards[0]?.outcome).toBe("drafted");

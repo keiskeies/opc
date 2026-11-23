@@ -303,6 +303,7 @@ async function runChainToRole(h: ReturnType<typeof hub>, roleId: string) {
     maxBudgetUsd: 0.5,
     taskLimitCents: 100_000,
     cwd: TMP,
+    evidenceRoot: TMP + "/artifacts",
     ceoRoleId: "ceo",
     nowMs: () => NOW,
   });

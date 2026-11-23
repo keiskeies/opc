@@ -184,7 +184,7 @@ describe("L1 validateReparenting：改汇报关系", () => {
     // 判据的存在理由写在 rejectMalformed：坏图上 depthOf 会给一个偏小的数，
     // 于是「深度超限」反而不触发。这条用例是那条推理唯一的地面。
     const org = base();
-    org.nodes.tech.reports_to = "dev"; // tech → dev → tech
+    org.nodes.tech = { ...org.nodes.tech, reports_to: "dev" } as OrgGraphNode; // tech → dev → tech
     expect(reportsToCycle(org)).not.toBeNull();
     expect(bad(validateReparenting("product", "dev", org)).code).toBe(
       "report_cycle_present",
@@ -193,7 +193,7 @@ describe("L1 validateReparenting：改汇报关系", () => {
 
   it("汇报关系指向不存在的节点 ⇒ 拒绝（不静默把它当根）", () => {
     const org = base();
-    org.nodes.dev.reports_to = "ghost";
+    org.nodes.dev = { ...org.nodes.dev, reports_to: "ghost" } as OrgGraphNode;
     expect(bad(validateReparenting("product", "tech", org)).code).toBe(
       "dangling_report",
     );
@@ -370,7 +370,7 @@ describe("L2 validateNewEdge：加委派边", () => {
 
   it("同家族自审：dev(claude) 交给 tech(claude) 审 ⇒ 拒", () => {
     const org = base();
-    org.nodes.dev.model_family = "claude";
+    org.nodes.dev = { ...org.nodes.dev, model_family: "claude" } as OrgGraphNode;
     expect(bad(validateNewEdge("dev", "tech", org, true)).code).toBe("same_model_family");
   });
 
@@ -383,13 +383,13 @@ describe("L2 validateNewEdge：加委派边", () => {
     // 与 hub 的 unknown_model_family 同方向：缺信息必须落到【有人来判】。
     // 「不声明家族」若成了一条放行通路，绕过同家族拦截的代价就是删掉一行 yaml。
     const org = base();
-    delete org.nodes.dev.model_family;
+    org.nodes.dev = { ...org.nodes.dev, model_family: undefined } as OrgGraphNode;
     expect(bad(validateNewEdge("dev", "tech", org, true)).code).toBe(
       "unknown_model_family",
     );
     // 空串与缺失同判（trim）。这条不是洁癖：yaml 里 `model_family:` 后面留空
     // 读进来就是空串，而那正是「作者忘了填」最常见的那一种。
-    org.nodes.dev.model_family = "   ";
+    org.nodes.dev = { ...org.nodes.dev, model_family: "   " } as OrgGraphNode;
     expect(bad(validateNewEdge("dev", "tech", org, true)).code).toBe(
       "unknown_model_family",
     );
@@ -719,7 +719,7 @@ describe("原语自身（判据的地面）", () => {
 
   it("pathToRoot 在有环的图上【不转圈】（有限步返回）", () => {
     const org = base();
-    org.nodes.tech.reports_to = "dev";
+    org.nodes.tech = { ...org.nodes.tech, reports_to: "dev" } as OrgGraphNode;
     expect(() => pathToRoot(org, "dev")).not.toThrow();
     expect(pathToRoot(org, "dev").length).toBeGreaterThan(0);
   });
@@ -727,7 +727,7 @@ describe("原语自身（判据的地面）", () => {
   it("reportsToCycle 在无环图上返回 null，且能报出环上的节点", () => {
     expect(reportsToCycle(base())).toBeNull();
     const org = base();
-    org.nodes.tech.reports_to = "dev";
+    org.nodes.tech = { ...org.nodes.tech, reports_to: "dev" } as OrgGraphNode;
     const cyc = reportsToCycle(org);
     expect(cyc).not.toBeNull();
     expect(cyc).toContain("tech");

@@ -189,10 +189,12 @@ describe("① 一次：一张票只换一次兑换", () => {
       .prepare("SELECT * FROM events WHERE actor_id = ? ORDER BY id")
       .all("approval-token") as Record<string, unknown>[];
     expect(rows.length).toBe(1);
-    expect(Number(rows[0]["created_at"])).toBe(T0 + 4321);
-    expect(rows[0]["task_id"]).toBe("t-1");
+    const head = rows[0];
+    if (head === undefined) throw new Error("events 该有一行");
+    expect(Number(head["created_at"])).toBe(T0 + 4321);
+    expect(head["task_id"]).toBe("t-1");
     // seq 就是 events.id（0005 §3）：调用方拿它去 publish，两个数不等就是游标不可比。
-    expect(r.seq).toBe(Number(rows[0]["id"]));
+    expect(r.seq).toBe(Number(head["id"]));
   });
 
   it("兑换【不改 approvals】：决策仍是调用方那一条写路径", () => {

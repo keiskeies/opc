@@ -241,7 +241,7 @@ describe("② 汇聚的合并语义：交换律（PoC 门禁第 3 项的可验�
       mergeParallelResults(p, contributions),
     );
     // 同一排列两次调用结果一致（纯函数，不藏状态）。
-    expect(mergeParallelResults(PERMUTATIONS_3[0], contributions)).toEqual(results[0]);
+    expect(mergeParallelResults(PERMUTATIONS_3[0] as readonly ParallelBranch[], contributions)).toEqual(results[0]);
 
     // 集合层面：6 种排列的产物集合与汇聚 gate 全同。
     // （用 .size 而不是 toHaveLength —— 理由见 ① 节末尾那条注释。）

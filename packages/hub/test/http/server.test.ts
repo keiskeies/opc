@@ -45,16 +45,7 @@ import { LOOPBACK_HOST, MAX_BODY_BYTES, type HubServer, serveHub } from "../../s
 const HUB = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const TMP = fixtureTmp("http-server", import.meta.url);
 
-type Row = Record<string, unknown>;
-type Db = {
-  prepare: (sql: string) => {
-    all: (...a: unknown[]) => Row[];
-    get: (...a: unknown[]) => Row | undefined;
-    run: (...a: unknown[]) => unknown;
-  };
-  exec: (sql: string) => void;
-  close: () => void;
-};
+type Db = DatabaseSync;
 
 const opened: Db[] = [];
 const servers: HubServer[] = [];
@@ -91,7 +82,7 @@ interface Harness {
 async function harness(): Promise<Harness> {
   const { openDb } = await import("../../src/db/driver.js");
   const { newLocalToken } = await import("../../src/http/auth.js");
-  const db = openDb(join(TMP, "s-" + process.pid + "-" + ++fileSeq + ".db")) as unknown as Db;
+  const db = openDb(join(TMP, "s-" + process.pid + "-" + ++fileSeq + ".db")) ;
   opened.push(db);
   migrate(db);
   db.prepare(
@@ -326,14 +317,14 @@ describe("真 socket 上的 HTTP", () => {
      * 首尾相接，任何一段单独对、接起来错，都会在这里红。
      */
     const h = await harness();
-    (h.deps.db as unknown as Db)
+    (h.deps.db )
       .prepare(
         "INSERT INTO events (task_id, actor_type, actor_id, action, target, payload, " +
           "state_snapshot, created_at) VALUES ('task-1','agent','dev','state_change'," +
           "'task-1',?,NULL,?)",
       )
       .run(JSON.stringify({ text: "覆盖率 92% 达标" }), NOW);
-    (h.deps.db as unknown as Db)
+    (h.deps.db )
       .prepare(
         "INSERT INTO events (task_id, actor_type, actor_id, action, target, payload, " +
           "state_snapshot, created_at) VALUES ('task-1','agent','dev','state_change'," +

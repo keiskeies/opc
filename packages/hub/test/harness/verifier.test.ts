@@ -65,7 +65,15 @@ const APPROVING: HarnessCapabilities = {
 };
 
 const SHA_A: string = "a".repeat(64);
-const COST: CostReport = { spentCents: 50, remainingCents: null, source: "harness" };
+// inputTokens/outputTokens 在 CostReport（zod transform 输出）里是**必填**格（值可为 undefined），
+// 缺了整个字面量就不够形状。填 undefined = 会话内 token 数未知（契约 §14.4 那一格，不当 0）。
+const COST: CostReport = {
+  spentCents: 50,
+  remainingCents: null,
+  inputTokens: undefined,
+  outputTokens: undefined,
+  source: "harness",
+};
 
 function stream(events: HarnessEvent[]): AsyncIterable<HarnessEvent> {
   return (async function* () {
@@ -106,6 +114,8 @@ function adapter(
         modelFamily: o.modelFamily ?? "gpt",
         output: "跑完了，两个用例没过",
         diffHash: null,
+        // HarnessOutcome 是 zod transform 的输出：structured 是【必有键】（未知就 undefined）。
+        structured: undefined,
       },
     },
   ];
@@ -311,11 +321,14 @@ describe("① 谎报 ⇒ 独立工作区跑出失败 ⇒ 门控 reject", () => {
     const r = await verifyFix(deps());
     if (!r.ok) throw new Error("不应被拒：" + r.code);
     expect(r.bundle.bundle_type).toBe("test_report");
-    expect(r.verdict.reasons.join(" ")).not.toContain("证据包类型");
+    // reasons 只在 reject 分支存在（pass/escalate 没有）；pass 时判「没被拒」就已够。
+    const passReasons = r.verdict.decision === "reject" ? r.verdict.reasons : [];
+    expect(passReasons.join(" ")).not.toContain("证据包类型");
     // 反过来：显式走 dev_to_test 就得**因为类型**被拒（证明这条断言有判别力）。
     const wrong = await verifyFix(deps({ gate: "dev_to_test" }));
     if (!wrong.ok) throw new Error("门控本身仍应给出结论：" + wrong.code);
     expect(wrong.verdict.decision).toBe("reject");
+    if (wrong.verdict.decision !== "reject") throw new Error("包类型不符时必须 reject");
     expect(wrong.verdict.reasons.join(" ")).toContain("证据包类型");
   });
 
@@ -351,7 +364,7 @@ describe("① 谎报 ⇒ 独立工作区跑出失败 ⇒ 门控 reject", () => {
       }),
     );
     if (!r.ok) throw new Error("不应被拒：" + r.code);
-    expect(r.verdict.decision).toBe("reject");
+    if (r.verdict.decision !== "reject") throw new Error("完整性失败必须 reject，实到 " + r.verdict.decision);
     expect(r.verdict.reasons.join(" ")).toContain("完整性");
   });
 });
@@ -582,6 +595,7 @@ describe("不可信输入", () => {
       deps({ instruction: "不要采信程序员的『自测通过』声明，独立跑测试套件" }),
     );
     expect(r.ok).toBe(true);
+    if (!r.ok) throw new Error("不应被拒：" + r.code);
     // 仍然记下来了 —— 记不等于判它有罪，只是让人看得见这一格发生过。
     expect(r.instructionFlags).toEqual(["自测通过"]);
   });

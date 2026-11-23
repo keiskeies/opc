@@ -486,6 +486,7 @@ describe("库不存在 / 锁拿不到：不创建、不留下垃圾", () => {
       await boot(args({ dbPath: path, port: 8787 }), io, {
         acquire: (): LockAcquire => ({
           ok: false,
+          path,
           reason: "held_by_other_process",
           holder: { pid: 4321, startedAtMs: Date.parse("2026-03-04T05:06:07Z"), host: "h", who: "hub-serve" },
         }),
@@ -1571,7 +1572,7 @@ describe("决策写路径是哪一条，启动时就要说出来（两条路线�
       }),
     );
     expect(installed).not.toBeNull();
-    const deps = installed as HubDeps;
+    const deps = installed as unknown as HubDeps;
     // resumeGraph 仍然是【必填】的：引擎路线不需要它，但"不需要"要装成一条
     // 有名字的静默，而不是少装一格（real-deps 的 engineRouteNothingToResume）。
     expect(typeof deps.resumeGraph).toBe("function");
@@ -1610,7 +1611,8 @@ describe("决策写路径是哪一条，启动时就要说出来（两条路线�
     await expect(unavailableGraphFor()("t9").graph.getState("t9" as never)).rejects.toThrow(
       /task_id = t9/u,
     );
-    await expect(unavailableGraphFor()("t9").graph.invoke()).rejects.toThrow(GRAPH_NOT_WIRED);
+    await expect(unavailableGraphFor()("t9").graph.invoke({} as never, { configurable: { thread_id: "t9" } }))
+      .rejects.toThrow(GRAPH_NOT_WIRED);
   });
 
   it("报错文案三件事都要有：为什么没接、归属哪条决策、现在能做什么", () => {
@@ -1677,11 +1679,11 @@ describe("监听地址（Task 4.1）：绑定策略跟随【实际装配结果�
     // 而且它读起来更精确 —— 精确到足以让下一个人顺手改对。
     // 这里选偏严（两个都在才算接通），理由与取向写在 bindForAssembly 文件头。
     // 这一发的作用是：那次「顺手改精确」必须红，而不是安静地放宽一条安全边界。
-    const onlyRedeem = { redeemApprovalToken: async () => ({ ok: false, reason: "expired" as const }) };
+    const onlyRedeem = { redeemApprovalToken: async () => ({ ok: false as const, reason: "expired" as const }) };
     expect(bindForAssembly({ requested: "0.0.0.0", deps: onlyRedeem }).remoteApprovalsWired).toBe(
       false,
     );
-    const onlyMint = { issueApprovalToken: async () => ({ ok: false, reason: "approval_missing" as const }) };
+    const onlyMint = { issueApprovalToken: async () => ({ ok: false as const, reason: "approval_missing" as const }) };
     expect(bindForAssembly({ requested: "0.0.0.0", deps: onlyMint }).remoteApprovalsWired).toBe(
       false,
     );

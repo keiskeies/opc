@@ -125,7 +125,7 @@ describe("② 非回环：通道没接 ⇒ 拒绝；接上 ⇒ 放行且告警",
       [LOOPBACK_HOST, false],
       ["0.0.0.0", true],
     ] as const) {
-      kinds.add(dec(BindDecision.resolve({ requested: host, remoteApprovalsWired: wired })).exposure);
+      kinds.add(dec(BindDecision.resolve({ requested: host as string, remoteApprovalsWired: wired })).exposure);
     }
     expect([...kinds].sort()).toEqual(["lan", "loopback"]);
   });
@@ -185,9 +185,7 @@ describe("④ 造不出一个 LAN 决定（这一节是「不是靠默认值」�
      * 于是这一格现在钉的是【真存在】的那道运行期检查，而不是一个我以为存在的编译期检查。
      */
     const spoofed = { host: "0.0.0.0", exposure: "lan", warning: null };
-    const ctor = BindDecision as unknown as (
-      ...a: unknown[]
-    ) => BindDecision;
+    const ctor = BindDecision as unknown as new (...a: unknown[]) => BindDecision;
     // ① 直接 new（连 key 都不给）⇒ 抛。
     expect(() => new ctor("0.0.0.0", "lan", null)).toThrow(/resolve\(\)/u);
     // ② 把字段整个抄一遍当参数 ⇒ 也抛。这是【真威胁】的形状：

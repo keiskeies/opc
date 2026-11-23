@@ -39,18 +39,18 @@ import {
   readGraphByVersion,
   RUNNING_TASKS_SQL,
 } from "../../packages/hub/src/org/commit.js";
+import type { WriteQueue } from "../../packages/hub/src/db/write-queue.js";
 
 const TMP = fixtureTmp("org-commit", import.meta.url);
 
 type Row = Record<string, unknown>;
-type Db = {
-  prepare: (sql: string) => {
-    all: (...a: unknown[]) => Row[];
-    get: (...a: unknown[]) => Row | undefined;
-    run: (...a: unknown[]) => unknown;
-  };
-  exec: (sql: string) => void;
-};
+// 库不经手搓 stub（B5）：本文件跑在真 WriteQueue 上，而 commitOrgGraph /
+// readGraphByVersion 要的是 DbLike = Pick<DatabaseSync, "prepare">。
+// Db 取【hub 自己导出】的 writeConnection 返回型 —— 一条 hub 相对导入就拿到
+// 真 DatabaseSync，而不在 test/org 下写 `import type … from "node:sqlite"`（那一行
+// 会撞 SQLite 依赖边界：node:sqlite 只准待在 packages/hub/**，test/ 在界外）。
+// 同 driver-pump 那一条：手搓窄 stub 换不来结构兼容。
+type Db = ReturnType<WriteQueue["writeConnection"]>;
 
 const NOW = 1_700_000_000_000;
 const CEO: OrgActor = { type: "human", id: CEO_ROLE_ID };
@@ -92,18 +92,18 @@ async function newDb(): Promise<{ db: Db; w: any; path: string }> {
 
 /** 落一条任务。graph_version 走列默认值，好让「有没有被 stamp」是可分辨的。 */
 function task(db: Db, id: string, status = "IN_PROGRESS", graphVersion?: number): void {
+  const hasVersion = graphVersion !== undefined;
+  const params = hasVersion
+    ? ([id, "t-" + id, status, NOW, NOW, graphVersion] as (string | number)[])
+    : ([id, "t-" + id, status, NOW, NOW] as (string | number)[]);
   db.prepare(
     "INSERT INTO tasks (id, title, status, assigned_role, current_node, created_at, " +
       "updated_at" +
-      (graphVersion === undefined ? "" : ", graph_version") +
+      (hasVersion ? ", graph_version" : "") +
       ") VALUES (?, ?, ?, 'dev', 'dev', ?, ?" +
-      (graphVersion === undefined ? ")" : ", ?)") +
+      (hasVersion ? ", ?)" : ")") +
       "",
-  ).run(
-    ...(graphVersion === undefined
-      ? [id, "t-" + id, status, NOW, NOW]
-      : ([id, "t-" + id, status, NOW, NOW, graphVersion] as unknown[])),
-  );
+  ).run(...params);
 }
 
 /** 落一版岗位书。config 用真 charter 的 camelCase 形状（提交路径改的是 reportsTo）。 */

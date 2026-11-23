@@ -365,6 +365,7 @@ describe("接进门控：让『打回』真的是**门控**打回", () => {
       bundle: bundle({ claims: [] }),
     });
     expect(v.decision).toBe("reject");
+    if (v.decision !== "reject") throw new Error("该走 reject 分支");
     expect(v.reasons.join(" ")).toContain("强制搜索领域缺来源");
   });
 

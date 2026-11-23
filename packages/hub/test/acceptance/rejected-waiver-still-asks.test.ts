@@ -56,6 +56,20 @@ const said = (o: Record<string, unknown>) =>
  * 汇报树与家族取值都沿用 idea-to-delivered.test.ts 那张图的口径：
  * 四层（intake / director / dev）是【到顶】那条路能走完的最小形状，
  * 而全家同一个 model_family 是【今天的真实配置】—— 正是它让同源那一拦恒命中。
+ *
+ * ── edges 里为什么必须有 dev → director 这一条 ─────────────────────
+ * 本发的对象是【同源豁免卡】：断言「收件箱里恰好一张卡，键是
+ * `same-family-review:dev->director`」，以及「退回之后下一轮还建」「批过之后不再建」。
+ * §8.2 第 3 条接进 dispatch 之后，审阅那一维变成【两个独立的判定、各一张卡】：
+ * 家族相同 ⇒ 一张 same-family-review（点一次批准能过）；产出方没有带门控的出边 ⇒
+ * 一张 review-blocked（点批准没用，得改图）。夹具若留着 `edges: []`，
+ * 每一轮就是【两张 pending】，而这三发问的都是「那张豁免卡怎么样了」——
+ * 它们会在一张与本发无关的第二张卡上变红。
+ *
+ * 所以补这条边是把【本发要的那个前提】写进夹具：「这一格只欠同源那一个决定」。
+ * ⚠ 不许改成「断言里多容忍一张卡」：那等于把「一格至多欠一个决定」这条
+ *   0041 §5 / 0046 §7 登记的不变量在验收里放弃掉。
+ * 反向证据由这条边自己提供：把 review_gate 抹掉，第一条断言当场变成两张卡。
  */
 function graphOf(family: string): OrgGraph {
   const node = (
@@ -75,7 +89,7 @@ function graphOf(family: string): OrgGraph {
       director: node("director", "intake", true),
       dev: node("dev", "director", false),
     },
-    edges: [],
+    edges: [{ from: "dev", to: "director", review_gate: true }],
   };
 }
 
@@ -126,6 +140,7 @@ async function world(): Promise<World> {
     maxBudgetUsd: 0.5,
     taskLimitCents: 100_000,
     cwd: TMP,
+    evidenceRoot: TMP + "/artifacts",
     ceoRoleId: CEO,
     nowMs: () => NOW,
   });
@@ -213,7 +228,7 @@ async function world(): Promise<World> {
           (r) => (r.key ?? "").startsWith(prefix) && r.status === "pending",
         );
         if (hit !== undefined) return hit.id;
-        const only = String((pend[0] as Row)["id"]);
+        const only = String((pend[0] as unknown as Row)["id"]);
         const r = await approveCard(
           q,
           {
@@ -319,10 +334,17 @@ describe("① 同源豁免卡被【退回】之后，问题必须再被问一次
     expect(w.rows().filter((r) => r.status === "pending")).toHaveLength(1);
   });
 
-  it("批准仍然终结这件事：批过之后同族审阅直接放行，不再建卡", async () => {
+  it("批准仍然终结这件事：批过之后同族审阅不再建【豁免】卡（门 4 另算）", async () => {
     /*
      * 第三发挡的是"为了让退回能重问，把索引改成【什么都不挡】"那种改法：
      * 那种改法下这一发红 —— 批过的键会被再建一张卡，收件箱永远清不掉。
+     *
+     * round359 语义变更（门 4 全量拦）：批掉豁免卡之后，「下一轮不再建卡」这句话
+     * **不再整体成立** —— 门 3 放行了，但门 4 会建一张 gate-blocked 卡。
+     * 本发相应收窄，只钉它原本要钉的那一格：**同族豁免卡**的键不再重复出现。
+     * 这与回退重问那一发同源 —— 0006 只收窄了「已决策」那一半，而豁免卡
+     * 批过之后不重建是同一个去重键的另一半。门 4 的卡是不同键族的另一件事，
+     * 由 idea-to-delivered / gate 测试钉，不在本发的射程内。
      */
     const w = await world();
     const waiverId = await w.clickUntilCardWith("same-family-review:");
@@ -357,10 +379,10 @@ describe("① 同源豁免卡被【退回】之后，问题必须再被问一次
       () => {},
     );
     expect(ok.outcome).toBe("decided");
-    const next = await w.dispatchOnce();
-    expect(next.card, "CEO 批过之后这道门就该放行 ⇒ 不该再建豁免卡").toBe(
-      false,
-    );
+    // 批过 ⇒ 下一轮门 3 放行。产生门 4 的 gate-blocked 卡（在代码里不读它的
+    // 返回值 —— 卡面形状由下面 rows() 那两发断言，读过反而会忽略「没推进」本身）。
+    await w.dispatchOnce();
+    // 批过 ⇒ 门 3 放行 ⇒ 不再建【豁免】卡（这是本发钉的那一格）。
     expect(
       w
         .rows()
@@ -369,5 +391,18 @@ describe("① 同源豁免卡被【退回】之后，问题必须再被问一次
             r.status === "pending" && (r.key ?? "").startsWith("same-family"),
         ),
     ).toEqual([]);
+    // 但门 4 全量拦还在：同一条任务上会建 gate-blocked 卡（键族不同，点不掉，
+    // 与豁免卡是两个独立的问题）。这一发明确说它【不算】本发要钉的东西 ——
+    // 免得下一任读代码把「出现了 gate-blocked 卡」读成「豁免批准失败了」。
+    const gates = w
+      .rows()
+      .filter(
+        (r) =>
+          r.status === "pending" && (r.key ?? "").startsWith("gate-blocked:"),
+      );
+    expect(
+      gates.length,
+      "门 4 的 gate-blocked 卡与豁免卡同屏出现是【设计如此】，不是本发回归",
+    ).toBe(1);
   });
 });

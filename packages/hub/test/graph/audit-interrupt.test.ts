@@ -10,6 +10,7 @@ import {
   auditedInvoke,
   detectInterrupts,
 } from "../../src/graph/audit-middleware.js";
+import { EVENTS_DDL_WITH_REPLAY } from "../fixtures/events-ddl.js";
 
 const dirs: string[] = [];
 // Windows 下 SQLite 连接不 close 就删目录会 EPERM，且 maxRetries 对它无效：
@@ -21,27 +22,13 @@ afterAll(() => {
     rmSync(d, { recursive: true, maxRetries: 40, retryDelay: 50 });
 });
 
-const EVENTS_DDL = [
-  "CREATE TABLE events (",
-  "  id INTEGER PRIMARY KEY AUTOINCREMENT,",
-  "  task_id TEXT,",
-  "  actor_type TEXT NOT NULL,",
-  "  actor_id TEXT NOT NULL,",
-  "  action TEXT NOT NULL,",
-  "  target TEXT,",
-  "  payload TEXT NOT NULL,",
-  "  state_snapshot TEXT,",
-  "  created_at INTEGER NOT NULL",
-  ")",
-].join("\n");
-
 function openDb(): DatabaseSync {
   const dir = mkdtempSync(join(tmpdir(), "opc-graph-"));
   dirs.push(dir);
   const db = new DatabaseSync(join(dir, "g.db"));
   db.exec("PRAGMA journal_mode = WAL;");
   db.exec("PRAGMA foreign_keys = ON;");
-  db.exec(EVENTS_DDL);
+  db.exec(EVENTS_DDL_WITH_REPLAY);
   dbs.push(db);
   return db;
 }

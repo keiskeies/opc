@@ -33,6 +33,7 @@ import { CEO_DECISION_STATUSES, readToday } from "../../src/overview/today.js";
 import {
   DEMO_BUDGETS,
   DEMO_CARDS,
+  DEMO_ORG_EDGES,
   DEMO_ORG_NODES,
   DEMO_TASKS,
   seedDemoOrg,
@@ -79,8 +80,15 @@ describe("dev-seed", () => {
 
     const first = await seedDemoOrg(q, { nowMs: NOW });
     expect(first.skipped).toBe(false);
+    /*
+     * 版本数 = 【提交次数】，而一次提交 = 一个 change。种子现在种两类 change：
+     * 每个角色一次 add_node，每条委派边一次 add_edge（DEMO_ORG_EDGES，理由见
+     * dev-seed.ts 那一格的注释）。这一格从「节点数」变成「节点数 + 边数」不是
+     * 断言跟着实现走 —— 它钉的正是「边也走了 commitOrgGraph」：边若改成直接塞
+     * graph 对象再落库，版本数会退回节点数，这一发当场少 3。
+     */
     const rowsAfterFirst = countGraphs();
-    expect(rowsAfterFirst).toBe(DEMO_ORG_NODES.length);
+    expect(rowsAfterFirst).toBe(DEMO_ORG_NODES.length + DEMO_ORG_EDGES.length);
 
     const second = await seedDemoOrg(q, { nowMs: NOW + 1000 });
     expect(second.skipped).toBe(true);
@@ -125,7 +133,21 @@ describe("dev-seed", () => {
         model_family: spec.model_family,
       });
     }
-    expect(latest.version).toBe(DEMO_ORG_NODES.length);
+    /*
+     * 边也要逐条对得上，而不只看节点。§8.2 第 4 条「门控绑在边上」的载体就是
+     * `review_gate: true` 这一个布尔：它在读写两侧各有一次改名
+     * （contracts 的 delegationEdgeSchema 叫 review_gate，门控层的 DelegationEdge 叫 gate），
+     * 写错名字不会报错、只会静默变成「这条边没有门控」，于是判据 3 把每个产出方
+     * 都判成「没有独立审阅者」。所以这里断言的是【读回来的那个名字上的那个值】。
+     */
+    expect(latest.graph.edges).toHaveLength(DEMO_ORG_EDGES.length);
+    for (const e of DEMO_ORG_EDGES) {
+      const got = latest.graph.edges.find(
+        (x) => x.from === e.from && x.to === e.to,
+      );
+      expect(got?.review_gate).toBe(true);
+    }
+    expect(latest.version).toBe(DEMO_ORG_NODES.length + DEMO_ORG_EDGES.length);
   });
 
   it("任务状态散在不同状态，且至少一条落在 CEO_DECISION_STATUSES（清单从 today.ts 读）", async () => {

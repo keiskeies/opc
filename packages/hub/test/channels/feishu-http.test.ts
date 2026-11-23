@@ -199,13 +199,12 @@ describe("fetchTimeoutMs：交得进去，且畸形值不是「关掉超时」",
   async function probe(
     timeoutMs: number | undefined,
     waitMs: number,
-  ): { signal: AbortSignal | undefined; aborted: boolean } {
+  ): Promise<{ signal: AbortSignal | undefined; aborted: boolean }> {
     const f = spyFetch();
-    const over: Partial<ConstructorParameters<typeof FeishuChannel>[0]> = {
+    const p = ch({
       fetchImpl: f.fetchImpl,
-    };
-    if (timeoutMs !== undefined) over.fetchTimeoutMs = timeoutMs;
-    const p = ch(over).pollOnce();
+      ...(timeoutMs !== undefined ? { fetchTimeoutMs: timeoutMs } : {}),
+    }).pollOnce();
     await new Promise((r) => setTimeout(r, waitMs));
     const signal = f.inits[0]?.signal;
     const aborted = signal?.aborted ?? false;

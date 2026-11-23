@@ -429,11 +429,12 @@ describe("④ stop 与参数校验", () => {
 describe("⑤ 在飞状态：inFlight / cancelling 两个字段各自是一条性质", () => {
   it("派一件 → 同刻第二件被拒，且原因是 in_flight", async () => {
     const w = createInFlightWatch<void>();
-    let releaseFirst: (() => void) | null = null;
+    // 闭包里赋值的 let 会丢收窄（TS2349，B5 在 assemble-driver 踩过并 probe 验证）。
+    const releaseGate: { fn: (() => void) | null } = { fn: null };
     const first = w.start(
       () =>
         new Promise<void>((r) => {
-          releaseFirst = r;
+          releaseGate.fn = r;
         }),
     );
     expect(first).toEqual({ started: true });
@@ -447,7 +448,7 @@ describe("⑤ 在飞状态：inFlight / cancelling 两个字段各自是一条�
     });
     await drain();
     expect(secondCalled).toBe(0);
-    releaseFirst?.();
+    releaseGate.fn?.();
     await w.settle();
     expect(w.inFlight).toBe(false);
   });
@@ -471,16 +472,16 @@ describe("⑤ 在飞状态：inFlight / cancelling 两个字段各自是一条�
     // 只有这里「先派一件、再 cancel」的情形能分辨 —— 那时 inFlight 与 cancelling
     // 同时为真，而正确答案是 cancelling（别派新活）而不是 in_flight（有个活的在跑）。
     const w = createInFlightWatch<void>();
-    let release: (() => void) | null = null;
+    const releaseGate: { fn: (() => void) | null } = { fn: null };
     w.start(
       () =>
         new Promise<void>((r) => {
-          release = r;
+          releaseGate.fn = r;
         }),
     );
     w.beginCancel();
     expect(w.start(async () => {})).toEqual({ started: false, reason: "cancelling" });
-    release?.();
+    releaseGate.fn?.();
   });
 
   it("settle 等到落地；任务【抛】也照样 settle 而不 reject", async () => {

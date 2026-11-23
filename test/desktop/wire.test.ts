@@ -169,7 +169,7 @@ async function startStreamServer(opts: { skipAuth?: boolean } = {}): Promise<{
     emit: (_e: string, _d: string, _i: string): void => {
       throw new Error("没有活的连接");
     },
-    dropCurrent: () => {
+    dropCurrent: (): void => {
       throw new Error("没有活的连接");
     },
   };

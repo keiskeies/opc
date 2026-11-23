@@ -39,6 +39,7 @@ import {
   ensureCharterCard,
   parseCharterDraft,
 } from "../../src/engine/charter.js";
+import type { HubWriter } from "../../src/db/write-queue.js";
 
 const TMP = fixtureTmp("engine-charter", import.meta.url);
 const NOW = 1_700_000_000_000;
@@ -87,7 +88,7 @@ function draftText(body = "业务目标：做个 AI 笔记应用\n可量化验�
 
 interface World {
   db: Db;
-  q: Queue;
+  q: HubWriter;
   bus: InMemoryEventBus;
   published: { kind: string; seq: number }[];
 }
@@ -125,7 +126,7 @@ async function world(o: {
     );
   }
   const bus = new InMemoryEventBus();
-  return { db, q, bus, published: [] };
+  return { db, q: q as unknown as HubWriter, bus, published: [] };
 }
 
 /**
@@ -151,6 +152,7 @@ async function draft(
     maxBudgetUsd: 0.5,
     taskLimitCents: 1000,
     cwd: TMP,
+    evidenceRoot: TMP + "/artifacts",
   });
   const onCost = rt.deps.onCost;
   const res = await ensureCharterCard(

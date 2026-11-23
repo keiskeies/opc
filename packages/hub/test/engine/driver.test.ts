@@ -227,7 +227,7 @@ describe("advance + 真 dispatch（桩 CLI，真库）", () => {
     const { INSERT_DELEGATION_GRAPH_SQL } = await import("../../src/org/commit.js");
     const { InMemoryEventBus } = await import("../../src/events/bus.js");
     const { makeRuntime } = await import("../../src/engine/runtime.js");
-    type Db = ReturnType<WriteQueue["writeConnection"]>;
+    type Db = ReturnType<typeof q.writeConnection>;
     const q = new WriteQueue(TMP + "/chain.db");
     const db = q.writeConnection() as unknown as Db;
     migrate(db as unknown as Parameters<typeof migrate>[0]);
@@ -256,6 +256,7 @@ describe("advance + 真 dispatch（桩 CLI，真库）", () => {
       maxBudgetUsd: 0.5,
       taskLimitCents: 1000,
       cwd: TMP,
+      evidenceRoot: TMP + "/artifacts",
       bin: fileURLToPath(new URL("./fixtures/fake-claude.mjs", import.meta.url)),
     });
     const dispatch = makeDispatch(rt.deps);

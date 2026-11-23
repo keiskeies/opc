@@ -47,15 +47,7 @@ import type { TaskState } from "../../src/graph/status.js";
 const TMP = fixtureTmp("acceptance", import.meta.url);
 
 type Row = Record<string, unknown>;
-type Db = {
-  prepare: (sql: string) => {
-    all: (...a: unknown[]) => Row[];
-    get: (...a: unknown[]) => Row | undefined;
-    run: (...a: unknown[]) => unknown;
-  };
-  exec: (sql: string) => void;
-  close: () => void;
-};
+type Db = DatabaseSync;
 
 const opened: Db[] = [];
 let fileSeq = 0;
@@ -94,7 +86,7 @@ async function scenario(taskId: string): Promise<{
   actions: () => string[];
 }> {
   const { openDb } = await import("../../src/db/driver.js");
-  const db = openDb(join(TMP, "a-" + process.pid + "-" + ++fileSeq + ".db")) as unknown as Db;
+  const db = openDb(join(TMP, "a-" + process.pid + "-" + ++fileSeq + ".db")) ;
   opened.push(db);
   migrate(db);
   db.prepare(

@@ -449,7 +449,9 @@ describe("⑤ 落库那一行：计划 Test 项『含 auto_approved_by』的逐�
     expect(rec.card_claimed).toBe(false);
     expect(rec.payload["card"]).toEqual({ present: false, claimed: false });
     // target 退化成动作指纹而不是 null：null 的行无法问责（recorder 对空 actor 同立场）。
-    expect(String(rec.payload["card"]["present"])).toBe("false");
+    expect(
+      String((rec.payload["card"] as Record<string, unknown>)["present"]),
+    ).toBe("false");
     const e = eventsOf(db)[0] as Row;
     expect(String(e["target"]).startsWith("action:")).toBe(true);
   });

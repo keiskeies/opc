@@ -351,7 +351,7 @@ describe("② 真库巡检：SQL 读出来的信号与判定一致", () => {
     // 故意写一条 kind 缺失的脏行：它必须被算作【真实事件】（<> 'HeartbeatStalled' 为真需非 NULL）
     appendAudit(
       db,
-      { actorType: "system", actorId: "hub", taskId: "T1", action: "state_change", payload: { note: "没有 kind" }, createdAt: T0 - HOUR },
+      { actorType: "system", actorId: "hub", taskId: "T1", action: "state_change", target: null, payload: { note: "没有 kind" }, createdAt: T0 - HOUR },
       () => T0 - HOUR,
     );
     const j = verdictOf(fix.path, "T1", T0);

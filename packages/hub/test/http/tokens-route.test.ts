@@ -73,22 +73,14 @@ const TOKEN_HEADER = "x-opc-approval-token";
 const DECIDE_BODY = JSON.stringify({ resume: "approve" });
 
 type Row = Record<string, unknown>;
-type Db = {
-  prepare: (sql: string) => {
-    all: (...a: unknown[]) => Row[];
-    get: (...a: unknown[]) => Row | undefined;
-    run: (...a: unknown[]) => unknown;
-  };
-  exec: (sql: string) => void;
-  close: () => void;
-};
+type Db = DatabaseSync;
 
 const opened: Db[] = [];
 let fileSeq = 0;
 
 async function newDb(): Promise<Db> {
   const { openDb } = await import("../../src/db/driver.js");
-  const db = openDb(join(TMP, "tr-" + process.pid + "-" + ++fileSeq + ".db")) as unknown as Db;
+  const db = openDb(join(TMP, "tr-" + process.pid + "-" + ++fileSeq + ".db")) ;
   opened.push(db);
   migrate(db);
   db.prepare(
@@ -129,7 +121,7 @@ function card(db: Db, id: string, o: { type?: string; params?: string; status?: 
 /** 签一张票（走签发函数本身，不走 HTTP），返回原文。 */
 function mint(db: Db, approvalId: string): string {
   const raw = newApprovalToken();
-  issueToken(db as never, { rawToken: raw, approvalId, nowMs: NOW });
+  issueToken(db, { rawToken: raw, approvalId, nowMs: NOW });
   return raw;
 }
 
@@ -170,7 +162,7 @@ async function harness(nowMs = NOW): Promise<{
     // 这台夹具扮演的是哪一台 Hub（HubDeps.driverState 必填的理由在那边）：一次性审批票那一条与驱动器无关；OFF 让「没有事件」这个前提在测试里是真的而不是碰巧。
     driverState: () => DRIVER_OFF,
     redeemApprovalToken: async ({ token, approvalId }) => {
-      const r = redeemToken(db as never, {
+      const r = redeemToken(db, {
         rawToken: token,
         nowMs,
         expectedApprovalId: approvalId,
@@ -178,12 +170,12 @@ async function harness(nowMs = NOW): Promise<{
       return r.ok === true ? { ok: true, taskId: r.taskId } : { ok: false, reason: r.reason };
     },
     issueApprovalToken: async ({ approvalId, nowMs: issuedAt }) => {
-      const pre = precheckIssue(db as never, approvalId);
+      const pre = precheckIssue(db, approvalId);
       if (pre.ok !== true) return pre;
       // 与 real-deps.ts 那个包装同形：先 precheck、后 issue，且在【一次同步块】里
       // （真实现里是同一个 w.node 事务；这里没有写队列，窗口这一维由 real-deps 测）。
       const rawToken = newApprovalToken();
-      const { expiresAt } = issueToken(db as never, { rawToken, approvalId, nowMs: issuedAt });
+      const { expiresAt } = issueToken(db, { rawToken, approvalId, nowMs: issuedAt });
       return { ok: true, token: rawToken, expiresAt };
     },
   };
@@ -310,7 +302,9 @@ describe("POST /approvals/:id/token 的路由与【远程不可达】", () => {
   it("装配没接签发实现 ⇒ 501 而【不是】404：卡片在，缺的是服务端", async () => {
     const h = await harness();
     card(h.db, "A-4");
-    const deps: HubDeps = { ...h.deps, issueApprovalToken: undefined };
+    const { issueApprovalToken: _issue, ...rest } = h.deps;
+    void _issue;
+    const deps: HubDeps = rest;
     const res = await mintToken(deps, "A-4", rawReq(LOOPBACK_HOST));
     expect(res.status).toBe(501);
     // 404 会说「这张卡不存在」，而这张卡在 —— 那会把人支去检查自己的 id。
@@ -453,7 +447,9 @@ describe("远程靠一次性票批准：一条通路、一条写路径、一种�
   it("装配没接 token 存储 ⇒ 远程一律拒，而【不是靠「远程反正签不出」】", async () => {
     const h = await harness();
     card(h.db, "B-4");
-    const deps: HubDeps = { ...h.deps, redeemApprovalToken: undefined };
+    const { redeemApprovalToken: _redeem, ...rest2 } = h.deps;
+    void _redeem;
+    const deps: HubDeps = rest2;
     const res = await handleRequest(
       deps,
       h.req({

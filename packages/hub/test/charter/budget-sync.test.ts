@@ -85,7 +85,7 @@ async function newTracker(): Promise<{
     "INSERT INTO tasks (id, title, status, assigned_role, current_node, created_at, updated_at) " +
       "VALUES ('T-1','预算夹具','IN_PROGRESS','dev','implement',?,?)",
   ).run(NOW, NOW);
-  const als = new AsyncLocalStorage<{ db: DatabaseSync }>();
+  const als = new AsyncLocalStorage<{ db: AnyDb }>();
   let open = false;
   const tx: StepTx = {
     begin: async () => {
@@ -104,7 +104,8 @@ async function newTracker(): Promise<{
       }
       open = false;
     },
-    scope: <T,>(fn: () => Promise<T>): Promise<T> => als.run({ db }, fn),
+    scope: <T,>(fn: () => Promise<T>): Promise<T> =>
+      (als.run({ db }, fn) as Promise<T>),
     inTx: () => open,
     db: () => {
       const s = als.getStore();

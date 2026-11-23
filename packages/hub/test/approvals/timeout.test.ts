@@ -246,7 +246,7 @@ describe("② auto_approve 到期：自动通过，但不可逆+auto_approve 建
         },
         evidence_refs: ["task:t-1/evidence"],
         buttons: ["approve", "reject_with_comment", "defer_deep_review"],
-      } as NewCardDraft),
+      } as NewCardDraft, { nowMs: T0 }),
     ).rejects.toThrow(/auto_approve/u);
     // 库里没有留下任何行（拒建发生在 INSERT 之前）。
     expect(db.prepare("SELECT COUNT(*) AS c FROM approvals").get()).toEqual({ c: 0 });

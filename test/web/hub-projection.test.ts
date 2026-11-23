@@ -60,7 +60,7 @@ function task(id: string, status = "IN_PROGRESS", over: Partial<TaskView> = {}):
   };
 }
 
-const changed = (seq: number, taskId: string, from: string, to: string): unknown => ({
+const changed = (seq: number, taskId: string, from: string, to: string) => ({
   seq,
   kind: "TaskStateChanged",
   taskId,

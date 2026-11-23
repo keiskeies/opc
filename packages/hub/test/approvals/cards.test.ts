@@ -71,6 +71,9 @@ const opened: Array<{ close(): void }> = [];
 const queues: Array<{ close(): Promise<void> }> = [];
 let seq = 0;
 
+/** node:sqlite 的 get() 返回 unknown：要按列名取就从这里过一道（既有用例的通行写法）。 */
+type Row = Record<string, unknown>;
+
 function fresh(): { path: string; db: DatabaseSync; q: WriteQueue } {
   const path = join(TMP, "ap-" + ++seq + ".db");
   const db = openDb(path) as unknown as DatabaseSync;
@@ -212,9 +215,9 @@ describe("① 建得出：卡片与审计同事务，字段各归各位", () => 
     const { db, q } = fresh();
     addTask(db, "t-1");
     const r = await createCard(q, draft(), { nowMs: T0 });
-    const at = db
+    const at = (db
       .prepare("SELECT created_at FROM approvals WHERE id = ?")
-      .get(r.result.approvalId)["created_at"];
+      .get(r.result.approvalId) as Row)["created_at"];
     expect(Number(at)).toBe(T0);
   });
 
@@ -227,9 +230,9 @@ describe("① 建得出：卡片与审计同事务，字段各归各位", () => 
       recommendationSource: "tech_director",
     });
     const get = (id: string): unknown =>
-      db
+      ((db
         .prepare("SELECT recommendation_source FROM approvals WHERE id = ?")
-        .get(id)["recommendation_source"];
+        .get(id) as Row)["recommendation_source"]);
     expect(get(noSource.result.approvalId)).toBeNull();
     expect(get(withSource.result.approvalId)).toBe("tech_director");
   });
@@ -243,8 +246,8 @@ describe("① 建得出：卡片与审计同事务，字段各归各位", () => 
     await expect(
       createCard(q, draft({ taskId: "nope" }), { nowMs: T0 }),
     ).rejects.toThrow(/FOREIGN KEY|FOREIGN KEY constraint/iu);
-    expect(Number(db.prepare("SELECT COUNT(*) AS n FROM approvals").get()["n"])).toBe(0);
-    expect(Number(db.prepare("SELECT COUNT(*) AS n FROM events").get()["n"])).toBe(0);
+    expect(Number((db.prepare("SELECT COUNT(*) AS n FROM approvals").get() as Row)["n"])).toBe(0);
+    expect(Number((db.prepare("SELECT COUNT(*) AS n FROM events").get() as Row)["n"])).toBe(0);
   });
 
   it("撞去重键 ⇒ 事件也不写（否则审计里多一次【没发生过的】「需要批准」）", async () => {
@@ -257,7 +260,7 @@ describe("① 建得出：卡片与审计同事务，字段各归各位", () => 
     expect(second.result.skipped).toBe("duplicate");
     expect(second.event).toBeNull();
     expect(second.seq).toBeNull();
-    expect(Number(db.prepare("SELECT COUNT(*) AS n FROM events").get()["n"])).toBe(1);
+    expect(Number((db.prepare("SELECT COUNT(*) AS n FROM events").get() as Row)["n"])).toBe(1);
   });
 });
 
@@ -268,7 +271,7 @@ describe("② 去重：同一个决定一张卡，而不同决定不能被合成
     for (let i = 0; i < 3; i++) {
       await createCard(q, draft({ cardKey: "gate-1" }), { nowMs: T0 + i * HOUR });
     }
-    expect(Number(db.prepare("SELECT COUNT(*) AS n FROM approvals").get()["n"])).toBe(1);
+    expect(Number((db.prepare("SELECT COUNT(*) AS n FROM approvals").get() as Row)["n"])).toBe(1);
   });
 
   it("⭐ 反向对照：同任务、【不同 key】必须各建一张 —— 合并比重复贵", async () => {
@@ -282,7 +285,7 @@ describe("② 去重：同一个决定一张卡，而不同决定不能被合成
     addTask(db, "t-1");
     await createCard(q, draft({ cardKey: "gate-a", summary: "第一次" }), { nowMs: T0 });
     await createCard(q, draft({ cardKey: "gate-b", summary: "第一次" }), { nowMs: T0 });
-    expect(Number(db.prepare("SELECT COUNT(*) AS n FROM approvals").get()["n"])).toBe(2);
+    expect(Number((db.prepare("SELECT COUNT(*) AS n FROM approvals").get() as Row)["n"])).toBe(2);
   });
 
   it("不传 cardKey ⇒ 不去重（显式选择），但它不去重的是【别的】卡", async () => {
@@ -290,7 +293,7 @@ describe("② 去重：同一个决定一张卡，而不同决定不能被合成
     addTask(db, "t-1");
     await createCard(q, draft(), { nowMs: T0 });
     await createCard(q, draft(), { nowMs: T0 });
-    expect(Number(db.prepare("SELECT COUNT(*) AS n FROM approvals").get()["n"])).toBe(2);
+    expect(Number((db.prepare("SELECT COUNT(*) AS n FROM approvals").get() as Row)["n"])).toBe(2);
     // 反向：NULL 不去重 ≠ 唯一性整体失效。带 key 的那条路仍然被挡。
     await createCard(q, draft({ cardKey: "k" }), { nowMs: T0 });
     const dup = await createCard(q, draft({ cardKey: "k" }), { nowMs: T0 });
@@ -354,7 +357,7 @@ describe("② 去重：同一个决定一张卡，而不同决定不能被合成
     );
     const again = await createCard(q, draft({ cardKey: "gate-once" }), { nowMs: T0 + HOUR });
     expect(again.result.created, "退回之后同一个决定必须能再问一次").toBe(true);
-    expect(Number(db.prepare("SELECT COUNT(*) AS n FROM approvals").get()["n"])).toBe(2);
+    expect(Number((db.prepare("SELECT COUNT(*) AS n FROM approvals").get() as Row)["n"])).toBe(2);
   });
 
   it("⭐ 但收窄只收窄【已决策】那一半：两张 pending 仍然挡得住", () => {
@@ -399,7 +402,7 @@ describe("③ 契约拦得住：§9.2 那三条硬约束不是注释", () => {
     await expect(
       createCard(q, draft({ evidence_refs: [] }), { nowMs: T0 }),
     ).rejects.toThrow(/evidence_refs/u);
-    expect(Number(db.prepare("SELECT COUNT(*) AS n FROM approvals").get()["n"])).toBe(0);
+    expect(Number((db.prepare("SELECT COUNT(*) AS n FROM approvals").get() as Row)["n"])).toBe(0);
   });
 
   it("⭐ 第四个按钮 ⇒ 抛（§8.2 第 4 条「不可绕过」由 schema 的 .length(3) 落地）", async () => {
@@ -417,9 +420,11 @@ describe("③ 契约拦得住：§9.2 那三条硬约束不是注释", () => {
   it("「推荐，非决定」标志位缺失 ⇒ 抛（漏标是让 CEO 把推荐读成结论）", async () => {
     const { db, q } = fresh();
     addTask(db, "t-1");
-    const bad = draft();
-    (bad.parameters as Record<string, unknown>)["recommendation_is_not_decision"] = false;
-    await expect(createCard(q, bad, { nowMs: T0 })).rejects.toThrow(
+    const bad = draft() as { parameters: Record<string, unknown> };
+    bad.parameters["recommendation_is_not_decision"] = false;
+    await expect(
+      createCard(q, bad as Parameters<typeof createCard>[1], { nowMs: T0 }),
+    ).rejects.toThrow(
       /recommendation_is_not_decision/u,
     );
   });
@@ -435,7 +440,7 @@ describe("③ 契约拦得住：§9.2 那三条硬约束不是注释", () => {
     await expect(
       createCard(q, draft({ approvalType: "strategc" }), { nowMs: T0 }),
     ).rejects.toThrow(/approval_type 取值非法/u);
-    expect(Number(db.prepare("SELECT COUNT(*) AS n FROM approvals").get()["n"])).toBe(0);
+    expect(Number((db.prepare("SELECT COUNT(*) AS n FROM approvals").get() as Row)["n"])).toBe(0);
     // 反向：六个合法取值全部建得出来（少一格会在上面那发的反向对照里红）。
     for (const t of APPROVAL_TYPES) {
       const r = await createCard(q, draft({ approvalType: t, cardKey: "k-" + t }), { nowMs: T0 });
@@ -503,7 +508,7 @@ describe("④ 下游立刻能用：两处此前恒空/恒 UNKNOWN 的读法拿�
     const payload = e.payload as Record<string, unknown>;
     expect(payload["kind"]).toBe("ApprovalRequired");
     expect(payload["approval_type"]).toBe("escalation");
-    expect(payload["summary"]).toBe(draft().summary);
+    expect(payload["summary"]).toBe((draft() as { summary: string }).summary);
   });
 
   it("升级原因落进 parameters.escalation，而不是混进给人读的那一行", async () => {

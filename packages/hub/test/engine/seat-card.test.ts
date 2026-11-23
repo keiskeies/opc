@@ -40,6 +40,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import type { OrgGraph } from "@opc/contracts";
 import { fixtureTmp } from "../fixtures/fixture-dir.js";
+import { gateDepsFrom } from "../fixtures/gate-deps.js";
 import { migrate } from "../../src/db/migrate.js";
 import { WriteQueue } from "../../src/db/write-queue.js";
 import { INSERT_DELEGATION_GRAPH_SQL } from "../../src/org/commit.js";
@@ -71,6 +72,18 @@ type Row = Record<string, unknown>;
  * 三格是【到顶】这条路的最小图：director 的上级是 ceo ⇒ IN_REVIEW + pass 走
  * planEdge 的 topmost 那一支直接升 ESCALATED_TO_CEO（【规格】§7.2 步骤 8），
  * 而那正是 0046 §1 探针量到「卡片数 = 0」的那一发。
+ *
+ * ── 那条 `edges` 为什么以前是空的、现在不是 ─────────────────────────
+ * 本文件的判据是「落到人席要有一张能点的卡」，与委派边无关，所以夹具一直写 `edges: []`。
+ * §8.2 第 3 条接进 dispatch 之后，判据 3（`selfReviewEdgeBlock`）也读这张图：
+ * 产出方 dev 没有一条 `review_gate=true` 的出边 ⇒ 每一次 director 审阅都被拦、
+ * 任务不跃迁 ⇒ 本文件那几发「跃迁到人席」的用例整个失去对象。
+ * 补这条边的口径是【夹具本来缺这条不变量的载体】，不是把断言改成放行：
+ * 「IN_REVIEW + pass 到顶」这个前提在今天的生产语义下【就包含】「dev 有一条带门控的
+ * 出边」，以前它能成立恰恰是因为那一维没接上（接线前的假绿面）。
+ * ⚠ review_gate 这个名字写错不会报错、只会静默变成「这条边没门控」
+ *   （门控层的字段叫 gate，由 dispatch 的 reviewerEdges 负责改名），所以下面
+ *   「到顶那一发」必须真跃迁 —— 那才是这条边写对了的证据，而不是这份夹具断言。
  */
 const GRAPH: OrgGraph = {
   nodes: {
@@ -78,7 +91,7 @@ const GRAPH: OrgGraph = {
     director: { role_id: "director", can_manage: true, reports_to: CEO, model_family: "sonnet" },
     dev: { role_id: "dev", can_manage: false, reports_to: "director", model_family: "claude" },
   },
-  edges: [],
+  edges: [{ from: "dev", to: "director", review_gate: true }],
 };
 
 const queues: WriteQueue[] = [];
@@ -205,27 +218,27 @@ describe("mintSeatCard —— 一张卡 + 一条审计 + 一个可广播的 seq"
 
     const cards = cardsIn(w.db);
     expect(cards.length).toBe(1);
-    expect(cards[0]["status"]).toBe("pending");
-    expect(cards[0]["approval_type"]).toBe("escalation");
-    expect(String(cards[0]["card_key"])).toBe("seat:ESCALATED_TO_CEO:1");
+    expect(cards[0]?.["status"]).toBe("pending");
+    expect(cards[0]?.["approval_type"]).toBe("escalation");
+    expect(String(cards[0]?.["card_key"])).toBe("seat:ESCALATED_TO_CEO:1");
     // 摘要带着【那一句为什么】：CEO 在收件箱里要在几秒内决定，光说"等你批"不可决策
-    expect(String(cards[0]["summary"])).toContain("覆盖率 92%");
+    expect(String(cards[0]?.["summary"])).toContain("覆盖率 92%");
     // 推荐必须自证是推荐（§9.2 那个字面量字段），且【不】伪装成有出处
-    const params = JSON.parse(String(cards[0]["parameters"])) as Record<string, unknown>;
+    const params = JSON.parse(String(cards[0]?.["parameters"])) as Record<string, unknown>;
     expect(params["recommendation_is_not_decision"]).toBe(true);
     // ⚠ 升级原因由【状态机 + 组织树】定（顶层审阅通过），不由 agent 给自己定性
     expect(JSON.stringify(params["escalation"])).toContain("outside_decision_scope");
 
     const evts = w.db.prepare("SELECT action, actor_type, actor_id, target, payload FROM events").all() as Row[];
     expect(evts.length).toBe(1);
-    expect(evts[0]["action"]).toBe("approval");
+    expect(evts[0]?.["action"]).toBe("approval");
     // 署名 system/hub：卡片是【系统提出的一次请求】，署人名会污染 role-memory 的分桶依据
-    expect(evts[0]["actor_type"]).toBe("system");
-    expect(evts[0]["actor_id"]).toBe("hub");
+    expect(evts[0]?.["actor_type"]).toBe("system");
+    expect(evts[0]?.["actor_id"]).toBe("hub");
     // target = 卡片 id：「这张卡被要求批准」与「这张卡被批掉」要在 target 上 join 得起来
-    expect(evts[0]["target"]).toBe(cards[0]["id"]);
+    expect(evts[0]?.["target"]).toBe(cards[0]?.["id"]);
     // payload 是【内层那份】（approval_type / summary / evidence_refs 在顶层），不是 {...evt}
-    const p = JSON.parse(String(evts[0]["payload"])) as Record<string, unknown>;
+    const p = JSON.parse(String(evts[0]?.["payload"])) as Record<string, unknown>;
     expect(p["kind"]).toBe("ApprovalRequired");
     expect(p["approval_type"]).toBe("escalation");
     expect(Array.isArray(p["evidence_refs"])).toBe(true);
@@ -347,6 +360,7 @@ async function runDispatch(o: {
   bus.subscribe(0);
   const dispatch = makeDispatch({
     writer: w.q,
+    ...gateDepsFrom(w.db, TMP + "/artifacts"),
     loadTask: (id) => {
       const r = w.db.prepare("SELECT * FROM tasks WHERE id = ?").get(id) as Row | undefined;
       if (r === undefined) return null;
@@ -375,7 +389,7 @@ async function runDispatch(o: {
   return { ...w, res, published };
 }
 
-/** 到顶那一发（【规格】§7.2 步骤 8）：IN_REVIEW + 独立审阅通过 + pass，落 ESCALATED_TO_CEO。 */
+/** 到顶那一发（【规格】§7.2 步骤 8）：IN_REVIEW + 独立审阅通过 + pass。 */
 const topPass = {
   status: "IN_REVIEW",
   role: "director",
@@ -383,43 +397,67 @@ const topPass = {
   turn: turn(said({ action: "pass", summary: "覆盖率 92%，3 个 P2 缺陷待后续迭代" })),
 } as const;
 
-describe("dispatch 把人席当终点时，同事务补一张卡", () => {
-  it("IN_REVIEW + pass 且已到顶层 ⇒ ESCALATED_TO_CEO + 【恰好一张】卡，键带着那条状态边的 seq", async () => {
+describe("dispatch 把人席当终点时 —— 门 4 全量拦下，补卡机制改由 approveCard 侧承担", () => {
+  /**
+   * round359 语义变更（CEO 拍板「门 4 全量拦」，CEO 简报 B9 那一格）：
+   * IN_REVIEW + pass 在门 1/2/3 全过后被门 4 拦（role_charters 0 行 ⇒ 空标准 ⇒ reject）。
+   * 于是【dispatch 到顶部人席】这条引擎路线到不了 ESCALATED_TO_CEO —— 补卡机制
+   * 的 dispatch 入口死了，但机制本身没死：approveCard 批卡落人席时补下一张
+   * （本篇下半部分那些用例，仍全绿）。这一组断言钉的是被拦那轮的正确形状：
+   * 不跃迁、不补 seat 卡、只建 gate-blocked 卡、账两行（evidence_bundles + review_gates）
+   * + 一条门控审计。若哪天 CEO 拍板放开（接一个读引擎审阅真实事实的评估器），
+   * 这一组要随门 4 一起改回原来的形状 —— 那件事记在台账 round359。
+   */
+  it("IN_REVIEW + pass 且已到顶层 ⇒ 被门 4 拦：停在 IN_REVIEW、moved=false、只在 gate-blocked 族建卡", async () => {
     const { db, res } = await runDispatch({ ...topPass });
-    expect(res.status).toBe("ESCALATED_TO_CEO");
-    expect(res.moved).toBe(true);
-    // 0046 §1 的探针在这一发上量到的是「卡片数 = 0」。这里它必须是 1。
+    expect(res.status).toBe("IN_REVIEW");
+    expect(res.moved).toBe(false);
+    // 全量拦下【不】补 seat 卡 —— 那张卡指向 ESCALATED_TO_CEO，而任务从没到过那一格。
     const cards = cardsIn(db);
     expect(cards.length).toBe(1);
-    expect(String(cards[0]["card_key"])).toBe("seat:ESCALATED_TO_CEO:" + String(res.stateEventSeq));
-    expect(String(cards[0]["summary"])).toContain("覆盖率 92%");
+    expect(String(cards[0]?.["card_key"])).toContain("gate-blocked:");
+    // 摘要要点名：谁（产出方）、为什么（没通过门控）、证据包 sha（可指认）
+    expect(String(cards[0]?.["summary"])).toContain("[dev] 的产出没有通过 §8.2 门控");
     expect(res.card).not.toBeNull();
     expect(res.card?.kind).toBe("ApprovalRequired");
+    // 门控的账两行 + 一条审计，evidence 引用在 —— §22.4「每个门控决定都有证据包引用」从此可校验
+    const rg = db.prepare("SELECT gate_type, decision, round_no FROM review_gates").all() as Row[];
+    expect(rg.length).toBe(1);
+    expect(String(rg[0]?.["gate_type"])).toBe("engine_review");
+    expect(String(rg[0]?.["decision"])).toBe("rejected");
+    expect(statusOf(db)).toBe("IN_REVIEW");
   });
 
-  it("补出来的那张卡【点得动】：拿它的 id 走 approveCard ⇒ 任务真的前进到 FINAL_REVIEW", async () => {
+  it("gate-blocked 卡【点得动】但【不推进】：批准只是把它记下来（这一族卡的按钮不是跃迁钮）", async () => {
     const { q, db } = await runDispatch({ ...topPass, turn: turn(said({ action: "pass", summary: "全绿" })) });
     const pending = pendingCards(q, "t1");
     expect(pending.length).toBe(1);
+    expect(String(pending[0]?.cardKey)).toContain("gate-blocked:");
+    const cardsBefore = cardsIn(db).length;
     const r = await approveCard(
       q,
-      { taskId: "t1", approvalId: pending[0].id, button: "approve", nowMs: NOW + 1000 },
+      { taskId: "t1", approvalId: (pending[0] as { id: string }).id, button: "approve", nowMs: NOW + 1000 },
       () => {},
     );
+    // outcome=decided（按钮有效、审计记下这次批准），但任务【不】推进 ——
+    // dispatch.ts 门 4 那张卡的文件头原文：「批准这张卡不会推进任务」。
     expect(r.outcome).toBe("decided");
-    expect(r.to).toBe("FINAL_REVIEW");
-    expect(statusOf(db)).toBe("FINAL_REVIEW");
+    expect(statusOf(db)).toBe("IN_REVIEW");
+    // 卡被认领掉（不再是 pending），也不会因此补一张 seat 卡 —— 任务没有动，没有新人席
+    expect(pendingCards(q, "t1").length).toBe(0);
+    expect(cardsIn(db).length).toBe(cardsBefore);
   });
 
-  it("本轮【每一个消费掉的 seq】都被广播（补卡既不能挖洞，也不能借状态边那个 seq）", async () => {
+  it("本轮【每一个消费掉的 seq】都被广播（被拦那轮：gate 审计一条 + 卡一条，无状态边）", async () => {
     const { db, published } = await runDispatch({ ...topPass, turn: turn(said({ action: "pass", summary: "全绿" })) });
     const inDb = seqsIn(db);
     expect(published.length).toBe(inDb.length);
     expect(published.map((p) => p.seq)).toEqual(inDb);
     expect(published.some((p) => p.kind === "ApprovalRequired")).toBe(true);
-    // 卡片事件的 seq 必须等于【它自己那条审计行】。填状态边那个 seq 的话，
-    // 广播列表里会出现两个相同 seq —— InMemoryEventBus.publishPersisted 当场抛，
-    // 而如果调用方是裸回调（生产装配里就是），症状是每次推进都把前端连接标脏。
+    // 没有状态边 ⇒ 广播里不该有 TaskStateChanged（那一类只在不跃迁的 wait/驳回轮之外出现）
+    expect(published.some((p) => p.kind === "TaskStateChanged")).toBe(false);
+    // 门控审计行确实广播了（RoleTurnReported 带 gate_decision）
+    expect(published.some((p) => p.kind === "RoleTurnReported")).toBe(true);
     const approvalSeq = (db.prepare("SELECT id FROM events WHERE action='approval'").all() as Row[]).map((r) =>
       Number(r["id"]),
     );
@@ -427,11 +465,12 @@ describe("dispatch 把人席当终点时，同事务补一张卡", () => {
     expect(new Set(published.map((p) => p.seq)).size).toBe(published.length);
   });
 
-  it("补卡排在记账钩子【之后】：本轮 cost 的幂等键还是状态边，不是卡片行", async () => {
+  it("补卡排在记账钩子【之后】：被拦那轮的账挂 gate 审计行，不挂卡片行", async () => {
     const w = openWorld("IN_REVIEW", "director");
     const cost: { seq: number; cents: number }[] = [];
     const dispatch = makeDispatch({
       writer: w.q,
+      ...gateDepsFrom(w.db, TMP + "/artifacts"),
       loadTask: (id) => {
         const r = w.db.prepare("SELECT * FROM tasks WHERE id = ?").get(id) as Row | undefined;
         if (r === undefined) return null;
@@ -455,11 +494,16 @@ describe("dispatch 把人席当终点时，同事务补一张卡", () => {
       publish: () => {},
     });
     const res = await dispatch({ taskId: "t1", nowMs: NOW, maxBudgetUsd: 0.5 });
-    expect(res.status).toBe("ESCALATED_TO_CEO");
+    // 被拦 ⇒ 状态没动；stateEventSeq 装的是【本轮最后写下的那条 seq】—— 门控审计行
+    //（探针实测 = 2：tool_call 执行 + tool_call 门控审计 + approval 卡）。onCost 的 seq 就是它。
+    expect(res.status).toBe("IN_REVIEW");
     expect(cost.length).toBe(1);
-    // 补卡插在 onCost 之前的话，这里会变成卡片那一行的 seq：两种都算真话，
-    // 但那是 BudgetTracker 幂等键的语义变更，不该由这一发顺手做掉。
-    expect(cost[0].seq).toBe(res.stateEventSeq);
+    const gateEvents = (w.db.prepare("SELECT id FROM events WHERE action='tool_call' ORDER BY id").all() as Row[]).map((r) =>
+      Number(r["id"]),
+    );
+    expect(gateEvents.length).toBeGreaterThan(0);
+    expect(res.stateEventSeq).toBe(gateEvents[gateEvents.length - 1]);
+    expect((cost[0] as { seq: number }).seq).toBe(res.stateEventSeq);
   });
 
   it("chain 的【中间那一格】不是人席 ⇒ 不补卡（IN_PROGRESS → EVIDENCE_SUBMITTED → IN_REVIEW）", async () => {
@@ -491,16 +535,31 @@ describe("dispatch 把人席当终点时，同事务补一张卡", () => {
     expect(res.moved).toBe(false);
     const cards = cardsIn(db);
     expect(cards.length).toBe(1);
-    expect(String(cards[0]["card_key"])).not.toContain(SEAT_CARD_KEY_PREFIX);
+    expect(String(cards[0]?.["card_key"])).not.toContain(SEAT_CARD_KEY_PREFIX);
   });
 
-  it("状态边守卫抛 ⇒ 补的那张卡【一起回滚】（不留一张指向错格子的卡）", async () => {
-    // 造「agent 干活期间 CEO 把任务挪走了」：loadTask 读到的是缓存的旧状态，
-    // runTurn 之后、写入之前库里已变 ⇒ 守卫式 UPDATE 的 AND status=? 挡下 → 抛 → 整笔回滚。
+  /**
+   * round359 语义变更后【删除】了原来的「状态边守卫抛 ⇒ 补的卡一起回滚」：
+   *
+   * 原测点的保护对象是「dispatch 补卡与状态边同一事务、守卫抛时一起回滚」。
+   * 全量拦下 IN_REVIEW + pass 被门 4 拦成 move:false —— dispatch 不再写状态边，
+   * 那个守卫（WRITE_EDGE_SQL 的 AND status=?）在这一轮根本不触发；
+   * 实测（round359 probe）外部挪走任务后 dispatch 正常 resolved，不抛。
+   * 所以「守卫抛 ⇒ 补卡回滚」的对象没了，留着会是一发【结构上不可能红的回归锁】
+   * （异侧同源，0046 §9 那一类）。dispatch 侧的同类原子性保护由 approveCard
+   * （approve.ts 那条守卫式 UPDATE + stale_card）与 approve.test.ts 承担。
+   *
+   * 替代测点（保留原意图中仍成立的那一半）：「被拦轮对任务行【零写入】」——
+   * 外部把任务挪走，被拦轮不碰它、不产生指向错格子的卡。下面这一发。
+   */
+  it("被拦轮对任务行零写入：外部挪走任务时，不写状态边、不留指向错格子的卡", async () => {
+    // runTurn 期间 CEO 把任务挪走（loadTask 读到缓存旧状态，库里已变）。
+    // 被拦轮 move:false ⇒ 不写状态边 ⇒ 不抛；任务停在外部设置的 BLOCKED，
+    // 而 gate 卡与账照常落（它们不碰任务行，互相独立）。
     const w = openWorld("IN_REVIEW", "director");
     const dispatch = makeDispatch({
       writer: w.q,
-      // loadTask 走【缓存的旧状态】，而库里已经被挪走 ⇒ 写入时守卫必然挡下
+      ...gateDepsFrom(w.db, TMP + "/artifacts"),
       loadTask: () => ({ id: "t1", title: "x", status: "IN_REVIEW", role: "director", graphVersion: 1 }),
       modelFamily: (r) => String(GRAPH.nodes[r]?.["model_family"] ?? ""),
       rolePrompt: () => "",
@@ -515,12 +574,15 @@ describe("dispatch 把人席当终点时，同事务补一张卡", () => {
       ceoApproved: () => false,
       publish: () => {},
     });
-    await expect(dispatch({ taskId: "t1", nowMs: NOW, maxBudgetUsd: 0.5 })).rejects.toThrow(/过期认知/);
-    // 关键：状态边、审计、【补的那张卡】三样一条都没留下。
-    // 补卡搬到 node() 之外（提交之后再建）时，这一发会变成「events 空、卡片一张」——
-    // 那张卡指向 ESCALATED_TO_CEO，而任务此刻在 BLOCKED。
-    expect(seqsIn(w.db).length).toBe(0);
-    expect(cardsIn(w.db).length).toBe(0);
+    const res = await dispatch({ taskId: "t1", nowMs: NOW, maxBudgetUsd: 0.5 });
+    // 不抛、不跃迁：被拦轮对状态零主张 —— 任务停在外部设置的 BLOCKED
+    expect(res.moved).toBe(false);
+    expect(statusOf(w.db)).toBe("BLOCKED");
+    // gate 卡指向【当前格】，不是指向一个从未到达的 ESCALATED_TO_CEO
+    const cards = cardsIn(w.db);
+    expect(cards.length).toBe(1);
+    expect(String(cards[0]?.["card_key"])).toContain("gate-blocked:");
+    expect(String(cards[0]?.["card_key"])).not.toContain("seat:");
   });
 });
 
@@ -537,6 +599,14 @@ describe("点【过期那张】不能推进当前这一格", () => {
    * 也就是说 approveCard 只判「卡片属于这条任务 + 是 pending」，不判它属于【哪一格】。
    * 后果是 CEO 回答 A 问题而任务按 B 问题动，且审计里留下一条她没做过的批准。
    */
+  /**
+   * round359 适配：第二跳不再走 dispatch。全量拦下 IN_REVIEW + pass 被门 4 拦，
+   * 任务到不了 ESCALATED_TO_CEO（dispatch 侧到人席的路死了，见上方 describe 注释）。
+   * 但这族测试测的是 approveCard 的两卡判据（点旧卡 ≠ 推进当前格），不是门 4 ——
+   * 所以「第二张卡存在」这一格改由【直接构造】提供：手动 UPDATE 任务到 CEO 席 +
+   * 走真 insertCard 插一张键带状态边 seq 的 seat 卡（与 worldWithCard 同一条写入口径）。
+   * 若哪天 CEO 拍板放开门 4（接真实评估器），再把它改回 dispatch 第二跳。
+   */
   async function twoPendingCards(): Promise<RunWorld> {
     const w = await runDispatch({
       status: "IN_PROGRESS",
@@ -544,25 +614,45 @@ describe("点【过期那张】不能推进当前这一格", () => {
       turn: turn(said({ action: "handoff", to_role: "dev", summary: "自己交自己" })),
     });
     expect(cardsIn(w.db).length).toBe(1);
-    // 任务真的往前走到 CEO 那一格
+    // 构造任务真的升到 CEO 那一格：状态 + 一条状态边事件（seat 卡的键要带它的 seq）
     w.db
-      .prepare("UPDATE tasks SET status='IN_REVIEW', assigned_role='director', current_node='director' WHERE id='t1'")
+      .prepare("UPDATE tasks SET status='ESCALATED_TO_CEO', assigned_role='ceo', current_node='ceo' WHERE id='t1'")
       .run();
-    const again = makeDispatch({
-      writer: w.q,
-      loadTask: () => ({ id: "t1", title: "做个 AI 笔记应用", status: "IN_REVIEW", role: "director", graphVersion: 1 }),
-      modelFamily: (r) => String(GRAPH.nodes[r]?.["model_family"] ?? ""),
-      rolePrompt: () => "",
-      roleSession: () => null,
-      runTurn: async () => turn(said({ action: "pass", summary: "全绿" })),
-      recentSummaries: () => [],
-      lastProducer: () => "dev",
-      rejectionCount: () => 0,
-      ceoApproved: () => false,
-      publish: () => {},
+    const stSeq = await w.q.node(() => {
+      const info = w.db
+        .prepare(
+          "INSERT INTO events (task_id, actor_type, actor_id, action, target, payload, created_at) VALUES (?, 'system', 'hub', 'state_change', 'ESCALATED_TO_CEO', ?, ?)",
+        )
+        .run("t1", JSON.stringify({ kind: "TaskStateChanged", taskId: "t1", from: "IN_REVIEW", to: "ESCALATED_TO_CEO" }), NOW + 1);
+      return Number(info.lastInsertRowid);
     });
-    const res = await again({ taskId: "t1", nowMs: NOW + 1, maxBudgetUsd: 0.5 });
-    return { ...w, res, published: w.published };
+    await w.q.node(() => {
+      insertCard(
+        w.db,
+        {
+          taskId: "t1",
+          approvalType: "escalation",
+          cardKey: "seat:ESCALATED_TO_CEO:" + String(stSeq),
+          summary: "席位卡：CEO 该拍板（测试构造的第二张）",
+          parameters: {
+            impact_scope: "这一跳的下一步",
+            irreversible: true,
+            recommendation: "测试构造的席位卡，点批准即前进",
+            recommendation_is_not_decision: true,
+            timeout_behavior: "escalate",
+          },
+          evidence_refs: ["events:" + String(stSeq) + "#state_snapshot"],
+          buttons: ["approve", "reject_with_comment", "defer_deep_review"],
+        },
+        { nowMs: NOW + 1 },
+      );
+      return null;
+    });
+    // 语义自检：这个形状必须是「一张拦截卡 + 一张 seat 卡、任务在 CEO 席」。
+    const keys = pendingCards(w.q, "t1").map((p) => String(p.cardKey)).sort();
+    expect(keys).toContain("handoff-block:dev->dev");
+    expect(keys.filter((k) => k.startsWith("seat:ESCALATED_TO_CEO:")).length).toBe(1);
+    return { ...w, res: { taskId: "t1", status: "ESCALATED_TO_CEO", moved: false, seat: "human", note: "", costCents: 0, sessionId: "", stateEventSeq: stSeq, card: null } as never, published: w.published };
   }
 
   it("分母：任务升到 CEO 之后【确实】同时有两张 pending（没有这个形状，下面两条都是空判）", async () => {
@@ -647,7 +737,7 @@ describe("点【过期那张】不能推进当前这一格", () => {
     db.prepare("UPDATE tasks SET status='ESCALATED_TO_CEO' WHERE id='t1'").run();
     const pend = pendingCards(q, "t1");
     expect(pend.length).toBe(1);
-    const r = await approveCard(q, { taskId: "t1", approvalId: pend[0].id, button: "approve", nowMs: NOW + 10 }, () => {});
+    const r = await approveCard(q, { taskId: "t1", approvalId: (pend[0] as { id: string }).id, button: "approve", nowMs: NOW + 10 }, () => {});
     // 沿用旧行为：能推进。白名单写法在这一发上会变成 stale_card ⇒ 那张卡既推不动也批不掉，
     // 而"CEO 看着一张待批卡而一个按钮都点不动"正是本篇在修的那个症状的镜像。
     expect(r.outcome).toBe("decided");
@@ -657,7 +747,7 @@ describe("点【过期那张】不能推进当前这一格", () => {
   it("CHARTER_PENDING 那一格认的是 charter.ts 的键（本模块不生产它，判据得跟着它定义）", async () => {
     const w = await worldWithCard("CHARTER_PENDING");
     const pend = pendingCards(w.q, "t1");
-    const r = await approveCard(w.q, { taskId: "t1", approvalId: pend[0].id, button: "approve", nowMs: NOW + 10 }, () => {});
+    const r = await approveCard(w.q, { taskId: "t1", approvalId: (pend[0] as { id: string }).id, button: "approve", nowMs: NOW + 10 }, () => {});
     expect(r.outcome, "charter:proposal 就是那一格自己的入口卡").toBe("decided");
   });
 });
@@ -696,19 +786,19 @@ describe("approveCard 落到人席时补下一张（否则「批过一步就再�
     const before = pendingCards(w.q, "t1");
     const r = await approveCard(
       w.q,
-      { taskId: "t1", approvalId: before[0].id, button: "approve", nowMs: NOW + 1000 },
+      { taskId: "t1", approvalId: (before[0] as { id: string }).id, button: "approve", nowMs: NOW + 1000 },
       () => {},
     );
     expect(r.to).toBe("FINAL_REVIEW");
     const after = pendingCards(w.q, "t1");
     // 「已批掉的那张」不算欠的决定：这张表要能答「还欠几个」（0026 §9 那一族）
     expect(after.length).toBe(1);
-    expect(after[0].id).not.toBe(before[0].id);
-    const row = w.db.prepare("SELECT card_key, summary FROM approvals WHERE id = ?").get(after[0].id) as Row;
+    expect((after[0] as { id: string }).id).not.toBe((before[0] as { id: string }).id);
+    const row = w.db.prepare("SELECT card_key, summary FROM approvals WHERE id = ?").get((after[0] as { id: string }).id) as Row;
     expect(String(row["card_key"])).toContain("seat:FINAL_REVIEW:");
     // 键的身份 = 【刚才那条状态边】的 seq，不是决策那条
     const stateSeq = Number(
-      (w.db.prepare("SELECT id FROM events WHERE action='state_change'").all() as Row[])[0]["id"],
+      ((w.db.prepare("SELECT id FROM events WHERE action='state_change'").all() as Row[])[0] as Row)["id"],
     );
     expect(String(row["card_key"])).toBe("seat:FINAL_REVIEW:" + String(stateSeq));
   });
@@ -716,14 +806,49 @@ describe("approveCard 落到人席时补下一张（否则「批过一步就再�
   it("CHARTER_PENDING 上点批准 ⇒ 落 CHARTER_APPROVED（agent 席）⇒ 【不】补卡", async () => {
     const w = await worldWithCard("CHARTER_PENDING");
     const before = pendingCards(w.q, "t1");
-    await approveCard(w.q, { taskId: "t1", approvalId: before[0].id, button: "approve", nowMs: NOW + 1000 }, () => {});
+    await approveCard(w.q, { taskId: "t1", approvalId: (before[0] as { id: string }).id, button: "approve", nowMs: NOW + 1000 }, () => {});
     expect(statusOf(w.db)).toBe("CHARTER_APPROVED");
     // 只有被批掉的那一张，没有第二张
     expect(cardsIn(w.db).length).toBe(1);
   });
 
   it("⭐ 只点卡片，从 ESCALATED_TO_CEO 一路点到 DELIVERED（金色路径，中途没有夹具替我建卡）", async () => {
-    const { q, db } = await runDispatch({ ...topPass, turn: turn(said({ action: "pass", summary: "全绿，可上线" })) });
+    // round359 适配：入口不再用 dispatch —— 全量拦下 IN_REVIEW + pass 出不了
+    // ESCALATED_TO_CEO 那一格（见上方 describe 注释）。金色路径测的是
+    // 【approveCard 批卡 → 补下一张】整条链，起点改为直接构造
+    // 「任务在 CEO 席 + 一张键带状态边 seq 的 seat 卡」（与 twoPendingCards 同一条构造路）。
+    const w = openWorld("ESCALATED_TO_CEO", CEO);
+    const stSeq = await w.q.node(() => {
+      const info = w.db
+        .prepare(
+          "INSERT INTO events (task_id, actor_type, actor_id, action, target, payload, created_at) VALUES (?, 'system', 'hub', 'state_change', 'ESCALATED_TO_CEO', ?, ?)",
+        )
+        .run("t1", JSON.stringify({ kind: "TaskStateChanged", taskId: "t1", from: "IN_REVIEW", to: "ESCALATED_TO_CEO" }), NOW);
+      return Number(info.lastInsertRowid);
+    });
+    await w.q.node(() => {
+      insertCard(
+        w.db,
+        {
+          taskId: "t1",
+          approvalType: "escalation",
+          cardKey: "seat:ESCALATED_TO_CEO:" + String(stSeq),
+          summary: "席位卡：CEO 该拍板",
+          parameters: {
+            impact_scope: "这一跳的下一步",
+            irreversible: true,
+            recommendation: "测试构造的席位卡，点批准即前进",
+            recommendation_is_not_decision: true,
+            timeout_behavior: "escalate",
+          },
+          evidence_refs: ["events:" + String(stSeq) + "#state_snapshot"],
+          buttons: ["approve", "reject_with_comment", "defer_deep_review"],
+        },
+        { nowMs: NOW },
+      );
+      return null;
+    });
+    const { q, db } = w;
     const clicks: string[] = [];
     // 至多两次；循环上限给到 4 是为了让「永远点不完」这一支以断言失败收场而不是悄悄通过。
     for (let i = 0; i < 4; i++) {
@@ -732,7 +857,7 @@ describe("approveCard 落到人席时补下一张（否则「批过一步就再�
       expect(pending.length, "每一格只欠一个决定").toBe(1);
       const r = await approveCard(
         q,
-        { taskId: "t1", approvalId: pending[0].id, button: "approve", nowMs: NOW + 1000 * (i + 1) },
+        { taskId: "t1", approvalId: (pending[0] as { id: string }).id, button: "approve", nowMs: NOW + 1000 * (i + 1) },
         () => {},
       );
       expect(r.outcome).toBe("decided");
@@ -755,7 +880,7 @@ describe("approveCard 落到人席时补下一张（否则「批过一步就再�
       w.q,
       {
         taskId: "t1",
-        approvalId: before[0].id,
+        approvalId: (before[0] as { id: string }).id,
         button: "reject_with_comment",
         note: "清单里那三条先补两条",
         nowMs: NOW + 1000,

@@ -45,15 +45,7 @@ const TMP = fixtureTmp("budget", import.meta.url);
  * 不在断言里到处 as never，也不把 node:sqlite 的具体类型漏进测试逻辑。
  */
 type Row = Record<string, unknown>;
-type Db = {
-  prepare: (sql: string) => {
-    all: (...a: unknown[]) => Row[];
-    get: (...a: unknown[]) => Row | undefined;
-    run: (...a: unknown[]) => unknown;
-  };
-  exec: (sql: string) => void;
-  close: () => void;
-};
+type Db = DatabaseSync;
 
 const opened: Db[] = [];
 let seq = 0;
@@ -110,7 +102,7 @@ async function make(): Promise<{
 }> {
   const { openDb } = await import("../../src/db/driver.js");
   const file = join(TMP, "b-" + process.pid + "-" + ++seq + ".db");
-  const db = openDb(file) as unknown as Db;
+  const db = openDb(file) ;
   opened.push(db);
   migrate(db);
 

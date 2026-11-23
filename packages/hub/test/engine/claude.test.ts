@@ -22,13 +22,13 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
-import type { RoleRunResult } from "../../src/engine/claude.ts";
+import type { RoleRunResult } from "../../src/engine/claude.js";
 import {
   DECISION_MARK,
   parseDecision,
   retryableWithoutCost,
   runRole,
-} from "../../src/engine/claude.ts";
+} from "../../src/engine/claude.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const FAKE = join(HERE, "fixtures", "fake-claude.mjs");

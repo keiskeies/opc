@@ -36,6 +36,7 @@ import {
 } from "../../src/engine/approve.js";
 import { STATUS_BY_RESUME } from "../../src/http/real-deps.js";
 import { HUMAN_EDGES } from "../../src/engine/dispatch.js";
+import type { HubWriter } from "../../src/db/write-queue.js";
 
 const TMP = fixtureTmp("engine-approve", import.meta.url);
 const NOW = 1_700_000_000_000;
@@ -73,7 +74,7 @@ afterAll(async () => {
 
 interface World {
   db: Db;
-  q: Queue;
+  q: HubWriter;
   bus: InMemoryEventBus;
   published: { kind: string; seq: number }[];
 }
@@ -144,7 +145,7 @@ async function world(o: {
   const published: World["published"] = [];
   const w: World = {
     db,
-    q,
+    q: q as unknown as HubWriter,
     bus,
     published,
   };

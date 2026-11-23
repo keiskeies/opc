@@ -980,6 +980,7 @@ describe("② 播种 → handoff → 提示词里有它自己的验收标准（�
       maxBudgetUsd: 0.5,
       taskLimitCents: 100_000,
       cwd: TMP,
+      evidenceRoot: TMP + "/artifacts",
       ceoRoleId: "ceo",
       nowMs: () => NOW,
     });
@@ -1127,6 +1128,7 @@ describe("② 播种 → handoff → 提示词里有它自己的验收标准（�
       maxBudgetUsd: 0.5,
       taskLimitCents: 100_000,
       cwd: TMP,
+      evidenceRoot: TMP + "/artifacts",
       ceoRoleId: "ceo",
       nowMs: () => NOW,
     });
@@ -1188,6 +1190,7 @@ describe("② 播种 → handoff → 提示词里有它自己的验收标准（�
       maxBudgetUsd: 0.5,
       taskLimitCents: 100_000,
       cwd: TMP,
+      evidenceRoot: TMP + "/artifacts",
       ceoRoleId: "ceo",
       nowMs: () => NOW,
     });
