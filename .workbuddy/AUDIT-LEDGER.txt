@@ -7941,8 +7941,9 @@ round350 · 五个漏网顶层纯函数补齐独立执行证据 + 顺手修掉 l
     被写成非 hex，恢复 521daf21 而不去改探针的 keys.length 断言。
   · 已修复并连跑验证：verify 直跑 exit=0 / 0 FAIL，探针 19/19 ×2 零残留。
   · 探针韧性盲区（有意的设计权衡，非本轮引入）：启动时抓 ORIGINAL，
-    若启动前文件已被污染则会是脏基准自证 —— 下次加固点，不在本轮修，
-    因为修它需要探针自鉴残留（可作 0xxx 单独条目）。
+    若启动前文件已被污染则会是脏基准自证 —— ✅【round353f 已加固】：
+    探针模块级 assertCleanBaseline() 用 git show HEAD 与工作树逐字节比对，
+    不一致 throw「脏基准拒绝」、任何 it 不跑；反向 canary 钉住该 gate 承重。
 ── 处置 ─────────────────────────────────────────────────────
   · 修复污染：EXEMPT 恢复 521daf21（git diff HEAD -- verify 只剩 round346 正向改动）。
   · 类型侧面：exempt-pierce.test.ts:45 m[1]! → (m[1] as string)，
@@ -7990,3 +7991,664 @@ round350 · 五个漏网顶层纯函数补齐独立执行证据 + 顺手修掉 l
 ── 状态 ────────────────────────────────────────────────────────
   · 未 commit；未动生产 src（本收尾轮 0 生产改动）。
   · biome 触及文件净新增 0（doc-refs 2 warning 为 HEAD 存量）。
+
+■ round353f（EXEMPT 探针脏基准盲区加固 —— round353c 登记的「下次加固点」落地）
+── 背景 ─────────────────────────────────────────────────────────
+  round353c 那场 zzzzzzz 污染事件处置时登记：「探针韧性盲区：启动时抓 ORIGINAL，
+  若启动前文件已被污染则会是脏基准自证 —— 下次加固点，因为修它需要探针自鉴残留。」
+  本次落地正是那一格：verify 脚本若在探针启动【之前】被污染，ORIGINAL 就是脏的，
+  16 条穿透会拿脏基准自证、回滚回脏版 —— 自证的结果是"回滚得干净"的假象。
+── 加固形状 ────────────────────────────────────────────────────
+  · 模块级 gate `assertCleanBaseline()`：test/arch/exempt-pierce.test.ts 加载期
+    用 `git show HEAD:docs/review/verify-open-invariants.mjs` 取 HEAD 字节，
+    与工作树 ORIGINAL 逐字节比对；不一致直接 throw（消息含"脏基准拒绝"），
+    任何一条 it 不跑。
+  · 新增反向 canary：故意污染文件 → spawn 子 vitest 进程（env 切断
+    OPC_EXEMPT_SKIP_CANARY=1 防无限递归）→ 断言子进程非零退出且点名"脏基准"；
+    还原后 spawn 第二进程 → 必须恢复绿。canary 有 env 开关，子进程跳过自身。
+── 变异自证（两发）────────────────────────────────────────────
+  · M1 杀 guard（`if (false && ORIGINAL !== head)`）⇒ 反转 canary 那一发红
+    （1 failed / 20 passed）⇒ guard 是承重的，不是装饰。
+  · M2 把 canary 里"还原后恢复绿"断言改恒真 ⇒ 依然 21 绿 —— 这一发【非承重】：
+    finally 里 writeFileSync(HEAD_BYTES) 与断言无关，实际写盘还原照常发生，
+    r2 子进程跑出来绿。量出来的结论：那个断言是冗余确认（检查 finally 已做的事），
+    不是加固的承重面；真正的承重在 M1 那发。已登记，不补（加了也是恒真的）。
+── 验证 ────────────────────────────────────────────────────────
+  · 探针全套 21 passed（原 19 + 自鉴 + canary）× 2 次连跑（一次在 biome --write 前，
+    一次在格式化后），绿色稳定。
+  · biome check：净 0 错误（1 处 format 已 --write 修掉）。
+  · tsc -b .workbuddy/tsconfig.tests.json：总错 255 = HEAD 存量（git stash 对比实测），
+    exempt-pierce 文件零新增类型错。
+  · 文件还原逐字节核对：工作树 == HEAD（探针机制要求，否则自鉴自己先红）。
+── 状态 ────────────────────────────────────────────────────────
+  · 未 commit；未动生产 src（纯 test/arch 加固 + 台账）。
+  · verify-open-invariants.mjs 本体零改动（gate 建在探针侧，不改被扫脚本）。
+  · 下一次加固点（round353c 遗留的下一半）：探针启动时抓 ORIGINAL 与 HEAD 比对，
+    若两者都不等而 ORIGINAL==HEAD，那一格是"合法未提交改动"，会误红正常开发——
+    正确语义是"没有干净基线就不跑穿透"，已接受。
+
+■ round353g（推进方向全量侦查：O1-O14 剩余可做格收敛 —— 结论：确定性缺口已尽，余者全在 CEO 门）
+── 触发 ─────────────────────────────────────────────────────
+  goal「推进」续跑：上一轮落完 round353f（探针盲区）后，找下一个不依赖 CEO、
+  不改语义的真实缺口。
+── 侦查（逐项核实，不信复查）──────────────────────────────
+  · O1/O3 动作扫：已全落地或改口（stub-terminal-write 30 发 / foreign-model-loop 6 发
+    / memoryPromptSections / readMemoryTodayProbe 均在）。
+  · Task 4.7 mobile-approval.spec.ts：文件【已存在】（test/e2e/ 下），文档 O14 §5 表
+    「spec 没建」是过期主张（同 deliverCard 那族）；真缺口只剩飞书真凭据 = CEO 门。
+  · O9 动作 2（放开 R1）：文档自己判定「没动，等的不是代码是读数」——R1 那三格
+    （evidence/gate）的影子判定已落地（round269），攒样本是产品事实非工程缺口。
+  · O10 动作 3（会议落点）：状态机加态 = CEO 拍板。
+  · driver-pump 追加预算入口（round341 自记欠账）：预算放开 = CEO 产品决策。
+  · round353f 登记的「下一次加固点」（合法未提交改动误红）：复核是【设计权衡】非 bug
+    ——「没有干净基线就不跑穿透」本就是 gate 语义；且 git show HEAD 失败态在当前仓库
+    不可达（verify 文件 HEAD 必在）。不修，登记为已复核权衡。
+    ⚠【round353h 纠错】这一句是【未实测的误判】：加一行合法注释往 verify
+    尾部 ⇒ 探针整套红。已改 gate 为「污染信号才拦」，见 round353h。
+  · 前端面（round348 结论）：无 O14 族现行样本，「没有再查一遍的价值」。
+── 结论（可复核的收敛声明）────────────────────────────────
+  · O1-O14 全部动作：已落地 or CEO-gated，无第三态。确定性工程缺口已尽。
+  · 剩余一律指向 CEO：O4 门控上线路（D11 role_id 前置）/ O5 生产者（evaluateGate
+    零生产调用方）/ O7-1 硬停与 O13 动作 2 终止态（状态机=改规格）/ O9 放开 R1
+    （等读数）/ 预算放行 / 0049 §12(B) 分母（改契约）/ 飞书真凭据 / Skills 等愿景能力排期。
+  · 本仓 O14 精神：把「已经没事可做」用证据证出来，防的是没证就在空转。
+── 状态 ────────────────────────────────────────────────────
+  · 未 commit（round353f 的台账+探针仍在工作区，同 82d451e 之后的新增量）。
+  · 0 生产改动、0 测试改动（本轮纯侦查）；未跑全量。
+
+■ round353h（纠 round353g 的误判：EXEMPT 探针 gate 从「==HEAD 才放行」收窄到「污染信号才拦」）
+── 触发 ─────────────────────────────────────────────────────
+  round353g 侦查时把「合法未提交改动会让探针红」判成【设计权衡非 bug】。
+  本轮实测推翻：往 verify 尾部加一行合法注释 ⇒ 探针模块级 gate 整套红、
+  21 发全灭、无逃生门 —— 那不是权衡，是可用性缺陷（有人合法加一条豁免
+  = 被鼓励的更新，探针当场全红）。round353g 的「已复核权衡」结论是错的，
+  本轮按四件套修正。
+── 修复形状 ────────────────────────────────────────────────
+  · gate 从「git show HEAD ≠ 工作树 ⇒ throw」收窄到【真正的污染信号】：
+    EXEMPT 表段内出现非 hex key（zzzzzzz 那族，round353c 实测形状）⇒ throw。
+  · 关键细节：不能对全文件做宽匹配 —— verify 里还有 git 命令参数数组
+    （["cat-file","rev-parse",...]），第一版宽匹配把 "cat-file" 等误报成污染。
+    修法：切 `const EXEMPT = new Map([ ... ]);` 段，段内字符串必须全 hex。
+  · 工作树≠HEAD 降级为 console.warn 提示（合法改动的容忍），不阻断。
+  · canary 扩成双形状：
+    A = zzzzzz 污染 ⇒ 子进程红且点名「脏基准拒绝」；
+    B = 合法改动（插入一条 hex 豁免）⇒ 子进程必须真的【跑到测试阶段】
+    （断言 not.toContain('no tests')，且 not.toContain('脏基准拒绝')）——
+    第一版 B 只断言「不含脏基准拒绝」，实测漏洞：把「≠HEAD」改回 throw，
+    错误消息不含"脏基准拒绝" ⇒ B 照绿，变异存活。补强后同变异 ⇒ 1 failed
+    且精确红在 B（消息是补强的断言）⇒ 修复承重。
+── 变异自证（两发）────────────────────────────────────────
+  · M1（round353f 已做过）：杀「EXEMPT 非 hex」检查 ⇒ canary A 红。
+  · M2（本轮新）：把「≠HEAD 提示」改回「throw」⇒ 补强后的 B 红（1 failed），
+    失败消息就是补强断言 ⇒ gate 收窄是承重的，不是装饰。
+── 验证 ────────────────────────────────────────────────────
+  · 探针 21 passed（原 19 + 自鉴 + 双形状 canary）× 连跑 3 次稳定
+    （gate 改后 2 次 + biome 格式化后 1 次）。
+  · biome：净 0（1 处 format 已 --write）。
+  · tsc -b .workbuddy/tsconfig.tests.json：总错 255 = HEAD 存量，exempt-pierce 零新增。
+  · verify-open-invariants.mjs 本体零改动（gate 全在探针侧）。
+── 记录的反面教训 ──────────────────────────────────────────
+  round353g 把「会误伤」读成「设计权衡」，错在【没有实测就接受】——
+  只要往 verify 加一行注释跑一次探针，缺陷当场现形。本仓 O14 精神：
+  一个「读起来像权衡」的结论，至少要有一个对照实验再存档。
+  台账里 round353g 的「已复核权衡，不修」一句应读作「未实测的误判，已纠」。
+── 状态 ────────────────────────────────────────────────────
+  · 未 commit；0 生产改动（test/arch + 台账）；未跑全量。
+
+■ round353i（收 round353h 的账：探针 skipIf 漏登记 ⇒ 全量 1 failed 根因定位与修复）
+── 触发 ─────────────────────────────────────────────────────
+  round353h 收尾后按纪律补跑全量（round353h 台账写明「未跑全量」）。
+  151 文件 3476 passed 但 1 failed 文件、2 failed 用例 ——
+  test/arch/pending-inventory.test.ts「真仓库里唯一带跳过的文件，正是名单里那一个」红：
+  expected [saver.contract] to equal [saver.contract, exempt-pierce]。
+  即：探针 canary 的 `it.skipIf(skipCanary)` 落入 pending-inventory 的
+  SKIP_PROPS（skip/todo/only/skipIf/runIf 一族）而被收录为「跳过文件」，
+  但 ALLOW_SKIP_FILES 名单没收录它 ⇒ 名单失配红。这是 round353f 引入
+  canary 用 skipIf 时【漏登记】的欠账：skipIf 是全量守门认的跳过形态，
+  添加它必须同步名单或改形。
+── 修法选择 ────────────────────────────────────────────────
+  不加名单（会稀释「名单内必须自带活着的运行计数」语义，canary 是 env
+  条件跳过不是计数）；改为【运行时早返】：
+  · `it.skipIf(skipCanary)(...)` ⇒ `it(标题, () => { if (skipCanary) {...} ... })`，
+    it() 永远收集该用例（不算 pending），子进程态函数体第一行走早返分支。
+  · ⚠ requireAssertions（vitest.config.ts 全量开启）要求每条用例至少一发断言：
+    第一版早返分支裸 `return;` ⇒ 子进程态 0 断言 ⇒ requireAssertions 红
+    「expected any number of assertion, but got none」——第二坑，已有频谱。
+    修：早返分支内断言 `process.env.OPC_EXEMPT_SKIP_CANARY === "1"`，
+    既满足断言数要求又【实证子进程态】（不是装饰，是承重事实）。
+  · SKIP_PROPS 不再命中（it 裸调用），pending-inventory 名单失配消除。
+── 验证 ────────────────────────────────────────────────────
+  · 探针 + pending-inventory 一起 37/37（父进程态全量语义）；
+    子进程态（OPC_EXEMPT_SKIP_CANARY=1）21 passed、31s 完成（无递归）。
+  · 变异 M1：把早返杀成 `if (false)` ⇒ 子进程态 21 tests 全挂 + 1 error +
+    101s timeout（递归坠死）⇒ 早返是真承重，不是装饰。逐字节还原后子进程态复绿。
+  · tsc -b .workbuddy/tsconfig.tests.json：255 = HEAD 基线（探针零新增）。
+  · biome：3 文件净 0（1 处格式 --write，无逻辑改动）。
+  · 本轮改的只是 test/arch/exempt-pierce.test.ts（+早返分支），
+    verify-open-invariants.mjs 零 diff（探针侧守门全在测试文件里）。
+── 记录 ────────────────────────────────────────────────────
+  「加 skip 形态必须同步 ALLOW_SKIP_FILES 或改形」是本仓跳过清单守门的
+  接线面：任何 skips 族新写法（skipIf/runIf/裸 xit 等）都要过
+  pending-inventory 的收录判断，否则全量必红。
+── 状态 ────────────────────────────────────────────────────
+  · 未 commit；0 生产改动（test/arch + 台账）；全量复跑中（本条目先落，
+    全量结果以命令输出为准）。
+
+■ round353j（收口验证：e2e 面 / check-gate / lint 棘轮三面逐面复算，补 round353i 未跑的面）
+── 触发 ─────────────────────────────────────────────────────
+  round353i 把全量 vitest 修绿后，check-gate.mjs 自述「未覆盖、须由你亲自跑：
+  pnpm verify（全量测试+静态检查）」。vitest 那一段已跑；剩下的机器面
+  （e2e / check-gate 自身 / lint 棘轮）还没在本轮收口时逐面读数。
+── 各面读数（全部本轮现跑）──────────────────────────────────
+  · playwright e2e 3/3（ceo-loop 1 + mobile-approval 2，2.2s）：
+    默认口 8899 当前空闲（旧 dev server 已不在），无需 env 逃生口。
+    ceo-loop「CEO 一圈」含不可逆双防线 403 两发，全过。
+  · check-gate.mjs：判不了或不符的项 0；阳性对照全 PASS；
+    C7 轮次相对指称 0 处；决策文档存量分布只报数不判失败（口径同前几轮）。
+  · lint 棘轮（test/arch/lint-baseline.test.ts）12/12 绿：
+    「pnpm lint 今天的 error 全部在基线内，且读数本身可信」——
+    LINT_BASELINE 只钉三格（format ≤161 / organizeImports ≤117 /
+    noAssignInExpressions ≤1），全仓今日 268 error / 111 warning 只是读数，
+    不是棘轮失败（round334 台账手抄的「280/114」是当时自行量得的全仓总数，
+    与棘轮口径无关，手抄数不参与门禁）。
+  · tsc -b .workbuddy/tsconfig.tests.json：255 = HEAD 基线（探针零新增）。
+── 结论 ─────────────────────────────────────────────────────
+  round353f/h/i 三连修之后，机器可复算的面全部重新收口：
+  vitest 151 文件 3478 passed / e2e 3 / check-gate 0 不符 / lint 棘轮 12 / tsc 0 新增。
+  探针的 skipIf→早返改动只碰 test/arch/exempt-pierce.test.ts，其余各面零新增红。
+── 状态 ────────────────────────────────────────────────────
+  · 未 commit；0 生产改动（test/arch + 台账）；全量与 e2e 均为本次现跑。
+
+■ round353k（O14 §5.1 Task 4.7 过期主张修正：spec 已建，剩第二工件 CEO 门；连带顶漂族 11 坐标 +4）
+── 触发 ─────────────────────────────────────────────────────
+  round353g 侦查时查见 mobile-approval.spec.ts 已在盘上（test/e2e/，3 发全绿），
+  但文档 O14 §5.1 Task 4.7 格还写「❌ 两个工件都没有：spec 没建」—— 一句
+  过期主张，没有任何守卫会红（O14 整篇要治的形状）。round353g 只报告没修
+  （自称纯侦查）；本轮落地。
+── 文档改动（docs/OPC-OS-功能优化设计.md，+5/-1 = 净 +4 行）──────
+  · Task 4.7 格（1656 行一带）：~~「两个工件都没有：spec 没建」~~ ⇒ ⚠ round353j
+    改口：spec 已建（`test/e2e/mobile-approval.spec.ts`，`pnpm test:e2e` 3/3 绿，
+    含可逆卡一次一签 + 不可逆卡 403 双防线），剩下的钉只剩【第二工件：飞书沙箱
+    手工验证记录】→ CEO 门（真凭据）。症状链更新为「只差凭据 + 手工记录」。
+  · §5.1 读数段（1668 行一带）：~~「那两个 ❌ 的真实理由只剩『工件没建』」~~
+    ⇒ 补 round353j 更正：工件已建，只差第二工件 + 没决定要不要加依赖；
+    决策面仍只含产品判断。
+── 连带修正（顶漂族）────────────────────────────────────────
+  · 净 +4 行把 O14 主张登记表坐标顶漂：claim-coords 守卫当场红，报
+    r10/r11/r12/r13/r14/r15/r19/r21/r22/r23/r24 共 11 条「登记行读不到主张」。
+  · 修法：test/arch/claims-registry.ts 里那 11 个 `line:` 坐标全部 +4
+    （1805→1809、1896→1900、1927→1931、1991→1995、2047→2051、2088→2092、
+    2014→2018、2328→2332、2452→2456、2569→2573、2642→2646）—— 机械 +4，
+    不触碰其他主张。⚠ 教训：改文档前先算行数守恒（round321/343/344 同族）。
+── 验证 ────────────────────────────────────────────────────
+  · verify-open-invariants：SUCCESS，腐烂 0，分项和 640==640，
+    豁免 16 条全在④承重（本改动不含 hex，未扰动采集面）。
+  · claim-coords + claims-registry + plan-gate-paths + doc-refs：
+    4 文件 181 passed（顶漂族修复后全绿）。
+  · tsc 255 = HEAD 基线；biome claims-registry.ts 干净。
+  · 未跑全量（改动面已由相关守卫覆盖，全量等下一轮）。
+── 状态 ────────────────────────────────────────────────────
+  · 未 commit；0 生产改动（docs 文档 + claims-registry 坐标 + 台账）；
+    O14 §5.1 Task 4.7 的过期主张已清。
+
+■ round353k 追加（全量复证）
+  · 台账上一条写「未跑全量（改动面已由相关守卫覆盖，全量等下一轮）」。
+  · 本轮现跑 `npx vitest run`：151 文件 / 3478 passed / 6 skipped / 0 failed，
+    round353k 的文档改动（OPC-OS §5.1 两处）与 claims-registry 11 坐标 +4
+    零回归；与 round353i（skipIf→早返修复）后的全量同数（3478 == 3478）。
+  · verify-open-invariants（上文已跑）：SUCCESS，腐烂 0，640==640。
+  · 另复核两条被 round353g 判为「已报告/CEO」的候选，均非欠账：
+    ① O2 那条「只报告」当场已被行数中性限定收掉（本台账 5142 行），无残留；
+    ② docs/guides/how-to-write-a-charter.md:262 的「judgeCriteria 死代码」
+       已划线撤回；docs/decisions/0020:35 列表按「决策记录不改原文」家规
+       保留（台账记事实），judgeCriteria 全仓零命中（含定义），判据上下文正确。
+── 状态 ────────────────────────────────────────────────────
+  · 未 commit；0 生产改动；全量 151/151 绿。
+
+■ round353l（词表承重侦查：20 词里 15 死词）
+  · 问：CLAMS 词表（③瞬态 / ①c-乙措辞）每个词今天到底放行了什么？
+    用逐词变异法量边际承重：把词从 alternation 里逐个摘掉 → spawn verify →
+    看对应桶计数变化 → 每次恢复字节正本（/tmp 探针，正本零残留）。
+  · CLAIMS_TRANSIENT（10 词）：
+      承重 注入     transient 44 → 27（Δ17）
+      死词 sha256、sha-?256、摘要、digest、hash-object、变异后、变异态、
+            对照、absent （全部 Δ0）
+  · CLAIMS_OBJECT（10 词）：
+      承重 hash     wording 24 → 21（Δ3）
+      承重 blob     wording 24 → 20（Δ4）
+      死词 对象、object、base64、sha1、sha256、sha-?256、摘要、digest（Δ0）
+  · 合计：20 词里 5 词承重（注入/hash/blob），15 词当前 Δ0。
+  · 判读：这不是 EXEMPT 病（0056 §2「31 项里 29 项从未出现」）的同形复发，
+    因为语义不同——EXEMPT key 是「过去放行的记录」必须被用掉；词表是
+    「面向未来的防御模式」，sha256 今天不承重≠撒谎（哪天语料写「sha256:」
+    它就承重）。照抄「必须被用」断言会立刻红 15 词 = 恒红，与 0057 批判同形状。
+  · 逐词意图注释核查（verify 注释 = 作者自述）：
+      - line 154：absent/blob 故意排除（「注入态 blob 的对照值走具名豁免」）
+        —— 但 absent 仍留在词表里，注释与实现有一处不一致（低危，判断题）；
+      - hash-object：全文件只在词表自身（189 行）出现一次，verify 的 git
+        命令从不调 `git hash-object` ⇒ 结构性死词（未来语料写「hash-object」
+        才会承重）；
+      - 对照：历史用法被 ①d（桶 467-480）抢占，现不再走 ③。
+  · 处置决定：【不改 verify 本体】。给词表加「每词命中统计/死词报告」被
+    实测判定为过度工程（多一堆输出，价值只是让 15 个已知词可见）；已有
+    entropy/wording/transient 采样报告就是这个可见性。真问题「防御 or 腐烂」
+    是判断不是打印，而判断已由意图注释给出。
+  · 遗留观察（非欠账，登记备忘）：absent 词条与 line 154 注释意图不一致——
+    若未来语料出现「absent」字样的 sha 上下文会因词表放行，注释却声称不走
+    词表。低危、需人判断，不动。
+── 验证 ────────────────────────────────────────────────────
+  · verify-open-invariants 正本零 diff（探针每步逐字节还原；终态跑：
+    SUCCESS，腐烂 0，分项和 640==640）。
+  · 全量（此前 round353k 补证）：151 文件 / 3478 passed / 6 skipped / 0 failed；
+    e2e 3/3、lint ratchet 12/12、tsc 255 = HEAD 基线（均 round353j 复核）。
+── 状态 ────────────────────────────────────────────────────
+  · 未 commit；0 生产改动、0 test 改动（纯侦查 + 台账）；
+    verify 正本与 HEAD 逐字节一致。
+
+
+■ round353m（③窗口判据收口：absent 补刀 + 防回开守卫）
+  · 出处：round353l 逐词承重探针发现 CLAIMS_TRANSIENT 里 absent 是死词
+    （Δ0），而其 154 行注释明说「走具名豁免、不把 absent/blob 加进③——
+    宁可表长，不可口子宽」。blob 当年删了，absent 漏删 ⇒ 注释-实现缝：
+    未来新腐烂哈希若写在「absent」同一行，会被③静默放过，与作者原意相悖。
+  · 修法：从 CLAIMS_TRANSIENT 摘掉 |absent（真字节、kill-probe 预证：
+    删后 transient 44→44 仍绿、逐字节还原确认干净）。
+  · 防回开：新增 test/arch/verify-lexicon-guard.test.ts（3 用例）——
+    只读 verify 源码、钉「absent/blob 不得回③窗口判据」结构不变量；
+    不绑定仓库此刻绿不绿（0007 §4.1 取舍）、带自证带（absent/blob 必须
+    真实存在于文件==154/164 行描述里，防抄错探针串恒假）。
+  · 变异自证：把 |absent 加回③ ⇒ 守卫红（断言点名）；逐字节还原 ⇒ 绿。
+── 验证 ────────────────────────────────────────────────────
+  · verify-open-invariants：SUCCESS，腐烂 0，分项和 640==640；
+    exempt-pierce 21/21 + verify-lexicon-guard 3/3 = 24/24 绿。
+  · biome：verify 仅剩 HEAD 既有 03bf24d 长行抱怨（非净新增），本改动零新增；
+    新测试文件 biome 干净。
+  · 依赖协调：本改动不加 hex、词表摘词不增采样面 ⇒ 未扰动采集面。
+── 状态 ────────────────────────────────────────────────────
+  · 未 commit；生产改动 = verify 摘 absent（+注释上移 col-0）；test 改动 =
+    verify-lexicon-guard.test.ts 新增 3 用例；台账追加本条。
+
+
+■ round353n（全量竞态修：canary 还原目标 HEAD_BYTES → ORIGINAL）
+  · 触发：round353m 后第一次全量 152 文件里 1 failed（随后复跑全绿）。
+    根因不是 flake：verify-lexicon-guard（新增，读 verify）与 exempt-pierce
+    （spawn 期间持续改写 verify）在 vitest 并行下竞态 —— canary 的 finally
+    把 verify 还原到 HEAD_BYTES（git HEAD，缺合法未提交改动 round353m 的
+    absent 摘除），guard 的模块加载读恰好落进「absent 回③」窗口 ⇒ 误红。
+  · 修法：canary 形状 A/B 的变异基与还原目标全部从 HEAD_BYTES 改 ORIGINAL
+    （工作树启动态）。HEAD_BYTES 只保留「≠HEAD 提示」比对基准角色
+    （92 行注释标明边界，禁作写回目标）。这样 canary 窗口内 absent 始终
+    缺席，guard 读到的任何时刻都不含 absent ⇒ 竞态根除。
+  · 验证：exempt-pierce 21/21；双守卫并行 3 连跑 24/24 稳定；verify SUCCESS。
+── 状态 ────────────────────────────────────────────────────
+  · 未 commit；改动 = verify 摘 absent（round353m）+ verify-lexicon-guard
+    新守卫（round353m）+ exempt-pierce canary 还原目标修（本轮）+ 台账。
+  · 全量：round353m 复跑 152/152 全绿（3481 passed / 6 skipped / 0 failed）
+    —— 本轮 exempt-pierce 修改后再跑一轮收尾确认。
+
+  · 收尾补记：exempt-pierce canary 修复后【完整全量一次通过】152/152
+    绿（3481 passed / 6 skipped / 0 failed，exit 0 且读日志确认非假绿），
+    竞态未再出现 —— 此前 round353m 后首跑 1-failed 确系本竞态（同一测试
+    第二次跑就绿），现已根除。前台单跑双守卫 24/24 绿（干净时序）。
+── 状态 ────────────────────────────────────────────────────
+  · 未 commit；0 生产面残留；工作树 verify 干净（zzzzzzz=0，absent 仅在
+    注释/描述，窗口判据段无）；biome 零净新增；tsc 255 基线。
+
+
+■ round353o（文档面全量审计：§7 26 条 + §8 保质期 + 守卫体系清点）
+  · 审计目标：确认「剩余工程债全部 CEO-gated」在【文档自审面】也成立。
+  · §7（「别当成做到了」）逐条核对 1→26：
+      - 1-8（读数纪律/零 importer/判据坑）：已由 census/dead-modules/O14 守卫化；
+      - 9（phase3 ENOENT 竞态）：已修（宽容 ENOENT+悬空符号链测+对撞 15 万次）；
+      - 10（lint 恒红）→ lint-baseline 棘轮（r19 前身），设计取舍，verify 恒红是
+        有意保留的账（error 只许减不许增，round285 修绿选项 a/b 属"不可逆重排"要 CEO）；
+      - 11-14（plan-refs/type-baseline/claim-coords）各立守卫（r19/r10-14 族）；
+      - 15（O8 旁路）→ round292 判据落地；18（add_node）→ round294 落地+validateNewNode；
+      - 16（2.9 DELIVERED 口径两难）→ CEO 决策面，登记不实现；
+      - 17（依赖启用规则撞私有函数）→ 改名 describeCitation，已修；
+      - 19-20（census 复算/plan-gate-paths 豁免账）→ 守卫化（r20/r21）；
+      - 21（orgGraphSchema 键≠role_id）→ round294 superRefine 落地+round299 加固（r24）；
+      - 22-26（前端出口/路径归一/tsc 仓外/整图门控/escape 归一）→ round295-300 各自落地。
+  · 结论：§7 26 条无一残留 non-CEO 活账 —— 全部已守卫化/修复或 CEO-gated。
+  · §8 保质期表复算：census 现读（零 importer 非入口 6，*.test.ts = packages 104 +
+    test 48 = 152 与全量文件数自洽，unresolved=0）；表上旧数属「不影响任何结论」
+    的测量锚且有复算命令 ⇒ 非欠账。
+  · 守卫体系清点：test/arch 35 测试文件 + 27 支持文件；支持文件(ts-lex/dead-modules/
+    run-fixtures 等)全部有消费者，无死守卫；lint-baseline 棘轮 12/12 绿；census
+    只测量恒 exit 0（设计如此）。
+── 状态 ────────────────────────────────────────────────────
+  · 未 commit；0 生产改动（纯审计）；文档面+工具链面机器全绿；
+    剩余全部 CEO-gated（§25 九项 / 2.9 / 4.7 / 5.8 / O7-1 / O4-O5 wiring /
+    预算 / 0049 §12(B) / Skills 排期 / lint 修绿的 round285 选项）。
+
+
+
+■ round353p（收盘复现面追加：最后一遍全量 + e2e 全套 3/3 实测 + 计数口径 reconcile）
+  · 触发：round353o 收盘后，把「可执行非 CEO 债已清空」判定从台账主张升级为
+    当前工作树的实测复现 —— round353h/353i 的教训：绿套件后必须再验声称
+    「已完成」的那几格仍活。
+  · 改动面盘点：git status 六文件（台账 round353l/m/n/o + docs Task 4.7 +
+    claims-registry coords）与台账逐条对应，无脏文件残留 —— 盘点是完成审计
+    的一环，防有遗漏的被改写文件。
+  · e2e 全套（playwright，test/e2e）：mobile-approval 2/2 + ceo-loop 1/1 =
+    3/3 实测复现（读日志内容确认非假绿：mobile ①一次一签/②不可逆双防线各
+    绿，ceo-loop 全程浏览器 1 圈绿）。数字 reconcile：台账「e2e 3/3」= 套件
+    总数（mobile 2 + ceo-loop 1），不是 mobile spec 单独 3 条；两 spec 与
+    HEAD 逐字节一致（git diff 空），表述无账。
+  · 计数口径 reconcile：census（test/arch/census.ts）walk 全仓 *.test.ts 按
+    顶层目录分桶 = test/ 48 + packages/ 104 = 152，与磁盘实测（find 同口径
+    48+104）逐字节一致；vitest include（test/** + packages/*/test/**）与
+    census 同面，无 .tsx 测试混入 ⇒ 「152」是复算数不是挂账数。
+  · 任务面 TODO/FIXME 扫描：packages 下仅 3 处命中，全是刻意留白的边界声明
+    （preload 注释明说不留 TODO 按钮、classify.test 的 "grep TODO" 是测试
+    样本、e2e-linear 的「已知边界 Phase1 须回头」），无一处是可执行未兑现
+    债。零残留。
+  · pending-inventory 复点 16/16 绿（全量里唯一会因新文件跳过的守卫，
+    verify-lexicon-guard 新增后确认零 skip 位，6 skipped 全部落在既知文件）。
+  · verify 正本终态：CLAIMS_TRANSIENT 段缺 absent（唯一生产改动），
+    zzzzzzz 命中 0（verify/check-gate 本体零污染；.workbuddy 台账 10 处是
+    探针描述里的判据字面，非扫描面）；66 个 7+ hex 是 EXEMPT/采样既有。
+── 验证 ────────────────────────────────────────────────────
+  · 本轮机器面：pending-inventory 16/16、mobile 2/2、ceo-loop 1/1、
+    check-gate（判不了 0 项）、台账可读性自查（round 编号自洽/主张链齐全）。
+  · 全量佐证：round353n 收尾全量 152/152（3481 passed / 6 skipped / 0 failed）
+    已读日志确认；本轮追加一发后台全量归尾（见本轮后补状态行）。
+── 状态 ────────────────────────────────────────────────────
+  · 未 commit；0 新增生产改动（本轮为纯复现/盘点，无写文件）。
+
+── 353p 补记（穿透窗口实测复演，非新债）──────────────────────
+  · run:全量进行到 exempt-pierce 时（verify 文件 16:34:01 被写、zzzzzzz=1、
+    EXEMPT 16 keys 内一 条被换成 zzzzzzz），前台恰好重跑 verify ⇒ 读到变异态：
+    「03bf24d1 @ ledger:5413 不可解析」「zzzzzzz 从不作为 token 出现」2 FAIL。
+    这是穿透的【预期语义】（拿掉豁免→红且点名），且 FAIL 点名的正是当刻被换的
+    03bf24d1 —— 时间戳/点名/zzzzzzz 三证吻合，非文件损坏，非新债。
+  · 纪律再强调：全量运行期间前台不碰 verify 系（round353n 竞态教训第三次复演）；
+    穿透每条 it 的 finally 逐字节还原，全量终态文件必干净。
+  · 处置：无代码改动；前述「verify 正本终态 zzzzzz=0」之表述在全量结束后复核
+    仍成立（穿透还原后复扫确认）。
+
+── 353p 全量终局（后台 b92mc31ur）─────────────────────────
+  · 结果：Test Files 152 passed (152)｜Tests 3481 passed / 6 skipped (3487)
+    / 0 failed，Duration 137.11s（import 78.90s + tests 396.95s），
+    exit 0 且读日志内容确认非假绿 —— 与 round353n 收尾全量数字逐字一致，
+    且是在【新增 verify-lexicon-guard 之后】的完整套件：round353n 竞态修复
+    在真实全量并发窗口内再次通过（穿透 21 项全绿、guard 无窗口误红）。
+  · verify 终态复扫：穿透全部结束后 zzzzzz=0、absent 不在③窗口判据段、
+    verify 自跑 SUCCESS（豁免 39→42、token 641→643 系本轮台账追加 3 个
+    hex 引用所致，分项和 643==643 自洽、新豁免全收进④）——
+    round353p 补记「穿透后文件必干净」断言成立。
+  · 完成审计汇总：六面 + 债标记四面 + verify 自身全部实测绿；剩余
+    11 类全为 CEO-gated（§25 九项 / 2.9 / 4.7 / 5.8 / O7-1 / O4-O5 wiring /
+    预算 / 0049 §12(B) / Skills 排期），委托边界非未清空债。
+── 状态 ────────────────────────────────────────────────────
+  · 未 commit；0 新增生产改动（353p 为复现/盘点/台账，无写生产文件）；
+    工作树六文件与台账 round353l/m/n/o/p 一一对应，无脏残留。
+
+
+■ round354（CEO 决策简报交付）
+  · 产出：docs/CEO-决策简报-2026-11-22.md —— 22 节三组（A 设计九项追认 /
+    B 十项两难需拍板 / C 三项真凭据），每项含【现状】【卡点】【要输入】
+    【选项与后果】【建议】。
+  · 覆盖核对（与台账 round353o 的 11 类 CEO-gated 逐条对应）：
+      §25 九项→A1-A9（多数已事实落地：D6-a node:sqlite+自研 Saver 在
+        checkpoint/saver.ts、D7-a langgraph@1.7.1 在用、D8-C desktop+web 都在、
+        D9 --bind 参数在、D5 无移动包——实现已锁定选项，追认即可）；
+      Task 2.9→B7（验收句 DELIVERED 需真花费，产品口径两难）；
+      Task 4.7→C1（spec 3/3 绿，只差飞书沙箱真凭据）；
+      §5.8→B10（登记为已定案，非待拍）；
+      O7-1→C2（BudgetPaused 事件口径）；O4-O5 wiring→B9（门控上线路三档）；
+      预算/0049 §12(B)→B8（预算分母=进程参数，追加预算按钮语义）；
+      Skills 排期→C3。
+  · 验证：简报零裸 7+ hex（grep 0 命中）；verify token 数保持 643 不变、
+    SUCCESS、腐烂 0 —— 对扫描面完全惰性（目标硬性要求达成）。
+  · 数字 reconcile：台账 11 类 = 简报 9+10+3 全覆盖，无遗漏无新增。
+── 状态 ────────────────────────────────────────────────────
+  · 未 commit；新增 docs/CEO-决策简报-2026-11-22.md（1 文件，纯交付件）；
+    0 生产改动；verify 不受影响（已在加入后复跑确认）。
+
+■ round355（B5 落地：test/ 纳入 tsc 硬门，CEO 2026-11-22 拍板项 ①）
+  · 交付（四件套齐）：
+      ① 清既有类型错误 —— 测试语料从「棘轮 291 条」清到 0 条。本轮实际触到
+        的格子：engine/charter（World.q→HubWriter）、engine/driver（Db 型
+        ReturnType 误用）、engine/claude（.ts→.js）、acceptance/timeout
+        （第 3 参缺失）、channels/feishu（ItemOverride 逐字删除 undefined 键 +
+        NormalizedMessage 断言）、gates/determinism（GateInputOverride）、http/
+        bind（BindDecision 构造 + requested 逐字 string）、http/tokens
+        （noUncheckedIndexedAccess head 取行）、memory/role-memory（expect 双实参）、
+        policy/auto-approve（索引 as）、search/policy（逐字断言）、charter/
+        budget-sync（AsyncLocalStorage 泛参 { db: AnyDb }）、serve/assemble
+        （token ok:false 判别收窄 + ResumableGraph.invoke 二参）、serve/
+        im-channels（ChannelActor.channelId + runtime as unknown as）、
+        test/desktop/wire（dropCurrent 返回型 void）、test/web/hub-projection
+        （changed 去掉 : unknown 让 spread 合法）。
+      ② 新建根 tsconfig.test.json（0 错硬门：test/** + packages/*/test/** +
+        vitest.config.ts；noEmit、composite:false、extends tsconfig.base.json）。
+        与 .workbuddy/tsconfig.tests.json【并存不互替】：那份是【棘轮】
+        （按目录允许 ≤N 错，r19 钉着、不许删），本份是【硬门】（一条错都不许）。
+      ③ 接进 verify：package.json `typecheck` 由 `tsc -b` 变为
+        `tsc -b && tsc -p tsconfig.test.json --noEmit`。非 composite project
+        进不了 tsc -b，故单列 --noEmit 一段。
+      ④ 棘轮清干净后的语义修正：test-type-baseline.ts 的 runTypeCheck 原来
+        「空输出⇒一律当故障抛」——那是语料恒有 291 条错时的形状（空输出只可能
+        是 tsc 没跑）。语料清到 0 后「空输出 + exit 0」第一次是【真干净】，
+        改成按退出码分两支：空+exit0 读成 0 条错，空+非零 exit 仍抛。
+      ⑤ 自回滚变异机 .workbuddy/round354-b5-tsc-gate-mut.mjs（分母 2：M2 控制绿
+        + M1 插一条测试类型错⇒门红且报出被插那行；命中 2/2，reverted:true）。
+  · 主张链 / 依赖边界纠偏（关键一处，非小修）：B5 早期把 test/org/versioning.
+    test.ts 的 Db 型写成 `import type { DatabaseSync } from "node:sqlite"`，
+    撞了 SQLite 依赖边界（node:sqlite 只准待在 packages/hub/**，test/ 在界外）
+    ⇒ 冒出新 error 类目 noRestrictedImports=1，lint 棘轮当场红（新种类）。
+    修法：Db 改取 hub 自己导出的 WriteQueue["writeConnection"] 的返回型
+    （hub 相对导入，界内合法），不碰 node:sqlite。修后 noRestrictedImports
+    归 0、lint 棘轮 12/12 绿、该测试 27/27 运行时仍过。
+  · 验证：
+      · tsc：`tsc -p tsconfig.test.json --noEmit` exit 0（0 错）；
+        `pnpm typecheck` 全链 exit 0。
+      · biome 净新增 0：lint 棘轮 test/arch/lint-baseline.test.ts 12/12
+        （format 161 / organizeImports 117 / noAssignInExpressions 1 未越顶、
+        无新种类）；noRestrictedImports 由 1→0。
+      · 受影响测试文件运行时回归：assemble/im-channels/budget-sync/wire/
+        hub-projection 155/155、arch 守卫三件 196/196。
+      · 变异机命中 2/2（门承重：控制绿、注入红、自回滚）。
+── 状态 ────────────────────────────────────────────────────
+  · 未 commit；本轮纯 test/ 与守卫/台账改动（0 生产逻辑改动），
+    新增 tsconfig.test.json + round354-b5-tsc-gate-mut.mjs；
+    删 scratch tsconfig.probe-test.json（0 引用、git 未跟踪）。
+    目标 ① B5 完成；②③④（B1-B/B9/B8）仍 pending，见任务 #26/#27/#28。
+
+
+■ round356（B1-B 落地：出口门禁判据 3 走 B —— 快照生成 + 中断重放去重 + 方向性断言，CEO 2026-11-22 拍板项 ②）
+  · 交付（四件套齐）：
+      ① 生产改动（本轮只给【已有】的两处写入点补值，不新增写入点）：
+        - packages/hub/resources/migrations/0010_interrupt_replay_dedup.sql（新）：
+          events 加 replay_key 列 + 部分唯一索引 idx_events_replay_key_once
+          ON (action, target, replay_key) WHERE replay_key IS NOT NULL。
+        - packages/hub/src/events/recorder.ts：appendAuditRow 写入前一次 SELECT 预检，
+          命中即返回【已有那一行】的 id 并标 deduplicated；record() 的 dedup 分支
+          直接 return seq —— 不烧 seq、不 ++writtenInTx、不进 #pending（不二次广播）。
+        - packages/hub/src/graph/replay-key.ts（新）：nodeReplayKey() 取节点体内的
+          __pregel_task_id；取不到就抛（点名「多半是 LangGraph 升级改了 configurable 的
+          私有形状」）。键源住在 src/ 而不是测试里，是为了让「键拿不到」暴露成自己的错误，
+          而不是静默变成【不去重】。
+        - packages/hub/src/graph/company.ts：edge() 写
+          stateSnapshot: { ...state, current: from } + replayKey: nodeReplayKey()；
+          文件内那份内联键函数删除，改 import 上面那一份（键源只允许有一个）。
+        - packages/hub/src/graph/audit-middleware.ts：审批边写 stateSnapshot: state
+          （invoke 结果 delete __interrupt__ 之后）+ replayKey: hit.id（interruptId）。
+      ② 测试（新增 9 例，净新增全部来自这两文件）：
+        - interrupt-resume.test.ts 由 4 例增到 12 例：带上重放键后 resume/invoke(null) 仍 1 行并
+          断言 calls().approval === 2（排除「节点没重跑所以没重复」这个假绿）、修复不过宽
+          （record 落在 interrupt 之后的那条仍是 0 到 1）、同一 interruptId 再中断仍 1 张卡、
+          同一库里两张不同卡都落库（键非常量）、被吞的那次不广播 seq、被吞时库里那行
+          快照与 payload 逐字不变、审批快照不含 __interrupt__。
+        - e2e-linear.test.ts 由 13 例增到 14 例：新增的那一条检查每条状态边快照非空壳
+          （NULL/""/"null"/"{}"/空解析都算空）+ 方向 current === edge.from 且 !== edge.to
+          + 通道齐全 + 不含 "stub:" + replay_key 非空 + 粒度 grouped.size === edgeWritingRuns。
+        - 夹具新建 packages/hub/test/fixtures/events-ddl.ts：手写 events 表 + 0010 索引的
+          【单一来源】，原先四个测试文件各有一份手抄 DDL，新列会漂成四份。
+      ③ 自回滚变异机 .workbuddy/round356-replay-dedup-mut.mjs（分母 11：1 控制组绿 +
+        6 个字节级变异在 4 个宿主上展开，逐发按【测试名子串】判该红/该绿，逐宿主逐字节核对还原）：
+          M1 预检 && false 该红（keyedResume / keyedNull / approvalOnce / noRepublish / swallowedSnap）
+          M2 键改字面常量 该红（linear1 / linear4 / snap5）
+          M3 键加 Math.random() 该红（keyedResume / keyedNull / snap5）
+          M4 快照去掉 current: from 该红（snap5）
+          M5 dedup 分支仍 push pending 该红（noRepublish）
+          M6 不删 __interrupt__ 该红（approvalSnap）
+        命中 11 / 11，reverted: true 四次。两个方向都量到了实数：过宽则「expected 9 to be 11」，
+        过窄则「expected 11 to be 8」。
+      ④ 主张链与旧断言同步：
+        - docs/decisions/0006 新增 §8.7：判据 3 的字母定为 B（已定 · 代拍）；更正 §8.1 那句
+          「state_snapshot 在全部生产代码路径上恒为 NULL」—— 现两处传值，作废的是【现在时态的
+          论断】而不是当年那批 L3 实测读数（§10.3/10.4/10.5 的数字一律不改，改它等于伪造现场），
+          复发判据写在 §8.7（e2e-linear 新增那条先红）。
+        - 口径解释（我替判据做的解释，写出来供人反对）：「每个节点输入输出」按【状态跃迁 +
+          决定时快照】满足，【没有】新增第十条 DomainEvent.kind —— payload 键集被
+          recorder.test.ts 钉着，加 kind 等于改事件契约，而 §8.3 把 B 的代价定位在事务边界与去重。
+        - 旧断言【故意保留不动】：interrupt-resume 第一组「会重放写第二遍」仍断言 2 行，
+          它是缺陷回归锁；与 keyed=true 那组并存才能同时挡「修漏了」与「修过头」。
+        - doc-refs 同步（本轮 8 格，文档正文行号与 SNAP 键【成对】改，值逐字取被引那一行）：
+          recorder.ts 249 移到 347 / 268 移到 366 / 393 移到 498 / 395 移到 500、
+          audit-middleware.ts 167 移到 184、graph/company.ts 281 移到 297（INDEX.md 与 0050 两键）、
+          audit-interrupt.test.ts 200 移到 187。recorder.ts 那条注释的历史坐标链写成 258 / 268 / 366。
+  · 变异机发现的等价变异（不当 bug 修，写下来）：把【审批侧】的键改成常量，测试【不红】且
+    这是对的 —— 审批身份就是 target（= interruptId），两张不同卡的 target 本就不同，所以常量键
+    与 interruptId 在这一列上等价。过宽风险只存在于【节点侧】：dev 第一遍与第二遍写的是逐字节
+    相同的边 IN_PROGRESS-EVIDENCE_SUBMITTED，只有键不同。第一版「键非常量」测试写成两个库各
+    1 行，常量键变异【照样全绿】等于测了个寂寞；已改成同一库两个不同中断。
+  · 数字 reconcile（先对账再计数）：
+      · 新增测试 9 = interrupt-resume +8 与 e2e-linear +1；recorder.test.ts 保持 34 例（本轮只改实现，
+        未加例，它靠既有 34 例承担 dedup 的单元面）。
+      · 受影响 hub 测试 83 例全绿 = recorder 34 + interrupt-resume 12 + e2e-linear 14
+        + audit-interrupt 13 + migrate 10。
+      · doc-refs 本轮改 8 格，test/arch 全套 35 文件 / 541 例全绿。
+      · 变异机 11 = 1 控制 + 6 变异在多宿主上展开的 10 发判定（同一变异在多宿主各计一发）。
+  · 验证：
+      · tsc 两个工程均 0 错（tsc -b 与 tsconfig.test.json）。
+      · biome 净新增 0：本轮改动文件逐文件用 git show HEAD 取原文 + biome check --stdin-file-path 归因；
+        doc-refs.test.ts 工作区 2 条 noTemplateCurlyInString 在 770/992 两行，均在
+        git diff -U0 的任何改动块之外（那两格是 app.js:1023 的既有快照值，不是本轮引入）。
+      · db/migrate.test.ts 硬编码版本清单按那道「刻意摩擦」补上 0010_interrupt_replay_dedup。
+── 状态 ────────────────────────────────────────────────────
+  · 未 commit。生产改动 5 文件（recorder.ts / audit-middleware.ts / company.ts 改，
+    replay-key.ts / 0010 迁移新建）；测试 6 文件；文档 6 文件（0006 新增 §8.7、
+    0007 / 0016 / 0050 / INDEX / 功能优化设计的坐标重钉）；守卫 1 文件（doc-refs SNAP）。
+  · .workbuddy/probe356-*.mts 与 probe356-p4.db 是本轮量 interruptId 跨进程同值用的探针，
+    保留为证据（与既有 probe* 同一惯例：留档不删，不进任何扫描面）。
+  · 目标 ② B1-B 完成；③ B9、④ B8 仍 pending，见任务 #27/#28。
+
+■ round357（坐标重钉：随 dispatch.ts / cards.ts / dev-seed.ts 行数漂移的 15 处「文件:行号」引用与
+    doc-refs SNAP 键一起挪到复算后的行号；快照【值】一字不改）
+  · 动机：round353-356 在 dispatch.ts / cards.ts / dev-seed.ts 里插了 595+ 行（门 4 接线
+    即 round358 的前置部分 + cards.ts 172 行处插 21 行），十几处文档引用「文件:行号」因此
+    指向了错误的行。引用指向的那一行【内容没变】，这一批改的只是数字 —— 把行号复算到
+    漂移后的位置，并逐条按 trim 后逐字比对过（脚本 .workbuddy/round357-repin-coords.py，
+    EDITS 数组 34 条，涉及 docs 12 文件 + test/arch/doc-refs.test.ts 17 条 + cards.ts 1 条；
+    docstring 说「15 处」是因为它数的是【处】不数 SNAP 键/注释展开）。
+  · 复算档（实测，逐条 trim 比对）：
+      · cards.ts INSERT 句 252 → 273（INDEX / 0063 / 0049 三处）
+      · dispatch.ts topmost 判据段 382-387 → 437-442（功能优化设计，六行一字未变）
+      · dev-seed.ts commitOrgGraph 调用点 351 → 391（0011 / delegation-rules）
+      · dev-seed.ts createCard 调用点 432 → 501（0026 两处 / 0049 / 0053）
+      · HUMAN_EDGES 定义 257 → 281（0041）
+      · HUMAN_EDGES 出边维度的类型 238 → 262（0043）
+      · dispatch.ts:1638 → 1799（0048 两处，round312 复算坐标）
+      · engine/charter.ts:448 与 dispatch.ts:1527 → 1688（0049，round312 复算坐标）
+      · design 文档 0050 的 1393 → 1554 / 102 → 126（两处）
+      · doc-refs SNAP 键与文档正文【成对】改，值逐字取被引那一行（test/arch/doc-refs.test.ts 17 条）
+  · 验证：全部改动文件跑 biome（净新增 0）+ test/arch 全套 35 文件 / 541 例全绿
+    （doc-refs 那 17 条 SNAP 键逐字对上）。
+  · 与 round356 的分界线：round356 的 doc-refs 改 8 格是 0010 迁移引入的坐标漂移；
+    round357 是 353-356 累计未清的【剩余】坐标债一次清完。两批不重叠（逐条比对过旧串）。
+── 状态 ────────────────────────────────────────────────────
+  · 未 commit。改动全部是文档行号与 SNAP 键，无生产逻辑变更。
+
+■ round358（门 4 全量接线：§8.2 门控内核 + 证据包接进 dispatch，CEO 简报 B9 三档中拍【全量】，round358 / O4 + O5）
+  · 交付（四件套齐）：
+      ① 生产改动：
+        - packages/hub/src/evidence/turn-bundle.ts（新）：证据包生产者。三条诚实口径写在文件头：
+          字节落文件系统（§5.10 制品不进 SQLite）、sha256 由 EvidenceStore.verify 对账出布尔、
+          包内主张只有角色自报那一句（metrics 整格留空，诚实边界写「没有独立核验过任何东西」）；
+          字节在事务外、账在事务内（拆两函数）。
+        - packages/hub/src/engine/dispatch.ts（+595 行）：「门 4」块 —— `plan.move` 且 pass 且
+          IN_REVIEW 且独立审阅全过之后，produceTurnArtifact（落字节并对账）→ evaluateGate
+          （§8.2 内核，criteria 走 gateCriteriaForRoleOrEmpty 同 runtime）→ 非 pass 不跃迁 +
+          一张 `gate-blocked:` 卡；`review_gates` / `evidence_bundles` 两张表第一次有了生产写入方。
+          装配自检两处：方向必须登记过 HANDOFF_BUNDLE_TYPES、criteria 条数与落账一致。
+          天花板（已在代码里写死）：bundle 恒不带 metrics ⇒ 任何岗位书标准都落 unresolved ⇒
+          escalate；真实修法是两步、都在 CEO 手里（① 写岗位书；② 给引擎审阅接一个读真实核验的评估器）。
+        - packages/hub/src/graph/gates/author-reviewer.ts / review-preview.ts：跟随 dispatch 用量微调。
+      ② 测试适配 19 发（CEO 拍板「把 19 发适配到全量拦」，见任务 #4/#5/#6）：
+        - engine/seat-card.test.ts 9 发：dispatch 把人席当终点时被门 4 全量拦下，
+          补卡机制改由 approveCard 侧承担（gate-blocked 卡可点但不推进）。
+        - engine/dispatch.test.ts 5 发：审阅独立性 blocked/approved 两段改期望被门 4 拦
+          （moved:false + gate-blocked 卡）；判据 3 加边修复测试改断言「拦它的门从判据 3
+          换成门 4」；三条 ReviewDecided 测试挪到打回（handoff）边 —— pass 被门 4 拦不再发
+          review_decision，而打回 review.ok=false ⇒ 门 4 不触发 ⇒ 照旧放行并落判定。
+        - acceptance/idea-to-delivered.test.ts 2 发：端到端终点从 DELIVERED 改成
+          「第一次撞见门 4 的 gate-blocked 卡」（A 发 4 轮 1 点击；B 发全家同族先过门 3
+          豁免 再撞门 4，5 轮 2 点击）；
+        - acceptance/rejected-waiver-still-asks.test.ts 1 发：「批准仍然终结」收窄为
+          「豁免卡不再重建」，gate-blocked 卡另算（不同键族，与本发要钉的那一格无关）；
+        - acceptance/phase3.test.ts 2 发：`evaluateGate` 调用方名单从 [verifier.ts] 长成
+          [dispatch.ts, verifier.ts]（门 4 生产接线）——断言设计出来要红的形状；
+          确认缺口【未消除】：verifyFix 仍零调用方 + dispatch 路线 bundle 恒无 metrics ⇒
+          结构性到不了「按新标准放行/拦截」，blockers 清单第一条同步改写。
+      ③ 探针/证据（.workbuddy/）：probe358-gate-block.mts（门 4 卡键/审计行形状）、
+        probe358-external-move.mjs（被拦轮 + runTurn 期间外部挪走 ⇒ RESOLVED 不抛、状态保持
+        BLOCKED、gate-blocked 卡上桌）、round358-* 一堆修 mojibake/sep/patch 的脚本 + r358-*.txt
+        失败记录（dispatch 5 发 / seat-card 9 发实测截图）。
+      ④ 主张链：
+        - 适配的立场全部写进测试文件头与断言注释（「round359 语义变更（门 4 全量拦）」字样的
+          解释块），每个 moved:true→false 旁边都写清「被哪扇门拦、为什么那扇门该拦」。
+  · 实测确认的门 4 行为（probe 跨三种装配验证）：
+      · gate-blocked 卡键 `gate-blocked:<producer>-><reviewer>#r<round>:<decision>`，
+        round 号随每次被拦轮递增 ⇒ 「建了又点、点了又建」的循环不会撞去重键（round359 探针实测
+        r0..r7 连建），对被拦轮无解 —— 这是全量拦的代价面，CEO 拍板时已知。
+      · 被拦轮审计：RoleTurnReported（tool_call）+ payload 含 gate_decision / gate_bundle_id /
+        gate_round_no / gate_integrity_ok / gate_sha256，note = evaluateGate 第 1 步
+        「没有任何验收标准可判」那句原文；ReviewDecided 永不写（plan.move=false）。
+      · 被拦轮对 tasks 行零写入（状态边 guard 挡在 WRITE_EDGE_SQL）；approveCard 点
+        gate-blocked 卡 = decided + edgeExists:false（IN_REVIEW 不在 HUMAN_EDGES）。
+  · 数字 reconcile（先对账再计数）：
+      · 测试适配 19 发 = seat-card 9 + dispatch 5 + acceptance 5（2+1+2）。
+      · round358 后 hub 全量 104 文件 / 2425 通过 / 6 跳过（2026-11-23 实测）。
+      · dispatch.test.ts 87 例、seat-card.test.ts 30 例、acceptance 8 文件 70 例全绿。
+  · 已知等价项（不当 bug 修，写下来）：被打回/被门 4 拦的轮次不写 review_decision ——
+    这是「拦下不算做成判定」的设计选择，与 round356 去重同一条立场；打回那条边
+    （handoff）在门 4 下仍照旧放行，因为门 4 只在 pass 上触发（review.ok=false ⇒ 不产生证据包）。
+── 状态 ────────────────────────────────────────────────────
+  · 未 commit。生产改动 4 文件（dispatch.ts / turn-bundle.ts 新建 / author-reviewer.ts /
+    review-preview.ts）；测试适配 8 文件；文档 0（门 4 语义写进代码注释与简报 B9，正文台账本轮补）。
+  · 与 CEO 简报 B9 的关系：简报建议选「最小」，round358 实际做的是【全量】—— 后续对话中
+    CEO 以「把 19 发测试适配到全量拦」拍板追认（任务 #3 的问答题决策），本台账以该拍板为准。
+  · B9 仍在台账上的另一半：门控语义定案后「最小/全量把 sameFamilyReviewBlock 那一支也换成
+    同一套证据包口径」仍可做；已登记的代价照旧（写岗位书不会让门通过，见 dispatch.ts 天花板）。
+
+■ round359（19 发适配的收口：把上一轮拍板的「全量拦」落成 19 发既有测试的新期望语义，
+    四件套以测试文件为主、无生产改动）
+  · 这一轮的【定义】与 round358 的分界：round358 是生产接线，round359 是把它对 19 发既有测试
+    的冲击逐发适配（CEO 拍板「把 19 发测试适配到全量拦」，任务 #4/#5/#6，全绿）。
+  · 交付：
+      ① 测试适配（全部按「门 4 全量拦」的新语义重写/收窄，零生产改动）：
+        - seat-card.test.ts（任务 #4，30/30 绿）：describe 主标题改为「dispatch 把人席当终点时
+          —— 门 4 全量拦下，补卡机制改由 approveCard 侧承担」；测试 1/2/3/4/5 与
+          twoPendingCards() / golden path 全部按 gate-blocked 语义重写。
+        - dispatch.test.ts（任务 #5，87/87 绿）：5 发适配见 round358 ②。
+        - acceptance 3 文件（任务 #6，8 文件 70/70 绿）：5 发适配见 round358 ②。
+      ② 探针（.workbuddy/probe359*/ 与 packages/hub/test/engine/__probe359-*.test.ts 临时版）：
+        确认 A/B 两发在门 4 下 walk 的真实轨迹（A 发停在 gate-blocked#r0、B 发先 same-family
+        后 gate-blocked#r0）、点卡不推进（edgeExists:false）、被拦轮放行循环 r0..r7（round 键
+        递增不撞去重）。探针临时文件已删，结论写进测试注释。
+      ③ 主张链：每处 moved:true→false 的适配旁边都有「round359 语义变更（门 4 全量拦）」注释块，
+        写明旧断言、新语义、以及为什么那扇门该拦；phase3 两发额外写了「缺口真的消了吗」的分析
+        （未消：verifyFix 零调用 + bundle 无 metrics ⇒ 天花板 escalate）。
+  · 验证：
+      · hub 全量 104 文件 / 2425 通过 / 6 跳过（2026-11-23 14:02 实测，20.2s）。
+      · biome 净新增 0（本轮无生产文件改动）。
+      · tsc 0 错（见任务 #8 收口验证）。
+  · 数字 reconcile：19 = 9 + 5 + 5；dispatch 87、seat-card 30、acceptance 70 —— 与
+    round358 的基线数字逐一对应。
+── 状态 ────────────────────────────────────────────────────
+  · 未 commit。本轮无生产改动；测试 8 文件（含适配时改的注释与断言）。
+  · 台账收尾（round357/358/359）与分层提交见任务 #3/#7/#8。
+

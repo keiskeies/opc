@@ -459,7 +459,7 @@ engine/runtime.ts 的 rolePrompt                    ← 真的提示词，只有
       全量 `4 failed | 2461 passed | 6 skipped` ⇒ 至少一发红，达成。
       但四发里**有一发的红不来自它自己的主断言**：「库里一个版本都没有 ⇒ 明说没有岗位书」
       那一发的主断言在变异体下**成立**（一个"永远产出没有岗位书"的变异体，使"你没有岗位书"
-      这句话为真），红的是它旁边那条**反向对照** `runtime.test.ts:598`（round305 按语义重指；round312 同一轮内被顶漂两次 —— `seedCharter` 上提、随后 `biome check --write` 整份重排。原写 `:465` 从写下起就没对得上任何一次提交，口径与归因记在 `doc-refs.test.ts` 对应那一格）。
+      这句话为真），红的是它旁边那条**反向对照** `runtime.test.ts:599`（round305 按语义重指；round312 同一轮内被顶漂两次 —— `seedCharter` 上提、随后 `biome check --write` 整份重排。原写 `:465` 从写下起就没对得上任何一次提交，口径与归因记在 `doc-refs.test.ts` 对应那一格）。
       ⇒ 写反向对照是有价格的：它把一条本来会恒绿的断言变成一条**只有附录才杀得死**的断言。
       这条价格必须付，但**要知道是谁杀的** —— 否则下一次有人把"重复的"附录精简掉，
       主断言仍绿而杀掉变异的没了（0058 §4 那张死因表）。
@@ -835,6 +835,17 @@ engine/runtime.ts 的 rolePrompt                    ← 真的提示词，只有
 所以 §8.2 第 2 条「通过必须附可验证证据」现在**无处可满足**。
 门控那一侧的写法是对的（`integrityOk` 为 `undefined` 时进 `unresolved` 而不是放行），
 但**没有任何生产代码算这个布尔**。
+⚡ **round358 翻向（门 4 接线）**：上面那句「没有任何生产代码算这个布尔」**已过期** ——
+`evidence/turn-bundle.ts` 的 `produceTurnArtifact` 在生产路径上算 `integrityOk`（恒布尔，
+无 `undefined` 那一支），`registerTurnEvidence` 把包登记进 `evidence_bundles`，
+`writeGateDecision` 落 `review_gates`；`engine/dispatch.ts` 的门 4 在建事件之前
+调它并传 `evaluateGate`。而 `evidence/store.ts` 至此【模块可达】（链：
+`hub:engine` CLI → `engine/hub-work.ts` → `engine/work.ts` → `store.ts` 的
+`artifactsRoot`；dead-modules 基线条目 round358 摘除）。
+⚠ 但 O5 的【最小证据形状】那半没有全做到：`verify()` 对磁盘上那颗产物核验的内容可信
+（§8.2 第 2 条的「内容可信」那一半）仍靠岗位书标准撑，而 role_charters 今天 0 行 ⇒
+每一轮审阅都会在门 4 被拦成一张卡。那是 CEO 拍的「全量拦」（0 标准不放行），
+不是这一格漏了 —— 见 dispatch.ts 文件头 round358 那一段。
 
 **目标。** 交接带证据；门控拿到一个真的布尔；`integrityOk === undefined` 这一支
 在生产里不可达（而不是像今天这样：它是唯一一条不会误伤的路径）。
@@ -1590,7 +1601,7 @@ resolver 有了第一位读者），原文按口径留着。~~**「没有任何�
 | **r2** 超时执行者已接进心跳巡检（serve/assemble.ts 的每一跳调 runTimeoutPass，到期卡真的动） | test/arch/claims-registry.test.ts › r2 判据：serve/assemble.ts 必须含 runTimeoutPass( 调用 | 2026-11-17 |
 | **r3** `makeChannelActorResolver`（把 channelId → 平台 → 角色的那座桥）的读者在场：channels/approval-bridge.ts 的 actorFor 就是它（round280 之前这条是「零调用方」，判据方向随之翻向「读者必须在场」，同 r2 那次的剧本） | test/arch/claims-registry.test.ts › r3 判据：channels/approval-bridge.ts 在场且调用 makeChannelActorResolver( | 2026-11-17 |
 | **r4** BudgetPaused 事件今天零发布点（BudgetTracker 没有 new 点） | test/arch/claims-registry.test.ts › r4 判据：扫 src 里 new BudgetTracker（实例化即发布点） | 2026-11-17 |
-| **r5** review_gates 表在 src 里零 INSERT（db/integrity.ts 与 role-memory.ts 都这么说） | test/arch/zero-producer.test.ts › REGISTRY 里的 review_gates zero 条目（双向核对） | 2026-11-17 |
+| **r5** review_gates 表当年在 src 里零 INSERT（db/integrity.ts 与 role-memory.ts 都这么说过；round358 门 4 接线后 turn-bundle.ts 的 writeGateDecision 成为第一个写入方，该句翻作历史） | test/arch/zero-producer.test.ts › REGISTRY 里的 review_gates zero 条目（双向核对） | 2026-11-17 |
 | **r6** src 里没有任何 INSERT INTO approvals（该句是已过期主张的原文，登记为引用） | test/arch/zero-producer.test.ts › REGISTRY 里的 approvals quoted 条目（原文被引用故为 quoted） | 2026-11-17 |
 | **r7** policy/auto-approve.ts 无生产【写者】（round269 起读路径有读者：approvals/query.ts 的影子判定调 autoApprove；写者=recordAutoApproval 的调用方仍为零） | test/arch/claims-registry.test.ts › r7 判据：扫 src 除定义文件外对 recordAutoApproval 的调用 ＋ query.test.ts ⑦ 的调用方名单 | 2026-11-17 |
 | **r8** harness/ 整目录对外零 import（约 3300 行安全层没有任何 src 内 importer） | test/arch/dead-modules.ts › BASELINE 里 harness/* 四条（双向）；独立判据见死模块哨兵验收 | 2026-11-17 |
@@ -1653,7 +1664,7 @@ O6-2 gateway 接上 ──→ O7 预算停 ─────┘（R1 需要证据 
 | Task 1.8 | `pnpm verify`；门控判定分支覆盖率 ≥ 95%；`packages/hub/test/acceptance/phase1-gates.test.ts`（原文「三条」，实测 13 发） | O5（证据包 = 门控的输入）、O4（门控本身）、O2（验收标准的来源） | ❌ 同上；覆盖率阈值另见 debt ⑤ |
 | Task 2.9 | Playwright E2E `test/e2e/ceo-loop.spec.ts`：起 Hub + Web，点批准到 DELIVERED，全程无命令行；人工核对键盘审批 ≤ 20 秒 | O13（交付形状就是这一条） | ⚠ **round291 起变成「半可复核」**：工件建了、`pnpm test:e2e` 绿（1 passed / 1.5 s），但**验收句最后一格「更新为 DELIVERED」没有断言** —— 批准只走完人边那一跳，其后全是 agent 边，浏览器里没有任何一处点得动。⇒ 症状从【工件没建】换成【验收句要求一次真花费】，那一格是 CEO 决策不是测试缺陷，见 §7 第 16 格 |
 | Task 3.8 | `pnpm verify`；`packages/hub/test/acceptance/phase3.test.ts`：改验收标准 ⇒ 门控结果变化；自动审批可追溯 | O2、O4、O8（组织可编辑）、O9（自动批准可追溯） | ❌ `verify` 恒红；那 13 发**单独跑是绿的** |
-| Task 4.7 | E2E `test/e2e/mobile-approval.spec.ts` + 飞书沙箱手工验证记录 | O12（IM 最后一公里）、O13（移动端只做决定）、O11（一次一签） | ❌ 两个工件都没有：spec 没建。⚠ 原句那半「全仓**没有任何一个真的 IM 适配器文件**」在 round281 过期（`channels/feishu.ts` 在），沙箱手工验证**今天仍然做不了**，只是卡的东西换了：真凭据 + 那张投递台账（~~发卡那一路零生产调用方~~ **⚡ round293 撤回这半句**：投递台账在 r17 已接进心跳，`runDeliverPass` 的调用点在 `packages/hub/src/serve/im-channels.ts:377`（本轮 `grep` 现数）⇒ 「接了推不出去」也过期了，**今天只卡真凭据这一格**）。⇒ 症状从「无从接」变成「接了推不出去」再变成「只差凭据」 |
+| Task 4.7 | E2E `test/e2e/mobile-approval.spec.ts` + 飞书沙箱手工验证记录 | O12（IM 最后一公里）、O13（移动端只做决定）、O11（一次一签） | ⚠ **round353j 改口**：~~❌ 两个工件都没有：spec 没建~~ **spec 已建**（`test/e2e/mobile-approval.spec.ts` 在盘上，`pnpm test:e2e` 3/3 全绿，含可逆卡一次一签 + 不可逆卡 403 双防线两发 = round353j 现跑读数），剩下的钉只剩【第二工件：飞书沙箱手工验证记录】→ CEO 门（真凭据）。⚠ 原句那半「全仓**没有任何一个真的 IM 适配器文件**」在 round281 过期（`channels/feishu.ts` 在），沙箱手工验证**今天仍然做不了**，只是卡的东西换了：真凭据 + 那张投递台账（~~发卡那一路零生产调用方~~ **⚡ round293 撤回这半句**：投递台账在 r17 已接进心跳，`runDeliverPass` 的调用点在 `packages/hub/src/serve/im-channels.ts:377`（本轮 `grep` 现数）⇒ 「接了推不出去」也过期了，**今天只差真凭据这一格 + 那份手工验证记录**）。⇒ 症状从「无从接」变成「接了推不出去」再变成「只差凭据 + 手工记录」 |
 | Task 5.8 | E2E 一个真实缺陷修复任务跑通全链路，含 `forbidden_flags` 拦截一次人工尝试 | O6（四层预防 / `forbidden_flags`）、O7（预算门） | ❌ 纯人工，无可核对工件（debt ⑥，机制边界） |
 
 **这张表唯一一条本轮新量到的读数**：表里 4 个 ❌ 的理由**和文档原来写的不一样**。
@@ -1666,6 +1677,10 @@ O6-2 gateway 接上 ──→ O7 预算停 ─────┘（R1 需要证据 
   `locator("#x").textContent()` 读到 `ok`（`LAUNCH_OK version=159.0.8154.6`）。
 
 ⇒ **「装不上」是过期的**，那两个 ❌ 的真实理由只剩「工件没建」+「没决定要不要为它加这个依赖」。
+（⚡ **round353j 更正这半句**：~~「工件没建」~~ 现只剩【第二工件缺】+【没决定要不要为它加这个依赖】。
+`test/e2e/ceo-loop.spec.ts` 与 `mobile-approval.spec.ts` 都在盘上且 `pnpm test:e2e` 3/3 绿（本轮现跑）；
+Task 2.9 是【半可复核】（验收最后那格 DELIVERED 无断言=CEO 决策，见 §5.1 与 Task 4.7 格），
+Task 4.7 只剩飞书沙箱手工验证记录=真凭据 CEO 门。决策面仍只含产品判断，不含「装不上」。）
 决策面因此**变窄了**：它不再包含「装不装得上」这一项，而只剩产品判断。
 复算：`cd .workbuddy/probe278 && npm i --ignore-scripts playwright @larksuiteoapi/node-sdk && npx playwright install chromium && node launch.mjs`。
 
@@ -1715,6 +1730,13 @@ O6-2 gateway 接上 ──→ O7 预算停 ─────┘（R1 需要证据 
    零调用方那条**整条过期**：`approvals/query.ts` 的读路径是它的第一个生产调用方
    （O9 动作 1，影子判定只报不批）。`EvidenceStore` 对外零 import **本轮复核仍成立**
    —— src 里只有注释与类型名提到它，没有一处 import `evidence/store.js`。
+   ⚡ **round358 翻向**：这句「没有一处 import `evidence/store.js`」**已过期** ——
+   `engine/work.ts:40` 现在 `import { artifactsRoot } from "../evidence/store.js"`，
+   链是 `hub:engine` CLI → `engine/hub-work.ts` → `engine/work.ts` → `store.ts`
+   （`--evidence-root` 缺省时真调 `artifactsRoot()`），`evidence/store.ts` 从此
+   【模块可达】，dead-modules 基线条目 round358 摘除。这正是这段自我警告预言过的
+   那一类：**「待复核」的读数没有被机械盯住，直到有守卫把它踢出来**（dead-modules
+   方向 B 红行点名）。
    这一条自我警告【被它自己预言中了】：写下它的人说「次要结论按待复核读」，
    而上面两条正是当时没复核的那一类 —— 包括我自己在这一轮里顺手把
    `EvidenceStore` 一起划掉、复核之后发现它还成立。
@@ -1738,7 +1760,7 @@ O6-2 gateway 接上 ──→ O7 预算停 ─────┘（R1 需要证据 
    O7-1 还没做，仍按本篇原话「要 CEO 拍」读。
 7. **`events/batch` 那一格我原先写错了，错因是【按 basename grep】。**
    我原先写「它被 `events/recorder` 用」，依据是在 `recorder.ts` 里 grep 到了 `batch`。
-   实际命中的是 `recorder.ts:393` 的一个**局部变量** `const batch = this.#pending.splice(...)`。
+   实际命中的是 `recorder.ts:498` 的一个**局部变量** `const batch = this.#pending.splice(...)`。
    它今天和 `harness/*` 是同一族：**自己也是零 importer**。
    ⇒ 这条错的形状是**「子串命中当成引用」**，和本篇 §7 第 1 条那条
    「按说明符子串匹配造出 33 个假死模块」是**同一个病，换了宿主**：
@@ -2589,7 +2611,7 @@ O6-2 gateway 接上 ──→ O7 预算停 ─────┘（R1 需要证据 
     另一些读者取**值里的** `role_id`（`subordinateRoles`、`rootsOf`）。
     键=`alice`／值=`bob` 时升级判据那句 `上级 === CEO` **两头各拿一半 ⇒ 永不成立 ⇒
     升级永不触发** —— 而本仓自己把「每一轮真烧一次子进程、人类席位永远等不到」
-    列为那里最贵的那类故障（`dispatch.ts:382-387`）。
+    列为那里最贵的那类故障（`dispatch.ts:463-468`，round357 复算：382 → 437，六行一字未变）。
 
     **落点选 schema 而不是 `validate.ts`**，三个理由：`rejectMalformed` 在三个入口各调一次、
     判的都是**本次变更之前**那张图，而 `add_edge` 那条根本不进 `validateNewNode`

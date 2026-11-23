@@ -1,0 +1,25 @@
+{
+  "$comment": [
+    "B5（CEO 2026-11-22 拍板，0007 §5）：test/ 纳入 tsc，这是【清零后的 0 错硬门】。",
+    "语料 = 全部测试文件 + vitest.config.ts，与 .workbuddy/tsconfig.tests.json 同面。",
+    "两份的关系别混：.workbuddy 那份是【棘轮】（按目录允许 ≤N 错，r19 钉着、不许删）；",
+    "本份是【硬门】（一条错都不许，进 pnpm verify 的 typecheck 链尾）。",
+    "语料清到 0 之后，棘轮恒绿（0 ≤ 任何配额），它仍在挡『测试目录被改窄』那一条；",
+    "硬门挡的是『新增任何一条测试类型错』。两把尺子各挡各的，别把棘轮读成冗余就删。",
+    "跑法：npx tsc -p tsconfig.test.json --noEmit（应 0 错、exit 0、无输出）。",
+    "⚠ 改这里的 include 会让硬门的语料跟着变窄，而棘轮有一条 filesChecked 下限挡着",
+    "（test-type-baseline.test.ts），改窄 include 请连着看那一发。"
+  ],
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "composite": false
+  },
+  "include": [
+    "test/**/*.ts",
+    "test/**/*.tsx",
+    "packages/*/test/**/*.ts",
+    "packages/*/test/**/*.tsx",
+    "vitest.config.ts"
+  ]
+}

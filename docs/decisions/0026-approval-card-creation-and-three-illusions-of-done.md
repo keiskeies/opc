@@ -48,7 +48,7 @@ expect(srcFilesMatching(/INSERT\s+INTO\s+approvals/iu)).toEqual([]);
 
 - 「**创建路径存在**」—— 已做（42 条用例钉着）；
 - 「**有人调用它**」—— **没做**，`createCard` 在 `src` 里零调用方。
-  【round322 复核：「`createCard` 在 src 里零调用方」已过期。`serve/dev-seed.ts:432`
+  【round322 复核：「`createCard` 在 src 里零调用方」已过期。`serve/dev-seed.ts:501`
   现在调用它（`pnpm dev:seed` 开发种子入口，dev 专用正当建卡路径，卡片键带
   `dev-seed:` 前缀）。精确说：`createCard` 有 **dev 专用入口**、**运行时生产**仍零
   （三个生产建卡点仍绕过它直调 `insertCard`，0049 §11 记的那一族）。原句保留。】
@@ -467,7 +467,7 @@ SQLite 升序把 NULL 排在**最前**，而 0004 之前建的卡（没有 `crea
 
 - **端到端**：真起 Hub、真建一张卡、真断一次线、真比 `pendingTotal` 与事件累计值 —— 要 UI 那一半。
 - **`createCard` 有生产者**：零。图那条链没接（§1）。
-  【round322 复核：「`createCard` 有生产者：零」已过期——`serve/dev-seed.ts:432`
+  【round322 复核：「`createCard` 有生产者：零」已过期——`serve/dev-seed.ts:501`
   是它的调用点（dev 专用种子入口，非运行时生产；运行时生产仍零）。见 §1 复核块。】
 - **超时行为**：零执行者，且这是刻意的（§3）。
 

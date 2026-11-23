@@ -283,12 +283,12 @@ M1/M2 说明扫描静默失效时，扫描断言自己永远「绿」；M3 说�
 | 站点 | 判定 |
 | --- | --- |
 | `cli.ts:634` 只记录不上抛（**坐标漂过三次，原 `:489`、`:596`、`:631`** —— 第一次是 O1-1 的桩写权限守卫插在同文件上半部，第二次是 O1-2 之后 `cmdRun` 尾部那段「桩图跑到 END vs 等人批准」的分叉插得更靠上，第三次是 `biome check --write` 把头部 import 拆成多行（语义一字未动照样漂 3 行，与 0006 §5 记的同一发）；快照同改，此处留话不悄悄改） | 安全。`catch` 里 `return { code: 1 }`——失败换成了退出码，不是丢了 |
-| `db/driver.ts:64`、`db/migrate.ts:120`、`checkpoint/saver.ts:378`、`checkpoint/tx-scope.ts:86`、`graph/audit-middleware.ts:167` | 安全，且方向正确：都在回滚路径上，注释写着【事务可能已被 SQLite 自行中止，别盖掉原始异常】——吞掉回滚失败是为了保住真正那条错误 |
+| `db/driver.ts:64`、`db/migrate.ts:120`、`checkpoint/saver.ts:378`、`checkpoint/tx-scope.ts:86`、`graph/audit-middleware.ts:184` | 安全，且方向正确：都在回滚路径上，注释写着【事务可能已被 SQLite 自行中止，别盖掉原始异常】——吞掉回滚失败是为了保住真正那条错误 |
 | `db/migrate-cli.ts:120`、`internal/direct-run.ts:19` | 安全。`isDirectRun` 判不出时返回 false 是唯一合理解释：宁可什么都不做，也不要被 import 时跑副作用 |
 | `db/write-queue.ts:258`、`:284` | 安全。`return this.#rejected(e)` 是把失败交给调用方，不是就地消化 |
-| `events/recorder.ts:395` | 【真缺口】见下 |
+| `events/recorder.ts:500` | 【真缺口】见下 |
 
-`#flush()` 逐条 `try/catch`，`recorder.ts:268` 的注释写着「默认必须【可见】而不是静默」。`git grep` 显示 `onBroadcastError`
+`#flush()` 逐条 `try/catch`，`recorder.ts:366` 的注释写着「默认必须【可见】而不是静默」。`git grep` 显示 `onBroadcastError`
 在 `test/` 里【零命中】。变异实测，补断言之前：
 
 - ME 删掉 `catch` 里 `this.#onBroadcastError(e)` 这一行（彻底静默）→ 存活（`Tests 32 passed`）

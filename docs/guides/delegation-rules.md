@@ -152,7 +152,7 @@
 
 1. ~~**三层校验本身接得上，但那条通道零生产调用方。**~~【2026-11-19 改口：接上了】
    `org/commit.ts` 的 `applyChange` 照旧按 §2 的顺序调那三个校验，而**`commitOrgGraph` 今天有
-   生产调用方**：`real-deps.ts:987`（POST /org 提交通路，`app.js` 组织页真发）与 `dev-seed.ts:351`；
+   生产调用方**：`real-deps.ts:987`（POST /org 提交通路，`app.js` 组织页真发）与 `dev-seed.ts:391`；
    `http/org.ts` 头部「一直没有生产调用方」那句注释同样已过期。React Flow 专门编辑器
    （Task 3.2）确实还没做（复算：web/desktop 里 react-flow 零命中），但「改组织图只能直接写库」
    不再成立；仍成立的是**直接写库会绕过这三层校验的全部** —— 这一条仍是本节最实用的一条，

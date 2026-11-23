@@ -23,7 +23,7 @@ HEAD 里有没有写入方】分堆，现在是时而且为假的 **7 句、归�
 | # | 句子位置 | 主张 | 实际 | 何时变假 |
 | --- | --- | --- | --- | --- |
 | 1 | `db/integrity.ts` 文件头 ④ `review_gates / harness_calls 的 INSERT 是【零】`；同文件 §④ 规则段 `review_gates / harness_calls 在 src 里零 INSERT`；`harnessCallCheck` 文案 `harness_calls 是空的（src 里零 INSERT，0018 §9 复算）` | harness_calls 零 INSERT | `engine/runtime.ts` 的 `INSERT_HARNESS_CALL_SQL`（广告 commit 42c8eea = 0041 引擎路线那一批；生产路径经 `engine/driver.ts` / `serve/charter-pump.ts` 调） | 0041 把 harness_calls 复用为会话存储（`engine/runtime.ts` 文件头「为什么会话落在 harness_calls」自己写着这件事） |
-| 2 | `policy/auto-approve.ts` ① 分支 `src 里没有任何 INSERT INTO approvals`（0049 §11 点名的现在时假话） | approvals 没有 INSERT | `approvals/cards.ts:252` 就是那句 INSERT，经 `insertCard` 被三个生产调用方用着（本行原写「第 237 行」，见下方 ⚠⚡） | 0007 建卡模块补上为止（0049 §11 已记过） |
+| 2 | `policy/auto-approve.ts` ① 分支 `src 里没有任何 INSERT INTO approvals`（0049 §11 点名的现在时假话） | approvals 没有 INSERT | `approvals/cards.ts:291` 就是那句 INSERT，经 `insertCard` 被三个生产调用方用着（本行原写「第 237 行」，round357 复算 252 → 273，见下方 ⚠⚡） | 0007 建卡模块补上为止（0049 §11 已记过） |
 | 3 | `charter/budget-sync.ts` `budgets.consumed_cents 除 ADD_CONSUMED_SQL 之外零写入方` | 那一列只有一个自增作者 | `engine/runtime.ts` 的 `ADD_TASK_BUDGET_SQL` 也写同一列（两处、都是 `+ ?`） | 引擎路线接上（0062 之后） |
 | 4 | `channels/abstraction.ts` `读写方 **0 处** —— 全仓没有任何一条 SQL 碰过它` | im_bindings 无写入方 | `bindings/im.ts:164` 就是那句 INSERT（实测：1 INSERT + 2 UPDATE + 3 SELECT），HTTP 侧 `http/bindings.ts` 三条路由已接 | 0028 起（0028 自己就是来接那层的） |
 | 5 | `channels/abstraction.ts` `同 0027 §0 那张 im_tokens 零写入方`（类比用的第二句） | im_tokens 无写入方 | `http/tokens.ts:208` 插 im_tokens | 0028 起 |

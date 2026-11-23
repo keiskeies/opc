@@ -121,7 +121,7 @@ $ grep -rn "consumed_cents" --include='*.ts' packages/hub/src
 ## 7. 我这边做错的三件事
 
 1. **夹具第六次说谎，而且这次谎在两处，其中一处「用例根本不会红」。**
-   - `bundle_type` 我凭印象写成 `test_report`，实测 `HANDOFF_BUNDLE_TYPES`（`contracts/evidence.ts:165`）里 `dev_to_test → code_diff`。后果不是「用例红」—— 每一发 `evaluateGate` 都在规格 §8.1 那一维 reject，而**「改了标准 ⇒ 结论翻转」那两条用例仍然全绿**（它们只看 `decision`），**岗位书那一维从未进入判定**。这是这一族最坏的形状：夹具假装具备的性质恰好是用例要证的性质，而**分辨不出来的方式是「全绿」**。
+   - `bundle_type` 我凭印象写成 `test_report`，实测 `HANDOFF_BUNDLE_TYPES`（`contracts/evidence.ts:192`）里 `dev_to_test → code_diff`。后果不是「用例红」—— 每一发 `evaluateGate` 都在规格 §8.1 那一维 reject，而**「改了标准 ⇒ 结论翻转」那两条用例仍然全绿**（它们只看 `decision`），**岗位书那一维从未进入判定**。这是这一族最坏的形状：夹具假装具备的性质恰好是用例要证的性质，而**分辨不出来的方式是「全绿」**。
    - `evidence_refs` 我写成 `[0]`（下标），实测是**字符串路径**，当场 `TypeError: r.split is not a function`。这一发是红的，比上一条便宜得多。
 2. **`metric:coverage >= 80` 配 `action: reject`。** 0008 §7.3 末段专门写着我在这个题面上错过一次：condition 的语义是【不合格的情形】，`>= 80` + reject 表达的是「覆盖率好就拒」，症状是**全绿而门控从不拦任何东西** —— 本仓点名最难发现的那一形。**我隔了几轮又写了一遍。** 区别只是这次被自己新写的夹具用例当场拦住。记这条不是因为红了，是因为它证明「把教训写进文档」不等于「下一次的我会去读它」。
 3. **报错文案路由错，而且第一版断言恰好分辨不出。** camelCase 草案里没有 `role_id`，所以「roleId 不一致」那条**先**命中，把人指向「角色名拼错」这条死路（真问题是十四个键名全错）。我先写的断言是 `toContain("snake_case")` —— 而「不一致」那句里本来就带 snake_case 字样，于是**断言绿而诊断仍然错**。修法是先单独认一次 camelCase 形状，再加一条 `not.toContain("不一致")`。这条的价值在反向对照那半：防的是「有人在错误文案后面追加一句 snake_case 提示」—— 断言立刻转绿而主诊断仍然是错的。

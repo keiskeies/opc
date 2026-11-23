@@ -172,7 +172,7 @@ pending 卡 = 2 ["handoff-block:dev->dev / escalation","seat:ESCALATED_TO_CEO:4 
    不保证「会自己走到人席」。**顺序是刻意的**：先建入口再建泵 ——
    先建泵只会更快把任务送进那一格（0045 §6 同一条判断）。
    【round321 复核：本条的「至今没有生产调用方」已过期。`advance()` 今天有两个生产调用方：
-   `engine/work.ts:449`（`runTurn` 那一轮）与 `serve/driver-pump.ts:777`（`--driver-pump` 泵，
+   `engine/work.ts:483`（`runTurn` 那一轮）与 `serve/driver-pump.ts:780`（`--driver-pump` 泵，
    经 `assemble.ts` 每心跳派发）—— 「常驻驱动器」在 0048 落了真泵，这一格「没人让任务自己走」
    已由生产代码补上。本篇写作时的读数保留。】
 4. **`MEETING_REQUIRED` / `BLOCKED` 仍然是死路**（两张边表里都没有出边）。

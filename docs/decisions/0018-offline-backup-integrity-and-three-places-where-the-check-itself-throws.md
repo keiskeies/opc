@@ -161,7 +161,7 @@
   【round322 复核：本段「零生产调用方」已过期。`runIntegrityScan` 现在由
   `heartbeat/maintenance.ts:257`（每日巡检）与 `serve/assemble.ts:860`（启动完整性检查、
   onMainThread 分支）调用；`createBackup` 由 `db/backup.worker.ts:131`（离线备份 worker）
-  调用；`serveHub` 由 `serve/assemble.ts:1217`（HTTP serve 命令）调用。堵点（Task 6.1
+  调用；`serveHub` 由 `serve/assemble.ts:1228`（HTTP serve 命令）调用。堵点（Task 6.1
   常驻进程）已在 0048 之后的轮次落地。原句保留为 0018 写作时的读数。】
 - **执行顺序偏离计划 §10.1**：那一节把 6.x 排在 `{4.7, 5.8}` 之后。选现在做的理由是
   6.2/6.3 是本机【唯一两条不依赖网络与 SDK 就能整条做完】的 Phase 6 条目，

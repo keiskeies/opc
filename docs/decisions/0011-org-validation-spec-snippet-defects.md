@@ -190,7 +190,7 @@ wouldExceedMaxDepth / 深度判据：parentDepth + heightBelow(child)   // 规�
 现在被 `org/commit.ts:200` 的 `validateReparenting` 调用（`commitOrgGraph` 校验段：
 `:200` validateReparenting、`:202` validateNewEdge、`:216` validateOrgChange），而
 `commitOrgGraph` 经 `http/real-deps.ts:987`（HTTP 组织提交路由，生产）与
-`serve/dev-seed.ts:351`（seed 入口）调用。原句保留为 0011 写作时的读数。】
+`serve/dev-seed.ts:391`（seed 入口）调用（round357 复算：351 → 391）。原句保留为 0011 写作时的读数。】
 【补齐：下面的 Task 3.3 叙述不受本标注影响 —— 它说的是前端那一侧（React Flow 编辑器）
 仍缺失，那是另一件事。】
 

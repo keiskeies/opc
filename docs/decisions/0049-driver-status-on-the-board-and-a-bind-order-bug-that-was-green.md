@@ -444,11 +444,11 @@ M15 值得说一句：它**不是**"把共享函数 `driverCellTargetSql` 改掉
    是边表里那两条出边不存在** —— 修法完全不同，别再照着函数名去找。
 2. **`createCard` 在 src 里仍然零生产调用方**（`grep -rn 'createCard(' packages/*/src`
    只命中它自己的定义那一行；`insertCard` 才有三个生产调用方：`seat-card.ts:254`、
-   `engine/charter.ts:448`、`dispatch.ts:1527`（round312 复算坐标，两行一字未变））。
+   `engine/charter.ts:448`、`dispatch.ts:2107`（round357 复算：1527 → 1688，两行一字未变））。
    ⇒ 这是本仓记过最多次的那一族的现役样本（`createCard` = 建卡 + 落审计 + 事务，
    而生产里三个建卡点全都绕过它直接调 `insertCard`）。
    【round321 复核：那条可复算断言（`grep 'createCard('` 只命中定义行）已过期 ——
-   `serve/dev-seed.ts:432` 是 `createCard` 的调用点（`pnpm dev:seed` 入口，dev 专用建卡，
+   `serve/dev-seed.ts:501` 是 `createCard` 的调用点（`pnpm dev:seed` 入口，dev 专用建卡，
    dev-seed.ts 文件头自己写着「只走 approvals/cards.ts 的 createCard 这一条正当写入口」，
    卡片键带 `dev-seed:` 前缀不撞生产键空间）。⇒ 「零生产调用方」精确说是「零**运行时**生产
    调用方」：seed 是开发构建脚本不是服务路径。insertCard 的三个生产调用方坐标不变。】
@@ -462,9 +462,9 @@ M15 值得说一句：它**不是**"把共享函数 `driverCellTargetSql` 改掉
    **真翻车的是另一处**：`policy/auto-approve.ts:442` 那句
    「① 那一行不存在（**今天**的真库就是这种：src 里没有任何 `INSERT INTO approvals`）」
    —— 这一句是**现在时**，没有"写之前"这类限定，而它**今天为假**：
-   `cards.ts:252` 就是那句 INSERT，被 `insertCard` 用着，而 `insertCard` 有上面那三个
+   `cards.ts:291` 就是那句 INSERT，被 `insertCard` 用着，而 `insertCard` 有上面那三个
    生产调用方（章程泵经 `ensureCharterCard`、dispatch/approve 经 `mintSeatCard`）——
-   `charter-pump.test.ts:248` 那个 `pendingCards()` 数的正是真库里的 `approvals` 行。
+   `charter-pump.test.ts:249` 那个 `pendingCards()` 数的正是真库里的 `approvals` 行。
    它在那里的作用**不是无害的**：那是 `changes === 0` 那一支的成因 ①，
    注释把一个**今天已经不常见**的成因写成"真库今天就是这样"，
    下一个人读到就会以为「认领不中 ≈ 常态」而不去查它为什么认领不中。
@@ -493,7 +493,7 @@ M15 值得说一句：它**不是**"把共享函数 `driverCellTargetSql` 改掉
 把库里 limit_cents 提到 5000 之后     看板「被钱挡住」= 1 条    驱动器候选 = 0 条
 ```
 
-因为那道门的**分母是进程里那个命令行数字**，`serve/driver-pump.ts:487` 绑的是
+因为那道门的**分母是进程里那个命令行数字**，`serve/driver-pump.ts:489` 绑的是
 `o.taskLimitCents`，不是库里那一列。**这一条不是我发现的** —— 0045 §4 明写着
 「上限的那一侧**读参数**，不读 `budgets.limit_cents`」。我只量了它反过来的那一面
 （0045 写的是"参数变了而屏幕不变"，我量的是"屏幕那一列改了而门不变"），

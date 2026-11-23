@@ -15,7 +15,7 @@
     "test:e2e": "playwright test",
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
-    "typecheck": "tsc -b",
+    "typecheck": "tsc -b && tsc -p tsconfig.test.json --noEmit",
     "verify": "pnpm lint && pnpm typecheck && pnpm test",
     "migrate": "tsx packages/hub/src/db/migrate-cli.ts",
     "hub": "tsx packages/hub/src/cli.ts",

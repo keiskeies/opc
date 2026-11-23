@@ -171,7 +171,7 @@ const engineRoute = o.graphFor === undefined;
 
 - `hub:engine work` **需要 `tsx`，本机装不上**（0039）。启动横幅现在**如实说出这一点**，
   而不是给一句照抄会挂的补救命令 —— 那正是改前那句 `hub resume` 犯的错。
-- **只有 `approve` 有出边**（`HUMAN_EDGES`，`dispatch.ts:238`：出边那个维度的类型是
+- **只有 `approve` 有出边**（`HUMAN_EDGES`，`dispatch.ts:288`：出边那个维度的类型是
   `Partial<Record<"approve", …>>`，**不是运行时忘了填，是类型上就只有这一个键**）。
   `reject_with_comment` / `defer_deep_review` 落库而任务原地，这是**规格的现状**
   （[规格] §7.1），本篇把它钉成断言而不是修掉它 —— 但它曾经是 500，
@@ -350,6 +350,6 @@ CLI 那条 `hub work`：失败那句话会经 `CharterResult.note` 打到 stderr
 | M8 失败分支的 `publish` 换成空函数 | **红 1**（广播那一条断言） |
 
 ⚠ `charter.ts` 与 `charter.test.ts` 里那两处对本节的引用**都写成 `0043 §10`**，
-而 `engine/charter.ts:350`（round312 复算：runTurn 签名收敛共享类型时 import 少了一行，本行一字未变） 与 `test/engine/charter.test.ts:331` 是**先写代码后补这一节**的
+而 `engine/charter.ts:350`（round312 复算：runTurn 签名收敛共享类型时 import 少了一行，本行一字未变） 与 `test/engine/charter.test.ts:333` 是**先写代码后补这一节**的
 （`comment-citations` 那一条守的就是这种顺序：它在我补完这一节之前是**红的**）。
 
