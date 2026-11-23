@@ -303,6 +303,27 @@ function spend(w: World, taskId: string, cents: number): void {
 }
 
 /**
+ * 「这条任务的【生效上限】是 limitCents，而它已经花掉 consumedCents」。
+ *
+ * spend() 那一份把 limit 写成与 consumed 相等 —— 那是"花到上限"的快捷写法，
+ * 而在 round360（预算列 = 生效值）之后它不再能表达【上限与已花是两个数】这件事。
+ * 判「差一分钱放行」必须能写下"上限 100 而只花了 99"，
+ * 用 spend() 造出来的是"上限 99 花了 99"= 那一格要判的相等情形，
+ * 于是反向对照会退化成它自己的分母（实测：改成列说话后它红在这里）。
+ * 生产里这一行由 POST /budget 的 UPSERT 或章程批准同步写出来，形状一样。
+ */
+function budgetRow(w: World, taskId: string, limitCents: number, consumedCents: number, hardStop = 1): void {
+  w.db
+    .prepare(
+      "INSERT INTO budgets (id, scope_type, scope_id, period, limit_cents, consumed_cents, hard_stop) " +
+        "VALUES (?, 'task', ?, 'per_task', ?, ?, ?) " +
+        "ON CONFLICT(scope_type, scope_id, period) DO UPDATE " +
+        "SET limit_cents = excluded.limit_cents, consumed_cents = excluded.consumed_cents",
+    )
+    .run("task|" + taskId + "|per_task", taskId, limitCents, consumedCents, hardStop);
+}
+
+/**
  * 真建一张章程卡（不用手写 INSERT：夹具绕开契约校验，就等于绕开 §8.2 第 4 条那道检查，
  * 而 charter.test.ts 那条「两边形状要一致」的判据也就没有对照物了）。
  * async：走的是写队列，不 await 的话调用方下一次读可能还没落库。
@@ -1048,12 +1069,15 @@ describe("I. 花钱的门：到上限就不再为这条任务起子进程", () =
 
   it("⭐ 刚好等于上限也挡（§7.4 说的是「达到阈值」，达到就是达到）", async () => {
     const w = await world({});
-    spend(w, "t1", 100);
-    expect((await pump(w, { taskLimitCents: 100 })).cards).toHaveLength(0);
+    // 上限写【列】而 CLI 给一个大数：这一发判的是"已花 == 生效上限"，
+    // 不是"已花 == CLI"。round360 之前夹具只有 spend()（limit := consumed），
+    // 那两个数在这条夹具里永远相等 ⇒ 这一发分不清门读的是哪一侧。
+    budgetRow(w, "t1", 100, 100);
+    expect((await pump(w, { taskLimitCents: 100_000 })).cards).toHaveLength(0);
     // 反向对照：少一分钱就放行。少了这一句，"恰好相等"这一发与"门整个不在"不可区分。
     const w2 = await world({});
-    spend(w2, "t1", 99);
-    expect((await pump(w2, { taskLimitCents: 100 })).cards[0]?.outcome).toBe("drafted");
+    budgetRow(w2, "t1", 100, 99);
+    expect((await pump(w2, { taskLimitCents: 100_000 })).cards[0]?.outcome).toBe("drafted");
   });
 
   it("⭐ taskLimit=1 时门【还是门】：两个相邻的整数没被绑串", async () => {
@@ -1079,6 +1103,60 @@ describe("I. 花钱的门：到上限就不再为这条任务起子进程", () =
     const r = await pump(w, { taskLimitCents: 100 });
     expect(r.cards[0]?.outcome).toBe("drafted");
     expect(r.blocked).toHaveLength(0);
+  });
+
+  it("⭐ 生效上限读【列】：列比 CLI 小 ⇒ 按列挡（CEO 拍板「预算列 = 生效值」）", async () => {
+    // 这一发是 round360 那次契约改动的【正面】证据：同一笔花费、同一个 CLI，
+    // 唯一变的是库里那一格。旧形状（门只读参数）在这里会放行，
+    // 而放行就是"追加预算只改屏幕不改门"的反面命题 —— 见 underTaskBudgetSql 头上那段。
+    const w = await world({});
+    budgetRow(w, "t1", 50, 100); // 列说上限 50、已花 100
+    const r = await pump(w, { taskLimitCents: 100_000 }); // CLI 说得很宽松
+    expect(r.cards).toHaveLength(0);
+    expect(r.blocked.map((b) => b.taskId)).toEqual(["t1"]);
+    // 反向对照：同一个库同一刻只把【列】抬到 200，CLI 一个字没动 ⇒ 放行。
+    // 少了这一句，上面那发分不清是"列挡住了"还是"这一轮本来就没事做"。
+    budgetRow(w, "t1", 200, 100);
+    expect((await pump(w, { taskLimitCents: 100_000 })).cards[0]?.outcome).toBe("drafted");
+  });
+
+  it("⭐ 列比 CLI 大 ⇒ 追加预算【真的把门打开】（产品口径的那一格）", async () => {
+    // 这是 B8 的全部产品意义：POST /budget 写的就是这一列（http/budget.ts 的 UPSERT
+    // 写 DO UPDATE SET limit_cents）。旧形状下这一发是挡住的 ⇒ 那个接口改完屏幕改不了门。
+    const w = await world({});
+    budgetRow(w, "t1", 1000, 150); // 库里已追加到 1000
+    const r = await pump(w, { taskLimitCents: 100 }); // 命令行了当初只给 100
+    expect(r.cards[0]?.outcome).toBe("drafted");
+    expect(r.blocked).toHaveLength(0);
+  });
+
+  it("⭐ 没有预算行 ⇒ 回落到 CLI（不出现「没记录 = 无限花钱」）", async () => {
+    // 门必须在"从没花过钱、也没人写过预算行"的任务上仍然有分母。
+    // 花过钱的任务【一定】有行（runtime 的 onCost 先 ENSERT 再 ADD_CONSUMED），
+    // 所以这一格保护的是新任务与手工建的那条。
+    const w = await world({});
+    expect((await pump(w, { taskLimitCents: 100 })).cards[0]?.outcome).toBe("drafted");
+    // 反向对照：CLI 给 0 ⇒ 无行时照样全挡。回落值不是装饰，它能独立关门。
+    const w2 = await world({});
+    expect((await pump(w2, { taskLimitCents: 0 })).cards).toHaveLength(0);
+  });
+
+  it("⭐ 列 = 0 ⇒ 全挡（那是「停掉这条任务」的合法写法，不是缺值）", async () => {
+    // DDL 里 limit_cents 是 NOT NULL（0001_init.sql），所以 0 只能是人写的。
+    // COALESCE 不能把 0 当成"没值"再回落到 CLI —— 那样"停掉它"会变成"照旧跑"。
+    const w = await world({});
+    budgetRow(w, "t1", 0, 0);
+    const r = await pump(w, { taskLimitCents: 100_000 });
+    expect(r.cards).toHaveLength(0);
+    expect(r.blocked.map((b) => b.taskId)).toEqual(["t1"]);
+  });
+
+  it("⭐ 列说话而 hard_stop = 0 仍然开门（那一格盖过【生效值】而不只盖过参数）", async () => {
+    // 超预算不禁 spawn 那一格（§7.4 的例外）判的是"要不要花钱"，
+    // 生效值换成列之后它必须还成立，否则 PUT /budget 写 hard_stop=0 会静默失效。
+    const w = await world({});
+    budgetRow(w, "t1", 100, 500, 0);
+    expect((await pump(w, { taskLimitCents: 100 })).cards[0]?.outcome).toBe("drafted");
   });
 
   it("⭐ 被挡住的那条【在 blocked 里】，而且【穿过候选为空的早退】", async () => {

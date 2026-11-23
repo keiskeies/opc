@@ -38,6 +38,12 @@ export interface ClaudeCliAdapterOptions {
   readonly bin?: string;
   readonly timeoutMs?: number;
   /**
+   * 模型名（round363，T6）：member_executors.config.model 的落点。
+   * 与 rolePrompt 同族 —— 从装配期给而不是从请求取（HarnessRequest 没有模型格），
+   * 执行器装配时把 config.model 放进这里；缺省不给 --model，CLI 用自己的默认。
+   */
+  readonly model?: string;
+  /**
    * 角色身份（→ --append-system-prompt 的那一格）。
    *
    * ⚠ 它必须在【装配期】给而不是从请求里取：HarnessRequest 刻意没有「角色系统提示词」
@@ -114,6 +120,7 @@ export class ClaudeCliAdapter implements HarnessAdapter {
       cwd: req.workspace,
       maxBudgetUsd: req.maxBudgetUsd,
       ...(this.#o.bin !== undefined ? { bin: this.#o.bin } : {}),
+      ...(this.#o.model !== undefined ? { model: this.#o.model } : {}),
       ...(this.#o.timeoutMs !== undefined
         ? { timeoutMs: this.#o.timeoutMs }
         : {}),

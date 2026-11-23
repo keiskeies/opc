@@ -233,7 +233,7 @@ const SNAP: Record<string, string> = {
   // cli.ts 顶层 import @langchain（本机装不上）⇒ hub resume 不可达 ⇒ 那次失败的副作用不可撤销。
   // 哪天 langchain 能装了、或者 cli.ts 拆出 langchain-free 的入口（那正是该做的事），
   // 第一格会红 —— 那时要改的不是快照，是 0043 §1 整段的结论。
-  "0043-default-value-should-be-the-one-that-runs-and-a-500-that-lied-about-replaying.md>cli.ts:28":
+  "0043-default-value-should-be-the-one-that-runs-and-a-500-that-lied-about-replaying.md>src/cli.ts:28":
     'import { Command } from "@langchain/langgraph";',
   // HUMAN_EDGES 的类型那一行。0043 §6「只有 approve 有出边」这条现状的落点：
   // 出边这个维度的类型是 Partial<Record<"approve", …>> —— 不是运行时忘了填，是类型上就只有这一个键。
@@ -288,7 +288,9 @@ const SNAP: Record<string, string> = {
   // 109 那行是 `timedOut = true;`。这不是守卫在闹脾气 —— 是我在同一个文件上边改边数，
   // 每次数完又往头部加了两行。**坐标要等那个文件停手之后再数**（详见 0044 §4 那段）。
   // 也正因为 key 存行号而值存内容，"看着像"的行号一个都混不过去。
-  "0044-charter-pump-where-do-cards-come-from-and-what-a-zero-cost-failure-costs.md>engine/claude.ts:213":
+  // round363 坐标 +13：T6 的 --model 接线（RoleRunInput 的 model 格 + args 那一段）
+  // 插在超时支上方，本行一字未变 —— 与 round305 那一次同剧本（重试判据插楼）。
+  "0044-charter-pump-where-do-cards-come-from-and-what-a-zero-cost-failure-costs.md>engine/claude.ts:226":
     "}, i.timeoutMs ?? 180_000);",
   "0044-charter-pump-where-do-cards-come-from-and-what-a-zero-cost-failure-costs.md>serve/timer.ts:336":
     "skipped++;",
@@ -351,20 +353,23 @@ const SNAP: Record<string, string> = {
   "0015-charter-editor-and-two-sources-of-budget.md>tracker.ts:249":
     "taskId: input.taskId,",
   "0015-charter-editor-and-two-sources-of-budget.md>contracts/evidence.ts:192":
-    '"dev_to_test": "code_diff",',
+    'dev_to_test: "code_diff",',
   "0006-cli-resume-and-identity.md>graph/thread.ts:24":
     "export function threadConfig(taskId: string): { configurable: { thread_id: string } } {",
   "0006-cli-resume-and-identity.md>graph/thread.ts:25":
     "return { configurable: { thread_id: taskId } };",
-  "0006-cli-resume-and-identity.md>cli.ts:5":
+  "0006-cli-resume-and-identity.md>src/cli.ts:5":
     "* 验收对象是【命令行退出码】，必须能被真子进程执行来验证。计划 V13 实测过 ——",
   // 坐标漂过【两次】（原 :479 → :586 → :621）。第一次是 O1-1 的桩写权限守卫插进
   // cli.ts 上半部；第二次是 O1-2 之后 cmdRun 尾部那段「桩图跑到 END vs 等人批准」
   // 的分叉插在同一文件更靠上的位置。同一个形状：cli.ts 里任何一处上半部的插入都会
   // 把下面整体推下去。
+  // round363：键全体换成 src/cli.ts 形态 —— 新建的 executors/cli.ts 让裸基名变成
+  // 同名歧义，守卫按纪律拒答（resolver 不替文档猜指的是哪一个）。行号【一发都没动】，
+  // 动的是限定段：这不是坐标漂了，是仓库里多了一个同名文件。
   // 只换 key，内容串照抄【含那两个转义反斜杠】—— 内容里那对 \\n 正是这一行
   // 值得钉的地方（它拼的是"错误 + 用法"两段，写法写错就少一个空行）。
-  "0006-cli-resume-and-identity.md>cli.ts:624":
+  "0006-cli-resume-and-identity.md>src/cli.ts:624":
     'io.error("错误：" + p.error + "\\n\\n" + USAGE + "\\n");',
   "0006-cli-resume-and-identity.md>write-queue.test.ts:208":
     'it("失败之后立刻 close()：不得重抛旧失败，且必须真的关掉连接", async () => {',
@@ -389,7 +394,7 @@ const SNAP: Record<string, string> = {
   // 同样漂过【两次】（原 :489 → :596 → :631），同一个原因、同一个文件。
   // 这一格内容就是裸一句 `try {`，它唯一能证的是【那一行还在、还在原位附近】——
   // weaker 得很，但那是原作者挑的坐标（0007 §那张表逐处读 try/catch），本守卫不负责替谁改写法。
-  "0007-test-type-coverage-blindspot.md>cli.ts:634": "try {",
+  "0007-test-type-coverage-blindspot.md>src/cli.ts:634": "try {",
   "0007-test-type-coverage-blindspot.md>db/driver.ts:64": "try {",
   "0007-test-type-coverage-blindspot.md>db/migrate.ts:120": "try {",
   "0007-test-type-coverage-blindspot.md>checkpoint/saver.ts:378": "try {",
@@ -1075,7 +1080,7 @@ const SNAP: Record<string, string> = {
     "return HUMAN_EDGES[status]?.[decision] ?? null;",
   "0041-engine-entry-work-and-decide.md>seat-card.ts:71":
     'return status !== "CHARTER_PENDING" && HUMAN_EDGES[status] !== undefined;',
-  "0041-engine-entry-work-and-decide.md>cli.ts:442":
+  "0041-engine-entry-work-and-decide.md>src/cli.ts:442":
     "// 判据从 HUMAN_EDGES 推（humanEdge 查得到 = 这一格等人点批准），不写状态名单：",
   "0046-human-seat-card-where-the-state-says-waiting-and-the-second-pending-card.md>engine/work.ts:483":
     "const r: AdvanceResult = await advance(rt, (o) => dispatch(o), {",
@@ -1149,7 +1154,9 @@ const SNAP: Record<string, string> = {
     "return await serveHub(d, { port: p, bind: b });",
   "0021-harness-gateway-and-when-blocked-is-a-lie.md>engine/runtime.ts:483":
     "const rr = await runViaGateway(",
-  "0021-harness-gateway-and-when-blocked-is-a-lie.md>harness/gateway-runner.ts:120":
+  // round363 搬家：T6 把四格出口表搬进 harness-runner.ts 的 runHarnessViaGateway，
+  // callHarness 那一发随实现同行（0021 正文里的句内坐标已同步复算）。内容串照抄。
+  "0021-harness-gateway-and-when-blocked-is-a-lie.md>harness/harness-runner.ts:81":
     "const g = await callHarness(adapter, req, gwDeps);",
   "0026-approval-card-creation-and-three-illusions-of-done.md>serve/dev-seed.ts:501":
     "const r = await createCard(w, draft, { nowMs: o.nowMs });",

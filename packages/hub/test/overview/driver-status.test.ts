@@ -517,17 +517,36 @@ describe("C 「被钱挡住」与「试到上限」是两档，下一步动作�
     expect(causesOf(readDriverStatus(w.db as never, DRIVER_ON))).toEqual({ c2: "no_budget" });
   });
 
-  it("⭐ 分母不知道（taskLimitCents=null）⇒ 【不许】报「被钱挡住」", () => {
+  it("⭐ 两边都不知道（无预算行而 taskLimitCents=null）⇒ 【不许】报「被钱挡住」", () => {
     // 不是"保守起见别说"的谨慎，是算术：NOT(x < NULL) 是 NULL，
     // 那一列回来的是 null ⇒ 判 `=== 1` 落空。而落空的方向【必须】是不说话。
+    // ⚠ round360 之前这一发的夹具是 budget(c3,500,500) + CLI=null，
+    // 那时"库里写着而参数不知道"就算不知道。生效值改成 COALESCE(列, CLI) 之后
+    // 那一格【知道】了，所以它搬到了下面那条；这里换成真正两边都没有的形状。
     const w = world();
     task(w.db, "c3");
     entered(w.db, "c3", "IN_PROGRESS");
-    budget(w.db, "c3", 500, 500); // 库里看是超了
     const unknown: DriverRuntimeState = { enabled: true, pumping: true, taskLimitCents: null };
     expect(readDriverStatus(w.db as never, unknown).stopped).toEqual([]);
-    // 分母：同一个库同一刻，把上限告诉它就报 ⇒ 上一句真的是"因为不知道"。
-    expect(causesOf(readDriverStatus(w.db as never, DRIVER_ON))).toEqual({ c3: "no_budget" });
+    // 分母：同一个库同一刻，把上限告诉它就报 ⇒ 上一句真的是"因为不知道"而不是"没接通"。
+    budget(w.db, "c3", 0, 0); // 有行而上限 0 ⇒ 一定挡
+    expect(causesOf(readDriverStatus(w.db as never, unknown))).toEqual({ c3: "no_budget" });
+  });
+
+  it("⭐ 有预算而 CLI=null ⇒ 【照旧报】：库里就是分母，不是「未知」（round360）", () => {
+    // 这一发钉的是 B8 在【读侧】的形状：门按那一格关着而屏幕一声不响，
+    // 就是 underTaskBudgetSql 头上那条"沉默的省钱与沉默的失败在库里长得一样"。
+    // 旧注释在这里写过相反的判据（"CLI 为 null 就不许报，否则会自信地说错话"），
+    // 那个前提是"命令行与库里两个上限并存"—— 现在只剩一个生效值，前提没了。
+    const w = world();
+    task(w.db, "c5");
+    entered(w.db, "c5", "IN_PROGRESS");
+    budget(w.db, "c5", 500, 900); // 库里超了，而 CLI 没人给
+    const unknown: DriverRuntimeState = { enabled: true, pumping: true, taskLimitCents: null };
+    expect(causesOf(readDriverStatus(w.db as never, unknown))).toEqual({ c5: "no_budget" });
+    // 反向对照：把那一列抬到没超 ⇒ 同一个 null CLI 下什么都不报。
+    spend(w.db, "c5", 100);
+    expect(readDriverStatus(w.db as never, unknown).stopped).toEqual([]);
   });
 
   it("⭐ 到顶那一档【优先于】钱：两个条件同时成立时说是到顶", () => {

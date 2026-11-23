@@ -169,6 +169,21 @@ it("schema_migrations 记录版本与 Unix 毫秒时间戳", async () => {
     // 0010：中断重放去重（0005 §11 缺陷 A/B 的修复落点）。这条必须与上面那句
     // 「加新迁移时必须同时改这一行」一起改 —— 它就是那道刻意摩擦。
     "0010_interrupt_replay_dedup",
+    // 0011–0021：群角色上层（docs/design-2026-11-23-群角色上层-实施计划.md §2）。
+    // 顺序按【外键依赖】排，不是按上游功能面排：roles ← members ← groups ←
+    // conversations/documents ← meetings(扩列) ← backlog ← plugins ← talent ← rhythm。
+    // 换序会让某条 ALTER/CREATE 引用尚未存在的表，foreign_key_check 当轮就红。
+    "0011_roles",
+    "0012_assets",
+    "0013_members",
+    "0014_groups",
+    "0015_conversations",
+    "0016_documents",
+    "0017_meetings_real",
+    "0018_backlog",
+    "0019_plugins",
+    "0020_talent_market",
+    "0021_rhythm",
   ]);
   // applied_at 必须是 Unix 毫秒整数：审计要能还原「这张表什么时候建的」
   for (const r of rows) {

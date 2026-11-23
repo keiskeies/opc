@@ -130,6 +130,11 @@ process.stdin.on("end", () => {
   const systemPrompt = argv.includes("--append-system-prompt")
     ? (argv[argv.indexOf("--append-system-prompt") + 1] ?? "")
     : "";
+  // model 回显（T6）：member_executors.config.model 经 ClaudeCliAdapterOptions 落到
+  // --model 的那条链，判据要能读回来 —— 没有回显，「装配传了但 argv 没拼」只能靠读码相信。
+  const model = argv.includes("--model")
+    ? (argv[argv.indexOf("--model") + 1] ?? "")
+    : "";
   // cwd 排在【最前面】而不是 prompt 之后：调用方（charter 那条路）会把这段 JSON 折进
   // 卡片第二行，而那一行在 600 字处截断（charter.ts 的 impactScopeOf），
   // prompt 有几百字 —— 排在后面的字段会被截掉，那一发就会红在截断上而不是红在判据上。
@@ -142,6 +147,7 @@ process.stdin.on("end", () => {
     resumeFlag,
     budget,
     systemPrompt,
+    model,
     prompt: stdin.trim(),
   };
 

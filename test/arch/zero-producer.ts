@@ -133,6 +133,37 @@ export const KNOWN_TABLES: ReadonlySet<string> = new Set<string>([
   // 不能靠"这条不是表"绕过。
   "checkpoints",
   "schema_migrations",
+  // 0011–0021（群角色上层）建的 22 张表。它们【在】migrations 的 CREATE TABLE 清单里，
+  // 所以漏任何一张，上面那条「迁移建了 X 而 KNOWN_TABLES 没有它」就会红。红得有道理：
+  // 名单里少一张表 = 那张表能走 `other` 免检，而「`groups` 零写入方」这种话一旦能走
+  // other 就永远不红 —— 恰恰在这一点上，本轮新表比旧表更危险：它们【今天真的】
+  // 一个写入方都没有（存储层在 T5 才接线），所以正是最容易写出真「零写入方」句子、
+  // 也最需要被对账逼着在接线后改登记的一批。
+  // 两张 FTS 影子表（messages_fts / documents_fts）不在这里：它们是
+  // CREATE VIRTUAL TABLE，上面那条对账的正则只认 CREATE TABLE，不认不登记。
+  // 顺序按迁移号，不按字典序：将来加 0022 时照着末尾续，不用在字母缝里找位置。
+  "roles", // 0011
+  "assets", // 0012
+  "members", // 0013
+  "member_skills",
+  "member_executors",
+  "hire_events",
+  "groups", // 0014
+  "group_members",
+  "conversations", // 0015
+  "messages",
+  "message_reads",
+  "documents", // 0016
+  "document_versions",
+  "document_permissions",
+  "document_templates",
+  "meeting_turns", // 0017
+  "backlog_items", // 0018
+  "plugins", // 0019
+  "plugin_tools",
+  "talent_market", // 0020
+  "rhythm_events", // 0021
+  "research_cards",
 ]);
 
 /** 一句「某张表在 src 里没有写入方」的登记。 */

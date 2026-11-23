@@ -316,11 +316,16 @@ export function readDriverStatus(
       continue;
     }
     // ⚠ 这里判的是 `=== 1` 而不是"真值"，而这一格【必须】这么写：
-    // taskLimitCents 为 null 时 SQL 里那个比较得到 NULL，NOT(NULL) 也是 NULL，
-    // 于是这一列回来的是 null ⇒ Number(null) = 0 ⇒ 不说「被钱挡住」。
-    // 那是【对的行为】而不是巧合：**分母不知道的时候不许下判断**。
-    // 我第一版在这里绑的是 budgets.limit_cents（"看着同源"），
-    // 那会把「命令行上限 ≠ 库里声明上限」那一天变成一句自信的错话。
+    // 只有【既没有预算行、CLI 又是 null】时，SQL 里那个比较才得到 NULL
+    // （NOT(NULL) 也是 NULL）⇒ Number(null) = 0 ⇒ 不说被钱挡住。
+    // 那是【对的行为】而不是巧合：**分母两边都不知道的时候不许下判断**。
+    // ⚠ 「有预算行而 CLI 是 null」现在【会】报 —— round360 改的，不是回归：
+    // 生效值 = COALESCE(列, CLI)，列有值时分母就不是 unknown，门真的在按那一格关着。
+    // 那时候不报 = 门挡了而屏幕一声不响，正是 underTaskBudgetSql 头上那条
+    // 「沉默的省钱与沉默的失败在库里长得一样」要避免的形状。
+    // （旧注释写的是"CLI 为 null 就不许报"，理由是"命令行上限 ≠ 库里声明上限时
+    //  会自信地说错话"。那个前提在「列 = 生效值」之后不成立：两者不再并存，
+    //  库里那一格【就是】生效值。）
     if (Number(r.over_budget) === 1) {
       stopped.push({
         task_id: r.id,

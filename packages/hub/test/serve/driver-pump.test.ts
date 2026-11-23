@@ -318,6 +318,23 @@ function spend(w: World, taskId: string, cents: number): void {
     .run("task|" + taskId + "|per_task", taskId, cents, cents);
 }
 
+/**
+ * 上限与已花【分开写】的那一发（spend 把两者绑成同一个数）。
+ * round360「预算列 = 生效值」之后判边界必须能写下"上限 100 而只花了 99"，
+ * 用 spend() 造出来的是"上限 99 花了 99"= 相等那一档，反向对照会退化成它自己的分母。
+ * 生产形状：POST /budget 的 UPSERT 或章程批准同步都这样写这一行。
+ */
+function budgetRow(w: World, taskId: string, limitCents: number, consumedCents: number, hardStop = 1): void {
+  w.db
+    .prepare(
+      "INSERT INTO budgets (id, scope_type, scope_id, period, limit_cents, consumed_cents, hard_stop) " +
+        "VALUES (?, 'task', ?, 'per_task', ?, ?, ?) " +
+        "ON CONFLICT(scope_type, scope_id, period) DO UPDATE " +
+        "SET limit_cents = excluded.limit_cents, consumed_cents = excluded.consumed_cents",
+    )
+    .run("task|" + taskId + "|per_task", taskId, limitCents, consumedCents, hardStop);
+}
+
 /* ──────────────────────────────────────────────────────────────────────────
  * A. 候选集合是【派生】的
  * ────────────────────────────────────────────────────────────────────────── */
@@ -639,12 +656,25 @@ describe("E. 绑参顺序与那道花钱的门", () => {
   });
 
   it("刚好等于上限也挡，少一分放行（>= 与 > 的分界不能糊）", async () => {
+    // 上限写【列】、CLI 给大数：这样"相等"判的是"已花 == 生效上限"。
     const w = await world();
-    spend(w, "t1", 100);
-    expect((await drive(w, { taskLimitCents: 100 })).driven).toHaveLength(0);
+    budgetRow(w, "t1", 100, 100);
+    expect((await drive(w, { taskLimitCents: 100_000 })).driven).toHaveLength(0);
     const w2 = await world();
-    spend(w2, "t1", 99);
-    expect((await drive(w2, { taskLimitCents: 100 })).driven).toHaveLength(1);
+    budgetRow(w2, "t1", 100, 99);
+    expect((await drive(w2, { taskLimitCents: 100_000 })).driven).toHaveLength(1);
+  });
+
+  it("⭐ 驱动器的门也读【列】：列小则挡，把列抬高（追加预算）则放行", async () => {
+    // 这一发钉的是"第五条 SQL 与第一条用的是同一个生效值"—— 谓词是同一个常量，
+    // 但它在这里必须是【实测】而不是推断：候选 SQL 那一侧的 ? 位置与章程泵不同
+    // （driver-status 头上记过：两条 SQL 的绑参顺序不一样），
+    // 生效值改成 COALESCE(列, ?) 之后如果驱动器的绑参漂了，这里就会红。
+    const w = await world();
+    budgetRow(w, "t1", 50, 100);
+    expect((await drive(w, { taskLimitCents: 100_000 })).driven).toHaveLength(0);
+    budgetRow(w, "t1", 1000, 100);
+    expect((await drive(w, { taskLimitCents: 100_000 })).driven).toHaveLength(1);
   });
 
   it("⭐ 被挡住的那条进 blocked，而且【穿过候选为空的早退】", async () => {

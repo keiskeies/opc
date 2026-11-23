@@ -113,7 +113,15 @@ const acceptanceCriterionSchema = z
     }
   });
 
-const charterInput = z
+/**
+ * 岗位书的【输入】形状（snake_case，strict）。
+ *
+ * 导出理由：charterSchema 是它的 transform 输出（camelCase），而【请求体】带的是
+ * 输入形状 —— role.ts 的 setRoleCharterRequestSchema 要嵌这一份。不导出的话
+ * 消费方只能 .pick/.omit 反推 transform 之前的形状，反推出来的那份和这里的
+ * 不是同一个 zod 对象，strict 语义一漂、两边就各拦各的。
+ */
+export const charterInput = z
   .object({
     role_id: z.string().min(1),
     display_name: z.string().min(1),

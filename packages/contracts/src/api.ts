@@ -206,10 +206,7 @@ export type ApprovalDecisionRequest = z.infer<
  * 50 张卡对应 CEO 在收件箱里一次勾得过来的量；再多就该是分几次点，
  * 而不是让一次点击独占写队列。
  */
-export const BATCH_RESUME_VALUES = [
-  "approve",
-  "reject_with_comment",
-] as const;
+export const BATCH_RESUME_VALUES = ["approve", "reject_with_comment"] as const;
 export type BatchResumeValue = (typeof BATCH_RESUME_VALUES)[number];
 
 export const BATCH_MAX_CARDS = 50;
@@ -256,9 +253,7 @@ export const approvalBatchRequestSchema = z
       seen.add(id);
     }
   });
-export type ApprovalBatchRequest = z.infer<
-  typeof approvalBatchRequestSchema
->;
+export type ApprovalBatchRequest = z.infer<typeof approvalBatchRequestSchema>;
 
 /**
  * 批量那一判的结论（【规格】§9.4「仅限同类型」+ 「不存在的卡整批不写」）。
@@ -494,9 +489,7 @@ export type ApprovalView = z.infer<typeof approvalViewSchema>;
  */
 export const approvalDetailViewSchema = approvalViewSchema.extend({
   /** §9.2 第二行「关键参数快照」的原文形状（落库那段 JSON 的对象面）。见上。 */
-  parameters: z
-    .record(z.string(), z.unknown())
-    .nullable(),
+  parameters: z.record(z.string(), z.unknown()).nullable(),
   /** 谁做的决定（`approvals.decided_by`）。pending 为 null。 */
   decided_by: z.string().nullable(),
   decided_at: z.number().int().nullable(),
@@ -526,7 +519,9 @@ export const approvalDetailResponseSchema = z
     asOfMs: z.number().int(),
   })
   .strict();
-export type ApprovalDetailResponse = z.infer<typeof approvalDetailResponseSchema>;
+export type ApprovalDetailResponse = z.infer<
+  typeof approvalDetailResponseSchema
+>;
 
 /**
  * `GET /approvals` 的查询参数（白名单，未登记的键忽略而不是拒 —— 与 SSE 的

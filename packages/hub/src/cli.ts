@@ -48,7 +48,7 @@ import {
   threadConfig,
 } from "./graph/thread.js";
 import { isDirectRun } from "./internal/direct-run.js";
-import { loadPresetRoles } from "./roles/preset.js";
+import { rolesFromOrg } from "./roles/registry.js";
 
 export interface CliIo {
   write(text: string): void;
@@ -334,7 +334,7 @@ async function withHub<T>(
       db,
       recorder: auditor.recorder,
       saver,
-      roles: loadPresetRoles(),
+      roles: rolesFromOrg(db),
       models,
       // thread_id = task_id（0006 §4）；图内部靠 taskId 写 tasks 行与审计。
       taskId,

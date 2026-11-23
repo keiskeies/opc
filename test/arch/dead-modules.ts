@@ -491,6 +491,42 @@ export const BASELINE: Baseline = new Map([
   // 「两层粒度各守各的」，别拿这一格的绿去宣布重试在真机上自愈过）。
   ["graph/branches.ts", "PARALLEL_MIN_BRANCHES"],
   ["events/batch.ts", "appendAuditBatch"],
+  // ⚠ roles/service.ts（round361 登记，T4）：角色表唯一写路径今天【零生产入口】——
+  // 读写函数已全部实现并被 packages/hub/test/roles/service.test.ts 逐条钉着，
+  // 但 HTTP（T10）与桌面 IPC（T11）两个入口都还没接线，从静态入口走不到它。
+  // 文件头横幅写着接线日自删；方向 B 那条红会如约点名，别到时候只删不读。
+  // 同格的读侧（roles/registry.ts）今天【不在本表】：cli.ts 的 hub run 经
+  // rolesFromOrg 真调它 —— 一死一活正说明这张表判的是可达性，不是「这个目录写完了没」。
+  ["roles/service.ts", "ROLE_AUDIT_KINDS"],
+  // ⚠ members/service.ts（round362 登记，T5）：成员任职四件套 + 特助孵化今天
+  // 【零生产入口】——写读全被 packages/hub/test/members/service.test.ts 钉着，
+  // 但 HTTP（T10）/桌面 IPC（T11）未接线。文件头横幅写着接线日自删。
+  ["members/service.ts", "HIRE_EVENT_ACTIONS"],
+  // ⚠ groups/service.ts（round362 登记，T5）：群容器唯一写路径（建群事务/席位/
+  // 立项回填）——packages/hub/test/groups/service.test.ts 逐条钉着，入口未接线。
+  ["groups/service.ts", "GROUP_AUDIT_KINDS"],
+  // ⚠ talent/service.ts（round362 登记，T5）：人才市场唯一写路径（导入挂牌/
+  // 派生键 upsert/下架）——packages/hub/test/talent/service.test.ts 逐条钉着。
+  ["talent/service.ts", "PUBLISHED_ITEM_PREFIX"],
+  // ⚠ 执行器层八格 + 两家适配器 + 插件层两格（round363 登记，T6）：七执行器、
+  // codex/qoder 适配器与插件注册/服务今天【实现齐备而零生产入口】——
+  // packages/hub/test/executors/ 43 发与 packages/hub/test/harness/adapters/ 逐条钉着，
+  // 但路由器 runExecutions 的两个未来调用方（T7 dispatch 接线、T10 HTTP/IPC）都还没接线。
+  // codex/qoder 适配器与 plugins/* 曾被 executors/cli.ts 的 import 挂在死链上，
+  // 这次一起登记：登记判的是「此刻从入口走不到」，不是「谁连累谁」。
+  // 接线日 checkBaseline 方向 B 的红会逐格点名 ⇒ 连本段注释一起自删，别只删不读。
+  ["executors/types.ts", "EXECUTOR_RUN_PAYLOAD_KIND"],
+  ["executors/registry.ts", "registerDisabled"],
+  ["executors/run.ts", "runExecutions"],
+  ["executors/cli.ts", "CLI_HARNESS_ID"],
+  ["executors/plugin-webhook.ts", "PluginWebhookExecutor"],
+  ["executors/builtin-plugin.ts", "BuiltinPluginExecutor"],
+  ["executors/pure-model.ts", "ModelCaller"],
+  ["executors/human.ts", "human_pending"],
+  ["harness/adapters/codex.ts", "codexSandboxModeFor"],
+  ["harness/adapters/qoder.ts", "qoderPermissionModeFor"],
+  ["plugins/registry.ts", "PLUGIN_VERSION_CONFIG_KEY"],
+  ["plugins/service.ts", "PLUGIN_AUDIT_KINDS"],
   // 有意占位，非缺口。
   ["index.ts", "HUB_ENTRY_PENDING"],
   ["main.ts", "为什么不把参数解析也写进"],

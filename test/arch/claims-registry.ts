@@ -376,6 +376,85 @@ function hardStopReaderCheck(f: Files): string {
 }
 
 /**
+ * r25：预算上限那一侧读【列】、CLI 参数只是回落（CEO 拍板「预算列 = 生效值」，round360）。
+ *
+ * 这条与 r1 是同一条 SQL 的两半：r1 盯 OR 那半条（hard_stop = 0 放行 + 最外层括号），
+ * 这里盯 < 右侧那一坨（分母读谁）。
+ *
+ * 三格全判【剥掉注释之后、且切到函数那一段】的字节。剥注释的理由同 r22 那段：
+ * 这个函数的函数头今天正躺着一整段「上限读列」的解释文字（round360 落地时从旧文案
+ * 改过来的），判原文会被那种诚实的历史注释喂绿。切段的理由见 sliceFrom 自己的红话。
+ *  · E1 上限那一坨真去 SELECT b.limit_cents ⇒ 缺 ⇒ 红。这条主张的正面格。
+ *  · E2 比较尾巴 `, 0) < ` 在场 ⇒ 缺 ⇒ 红。防的是整条谓词换成别的形状（比如改到
+ *    别处算好再传布尔）：那种改法如果别处恰好抄了 limit_cents 那串字节，E1 单独
+ *    存在会被喂绿 —— E2 钉的是【这条 SQL 里】那次比较还在。
+ *  · E3 段内恰好 1 个 `?`。0 = 回落槽没了（要么列变唯一分母 ⇒ 库里没预算行的任务
+ *    从此没有分母；要么参数变唯一分母 ⇒ 退回 0045 §7 的 (C)）；≥2 = 五条 SQL 共用
+ *    的绑参顺序被改，那条契约由 packages/hub/test/budget/hard-stop-gate.test.ts 的
+ *    拆 `?` 一发钉着 —— 测试文件可以整份删掉，登记表这一格删不掉（口径同 r1 E2）。
+ *
+ * ⚠ 射程（比三格加起来重要）：
+ *  · 这里【不判】五条消费 SQL 还引不引用这个函数 —— 那半由 hub 侧测试判
+ *    （charter-pump / driver-pump / driver-status 各自「门也读【列】」那几发当场开库）。
+ *    这里只核对那五条 SQL 共同的【分母】读谁。
+ *  · 这里【不判】最外层那层括号（r1 E2 判它）、hard_stop 那半条（r1 E1 判它），
+ *    也不判 POST /budget 真把列写进去了（r1 写侧名单 + http/budget 测试）。
+ *  · 这里【不判】屏幕预算条读的是不是同一个数 —— 这格拦死的是「门退回参数」；
+ *    反向（门读列而屏幕抄参数）不在射程内。
+ *  · E1/E2 是【字节近似】不是语义等价：把子查询改写成 JOIN 之类的等价形状会让
+ *    两格红而那可能是对的写法 —— 那种时候改这一格，别把它改成恒真。
+ */
+function budgetColumnGovernsCheck(f: Files): string {
+  let pump: string;
+  try {
+    pump = f.src("serve/charter-pump.ts");
+  } catch {
+    return (
+      "packages/hub/src/serve/charter-pump.ts 不在了 —— 那条读预算的门连同它的分母一起没了，" +
+      "「上限那一侧读列」这一半主张失去执行者"
+    );
+  }
+  const code = withoutComments(pump);
+  const fn = sliceFrom(
+    code,
+    "export function underTaskBudgetSql",
+    "export const CHARTER_CANDIDATES_SQL",
+  );
+  if (fn === null) {
+    return (
+      "切不出 underTaskBudgetSql → CHARTER_CANDIDATES_SQL 那一段（函数被改名或五条消费 SQL " +
+      "搬出了这份文件）—— 判据【不退回全文搜】：全文另有几十条 SQL 的绑定参数，" +
+      "退回全文等于让取材失败自己把 E3 喂绿"
+    );
+  }
+  if (!fn.includes("COALESCE((SELECT b.limit_cents FROM budgets b ")) {
+    return (
+      "分母那一侧不再 SELECT budgets.limit_cents —— 上限退回【只有 CLI 参数说话】，" +
+      "POST /budget 的追加预算只改屏幕（today.ts 那条 SUM）而门一个字都不响应 ⇒ " +
+      "「点完按钮门真的放行」重新变成一句没人验过的主张（0045 §7 的 (C) 复活）"
+    );
+  }
+  if (!fn.includes(", 0) < ")) {
+    return (
+      "那条谓词的比较尾巴 `, 0) < ` 不在了 —— consumed 与上限的那次比较被换掉了" +
+      "（整条谓词换形状 / 挪去别处算）。E1 会被别处抄过去的同名字节喂绿，" +
+      "这一格钉的是【这条 SQL 里】那次比较还在"
+    );
+  }
+  const binds = (fn.match(/\?/gu) ?? []).length;
+  if (binds !== 1) {
+    return (
+      "那段谓词剥注释后有 " +
+      binds +
+      " 个 `?`，而契约是恰好 1 个 —— 0 个 = 回落槽没了（没预算行的任务没有分母，" +
+      "或列被换回参数）；≥2 个 = 五条 SQL 共用的绑参顺序被改。两种都不在" +
+      "「列说话」那一侧，而绑参顺序那半的测试（拆 `?` 一发）整份删得掉、这格删不掉"
+    );
+  }
+  return "";
+}
+
+/**
  * r2：超时执行者【已接进】心跳巡检 —— serve/assemble.ts 的每一跳都调 runTimeoutPass。
  *
  * 这条登记的三次改史（0026 §4「主张随事实改，原文不消」在这里的完整落点）：
@@ -2171,7 +2250,7 @@ export function nodeKeyIdentityCheck(f: Files): string {
       checkedAt: "2026-11-17",
       source: {
         doc: "docs/OPC-OS-功能优化设计.md",
-        line: 1827,
+        line: 1829,
         sentence: "本篇之外还有一份计划文档，而它的出口门前提今天不成立",
       },
       check: r10LintGuardCheck,
@@ -2190,7 +2269,7 @@ export function nodeKeyIdentityCheck(f: Files): string {
       checkedAt: "2026-11-17",
       source: {
         doc: "docs/OPC-OS-功能优化设计.md",
-        line: 1918,
+        line: 1920,
         sentence: "上一格那条计划引用守卫，落地后被自己的变异打回过一次",
       },
       check: r11PlanRefsGuardCheck,
@@ -2209,7 +2288,7 @@ export function nodeKeyIdentityCheck(f: Files): string {
       checkedAt: "2026-11-17",
       source: {
         doc: "docs/OPC-OS-功能优化设计.md",
-        line: 1949,
+        line: 1951,
         sentence: "计划的 6 道出口门禁，今天",
       },
       check: r12GatePathGuardCheck,
@@ -2231,7 +2310,7 @@ export function nodeKeyIdentityCheck(f: Files): string {
       checkedAt: "2026-11-17",
       source: {
         doc: "docs/OPC-OS-功能优化设计.md",
-        line: 2013,
+        line: 2015,
         sentence:
           "今天真的员工身上唯一生效的安全边界，此前一条守卫都没有 —— 顺带量到 `tsc -b` 从不检查测试",
       },
@@ -2254,7 +2333,7 @@ export function nodeKeyIdentityCheck(f: Files): string {
       checkedAt: "2026-11-17",
       source: {
         doc: "docs/OPC-OS-功能优化设计.md",
-        line: 2069,
+        line: 2071,
         sentence: "本篇自己的坐标从来没有门禁",
       },
       check: claimCoordsGuardCheck,
@@ -2342,7 +2421,7 @@ export function nodeKeyIdentityCheck(f: Files): string {
       checkedAt: "2026-11-19",
       source: {
         doc: "docs/OPC-OS-功能优化设计.md",
-        line: 2110,
+        line: 2112,
         sentence: "O8 那条端到端验收写出来了",
       },
       check: orgAddNodeGapCheck,
@@ -2555,7 +2634,7 @@ export function nodeKeyIdentityCheck(f: Files): string {
       checkedAt: "2026-11-18",
       source: {
         doc: "docs/OPC-OS-功能优化设计.md",
-        line: 2036,
+        line: 2038,
         sentence: "round285：这一格接成了门禁，形状是棘轮（登记为 r19）",
       },
       check: testTypeRatchetCheck,
@@ -2651,7 +2730,7 @@ export function nodeKeyIdentityCheck(f: Files): string {
       checkedAt: "2026-11-17",
       source: {
         doc: "docs/OPC-OS-功能优化设计.md",
-        line: 2350,
+        line: 2352,
         sentence: "round293 第二段落地并登记为 r21",
       },
       check: gateExemptionAccountCheck,
@@ -2728,7 +2807,7 @@ export function nodeKeyIdentityCheck(f: Files): string {
       checkedAt: "2026-11-17",
       source: {
         doc: "docs/OPC-OS-功能优化设计.md",
-        line: 2474,
+        line: 2476,
         sentence: "round294 落地并登记为 r22",
       },
       check: addNodeDispatchCheck,
@@ -2796,7 +2875,7 @@ export function nodeKeyIdentityCheck(f: Files): string {
       checkedAt: "2026-11-18",
       source: {
         doc: "docs/OPC-OS-功能优化设计.md",
-        line: 2591,
+        line: 2593,
         sentence: "round298 落地并登记为 r23",
       },
       check: delegationEdgeSelfCheckCheck,
@@ -2869,10 +2948,67 @@ export function nodeKeyIdentityCheck(f: Files): string {
       checkedAt: "2026-11-18",
       source: {
         doc: "docs/OPC-OS-功能优化设计.md",
-        line: 2664,
+        line: 2666,
         sentence: "round299 落地并登记为 r24",
       },
       check: nodeKeyIdentityCheck,
+    },
+    {
+      id: "r25",
+      claim:
+        "预算的门：上限那一侧读【列】、CLI 参数只是回落（CEO 拍板「预算列 = 生效值」，" +
+        "round360）—— 有预算行 ⇒ limit_cents 说话，POST /budget 追加预算真能把门打开；" +
+        "无预算行 ⇒ 参数说话。0045 §7 那三个候选一个都没选，拍的是第四条：门与界面共用" +
+        "同一个分母，(B) 那半「界面改读进程里的参数」随之作废。",
+      method:
+        "判据：test/arch/claims-registry.ts 的 budgetColumnGovernsCheck —— 只读一份" +
+        "【权威落点】（packages/hub/src/serve/charter-pump.ts 里 underTaskBudgetSql 那一段，" +
+        "用 sliceFrom 掐到下一条消费 SQL 之前），三格各判【剥掉注释之后】的字节：E1 上限" +
+        "那一坨含 `COALESCE((SELECT b.limit_cents FROM budgets b `；E2 比较尾巴 `, 0) < ` " +
+        "在场（防整条谓词换形状而 E1 被别处抄过去的同名字节喂绿）；E3 段内恰好 1 个 `?` ——" +
+        " 0 ⇒ 回落槽没了，≥2 ⇒ 五条 SQL 共用的绑参顺序被改（那条契约由 hub 侧拆 `?` 那一发" +
+        "钉着，测试可整份删、这格删不掉）。剥注释与切段都是必需的：那段函数头注释写的正是" +
+        "本条主张自己（旧文案的历史），判原文会被它喂绿；全文另有几十条 SQL 的绑定参数，" +
+        "不切段则 E3 恒成立。" +
+        "外加打在合成语料上的一族变异（claims-registry.test.ts 的 r25 那一族，不碰盘，" +
+        "发数以那个文件当场为准）：控制组该绿 / E1 列没了 ⇒ 红且不许红在别的格上（红因" +
+        "串扰排除）/ 只留一句「这里以前读列」的注释 ⇒ 仍红（同一发带反向对照：只加一句" +
+        "无关注释该绿）/ 比较方向翻成 `>=` ⇒ 红在 E2 而 E1 满足 / `?` 多一条与少一条 ⇒ " +
+        "两条各红在 E3（只登记一半的话，实现写成 `binds < 1` 或 `> 1` 都能过另一半）/ " +
+        "函数改名（取材断掉）⇒ 红在「切不出那一段」而不是退回全文继续绿 / 那份文件整份" +
+        "不见 ⇒ 红在「不在了」。" +
+        "生产行为那一半不在这里判：charter-pump、driver-pump、driver-status 各自的" +
+        "「⭐ 门也读【列】」那几发当场开库验放行，另有 .workbuddy 那台自回滚变异机打真字节。" +
+        "本条不重开库、不重跑那台机器，口径同 r12/r13/r21/r22/r24",
+      judge: "claims-registry",
+      checkedAt: "2026-11-23",
+      source: {
+        doc: "docs/CEO-决策简报-2026-11-22.md",
+        line: 134,
+        sentence:
+          "### B8. 预算分母 / 追加预算按钮语义（0049 §12(B) → 0045 §7）",
+      },
+      check: budgetColumnGovernsCheck,
+    },
+    {
+      id: "r26",
+      claim:
+        "HTTP 可达口径的建卡者仍是零：executors/human.ts（T6 真人席执行器，round363）" +
+        "已把 createCard 调用方名册从 [serve/dev-seed.ts] 长到两家，但它自己今天没有任何 " +
+        "HTTP/巡检/CLI 路径可达 —— dead-modules 的 BASELINE 钉着 executors/human.ts，" +
+        "接线日（T7 dispatch / T10 HTTP）方向 B 的红会逐格点名，届时本条翻作历史。",
+      method:
+        "test/arch/dead-modules.ts › BASELINE 里的 executors/human.ts 条目（双向：档案被摘 ⇒ " +
+        "本条红；接线真发生 ⇒ dead-modules 先红，改的是主张不是删档案）",
+      judge: "dead-modules",
+      checkedAt: "2026-11-23",
+      source: {
+        doc: "docs/decisions/0014-policy-auto-approval-and-a-module-nobody-calls.md",
+        line: 335,
+        sentence:
+          "2. 「HTTP 可达口径的建卡者仍是零」【仍成立】—— human.ts 今天零生产入口",
+      },
+      check: (f) => deadModulesHas(f, "executors/human.ts"),
     },
   ];
 

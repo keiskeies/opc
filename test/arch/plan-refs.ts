@@ -132,7 +132,13 @@ export function collect(
 ): string[] {
   for (const e of readdirSync(join(root, dir), { withFileTypes: true })) {
     // node_modules 里也有 .ts（依赖自带的类型），扫它是纯粹的噪声。
-    if (e.name === "node_modules" || e.name === ".git") continue;
+    // .tmp 同族（round364）：那是 fixtureTmp 的夹具根（<夹具根>/<名字>-<pid>），
+    // 别的测试此刻正在往里写、afterAll 里整棵 rmSync。round277 按【文件名】排除
+    // 运行期探针挡不住它 —— 这里消失的是【整棵目录树】：实测全量里扫到
+    // dead-modules 夹具的 keep 文件目录项、读它之前目录被删 ⇒ ENOENT Failed Suites，
+    // 红的不是任何判据，是取材本身。跳过而不是读错吞掉：同一个理由（见上面那段）。
+    if (e.name === "node_modules" || e.name === ".git" || e.name === ".tmp")
+      continue;
     // 别的测试此刻正在跑的夹具：它不是仓库的一部分，且随时会消失。
     if (!e.isDirectory() && isRuntimeFixture(e.name)) continue;
     const rel = dir === "" ? e.name : dir + "/" + e.name;

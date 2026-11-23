@@ -782,12 +782,22 @@ describe("⑧ 接线状态（接线那天这条会红，逼着同时更新 0014�
     // ⚠ 这一翻【不改标题说的「认领走不到」】：认领 = 下一发的 recordAutoApproval，
     // 它的名单仍是 []，一个字没动（O9 验收第 1 条的红仍然由那一发守着）。
     // 同口径在 phase3.test.ts 的 blocker 6 一起翻（两处口径必须一起改）。
+    //
+    // round363（T6）第二次翻：名单长出 executors/human.ts —— 执行器层的真人席
+    // 执行器 run() 里建待办卡片走的就是这层正当包装（取锁 + 事件 + 审计都在包装里）。
+    // 上面「生产路径哪天也接上，这一发红」兑现的是【执行器层】那一格：human.ts 是
+    // src 里的生产代码，但今天零生产入口（dead-modules 基线钉着，T10 HTTP 接线日摘）
+    // ⇒ 【HTTP 可达】口径下的建卡者仍一个没多。名单继续钉死恰好这两个名字：
+    // 第三个名字出现 ⇒ 红 ⇒ 回来分清那一次接的是哪一层（0014 round363 追加）。
     const callers = files.filter(
       (f) =>
         !f.endsWith("approvals/cards.ts") &&
         readFileSync(f, "utf8").includes("createCard("),
     );
-    expect(callers.map((f) => relPosix(f, SRC))).toEqual(["serve/dev-seed.ts"]);
+    expect(callers.map((f) => relPosix(f, SRC))).toEqual([
+      "executors/human.ts",
+      "serve/dev-seed.ts",
+    ]);
   });
 
   it("⭐ 接线日已过（round269）：读路径有读者，写路径 recordAutoApproval 仍零调用方", async () => {

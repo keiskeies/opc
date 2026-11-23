@@ -1,6 +1,7 @@
 /**
  * Gateway 的装配薄层：把「岗位书授权 + 注入槽」拼成 GatewayDeps，
- * 再把 callHarness 的结果翻回 RoleRunResult 形状（2026-11 落地，O6 接线 Step A）。
+ * 再把适配器经 harness-runner 的四格映射翻回 RoleRunResult 形状
+ * （2026-11 落地，O6 接线 Step A；四格实现 round363 起在 harness-runner.ts）。
  *
  * ── 这一层存在的唯一理由 ──────────────────────────────────────────────
  * gateway.ts 的 GatewayDeps 把 grantedSandbox / grantedForbidden 设为【必填】，
@@ -9,9 +10,9 @@
  * 缺省口径）如果被每个调用点各抄一遍，就会漂出 N 份「缺省时当成什么」的口径。
  * 所以集中在这一处。
  *
- * ── 三态映射（本文件的全部判据）────────────────────────────────────────
+ * ── 三态映射（判据全文在这里，实现在 harness-runner.ts）──────────────────
  * GatewayOutcome 不携带「进程起没起」，而 Task 6.1 的重试判据要的恰是这一族。
- * 适配器把完整 RoleRunResult 存进 takeRun()，这里按它把出口分成四格：
+ * 适配器把完整 RoleRunResult 存进 takeRun()，按它把出口分成四格：
  *   ① gateway 拒且【适配器没跑过】（禁止项/预算/档位/越界命中）
  *      ⇒ ok:false、started:false、spawnErrno:""。
  *      ⚠ spawnErrno 给【空串】而不是编一个 errno：空串不在 SPAWN_TRANSIENT_ERRNOS
@@ -22,6 +23,24 @@
  *   ③ 进程起了但业务错（CLI is_error / 非零退出）⇒ ok:false、started:true、
  *      errno:"" ⇒ 不可重试（起过进程就可能真花了钱）。
  *   ④ 全绿 ⇒ ok:true + text + sessionId + costUsd。
+ *      costUsd 由 spentCents/100 得来：预算侧全程美分（CostReport 文件头的理由），
+ *      RoleRunResult 的 costUsd 是既有形状的历史口径。0.042 美元先被适配器
+ *      Math.round 成 4 美分、再在这里变回 0.04 —— 半美分的精度损失是【记账口径】
+ *      决定的，不是 bug；要保精度的读数请读 gateway 审计行的 spent_cents。
+ * ⚠ 「适配器跑没跑过」这一族的真判据是一个构造性蕴含，不是 run===null 单条：
+ *   run null 时 runRole 返回后、任何事件发出【之前】#lastRun 已写 —— spawn ENOENT
+ *   那发 lastRun 已置（started:false）却被 gateway 以 no_session 拒掉。所以：
+ *     A 前置层（能力/预算/禁止项/档位/越界）命中 ⇒ execute 从未被调 ⇒ run 必为 null；
+ *     B execute 被调 ⇒ 第一个事件 yield 前 lastRun 已写；gateway 消费过 finished 才
+ *       走到事件循环之后 ⇒ run 必非 null。
+ *   于是 run 非 null 只可能发生在 execute 之后，此时 !run.started 恰是「spawn 自己
+ *   抛了（ENOENT/EPERM…），进程从未存在」⇒ 与 A 同归「结构上没花过钱」。
+ *   run 为 null 时 spawnErrno 只能是空串：那是【没有过 spawn 尝试】，不是「有尝试但
+ *   没记下 errno」；把它编成一个 errno 会把安全拒放进重试白名单。
+ * round363（T6）起这四格的【实现】搬进 harness-runner.ts 的 runHarnessViaGateway：
+ * codex/qoder 两家执行器要的是同一份映射，抄第二遍就是本仓最贵那一族失效
+ * （两份抄本各改一格）。本文件只剩两件事 —— 拼 GatewayDeps（上面那段缺省口径）
+ * 与把 claude-cli 那一家接进工厂。这份注释仍是判据的权威文本，实现侧只指回来。
  *
  * ── runner 自己不碰库 ─────────────────────────────────────────────────
  * audit / checkBudget / settle 全部是注入槽。tracker.consume 有 inStepTx 纪律
@@ -29,14 +48,18 @@
  * 所以 settle 原样透传给 GatewayDeps.settle，落哪个事务是 Step B 调用方的事。
  */
 
-import type { HarnessRequest, SandboxTier } from "@opc/contracts";
+import type {
+  HarnessId,
+  HarnessRequest,
+  SandboxTier,
+} from "@opc/contracts";
 import { harnessDefaultsFor } from "@opc/contracts";
 import type { RoleRunResult } from "../engine/claude.js";
 import type { AuditRow } from "../events/recorder.js";
 import type { ClaudeCliAdapterOptions } from "./adapters/claude.js";
 import { ClaudeCliAdapter } from "./adapters/claude.js";
 import type { GatewayDeps } from "./gateway.js";
-import { callHarness } from "./gateway.js";
+import { runHarnessViaGateway } from "./harness-runner.js";
 
 export interface GatewayRunnerDeps {
   /** 落审计的回调（gateway 的必填 audit 槽）。 */
@@ -51,6 +74,13 @@ export interface GatewayRunnerDeps {
   readonly grantedSandbox?: SandboxTier;
   /** 显式覆盖授权基线。 */
   readonly grantedForbidden?: readonly string[];
+  /**
+   * 读岗位书默认授权时取哪一家的列（缺省 "claude-code"，runtime 主循环行为逐字保持）。
+   * round363（T6）起不再写死：执行器层按 kind 传 codex/qoder。写死时章程里那两列
+   * 【存着而没人读】，codex 执行器拿 claude-code 的禁旗列表判 codex 命令（两家参数名
+   * 不同），字节级不匹配的白名单等于没有白名单。
+   */
+  readonly harnessId?: HarnessId;
   /** 预算闸门：注入槽，runner 不碰库。 */
   readonly checkBudget?: GatewayDeps["checkBudget"];
   /** 事后消费上报：注入槽。落哪个事务由调用方决定（tracker 的 inStepTx 纪律在它那边）。 */
@@ -74,11 +104,12 @@ export function buildGatewayDeps(deps: GatewayRunnerDeps): GatewayDeps {
         "第 1/2 层在拿请求和【自己】比（gateway.ts 注释点名的自比失效）。",
     );
   }
-  const entry = harnessDefaultsFor(deps.charterHarnessDefaults, "claude-code");
+  // 缺省口径集中在这一行：岗位书没写这一家的 sandbox ⇒ read-only（最严档）。
+  // 「没接岗位书」在上面已经抛了，走到这里缺格只是「声明了默认最严」。
+  // 取哪一家的列由 deps.harnessId 定（缺 claude-code = runtime 主循环既有行为）。
+  const entry = harnessDefaultsFor(deps.charterHarnessDefaults, deps.harnessId ?? "claude-code");
   return {
     audit: deps.audit,
-    // 缺省口径集中在这一行：岗位书没写 claude_code.sandbox ⇒ read-only（最严档）。
-    // 「没接岗位书」在上面已经抛了，走到这里缺格只是「声明了默认最严」。
     grantedSandbox: deps.grantedSandbox ?? entry?.sandbox ?? "read-only",
     // 缺省空基线：基线为空只是「岗位书没点名禁令」，「运行时不许缩短」仍由
     // forbiddenFlagBlock 对【本次请求】的 forbidden_flags 成立。
@@ -91,102 +122,21 @@ export function buildGatewayDeps(deps: GatewayRunnerDeps): GatewayDeps {
   };
 }
 
-function fail(
-  text: string,
-  sessionId: string | null,
-  costUsd: number,
-  error: string | null,
-  started: boolean,
-  spawnErrno: string,
-): RoleRunResult {
-  return { ok: false, text, sessionId, costUsd, error, started, spawnErrno };
-}
-
 /**
- * 经 Gateway 跑一次角色调用。每次调用【新造一个适配器实例】：
- * 适配器要把「这一次 execute 的完整结果」带出来（takeRun），共享实例会让
- * 两次并发调用互相踩对方的结果 —— 实例化在这里，竞态就在结构上不存在。
+ * 经 Gateway 跑一次角色调用（claude-cli 那一家）。
+ * 四格映射的【判据】在本文件头（权威文本），【实现】在 harness-runner.ts 的
+ * runHarnessViaGateway —— T6 起 codex/qoder 执行器共用同一份实现，这里只保留
+ * claude 的装配：先 buildGatewayDeps（缺省口径 + harnessId 取列都在那里），
+ * 再把适配器放进工厂（每次新实例，竞态理由在工厂注释）。
  */
 export async function runViaGateway(
   adapterOptions: ClaudeCliAdapterOptions,
   req: HarnessRequest,
   deps: GatewayRunnerDeps,
 ): Promise<RoleRunResult> {
-  const gwDeps = buildGatewayDeps(deps);
-  const adapter = new ClaudeCliAdapter(adapterOptions);
-  if (req.resumeSessionId !== undefined && req.resumeSessionId !== "") {
-    adapter.seedResumeRequest(req);
-  }
-  const g = await callHarness(adapter, req, gwDeps);
-  const run = adapter.takeRun();
-
-  if (g.ok) {
-    if (run === null) {
-      // gateway ok:true 必然消费过 finished，而 finished 只能在 execute 的流里发出，
-      // 那时 #lastRun 已写 —— 走到这里说明适配器的存储被绕过（结构性不该发生）。
-      // 抛，不编一个 ok 结果：那会把「存储接缝坏了」伪装成「角色跑成功了」。
-      throw new Error(
-        "runViaGateway：gateway 成功却没有 takeRun()，适配器结果存储接缝坏了",
-      );
-    }
-    if (!run.ok) {
-      // 三态里的「起了但业务错」：CLI 报 is_error/非零退出。gateway 侧那行
-      // harness_call 照常落账（调用真发生了、账单真报了），这里翻成失败轮。
-      return fail(
-        run.text,
-        run.sessionId,
-        run.costUsd,
-        run.error,
-        run.started,
-        run.spawnErrno,
-      );
-    }
-    return {
-      ok: true,
-      text: g.result.output,
-      sessionId: g.result.sessionId,
-      // 美分→美元的【唯一】换算点（本行）：预算侧全程美分（CostReport 文件头的理由），
-      // RoleRunResult 的 costUsd 是既有形状的历史口径。0.042 美元会先被适配器
-      // Math.round 成 4 美分再在这里变回 0.04 —— 半美分的精度损失是【记账口径】
-      // 决定的，不是这里的 bug；要保精度的读数请读 gateway 审计行的 spent_cents。
-      costUsd: g.result.cost.spentCents / 100,
-      error: null,
-      started: true,
-      spawnErrno: "",
-    };
-  }
-
-  // gateway 拒绝。先分清「拒绝发生时适配器跑没跑过」—— 这决定 started 的真值。
-  // ⚠ run === null 【单独】不足证「没跑」：#lastRun 在 runRole 返回后、任何事件
-  // 发出【之前】写入 —— spawn ENOENT 那发 lastRun 已置（started:false）却被 gateway
-  // 以 no_session 拒掉。真判据是一个构造性蕴含：
-  //   ① 前置层（能力/预算/禁止项/档位/越界）命中 ⇒ execute 从未被调 ⇒ run 必为 null；
-  //   ② execute 被调 ⇒ 第一个事件 yield 前 lastRun 已写；gateway 消费过 finished 才
-  //      走到事件循环之后 ⇒ run 必非 null。
-  // 所以 run 非 null 只可能发生在 execute 之后，此时 !run.started 恰是
-  // 「spawn 自己抛了（ENOENT/EPERM…），进程从未存在」⇒ 与 ① 同归「结构上没花过钱」。
-  if (run === null || !run.started) {
-    // 进程从未存在（gateway 拒于进程之前，或 spawn 直接失败）。
-    // spawnErrno：没跑过 ⇒ 空串（【没有过 spawn 尝试】，retryableWithoutCost 恒 false，
-    // 安全拒永不自动重试）；跑过而没起 ⇒ 真 errno 透出，交给重试白名单判。
-    return fail(
-      run?.text ?? "",
-      run?.sessionId ?? null,
-      run?.costUsd ?? 0,
-      run === null
-        ? "gateway 拒绝（" + g.code + "）：" + g.reason
-        : (run.error ?? "gateway 拒绝（" + g.code + "）：" + g.reason),
-      false,
-      run?.spawnErrno ?? "",
-    );
-  }
-  // 进程起过、run 成功，但 gateway 仍拒（今天可达的形状：无 session_started ⇒ no_session）。
-  return fail(
-    run.text,
-    run.sessionId,
-    run.costUsd,
-    "gateway 拒绝（" + g.code + "）：" + g.reason,
-    true,
-    "",
+  return runHarnessViaGateway(
+    () => new ClaudeCliAdapter(adapterOptions),
+    req,
+    buildGatewayDeps(deps),
   );
 }

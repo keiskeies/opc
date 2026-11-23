@@ -8652,3 +8652,271 @@ round350 · 五个漏网顶层纯函数补齐独立执行证据 + 顺手修掉 l
   · 未 commit。本轮无生产改动；测试 8 文件（含适配时改的注释与断言）。
   · 台账收尾（round357/358/359）与分层提交见任务 #3/#7/#8。
 
+
+■ round360（群角色上层地基两块：迁移 0011–0021 建表 + 契约层 11 模块，
+    design-2026-11-23-群角色上层.md 实施计划 T1–T3，四件套齐全）
+  · 交付：
+      ① 迁移 11 条（packages/hub/resources/migrations/）：0011_roles（完整公司树 13 内置行 +
+        builtin 禁删/禁降级两个触发器）、0012_assets、0013_members（四件套拆表：members/
+        member_skills/member_executors/hire_events，executor kind 的 CHECK 七值）、
+        0014_groups（groups/group_members）、0015_conversations（conversations/messages/
+        message_reads + messages_fts）、0016_documents（documents/document_versions/
+        document_permissions/document_templates + documents_fts）、0017_meetings_real
+        （meeting_turns + meetings ALTER）、0018_backlog、0019_plugins（plugins/plugin_tools）、
+        0020_talent_market、0021_rhythm（rhythm_events/research_cards）。
+      ② 契约层 11 模块（packages/contracts/src/）：group/member/conversation/meeting/backlog/
+        document/plugin/role/talent/rhythm/search，全部 zod strict + 视图/请求分离；
+        index.ts 出口按模块成块追加。
+      ③ 新守卫 1 发：test/contracts/executor-kinds-parity.test.ts —— 0013 DDL 的 CHECK 枚举
+        与 EXECUTOR_KINDS 双向集合相等 + 每种 kind 的最小 config safeParse + 三条反向对照
+        （DDL 多值/契约多值/取材坏 ⇒ 各自红或抛「取材坏了」）。
+      ④ 守卫同步 4 处：zero-producer KNOWN_TABLES +22 表（FTS 影子表按 CREATE VIRTUAL TABLE
+        豁免，口径写在条目注释）；test-type-baseline 无净增（count() 用 SQLInputValue 而非 as never）；
+        comment-test-readers 因 member.ts 兑现承诺的测试文件名转绿；lint-baseline format 161 持平
+        （biome --write 17 文件 + backlog.ts 删掉 no-op superRefine）。
+  · 变异自证（真抹字节）：0013 的 'human' 从 CHECK 里抹掉 ⇒ parity 2 发当场红 ⇒ 逐字节还原 ⇒
+    6/6 复绿 + sed 复核 DDL 七值完好在位。第一次还原失配（模式写成 'pure-model'), 实际是
+    'pure-model')),），修正后成功 —— 教训：还原模式要对着 sed 打印的真实字节写，不凭记忆。
+  · 实测数字：
+      · 目标套件：schema-upper 27 + parity 6 + doc-refs 2 + zero-producer 11 + type-baseline 全绿。
+      · 全量：154 文件 / 3541 通过 / 6 跳过（2026-11-23 19:14 实测；首轮 1 红 = doc-refs 的
+        evidence.ts:192 快照，biome 把引号键 "dev_to_test" 规范成 dev_to_test ⇒ 快照逐字重钉，
+        坐标 192 未漂，单跑 2/2 复绿）。
+  · 数字 reconcile：22 = 27 CREATE TABLE − 2 FTS 影子表 − 3 已在本表册旧名重复？—— 不是，
+    逐条数过：22 全是新建表名，0017 的 ALTER 不产表、FTS 虚表不入册。契约模块 11 =
+    group/member/conversation/meeting/backlog/document/plugin/role/talent/rhythm/search。
+── 状态 ────────────────────────────────────────────────────
+  · 未 commit。生产改动：迁移 11 新建 + 契约 11 新建 + index.ts 追加；测试：parity 新建 +
+    schema-upper 新建 + doc-refs 重钉 1 键 + zero-producer KNOWN_TABLES 扩册。
+  · 端点登记（api.ts）刻意【不动】：UNIMPLEMENTED_ENDPOINTS 保持空表，端点字符串与 handler
+    同批落地（T10），避免「契约先亮灯、实现后补」的假可用面。
+
+■ round361（角色表服务 + 只读兼容层，design-2026-11-23-群角色上层.md 实施计划 T4，四件套齐全）
+  · 交付：
+      ① packages/hub/src/roles/service.ts（新建，唯一写路径）：listRoles/getRole/getRoleForEdit 读侧
+        （occupant_count = group_members 席位数，兼任按席位计）+ createRole/updateRole/deleteRole/
+        setRoleCharter 写侧（校验/写/审计同一 node() 事务）+ roleServiceStatus 状态码表（T10 HTTP 与
+        桌面 IPC 共用）。结构判据复用 contracts L1 纯函数，桥接口径三条登记在文件头：
+        can_manage := model_tier === "management"（不造假列）；不合成 ceo 节点（L1 两条判据只读 child
+        身份）；boss 在服务侧焊根（updateRole 拒改 boss 的 reports_to，code ceo_is_root）。
+      ② packages/hub/src/roles/registry.ts（新建，只读兼容层）：NODE_TO_ORG_ROLE 七格写死映射
+        （intake/charter→cos、product→product_director、tech→tech_director、dev→dev、test→qa、
+        report→boss）+ rolesFromOrg：charter_json 有值用库里的（档位跟生效岗位书走，不跟
+        roles.model_tier 列走），NULL/缺行回退 preset；坏 JSON 读侧抛（assertCharterShape），
+        不静默换 preset。已登记缺口：model_tier 列与岗位书档位不互校（service.ts 文件头），
+        消费侧已选边岗位书。
+      ③ cli.ts 接线：hub run 的 roles 入参 loadPresetRoles() ⇒ rolesFromOrg(db)。字节稳定族测试
+        （e2e-linear / foreign-model-loop）继续显式 loadPresetRoles()，来源由测试自定。
+      ④ 测试 39 发新建：test/roles/service.test.ts 34（种子 13 行普查 / occupant 席位语义 /
+        createRole 五类拒码 + 审计形状 + 失败零残留 / updateRole PATCH 语义 + boss 焊根 + COALESCE
+        不碰 charter_json / deleteRole 三门顺序 + 改挂 + 触发器兜底 / setRoleCharter 归一 + 身份 +
+        camelCase 点名 + null 清除 / 状态码全表）+ test/roles/registry.test.ts 5（映射表完整性 /
+        全 NULL 现状逐格回退 / 库优先 + 档位跟岗位书 / 坏 JSON 抛）。
+  · 产品决断（超出设计字面，均登记在 service.ts 文件头）：
+      ① deleteRole 的「归档成员的本职也算引用」—— 设计只写「无人任职可删」，但 members.role_id 是
+        NOT NULL FK，不拦会 500 成 FOREIGN KEY constraint failed；且档案里的成员不该被抽掉岗位。
+      ② 有下级 ⇒ 改挂到被删者的上级（拒删会把删除压缩到只能删叶子）；树上平移深度只减不增。
+      ③ custom 行带 null 上级 = 数据异常 ⇒ 拒删（not_writable），不制造森林。
+      ④ 任职席位拒删时消息列出群 id（「先去哪个群卸任」是用户唯一能行动的信息）。
+  · 守卫同步：dead-modules BASELINE +1 格 ["roles/service.ts","ROLE_AUDIT_KINDS"]（特征串 src 内
+    全仓唯一实测）+ service.ts 文件头横幅（模块名+否定词同行，line 2-5）—— 写路径今天零生产入口
+    是事实，T10 接线日方向 B 红点名 ⇒ 格与横幅同轮自删。registry.ts 不在表：cli.ts 真调它（一死一活
+    正是可达性口径）。test-type-baseline 无净增（packages/hub/test/roles 两文件 type-clean）。
+  · 变异自证（真抹字节 ×3，全部还原复核）：
+      ① dead-modules.ts 抹掉基线行 ⇒ 主断言红（「新增死模块 roles/service.ts」如约点名）⇒ 还原复绿；
+      ② service.ts boss 焊根条件加 false && ⇒ 「老板焊根」发当场红 ⇒ 还原复绿；
+      ③ registry.ts 把 assertCharterShape 换成 preset[node]（静默回退）⇒ 「坏 JSON 抛」发红 ⇒ 还原复绿。
+  · 测试夹具教训（本轮三连红当场修）：桥接后「上级必须 management」进了 createRole 的必经判据，
+    深度链与改挂 fixture 的中间格用执行档（designer/team_lead）会先撞 parent_not_manager 与
+    would_create_cycle —— 写链路用例前先按判据顺序摆档位，别拿执行档当树中间节点。
+  · 实测数字：目标套件 service 34 + registry 5 全绿；全量 156 文件 / 3580 通过 / 6 跳过
+    （2026-11-23 19:38 实测，含 arch 全守卫）；pnpm typecheck 绿；改动文件 biome 净零
+    （--write 后复检 5 文件 0 诊断）。
+── 状态 ────────────────────────────────────────────────────
+  · 未 commit。生产改动：roles/service.ts 新建 + roles/registry.ts 新建 + cli.ts 一行接线；
+    测试：test/roles/ 两文件新建；守卫：dead-modules.ts 基线 +1。
+  · 下一格（T5）：群容器 + 成员四件套存储 + 招聘入职事件 + 人才市场。roles/service.ts 的基线格
+    与横幅要等 T10 HTTP 接线才摘除 —— 中间轮次方向 B 不该红，红了就是有人提前接了线忘了摘。
+
+■ round362（群容器 + 成员任职四件套 + 招聘入职事件 + 人才市场，design-2026-11-23-群角色上层.md 实施计划 T5，四件套齐全）
+  · 交付：
+      ① packages/hub/src/groups/service.ts（新建，groups/group_members/conversations 的唯一写路径）：
+        createGroup（三写一事务：特助孵化 → 群行 → 群会话行，newId 消费序【特助→群→会话】）/
+        updateGroup / dissolveGroup 语义位 / addGroupMember（归档者拒入 active 门）/ removeGroupMember /
+        linkGroupTask / listGroups / getGroup / listGroupMembers / groupConversationId +
+        GROUP_AUDIT_KINDS + groupServiceStatus 状态码表。读侧守门口径修正：status 枚举有 DDL CHECK
+        先兜底，守门真正拦的是 DDL 管不住的坏形状（INTEGER 亲和列被手改成字符串）。
+      ② packages/hub/src/members/service.ts（新建）：hireMember 四件套一事务（members + member_skills +
+        member_executors + hire_events「hired」）+ setMemberSkills / setMemberExecutors（同值不落台账，
+        变一次落一条）+ updateMember（status 归档）+ getMember / listMembers + HIRE_EVENT_ACTIONS。
+        读面技能按 skill_id 归一排序（视图序 = 规范序，不是插入序）。
+      ③ packages/hub/src/talent/service.ts（新建，talent_market 唯一写路径）：listTalentItems /
+        getTalentItem / exportTalentPayload（导出 = 读过守门的门）+ importTalent（只挂牌不入职；
+        蓝图岗位本店不存在 ⇒ role_not_found 整单拒，reason 点名缺哪个 role）+ publishTalent
+        （派生键 'pub:'+member_id upsert，货架恒一；挂牌是快照不是活引用）+ unlistTalent
+        （builtin 应用层先查 + 触发器 talent_builtin_no_delete 兜底）+ talentPayloadFromMember /
+        hireRequestFromTalent 双向映射 + talentServiceStatus。
+      ④ 测试 79 发新建：test/groups/service.test.ts 29 + test/members/service.test.ts 30 +
+        test/talent/service.test.ts 20（builtin 种子逐条过契约 / 三入口一形状 / 导出导入 round-trip
+        逐字节等价 / 挂牌 upsert 幂等 / 审计 kinds 序列 / 读侧守门 / 状态码全表）。
+  · 产品决断（超出设计字面，均登记在文件头）：
+      ① createGroup 名单含归档成员 ⇒ member_archived 整单拒：入口要在职，历史不篡改；判定在孵化
+        特助之前，即便之后也整单回滚（群、会话、特助一个不留）。
+      ② 导入的重复蓝图 ⇒ 两条条目（「下载文件夹里两份同一 PDF」心智），删一份不伤另一份；
+        published 反而恒一（派生键），因为「重复挂牌」的意图是刷新不是多摆一份。
+      ③ 挂牌对象含归档成员合法（归档者的档案正是值得沉淀的东西），归档与否由 UI 标注。
+      ④ avatar_seed 缺席时拿 member_id 兜底：接收方至少能确定性重现同一张 identicon；
+        hireRequestFromTalent 对空种子/无语音整个键缺席，不把空串喂给招聘。
+  · 守卫同步：dead-modules BASELINE +3 格（members/service.ts ⇔ HIRE_EVENT_ACTIONS、
+    groups/service.ts ⇔ GROUP_AUDIT_KINDS、talent/service.ts ⇔ PUBLISHED_ITEM_PREFIX，特征串 src 内
+    全仓唯一实测；groups/members 文件头的审计 kinds 提法已改成「与角色/成员侧审计 kinds 同族」，
+    避免撞 ROLE_AUDIT_KINDS 字面破坏 roles 格唯一性）+ 三文件零生产入口横幅（T10 接线日同轮自删）。
+    test-type-baseline 无净增；B5 硬门（noUncheckedIndexedAccess）下 37 处索引读全部 as 收窄修复。
+  · 变异自证（真抹字节，探针脚本 .workbuddy/scratch/mutate-round362.mjs，每发跑完逐字节还原复核
+    Buffer.equals=true）：
+      ① p1 groups 归档门 if (m.status !== "active") ⇒ if (false) ⇒ 「member_archived」发当场红；
+      ② p2 群会话 INSERT 的 group_id 槽抹成 NULL ⇒ 会话断言当场红；
+      ③ p4 talent upsert 分支 !== 翻 === ⇒ 「挂牌刷新而非堆条目」当场红；
+      ④ p5 talent 岗位门 if (false) ⇒ 「role_not_found」发当场红；
+      ⑤ p3 抹 ORDER BY skill_id ⇒ 绿 —— 等价变异：PK (member_id, skill_id) 索引让 WHERE 天然按
+        skill_id 返回，运行时不可观测。补 p3b 方向性探针 ORDER BY skill_id DESC ⇒ 当场红，
+        证明规范序确实被测试看住（ORDER BY 是对「未来索引形态」的显式合同，留着）。
+  · 本轮抓出的测试自身缺陷（比绿更重要）：
+      ① 空转断言族：错误路径测试写成 const r = await …(); if (r.ok) return; expect(r.code)… ——
+        门禁被抹 ⇒ r.ok=true ⇒ return 装绿。p1 用「绿」当场暴露（脚本 bug 意外做的对照实验）。
+        三文件 30 处全部加固为 expect(r.ok).toBe(false); if (r.ok) return; 再断码。
+        成功路径的 if (!r.ok) return; 反向核查 13 处，前面都有 toBe(true) 预钉，无同类空洞。
+      ② 变异脚本自身 bug：writeFileSync(file, probe.to) 把整篇源码抹成了替换片段 —— 五发全红是
+        「编译崩」的假红。教训：变异写回必须是 text.replace(from,to) 整篇；「还原 byte-identical」
+        这条自证恰好兜住了破坏性（原始 Buffer 写回，五发还原全 true）。锚点唯一性检查（hits===1）
+        保留，五发实测全 1。
+      ③ 中文编辑注入 U+FFFD ×6（members 测试注释 3 + groups/service.ts 注释 3），no-null-bytes/
+        全仓 U+FFFD 扫描各逮一次；码位 dump 后逐处 guarded replace 修复，本轮改动 23 文件复扫 0。
+  · 夹具教训（当场修，登记防复发）：
+      ① newId 恒同值 ⇒ createGroup 消费序（特助→群→会话）让 hire 审计与 group_created 审计撞
+        target，happy path 断言 2 行变 1 行假象。夹具按消费序取号数组。
+      ② 同一条目多次动作共用一个审计 target（import+unlist ⇒ 2 行同 target）——断 kinds 序列而不是行数。
+      ③ Windows SQLite 句柄释放滞后于 close：afterAll 用 guarded close + rmSync 5 次重试
+        （Atomics.wait 50ms）卸载临时目录。
+      ④ status 枚举伪造被 DDL CHECK 拦死 ⇒「读侧守门」测试拿 INTEGER 亲和列塞字符串才打得到守门本身。
+  · 实测数字：目标套件 79/79 绿；全量 159 文件 / 3659 通过 / 6 跳过（2026-11-23 20:19 实测，
+    含 arch 35 文件 548 守卫全绿）；pnpm typecheck 绿（含 B5 硬门）；改动文件 biome 0 诊断。
+── 状态 ────────────────────────────────────────────────────
+  · 未 commit。生产改动：groups/service.ts + members/service.ts + talent/service.ts 新建；
+    测试：test/groups/service.test.ts + test/members/service.test.ts + test/talent/service.test.ts
+    新建；守卫：dead-modules.ts 基线 +3。三张基线格与横幅等 T10 HTTP 接线摘除。
+  · 下一格（T6）：执行器抽象七种全部实现（claude-cli / codex-cli / qoder-cli / platform-webhook(MCP)
+    / builtin-plugin / pure-model / human）+ registry + ExecutionResult + 审计。
+
+■ round363（执行器抽象七种全量落地，design-2026-11-23-群角色上层.md 实施计划 T6，四件套齐全）
+  · 落地内容：
+      ① packages/contracts/src/executor.ts 契约层：EXECUTOR_KINDS 七词表（claude-cli / codex-cli /
+        qoder-cli / platform-webhook / builtin-plugin / pure-model / human）、executorConfigSchema
+        判别联合、executorRunRequestSchema（superRefine 双判据：config.kind 与 kind 一致 + CLI 族
+        必带 workspace）、executorRunOutcomeSchema、executionOutcomeSchema（attempts min(1)，ok=true
+        必 final.ok=true）、EXECUTOR_FAILURE_CODES 十六值、ExecutionTarget（from_seq 续跑语义）。
+      ② packages/hub/src/executors/ 七执行器全量：cli.ts（三家 CLI 共用 spawn 骨架 + Gateway 调用前
+        拦截 + ENOENT 才 retry）、pure-model.ts（decision 缺失合成 decision_missing）、human.ts
+        （createCard 待办卡 + human_pending 回执）、builtin-plugin.ts 与 plugin-webhook.ts（插件表
+        驱动，mock 注入网关）、registry.ts（重复 kind 构造抛 + registerDisabled 可归因）。
+      ③ run.ts 路由器：读 member_executors 当前生效行（seq>=from_seq、enabled=1），沿 seq 试到
+        第一个成功 / retry=false / 试完；四类合成失败行（候选空 executor_disabled、配置坏
+        executor_unknown_kind retry=true、未注册/被裁 executor_disabled retry=false、违约抛
+        executor_error retry=true）；execution_id = exec:{task_id}:{seq} 把尝试链编进 id。
+      ④ types.ts 审计口径：一次尝试 = 恰好一行 executor_run，由执行器自己经 auditExecutorRun 落
+        （action 复用 tool_call、payload.kind 认领、target=executor:{execution_id}:{seq}）；
+        auditExecutorRunViaWriter 失败只 console.error「审计落盘失败」不 rethrow；extraRows（Gateway
+        缓冲行）与 executor_run 同一 node 事务先落。路由器【不代写】审计（合成行 attempts 有、events 无）。
+  · 产品决断（从设计文档 §D4/D5 自行拍板，登记备查）：
+      ① 路由器不代写审计：「一次尝试恰好一行」若由路由器兜底，执行器活到半路抛的场景会变两行双记；
+        合成行查 attempts 不查 events，口径更稳（run.ts 文件头展开）。
+      ② 未注册/被裁 retry=false（装配决定整段不存在，换下一格没意义）；配置坏 retry=true（每格配置
+        是自己的，换下一格有意义）；违约抛 retry=true（重试链的价值就是这个不行换下一个）。
+      ③ 候选空借第一行 kind/seq 指认「哪格被禁」；0 行时 pure-model 只作占位、真实成因写 message，
+        读侧不许拿占位 kind 归因。
+      ④ CLI 行缺 workspace 在请求构造处抛（422 式响亮），不静默落回 hub 自己的目录 —— spawn 在
+        错误目录干活比崩掉更难查。
+      ⑤ execution_id 由路由器生成而非调用方给：调用方有 from_seq 但没有「现在跑到第几格」。
+  · 守卫同步（接线日判据第二次翻，0014 已追加）：
+      ① auto-approve.test.ts ⑧ 与 phase3.test.ts blocker 6 的 createCard 调用方名册
+        翻成 [executors/human.ts, serve/dev-seed.ts]（round358 第一次翻是 gateway，本轮第二次翻是 human）。
+      ② 路由行写入方：members/service.ts 招聘事务是唯一生产写入方（executors 层刻意只读 —— 配置权威
+        与读侧分离，T10 管理端点接线时再来翻）。
+      ③ 35 个 arch 守卫 548 发全绿，无需重钉：dead-modules/zero-producer 把 executors/ 全链按
+        「T10 前零调用方」基线接管（接线日自删横幅已立）。
+  · 变异自证（真抹字节，探针脚本 .workbuddy/scratch/mutate-round363.mjs，十发全 PROBE-OK，
+    每发 Buffer.equals 逐字节还原 true）：
+      p1 cli ENOENT retry 判据抹成恒真 ⇒ cli.test「ENOENT」红；p7 Gateway 前置拒 retry=false 翻 true
+      ⇒「gateway_refused」红；p2 候选空门 if(false) ⇒ run.test「executor_disabled」红；p3 retry
+      即停 break 抹掉 ⇒「retry=false」红；p4 未注册门 if(false) ⇒「executor_disabled」红；
+      p5 registerDisabled 的 delete 抹成 void ⇒ registry.test「registerDisabled」红；p6 审计失败
+      console.error 套 if(false) 死守卫 ⇒ cli.test「console.error」红（min>=10 钉住「套件仍跑着」）；
+      p8 firstNonEmptyLine 占位串抹空 ⇒ types.test「firstNonEmptyLine」红（min>=15）；
+      p9 role_prompt 门恒真 ⇒「buildToolArgs」红；p10 pure-model decision 缺失门 ⇒「decision_missing」红。
+  · 本轮抓出的探针自身缺陷（比绿更重要，形状登记）：
+      ① 锚点撞注释：p6 首版锚 console.error( 的命中第一处在 types.ts 文件头注释里 ⇒ 抹完编译崩，
+        「红」是 parse error 的假红（测试没跑就红 = 什么都没判）。修法：带缩进的多行锚只打真调用点。
+      ② void (expr,) 不是合法死守卫：oxc 拒「Parenthesized expressions may not have a trailing
+        comma」—— 参数尾逗号在变成括号组后非法。死守卫的正 shape 是 if (false) 前缀（round362 p1
+        同族），变异必须是纯行为增量，不是「把文件弄坏」。
+      ③ 判定器要会读 vitest：ANSI 把「N passed」染花需先剥 SGR；「Test Files 1 passed」会抢
+        「数字+空格+passed」的匹配，钉「套件仍跑着」必须锚在 Tests 那一行；失败运行的格式是
+        「Tests  1 failed | 13 passed」，min 阈值要按文件真实用例数定（14/19 发的文件立 min:20 恒假）。
+      ④ 探针锚点里的中文在 .mjs 里要写单反斜杠的 u 转义（反斜杠+u+四位十六进制，JS 解析成真字形
+        才能对上源码），双反斜杠是字面量、hits=0。p7/p8 首版各踩一次，PROBE-SKIP 兜住没有假跑。
+  · 新增 direct 测试补齐（发现覆盖缺口后补）：types.test.ts 19 发 —— firstNonEmptyLine 五发（CRLF、
+    全空、占位串过契约 min(1)）、payload 双分支精确键集 + JSON 往返纯度、okRun/errRun 透传与
+    conditional spread、buildToolArgs、asExecutorFailureCode 三发、真库审计行形状一发（拿 q.node 真
+    落一行逐列断言）、auditExecutorRunViaWriter 三发（成功序 extraRows 先落 + 失败响亮 + 抛字符串
+    String() 兜住）。执行器套件 8 文件 62 发。
+  · 实测数字：全量 pnpm test 170 文件 / 3832 通过 / 6 跳过（2026-11-23 实测，含 arch 35 文件 548 守卫
+    全绿）；pnpm typecheck 绿（含 B5 硬门）；新文件 biome check --write 后 0 诊断（未入库新文件，
+    round285(b) 授权格）；变异探针 10/10 PROBE-OK。
+── 状态 ────────────────────────────────────────────────────
+  · 未 commit。生产改动：packages/contracts/src/executor.ts + packages/hub/src/executors/
+    {types,registry,run,cli,pure-model,human,builtin-plugin,plugin-webhook}.ts 新建；
+    测试：packages/hub/test/executors/ 八份新建（含 adapters 两份）。
+  · 下一格（T7）：会话层 + 真实会议（群消息/私聊/@拍板呈现 + 发言序列与结论三件套）。
+
+════════════════════════════════════════════════════════════════
+round364（2026-11-23）— plan-refs 全量随机红复现并修复：.tmp 夹具根整棵树进语料
+────────────────────────────────────────────────────────────────
+【症状与复现】round363 收尾的全量（full-test-363c）1 发 Failed Suites 红：
+  plan-refs.test.ts ENOENT open '.tmp/dead-mod-root-66976/packages/hub/src/keep.test.ts'
+  —— 红的不是任何判据，是取材本身（readCorpus 读盘时目录被删）。
+  复算：路径落在 dead-modules.test.ts 的 fixtureTmp("dead-mod-root") pid 目录，
+  该测试 afterAll 整棵 rmSync；plan-refs 的 collect(root,"",.ts) 从仓库根递归，
+  把 .tmp 列进队列，轮到读它之前属主进程删了它 ⇒ 目录项存在→文件消失窗口。
+
+【病因定位】round277 给 collect() 补的是 isRuntimeFixture 按【文件名】排除运行期
+  探针，挡不住【整棵夹具目录树】这个形状 —— 消失的不是一个文件，是一棵树。
+  同族的 .tmp 目录级跳过，harness-invariants.ts 的 SKIP_DIRS 与 test-inventory.ts
+  早有（walkFiles 文件头「跳过清单从此只在这里长」），plan-refs.collect 是第 N 个
+  各写一份遍历的消费者，round277 记「第四个消费者」时目录级这一层没进它的视野。
+
+【修复】plan-refs.ts collect() 目录排除加 .tmp（与 node_modules/.git 同格同理由：
+  跳过而不是读错吞掉 —— 吞读错误会把真取材失败一起咽掉，本守卫整条判据建立在
+  「取材失败必须炸」上）。
+  ⚠ 未收敛到 harness-invariants.SKIP_DIRS：plan-refs 口径刻意【不含】dist/coverage
+  （产物里的注释也是语料，dist 重建时并发删读会重演同款竞态，今天没红是因为
+  vitest 与 tsc -b 不在同一时刻跑）—— 两套名单语义不同（一个「扫产物噪声」一个
+  「扫竞态雷区」），合并会静默改变语料口径。这里记为已知重复，第三处需要目录
+  遍历口径时按 walkFiles 文件头的约定收敛。
+
+【单测】plan-refs.test.ts 新增 collect() 目录排除一发（临时树用 os tmpdir，
+  不用仓库根 .tmp —— 那棵正被并发测试整棵删建，fixtureTmp 的 pid 名是合法目录名，
+  在它里面再造同名树反而制造新并发）。四格一发同测：node_modules/.git/.tmp 三棵
+  树里各放文件且断言零收（防「那里本来没文件」的假绿）+ 探针【文件名】在普通
+  子目录里也零收（round277 那格首次有单测）+ 普通子目录照常收（防「什么都不收」）。
+  此前三条目录排除【从来没有判据】—— 一条没有判据的排除和被删了没区别。
+
+【变异自证】抹 "|| e.name === \".tmp\"" 字节 ⇒ 该发立刻红且点名泄漏路径
+  ".tmp/dead-mod-root-12345/packages/hub/src/w.ts"；逐字节还原（cmp 全等）复跑绿。
+
+【实测数字】plan-refs 11 发（+1）；plan-refs+production-deps 19 发绿；
+  typecheck EXIT=0；biome 两文件净新增 0；FFFD=0。
+  全量（full-test-364）：见下方追加行。
+
+【状态】round363 的 T6 全部改动 + 本轮修复一并未 commit，待全量绿后一次提交。
+全量实测：170 文件全绿 / 3836 通过 | 6 跳过（3842），181.43s。
+  上一轮唯一的那发随机 ENOENT（plan-refs 扫到 dead-modules 夹具目录）本轮未再出现。

@@ -150,10 +150,18 @@ export const CHARTER_ATTEMPTS_SQL =
  *      【今日视图那条预算条读的就是 budgets】（overview/today.ts:263 求和它），
  *      而【规格】§7.4 那张卡要显示的正是「已消耗 / 上限」。门与界面读【同一个累加器】，
  *      "门说它超了而条还空着"才不可表达；读另一列就是再造一个两源分叉（0041 §2 那一族）。
- *      【上限的那一侧读参数，不读 budgets.limit_cents】—— 实测：runtime 那条
- *      ENSERT_BUDGET_SQL（round272 之前是 runtime 自己手抄的 `ENSERT_TASK_BUDGET_SQL`）是 ON CONFLICT DO NOTHING，所以那一列【第一次写进去就再也不改】；
- *      跑第二次而把上限改成 1，库里仍是第一次那个 1000（0045 §1 那张表）。
- *      拿它当门 = 门永远按【这台机器第一次启动时】的那个数字关着。
+ *      【上限的那一侧读 budgets.limit_cents，参数只当回落】—— CEO 拍板「预算列 = 生效值」，
+ *      并【否掉】了当时建议的"列只给界面看、门读参数"（round360）。旧那一版的依据是
+ *      runtime 那条 ENSERT_BUDGET_SQL 是 ON CONFLICT DO NOTHING，所以那一列【第一次写进去
+ *      就再也不改】，跑第二次而把上限改成 1，库里仍是第一次那个 1000（0045 §1 那张表）——
+ *      「拿它当门 = 门永远按【这台机器第一次启动时】的那个数字关着」。
+ *      那条实测【仍然成立】，作废的是它的【结论】：能改那一列的写点后来有了两个 ——
+ *      POST /budget（http/budget.ts 的 UPSERT 写 DO UPDATE SET limit_cents，
+ *      scope_type/period 是枚举、task/per_task 都在里面）与章程批准同步
+ *      （charter/budget-sync.ts 同形状）。列既然可写，"永久冻结"就不再加剧"别读它"；
+ *      而一个【从没花过钱、也没人写过预算】的任务仍然得有门，所以参数留着做回落。
+ *      于是生效值 = COALESCE(列, 参数)：有行 ⇒ 列说话，「追加预算」真的开门；
+ *      无行 ⇒ 参数说话，不出现"没预算记录 = 无限花钱"。
  *    放行条件是 `consumed < limit`，也就是【花到上限那一格就挡】（等价于挡在 `>=` 上），
  *    而不是 `consumed <= limit`（那要多花一次才挡）：【规格】§7.4 写的是「达到预算阈值时」，
  *    达到就是达到。
@@ -183,8 +191,15 @@ export const CHARTER_ATTEMPTS_SQL =
  * 漂了的那一份不会有人发现：候选那边漂了 = 门失效（花钱），
  * 计数那边漂了 = 门明明挡了而终端一声不响。
  *
- * 绑参数量：一条 `?`（那一份上限）。五条 SQL 的形状刻意写成【可以直接 AND 进去】的样子，
+ * 绑参数量：一条 `?`（那一份【回落】上限 —— 库里没有这条任务的预算行时才轮到它）。
+ * 五条 SQL 的形状刻意写成【可以直接 AND 进去】的样子，
  * 因为五个使用点用的必须是【同一个方向】的判据 —— 一边 >= 一边 < 就是自相矛盾。
+ *
+ * ⚠ 上限那一侧读【列】、参数只是回落（CEO 拍板「预算列 = 生效值」，round360）：
+ * `COALESCE((SELECT b.limit_cents …), ?)`。有预算行 ⇒ 列说话（POST /budget 追加预算
+ * 真的能把门打开）；无预算行 ⇒ 参数说话（从没花过钱的任务不给"无限"）。
+ * 反过来说清楚它挡的是什么：把 `?` 挪回唯一那一侧、列只留在界面（today.ts 那条 SUM），
+ * 就是"追加预算只改屏幕不改门"—— 那正是这一项【否掉】的形状。
  *
  * ⚠ 整条外面那层括号【不能删】：五个使用点里有两个是裸拼的
  * （CHARTER_CANDIDATES_SQL 与 driver-pump 的 driverCandidatesSql 都写 `AND <谓词> ORDER BY`，
@@ -198,7 +213,11 @@ export function underTaskBudgetSql(t: string): string {
     "(COALESCE((SELECT b.consumed_cents FROM budgets b " +
     "WHERE b.scope_type = 'task' AND b.scope_id = " +
     t +
-    ".id AND b.period = 'per_task'), 0) < ?" +
+    ".id AND b.period = 'per_task'), 0) < " +
+    "COALESCE((SELECT b.limit_cents FROM budgets b " +
+    "WHERE b.scope_type = 'task' AND b.scope_id = " +
+    t +
+    ".id AND b.period = 'per_task'), ?)" +
     " OR COALESCE((SELECT b.hard_stop FROM budgets b " +
     "WHERE b.scope_type = 'task' AND b.scope_id = " +
     t +

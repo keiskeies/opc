@@ -44,16 +44,16 @@
  * **validateOrgChange 不保证运行中任务不受影响，它保证的是有人被问过一句。**
  */
 import {
-  canReach,
   CEO_ROLE_ID,
+  canReach,
   depthOf,
   getDescendants,
   nodeOf,
   ORG_MAX_DEPTH,
   type OrgActor,
   type OrgChange,
-  type OrgGraphNode,
   type OrgGraph,
+  type OrgGraphNode,
   reportsToCycle,
 } from "./graph.js";
 
@@ -166,7 +166,10 @@ export function validateReparenting(
     // 自环。放在环判据【之前】是必须的：getDescendants 不含自身，
     // 所以「挂到自己下面」按示例那句 getDescendants(child).includes(newParent)
     // 判是【放行】的 —— 规格那段示例代码漏了自环这一格。
-    return reject("would_create_cycle", `角色 [${childRole}] 不能挂到自己之下。`);
+    return reject(
+      "would_create_cycle",
+      `角色 [${childRole}] 不能挂到自己之下。`,
+    );
   }
   const parent = nodeOf(org, newParent);
   if (parent === undefined) {
@@ -252,10 +255,7 @@ export function validateReparenting(
  *  · 它不判新节点能不能干活（有没有岗位书、名字对不对得上模板名）。那两格
  *    分别卡在 CEO 的代笔边界（0008 §7）与计划 §10.2 D11 的命名拍板上。
  */
-export function validateNewNode(
-  node: OrgGraphNode,
-  org: OrgGraph,
-): Verdict {
+export function validateNewNode(node: OrgGraphNode, org: OrgGraph): Verdict {
   const malformed = rejectMalformed(org);
   if (malformed !== null) return malformed;
   const roleId = node.role_id;
@@ -434,7 +434,12 @@ export function violatesNoSelfReview(
   }
   const a = nodeOf(org, source)?.model_family;
   const b = nodeOf(org, target)?.model_family;
-  if (a === undefined || a.trim() === "" || b === undefined || b.trim() === "") {
+  if (
+    a === undefined ||
+    a.trim() === "" ||
+    b === undefined ||
+    b.trim() === ""
+  ) {
     return reject(
       "unknown_model_family",
       `产出方或审阅方未声明 model_family，无法判定是否同源（§5.9 第 1 条 / §24 风险 1）。` +

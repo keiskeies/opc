@@ -62,7 +62,7 @@
    而那个 `true` 是**真话**（那张卡确实已决策）说的一个**假意思**。
 
 那句报错教的补救 —— `hub resume --db … --task …` —— 在 `cli.ts` 那一侧，
-而 `cli.ts:28` 顶层 `import "@langchain/langgraph"`，本机 `ERR_MODULE_NOT_FOUND`（0039 量过）。
+而 `src/cli.ts:28` 顶层 `import "@langchain/langgraph"`，本机 `ERR_MODULE_NOT_FOUND`（0039 量过）。
 **也就是说报错给出的那一步在这台机器上跑不起来，而那一次失败的副作用已经不可撤销。**
 
 这一族是本仓反复定义的最贵形状（看起来接上了、跑起来必炸、测试全绿），

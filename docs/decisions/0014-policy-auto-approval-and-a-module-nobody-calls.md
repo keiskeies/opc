@@ -319,3 +319,22 @@ console.log("窗口函数在 LIMIT 前 =",d.prepare("SELECT COUNT(*) OVER () t F
 dead-modules 基线两条按方向 B 摘除。三发变异证据在
 `.workbuddy/round269-o9-shadow-mutate.mjs`（M1 影子恒 null / M2 不可逆短路失效 /
 M3 写路径越界，全杀且自恢复）。
+
+---
+
+## 追加（round363，2026-11-23）：createCard 包装名单的第二次翻 —— 执行器层的真人席接上了
+
+§⑧ 与 phase3 blocker 6 那对配对口径今天第二次一起翻：`callersOf("createCard")` 从
+`[serve/dev-seed.ts]` 长到 `[executors/human.ts, serve/dev-seed.ts]`。红因是 T6 的
+真人席执行器 —— `executors/human.ts` 的 `run()` 建待办卡片走的就是 `createCard` 这层
+正当包装（取写锁 + ApprovalRequired 事件 + appendAudit 都在包装里，这正是 round269
+那笔「超步内部才绕包装走 insertCard」账的对偶：执行器不在超步里，该走包装）。
+
+分层读法，三件事别混成一件：
+1. 「这层包装在 src 里零调用方」那半截【过期了】—— 两个名字都是 src 生产代码；
+2. 「HTTP 可达口径的建卡者仍是零」【仍成立】—— human.ts 今天零生产入口
+   （dead-modules 基线钉着，T10 接线日自删），没有任何 HTTP/巡检/CLI 路径调到它；
+3. 名单继续【钉死恰好这两个名字】：第三个名字出现 ⇒ 红 ⇒ 回来分清接的是哪一层。
+
+recordAutoApproval（认领写路径）名单仍 `== []`，一个字没动 —— 本篇 §3 对写路径的说法
+整段继续成立。

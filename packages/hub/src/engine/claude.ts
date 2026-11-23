@@ -62,6 +62,13 @@ export interface RoleRunInput {
   readonly cwd: string;
   /** 美元硬顶，直接给 --max-budget-usd。不是提示词里的「别花太多」。 */
   readonly maxBudgetUsd: number;
+  /**
+   * 模型名，有值才给 `--model`（round363，T6：member_executors.config 的 model
+   * 这一格要真的落到 CLI 手里，否则「成员绑定模型」只是数据库里的装饰）。
+   * undefined = 不给该 flag，CLI 用它自己的默认 —— 与 rolePrompt 同一立场：
+   * 不替 CLI 编一个默认模型名。
+   */
+  readonly model?: string;
   readonly timeoutMs?: number;
   /** 二进制名/路径。测试注入桩 CLI 用这一格（不是「测试专用后门」，是同一个入口）。 */
   readonly bin?: string;
@@ -182,6 +189,12 @@ export async function runRole(i: RoleRunInput): Promise<RoleRunResult> {
   ];
   if (i.resumeSessionId !== undefined && i.resumeSessionId !== "") {
     args.push("--resume", i.resumeSessionId);
+  }
+  // --model 有值才加（实测 `claude --help` 有这一面）；空串【不加】而不是传空串：
+  // 传 `--model ""` 是把「没配模型」伪装成「配了一个空名字」，CLI 侧的报错会指向
+  // 一个不存在的模型，而装配方检查 argv 时也会读到这一发。
+  if (i.model !== undefined && i.model !== "") {
+    args.push("--model", i.model);
   }
 
   const { spawn } = await import("node:child_process");

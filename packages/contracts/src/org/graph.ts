@@ -197,7 +197,9 @@ export const orgChangeSchema = z.discriminatedUnion("kind", [
       new_parent_role: z.string().min(1),
     })
     .strict(),
-  z.object({ kind: z.literal("add_edge"), edge: delegationEdgeSchema }).strict(),
+  z
+    .object({ kind: z.literal("add_edge"), edge: delegationEdgeSchema })
+    .strict(),
   // round294（O8 §7 第 18 格那一格自己点名的修法）。加这一种 kind 的【全部】意义在
   // 「带判据」三个字：round292 之前契约里没有「加节点」这一类变更，而
   // `commitOrgGraph` 落库的是【请求体那张图】经 applyChangeToGraph 的结果 ⇒
@@ -251,9 +253,7 @@ export function nodeOf(
   org: OrgGraph,
   roleId: string,
 ): OrgGraph["nodes"][string] | undefined {
-  return Object.prototype.hasOwnProperty.call(org.nodes, roleId)
-    ? org.nodes[roleId]
-    : undefined;
+  return Object.hasOwn(org.nodes, roleId) ? org.nodes[roleId] : undefined;
 }
 
 /**

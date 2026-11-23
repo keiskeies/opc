@@ -11,10 +11,13 @@
  * 同一条约束下的同一个解法：**描述坏形状时，不能长成坏形状**。
  */
 
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
+  collect,
   danglingTaskRefs,
   PLAN_PATH,
   planTaskIds,
@@ -191,5 +194,52 @@ describe("计划引用对账：真仓库那一半", () => {
     // 本轮实测：窄口径 10 个（1.8 / 2.4 / 2.5 / 2.7 / 2.8 / 4.2 / 4.3 / 5.6 / 5.8 / 6.6）。
     // 不钉死这个数字 —— 它随代码注释增减而漂，而这条判据要说的只是「它非空」。
     expect(narrowUncited.length).toBeLessThanOrEqual(corpus.planIds.size);
+  });
+});
+
+/**
+ * collect() 的目录排除（round364）。
+ *
+ * ⚠ 这个 describe 刻意在【上面那个真语料 describe 之外】：本文件在自己的语料里，
+ * 里面的字符串要直写「某关键字 + 空格 + 编号」的形状就会被判据收进语料 —— 文件头
+ * 那条约束对新代码同样成立，所以本段一个引用形状都不出现，路径段一律拼写。
+ *
+ * 为什么补在 round364：全量里 plan-refs 随机红了一次（ENOENT，路径指向 .tmp 下
+ * dead-modules 夹具的 pid 目录）—— 夹具根被 readdir 列进队列、轮到读它之前被
+ * afterAll 整棵删掉。round277 那格按【文件名】排运行期探针，挡不住【整棵目录树】
+ * 这个形状。同族的 node_modules/.git 两条排除【早就在】却从来没有单测 ——
+ * 一条没有判据的排除，和被删了没区别，所以三格一起钉。
+ * 根目录用 os tmpdir（仓库根的 .tmp 正被并发测试整棵删整棵建，fixtureTmp 的
+ * pid 名在 NAME_PATTERN 里是合法目录，在它【里面】再造一棵同名树反而制造并发）。
+ */
+describe("collect() 的目录排除", () => {
+  it("node_modules/.git/.tmp 三棵树与夹具【文件名】都不收，普通子目录照常收", () => {
+    const root = mkdtempSync(join(tmpdir(), "plan-refs-skip-"));
+    try {
+      const hit = (dir: string, name: string): string => {
+        mkdirSync(join(root, dir), { recursive: true });
+        writeFileSync(join(root, dir, name), "// x\n", "utf8");
+        return dir + "/" + name;
+      };
+      const expected = [
+        // 普通子目录照常收：排除名单不是「什么都不收」。
+        hit("a", "ok.ts"),
+        hit("a/b", "nested.ts"),
+      ].sort();
+      // 三棵被跳过的树里【确实放东西】—— 否则「跳过」是「那里本来就没文件」换来的假绿。
+      hit("node_modules", "dep.ts");
+      hit(".git", "obj.ts");
+      // 夹具根的标准形状：<名字>-<pid> 目录里放一个 .test.ts —— 正是这次 ENOENT 的路径形状。
+      hit(
+        join(".tmp", "dead-mod-root-12345", "packages", "hub", "src"),
+        "w.ts",
+      );
+      // 运行期探针【文件名】（round277 那一格，排的是文件不是目录）：放 a/ 下，被排。
+      hit("a", "__boundary" + "_probe.ts");
+      const got = collect(root, "", ".ts").sort();
+      expect(got).toEqual(expected);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });

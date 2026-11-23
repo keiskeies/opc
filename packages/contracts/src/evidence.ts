@@ -187,11 +187,11 @@ export const ENGINE_REVIEW_GATE = "engine_review";
  * 而 §5.11 说 zod schema 是唯一 schema 来源 —— 能不动数据形状就不动。
  */
 export const HANDOFF_BUNDLE_TYPES: Readonly<Record<string, BundleType>> = {
-  "product_to_tech": "spec",
-  "tech_to_dev": "design",
-  "dev_to_test": "code_diff",
-  "test_upward": "test_report",
-  "ops_to_ceo": "ops_plan",
+  product_to_tech: "spec",
+  tech_to_dev: "design",
+  dev_to_test: "code_diff",
+  test_upward: "test_report",
+  ops_to_ceo: "ops_plan",
   [ENGINE_REVIEW_GATE]: "approval_card",
 };
 

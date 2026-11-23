@@ -53,7 +53,11 @@ export type ExperimentalHarnessId = (typeof EXPERIMENTAL_HARNESS_IDS)[number];
  * safety.ts 那条「沙箱档位不得提级」的判据直接比下标。
  * ⚠ 别把它当字母序或当集合用 —— 一旦有人排成 `danger` 在前，那条判据就反了。
  */
-export const SANDBOX_TIERS = ["read-only", "workspace-write", "danger"] as const;
+export const SANDBOX_TIERS = [
+  "read-only",
+  "workspace-write",
+  "danger",
+] as const;
 export type SandboxTier = (typeof SANDBOX_TIERS)[number];
 
 /** 审批策略（§12.2 Codex 双轴的另一轴）。 */
@@ -564,4 +568,3 @@ export function shadowedHarnessKeys(
   }
   return out;
 }
-
