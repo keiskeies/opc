@@ -38,6 +38,7 @@ export {
   bindingRequestSchema,
   bindingVerifyRequestSchema,
   type CommitOrgChangeRequest,
+  type ContractRouteMatch,
   type CreateTaskRequest,
   commitOrgChangeRequestSchema,
   createTaskRequestSchema,
@@ -59,6 +60,7 @@ export {
   imBindingViewSchema,
   isImplemented,
   MAX_IDEA_CHARS,
+  matchContractEndpoint,
   type PutBudgetRequest,
   putBudgetRequestSchema,
   RECONNECT_BASE_MS,
@@ -74,6 +76,15 @@ export {
   taskViewSchema,
   UNIMPLEMENTED_ENDPOINTS,
 } from "./api.js";
+export {
+  ASSET_PURPOSES,
+  type AssetPurpose,
+  type AssetView,
+  assetViewSchema,
+  MAX_ASSET_BYTES,
+  type UploadAssetRequest,
+  uploadAssetRequestSchema,
+} from "./asset.js";
 export {
   BACKLOG_STATES,
   type BacklogItemView,
@@ -132,7 +143,9 @@ export {
 } from "./conversation.js";
 export {
   type CreateDocumentRequest,
+  type CreateDocumentTemplateRequest,
   createDocumentRequestSchema,
+  createDocumentTemplateRequestSchema,
   DOC_EXPORT_FORMATS,
   DOC_KINDS,
   DOC_ORIGINS,
@@ -282,8 +295,10 @@ export {
   unrecognizedHarnessKeys,
 } from "./harness.js";
 export {
+  type CancelMeetingRequest,
   type ConcludeMeetingRequest,
   type CreateMeetingRequest,
+  cancelMeetingRequestSchema,
   concludeMeetingRequestSchema,
   createMeetingRequestSchema,
   MAX_MEETING_TOPIC_CHARS,
@@ -367,6 +382,8 @@ export {
 } from "./org/validate.js";
 
 export {
+  type BuiltinPluginModule,
+  builtinPluginModuleProblem,
   type InstallPluginRequest,
   installPluginRequestSchema,
   PLUGIN_KINDS,
@@ -375,14 +392,16 @@ export {
   type PluginToolView,
   type PluginView,
   pluginProbeResultSchema,
-  type BuiltinPluginModule,
-  builtinPluginModuleProblem,
   pluginToolViewSchema,
   pluginViewSchema,
   type UpdatePluginRequest,
   updatePluginRequestSchema,
 } from "./plugin.js";
 export {
+  type CreateResearchCardRequest,
+  type CreateRhythmEventRequest,
+  createResearchCardRequestSchema,
+  createRhythmEventRequestSchema,
   type ListResearchQuery,
   type ListRhythmQuery,
   listResearchQuerySchema,

@@ -34,14 +34,13 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { fixtureTmp } from "../fixtures/fixture-dir.js";
+import { isBackupName, isSamePath } from "../../src/db/backup.js";
 import { openDb } from "../../src/db/driver.js";
 import { migrate } from "../../src/db/migrate.js";
-import { isBackupName, isSamePath } from "../../src/db/backup.js";
+import { openSnapshotReadonlyDb } from "../../src/db/pragmas.js";
 import { WriteQueue } from "../../src/db/write-queue.js";
 import { InMemoryEventBus } from "../../src/events/bus.js";
 import { appendAudit } from "../../src/events/recorder.js";
-import { openSnapshotReadonlyDb } from "../../src/db/pragmas.js";
 import {
   DRILL_TARGET_NAME,
   EXIT_OK,
@@ -53,6 +52,7 @@ import {
   runMaintenance,
   runMaintenanceCli,
 } from "../../src/heartbeat/maintenance.js";
+import { fixtureTmp } from "../fixtures/fixture-dir.js";
 
 const TMP = fixtureTmp("maintenance", import.meta.url);
 const T0 = Date.parse("2026-11-12T03:04:05.123Z");
@@ -89,7 +89,15 @@ function fresh(opts: { stalledBase?: number } = {}): Fix {
   db.prepare(
     "INSERT INTO events (task_id, actor_type, actor_id, action, payload, state_snapshot, created_at) " +
       "VALUES ('T-1', 'system', 'hub', 'state_change', ?, '{}', ?)",
-  ).run(JSON.stringify({ kind: "TaskStateChanged", taskId: "T-1", to: "IN_PROGRESS", n: 1 }), T0);
+  ).run(
+    JSON.stringify({
+      kind: "TaskStateChanged",
+      taskId: "T-1",
+      to: "IN_PROGRESS",
+      n: 1,
+    }),
+    T0,
+  );
   if (opts.stalledBase !== undefined) {
     // 把任务摆到「很久以前建、很久以前动过」，一轮巡检就该抓到它。
     // 【只能 INSERT，不能 UPDATE/DELETE 那条已有事件】—— 自家 append-only 触发器
@@ -110,7 +118,12 @@ function fresh(opts: { stalledBase?: number } = {}): Fix {
         taskId: "T-old",
         target: null,
         action: "state_change",
-        payload: { kind: "TaskStateChanged", taskId: "T-old", to: "IN_PROGRESS", n: 2 },
+        payload: {
+          kind: "TaskStateChanged",
+          taskId: "T-old",
+          to: "IN_PROGRESS",
+          n: 2,
+        },
         createdAt: old,
       },
       () => old,
@@ -155,7 +168,14 @@ mkdirSync(TMP, { recursive: true });
 function io() {
   const out: string[] = [];
   const err: string[] = [];
-  return { out, err, io: { write: (t: string) => out.push(t), error: (t: string) => err.push(t) } };
+  return {
+    out,
+    err,
+    io: {
+      write: (t: string) => out.push(t),
+      error: (t: string) => err.push(t),
+    },
+  };
 }
 
 describe("① 参数与退出码", () => {
@@ -166,27 +186,40 @@ describe("① 参数与退出码", () => {
   });
 
   it("OPC_DB 作为缺省来源，但空白值不算设置了它", () => {
-    expect(parseMaintenanceArgs(["--no-backup"], { OPC_DB: "/tmp/a.db" }).dbPath).toBe("/tmp/a.db");
+    expect(
+      parseMaintenanceArgs(["--no-backup"], { OPC_DB: "/tmp/a.db" }).dbPath,
+    ).toBe("/tmp/a.db");
     expect(parseMaintenanceArgs([], { OPC_DB: "   " }).error).toContain("--db");
     // 反向对照：显式参数赢过环境变量，否则「今天想换个库」做不到
     expect(
-      parseMaintenanceArgs(["--db", "/tmp/b.db", "--no-backup"], { OPC_DB: "/tmp/a.db" }).dbPath,
+      parseMaintenanceArgs(["--db", "/tmp/b.db", "--no-backup"], {
+        OPC_DB: "/tmp/a.db",
+      }).dbPath,
     ).toBe("/tmp/b.db");
   });
 
   it("要备份就必须给目录：不给 ⇒ 要么给目录要么显式 --no-backup", () => {
     const r = parseMaintenanceArgs(["--db", "/tmp/a.db"], {});
     expect(r.error).toContain("--backup-dir");
-    expect(parseMaintenanceArgs(["--db", "/tmp/a.db", "--no-backup"], {}).error).toBeUndefined();
-    expect(parseMaintenanceArgs(["--db", "/tmp/a.db", "--backup-dir", "/tmp/bk"], {}).backupDir).toBe("/tmp/bk");
+    expect(
+      parseMaintenanceArgs(["--db", "/tmp/a.db", "--no-backup"], {}).error,
+    ).toBeUndefined();
+    expect(
+      parseMaintenanceArgs(["--db", "/tmp/a.db", "--backup-dir", "/tmp/bk"], {})
+        .backupDir,
+    ).toBe("/tmp/bk");
   });
 
   it("--db=值 这种写法也认（不能只认空格分隔）", () => {
-    expect(parseMaintenanceArgs(["--db=/tmp/a.db", "--no-backup"], {}).dbPath).toBe("/tmp/a.db");
+    expect(
+      parseMaintenanceArgs(["--db=/tmp/a.db", "--no-backup"], {}).dbPath,
+    ).toBe("/tmp/a.db");
   });
 
   it("未知参数退 2 而不是被当裸参数吃掉", () => {
-    expect(parseMaintenanceArgs(["--frobnicate"], {}).error).toContain("--frobnicate");
+    expect(parseMaintenanceArgs(["--frobnicate"], {}).error).toContain(
+      "--frobnicate",
+    );
     expect(parseMaintenanceArgs(["--db"], {}).error).toContain("--db");
   });
 
@@ -219,7 +252,13 @@ describe("② 一轮维护真的把三块接上", () => {
     if (r.backup !== undefined && r.backup.ok) {
       const snap = openSnapshotReadonlyDb(r.backup.path);
       opened.push(snap);
-      const inSnap = Number((snap.prepare("SELECT count(*) AS c FROM events").get() as { c: number | bigint }).c);
+      const inSnap = Number(
+        (
+          snap.prepare("SELECT count(*) AS c FROM events").get() as {
+            c: number | bigint;
+          }
+        ).c,
+      );
       // 【不是 1】。完整性扫描的 append-only 探针自己会写一行安全审计 ——
       // 触发器里的写会被 RAISE(ABORT) 回滚，所以那一行必须由捕获异常之后的应用层写
       // （0018 §1 第 7 条）。于是「跑过一次检查」这个动作本身就往 events 里加了一行，
@@ -227,12 +266,58 @@ describe("② 一轮维护真的把三块接上", () => {
       expect(inSnap).toBe(r.backup.eventsInBackup);
       expect(inSnap).toBeGreaterThanOrEqual(1);
       const live = Number(
-        f.q.readConnection().prepare("SELECT count(*) AS c FROM events").all().length > 0
-          ? (f.db.prepare("SELECT count(*) AS c FROM events").get() as { c: number | bigint }).c
+        f.q.readConnection().prepare("SELECT count(*) AS c FROM events").all()
+          .length > 0
+          ? (
+              f.db.prepare("SELECT count(*) AS c FROM events").get() as {
+                c: number | bigint;
+              }
+            ).c
           : 0,
       );
       expect(inSnap).toBe(live);
     }
+  });
+
+  it("维护轮真的清理 30 天前版本，并永远保留每篇最新版", async () => {
+    const f = fresh();
+    const old = T0 - 31 * 24 * 60 * 60 * 1000;
+    f.db
+      .prepare(
+        "INSERT INTO documents (doc_id, kind, title, owner, body_text, origin, created_at, updated_at)" +
+          " VALUES ('doc-retain', 'markdown', 'Retention', 'boss', 'latest', 'created', ?, ?)",
+      )
+      .run(T0, T0);
+    for (const [seq, at, body] of [
+      [1, old, "v1"],
+      [2, old + 1, "v2"],
+      [3, T0, "latest"],
+    ] as const) {
+      f.db
+        .prepare(
+          "INSERT INTO document_versions (doc_id, seq, body_text, author, created_at)" +
+            " VALUES ('doc-retain', ?, ?, 'boss', ?)",
+        )
+        .run(seq, body, at);
+    }
+    const r = await runMaintenance({
+      dbPath: f.path,
+      db: f.q.readConnection(),
+      writer: f.q,
+      bus: f.bus,
+      backupDir: f.backupDir,
+      now: () => T0,
+      onWarning: () => {},
+    });
+    expect(r.ok).toBe(true);
+    expect(r.prunedDocumentVersions).toBe(2);
+    expect(
+      f.db
+        .prepare(
+          "SELECT seq FROM document_versions WHERE doc_id = ? ORDER BY seq",
+        )
+        .all("doc-retain"),
+    ).toEqual([{ seq: 3 }]);
   });
 
   it("停滞任务被巡检抓到并写成事件；退出面 ok=false（有问题不是「通过」）", async () => {
@@ -247,8 +332,12 @@ describe("② 一轮维护真的把三块接上", () => {
       onWarning: () => {},
     });
     expect(r.patrol?.stalled).toBe(1);
-    expect(r.patrol?.judgements.find((j) => j.id === "T-old")?.verdict).toBe("stalled");
-    expect(r.patrol?.judgements.find((j) => j.id === "T-1")?.verdict).toBe("recent");
+    expect(r.patrol?.judgements.find((j) => j.id === "T-old")?.verdict).toBe(
+      "stalled",
+    );
+    expect(r.patrol?.judgements.find((j) => j.id === "T-1")?.verdict).toBe(
+      "recent",
+    );
     expect(r.ok).toBe(false);
     const rows = f.db
       .prepare("SELECT count(*) AS c FROM events WHERE action = 'escalation'")
@@ -268,7 +357,10 @@ describe("② 一轮维护真的把三块接上", () => {
   it("--no-backup 是人的决定，不该退 1（告警疲劳同一条理由）", async () => {
     const f = fresh();
     const h = io();
-    const r = await runMaintenanceCli(["--db", f.path, "--no-backup", "--no-patrol"], h.io);
+    const r = await runMaintenanceCli(
+      ["--db", f.path, "--no-backup", "--no-patrol"],
+      h.io,
+    );
     expect(r.code).toBe(EXIT_OK);
     expect(h.out.join("\n")).toContain("跳过 —— 调用方显式 --no-backup");
   });
@@ -369,7 +461,10 @@ describe("③ 那一条实质决定：页面检查不过就不备份", () => {
       onWarning: (m) => warnings.push(m),
     });
     // 前置自查：这一发要测的是「检查没跑成」而不是「检查报了损坏」。
-    expect(r.integrity.unavailable, "夹具没造出仪器故障，这一发测不到那一格").toBe("worker_timeout");
+    expect(
+      r.integrity.unavailable,
+      "夹具没造出仪器故障，这一发测不到那一格",
+    ).toBe("worker_timeout");
     expect(r.backup?.ok, "检查没跑成【不该】连带跳过备份").toBe(true);
     expect(existsSync(f.backupDir)).toBe(true);
     expect(warnings.join("\n")).toContain("没有跑成");
@@ -460,7 +555,10 @@ describe("③ 那一条实质决定：页面检查不过就不备份", () => {
     closeAllQuietly(f.db);
     truncateSync(f.path, Math.floor(statSync(f.path).size * 0.5));
     const h = io();
-    const r = await runMaintenanceCli(["--db", f.path, "--no-backup", "--no-patrol"], h.io);
+    const r = await runMaintenanceCli(
+      ["--db", f.path, "--no-backup", "--no-patrol"],
+      h.io,
+    );
     expect(r.code).toBe(EXIT_PROBLEM);
     const all = h.err.join("\n");
     expect(all).toContain("库打不开");
@@ -487,7 +585,9 @@ describe("③ 那一条实质决定：页面检查不过就不备份", () => {
       now: () => T0,
       onWarning: () => {},
     });
-    expect(r.integrity.checks.some((c) => c.verdict === "not_observable")).toBe(true);
+    expect(r.integrity.checks.some((c) => c.verdict === "not_observable")).toBe(
+      true,
+    );
     expect(r.backup?.ok).toBe(true);
   });
 });
@@ -539,7 +639,8 @@ describe("④ 恢复演练接进来了（0032）", () => {
     const dir = join(TMP, "sidecar-" + process.pid + "-" + ++seq);
     mkdirSync(dir, { recursive: true });
     const target = join(dir, DRILL_TARGET_NAME);
-    for (const p of [target, target + "-wal", target + "-shm"]) writeFileSync(p, "x");
+    for (const p of [target, target + "-wal", target + "-shm"])
+      writeFileSync(p, "x");
     removeDrillTarget(target);
     expect(readdirSync(dir)).toEqual([]);
     // 反向对照 + 幂等：文件本来不存在时不抛（成功路径每轮都会走到它）
@@ -646,7 +747,15 @@ describe("④ 恢复演练接进来了（0032）", () => {
       const snap = openSnapshotReadonlyDb(r.backup.path);
       opened.push(snap);
       expect(
-        Number((snap.prepare("PRAGMA integrity_check").get() as { integrity_check: string }).integrity_check === "ok" ? 1 : 0),
+        Number(
+          (
+            snap.prepare("PRAGMA integrity_check").get() as {
+              integrity_check: string;
+            }
+          ).integrity_check === "ok"
+            ? 1
+            : 0,
+        ),
       ).toBe(1);
     }
   });
@@ -668,7 +777,13 @@ describe("④ 恢复演练接进来了（0032）", () => {
     const dir = "/data/backups";
     const drill = join(dir, DRILL_TARGET_NAME);
     // 正常库名（含与它同目录那种）⇒ 一律不算同一个文件
-    for (const name of ["opc.db", "hub.db", "drill-target.db.bak", "drill.db", "DRILL-TARGET.DB"]) {
+    for (const name of [
+      "opc.db",
+      "hub.db",
+      "drill-target.db.bak",
+      "drill.db",
+      "DRILL-TARGET.DB",
+    ]) {
       expect(isSamePath(join(dir, name), drill)).toBe(false);
     }
     // 唯一会算成同一个文件的那一种
@@ -685,7 +800,10 @@ describe("④ 恢复演练接进来了（0032）", () => {
     // 前者看不出「今天压根没演练」，而那正是这个模块要防的看不见的失效。
     const f = fresh();
     const h = io();
-    const r = await runMaintenanceCli(["--db", f.path, "--no-backup", "--no-patrol"], h.io);
+    const r = await runMaintenanceCli(
+      ["--db", f.path, "--no-backup", "--no-patrol"],
+      h.io,
+    );
     expect(r.code).toBe(EXIT_OK);
     expect(h.out.join("\n")).toContain("恢复演练：没跑");
   });
@@ -693,7 +811,9 @@ describe("④ 恢复演练接进来了（0032）", () => {
 
 /** events 行数。单开一个函数只是为了让上面那条自指用例读起来是一句断言。 */
 function countTasks(db: { prepare(sql: string): { get(): unknown } }): number {
-  const row = db.prepare("SELECT count(*) AS c FROM tasks").get() as { c: number | bigint };
+  const row = db.prepare("SELECT count(*) AS c FROM tasks").get() as {
+    c: number | bigint;
+  };
   return Number(row.c);
 }
 
@@ -707,7 +827,8 @@ function corruptWholePages(path: string, n: number): void {
   const fd = openSync(path, "r+");
   try {
     // 从 page 3 起（0 是 header 页，1 通常是 sqlite_master）
-    for (let i = 0; i < n; i++) writeSync(fd, Buffer.alloc(ps, 0xab), 0, ps, (3 + i) * ps);
+    for (let i = 0; i < n; i++)
+      writeSync(fd, Buffer.alloc(ps, 0xab), 0, ps, (3 + i) * ps);
   } finally {
     closeSync(fd);
   }

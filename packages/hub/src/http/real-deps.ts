@@ -73,20 +73,17 @@ import {
   type ResumeValue,
 } from "@opc/contracts";
 import { requireScopeDb } from "../checkpoint/tx-scope.js";
-import type { DomainEvent, EventBus } from "../events/bus.js";
-import { appendAudit } from "../events/recorder.js";
+import {
+  type BackupOffLoopOutcome,
+  type BackupOffLoopRequest,
+  createBackupOffLoop,
+} from "../db/backup.js";
 import {
   assertParamCount,
   assertSingleStatement,
   type HubWriter,
-  type WriteQueue,
   type Writer,
 } from "../db/write-queue.js";
-import {
-  chooseResumeInput,
-  hasPendingInterrupt,
-  threadConfig,
-} from "../graph/thread.js";
 // 决策写路径的引擎那一条（0043）。方向是 http/ → engine/：本文件是【装配层】，
 // 它已经在组装 db/ / events/ / org/ / graph/thread / checkpoint/ 五个模块，
 // engine/ 是第六个而不是特例。⚠ 这一条 import【顶层】不能扩到 engine/work.ts
@@ -94,6 +91,16 @@ import {
 // 而本文件要被 assemble.ts import、assemble.ts 要被测试 import。
 // 只取 approveCard 这一个函数，正是为了让"决策落库"这件事离线可测。
 import { approveCard } from "../engine/approve.js";
+import type { DomainEvent, EventBus } from "../events/bus.js";
+import { appendAudit } from "../events/recorder.js";
+import { createExecutorRegistry } from "../executors/production.js";
+import type { ModelCaller } from "../executors/pure-model.js";
+import { runExecutions } from "../executors/run.js";
+import {
+  chooseResumeInput,
+  hasPendingInterrupt,
+  threadConfig,
+} from "../graph/thread.js";
 // 只在 insertTask 里取一版「当前组织图版本」。方向是 http/ → org/：
 // HTTP 是组织功能的一个入口，不是组织功能的归属地（同一个理由见 org/commit.ts
 // 文件头那条「ORG_ACTOR 不从 http/real-deps.ts 拿」）。
@@ -103,9 +110,10 @@ import { approveCard } from "../engine/approve.js";
 import {
   commitOrgGraph,
   currentGraphVersion,
-  readLatestGraph,
   RUNNING_TASKS_SQL,
+  readLatestGraph,
 } from "../org/commit.js";
+import type { HubDeps } from "./app.js";
 import {
   issueToken,
   newApprovalToken,
@@ -114,12 +122,6 @@ import {
   type TokenIssueReject,
   type TokenRejectReason,
 } from "./tokens.js";
-import type { HubDeps } from "./app.js";
-import {
-  createBackupOffLoop,
-  type BackupOffLoopOutcome,
-  type BackupOffLoopRequest,
-} from "../db/backup.js";
 
 /** CEO 这一侧的动作在审计里的身份。 */
 export const CEO_ACTOR = { actorType: "human", actorId: "ceo" } as const;
@@ -436,7 +438,9 @@ export async function decideWithEngineEdge(
  * 本仓在 publish / applyDecision 那两处都为"不给默认值"写过纪律，同一个理由
  * 在这里的方向反过来用 —— 缺席会被读成疏忽，所以让它成为一个【有名字的】决定。
  */
-export function engineRouteNothingToResume(): (taskId: string) => Promise<void> {
+export function engineRouteNothingToResume(): (
+  taskId: string,
+) => Promise<void> {
   return async (): Promise<void> =>
     // 什么都不做，而且【不该】做任何事：decideWithEngineEdge 已经在同一个事务里
     // 把状态边写掉了，这里再动一次任务就是推两格。
@@ -446,7 +450,10 @@ export function engineRouteNothingToResume(): (taskId: string) => Promise<void> 
 /** 装配 makeResumeGraph 需要的最小图接口（结构类型，测试好塞替身）。 */
 export interface ResumableGraph {
   getState(config: { configurable: { thread_id: string } }): Promise<unknown>;
-  invoke(input: unknown, config: { configurable: { thread_id: string } }): Promise<unknown>;
+  invoke(
+    input: unknown,
+    config: { configurable: { thread_id: string } },
+  ): Promise<unknown>;
 }
 
 /**
@@ -632,7 +639,12 @@ export async function mintApprovalTokenVia(
   w: Writer,
   o: { readonly approvalId: string; readonly nowMs: number },
 ): Promise<
-  | { readonly ok: true; readonly token: string; readonly expiresAt: number; readonly taskId: string }
+  | {
+      readonly ok: true;
+      readonly token: string;
+      readonly expiresAt: number;
+      readonly taskId: string;
+    }
   | { readonly ok: false; readonly reason: TokenIssueReject }
 > {
   // 预检与 INSERT 在【同一个 node()】里 —— 不是两次 await。
@@ -694,10 +706,15 @@ export async function mintApprovalTokenVia(
  */
 export async function redeemApprovalTokenVia(
   w: Writer,
-  o: { readonly token: string; readonly approvalId: string; readonly nowMs: number },
+  o: {
+    readonly token: string;
+    readonly approvalId: string;
+    readonly nowMs: number;
+  },
   publish: (e: DomainEvent, seq: number) => void,
 ): Promise<
-  { readonly ok: true; readonly taskId: string } | { readonly ok: false; readonly reason: TokenRejectReason }
+  | { readonly ok: true; readonly taskId: string }
+  | { readonly ok: false; readonly reason: TokenRejectReason }
 > {
   const r = await w.node(() =>
     redeemToken(requireScopeDb("redeemApprovalToken"), {
@@ -746,6 +763,10 @@ export interface RealHubDepsOptions {
   /** 新任务的受理角色。默认节点名，与图里 intake 的 roleId 同一个取值口径。 */
   readonly intakeRole?: string;
   readonly now?: () => number;
+  /** pure-model 的真实模型出口；缺省时执行器明确返回 model_unavailable。 */
+  readonly callModel?: ModelCaller;
+  /** CLI 工作区。只接受显式选项或 OPC_EXECUTOR_WORKSPACE，不默认当前仓库。 */
+  readonly executorWorkspace?: string;
   readonly nonces?: HubDeps["nonces"];
   /** Command 构造点，透传给 makeResumeGraph。测试用它让 resume 分支本机可跑。 */
   readonly makeCommand?: ResumeDeps["makeCommand"];
@@ -835,6 +856,13 @@ export function buildHubDeps(o: RealHubDepsOptions): HubDeps {
   const intakeRole = o.intakeRole ?? "intake";
   const publish = (e: DomainEvent, seq: number): void =>
     o.bus.publishPersisted(e, seq);
+  const registry = createExecutorRegistry({
+    writer: o.queue,
+    now,
+    ...(o.callModel === undefined ? {} : { callModel: o.callModel }),
+  });
+  const executorWorkspace =
+    o.executorWorkspace ?? process.env["OPC_EXECUTOR_WORKSPACE"];
   return {
     // 只读连接。给它而不是写连接：app.ts 里那三条 SELECT 是对外读的活
     // （GET /tasks、GET /tasks/:id、decide 前面那次 status 查询），
@@ -845,6 +873,9 @@ export function buildHubDeps(o: RealHubDepsOptions): HubDeps {
     now,
     // 进程状态直传（不在这里判、不在这里补默认，理由见 RealHubDepsOptions 那一条）。
     driverState: o.driverState,
+    executorRunner: (target) =>
+      runExecutions(target, { writer: o.queue, registry }),
+    ...(executorWorkspace === undefined ? {} : { executorWorkspace }),
     ...(o.nonces === undefined ? {} : { nonces: o.nonces }),
     // 决策的写路径。两条路线的选路在上面的 engineRoute，理由在那段，不重抄。
     recordDecision: async ({ approvalId, taskId, resume, note }) =>
@@ -880,17 +911,26 @@ export function buildHubDeps(o: RealHubDepsOptions): HubDeps {
         nowMs,
       }),
     redeemApprovalToken: async ({ token, approvalId }) =>
-      redeemApprovalTokenVia(o.queue, { token, approvalId, nowMs: now() }, publish),
-    issueApprovalToken: async ({ approvalId, nowMs }) => mintApprovalTokenVia(o.queue, { approvalId, nowMs }),
+      redeemApprovalTokenVia(
+        o.queue,
+        { token, approvalId, nowMs: now() },
+        publish,
+      ),
+    issueApprovalToken: async ({ approvalId, nowMs }) =>
+      mintApprovalTokenVia(o.queue, { approvalId, nowMs }),
     // 绑定那三条写路由走【同一个队列】（0031）。给它而不是给 deps.db 那条只读连接：
     // 上面每条写路径写明的同一条理由（P1 同连接重入），没有第二条更弱的写通道。
     bindingWriter: o.queue,
+    // 群角色上层各面共用同一个写队列；读侧仍走上面的只读连接。
+    domainWriter: o.queue,
     // 岗位书与预算的写路由走【同一个队列】，同 bindingWriter 一条理由，不重抄。
     // 无条件装（不是 org 那种「配了备份才装」）：这两条写路径本身不需要备份点，
     // 而读侧 GET /charter / GET /budget 本来也无条件（deps.db 那条只读连接）。
     charterWriter: o.queue,
     budgetWriter: o.queue,
-    ...(o.bindingVerifier === undefined ? {} : { bindingVerifier: o.bindingVerifier }),
+    ...(o.bindingVerifier === undefined
+      ? {}
+      : { bindingVerifier: o.bindingVerifier }),
     // 组织提交（0040）。只有当装配给了 dbPath + backupDir 才装 —— 那就是
     // 「这台 Hub 为改组织准备了恢复」（文件头 + HubDeps.commitOrgChange 那两段）。
     ...(o.orgBackupDir === undefined || o.orgDbPath === undefined
@@ -965,7 +1005,8 @@ export function makeCommitOrgChange(o: {
         ok: false,
         reason:
           "改组织前的备份没做成，拒绝提交（§6.5：改组织之前要留一份能回到起点的快照）。" +
-          "原因：" + bk.message,
+          "原因：" +
+          bk.message,
         code: "backup_failed",
       };
     }
@@ -975,7 +1016,8 @@ export function makeCommitOrgChange(o: {
         ok: false,
         reason:
           "改组织前的备份没做成，拒绝提交（§6.5：改组织之前要留一份能回到起点的快照）。" +
-          "原因：" + bk.result.message,
+          "原因：" +
+          bk.result.message,
         code: "backup_failed",
       };
     }

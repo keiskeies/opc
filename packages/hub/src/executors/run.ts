@@ -15,12 +15,10 @@
  * 同理，假执行器【故意不写】审计时 events 里就是零行 —— 测试把这条钉死，
  * 防的就是「哪天有人在路由器里顺手补一句 appendAudit」的善意破坏。
  *
- * ── 路由表只读库，不 join members（刻意）─────────────────────────────
- * 成员不存在 ⇒ 这里给 0 行 ⇒ 走 executor_disabled 分支。为什么不先查
- * members 再报 member_not_found：路由表是当前生效配置的【唯一】权威
- * （契约 ExecutionTarget 注释同款立场 —— 成员档案与执行器表的一致性
- * 归 members/service 的招聘事务管，路由器不做二次验尸，两处各判一次
- * 「成员在不在」早晚漂成两个答案）。
+ * ── 路由表只读库；成员人设在同一节点读取 ────────────────────────────
+ * 成员不存在 ⇒ 路由表通常也是 0 行 ⇒ 走 executor_disabled；不额外造 member_not_found。
+ * T12 需要每个成员按自己的 persona 说话，因此节点里同时读当前 name/persona/tone，
+ * 把它追加到调用方的 role_prompt；人设只影响表达，不能覆盖岗位书与门禁。
  */
 import {
   EXECUTOR_KINDS,
@@ -38,7 +36,15 @@ import {
   executorRunRequestSchema,
 } from "@opc/contracts";
 import { requireScopeDb } from "../checkpoint/tx-scope.js";
-import type { Writer } from "../db/write-queue.js";
+import {
+  assertParamCount,
+  assertSingleStatement,
+  type Writer,
+} from "../db/write-queue.js";
+import {
+  memberPersonaPrompt,
+  parseMemberPersona,
+} from "../humanizer/prompt.js";
 import type { ExecutorRegistry } from "./registry.js";
 
 export interface RunExecutionsDeps {
@@ -116,16 +122,39 @@ export async function runExecutions(
   const target = executionTargetSchema.parse(targetInput);
   const { writer, registry } = deps;
 
-  // 读路由表：写连接、进写队列（与后续执行器的审计写同一串行链，读不到半提交）。
-  const rows = await writer.node(
-    () =>
-      requireScopeDb("executors.run.route")
-        .prepare(
-          "SELECT seq, kind, config_json, enabled FROM member_executors " +
-            "WHERE member_id = ? AND seq >= ? ORDER BY seq ASC",
-        )
-        .all(target.member_id, target.from_seq) as unknown as RouteRow[],
-  );
+  // 路由表与成员人设在同一写队列节点读取：执行器看到的是当前生效配置与当前 persona。
+  // 人设缺失时保留调用方 role_prompt；行损坏则响亮抛，不静默退化成「没有性格」。
+  const { rows, rolePrompt } = await writer.node(() => {
+    const db = requireScopeDb("executors.run.route");
+    const routeSql =
+      "SELECT seq, kind, config_json, enabled FROM member_executors " +
+      "WHERE member_id = ? AND seq >= ? ORDER BY seq ASC";
+    const routeParams: unknown[] = [target.member_id, target.from_seq];
+    assertSingleStatement(routeSql);
+    assertParamCount(routeSql, routeParams);
+    const routeRows = db
+      .prepare(routeSql)
+      .all(...(routeParams as never[])) as unknown as RouteRow[];
+    const memberSql =
+      "SELECT name, persona_json, tone FROM members WHERE member_id = ?";
+    const memberParams: unknown[] = [target.member_id];
+    assertSingleStatement(memberSql);
+    assertParamCount(memberSql, memberParams);
+    const member = db.prepare(memberSql).get(...(memberParams as never[])) as
+      | Record<string, unknown>
+      | undefined;
+    const personaPrompt =
+      member === undefined
+        ? ""
+        : memberPersonaPrompt(parseMemberPersona(member));
+    return {
+      rows: routeRows,
+      rolePrompt:
+        personaPrompt === ""
+          ? target.role_prompt
+          : target.role_prompt + "\n\n" + personaPrompt,
+    };
+  });
 
   // enabled=1 才是候选：禁用行是「配置还留着但今天不上岗」，跳过而不是终止 ——
   // 与 from_seq 同族语义：两者都表达「这一格不参与本轮」，不是「路由到此为止」。
@@ -228,7 +257,7 @@ export async function runExecutions(
       config,
       model_tier: target.model_tier,
       instruction: target.instruction,
-      role_prompt: target.role_prompt,
+      role_prompt: rolePrompt,
       ...(target.workspace !== undefined
         ? { workspace: target.workspace }
         : {}),

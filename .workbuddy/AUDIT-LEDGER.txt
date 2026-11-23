@@ -8920,3 +8920,74 @@ round364（2026-11-23）— plan-refs 全量随机红复现并修复：.tmp 夹�
 【状态】round363 的 T6 全部改动 + 本轮修复一并未 commit，待全量绿后一次提交。
 全量实测：170 文件全绿 / 3836 通过 | 6 跳过（3842），181.43s。
   上一轮唯一的那发随机 ENOENT（plan-refs 扫到 dead-modules 夹具目录）本轮未再出现。
+
+════════════════════════════════════════════════════════════════════
+round365（2026-11-23）— 群角色上层 T7–T10 后端全量接线 + T12 真人感地基
+────────────────────────────────────────────────────────────────
+【范围】按 design-2026-11-23-群角色上层.md / 实施计划继续，不缩水：
+  · T7 会话/私聊/@提及/未读游标/卡片；真实会议开场、回合序列、主持指定下一人、
+    结论三件套、取消、逐字稿与结论自动纪要。
+  · T8 backlog 六操作、CoS 规则→LLM 兜底、群消息→执行任务、DispatchAssigned 审计/广播、
+    底层治理规划与审计抽样、节奏事件/每日调研卡。
+  · T9 文档 CRUD、全量版本、乐观锁、30 天保留、还原、三档权限、模板、软删、
+    DOCX/XLSX/PDF/Markdown 真格式导入导出；立项/任务拆解/会议/拆分/合并自动沉淀。
+  · T10 71 条 /api/v1 端点全部注册，legacy 21 条路由不动；契约外 404、已声明未实现 501；
+    二进制资产/导出走真字节；桌面统一 domainRequest 白名单 RPC + base64 二进制回传。
+  · T12 确定性 SVG 头像、persona 标签、Web Speech 音色映射；执行器自动追加成员 persona。
+
+【迁移】0024 meetings_driver（opened_at/next_speaker + 老行顺序回填）、
+  0025 cos_dispatch_rules（六条全局种子，含立项）、0026 documents_soft_delete。
+  contracts 新增 asset/rhythm 写请求、meeting next/cancel、search group 第七面。
+
+【关键产品判断】文档 DELETE 收敛为软删，保留版本/权限/审计；资产上传用 JSON base64，
+  避免 HTTP UTF-8 body 与桌面 IPC 破坏二进制；CoS 派发以 source_message_id 幂等，
+  同一条消息重放只建一个任务；会议纪要文档与 summary_doc_id/审计同一事务。
+
+【验证】typecheck（src+tests）绿；doc-refs / dead-modules / zero-producer / claims /
+  claim-coords / coverage-guard / lint-baseline 绿；acceptance group-upper-chain 1/1，
+  覆盖建群→招聘→CoS 建任务→私聊/会议→面板/文档→七面搜索→SSE 持久 seq 对账。
+  全量初跑 188 文件 / 3942 通过 / 6 跳过 / 2 红；两红分别是 recorder/bus 坐标漂移与
+  domainRequest 测试缺参数，均已修复并单独复跑绿。终跑待 T11 UI 落地后执行。
+
+【变异自证】matcher sentinel、conversation 广播、meeting 轮次、backlog 授权、
+  CoS 任务状态、persona 注入、会议纪要原子占位共 7 发；每发真改字节、单独跑红、
+  Buffer.equals 逐字节还原、还原后控制组绿。脚本：.workbuddy/scratch/t23-mutate-*.mjs。
+
+【状态】T7/T8/T10 已完成；T9 后端完成、编辑器 UI 随 T11；T12 真人感模块待接入 UI。
+  执行器路由器仍无生产派发入口（沿用 dead-modules 基线，接线日方向 B 自红）。
+  未 commit；全量终跑、UI 浏览器验收、守卫全同步与 claims/台账收尾仍在进行。
+
+【round365 终收尾】T1–T12 全量完成，未缩水：
+  · 0027 research_artifacts：调研卡原子关联群/backlog 草稿/auto 文档；同日 URL 幂等，
+    manual 多卡；节奏事件自动摘要文档。POST rhythm/research 两个生产写端点接入，
+    新面端点数 71，legacy 21 不动。
+  · 0028 boss_private_conversations：老板-成员 1:1 私聊（成员-成员旧私聊兼容），
+    表重建用 defer_foreign_keys + 参与者触发器；迁移保留消息/游标/FTS，FK check 绿。
+  · 文档中心补齐富文本标题/样式/链接/图片/表格、多 sheet、安全公式、排序筛选、
+    条件格式与 XLSX 样式矩阵；自动保存、离线草稿、联网同步、版本冲突保护；
+    DOCX 富文本白名单互转、XLSX 真公式/样式往返、PDF CJK 真导出回导；
+    文档打开/导出新增 DocumentAccessed 审计与 SSE。
+  · 群章程随改群/成员变更追加版本文档；群内任务流/文档区、文档关联群/任务/会议/成员；
+    人才市场真实 publish/unlist；待你拍板按 boss_attention_count 而非普通未读；
+    会话置顶、导航拖拽/键盘排序、本机在线/专注/忙碌状态；/admin 真路由保留旧控制室。
+  · 七执行器生产装配 createExecutorRegistry + runExecutions 接入 CoS 后台派发，
+    结果回写群消息与 auto 执行结果文档；老板私聊成员自动建幂等执行任务并按 executor
+    产出回复（DispatchAssigned.groupId=null）；招聘落座后自动群报到；workspace 必须显式配置，
+    pure-model 缺模型时诚实返回 model_unavailable；builtin-plugin 支持显式 tool_name；human 真建待办卡。
+  · claims r26 从“真人席不可达”翻为“已接通”，dead-modules 摘除执行器簇；
+    zero-producer 登记 0028 瞬态 conversations_new；doc-refs 全部按唯一原文重钉。
+
+【最终实测】pnpm typecheck：0 error；pnpm test：189 文件 / 3995 通过 / 6 跳过（4001），73.21s，全绿；
+  Playwright group-workbench + ceo-loop：9/9，15.9s，全绿，无 page/console/HTTP error；
+  tsc -b + tsconfig.test：0 error；node --check group.js 通过；全部 touched files
+  scan363 FFFD=0/NUL=0；pnpm lint 的既有红由 lint-baseline 守卫确认净新增 0。
+  关键链路新增 6 发自回滚变异（router 解码、节奏 digest、研究卡文档关联、boss 私聊
+  特判、CoS launchExecution、文档版本正文）：6/6 killed，6/6 逐字节 restored，
+  每发还原后控制组绿，六次 tsc -b 绿；脚本 .workbuddy/scratch/round365-mutations.mjs。
+  最后追加两发（私聊 routePrivateInstruction 接线、招聘 sendMessage 报到接线）：2/2 killed、
+  2/2 restored、SHA-256 前后一致、控制组 18/18 绿；脚本 round365-private-mutations.mjs。
+
+【完成审计结论】设计正文与实施计划 T1–T12 的 named deliverable 均有生产代码、契约、
+迁移、测试或真实浏览器证据；71 条新面端点 + 21 条 legacy 路由有全覆盖测试；
+自动沉淀、七执行器、私聊、文档保真、真人感与 /admin 旧看板无已知未接线缺口。
+  未 commit（用户未要求提交）。

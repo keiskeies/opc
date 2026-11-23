@@ -59,9 +59,17 @@ async function newQ(): Promise<{ q: WriteQueue; db: AnyDb }> {
   db.prepare(
     "INSERT INTO members (member_id, name, role_id, persona_json, model_tier," +
       " avatar_asset_id, avatar_seed, voice_json, tone, status, hired_at, updated_at)" +
-      " VALUES ('m1', '测试员', 'dev', '{}', 'execution', NULL, '', NULL, 'neutral'," +
+      " VALUES ('m1', '测试员', 'dev', ?, 'execution', NULL, '', NULL, 'direct'," +
       " 'active', ?, ?)",
-  ).run(NOW, NOW);
+  ).run(
+    JSON.stringify({
+      style: "先读代码再下结论",
+      values: ["实测"],
+      honesty: "不确定就说明",
+    }),
+    NOW,
+    NOW,
+  );
   db.prepare(
     "INSERT INTO tasks (id, title, status, assigned_role, current_node, created_at, updated_at)" +
       " VALUES ('t1', '任务', 'draft', 'dev', 'start', ?, ?)",
@@ -158,6 +166,21 @@ function executorRunRows(db: AnyDb): Record<string, unknown>[] {
 }
 
 describe("runExecutions", () => {
+  it("把当前成员 persona 追加到岗位提示，且不替换原岗位身份", async () => {
+    const { q, db } = await newQ();
+    insertExec(db, 1, "pure-model", '{"kind":"pure-model"}');
+    const executor = okExecutor("pure-model");
+    await runExecutions(target({ role_prompt: "你是开发工程师" }), {
+      writer: q,
+      registry: new ExecutorRegistry([executor]),
+    });
+    const request = executor.run.mock.calls[0]?.[0] as ExecutorRunRequest;
+    expect(request.role_prompt).toContain("你是开发工程师");
+    expect(request.role_prompt).toContain("数字同事「测试员」");
+    expect(request.role_prompt).toContain("先读代码再下结论");
+    expect(request.role_prompt).toContain("不得改变岗位书权限");
+  });
+
   it("seq1 失败 retry=true → seq2 成功：attempts 2、final ok、第二次 request.seq=2", async () => {
     const { q, db } = await newQ();
     insertExec(db, 1, "pure-model", '{"kind":"pure-model"}');

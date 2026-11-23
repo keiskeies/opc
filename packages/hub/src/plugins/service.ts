@@ -1,7 +1,6 @@
 /**
- * ⚠⚠ 今天【零生产入口】：plugins/service.ts 只被 test/plugins/service.test.ts 调，
- * HTTP（T10）与 executors/（T6 后续文件）还没接线 ⚠⚠
- * 接线那天 checkBaseline 方向 B 会红并点名基线里这一行 ⇒ 连横幅一起自删。
+ * 生产入口：HTTP catalog 路由（http/catalog.ts）维护插件授权，执行器通过
+ * executeTool 使用已授权工具。
  *
  * 插件服务（T6 / D14「完整插件运行时」）：plugins / plugin_tools 的唯一写路径，
  * 外加两条运行时能力：探测（probe）与执行（executeTool）。

@@ -53,6 +53,8 @@ export const executorConfigSchema = z.discriminatedUnion("kind", [
     .object({
       kind: z.literal("builtin-plugin"),
       plugin_id: z.string().min(1).max(200),
+      /** 可选；缺省时执行器按字典序选第一个已授权工具。 */
+      tool_name: z.string().min(1).max(200).optional(),
     })
     .strict(),
   z.object({ kind: z.literal("pure-model") }).strict(),

@@ -1,7 +1,5 @@
 /**
- * ⚠⚠ 今天【零生产入口】：roles/service.ts 的读写只被 test/roles/service.test.ts 调，
- * HTTP（T10）与桌面 IPC（T11）都还没接线 ⚠⚠
- * 接线那天 checkBaseline 方向 B 会红并点名基线里这一行 ⇒ 连横幅一起自删，不等谁记得改文档。
+ * 生产入口：HTTP catalog 路由（http/catalog.ts）统一调用本服务维护角色与公司树。
  *
  * 角色表服务（T4）：roles 公司树的唯一写路径。
  *

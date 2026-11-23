@@ -254,7 +254,7 @@ describe("events 插入语句与参数", () => {
     expect(eventParams(noCreated, () => 42)[7]).toBe(42);
   });
 
-  it("kind 到 action 的映射覆盖全部 9 个 kind，且值都在 §22.1 枚举内", () => {
+  it("kind 到 action 的映射覆盖全部 24 个 kind，且值都在 §22.1 枚举内", () => {
     // 6 → 7：实现侧加了 ApprovalDecided（CEO 批完一张卡片这件事，规格 §5.8 那张
     // 六行表里【没有】）。改这个数是【有意偏离规格】的一处，偏离的理由、
     // 丢掉的东西与「为什么不能靠随后的 TaskStateChanged 代替」记在
@@ -276,8 +276,31 @@ describe("events 插入语句与参数", () => {
     // 而 events.id 就是 seq —— 写了不 publish，就是每跑一轮不出边的活
     // 给活着的 SSE 订阅制造一个空洞（0010 §4）。所以要么广播它，要么别写它。
     // 它同样【没有渲染层消费者，而仍然不能删】。
+    // 9 → 18：实施计划 §5 一次加了九个 —— 群角色上层的事件族（群/成员/会话/会议/
+    // 面板/文档/执行器）随 T7 一次性进表。与前两次 +1 不同，这九条不是「某处逼出
+    // 一行 events 所以必须广播」的事后补票，而是【事前定表】：上层服务的每一次
+    // 群建档/招聘/发言/散会/改面板/写文档/跑执行器都要写一行 events 留痕，
+    // 而 events.id 就是 seq —— 那九族行里任何一行写了不 publish，都是同一个
+    // seq 空洞（ApprovalTokenRedeemed 与 RoleTurnReported 量的同一条）。
+    // kind→action 的规范源是实施计划 §5 那张表，recorder.ts 的 KIND_TO_ACTION
+    // 逐行照抄它；九个 kind 全部复用十个既有 action，AUDIT_ACTIONS 仍是十个值。
+    // ⚠ 一处刻意分歧记在 recorder.ts 里：执行器审计行在库里的 action 是
+    // 'tool_call'（T6 的 auditExecutorRun，不动它），而 ExecutorRunFinished
+    // 按 §5 映射 'harness_call' —— 两者走的是不同写入路径，故不冲突。
+    // 18 → 19：MeetingCancelled。§5 那张表只给了会议「发言/散会」两条，
+    // 而 0017 的 status 是三值 —— 缺这一条时会议服务只剩两条都不能走的路
+    // （套 MeetingConcluded 要为没开的会编三件套；不广播就是 seq 空洞）。
+    // 详见 bus.ts 那条 kind 的注释。它同样复用既有 action（'meeting'），
+    // AUDIT_ACTIONS 仍是十个值。
+    // 19 → 20：MeetingOpened，同一次补票补到的第二处。meetings 有时间戳（0001 的
+    // created_at）而没有任何「谁开的」列 —— 0017 扩的九列里也没有，于是「老板开的会」
+    // 与「节奏器开的会」在库里是同一个形状，分辨它们的唯一落点就是这一行 events 的
+    // actor_id。写它的理由与上面三次 +1 一字不差：要么广播它，要么别写它，
+    // 而「不写」会让这件事查无此刻。它也不能套
+    // MeetingTurnPosted —— 那要在 turn_seq=0 上造一条没说过的话，「还没开场」就长得
+    // 像「开场讲了一句」。同样复用既有 action（'meeting'），仍不开第 11 个值。
     const kinds = Object.keys(KIND_TO_ACTION);
-    expect(kinds.length).toBe(9);
+    expect(kinds.length).toBe(24);
     for (const k of kinds) {
       const action = KIND_TO_ACTION[k as keyof typeof KIND_TO_ACTION];
       expect((AUDIT_ACTIONS as readonly string[]).includes(action)).toBe(true);
@@ -301,6 +324,24 @@ describe("events 插入语句与参数", () => {
     expect(KIND_TO_ACTION.RoleTurnReported).toBe("tool_call");
     expect(KIND_TO_ACTION.MeetingSummaryReady).toBe("meeting");
     expect(KIND_TO_ACTION.HeartbeatStalled).toBe("escalation");
+    // 第 10–18 个：§5 表逐行照抄（那边是规范源）。全用既有 action，不开第 11 个值。
+    expect(KIND_TO_ACTION.GroupUpdated).toBe("state_change");
+    expect(KIND_TO_ACTION.MemberHired).toBe("state_change");
+    expect(KIND_TO_ACTION.MemberUpdated).toBe("state_change");
+    expect(KIND_TO_ACTION.MessageReceived).toBe("meeting");
+    expect(KIND_TO_ACTION.MeetingTurnPosted).toBe("meeting");
+    expect(KIND_TO_ACTION.MeetingConcluded).toBe("meeting");
+    expect(KIND_TO_ACTION.BacklogChanged).toBe("state_change");
+    expect(KIND_TO_ACTION.DocumentChanged).toBe("state_change");
+    expect(KIND_TO_ACTION.DocumentAccessed).toBe("state_change");
+    // 与 auditExecutorRun 的 tool_call 审计行是【两层两行两 action】，不冲突
+    // （bus.ts 的 ExecutorRunFinished 注释与 recorder.ts 的分歧说明各写了一遍）。
+    expect(KIND_TO_ACTION.ExecutorRunFinished).toBe("harness_call");
+    // 19th kind (meeting cancelled): reuses the existing "meeting" action,
+    // same stance as the two rows above (no 11th action value).
+    expect(KIND_TO_ACTION.MeetingCancelled).toBe("meeting");
+    // 20th kind (meeting opened): same action, same stance as the row above.
+    expect(KIND_TO_ACTION.MeetingOpened).toBe("meeting");
   });
 
   it("每类事件的 target 取自该事件最有信息量的字段", async () => {
@@ -352,6 +393,81 @@ describe("events 插入语句与参数", () => {
       "meeting",
       "escalation",
     ]);
+  });
+
+  it("§5 那族九个 + 会议补票两个 + 文档访问：target 逐条照表、action 一致、task_id 全 NULL", async () => {
+    // 这十一个对象【不走 evt()】：那个 helper 默认注入 taskId: "T-9"，
+    // 而这十一个 kind 按构造都不带 taskId 键（bus.ts 那族注释的第 ② 条：
+    // taskIdOf() 见 "taskId" in e 为假，就在可空的 task_id 列落 SQL NULL）。
+    // 用 helper 就把这条用例要验的东西先伪造掉了。后两条是 §5 表外补的会议 kind
+    // （0017 三值 status 与缺 opened_by 各逼出一条），一并放进来验的理由是它们与前面
+    // 九条走的是同一个 targetOf、同一个 taskIdOf——补票族要是漏了 case，这里就红。
+    const family: readonly DomainEvent[] = [
+      { kind: "GroupUpdated", groupId: "g-1", op: "created" },
+      { kind: "MemberHired", memberId: "m-1", groupId: "g-1", roleId: "r-1" },
+      { kind: "MemberUpdated", memberId: "m-1", op: "skills" },
+      {
+        kind: "MessageReceived",
+        messageId: "msg-1",
+        conversationId: "c-1",
+        groupId: null,
+        msgKind: "message",
+      },
+      { kind: "MeetingOpened", meetingId: "mt-1", groupId: "g-1" },
+      { kind: "MeetingTurnPosted", meetingId: "mt-1", turnSeq: 3 },
+      { kind: "MeetingConcluded", meetingId: "mt-1", summaryDocId: null },
+      { kind: "MeetingCancelled", meetingId: "mt-1", reason: "开场无人到场" },
+      { kind: "BacklogChanged", backlogItemId: "b-1", op: "create" },
+      { kind: "DocumentChanged", docId: "d-1", op: "saved" },
+      { kind: "DocumentAccessed", docId: "d-1", op: "opened" },
+      {
+        kind: "ExecutorRunFinished",
+        executionId: "x-1",
+        memberHint: null,
+        ok: true,
+        executorKind: "pure-model",
+      },
+    ];
+    const db = openDb();
+    const { rec, tx } = make(db);
+    await tx.begin();
+    await tx.scope(async () => {
+      for (const e of family) await rec.record(e);
+    });
+    await tx.commit();
+    expect(rows(db).map((r) => String(r.target))).toEqual([
+      "g-1",
+      "m-1",
+      "m-1",
+      "msg-1",
+      "mt-1",
+      "mt-1",
+      "mt-1",
+      "mt-1",
+      "b-1",
+      "d-1",
+      "d-1",
+      // 裸 executionId：targetOf 不再拼 "executor:<id>:<seq>"（那是 auditExecutorRun
+      // 审计行的口径），广播行按执行会话落 target。
+      "x-1",
+    ]);
+    expect(rows(db).map((r) => String(r.action))).toEqual([
+      "state_change",
+      "state_change",
+      "state_change",
+      "meeting",
+      "meeting",
+      "meeting",
+      "meeting",
+      "meeting",
+      "state_change",
+      "state_change",
+      "state_change",
+      "harness_call",
+    ]);
+    // 十二个全 NULL：缺 taskId 键 ⇒ 库里落 NULL —— 不是 helper 会注入的 "T-9"，
+    // 也不是 "none" 这类占位串（占位串禁令见 bus.ts 族级注释第 ③ 条）。
+    expect(rows(db).map((r) => r.task_id)).toEqual(family.map(() => null));
   });
 });
 

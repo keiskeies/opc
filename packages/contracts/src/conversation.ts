@@ -26,6 +26,8 @@ export const conversationViewSchema = z
     created_at: z.number().int(),
     /** 未读数由服务端按 message_reads 游标算出（客户端不自算，见 0015 文件头）。 */
     unread_count: z.number().int().nonnegative(),
+    /** 待拍板数：reader 游标后 mentions_json 数组含 MENTION_BOSS 的消息数；普通成员也返回，UI 仅老板使用。 */
+    boss_attention_count: z.number().int().nonnegative(),
     last_message_preview: z.string().nullable(),
     last_message_at: z.number().int().nullable(),
   })
@@ -86,6 +88,8 @@ export const openPrivateRequestSchema = z
   })
   .strict()
   .superRefine((data, ctx) => {
+    // 'boss' 是老板的保留参与者标识，不是 member_id；两端同为 'boss' 也由这支拒绝。
+    // 另一个参与者是否真实存在、是否在职由服务层查 members，契约只定形状。
     if (data.member_a === data.member_b) {
       ctx.addIssue({
         code: "custom",

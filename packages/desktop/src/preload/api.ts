@@ -49,8 +49,10 @@ export interface HubEventPayload {
  */
 export function createExposedApi(ipc: RendererBridge) {
   return {
-    createTask: (input: { idea: string; parent_id?: string }): Promise<unknown> =>
-      ipc.invoke("hub:createTask", input),
+    createTask: (input: {
+      idea: string;
+      parent_id?: string;
+    }): Promise<unknown> => ipc.invoke("hub:createTask", input),
 
     listTasks: (): Promise<unknown> => ipc.invoke("hub:listTasks"),
 
@@ -63,8 +65,10 @@ export function createExposedApi(ipc: RendererBridge) {
      * 在这里写一个 `status ?? "pending"` 就等于把那条口径抄了第二份，
      * 以后读侧改了默认值，这里会安静地继续发旧的那一档。
      */
-    listApprovals: (input?: { status?: string; limit?: number }): Promise<unknown> =>
-      ipc.invoke("hub:listApprovals", input),
+    listApprovals: (input?: {
+      status?: string;
+      limit?: number;
+    }): Promise<unknown> => ipc.invoke("hub:listApprovals", input),
 
     decideApproval: (input: {
       approvalId: string;
@@ -95,6 +99,14 @@ export function createExposedApi(ipc: RendererBridge) {
      */
     getOrg: (): Promise<unknown> => ipc.invoke("hub:getOrg"),
 
+    /** 群角色上层统一 RPC；主进程按 endpoint 白名单、路径参数与 query 形状校验。 */
+    domainRequest: (input: {
+      endpoint: string;
+      params?: Record<string, string>;
+      query?: Record<string, string | number | boolean>;
+      body?: unknown;
+    }): Promise<unknown> => ipc.invoke("hub:domainRequest", input),
+
     /**
      * 订阅 Hub 事件。返回一个【退订函数】。
      *
@@ -106,7 +118,9 @@ export function createExposedApi(ipc: RendererBridge) {
      * 在功能上【看不出来】，只在内存上长。没有退订函数的 API 形状，
      * 是在邀请调用方泄漏。
      */
-    onHubEvent: (listener: (payload: HubEventPayload) => void): (() => void) => {
+    onHubEvent: (
+      listener: (payload: HubEventPayload) => void,
+    ): (() => void) => {
       const wrapped = (payload: unknown): void => {
         listener(payload as HubEventPayload);
       };

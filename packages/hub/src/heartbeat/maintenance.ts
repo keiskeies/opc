@@ -1,5 +1,5 @@
 /**
- * 一次巡检维护（把 integrity / backup / drill / patrol 四块接上线的地方）。
+ * 一次巡检维护（把 integrity / 版本保留 / backup / drill / patrol 五块接上线的地方）。
  *
  * ── 为什么需要这个文件 ─────────────────────────────────────────────
  * 规格 §24 风险 8 与 §6.5 要的是「启动时执行 PRAGMA integrity_check，失败则提示从
@@ -32,23 +32,21 @@
 import { existsSync, rmSync } from "node:fs";
 import { isAbsolute, join, resolve } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
-import type { Writer } from "../db/write-queue.js";
-import type { EventBus } from "../events/bus.js";
 import {
-  restoreDrill,
   type BackupResult,
   type DrillResult,
+  restoreDrill,
 } from "../db/backup.js";
 import {
+  type IntegrityReport,
   pageIntegrityBroken,
   runIntegrityScan,
-  type IntegrityReport,
 } from "../db/integrity.js";
-import {
-  runPatrol,
-  type PatrolRunResult,
-} from "./patrol.js";
+import type { Writer } from "../db/write-queue.js";
+import { pruneDocumentVersions } from "../documents/service.js";
+import type { EventBus } from "../events/bus.js";
 import { isDirectRun } from "../internal/direct-run.js";
+import { type PatrolRunResult, runPatrol } from "./patrol.js";
 
 /** 退出码。0 = 一切正常；1 = 查出问题；2 = 用法/环境不对。与 migrate-cli.ts 同一套口径。 */
 export const EXIT_OK = 0;
@@ -68,7 +66,7 @@ export const MAINTENANCE_USAGE = [
   "用法：hub-maintenance --db <path> [--backup-dir <dir>] [--no-backup] [--no-patrol]",
   "      设置环境变量 OPC_DB / OPC_BACKUP_DIR 后可省略对应参数",
   "",
-  "做四件事，按这个顺序：",
+  "做五件事，按这个顺序：",
   "  1) 完整性检查（页面检查走 worker，不冻主线程）",
   "  2) VACUUM INTO 备份 + 保留最近 7 份 —— 【页面检查不过就跳过】，",
   "     否则一次损坏会挤掉一份好备份",
@@ -77,7 +75,8 @@ export const MAINTENANCE_USAGE = [
   "     ⚠ --db 指的文件名不能正好叫 drill-target.db：那样演练目标会算成库本身，",
   "     真跑下去是先删现网库再覆盖它。这一格现在会被拦下来并退 1（0032 §2）。",
   "     （目录相同不要紧 —— 名字不同就不是同一个文件。）",
-  "  4) 停滞巡检（孤儿活跃任务 → HeartbeatStalled 事件）",
+  "  4) 文档版本 30 天保留清理（每篇永远保留最新版）",
+  "  5) 停滞巡检（孤儿活跃任务 → HeartbeatStalled 事件）",
   "",
   "退出码：0 全部正常 / 1 查出问题或任一环节失败（含演练失败）/ 2 用法不对。",
 ].join("\n");
@@ -111,7 +110,8 @@ export function parseMaintenanceArgs(
         break;
       case "--backup-dir":
         backupDir = next();
-        if (backupDir === undefined) return { error: "--backup-dir 后面要跟目录" };
+        if (backupDir === undefined)
+          return { error: "--backup-dir 后面要跟目录" };
         break;
       case "--no-backup":
         skipBackup = true;
@@ -134,7 +134,11 @@ export function parseMaintenanceArgs(
     dbPath = envDb;
   }
   const envBackup = env["OPC_BACKUP_DIR"];
-  if (backupDir === undefined && envBackup !== undefined && envBackup.trim() !== "") {
+  if (
+    backupDir === undefined &&
+    envBackup !== undefined &&
+    envBackup.trim() !== ""
+  ) {
     backupDir = envBackup;
   }
 
@@ -150,7 +154,9 @@ export function parseMaintenanceArgs(
   }
   return {
     dbPath: isAbsolute(dbPath) ? dbPath : resolve(dbPath),
-    ...(backupDir === undefined ? {} : { backupDir: isAbsolute(backupDir) ? backupDir : resolve(backupDir) }),
+    ...(backupDir === undefined
+      ? {}
+      : { backupDir: isAbsolute(backupDir) ? backupDir : resolve(backupDir) }),
     ...(skipBackup ? { skipBackup: true } : {}),
     ...(skipPatrol ? { skipPatrol: true } : {}),
   };
@@ -216,6 +222,8 @@ export type MaintenanceResult = {
   readonly drillSkipped?: string | undefined;
   readonly patrol?: PatrolRunResult | undefined;
   readonly patrolSkipped?: string | undefined;
+  readonly prunedDocumentVersions?: number | undefined;
+  readonly documentPruneSkipped?: string | undefined;
 };
 
 /** 演练产物在备份目录里的名字。⚠ 不许改成匹配备份名形状，理由在用它的那一处。 */
@@ -237,7 +245,7 @@ export function removeDrillTarget(path: string): void {
 }
 
 /**
- * 跑一轮。四块都跑，各自把结论带回来 —— 【不抛】。
+ * 跑一轮。五块都跑，各自把结论带回来 —— 【不抛】。
  *
  * 为什么不抛：这个入口是「启动时顺手跑一次」的东西。让它抛，
  * 调用方最省事的写法就是 try/catch 里 log 一句然后继续启动 Hub，
@@ -376,7 +384,9 @@ export async function runMaintenance(
      * 可选字段会让下面读它的那段需要一个 `!`，而 `!` 正是「我没真判这一支」的写法 ——
      * 这一块防的就是「看起来跑了而其实没跑」，判据自己不该带这种缝。
      */
-    type DrillOutcome = { readonly done: true; readonly drill: DrillResult } | { readonly done: false };
+    type DrillOutcome =
+      | { readonly done: true; readonly drill: DrillResult }
+      | { readonly done: false };
     let outcome: DrillOutcome;
     try {
       outcome = {
@@ -402,7 +412,8 @@ export async function runMaintenance(
       if (!(e instanceof TypeError)) throw e;
       backupProblem = true;
       drillProblem = true;
-      drillSkipped = "演练目标与源库是同一个文件 ⇒ 备份与恢复【整块没跑】：" + e.message;
+      drillSkipped =
+        "演练目标与源库是同一个文件 ⇒ 备份与恢复【整块没跑】：" + e.message;
       // ⚠ 报错要说的是【真正触发的条件】，而它【不是】「--backup-dir 指错了」。
       // 演练目标叫 drill-target.db，所以「目录指到库所在目录」并【不会】触发这一支 ——
       // 真正的触发条件是【库文件名本身就叫 drill-target.db】（名字相同 + 目录相同）。
@@ -410,8 +421,14 @@ export async function runMaintenance(
       // 读到它的人会去改 --backup-dir，而改了也没用，因为出问题的是 --db。
       // ⇒ 措辞改成先给等式（谁 = 谁），再点出唯一能凑出这个等式的来路。
       o.onWarning(
-        "备份与演练整块没跑：演练目标算出来就是【库本身】（" + drillTarget + " = " + o.dbPath + "）。" +
-          "→ 触发条件是【--db 指的那个文件名正好叫 " + DRILL_TARGET_NAME + "】，" +
+        "备份与演练整块没跑：演练目标算出来就是【库本身】（" +
+          drillTarget +
+          " = " +
+          o.dbPath +
+          "）。" +
+          "→ 触发条件是【--db 指的那个文件名正好叫 " +
+          DRILL_TARGET_NAME +
+          "】，" +
           "最可能的来路是上一次演练失败留下的那个目标文件被当成了现网库（它躺在备份目录里，" +
           "名字像个库）。把 --db 指回真正的库。这里刻意不继续跑：真跑下去会先删掉它、" +
           "再用备份覆盖它、连带删掉它的 -wal，而那个函数原本会报「演练成功」。",
@@ -436,8 +453,12 @@ export async function runMaintenance(
         backupProblem = true;
         drillProblem = true;
         o.onWarning(
-          "备份已经落地（" + d.backup.path + "）而【恢复演练失败】：" + d.restore.message +
-            " ⇒ 这份备份不能算灾难恢复，演练目标留在原地供排查：" + drillTarget,
+          "备份已经落地（" +
+            d.backup.path +
+            "）而【恢复演练失败】：" +
+            d.restore.message +
+            " ⇒ 这份备份不能算灾难恢复，演练目标留在原地供排查：" +
+            drillTarget,
         );
       } else {
         // 演练成功 ⇒ 把那份目标删掉。留着它的代价是【备份目录体积翻倍】
@@ -449,13 +470,42 @@ export async function runMaintenance(
     }
   }
 
+  let prunedDocumentVersions: number | undefined;
+  let documentPruneSkipped: string | undefined;
+  let documentPruneProblem = false;
+  if (!integrity.ok) {
+    documentPruneSkipped = "完整性检查未通过，拒绝在可疑库上删除历史版本";
+  } else {
+    try {
+      const pruned = await pruneDocumentVersions(o.writer, {
+        nowMs: o.now === undefined ? Date.now() : o.now(),
+      });
+      if (pruned.ok) prunedDocumentVersions = pruned.deleted;
+      else {
+        documentPruneProblem = true;
+        o.onWarning("文档版本保留清理失败：" + pruned.reason);
+      }
+    } catch (error) {
+      documentPruneProblem = true;
+      o.onWarning(
+        "文档版本保留清理失败：" +
+          (error instanceof Error ? error.message : String(error)),
+      );
+    }
+  }
+
   let patrol: PatrolRunResult | undefined;
   let patrolSkipped: string | undefined;
   let patrolProblem = false;
   if (o.skipPatrol === true) {
     patrolSkipped = "调用方显式 --no-patrol";
   } else {
-    const p = await runPatrol(o.db, o.writer, o.bus, o.now === undefined ? {} : { now: o.now });
+    const p = await runPatrol(
+      o.db,
+      o.writer,
+      o.bus,
+      o.now === undefined ? {} : { now: o.now },
+    );
     patrol = p;
     if (p.stalled > 0) {
       patrolProblem = true;
@@ -469,19 +519,26 @@ export async function runMaintenance(
       // 所以这一格不会自愈，只会一直吵。这是对的。
       patrolProblem = true;
       o.onWarning(
-        "有 " + failed.length + " 条停滞【写不进】审计：" +
+        "有 " +
+          failed.length +
+          " 条停滞【写不进】审计：" +
           (failed[0]?.error ?? "原因未知"),
       );
     }
   }
 
-  // 四块（完整性 / 备份 / 演练 / 巡检）全绿才 ok。drillProblem 目前只由
+  // 五块（完整性 / 版本保留 / 备份 / 演练 / 巡检）全绿才 ok。drillProblem 目前只由
   // 「同路径」那一支置起来，而那一支同时置 backupProblem ——
   // 也就是它【今天】在 ok 上是冗余的。仍然写进来，理由与 0025 §8 那条一样：
   // 一条今天恒假的判据写在表达式里，与「恢复那块得算进 ok」这句话写在注释里，
   // 证据强度不同档；将来任何一支【只】让演练失败而不让备份失败的新形状
   // （例：备份目标盘满了而恢复读的是旧的一份）会在改那一支时自动生效。
-  const ok = integrity.ok && !backupProblem && !drillProblem && !patrolProblem;
+  const ok =
+    integrity.ok &&
+    !documentPruneProblem &&
+    !backupProblem &&
+    !drillProblem &&
+    !patrolProblem;
   return {
     ok,
     integrity,
@@ -491,6 +548,8 @@ export async function runMaintenance(
     ...(drillSkipped === undefined ? {} : { drillSkipped }),
     ...(patrol === undefined ? {} : { patrol }),
     ...(patrolSkipped === undefined ? {} : { patrolSkipped }),
+    ...(prunedDocumentVersions === undefined ? {} : { prunedDocumentVersions }),
+    ...(documentPruneSkipped === undefined ? {} : { documentPruneSkipped }),
   };
 }
 
@@ -527,7 +586,11 @@ export async function runMaintenanceCli(
   // 不创建库。openDb 会建文件，而空库的完整性检查【全绿】——
   // 那是最坏的一种「检查通过」：它让一次库丢失看起来像一次健康巡检。
   if (!existsSync(dbPath)) {
-    io.error("库文件不存在：" + dbPath + "（刻意不创建 —— 空库检查出来全绿，那是假绿）");
+    io.error(
+      "库文件不存在：" +
+        dbPath +
+        "（刻意不创建 —— 空库检查出来全绿，那是假绿）",
+    );
     return { code: EXIT_USAGE };
   }
   const { WriteQueue } = await import("../db/write-queue.js");
@@ -546,7 +609,10 @@ export async function runMaintenanceCli(
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     io.error("库打不开：" + msg);
-    io.error("→ 这不是用法错误。库文件本身读不出来，恢复步骤见 scripts/restore.md" + "（先停 Hub，先把现网库改名留一份，再从备份恢复）。");
+    io.error(
+      "→ 这不是用法错误。库文件本身读不出来，恢复步骤见 scripts/restore.md" +
+        "（先停 Hub，先把现网库改名留一份，再从备份恢复）。",
+    );
     return { code: EXIT_PROBLEM };
   }
   try {
@@ -579,14 +645,42 @@ export async function runMaintenanceCli(
  */
 export function report(r: MaintenanceResult, io: CliIo): void {
   const lines: string[] = [];
-  lines.push("完整性：" + (r.integrity.ok ? "通过" : "未通过") + "（" + r.integrity.ms + "ms，" + r.integrity.via + "）");
+  lines.push(
+    "完整性：" +
+      (r.integrity.ok ? "通过" : "未通过") +
+      "（" +
+      r.integrity.ms +
+      "ms，" +
+      r.integrity.via +
+      "）",
+  );
   for (const c of r.integrity.checks) {
     if (c.verdict === "ok") continue;
-    lines.push("  · " + c.name + " = " + c.verdict + "：" + c.detail.slice(0, 200));
+    lines.push(
+      "  · " + c.name + " = " + c.verdict + "：" + c.detail.slice(0, 200),
+    );
+  }
+  if (r.prunedDocumentVersions !== undefined) {
+    lines.push(
+      "文档版本保留：清理 " +
+        r.prunedDocumentVersions +
+        " 条过期快照（每篇最新版保留）",
+    );
+  } else if (r.documentPruneSkipped !== undefined) {
+    lines.push("文档版本保留：跳过 —— " + r.documentPruneSkipped);
   }
   if (r.backup !== undefined && r.backup.ok) {
-    lines.push("备份：" + r.backup.path + "（" + r.backup.eventsInBackup + " 条事件，" + r.backup.bytes + " 字节）");
-    if (r.backup.pruned.length > 0) lines.push("  · 清理旧备份 " + r.backup.pruned.length + " 份");
+    lines.push(
+      "备份：" +
+        r.backup.path +
+        "（" +
+        r.backup.eventsInBackup +
+        " 条事件，" +
+        r.backup.bytes +
+        " 字节）",
+    );
+    if (r.backup.pruned.length > 0)
+      lines.push("  · 清理旧备份 " + r.backup.pruned.length + " 份");
   } else if (r.backupSkipped !== undefined) {
     lines.push("备份：跳过 —— " + r.backupSkipped);
   }
@@ -597,7 +691,8 @@ export function report(r: MaintenanceResult, io: CliIo): void {
     if (r.drill.restore.ok) {
       lines.push(
         "恢复演练：通过 —— 恢复到临时目标、integrity_check 与事件行数都对得上（" +
-          r.drill.restore.events + " 条事件）",
+          r.drill.restore.events +
+          " 条事件）",
       );
     } else {
       lines.push("恢复演练：【失败】—— " + r.drill.restore.message);
@@ -606,7 +701,13 @@ export function report(r: MaintenanceResult, io: CliIo): void {
     lines.push("恢复演练：没跑 —— " + r.drillSkipped);
   }
   if (r.patrol !== undefined) {
-    lines.push("巡检：" + r.patrol.judgements.length + " 个任务，停滞 " + r.patrol.stalled + " 个");
+    lines.push(
+      "巡检：" +
+        r.patrol.judgements.length +
+        " 个任务，停滞 " +
+        r.patrol.stalled +
+        " 个",
+    );
   } else if (r.patrolSkipped !== undefined) {
     lines.push("巡检：跳过 —— " + r.patrolSkipped);
   }
@@ -625,7 +726,9 @@ export function report(r: MaintenanceResult, io: CliIo): void {
           "\n  【不要】照 scripts/restore.md 恢复 —— 那会覆盖一份可能完全健康的现网库。",
       );
     } else {
-      lines.push("→ 库可能已损坏。恢复步骤见 scripts/restore.md（先停 Hub，先改名留一份现网库）。");
+      lines.push(
+        "→ 库可能已损坏。恢复步骤见 scripts/restore.md（先停 Hub，先改名留一份现网库）。",
+      );
     }
   }
   io.write(lines.join("\n"));

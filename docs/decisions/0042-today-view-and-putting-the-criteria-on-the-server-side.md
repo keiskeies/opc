@@ -190,7 +190,7 @@
 
 ## 5. `GET /today` 刻意没有 IPC 通道（而且 `EXPOSED_ENDPOINTS` 这个名字在说谎）
 
-`packages/desktop/src/ipc-surface.ts:171` 是 `EXPOSED_ENDPOINTS = IMPLEMENTED_ENDPOINTS` 的**别名**。
+`packages/desktop/src/ipc-surface.ts:208` 是 `EXPOSED_ENDPOINTS = IMPLEMENTED_ENDPOINTS` 的**别名**。
 所以一个端点一进 `IMPLEMENTED_ENDPOINTS` 就**自动**算「暴露给渲染进程」，
 而真正决定渲染侧碰不碰得到它的是 `CHANNEL_SPECS`。本篇落地之后实测（`channelFor` 逐个问）：
 
@@ -262,7 +262,7 @@ channelFor(GET /today)    : null      ← 真的没通道
 **一处已埋的假红**（记下来，因为它迟早会响而没人知道为什么）：`callersOf` 是裸 `includes`，
 **不滤注释**（`srcFilesMatching` 滤）。实测往 `real-deps.ts` 追加一行**纯注释**的
 `// insertCard( …` ⇒ 新判据红，报的正是「实到三项」。方向是误报（可接受），
-但 `http/real-deps.ts:614` 那句注释写着「与 insertCard 同事务」，**只差没跟一对括号**才没命中。
+但 `http/real-deps.ts:621` 那句注释写着「与 insertCard 同事务」，**只差没跟一对括号**才没命中。
 
 ## 8. 前端那份签名抄件：边界逼出来的手抄，配了一发逐字节对账
 

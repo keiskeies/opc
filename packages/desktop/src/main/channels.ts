@@ -13,12 +13,20 @@
  * 拿不到密钥，也就换不来任意端点的调用。
  */
 
-import { type ChannelSpec, checkArgs, specOf } from "../ipc-surface.js";
+import {
+  type ChannelSpec,
+  checkArgs,
+  parseDomainRequest,
+  specOf,
+} from "../ipc-surface.js";
 import type { HubEventPayload } from "../preload/api.js";
 
 export interface MainFetchResult {
   readonly status: number;
   readonly bodyText: string;
+  /** 二进制端点（资产/导出）走 base64，避免 UTF-8 解码破坏字节。 */
+  readonly bodyBase64?: string;
+  readonly contentType?: string;
 }
 
 export interface MainDeps {
@@ -69,17 +77,24 @@ export async function dispatch(
     // 而 ipcRenderer.send 是全局对象上的函数，拿到 window 就能拼任意通道名。
     return {
       ok: false,
-      error: { code: "bad_args", message: "未登记的 IPC 通道：" + channel.slice(0, 64) },
+      error: {
+        code: "bad_args",
+        message: "未登记的 IPC 通道：" + channel.slice(0, 64),
+      },
     };
   }
   if (spec.kind !== "invoke") {
     return {
       ok: false,
-      error: { code: "bad_args", message: spec.channel + " 是推送通道，不能被 invoke" },
+      error: {
+        code: "bad_args",
+        message: spec.channel + " 是推送通道，不能被 invoke",
+      },
     };
   }
   const why = checkArgs(spec, args);
-  if (why !== null) return { ok: false, error: { code: "bad_args", message: why } };
+  if (why !== null)
+    return { ok: false, error: { code: "bad_args", message: why } };
 
   const { path, init } = toHttpRequest(spec, args);
   let res: MainFetchResult;
@@ -91,7 +106,17 @@ export async function dispatch(
       error: {
         code: "unreachable",
         message:
-          "本机 Hub 未响应：" + (e instanceof Error ? e.message : String(e)).slice(0, 200),
+          "本机 Hub 未响应：" +
+          (e instanceof Error ? e.message : String(e)).slice(0, 200),
+      },
+    };
+  }
+  if (res.bodyBase64 !== undefined) {
+    return {
+      ok: true,
+      data: {
+        base64: res.bodyBase64,
+        content_type: res.contentType ?? "application/octet-stream",
       },
     };
   }
@@ -136,7 +161,10 @@ export function toHttpRequest(
       const o = (args ?? {}) as { idea?: string; parent_id?: string };
       const body: Record<string, unknown> = { idea: o.idea };
       if (o.parent_id !== undefined) body["parent_id"] = o.parent_id;
-      return { path: "/tasks", init: { method: "POST", body: JSON.stringify(body) } };
+      return {
+        path: "/tasks",
+        init: { method: "POST", body: JSON.stringify(body) },
+      };
     }
     case "hub:listTasks":
       return { path: "/tasks", init: { method: "GET" } };
@@ -175,7 +203,11 @@ export function toHttpRequest(
       // 所以这里也只有读分支 —— 有人加写通道时会先在 toHttpRequest 撞抛。
       return { path: "/org", init: { method: "GET" } };
     case "hub:decideApproval": {
-      const o = (args ?? {}) as { approvalId?: string; resume?: string; note?: string };
+      const o = (args ?? {}) as {
+        approvalId?: string;
+        resume?: string;
+        note?: string;
+      };
       const body: Record<string, unknown> = { resume: o.resume };
       // note 缺席时【不带这个键】：带一个 undefined 进 JSON 再进审计，
       // 读起来像「他写了空备注」而不是「没备注」（exactOptionalPropertyTypes 同一条理由）。
@@ -185,10 +217,39 @@ export function toHttpRequest(
         init: { method: "POST", body: JSON.stringify(body) },
       };
     }
+    case "hub:domainRequest": {
+      const parsed = parseDomainRequest(args);
+      if (!parsed.ok) throw new Error(parsed.reason);
+      const request = parsed.value;
+      const space = request.endpoint.indexOf(" ");
+      const method = request.endpoint.slice(0, space);
+      let path = request.endpoint.slice(space + 1);
+      for (const [key, value] of Object.entries(request.params ?? {})) {
+        path = path.replace(":" + key, value);
+      }
+      const query = Object.entries(request.query ?? {})
+        .map(
+          ([key, value]) =>
+            encodeURIComponent(key) + "=" + encodeURIComponent(String(value)),
+        )
+        .join("&");
+      if (query !== "") path += "?" + query;
+      return {
+        path,
+        init: {
+          method,
+          ...(request.body === undefined
+            ? {}
+            : { body: JSON.stringify(request.body) }),
+        },
+      };
+    }
     default: {
       // 推送通道不该走到这里（dispatch 已挡）。抛而不是回一个假路径：
       // 假路径会让一次「忘了加分支」变成一次指向错误方向的 hub_error。
-      throw new Error("通道 " + spec.channel + " 不是 invoke 通道，无法映射为 HTTP 请求。");
+      throw new Error(
+        "通道 " + spec.channel + " 不是 invoke 通道，无法映射为 HTTP 请求。",
+      );
     }
   }
 }

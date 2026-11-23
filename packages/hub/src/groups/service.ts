@@ -1,7 +1,5 @@
 /**
- * ⚠⚠ 今天【零生产入口】：groups/service.ts 的读写只被 test/groups/service.test.ts 调，
- * HTTP（T10）与桌面 IPC（T11）都还没接线 ⚠⚠
- * 接线那天 checkBaseline 方向 B 会红并点名基线里这一行 ⇒ 连横幅一起自删，不等谁记得改文档。
+ * 生产入口：HTTP people 路由（http/people.ts）统一调用本服务读写群与席位。
  *
  * 群服务（T5）：groups / group_members 的唯一写路径，兼管群会话行的诞生。
  *

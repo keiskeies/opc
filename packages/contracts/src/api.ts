@@ -60,6 +60,82 @@ export const API_ENDPOINTS = [
   "POST /charter/:roleId",
   "GET /budget",
   "POST /budget",
+  // ── 群角色上层（design-2026-11-23-群角色上层.md，实施计划 §3 端点清单）──────
+  // 逐字照抄实施计划的清单，一条不省；参数名沿用既有表的命名线条（GET 单数段是
+  // 集合、复数段是资源）。斜杠路由（import/export/versions/restore）在本表里逐条
+  // 展开登记 —— app.ts 那条批量先于参数的顺序教训（matchRoute 注释）说明：
+  // 清单上写 `POST /backlog/:id/merge`，代码里就必须看得见 merge 与 :id 谁在前。
+  "GET /api/v1/groups",
+  "POST /api/v1/groups",
+  "GET /api/v1/groups/:id",
+  "PATCH /api/v1/groups/:id",
+  "POST /api/v1/groups/:id/members",
+  "DELETE /api/v1/groups/:id/members/:memberId",
+  "GET /api/v1/members",
+  "POST /api/v1/members",
+  "GET /api/v1/members/:id",
+  "PATCH /api/v1/members/:id",
+  "DELETE /api/v1/members/:id",
+  "POST /api/v1/members/:id/skills",
+  "DELETE /api/v1/members/:id/skills/:skillId",
+  "GET /api/v1/members/:id/executors",
+  "POST /api/v1/members/:id/executors",
+  "DELETE /api/v1/members/:id/executors/:seq",
+  "POST /api/v1/members/:id/avatar",
+  "GET /api/v1/members/:id/training",
+  "GET /api/v1/talent",
+  "GET /api/v1/talent/:id",
+  "GET /api/v1/talent/:id/export",
+  "POST /api/v1/talent/:id/publish",
+  "POST /api/v1/talent/:id/unlist",
+  "POST /api/v1/talent/import",
+  "GET /api/v1/conversations",
+  "GET /api/v1/conversations/:id/messages",
+  "POST /api/v1/conversations/:id/messages",
+  "POST /api/v1/conversations/:id/open-private",
+  "POST /api/v1/conversations/:id/read",
+  "GET /api/v1/meetings",
+  "POST /api/v1/meetings",
+  "GET /api/v1/meetings/:id",
+  "POST /api/v1/meetings/:id/turns",
+  "POST /api/v1/meetings/:id/conclude",
+  "POST /api/v1/meetings/:id/cancel",
+  "GET /api/v1/backlog",
+  "POST /api/v1/backlog",
+  "PATCH /api/v1/backlog/:id",
+  "POST /api/v1/backlog/:id/split",
+  "POST /api/v1/backlog/:id/merge",
+  "DELETE /api/v1/backlog/:id",
+  "GET /api/v1/documents",
+  "POST /api/v1/documents",
+  "GET /api/v1/documents/:id",
+  "PATCH /api/v1/documents/:id",
+  "DELETE /api/v1/documents/:id",
+  "GET /api/v1/documents/:id/versions",
+  "POST /api/v1/documents/:id/versions/:seq/restore",
+  "GET /api/v1/documents/:id/permissions",
+  "POST /api/v1/documents/:id/permissions",
+  "DELETE /api/v1/documents/:id/permissions/:grantee",
+  "POST /api/v1/documents/import",
+  "GET /api/v1/documents/:id/export",
+  "GET /api/v1/templates",
+  "POST /api/v1/templates",
+  "GET /api/v1/plugins",
+  "POST /api/v1/plugins",
+  "PATCH /api/v1/plugins/:id",
+  "DELETE /api/v1/plugins/:id",
+  "POST /api/v1/plugins/:id/probe",
+  "GET /api/v1/roles",
+  "POST /api/v1/roles",
+  "PATCH /api/v1/roles/:id",
+  "DELETE /api/v1/roles/:id",
+  "GET /api/v1/search",
+  "POST /api/v1/assets",
+  "GET /api/v1/assets/:id",
+  "GET /api/v1/rhythm/events",
+  "POST /api/v1/rhythm/events",
+  "GET /api/v1/research/today",
+  "POST /api/v1/research/today",
 ] as const;
 export type ApiEndpoint = (typeof API_ENDPOINTS)[number];
 
@@ -99,20 +175,199 @@ export const IMPLEMENTED_ENDPOINTS: readonly ApiEndpoint[] = [
   "POST /charter/:roleId",
   "GET /budget",
   "POST /budget",
+  "GET /api/v1/groups",
+  "POST /api/v1/groups",
+  "GET /api/v1/groups/:id",
+  "PATCH /api/v1/groups/:id",
+  "POST /api/v1/groups/:id/members",
+  "DELETE /api/v1/groups/:id/members/:memberId",
+  "GET /api/v1/members",
+  "POST /api/v1/members",
+  "GET /api/v1/members/:id",
+  "PATCH /api/v1/members/:id",
+  "DELETE /api/v1/members/:id",
+  "POST /api/v1/members/:id/skills",
+  "DELETE /api/v1/members/:id/skills/:skillId",
+  "GET /api/v1/members/:id/executors",
+  "POST /api/v1/members/:id/executors",
+  "DELETE /api/v1/members/:id/executors/:seq",
+  "POST /api/v1/members/:id/avatar",
+  "GET /api/v1/members/:id/training",
+  "GET /api/v1/talent",
+  "GET /api/v1/talent/:id",
+  "GET /api/v1/talent/:id/export",
+  "POST /api/v1/talent/:id/publish",
+  "POST /api/v1/talent/:id/unlist",
+  "POST /api/v1/talent/import",
+  "GET /api/v1/conversations",
+  "GET /api/v1/conversations/:id/messages",
+  "POST /api/v1/conversations/:id/messages",
+  "POST /api/v1/conversations/:id/open-private",
+  "POST /api/v1/conversations/:id/read",
+  "GET /api/v1/meetings",
+  "POST /api/v1/meetings",
+  "GET /api/v1/meetings/:id",
+  "POST /api/v1/meetings/:id/turns",
+  "POST /api/v1/meetings/:id/conclude",
+  "POST /api/v1/meetings/:id/cancel",
+  "GET /api/v1/backlog",
+  "POST /api/v1/backlog",
+  "PATCH /api/v1/backlog/:id",
+  "POST /api/v1/backlog/:id/split",
+  "POST /api/v1/backlog/:id/merge",
+  "DELETE /api/v1/backlog/:id",
+  "GET /api/v1/documents",
+  "POST /api/v1/documents",
+  "GET /api/v1/documents/:id",
+  "PATCH /api/v1/documents/:id",
+  "DELETE /api/v1/documents/:id",
+  "GET /api/v1/documents/:id/versions",
+  "POST /api/v1/documents/:id/versions/:seq/restore",
+  "GET /api/v1/documents/:id/permissions",
+  "POST /api/v1/documents/:id/permissions",
+  "DELETE /api/v1/documents/:id/permissions/:grantee",
+  "POST /api/v1/documents/import",
+  "GET /api/v1/documents/:id/export",
+  "GET /api/v1/templates",
+  "POST /api/v1/templates",
+  "GET /api/v1/plugins",
+  "POST /api/v1/plugins",
+  "PATCH /api/v1/plugins/:id",
+  "DELETE /api/v1/plugins/:id",
+  "POST /api/v1/plugins/:id/probe",
+  "GET /api/v1/roles",
+  "POST /api/v1/roles",
+  "PATCH /api/v1/roles/:id",
+  "DELETE /api/v1/roles/:id",
+  "GET /api/v1/search",
+  "POST /api/v1/assets",
+  "GET /api/v1/assets/:id",
+  "GET /api/v1/rhythm/events",
+  "POST /api/v1/rhythm/events",
+  "GET /api/v1/research/today",
+  "POST /api/v1/research/today",
 ];
 
 /**
- * 还没有实现的端点。本期为空。
+ * 还没有实现的端点 = 全集减去已落地的那份，**派生**而不是手抄。
  *
- * 这一格【保留而不是删掉】：`isImplemented` 靠它把「契约里有」与「能用」分开，
- * 而 app.ts 对未实现端点回 501 而不是 404（404 会让调用方去检查自己的参数，
- * 真相却是服务端还没做 —— 两种「没有」的修法完全不同）。
- * 哪天再加契约先行的端点，位置就是这里。
+ * 这里原来是手写的第二张清单，`GET /replay/:taskId` 落地那天有人把它删空了。
+ * 那种「删空」当时是对的，但它顺手抹掉了一个性质：这张表与 IMPLEMENTED 必须
+ * 拼成全集。手写两份的失效方向是「某个端点【两边都不在】」—— 它会被 isImplemented
+ * 判成未实现而永远 501，而【没有任何一条测试看得见】（两条断言各自看一张表，
+ * 都以为对方那张是剩下的那一半）。server.test.ts 用一条相等断言把这事钉住过，
+ * 而那条断言的写法是「IMPLEMENTED == 全集」，于是它同时禁止了合法的契约先行。
+ *
+ * 派生之后那个失效方向写不出来了：只有一个手写清单（IMPLEMENTED），
+ * 另一张是它的补集。代价是这张表不再能表达「清单之外还有没登记的路径」——
+ * 而那本来就不是它的职责（未登记的路径归 404，见 app.ts 的 dispatch）。
+ *
+ * 这一格【保留而不是删掉】的另一半理由不变：app.ts 对未实现端点回 501 而不是 404
+ * （404 会让调用方去检查自己的参数，真相却是服务端还没做 —— 两种「没有」的修法
+ * 完全不同）。群角色上层这一轮把契约先行的量从 0 推到 71 条，它第一次有了分母。
  */
-export const UNIMPLEMENTED_ENDPOINTS: readonly ApiEndpoint[] = [];
+export const UNIMPLEMENTED_ENDPOINTS: readonly ApiEndpoint[] =
+  API_ENDPOINTS.filter((e) => !IMPLEMENTED_ENDPOINTS.includes(e));
 
 export function isImplemented(e: ApiEndpoint): boolean {
   return IMPLEMENTED_ENDPOINTS.includes(e);
+}
+
+/**
+ * 按【契约清单】把 (method, path) 解析成端点 —— 纯函数，不 import http。
+ *
+ * 为什么放 contracts 而不是 hub/router.ts：判据的两端都要用它。hub 用它决定
+ * 「这条路径在契约里存在吗，存在但没实现就回 501」（app.ts dispatch 的兜底分支），
+ * 契约测试用它自证「清单里每一条都能被解析回来，且没有一条被另一条吃掉」。
+ * 放 hub 侧的话，后者就变成 hub 测试 contracts 内部 —— 而本仓的分工是
+ * 「契约的不变量在契约包内测」（见本文件头）。
+ *
+ * 匹配规则与 app.ts 那条手写瀑布同构，只是把它写成了表：
+ *  · 段数必须相等（`/groups` 不匹 `/groups/:id`），且不许空段；
+ *  · `:xxx` 吃一段，任何非空段都算；
+ *  · 同一段上【字面量优先于参数】—— 这就是 `POST /approvals/batch` 必须排在
+ *    `POST /approvals/:interruptId` 之前那条教训的一般形式。瀑布里它靠**行的顺序**
+ *    表达，顺序是承重的、而它在 diff 里看不出来（0030 记过一次）；这里改成分数
+ *    比较，谁更具体谁赢，加一条端点不需要考虑插入位置。
+ *  · 命中返回捕获的参数（`{id: "g-1"}`），router.ts 直接拿去用。
+ *
+ * 返回 null 的含义是【契约里没有这条路径】，调用方据此回 404。
+ * 方法不对也算 null，且【不提示】「路径存在但方法错」—— app.ts 那边明写了
+ * 既有口径是不说「你用错方法了」，这里保持一致，别在契约层把它改回去。
+ */
+export interface ContractRouteMatch {
+  readonly endpoint: ApiEndpoint;
+  readonly params: Readonly<Record<string, string>>;
+}
+
+/** 一条清单条目拆成 (method, 段数组)。拆一次，后面每条路径复用同一份。 */
+interface EndpointPattern {
+  readonly endpoint: ApiEndpoint;
+  readonly method: string;
+  readonly segments: readonly string[];
+}
+
+const ENDPOINT_PATTERNS: readonly EndpointPattern[] = API_ENDPOINTS.map((e) => {
+  const space = e.indexOf(" ");
+  // 清单是本文件的常量，形如 "METHOD /path"；空格不存在只可能是有人手改坏了表。
+  // 与其在这里静默产出一个 method="" 的幽灵条目（它会匹配不到任何东西，
+  // 于是症状变成「这条端点永远 404」），不如当场炸在拆表这一刻。
+  if (space <= 0)
+    throw new Error(`API_ENDPOINTS 有条目缺少方法前缀：${JSON.stringify(e)}`);
+  return {
+    endpoint: e,
+    method: e.slice(0, space),
+    segments: e
+      .slice(space + 1)
+      .split("/")
+      .filter((s) => s !== ""),
+  };
+});
+
+export function matchContractEndpoint(
+  method: string,
+  path: string,
+): ContractRouteMatch | null {
+  const wanted = method.toUpperCase();
+  const pathname = path.split("?")[0] ?? "";
+  const rawParts = pathname.split("/");
+  // 与既有 matchRoute 一致：双斜杠、尾斜杠与空路径都不是另一个合法写法。
+  // 若在这里 filter 掉空段，`/groups//` 会被折叠成 `/groups/:id` 的合法输入，
+  // 于是一个畸形 URL 会得到 501/资源响应，而不是清晰的 404。
+  if (!pathname.startsWith("/") || rawParts.slice(1).some((seg) => seg === ""))
+    return null;
+  const parts = rawParts.slice(1);
+  let best: ContractRouteMatch | null = null;
+  let bestScore = Number.NEGATIVE_INFINITY;
+  for (const p of ENDPOINT_PATTERNS) {
+    if (p.method !== wanted) continue;
+    if (p.segments.length !== parts.length) continue;
+    const params: Record<string, string> = {};
+    let score = 0;
+    let ok = true;
+    for (let i = 0; i < p.segments.length; i += 1) {
+      const seg = p.segments[i];
+      const got = parts[i];
+      if (seg === undefined || got === undefined) {
+        ok = false;
+        break;
+      }
+      if (seg.startsWith(":")) {
+        params[seg.slice(1)] = got;
+        // 字面量段比参数段更具体，所以参数段扣分：具体者优先。
+        score -= 1;
+      } else if (seg !== got) {
+        ok = false;
+        break;
+      }
+    }
+    if (!ok) continue;
+    if (score > bestScore) {
+      best = { endpoint: p.endpoint, params };
+      bestScore = score;
+    }
+  }
+  return best;
 }
 
 /* ────────────────────────── 请求体 ────────────────────────── */
@@ -641,7 +896,15 @@ export const feedItemSchema = z
   .object({
     seq: z.number().int().nonnegative(),
     kind: z.string().min(1),
-    taskId: z.string().min(1),
+    // 不是每条事件都属于一个任务：§5 那九个上层 kind（群/成员/消息/会议/面板/文档/
+    // 执行器）一律不带 taskId 键，events.task_id 落 SQL NULL（0001 迁移起该列就允许 NULL），
+    // 帧上这个键就随之缺席 —— .optional() 是让【帧的形状】与【库里的形状】保持同一口径。
+    // ⚠ 「没有任务」只能是【键不存在】，绝不允许塞 "none"/"-" 这类占位串凑必填：
+    // 占位串在 web 投影看来是一个真实存在的 task id，它会拿这个不存在的任务去拉详情、
+    // 等跃迁 —— 0010 §4 那族「用假值换类型便利」的错形：错误被一个能过类型检查的值掩护，
+    // 比缺键当场暴露坏得多。（旧口径曾要求 .nullable() 必填 + 发布侧显式写 null，
+    // 那是让每一族生产者都替「不属于任务」背一个字符串；现已改为键缺席即合法。）
+    taskId: z.string().min(1).optional(),
     degraded: z.literal(true).optional(),
   })
   .passthrough();

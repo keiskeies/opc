@@ -2537,37 +2537,47 @@ describe("主张登记表：变异 r25（预算上限那一侧读列，round360�
     expect(msg).not.toContain("切不出");
   });
 
-  // r26（round363）：0014 追加里「HTTP 可达口径的建卡者仍是零」那句 —— 判据是
-  // dead-modules BASELINE 里 executors/human.ts 那格档案还在不在（r5/r8 同族形状）。
-  it("变异 r26：档案被摘 ⇒ 红且点名 executors/human.ts", () => {
-    const msg = checkOne(
-      "r26",
-      fakeFiles({
-        "arch:dead-modules.ts": realFiles
-          .arch("dead-modules.ts")
-          .replace('["executors/human.ts", "human_pending"],', ""),
-      }),
-    );
-    expect(msg).toContain("executors/human.ts");
+  // r26：真人席执行器已接进生产装配与 CoS 派发；判据认三处真实接线。
+  const r26Good = (
+    over: Record<string, string> = {},
+  ): Record<string, string> => ({
+    "executors/production.ts": realFiles.src("executors/production.ts"),
+    "dispatch/service.ts": realFiles.src("dispatch/service.ts"),
+    "http/social.ts": realFiles.src("http/social.ts"),
+    ...over,
   });
 
-  it("变异 r26 之二：只动别的行 ⇒ 仍绿（判据认的是那一条档案，不是整表字数）", () => {
+  it("变异 r26：生产装配摘掉 HumanExecutor ⇒ 红且点名真人席", () => {
     const msg = checkOne(
       "r26",
-      fakeFiles({
-        "arch:dead-modules.ts": realFiles
-          .arch("dead-modules.ts")
-          .replace('["plugins/service.ts", "PLUGIN_AUDIT_KINDS"],', ""),
-      }),
+      fakeFiles(
+        r26Good({
+          "executors/production.ts": realFiles
+            .src("executors/production.ts")
+            .replace("new HumanExecutor", "removedHumanExecutor"),
+        }),
+      ),
+    );
+    expect(msg).toContain("HumanExecutor");
+  });
+
+  it("变异 r26 之二：只动无关行 ⇒ 仍绿（判据认三处接线，不是整表字数）", () => {
+    const msg = checkOne(
+      "r26",
+      fakeFiles(
+        r26Good({
+          "dispatch/service.ts":
+            realFiles.src("dispatch/service.ts") + "\n// unrelated comment\n",
+        }),
+      ),
     );
     expect(msg).toBe("");
   });
 
   it("变异 r26 之三：取材文件整份不见 ⇒ 响亮抛，不静默绿", () => {
-    // deadModulesHas 没包 try：缺键必须炸在「fake arch 缺失」上 ——
-    // 这一发钉的是「扫描没跑」与「跑出来是空」永不长得一样（memory
-    // [[empty-output-is-not-a-clean-result]] 一族）。
-    expect(() => checkOne("r26", fakeFiles({}))).toThrow("dead-modules.ts");
+    expect(() => checkOne("r26", fakeFiles({}))).toThrow(
+      "executors/production.ts",
+    );
   });
 });
 

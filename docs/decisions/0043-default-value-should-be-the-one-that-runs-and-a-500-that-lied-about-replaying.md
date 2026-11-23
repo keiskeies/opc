@@ -204,9 +204,9 @@ const engineRoute = o.graphFor === undefined;
 **0016 §4 那一格不是漂移，是「指的东西换了」**（0042 §7 那一族的第五次）：
 它当年指的是 `real-deps` 里第 291 行那句 `action: "approval"`。
 0043 之后**默认装配**的 CEO 决策写在 `engine/approve.ts:408`，
-`real-deps` 那条 `applyDecision` 里**那句写入**（`http/real-deps.ts:298`）只在**显式交了图工厂**时才被走到。
+`real-deps` 那条 `applyDecision` 里**那句写入**（`http/real-deps.ts:300`）只在**显式交了图工厂**时才被走到。
 ⚠ round332 复算本句：原写的是「那条 `applyDecision`（现在在第 298 行）」，也就是把**写入点**的坐标
-挂在**函数名**后面 —— 298 是函数体内那句 `action: "approval"`（函数本体在 `http/real-deps.ts:237`，
+挂在**函数名**后面 —— 298 是函数体内那句 `action: "approval"`（函数本体在 `http/real-deps.ts:239`，
 跨度到 325），下面那句「两行写的 `action` 值**相同**」用的正是两个写入点做对比，所以**那个数没错**，
 错的是这个读起来像「函数在 298 行」的挂法。这是 0051 §2(b) 那一族的**镜像**：那条是「行号对、
 符号名错」，这条是「行号对、挂错了主语」。

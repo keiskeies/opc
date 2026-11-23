@@ -20,9 +20,8 @@
  */
 import { mkdirSync, readFileSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
 import type { DatabaseSync } from "node:sqlite";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { fileURLToPath } from "node:url";
 import {
   API_ENDPOINTS,
   approvalOutcome,
@@ -30,25 +29,36 @@ import {
   encodeSseFrame,
   IMPLEMENTED_ENDPOINTS,
   isImplemented,
-  UNIMPLEMENTED_ENDPOINTS,
+  matchContractEndpoint,
   type SseFrame,
+  UNIMPLEMENTED_ENDPOINTS,
 } from "@opc/contracts";
-import { fixtureTmp } from "../fixtures/fixture-dir.js";
-import { DRIVER_OFF } from "../fixtures/driver-state.js";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { migrate } from "../../src/db/migrate.js";
 import type { DomainEvent } from "../../src/events/bus.js";
 import { InMemoryEventBus } from "../../src/events/bus.js";
-import { migrate } from "../../src/db/migrate.js";
 import {
+  type HubDeps,
+  type HubRequest,
   handleRequest,
   matchRoute,
   notImplementedMessage,
   titleOf,
-  type HubDeps,
-  type HubRequest,
 } from "../../src/http/app.js";
-import { newLocalToken, signedHeaders, verifyRequest, NonceGuard } from "../../src/http/auth.js";
+import {
+  NonceGuard,
+  newLocalToken,
+  signedHeaders,
+  verifyRequest,
+} from "../../src/http/auth.js";
 import { LOOPBACK_HOST } from "../../src/http/bind.js";
-import { reconnectDelayMs, ResumeStream, shouldGiveUp } from "../../src/http/sse.js";
+import {
+  ResumeStream,
+  reconnectDelayMs,
+  shouldGiveUp,
+} from "../../src/http/sse.js";
+import { DRIVER_OFF } from "../fixtures/driver-state.js";
+import { fixtureTmp } from "../fixtures/fixture-dir.js";
 
 const TMP = fixtureTmp("http", import.meta.url);
 
@@ -60,7 +70,7 @@ let fileSeq = 0;
 /** 每个用例一个【独立库文件】：脏行那条用例要往库里写坏数据，共享会串味。 */
 async function newDb(taskId = "task-1"): Promise<Db> {
   const { openDb } = await import("../../src/db/driver.js");
-  const db = openDb(join(TMP, "h-" + process.pid + "-" + ++fileSeq + ".db")) ;
+  const db = openDb(join(TMP, "h-" + process.pid + "-" + ++fileSeq + ".db"));
   opened.push(db);
   migrate(db);
   db.prepare(
@@ -108,7 +118,9 @@ async function harness(taskId = "task-1"): Promise<{
   bus: InMemoryEventBus;
   calls: { decision: number; created: number; resumed: string[] };
   sign: (method: string, path: string, body?: string) => Record<string, string>;
-  req: (o: Partial<HubRequest> & { method: string; path: string }) => HubRequest;
+  req: (
+    o: Partial<HubRequest> & { method: string; path: string },
+  ) => HubRequest;
   approvals: (id: string, status?: string) => void;
 }> {
   const db = await newDb(taskId);
@@ -123,10 +135,9 @@ async function harness(taskId = "task-1"): Promise<{
     nonces,
     recordDecision: async () => {
       calls.decision += 1;
-      db.prepare("UPDATE approvals SET status = 'approved', decided_at = ? WHERE id = ?").run(
-        NOW,
-        taskId,
-      );
+      db.prepare(
+        "UPDATE approvals SET status = 'approved', decided_at = ? WHERE id = ?",
+      ).run(NOW, taskId);
       return true;
     },
     createTask: async () => {
@@ -141,7 +152,11 @@ async function harness(taskId = "task-1"): Promise<{
   // 形参就叫 target：调用方传进来的【必须】是它准备发出的那一整个请求目标。
   // 若签名函数叫 target 而调用方传的是剥过 query 的 path，那是同一个 bug 的两副面孔
   // —— 名字对齐之后，「我该传哪个」在调用点就能看见。
-  const sign = (method: string, target: string, body = ""): Record<string, string> =>
+  const sign = (
+    method: string,
+    target: string,
+    body = "",
+  ): Record<string, string> =>
     signedHeaders(TOKEN, { method, target, body, now: NOW });
   return {
     deps,
@@ -207,12 +222,17 @@ describe("② 鉴权：无 token 请求 401", () => {
       { "x-opc-signature": "deadbeef", "x-opc-nonce": "n2" },
       { "x-opc-signature": "deadbeef", "x-opc-timestamp": String(NOW) },
     ]) {
-      const res = await handleRequest(h.deps, h.req({ method: "GET", path: "/tasks", headers }));
+      const res = await handleRequest(
+        h.deps,
+        h.req({ method: "GET", path: "/tasks", headers }),
+      );
       expect(res.status).toBe(401);
       // 报错体只有一句通用文案：不得把「缺哪个头 / 时间戳过期 / 签名不符」写进去。
       // 那三者对合法用户毫无用处（他要么全对要么全错），对攻击者却是一台
       // 免费告诉他「你已经过到哪一步」的预言机。
-      expect(JSON.stringify(res.body)).not.toMatch(/signature|timestamp|nonce|stale/iu);
+      expect(JSON.stringify(res.body)).not.toMatch(
+        /signature|timestamp|nonce|stale/iu,
+      );
     }
   });
 
@@ -220,7 +240,10 @@ describe("② 鉴权：无 token 请求 401", () => {
     const h = await harness();
     const headers = h.sign("GET", "/tasks");
     expect(Object.values(headers).join("|")).not.toContain(TOKEN);
-    const res = await handleRequest(h.deps, h.req({ method: "GET", path: "/tasks", headers }));
+    const res = await handleRequest(
+      h.deps,
+      h.req({ method: "GET", path: "/tasks", headers }),
+    );
     expect(res.status).toBe(200);
   });
 
@@ -232,7 +255,10 @@ describe("② 鉴权：无 token 请求 401", () => {
       body: "",
       now: NOW,
     });
-    const res = await handleRequest(h.deps, h.req({ method: "GET", path: "/tasks", headers }));
+    const res = await handleRequest(
+      h.deps,
+      h.req({ method: "GET", path: "/tasks", headers }),
+    );
     expect(res.status).toBe(401);
   });
 
@@ -242,7 +268,12 @@ describe("② 鉴权：无 token 请求 401", () => {
     const headers = h.sign("POST", "/tasks", body);
     const res = await handleRequest(
       h.deps,
-      h.req({ method: "POST", path: "/tasks", headers, body: JSON.stringify({ idea: "被换了" }) }),
+      h.req({
+        method: "POST",
+        path: "/tasks",
+        headers,
+        body: JSON.stringify({ idea: "被换了" }),
+      }),
     );
     expect(res.status).toBe(401);
     expect(h.calls.created).toBe(0);
@@ -277,12 +308,26 @@ describe("② 鉴权：无 token 请求 401", () => {
       now: NOW - 61_000,
     });
     expect(
-      (await handleRequest(h.deps, h.req({ method: "GET", path: "/tasks", headers: stale })))
-        .status,
+      (
+        await handleRequest(
+          h.deps,
+          h.req({ method: "GET", path: "/tasks", headers: stale }),
+        )
+      ).status,
     ).toBe(401);
-    const ok = signedHeaders(TOKEN, { method: "GET", target: "/tasks", body: "", now: NOW - 59_000 });
+    const ok = signedHeaders(TOKEN, {
+      method: "GET",
+      target: "/tasks",
+      body: "",
+      now: NOW - 59_000,
+    });
     expect(
-      (await handleRequest(h.deps, h.req({ method: "GET", path: "/tasks", headers: ok }))).status,
+      (
+        await handleRequest(
+          h.deps,
+          h.req({ method: "GET", path: "/tasks", headers: ok }),
+        )
+      ).status,
     ).toBe(200);
   });
 
@@ -296,7 +341,12 @@ describe("② 鉴权：无 token 请求 401", () => {
       now: NOW,
       nonces,
     };
-    const good = signedHeaders(TOKEN, { method: "GET", target: "/tasks", body: "", now: NOW });
+    const good = signedHeaders(TOKEN, {
+      method: "GET",
+      target: "/tasks",
+      body: "",
+      now: NOW,
+    });
     const first = verifyRequest({ ...base, headers: good });
     expect(first.ok).toBe(true);
     expect(verifyRequest({ ...base, headers: good })).toEqual({
@@ -307,7 +357,12 @@ describe("② 鉴权：无 token 请求 401", () => {
     // 反例，也是这段真正的目的：攻击者【不需要破签名】，只要抢在合法请求之前
     // 用同一个 nonce 打一枪（签名故意错），就能让随后那次合法请求被判成重放。
     // 所以 nonce 只能在【整体通过】之后记账。
-    const victim = signedHeaders(TOKEN, { method: "GET", target: "/tasks", body: "", now: NOW });
+    const victim = signedHeaders(TOKEN, {
+      method: "GET",
+      target: "/tasks",
+      body: "",
+      now: NOW,
+    });
     const bogus = { ...victim, "x-opc-signature": "0".repeat(64) };
     expect(verifyRequest({ ...base, headers: bogus })).toEqual({
       ok: false,
@@ -321,7 +376,10 @@ describe("② 鉴权：无 token 请求 401", () => {
     const s = h.sign("GET", "/tasks");
     const reshaped: Record<string, string> = {};
     for (const [k, v] of Object.entries(s)) reshaped[k.toUpperCase()] = v;
-    const res = await handleRequest(h.deps, h.req({ method: "GET", path: "/tasks", headers: reshaped }));
+    const res = await handleRequest(
+      h.deps,
+      h.req({ method: "GET", path: "/tasks", headers: reshaped }),
+    );
     expect(res.status).toBe(200);
   });
 
@@ -331,7 +389,10 @@ describe("② 鉴权：无 token 请求 401", () => {
     // 就能枚举出哪些路径存在、哪些已实现（501 尤其漏）。
     // headers: {} 是【显式裸发】的记号（见 harness.req 的注释）—— 这里要的正是没签名。
     for (const p of ["/nope", "/replay/task-1", "/tasks"]) {
-      const res = await handleRequest(h.deps, h.req({ method: "GET", path: p, headers: {} }));
+      const res = await handleRequest(
+        h.deps,
+        h.req({ method: "GET", path: p, headers: {} }),
+      );
       expect(res.status).toBe(401);
     }
   });
@@ -342,7 +403,11 @@ describe("② 鉴权：无 token 请求 401", () => {
       (
         await handleRequest(
           h.deps,
-          h.req({ method: "GET", path: "/nope", headers: h.sign("GET", "/nope") }),
+          h.req({
+            method: "GET",
+            path: "/nope",
+            headers: h.sign("GET", "/nope"),
+          }),
         )
       ).status,
     ).toBe(404);
@@ -352,27 +417,54 @@ describe("② 鉴权：无 token 请求 401", () => {
      * 而那样会把这条用例的【名字与性质】留在原地 —— 标题写着「两种没有可区分」，
      * 内容却再也不提 501。那是文档债，不是测试。
      *
-     * 现在的处境：UNIMPLEMENTED_ENDPOINTS 为空 ⇒ 【没有任何一条真请求】能走到 501。
-     * 我没有去造一条能走到的（那要往契约清单里塞一个假端点，
-     * 而那张清单是对外契约面，不能为了测试好看而脏）。
-     * 所以 501 那一侧改成【直接问判据】，并且把「此刻没有活的分母」这句话
-     * 留在断言旁边而不是注释里 —— 下一个人读到这条用例时得知道它为什么少了半边。
+     * 群角色上层 71 条端点已全部接线，UNIMPLEMENTED_ENDPOINTS 因而重新为空。
+     * 「已登记未实现 ⇒ 501」由 router.test.ts 用未注册的契约端点守着；
+     * 这里保留两套清单的「并集为全集、交集为空」不变量，既不禁止未来的
+     * 契约先行，也不许端点从两张表之间漏掉。
      */
     const res = await handleRequest(
       h.deps,
-      h.req({ method: "GET", path: "/replay/task-1", headers: h.sign("GET", "/replay/task-1") }),
+      h.req({
+        method: "GET",
+        path: "/replay/task-1",
+        headers: h.sign("GET", "/replay/task-1"),
+      }),
     );
     expect(res.status).toBe(200);
     expect(isImplemented("GET /replay/:taskId")).toBe(true);
-    const view = res.body as { task: { id: string }; entries: unknown[]; complete: boolean };
+    const view = res.body as {
+      task: { id: string };
+      entries: unknown[];
+      complete: boolean;
+    };
     expect(view.task.id).toBe("task-1");
     expect(view.entries).toHaveLength(0);
 
-    // 「404 与 501 可区分」这条口径本身仍被守着，只是换了问法。
-    expect(UNIMPLEMENTED_ENDPOINTS).toHaveLength(0);
-    const msg = notImplementedMessage("GET /replay/:taskId");
+    // 清单关系：并集为全集、交集为空。只断言长度会漏掉「重复条目」与「两边都没有」。
+    const implemented = API_ENDPOINTS.filter((e) => isImplemented(e));
+    const unimplemented = API_ENDPOINTS.filter((e) => !isImplemented(e));
+    expect([...implemented, ...unimplemented].sort()).toEqual(
+      [...API_ENDPOINTS].sort(),
+    );
+    expect(
+      implemented.filter((e) => UNIMPLEMENTED_ENDPOINTS.includes(e)),
+    ).toEqual([]);
+    expect([...UNIMPLEMENTED_ENDPOINTS].sort()).toEqual(
+      [...unimplemented].sort(),
+    );
+    expect(new Set(API_ENDPOINTS).size).toBe(API_ENDPOINTS.length);
+    expect(new Set(IMPLEMENTED_ENDPOINTS).size).toBe(
+      IMPLEMENTED_ENDPOINTS.length,
+    );
+    // 已登记但方法不对不泄露提示，与未知路径一样回 404。
+    expect(
+      matchContractEndpoint("DELETE", "/api/v1/groups")?.endpoint ?? null,
+    ).toBeNull();
     // 报错里必须带端点名：501 的价值就是「告诉你哪个还没做」，
     // 只回一句 not implemented 会让调用方去猜。
+    // 报错里必须带端点名：501 的价值就是「告诉你哪个还没做」，
+    // 只回一句 not implemented 会让调用方去猜。
+    const msg = notImplementedMessage("GET /replay/:taskId");
     expect(msg).toContain("GET /replay/:taskId");
     expect(msg).toContain("501");
   });
@@ -400,7 +492,11 @@ describe("② 鉴权：无 token 请求 401", () => {
 
     const hit = await handleRequest(
       h.deps,
-      h.req({ method: "GET", path: "/replay/task-1", query: { keyword: "审阅决定" } }),
+      h.req({
+        method: "GET",
+        path: "/replay/task-1",
+        query: { keyword: "审阅决定" },
+      }),
     );
     expect(hit.status).toBe(200);
     const view = hit.body as { entries: { payload: { text: string } }[] };
@@ -415,7 +511,11 @@ describe("② 鉴权：无 token 请求 401", () => {
 
     const tooLong = await handleRequest(
       h.deps,
-      h.req({ method: "GET", path: "/replay/task-1", query: { keyword: "覆".repeat(201) } }),
+      h.req({
+        method: "GET",
+        path: "/replay/task-1",
+        query: { keyword: "覆".repeat(201) },
+      }),
     );
     expect(tooLong.status).toBe(422);
     // 422 而不是 400：调用方能自己修（改短一点），服务端没做错任何事。
@@ -425,7 +525,11 @@ describe("② 鉴权：无 token 请求 401", () => {
     // 反向对照：200 个字符【不】被拒（边界在 201，不是 200）。
     const edge = await handleRequest(
       h.deps,
-      h.req({ method: "GET", path: "/replay/task-1", query: { keyword: "覆".repeat(200) } }),
+      h.req({
+        method: "GET",
+        path: "/replay/task-1",
+        query: { keyword: "覆".repeat(200) },
+      }),
     );
     expect(edge.status).toBe(200);
   });
@@ -469,10 +573,17 @@ describe("GET /approvals（收件箱计数的对账源）", () => {
     h.approvals("a-q");
     const res = await handleRequest(
       h.deps,
-      h.req({ method: "GET", path: "/approvals", query: { status: "pending" } }),
+      h.req({
+        method: "GET",
+        path: "/approvals",
+        query: { status: "pending" },
+      }),
     );
     expect(res.status).toBe(200);
-    const body = res.body as { approvals: { id: string }[]; pendingTotal: number };
+    const body = res.body as {
+      approvals: { id: string }[];
+      pendingTotal: number;
+    };
     expect(body.approvals.map((a) => a.id)).toEqual(["a-q"]);
     expect(body.pendingTotal).toBe(1);
   });
@@ -499,10 +610,12 @@ describe("GET /approvals（收件箱计数的对账源）", () => {
 
   it("出参【不含】parameters 全文（列表不是「顺手把整行发出去」）", async () => {
     const h = await harness();
-    h.db.prepare(
-      "INSERT INTO approvals (id, task_id, approval_type, summary, parameters, status) " +
-        "VALUES ('a-p', ?, 'strategic', 's', ?, 'pending')",
-    ).run("task-1", JSON.stringify({ impact_scope: "SECRET-SCOPE" }));
+    h.db
+      .prepare(
+        "INSERT INTO approvals (id, task_id, approval_type, summary, parameters, status) " +
+          "VALUES ('a-p', ?, 'strategic', 's', ?, 'pending')",
+      )
+      .run("task-1", JSON.stringify({ impact_scope: "SECRET-SCOPE" }));
     const res = await handleRequest(
       h.deps,
       h.req({ method: "GET", path: "/approvals" }),
@@ -549,7 +662,9 @@ describe("③ POST /approvals/:id", () => {
     expect(res.status).toBe(404);
     expect(h.calls.decision).toBe(0);
     // 库侧再钉一次：approvals 与 events 都没有因这次请求而动。
-    expect(h.db.prepare("SELECT COUNT(*) AS c FROM events").get()).toEqual({ c: 0 });
+    expect(h.db.prepare("SELECT COUNT(*) AS c FROM events").get()).toEqual({
+      c: 0,
+    });
   });
 
   it("反例：存在的 pending 卡片 ⇒ 200 且【恰好一次】", async () => {
@@ -643,7 +758,10 @@ describe("③ POST /approvals/:id", () => {
     expect(res.status).toBe(422);
     expect(h.calls.decision).toBe(0);
 
-    const withNote = decideBody({ resume: "reject_with_comment", note: "缺压测数据" });
+    const withNote = decideBody({
+      resume: "reject_with_comment",
+      note: "缺压测数据",
+    });
     const ok = await handleRequest(
       h.deps,
       h.req({
@@ -747,8 +865,9 @@ describe("③ POST /approvals/:id", () => {
     // 这里换一个 return false 的替身，把这一支单独接出来。
     const h = await harness();
     h.approvals("r-3");
-    (h.deps as { recordDecision: (o: unknown) => Promise<boolean> }).recordDecision =
-      async () => false;
+    (
+      h.deps as { recordDecision: (o: unknown) => Promise<boolean> }
+    ).recordDecision = async () => false;
     const body = decideBody({ resume: "approve" });
     const res = await handleRequest(
       h.deps,
@@ -867,20 +986,25 @@ async function collect(
   }
 }
 
-const evt = (seq: number): DomainEvent => ({
-  kind: "TaskStateChanged",
-  taskId: "task-1",
-  from: "IN_PROGRESS",
-  to: "IN_REVIEW",
-  seq,
-}) as DomainEvent;
+const evt = (seq: number): DomainEvent =>
+  ({
+    kind: "TaskStateChanged",
+    taskId: "task-1",
+    from: "IN_PROGRESS",
+    to: "IN_REVIEW",
+    seq,
+  }) as DomainEvent;
 
 describe("① SSE 游标续订", () => {
   it("先发布、后用【旧游标】续订 ⇒ 一条不丢", async () => {
     const bus = new InMemoryEventBus();
     for (let s = 1; s <= 4; s++) bus.publishPersisted(evt(s) as DomainEvent, s);
 
-    const stream = await ResumeStream.resume(bus, { name: "tasks", read: async () => ({}) }, 2);
+    const stream = await ResumeStream.resume(
+      bus,
+      { name: "tasks", read: async () => ({}) },
+      2,
+    );
     const frames = await collect(stream.frames(), 3); // snapshot + 2 条
 
     expect(frames[0]?.event).toBe("snapshot");
@@ -895,7 +1019,10 @@ describe("① SSE 游标续订", () => {
     // begin() 是【首次连接】那条路：它取当前 latestSeq 作游标。
     // 拿它做重连 = 把客户端「我缺 3、4」那句话抹掉，静默只发 5 之后的。
     // 这条断言的价值全在下面那句：无事件 = 事件丢了，而连接看着完全健康。
-    const wrong = await ResumeStream.begin(bus, { name: "tasks", read: async () => ({}) });
+    const wrong = await ResumeStream.begin(bus, {
+      name: "tasks",
+      read: async () => ({}),
+    });
     const frames = await collect(wrong.frames(2), 1);
     expect(frames.length).toBe(1);
     expect(frames[0]?.event).toBe("snapshot");
@@ -926,7 +1053,10 @@ describe("① SSE 游标续订", () => {
 
   it("快照帧【不带 id】（给它编一个 id 等于伪造游标）", async () => {
     const bus = new InMemoryEventBus();
-    const stream = await ResumeStream.begin(bus, { name: "tasks", read: async () => ({ ok: 1 }) });
+    const stream = await ResumeStream.begin(bus, {
+      name: "tasks",
+      read: async () => ({ ok: 1 }),
+    });
     const [snapshot] = await collect(stream.frames(), 1);
     expect(snapshot?.id).toBeUndefined();
     const body = JSON.parse(String(snapshot?.data)) as { as_of_seq: number };
@@ -937,7 +1067,11 @@ describe("① SSE 游标续订", () => {
     const bus = new InMemoryEventBus();
     for (const bad of [-1, 1.5, Number.NaN]) {
       await expect(
-        ResumeStream.resume(bus, { name: "tasks", read: async () => ({}) }, bad),
+        ResumeStream.resume(
+          bus,
+          { name: "tasks", read: async () => ({}) },
+          bad,
+        ),
       ).rejects.toThrow(/非负整数/u);
       // 夹紧到 0 会让「客户端的游标管理错了」这件事【看起来成功】，
       // 代价是从头重放全部历史 —— 那是比报错难查得多的症状。
@@ -947,7 +1081,11 @@ describe("① SSE 游标续订", () => {
   it("取完就 close：bus.subscribers() 回到 0", async () => {
     const bus = new InMemoryEventBus();
     bus.publishPersisted(evt(1) as DomainEvent, 1);
-    const stream = await ResumeStream.resume(bus, { name: "tasks", read: async () => ({}) }, 0);
+    const stream = await ResumeStream.resume(
+      bus,
+      { name: "tasks", read: async () => ({}) },
+      0,
+    );
     expect(bus.subscribers()).toBe(0);
     const it = stream.frames(1)[Symbol.asyncIterator]();
     await it.next(); // snapshot
@@ -961,7 +1099,8 @@ describe("① SSE 游标续订", () => {
 
   it("GET /events 的 cursor 参数：非法 422，合法则【真的】用它续订", async () => {
     const h = await harness();
-    for (let s = 1; s <= 3; s++) h.bus.publishPersisted(evt(s) as DomainEvent, s);
+    for (let s = 1; s <= 3; s++)
+      h.bus.publishPersisted(evt(s) as DomainEvent, s);
 
     const bad = await handleRequest(
       h.deps,
@@ -985,9 +1124,17 @@ describe("① SSE 游标续订", () => {
   it("环形缓冲吐掉了一段 ⇒ 降级标记跟着【现存最早那条】走，前端才知道要去拉快照", async () => {
     const bus = new InMemoryEventBus(2); // 只留最后两条
     for (let s = 1; s <= 6; s++) bus.publishPersisted(evt(s) as DomainEvent, s);
-    const stream = await ResumeStream.resume(bus, { name: "tasks", read: async () => ({}) }, 0);
+    const stream = await ResumeStream.resume(
+      bus,
+      { name: "tasks", read: async () => ({}) },
+      0,
+    );
     const frames = await collect(stream.frames(), 3);
-    const data = frames.slice(1).map((f) => JSON.parse(String(f.data)) as { seq: number; degraded?: true });
+    const data = frames
+      .slice(1)
+      .map(
+        (f) => JSON.parse(String(f.data)) as { seq: number; degraded?: true },
+      );
     expect(data.map((d) => d.seq)).toEqual([5, 6]);
     // 标记必须落在【现存最早】那条上。落在「下一条」上的话，慢消费者攒着的那批里
     // 带标记的那条可能已被挤出队列 ⇒ 永远收不到 degraded ⇒ 前端以为画面是全的。
@@ -1000,24 +1147,34 @@ describe("① SSE 游标续订", () => {
 
 describe("SSE 线格式", () => {
   it("编解码对偶，含多行 data", () => {
-    const f: SseFrame = { event: "TaskStateChanged", id: "42", data: 'a\n{"b":1}\nc' };
+    const f: SseFrame = {
+      event: "TaskStateChanged",
+      id: "42",
+      data: 'a\n{"b":1}\nc',
+    };
     const back = decodeSseFrame(encodeSseFrame(f));
     expect(back).toEqual(f);
   });
 
   it("每帧以【空行】结尾（少一个换行 = 客户端静静收不到）", () => {
-    expect(encodeSseFrame({ event: "x", data: "y" }).endsWith("\n\n")).toBe(true);
+    expect(encodeSseFrame({ event: "x", data: "y" }).endsWith("\n\n")).toBe(
+      true,
+    );
   });
 
   it("data 里的裸换行【不会截断事件】", () => {
     const raw = encodeSseFrame({ event: "notice", data: "第一行\n第二行" });
     expect(decodeSseFrame(raw).data).toBe("第一行\n第二行");
     // 反例的形态是「后半截被当成新字段解析掉」，所以钉一下字段数没变。
-    expect(raw.split("\n").filter((l) => l.startsWith("event:")).length).toBe(1);
+    expect(raw.split("\n").filter((l) => l.startsWith("event:")).length).toBe(
+      1,
+    );
   });
 
   it("retry 非法 ⇒ 抛；空事件名 ⇒ 抛", () => {
-    expect(() => encodeSseFrame({ event: "x", data: "y", retryMs: -1 })).toThrow();
+    expect(() =>
+      encodeSseFrame({ event: "x", data: "y", retryMs: -1 }),
+    ).toThrow();
     expect(() => encodeSseFrame({ event: "  ", data: "y" })).toThrow();
   });
 
@@ -1034,7 +1191,7 @@ describe("SSE 线格式", () => {
 /* ───────────────── 路由与任务视图 ───────────────── */
 
 describe("路由与视图", () => {
-  it("空 id 段【不匹配】，而不是匹配成 id=\"\"", () => {
+  it('空 id 段【不匹配】，而不是匹配成 id=""', () => {
     expect(matchRoute("GET", "/tasks/")).toBeNull();
     // 中间的空段也一样：filter(s => s !== "") 会把它抹成一次合法匹配，
     // 于是「id 必须非空」那条判断变成死代码。
@@ -1049,7 +1206,11 @@ describe("路由与视图", () => {
     const h = await harness();
     const res = await handleRequest(
       h.deps,
-      h.req({ method: "GET", path: "/tasks", headers: h.sign("GET", "/tasks") }),
+      h.req({
+        method: "GET",
+        path: "/tasks",
+        headers: h.sign("GET", "/tasks"),
+      }),
     );
     const body = res.body as { tasks: Record<string, unknown>[] };
     expect(body.tasks.length).toBe(1);
@@ -1058,14 +1219,20 @@ describe("路由与视图", () => {
     expect("graph_checkpoint_id" in row).toBe(false);
     expect(row["consumed_cents"]).toBe(0);
     expect(typeof row["budget_cents"]).not.toBe("string"); // §6.1：美分整数，不是浮点美元
-    expect(h.db.prepare("SELECT COUNT(*) AS c FROM tasks").get()).toEqual({ c: 1 });
+    expect(h.db.prepare("SELECT COUNT(*) AS c FROM tasks").get()).toEqual({
+      c: 1,
+    });
   });
 
   it("GET /tasks/:id 找不到 ⇒ 404", async () => {
     const h = await harness();
     const res = await handleRequest(
       h.deps,
-      h.req({ method: "GET", path: "/tasks/ghost", headers: h.sign("GET", "/tasks/ghost") }),
+      h.req({
+        method: "GET",
+        path: "/tasks/ghost",
+        headers: h.sign("GET", "/tasks/ghost"),
+      }),
     );
     expect(res.status).toBe(404);
   });
@@ -1076,7 +1243,12 @@ describe("路由与视图", () => {
       const body = JSON.stringify({ idea });
       const res = await handleRequest(
         h.deps,
-        h.req({ method: "POST", path: "/tasks", headers: h.sign("POST", "/tasks", body), body }),
+        h.req({
+          method: "POST",
+          path: "/tasks",
+          headers: h.sign("POST", "/tasks", body),
+          body,
+        }),
       );
       expect(res.status).toBe(422);
     }
@@ -1084,7 +1256,12 @@ describe("路由与视图", () => {
     const body = JSON.stringify({ idea: "做一个能自动跑通的接单系统" });
     const ok = await handleRequest(
       h.deps,
-      h.req({ method: "POST", path: "/tasks", headers: h.sign("POST", "/tasks", body), body }),
+      h.req({
+        method: "POST",
+        path: "/tasks",
+        headers: h.sign("POST", "/tasks", body),
+        body,
+      }),
     );
     expect(ok.status).toBe(201);
     expect(h.calls.created).toBe(1);
@@ -1095,7 +1272,12 @@ describe("路由与视图", () => {
     const body = "{not json";
     const res = await handleRequest(
       h.deps,
-      h.req({ method: "POST", path: "/tasks", headers: h.sign("POST", "/tasks", body), body }),
+      h.req({
+        method: "POST",
+        path: "/tasks",
+        headers: h.sign("POST", "/tasks", body),
+        body,
+      }),
     );
     expect(res.status).toBe(422);
   });
@@ -1112,7 +1294,11 @@ describe("路由与视图", () => {
     h.db.prepare("UPDATE tasks SET status = '' WHERE id = 'task-1'").run();
     const res = await handleRequest(
       h.deps,
-      h.req({ method: "GET", path: "/tasks", headers: h.sign("GET", "/tasks") }),
+      h.req({
+        method: "GET",
+        path: "/tasks",
+        headers: h.sign("GET", "/tasks"),
+      }),
     );
     expect(res.status).toBe(500);
     const msg = JSON.stringify(res.body);
@@ -1129,18 +1315,30 @@ describe("路由与视图", () => {
     // schema 全绿，而前端按状态名分支渲染认不出来 ⇒ 那块卡片不画 ⇒
     // CEO 看到的是「任务凭空少了」。所以【不能】只测空字符串那一例 ——
     // 空串会被 schema 先拦掉，测不出状态名对账这条通路有没有接上。
-    h.db.prepare("UPDATE tasks SET status = 'IN_PROGRES' WHERE id = 'task-1'").run();
+    h.db
+      .prepare("UPDATE tasks SET status = 'IN_PROGRES' WHERE id = 'task-1'")
+      .run();
     const res = await handleRequest(
       h.deps,
-      h.req({ method: "GET", path: "/tasks", headers: h.sign("GET", "/tasks") }),
+      h.req({
+        method: "GET",
+        path: "/tasks",
+        headers: h.sign("GET", "/tasks"),
+      }),
     );
     expect(res.status).toBe(500);
     expect(JSON.stringify(res.body)).toMatch(/IN_PROGRES/u);
     // 原型键同样不能混过去（状态名可能来自事件载荷）。
-    h.db.prepare("UPDATE tasks SET status = 'constructor' WHERE id = 'task-1'").run();
+    h.db
+      .prepare("UPDATE tasks SET status = 'constructor' WHERE id = 'task-1'")
+      .run();
     const proto = await handleRequest(
       h.deps,
-      h.req({ method: "GET", path: "/tasks", headers: h.sign("GET", "/tasks") }),
+      h.req({
+        method: "GET",
+        path: "/tasks",
+        headers: h.sign("GET", "/tasks"),
+      }),
     );
     expect(proto.status).toBe(500);
   });
@@ -1153,13 +1351,13 @@ describe("路由与视图", () => {
  * 或反过来在 IMPLEMENTED_ENDPOINTS 里加了一行、matchRoute 却还没接 ——
  * 两边各有一份「能用端点」清单，此前没有任何测试比它们。症状是
  * 「契约里写着已实现、一打 404」或「路由表里能命中、契约却不知道」，
- * 而 UNIMPLEMENTED_ENDPOINTS 在 Task 3.4 之后是空数组，把那条回退面也捂住了。
+ * 群角色上层端点登记后，未实现集合由全集减去已实现集合派生，
+ * 契约兜底因此能区分「已登记未接线」与「路径根本不存在」。
  *
- * 两个方向都验，且各自防退化：
- *  - 【正向】IMPLEMENTED 每项都真实命中 matchRoute，且 endpoint 一致。
- *  - 【反向】app.ts 源码里每一处 `endpoint: "…"` 字面量（Route 联合 + matchRoute
- *    返回值两处）都在 API_ENDPOINTS（契约全集）里。这样 matchRoute 新加一条
- *    契约不知道的路由，会红在反向；IMPLEMENTED 新加一行路由没接，红在正向。
+ * 两个路由面各守一边：
+ *  - 【旧面正向】21 条 legacy 端点必须命中 matchRoute，且 endpoint 一致；
+ *  - 【新面正向】71 条 /api/v1 端点由 domain-route-coverage 与 matcher 往返测试守着；
+ *  - 【反向】app.ts 里每一处 endpoint 字面量都在契约全集里。
  *
  * 样例 path 生成：`:段名` 全填字面 "x"。若哪天有人把参数段名改成一个 . 都
  * 不带的段（`:interruptId` → `interruptId`），或把字面段名漏了大写，
@@ -1170,13 +1368,15 @@ describe("④ 契约端点清单 ↔ matchRoute 路由表：双向对拍", () =>
   /** `/a/:b/c` → `/a/x/c`。先剥掉方法前缀，再替换参数段。 */
   const samplePath = (endpoint: string): string => {
     const path = endpoint.split(" ").slice(1).join(" ");
-    return path.replace(/:[A-Za-z0-9_]+/u, "x");
+    return path.replace(/:[A-Za-z0-9_]+/gu, "x");
   };
 
   const methodOf = (endpoint: string): string => endpoint.split(" ")[0] ?? "";
 
-  it("正向：每条已实现端点都能被 matchRoute 命中，且 endpoint 一致", () => {
-    for (const ep of IMPLEMENTED_ENDPOINTS) {
+  it("正向：每条 legacy 已实现端点都能被 matchRoute 命中，且 endpoint 一致", () => {
+    for (const ep of IMPLEMENTED_ENDPOINTS.filter(
+      (endpoint) => !endpoint.includes("/api/v1/"),
+    )) {
       const hit = matchRoute(methodOf(ep), samplePath(ep));
       expect(hit, `matchRoute 未命中 ${ep}`).not.toBeNull();
       expect(hit?.endpoint, `endpoint 不一致: ${ep}`).toBe(ep);

@@ -45,10 +45,20 @@
  *       所以这里的 instanceof 不是防御性冗余，是【那次误判的补丁】。
  */
 
+import {
+  createServer,
+  type IncomingMessage,
+  type Server,
+  type ServerResponse,
+} from "node:http";
 import { encodeSseFrame } from "@opc/contracts";
-import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import {
+  type HubDeps,
+  type HubRequest,
+  type HubResponse,
+  handleRequest,
+} from "./app.js";
 import { BindDecision, defaultBindDecision, LOOPBACK_HOST } from "./bind.js";
-import { type HubRequest, type HubResponse, handleRequest, type HubDeps } from "./app.js";
 
 /**
  * 唯一的默认监听地址。定义已搬到 http/bind.ts（理由写在那边：绑定策略要能在
@@ -69,7 +79,9 @@ export const MAX_BODY_BYTES = 64 * 1024;
  * 包括正在跑的所有 agent 图。单用户本机不会有人这么发，
  * 但这一层守的是「最坏情况下 Hub 还活着」。
  */
-export async function readBody(req: IncomingMessage): Promise<{ text: string; tooLarge: boolean }> {
+export async function readBody(
+  req: IncomingMessage,
+): Promise<{ text: string; tooLarge: boolean }> {
   const chunks: Buffer[] = [];
   let total = 0;
   for await (const c of req) {
@@ -143,6 +155,16 @@ class ClientGone extends Error {}
 
 async function pump(res: ServerResponse, hubRes: HubResponse): Promise<void> {
   if (hubRes.stream === undefined) {
+    if (hubRes.body instanceof Uint8Array) {
+      const bytes = Buffer.from(hubRes.body);
+      res.writeHead(hubRes.status, {
+        "content-type": "application/octet-stream",
+        "content-length": bytes.byteLength,
+        ...(hubRes.headers ?? {}),
+      });
+      res.end(bytes);
+      return;
+    }
     const text = JSON.stringify(hubRes.body ?? null);
     res.writeHead(hubRes.status, {
       "content-type": "application/json; charset=utf-8",
@@ -195,7 +217,9 @@ async function pump(res: ServerResponse, hubRes: HubResponse): Promise<void> {
       const step = await Promise.race([it.next(), gone]);
       if (step.done === true) break;
       if (res.writableEnded || res.destroyed) break; // 双保险：close 之外再问一次
-      res.write(encodeSseFrame(step.value as Parameters<typeof encodeSseFrame>[0]));
+      res.write(
+        encodeSseFrame(step.value as Parameters<typeof encodeSseFrame>[0]),
+      );
     }
   } catch (e) {
     if (!(e instanceof ClientGone)) throw e; // 真写失败照常往上抛，交给最外层 500
@@ -223,7 +247,6 @@ export interface HubServer {
   close(): Promise<void>;
 }
 
-
 export async function serveHub(
   deps: HubDeps,
   opts: { readonly port?: number; readonly bind?: BindDecision } = {},
@@ -236,7 +259,9 @@ export async function serveHub(
       try {
         const body = await readBody(req);
         if (body.tooLarge) {
-          res.writeHead(413, { "content-type": "application/json; charset=utf-8" });
+          res.writeHead(413, {
+            "content-type": "application/json; charset=utf-8",
+          });
           res.end(
             JSON.stringify({
               error:
@@ -252,9 +277,13 @@ export async function serveHub(
         await pump(res, hubRes);
       } catch (e) {
         if (!res.headersSent) {
-          res.writeHead(500, { "content-type": "application/json; charset=utf-8" });
+          res.writeHead(500, {
+            "content-type": "application/json; charset=utf-8",
+          });
         }
-        res.end(JSON.stringify({ error: e instanceof Error ? e.message : String(e) }));
+        res.end(
+          JSON.stringify({ error: e instanceof Error ? e.message : String(e) }),
+        );
       }
     })();
   });

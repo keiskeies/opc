@@ -1,4 +1,11 @@
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  copyFileSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import { afterAll, beforeAll, expect, it } from "vitest";
@@ -137,6 +144,189 @@ it("pnpm migrate 对已应用迁移是 no-op（幂等）", async () => {
   expect(migrate(db).applied).toEqual([]);
 });
 
+it("0024 给老会议补开场顺序，但不伪造开场时间与下一发言人", async () => {
+  const { db } = await open();
+  const dir = join(TMP, "meeting-upgrade-" + process.pid + "-" + ++seq);
+  mkdirSync(dir, { recursive: true });
+  for (const name of readdirSync(MIGRATIONS_DIR)
+    .filter((name) => name < "0024_")
+    .sort()) {
+    copyFileSync(join(MIGRATIONS_DIR, name), join(dir, name));
+  }
+  migrate(db, { dir });
+  db.prepare(
+    "INSERT INTO meetings (id, meeting_type, participants, created_at)" +
+      " VALUES ('legacy-meeting', 'review', ?, ?)",
+  ).run('["member-1"]', 1234);
+  copyFileSync(
+    join(MIGRATIONS_DIR, "0024_meetings_driver.sql"),
+    join(dir, "0024_meetings_driver.sql"),
+  );
+  expect(migrate(db, { dir }).applied).toEqual(["0024_meetings_driver"]);
+  expect(
+    db
+      .prepare(
+        "SELECT speaking_order_json, opened_at, next_speaker_member_id FROM meetings WHERE id = ?",
+      )
+      .get("legacy-meeting"),
+  ).toEqual({
+    speaking_order_json: '["member-1"]',
+    opened_at: 0,
+    next_speaker_member_id: null,
+  });
+});
+
+it("0028 升级旧库保留会话/消息/游标，失败可回滚并拒绝悬空私聊参与者", async () => {
+  const { db } = await open();
+  const dir = join(TMP, "boss-private-upgrade-" + process.pid + "-" + ++seq);
+  mkdirSync(dir, { recursive: true });
+  for (const name of readdirSync(MIGRATIONS_DIR)
+    .filter((name) => name < "0028_" && name.endsWith(".sql"))
+    .sort()) {
+    copyFileSync(join(MIGRATIONS_DIR, name), join(dir, name));
+  }
+  migrate(db, { dir });
+  for (const id of ["m-a", "m-b"]) {
+    db.prepare(
+      "INSERT INTO members (member_id, name, role_id, persona_json, model_tier, status, hired_at, updated_at)" +
+        " VALUES (?, ?, 'dev', '{}', 'execution', 'active', 1, 1)",
+    ).run(id, "Member " + id);
+  }
+  db.prepare(
+    "INSERT INTO conversations (conversation_id, kind, member_a, member_b, title, created_at)" +
+      " VALUES ('legacy-private', 'private', 'm-a', 'm-b', 'legacy', 1)",
+  ).run();
+  db.prepare(
+    "INSERT INTO messages (message_id, conversation_id, sender_member_id, author_kind, body, seq_in_conv, created_at)" +
+      " VALUES ('legacy-message', 'legacy-private', 'm-a', 'member', 'legacy message', 1, 1)",
+  ).run();
+  db.prepare(
+    "INSERT INTO message_reads (conversation_id, reader, last_seq_in_conv, read_at)" +
+      " VALUES ('legacy-private', 'boss', 1, 2)",
+  ).run();
+
+  const migrationPath = join(dir, "0028_boss_private_conversations.sql");
+  const migrationSql = readFileSync(
+    join(MIGRATIONS_DIR, "0028_boss_private_conversations.sql"),
+    "utf8",
+  );
+  writeFileSync(
+    migrationPath,
+    migrationSql + "\nSELECT * FROM conversations_0028_missing;\n",
+    "utf8",
+  );
+  expect(() => migrate(db, { dir })).toThrow(/0028.*失败并已回滚/iu);
+  expect(
+    db
+      .prepare("SELECT * FROM conversations WHERE conversation_id = ?")
+      .get("legacy-private"),
+  ).toMatchObject({ member_a: "m-a", member_b: "m-b", title: "legacy" });
+  expect(
+    db
+      .prepare("SELECT body FROM messages WHERE message_id = ?")
+      .get("legacy-message"),
+  ).toEqual({ body: "legacy message" });
+  expect(
+    db
+      .prepare("SELECT reader FROM message_reads WHERE conversation_id = ?")
+      .get("legacy-private"),
+  ).toEqual({ reader: "boss" });
+  expect(
+    (
+      db.prepare("PRAGMA foreign_key_list(conversations)").all() as {
+        from: string;
+      }[]
+    )
+      .map((row) => row.from)
+      .sort(),
+  ).toEqual(["group_id", "member_a", "member_b"]);
+  expect(
+    (
+      db
+        .prepare("SELECT version FROM schema_migrations WHERE version = ?")
+        .get("0028_boss_private_conversations") as
+        | { version: string }
+        | undefined
+    )?.version,
+  ).toBeUndefined();
+
+  writeFileSync(migrationPath, migrationSql, "utf8");
+  expect(migrate(db, { dir }).applied).toEqual([
+    "0028_boss_private_conversations",
+  ]);
+  expect(
+    db
+      .prepare("SELECT * FROM conversations WHERE conversation_id = ?")
+      .get("legacy-private"),
+  ).toMatchObject({ member_a: "m-a", member_b: "m-b", title: "legacy" });
+  expect(
+    db
+      .prepare("SELECT body FROM messages WHERE message_id = ?")
+      .get("legacy-message"),
+  ).toEqual({ body: "legacy message" });
+  expect(
+    db
+      .prepare("SELECT reader FROM message_reads WHERE conversation_id = ?")
+      .get("legacy-private"),
+  ).toEqual({ reader: "boss" });
+  expect(
+    db
+      .prepare(
+        "SELECT body FROM messages_fts WHERE messages_fts MATCH 'legacy'",
+      )
+      .all(),
+  ).toEqual([{ body: "legacy message" }]);
+  expect(db.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
+  expect(db.prepare("PRAGMA defer_foreign_keys").get()).toEqual({
+    defer_foreign_keys: 0,
+  });
+  expect(
+    (
+      db.prepare("PRAGMA foreign_key_list(conversations)").all() as {
+        from: string;
+        table: string;
+      }[]
+    ).map((row) => ({ from: row.from, table: row.table })),
+  ).toEqual([{ from: "group_id", table: "groups" }]);
+  expect(
+    (
+      db
+        .prepare(
+          "SELECT name FROM sqlite_master WHERE type = 'index'" +
+            " AND tbl_name = 'conversations' AND name NOT LIKE 'sqlite_%' ORDER BY name",
+        )
+        .all() as { name: string }[]
+    ).map((row) => row.name),
+  ).toEqual(["idx_conv_group", "idx_conv_pair"]);
+
+  db.prepare(
+    "INSERT INTO conversations (conversation_id, kind, member_a, member_b, title, created_at)" +
+      " VALUES ('boss-private', 'private', 'boss', 'm-a', 'boss', 2)",
+  ).run();
+  for (const [id, a, b] of [
+    ["boss-boss", "boss", "boss"],
+    ["boss-ghost", "boss", "ghost"],
+    ["ghost-member", "ghost", "m-a"],
+  ] as const) {
+    expect(() =>
+      db
+        .prepare(
+          "INSERT INTO conversations (conversation_id, kind, member_a, member_b, title, created_at)" +
+            " VALUES (?, 'private', ?, ?, 'invalid', 3)",
+        )
+        .run(id, a, b),
+    ).toThrow(/private 会话必须/u);
+  }
+  expect(() =>
+    db
+      .prepare(
+        "UPDATE conversations SET member_b = 'ghost' WHERE conversation_id = 'boss-private'",
+      )
+      .run(),
+  ).toThrow(/private 会话必须/u);
+  expect(db.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
+});
+
 it("删库重建可重放：两次独立迁移产出完全相同的 schema", async () => {
   const a = await open();
   const b = await open();
@@ -184,6 +374,13 @@ it("schema_migrations 记录版本与 Unix 毫秒时间戳", async () => {
     "0019_plugins",
     "0020_talent_market",
     "0021_rhythm",
+    "0022_meetings_topic",
+    "0023_message_refs",
+    "0024_meetings_driver",
+    "0025_cos_dispatch_rules",
+    "0026_documents_soft_delete",
+    "0027_research_artifacts",
+    "0028_boss_private_conversations",
   ]);
   // applied_at 必须是 Unix 毫秒整数：审计要能还原「这张表什么时候建的」
   for (const r of rows) {

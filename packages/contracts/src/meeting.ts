@@ -44,6 +44,8 @@ export const meetingViewSchema = z
     owner_member_id: z.string().nullable(),
     deadline_at: z.number().int().nullable(),
     summary_doc_id: z.string().nullable(),
+    /** 当前轮到谁；散会/取消后为 null。由服务层在每次发言后原子推进。 */
+    next_speaker_member_id: z.string().nullable(),
     turns: z.array(meetingTurnViewSchema),
     opened_at: z.number().int(),
     concluded_at: z.number().int().nullable(),
@@ -68,6 +70,8 @@ export const postTurnRequestSchema = z
   .object({
     speaker_member_id: z.string().min(1).max(200),
     content: z.string().trim().min(1).max(MAX_TURN_CHARS),
+    /** 发言者/主持人指定下一位；省略时按既定顺序推进并在末尾回到主持人。 */
+    next_speaker_member_id: z.string().min(1).max(200).optional(),
   })
   .strict();
 export type PostTurnRequest = z.infer<typeof postTurnRequestSchema>;
@@ -89,3 +93,11 @@ export const concludeMeetingRequestSchema = z
 export type ConcludeMeetingRequest = z.infer<
   typeof concludeMeetingRequestSchema
 >;
+
+/** 取消会议必须留下原因：时间线上不能说「取消了」却没有为什么。 */
+export const cancelMeetingRequestSchema = z
+  .object({
+    reason: z.string().trim().min(1).max(1000),
+  })
+  .strict();
+export type CancelMeetingRequest = z.infer<typeof cancelMeetingRequestSchema>;

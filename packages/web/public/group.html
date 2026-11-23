@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>OPC · 群角色工作台</title>
+  <link rel="stylesheet" href="/group.css">
+  <script src="/group.js" type="module"></script>
+</head>
+<body>
+  <svg class="svg-defs" aria-hidden="true" xmlns="http://www.w3.org/2000/svg">
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4.5 4.5"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-chat" viewBox="0 0 24 24"><path d="M4 5h16v11H9l-5 4V5Z"/><path d="M8 9h8M8 12h5"/></symbol>
+    <symbol id="i-users" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3"/><path d="M3 20v-2a6 6 0 0 1 12 0v2M16 5a3 3 0 0 1 0 6M18 14a5 5 0 0 1 3 4v2"/></symbol>
+    <symbol id="i-doc" viewBox="0 0 24 24"><path d="M6 3h8l4 4v14H6V3Z"/><path d="M14 3v5h5M9 12h6M9 16h6"/></symbol>
+    <symbol id="i-board" viewBox="0 0 24 24"><rect x="3" y="4" width="5" height="16" rx="1"/><rect x="10" y="4" width="5" height="11" rx="1"/><rect x="17" y="4" width="4" height="14" rx="1"/></symbol>
+    <symbol id="i-talent" viewBox="0 0 24 24"><path d="m12 3 2.7 5.5 6.1.9-4.4 4.3 1 6.1-5.4-2.9-5.4 2.9 1-6.1-4.4-4.3 6.1-.9L12 3Z"/></symbol>
+    <symbol id="i-settings" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.1-1l2-1.5-2-3.4-2.4 1A8 8 0 0 0 15 6l-.3-2.5h-4L10.4 6a8 8 0 0 0-1.5 1.1l-2.4-1-2 3.4 2 1.5a7 7 0 0 0 0 2l-2 1.5 2 3.4 2.4-1A8 8 0 0 0 10.4 18l.3 2.5h4L15 18a8 8 0 0 0 1.5-1.1l2.4 1 2-3.4-2-1.5a7 7 0 0 0 .1-1Z"/></symbol>
+    <symbol id="i-admin" viewBox="0 0 24 24"><path d="m12 3 8 4v5c0 5-3.5 8-8 10-4.5-2-8-5-8-10V7l8-4Z"/><path d="m8 12 3 3 5-6"/></symbol>
+    <symbol id="i-panel" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/></symbol>
+    <symbol id="i-pin" viewBox="0 0 24 24"><path d="m9 3 6 0-1 6 4 4v2H6v-2l4-4-1-6ZM12 15v6"/></symbol>
+    <symbol id="i-grip" viewBox="0 0 24 24"><circle cx="9" cy="6" r="1"/><circle cx="15" cy="6" r="1"/><circle cx="9" cy="12" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="9" cy="18" r="1"/><circle cx="15" cy="18" r="1"/></symbol>
+    <symbol id="i-chevron" viewBox="0 0 24 24"><path d="m9 5 7 7-7 7"/></symbol>
+    <symbol id="i-down" viewBox="0 0 24 24"><path d="m5 9 7 7 7-7"/></symbol>
+    <symbol id="i-close" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></symbol>
+    <symbol id="i-send" viewBox="0 0 24 24"><path d="m3 4 18 8-18 8 3-8-3-8Z"/><path d="M6 12h15"/></symbol>
+    <symbol id="i-reply" viewBox="0 0 24 24"><path d="m9 5-6 6 6 6M3 11h10a7 7 0 0 1 7 7v1"/></symbol>
+    <symbol id="i-volume" viewBox="0 0 24 24"><path d="M4 9h4l5-4v14l-5-4H4V9ZM17 8a6 6 0 0 1 0 8M20 5a10 10 0 0 1 0 14"/></symbol>
+    <symbol id="i-meeting" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="13" rx="2"/><path d="M8 21h8M12 18v3M8 10h8M8 13h5"/></symbol>
+    <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 7v5h-5M4 17v-5h5"/><path d="M6 7a8 8 0 0 1 13 2l1 3M4 12l1 3a8 8 0 0 0 13 2"/></symbol>
+    <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 3v12m-5-5 5 5 5-5M4 17v4h16v-4"/></symbol>
+    <symbol id="i-upload" viewBox="0 0 24 24"><path d="M12 16V4m-5 5 5-5 5 5M4 17v4h16v-4"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/></symbol>
+    <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
+    <symbol id="i-bold" viewBox="0 0 24 24"><path d="M7 4h6a4 4 0 0 1 0 8H7V4Zm0 8h7a4 4 0 0 1 0 8H7v-8Z"/></symbol>
+    <symbol id="i-list" viewBox="0 0 24 24"><path d="M9 6h12M9 12h12M9 18h12M4 6h.01M4 12h.01M4 18h.01"/></symbol>
+    <symbol id="i-heading" viewBox="0 0 24 24"><path d="M5 4v16M19 4v16M5 12h14"/></symbol>
+    <symbol id="i-tree" viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="5" rx="1"/><rect x="2" y="16" width="6" height="5" rx="1"/><rect x="16" y="16" width="6" height="5" rx="1"/><path d="M12 8v4M5 16v-4h14v4"/></symbol>
+  </svg>
+
+  <header class="topbar">
+    <a class="brand" href="#/messages" aria-label="OPC 群角色工作台首页"><span class="brand-mark">OPC</span><span class="brand-name">群角色工作台</span></a>
+    <div class="global-search" role="search">
+      <svg class="icon"><use href="#i-search"/></svg>
+      <input id="globalSearch" type="search" autocomplete="off" placeholder="搜索消息、文档、群、成员、任务、会议" aria-label="全局搜索" aria-controls="searchResults" aria-expanded="false">
+      <kbd>Ctrl K</kbd>
+      <div id="searchResults" class="search-results popover" role="listbox" hidden></div>
+    </div>
+    <div class="create-wrap">
+      <button id="createButton" class="btn primary" type="button" aria-haspopup="menu" aria-expanded="false"><svg class="icon"><use href="#i-plus"/></svg>创建</button>
+      <div id="createMenu" class="popover create-menu" role="menu" hidden>
+        <button type="button" role="menuitem" data-create="group"><svg class="icon"><use href="#i-users"/></svg><span>新建群<small>立项与协作</small></span></button>
+        <button type="button" role="menuitem" data-create="document"><svg class="icon"><use href="#i-doc"/></svg><span>新建文档<small>模板或空白文档</small></span></button>
+        <button type="button" role="menuitem" data-create="meeting"><svg class="icon"><use href="#i-meeting"/></svg><span>发起会议<small>按顺序发言</small></span></button>
+        <button type="button" role="menuitem" data-create="boss-private"><svg class="icon"><use href="#i-chat"/></svg><span>私聊成员（老板）<small>默认 1:1 私聊入口</small></span></button>
+        <button type="button" role="menuitem" data-create="member-private"><svg class="icon"><use href="#i-users"/></svg><span>私聊成员（成员间）<small>可选的双成员私聊</small></span></button>
+      </div>
+    </div>
+    <div class="top-spacer"></div>
+    <button id="reconnectButton" class="connection" type="button" title="点击重新连接事件流"><span id="connectionDot" class="status-dot connecting"></span><span id="connectionText">连接中…</span></button>
+    <div class="profile-wrap">
+      <button class="profile-button" type="button" data-nav="settings" aria-label="打开个人设置"><span id="profileStatusDot" class="status-dot online" aria-hidden="true"></span><span class="avatar boss-avatar">B</span><span class="profile-copy"><strong>老板</strong><small id="profileStatusText">在线 · 本机 · 决策人</small></span><svg class="icon"><use href="#i-down"/></svg></button>
+      <select id="personalStatus" class="personal-status" aria-label="个人状态（仅本机）" title="仅保存在本机，不代表服务端在线状态"><option value="online">在线</option><option value="focus">专注</option><option value="busy">忙碌</option></select>
+    </div>
+  </header>
+
+  <div class="workspace">
+    <nav id="navRail" class="nav-rail" aria-label="应用导航" aria-describedby="navReorderHint">
+      <div class="rail-top">
+        <div class="nav-entry" draggable="true"><button class="nav-item active" type="button" data-nav="messages" aria-current="page" title="消息"><svg class="icon"><use href="#i-chat"/></svg><span>消息</span><b id="messageBadge" class="rail-badge" hidden></b></button><span class="nav-grip" aria-hidden="true"><svg class="icon"><use href="#i-grip"/></svg></span></div>
+        <div class="nav-entry" draggable="true"><button class="nav-item" type="button" data-nav="contacts" title="通讯录"><svg class="icon"><use href="#i-users"/></svg><span>通讯录</span></button><span class="nav-grip" aria-hidden="true"><svg class="icon"><use href="#i-grip"/></svg></span></div>
+        <div class="nav-entry" draggable="true"><button class="nav-item" type="button" data-nav="documents" title="文档中心"><svg class="icon"><use href="#i-doc"/></svg><span>文档中心</span></button><span class="nav-grip" aria-hidden="true"><svg class="icon"><use href="#i-grip"/></svg></span></div>
+        <div class="nav-entry" draggable="true"><button class="nav-item" type="button" data-nav="backlog" title="任务面板"><svg class="icon"><use href="#i-board"/></svg><span>任务面板</span></button><span class="nav-grip" aria-hidden="true"><svg class="icon"><use href="#i-grip"/></svg></span></div>
+        <div class="nav-entry" draggable="true"><button class="nav-item" type="button" data-nav="talent" title="人才市场"><svg class="icon"><use href="#i-talent"/></svg><span>人才市场</span></button><span class="nav-grip" aria-hidden="true"><svg class="icon"><use href="#i-grip"/></svg></span></div>
+        <div class="nav-entry" draggable="true"><button class="nav-item" type="button" data-nav="settings" title="设置"><svg class="icon"><use href="#i-settings"/></svg><span>设置</span></button><span class="nav-grip" aria-hidden="true"><svg class="icon"><use href="#i-grip"/></svg></span></div>
+      </div>
+      <div class="rail-bottom">
+        <p id="navReorderHint" class="rail-hint">拖拽排序<br>Alt + ↑ / ↓</p>
+        <a class="nav-item" href="/admin" title="旧运营控制室"><svg class="icon"><use href="#i-admin"/></svg><span>管理视图</span></a>
+        <button id="collapseNav" class="icon-button rail-collapse" type="button" aria-label="折叠导航" aria-expanded="true" title="折叠导航"><svg class="icon"><use href="#i-panel"/></svg></button>
+      </div>
+    </nav>
+
+    <aside id="listPane" class="list-pane" aria-label="内容列表">
+      <div class="list-heading"><div><h1 id="listTitle">消息</h1><p id="listSubtitle">群聊、私聊与会议</p></div><button id="listAction" class="icon-button" type="button" aria-label="列表操作" title="列表操作"><svg class="icon"><use href="#i-plus"/></svg></button></div>
+      <div id="listToolbar" class="list-toolbar"></div>
+      <div id="listContent" class="list-content" aria-live="polite"></div>
+    </aside>
+
+    <main id="mainPane" class="main-pane" tabindex="-1">
+      <div id="view" class="view"></div>
+    </main>
+    <button id="mobileListButton" class="mobile-list-button" type="button" aria-label="显示内容列表"><svg class="icon"><use href="#i-panel"/></svg></button>
+  </div>
+
+  <div id="toastRegion" class="toast-region" role="status" aria-live="polite"></div>
+  <dialog id="modal" class="modal" aria-labelledby="modalTitle">
+    <form id="modalForm" method="dialog">
+      <header class="modal-header"><div><p id="modalEyebrow" class="eyebrow"></p><h2 id="modalTitle"></h2></div><button id="modalClose" class="icon-button" type="button" aria-label="关闭对话框"><svg class="icon"><use href="#i-close"/></svg></button></header>
+      <div id="modalBody" class="modal-body"></div>
+      <footer class="modal-footer"><span id="modalError" class="form-error" role="alert"></span><button id="modalCancel" class="btn" type="button">取消</button><button id="modalSubmit" class="btn primary" type="submit">确认</button></footer>
+    </form>
+  </dialog>
+  <noscript><div class="noscript">此工作台需要 JavaScript。请启用后刷新页面。</div></noscript>
+</body>
+</html>

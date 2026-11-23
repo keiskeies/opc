@@ -52,16 +52,17 @@ import type { MainDeps, MainFetchResult } from "./channels.js";
 /**
  * 一次请求用得到的那一小部分 Response。
  *
- * ⚠ 刻意**不写** `typeof globalThis.fetch`，也刻意只留两个成员：
- *  · 留两个成员是因为 `dispatch()` 只读这两个（channels.ts：status 判三态、
- *    bodyText 进 parseMaybeJson）。多声明的用不到的成员，等于给实现者一个
- *    「顺便也依赖上它」的口子，而线上炸在那儿。
+ * ⚠ 刻意**不写** `typeof globalThis.fetch`，也刻意只留请求真正需要的成员：
+ *  · text 是 JSON/文本路径；二进制路径额外要求 headers.get 与 arrayBuffer，
+ *    适配器没实现就必须明确抛，不能把字节当 UTF-8 静默损坏。
  *  · 不写 typeof fetch 的理由见文件头 ①：本机那个类型是空壳，而「兼容」这件事
  *    必须由**装配点那一次赋值**去证，不能由这里的断言自称。
  */
 export interface FetchResponseLike {
   readonly status: number;
   text(): Promise<string>;
+  readonly headers?: { get(name: string): string | null };
+  arrayBuffer?(): Promise<ArrayBuffer>;
 }
 
 /**
@@ -75,9 +76,10 @@ export interface FetchInitLike {
   readonly body?: string;
 }
 
-export interface FetchLike {
-  (url: string, init: FetchInitLike): Promise<FetchResponseLike>;
-}
+export type FetchLike = (
+  url: string,
+  init: FetchInitLike,
+) => Promise<FetchResponseLike>;
 
 /** 与 auth.ts 的 HEADER_* 三个常量逐字一致（抄，理由见文件头）。 */
 export const HEADER_SIGNATURE = "x-opc-signature";
@@ -102,7 +104,13 @@ export function canonicalString(o: {
   readonly nonce: string;
 }): string {
   const digest = createHash("sha256").update(o.body, "utf8").digest("hex");
-  return [o.method.toUpperCase(), o.target, digest, String(o.timestamp), o.nonce].join("\n");
+  return [
+    o.method.toUpperCase(),
+    o.target,
+    digest,
+    String(o.timestamp),
+    o.nonce,
+  ].join("\n");
 }
 
 export interface SignedFetchOptions {
@@ -135,7 +143,9 @@ export function assertUsableToken(token: string): void {
     // 空 token 不在这里悄悄签出一种必然 401 的头：那会把「没配 token」
     // 伪装成「token 不对」。前者是配置缺失（该去查启动器有没有传），
     // 后者会让人去换凭据 —— 而 auth.ts 的 401 刻意不区分这两者。
-    throw new Error("token 不能是空串：桌面壳拿它当 HMAC 密钥，空串签出的每个请求都会 401。");
+    throw new Error(
+      "token 不能是空串：桌面壳拿它当 HMAC 密钥，空串签出的每个请求都会 401。",
+    );
   }
 }
 
@@ -200,7 +210,10 @@ export function makeSignedFetch(o: SignedFetchOptions): MainDeps {
   assertUsableToken(o.token);
   const base = "http://" + o.hubAddress;
 
-  const signedFetch = async (path: string, init: { method: string; body?: string }): Promise<MainFetchResult> => {
+  const signedFetch = async (
+    path: string,
+    init: { method: string; body?: string },
+  ): Promise<MainFetchResult> => {
     // 签名这件事【只在这里发生一次】，且走的是 signedHeaders ——
     // 不为整齐：事件流那一路也要签同一个串，两处各写一遍 HMAC 就是两份抄件，
     // 而它漂了的形状是「事件流 401 而看板正常」（signedHeaders 的注释里那条）。
@@ -231,6 +244,19 @@ export function makeSignedFetch(o: SignedFetchOptions): MainDeps {
       //   那正是 ① 那条编译期错误存在的原因，不只是洁癖。
       ...(init.body === undefined ? {} : { body: init.body }),
     });
+    const contentType = res.headers?.get("content-type") ?? "application/json";
+    if (!contentType.includes("json") && !contentType.startsWith("text/")) {
+      if (res.arrayBuffer === undefined) {
+        throw new Error("二进制响应需要 fetch 适配器提供 arrayBuffer()");
+      }
+      const bytes = Buffer.from(await res.arrayBuffer());
+      return {
+        status: res.status,
+        bodyText: "",
+        bodyBase64: bytes.toString("base64"),
+        contentType,
+      };
+    }
     return { status: res.status, bodyText: await res.text() };
   };
   return { signedFetch };

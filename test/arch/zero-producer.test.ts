@@ -257,9 +257,9 @@ describe("零写入方声明的事实核查", () => {
     ]) {
       expect(tables.has(must), "阳性对照：写入方扫不出来 " + must).toBe(true);
     }
-    // 反面对照：round358 之后 review_gates 有了第一个写入方（turn-bundle.ts），
-    // 不能再用它当「必然零写入」的例子 —— 换一张今天 src 里确实零 INSERT 的表。
-    expect(tables.has("meetings")).toBe(false);
+    // 反面对照：meetings 在 T7 已有第一个写入方（meetings/service.ts），
+    // 不能再用它当「必然零写入」的例子 —— trust_scores 今天仍只有读取、没有 INSERT。
+    expect(tables.has("trust_scores")).toBe(false);
     // 声明句必须扫得出【已知存在】的句子；扫出来 0 句 = 正则坏了 = 守卫恒绿。
     expect(findZeroClaims(files).length).toBeGreaterThanOrEqual(10);
   });

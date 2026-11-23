@@ -78,7 +78,7 @@ resources/charter-templates/dev.yaml
 | `product` / `tech` / `dev` / `test` | 同名 | ✓ |
 
 而 `tasks.assigned_role` 的**建卡初值**是 `intakeRole`，它的缺省值是 `"intake"`
-（`http/real-deps.ts:835`，公开装配 `serve/assemble.ts` 不传它）。
+（`http/real-deps.ts:856`，公开装配 `serve/assemble.ts` 不传它）。
 ⇒ **一条新任务默认落在 `intake` 这个名字上，而 `intake.yaml` 这个模板不存在**：
 七份模板播完，第一个要干活的角色仍然读 `NO_CHARTER_LINE`。
 

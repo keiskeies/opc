@@ -44,6 +44,8 @@ export const documentViewSchema = z
     template_id: z.string().nullable(),
     created_at: z.number().int(),
     updated_at: z.number().int(),
+    /** 软删时刻；非 null 的文档不出现在列表/详情，但版本与审计仍保留。 */
+    deleted_at: z.number().int().nullable(),
     /** 正文只在详情视图给（列表视图读封面字段就够，不拖 2M 正文）。 */
     body_text: z.string().optional(),
     /** 当前用户对该文档的有效权限档（服务端按 0016 判定顺序算好）。 */
@@ -86,6 +88,17 @@ export const documentTemplateViewSchema = z
   })
   .strict();
 export type DocumentTemplateView = z.infer<typeof documentTemplateViewSchema>;
+
+export const createDocumentTemplateRequestSchema = z
+  .object({
+    name: z.string().trim().min(1).max(200),
+    kind: z.enum(DOC_KINDS),
+    body_text: z.string().max(MAX_DOC_BODY_CHARS).default(""),
+  })
+  .strict();
+export type CreateDocumentTemplateRequest = z.infer<
+  typeof createDocumentTemplateRequestSchema
+>;
 
 export const createDocumentRequestSchema = z
   .object({

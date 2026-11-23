@@ -28,16 +28,21 @@
 import { mkdirSync, readFileSync, rmSync } from "node:fs";
 import { request as httpRequest } from "node:http";
 import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
 import type { DatabaseSync } from "node:sqlite";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { fileURLToPath } from "node:url";
 import { decodeSseFrame, type SseFrame } from "@opc/contracts";
-import { fixtureTmp } from "../fixtures/fixture-dir.js";
-import { DRIVER_OFF } from "../fixtures/driver-state.js";
-import { type DomainEvent, InMemoryEventBus } from "../../src/events/bus.js";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { migrate } from "../../src/db/migrate.js";
+import { type DomainEvent, InMemoryEventBus } from "../../src/events/bus.js";
 import type { HubDeps } from "../../src/http/app.js";
-import { LOOPBACK_HOST, MAX_BODY_BYTES, type HubServer, serveHub } from "../../src/http/server.js";
+import {
+  type HubServer,
+  LOOPBACK_HOST,
+  MAX_BODY_BYTES,
+  serveHub,
+} from "../../src/http/server.js";
+import { DRIVER_OFF } from "../fixtures/driver-state.js";
+import { fixtureTmp } from "../fixtures/fixture-dir.js";
 
 // 本文件在 packages/hub/test/http/ ⇒ 往上【两层】才是 hub 根。
 // 只上一层得到的是 packages/hub/test，于是下面那条源码扫描读的是另一个目录，
@@ -82,7 +87,7 @@ interface Harness {
 async function harness(): Promise<Harness> {
   const { openDb } = await import("../../src/db/driver.js");
   const { newLocalToken } = await import("../../src/http/auth.js");
-  const db = openDb(join(TMP, "s-" + process.pid + "-" + ++fileSeq + ".db")) ;
+  const db = openDb(join(TMP, "s-" + process.pid + "-" + ++fileSeq + ".db"));
   opened.push(db);
   migrate(db);
   db.prepare(
@@ -132,6 +137,7 @@ interface Raw {
   status: number;
   headers: Record<string, string | string[] | undefined>;
   body: string;
+  bytes: Buffer;
 }
 
 /**
@@ -140,19 +146,34 @@ interface Raw {
  */
 function raw(
   port: number,
-  o: { method: string; path: string; headers?: Record<string, string>; body?: string },
+  o: {
+    method: string;
+    path: string;
+    headers?: Record<string, string>;
+    body?: string;
+  },
 ): Promise<Raw> {
   return new Promise((ok, bad) => {
     const req = httpRequest(
-      { host: LOOPBACK_HOST, port, method: o.method, path: o.path, headers: o.headers ?? {} },
+      {
+        host: LOOPBACK_HOST,
+        port,
+        method: o.method,
+        path: o.path,
+        headers: o.headers ?? {},
+      },
       (res) => {
         const chunks: Buffer[] = [];
         res.on("data", (c) => chunks.push(c as Buffer));
         res.on("end", () =>
           ok({
             status: res.statusCode ?? 0,
-            headers: res.headers as Record<string, string | string[] | undefined>,
+            headers: res.headers as Record<
+              string,
+              string | string[] | undefined
+            >,
             body: Buffer.concat(chunks).toString("utf8"),
+            bytes: Buffer.concat(chunks),
           }),
         );
         res.on("error", bad);
@@ -165,10 +186,22 @@ function raw(
 }
 
 /** 签好名的非流式请求。 */
-async function signed(h: Harness, method: string, path: string, body = ""): Promise<Raw> {
-  const headers: Record<string, string> = { ...(await sign(h, method, path, body)) };
+async function signed(
+  h: Harness,
+  method: string,
+  path: string,
+  body = "",
+): Promise<Raw> {
+  const headers: Record<string, string> = {
+    ...(await sign(h, method, path, body)),
+  };
   if (body !== "") headers["content-type"] = "application/json";
-  return raw(h.port, { method, path, headers, ...(body === "" ? {} : { body }) });
+  return raw(h.port, {
+    method,
+    path,
+    headers,
+    ...(body === "" ? {} : { body }),
+  });
 }
 
 /**
@@ -186,7 +219,11 @@ interface Stream {
   destroy(): void;
 }
 
-function openStream(h: Harness, path: string, headers: Record<string, string>): Stream {
+function openStream(
+  h: Harness,
+  path: string,
+  headers: Record<string, string>,
+): Stream {
   const frames: SseFrame[] = [];
   let buffered = "";
   let settled: (() => void) | undefined;
@@ -216,9 +253,14 @@ function openStream(h: Harness, path: string, headers: Record<string, string>): 
   // destroy 之后的 error 是【预期内】的：不挂这个监听，它就是个 uncaught exception，
   // 会把整个测试进程带走 —— 而带走的方式看着像「别的用例随机红」。
   req.on("error", () => {});
-  const statusP = new Promise<number>((ok) => req.on("response", (r) => ok(r.statusCode ?? 0)));
-  const headersP = new Promise<Record<string, string | string[] | undefined>>((ok) =>
-    req.on("response", (r) => ok(r.headers as Record<string, string | string[] | undefined>)),
+  const statusP = new Promise<number>((ok) =>
+    req.on("response", (r) => ok(r.statusCode ?? 0)),
+  );
+  const headersP = new Promise<Record<string, string | string[] | undefined>>(
+    (ok) =>
+      req.on("response", (r) =>
+        ok(r.headers as Record<string, string | string[] | undefined>),
+      ),
   );
   req.end();
   return {
@@ -229,7 +271,16 @@ function openStream(h: Harness, path: string, headers: Record<string, string>): 
         const check = (): void => {
           if (frames.length >= n) ok(frames.slice());
           else if (!req.destroyed) settled = check;
-          else rej(new Error("连接已断，还差 " + (n - frames.length) + " 帧。已收 " + frames.length + " 帧。"));
+          else
+            rej(
+              new Error(
+                "连接已断，还差 " +
+                  (n - frames.length) +
+                  " 帧。已收 " +
+                  frames.length +
+                  " 帧。",
+              ),
+            );
         };
         check();
         void waiting.catch(rej);
@@ -246,12 +297,18 @@ async function openSigned(h: Harness, path: string): Promise<Stream> {
 /** 轮询等一个条件成立。超时不「算了通过」，而是把当前值报出来。 */
 async function untilZero(get: () => number, ms = 5_000): Promise<void> {
   const deadline = Date.now() + ms;
-  while (get() > 0 && Date.now() < deadline) await new Promise((r) => setTimeout(r, 20));
+  while (get() > 0 && Date.now() < deadline)
+    await new Promise((r) => setTimeout(r, 20));
   expect(get()).toBe(0);
 }
 
 /** 带 seq 的用于【帧内容】；不带 seq 的用于 publishPersisted（seq 由它自己校验并附上）。 */
-function changed(seq: number, taskId: string, from: string, to: string): DomainEvent & { seq: number } {
+function changed(
+  seq: number,
+  taskId: string,
+  from: string,
+  to: string,
+): DomainEvent & { seq: number } {
   return { kind: "TaskStateChanged", taskId, from, to, seq };
 }
 function evt(taskId: string, from: string, to: string): DomainEvent {
@@ -317,14 +374,14 @@ describe("真 socket 上的 HTTP", () => {
      * 首尾相接，任何一段单独对、接起来错，都会在这里红。
      */
     const h = await harness();
-    (h.deps.db )
+    h.deps.db
       .prepare(
         "INSERT INTO events (task_id, actor_type, actor_id, action, target, payload, " +
           "state_snapshot, created_at) VALUES ('task-1','agent','dev','state_change'," +
           "'task-1',?,NULL,?)",
       )
       .run(JSON.stringify({ text: "覆盖率 92% 达标" }), NOW);
-    (h.deps.db )
+    h.deps.db
       .prepare(
         "INSERT INTO events (task_id, actor_type, actor_id, action, target, payload, " +
           "state_snapshot, created_at) VALUES ('task-1','agent','dev','state_change'," +
@@ -336,7 +393,9 @@ describe("真 socket 上的 HTTP", () => {
     const target = "/replay/task-1?keyword=" + encodeURIComponent("92%");
     const res = await signed(h, "GET", target);
     expect(res.status).toBe(200);
-    const view = JSON.parse(res.body) as { entries: { payload: { text: string } }[] };
+    const view = JSON.parse(res.body) as {
+      entries: { payload: { text: string } }[];
+    };
     expect(view.entries).toHaveLength(1);
     expect(view.entries[0]?.payload.text).toContain("92%");
 
@@ -348,31 +407,48 @@ describe("真 socket 上的 HTTP", () => {
     // 反向对照：同一发请求【不带 keyword】时两条都在。
     // 少了这一格，上面那个 1 可能来自「keyword 被解码成空 ⇒ 恒 0 命中」这种错法。
     const all = await signed(h, "GET", "/replay/task-1");
-    expect((JSON.parse(all.body) as { entries: unknown[] }).entries).toHaveLength(2);
+    expect(
+      (JSON.parse(all.body) as { entries: unknown[] }).entries,
+    ).toHaveLength(2);
   });
 
-  it("未知路径 ⇒ 404；未实现端点的判据本身仍然成立（清单为空 ⇒ 只能直接问函数）", async () => {
-    // Task 3.4 之后 UNIMPLEMENTED_ENDPOINTS 是空的，于是【没有任何一条真请求】
-    // 能走到 501 那一支。这里不假装还有一条能走：
-    //  - 路由侧照旧测 404（未知路径）；
-    //  - 501 侧改成直接问那个判据函数（notImplementedMessage + isImplemented），
-    //    并【明写】这一支此刻没有活的分母。
-    // 为什么不能就这么删掉这条用例：那等于把「404 与 501 可区分」这条口径
-    // 从测试里抹掉，而下一次加契约先行的端点时没人提醒要保持它。
+  it("未知路径 ⇒ 404；已接线的群列表在真 TCP 线上返回 200", async () => {
+    // 旧面未知路径仍是 404；群角色上层已实现端点必须走生产分派器而不是 501。
     const h = await harness();
     const missing = await signed(h, "GET", "/nope");
     expect(missing.status).toBe(404);
 
-    const { isImplemented, UNIMPLEMENTED_ENDPOINTS, API_ENDPOINTS } = await import(
-      "@opc/contracts"
-    );
-    const { notImplementedMessage } = await import("../../src/http/app.js");
-    expect(UNIMPLEMENTED_ENDPOINTS).toHaveLength(0);
-    // 清单为空 ⇒ IMPLEMENTED 必须等于全表，否则就有端点【两边都不在】，
-    // 那种端点会被 isImplemented 判成未实现而永远 501，且没有任何测试看得见。
+    const groups = await signed(h, "GET", "/api/v1/groups");
+    expect(groups.status).toBe(200);
+
+    const { isImplemented, UNIMPLEMENTED_ENDPOINTS, API_ENDPOINTS } =
+      await import("@opc/contracts");
     const implemented = API_ENDPOINTS.filter((e) => isImplemented(e));
-    expect([...API_ENDPOINTS].sort()).toEqual([...implemented].sort());
-    expect(notImplementedMessage("GET /replay/:taskId")).toContain("501");
+    const unimplemented = API_ENDPOINTS.filter((e) => !isImplemented(e));
+    expect([...implemented, ...unimplemented].sort()).toEqual(
+      [...API_ENDPOINTS].sort(),
+    );
+    expect(
+      implemented.filter((e) => UNIMPLEMENTED_ENDPOINTS.includes(e)),
+    ).toEqual([]);
+    expect([...UNIMPLEMENTED_ENDPOINTS].sort()).toEqual(
+      [...unimplemented].sort(),
+    );
+  });
+
+  it("二进制资产在真 TCP 线上逐字节返回，不被 JSON/UTF-8 改写", async () => {
+    const h = await harness();
+    const bytes = Buffer.from([0x00, 0xff, 0x80, 0x41, 0x00]);
+    h.db
+      .prepare(
+        "INSERT INTO assets (asset_id, purpose, mime, size_bytes, sha256, data, created_at)" +
+          " VALUES ('asset-1', 'attachment', 'application/octet-stream', ?, ?, ?, ?)",
+      )
+      .run(bytes.length, "a".repeat(64), bytes, NOW);
+    const result = await signed(h, "GET", "/api/v1/assets/asset-1");
+    expect(result.status).toBe(200);
+    expect(result.headers["content-type"]).toBe("application/octet-stream");
+    expect(result.bytes.equals(bytes)).toBe(true);
   });
 
   it("POST /approvals 的 404 在真线上也【不写审计】", async () => {
@@ -381,7 +457,9 @@ describe("真 socket 上的 HTTP", () => {
     const res = await signed(h, "POST", "/approvals/ghost", body);
     expect(res.status).toBe(404);
     expect(h.calls.decision).toBe(0);
-    expect(h.db.prepare("SELECT COUNT(*) AS c FROM events").get()).toEqual({ c: 0 });
+    expect(h.db.prepare("SELECT COUNT(*) AS c FROM events").get()).toEqual({
+      c: 0,
+    });
   });
 
   it("非法 cursor ⇒ 422，且【没打开任何流】（订阅数仍为 0）", async () => {
@@ -411,11 +489,19 @@ describe("真 socket 上的 HTTP", () => {
     // /tasks 是普通 JSON、会自己结束，对照组才写得下来。
     const h = await harness();
     const headers = await sign(h, "GET", "/tasks?foo=1");
-    const tampered = await raw(h.port, { method: "GET", path: "/tasks?foo=2", headers });
+    const tampered = await raw(h.port, {
+      method: "GET",
+      path: "/tasks?foo=2",
+      headers,
+    });
     expect(tampered.status).toBe(401);
     // 同一条签名原样发出去就是 200 —— 排掉「这条签名本来就无效」这个解释。
     // 少了这一句，上面那次 401 可能来自任何别的原因（token 错、时钟歪、头名写错）。
-    const same = await raw(h.port, { method: "GET", path: "/tasks?foo=1", headers });
+    const same = await raw(h.port, {
+      method: "GET",
+      path: "/tasks?foo=1",
+      headers,
+    });
     expect(same.status).toBe(200);
   });
 
@@ -427,7 +513,11 @@ describe("真 socket 上的 HTTP", () => {
     // 而不是在生产上撞见「某些客户端偶尔 401」。
     const h = await harness();
     const headers = await sign(h, "GET", "/tasks?foo=1");
-    const res = await raw(h.port, { method: "GET", path: "/tasks?foo=1&", headers });
+    const res = await raw(h.port, {
+      method: "GET",
+      path: "/tasks?foo=1&",
+      headers,
+    });
     expect(res.status).toBe(401);
   });
 });
@@ -440,13 +530,17 @@ describe("监听地址", () => {
     const { serveHub: serve } = await import("../../src/http/server.js");
     // 先证【端口确实被占着】：不占着的话，下面那句「关掉后能重用」是恒真的。
     // 这正是本仓反复处理的那种自我安慰式断言。
-    const second = await serve(h.deps, { port: h.port }).catch((e: unknown) => e);
+    const second = await serve(h.deps, { port: h.port }).catch(
+      (e: unknown) => e,
+    );
     expect(second).toBeInstanceOf(Error);
     for (const s of servers) if (s.port === h.port) await s.close();
     const again = await serve(h.deps, { port: h.port });
     servers.push(again);
     expect(again.port).toBe(h.port);
-    expect((await raw(again.port, { method: "GET", path: "/tasks" })).status).toBe(401);
+    expect(
+      (await raw(again.port, { method: "GET", path: "/tasks" })).status,
+    ).toBe(401);
   });
 
   it("close 会【等到 SSE 连接结束】，不是把端口拖进 TIME_WAIT", async () => {
@@ -491,7 +585,9 @@ describe("监听地址", () => {
     // 或者让守卫只看它本来要看的东西（✅）。下面那个剥注释的函数很粗，
     // 但它只需要粗到【能把这两种注释形态剥掉】，而漏剥的后果是守卫偏严（多报），
     // 不是偏松（漏报）—— 方向是安全的。
-    const code = src.replace(/\/\*[\s\S]*?\*\//gu, "").replace(/^\s*\/\/.*$/gmu, "");
+    const code = src
+      .replace(/\/\*[\s\S]*?\*\//gu, "")
+      .replace(/^\s*\/\/.*$/gmu, "");
     expect(code).toMatch(/listen\(\s*port,\s*bind\.host/u);
     expect(code).not.toMatch(/listen\(\s*port\s*\)/u); // 漏 host ⇒ Node 绑所有网卡
     expect(code).not.toMatch(/opts\.host|\bhost\?\s*:/u);
@@ -515,7 +611,10 @@ describe("请求体上限", () => {
     const res = await raw(h.port, {
       method: "POST",
       path: "/tasks",
-      headers: { "content-type": "application/json", "content-length": String(big.length) },
+      headers: {
+        "content-type": "application/json",
+        "content-length": String(big.length),
+      },
       body: big,
     });
     expect(res.status).toBe(413);

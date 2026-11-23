@@ -16,15 +16,24 @@
  * 而那是可以的：它们的形状就三个方法，而【真 electron 的语义】本来也不在这一格里
  * （那要等依赖到位，0052 §7 第 1 条记的就是那一句）。
  */
-import { type Server, createServer } from "node:http";
+import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterEach, describe, expect, it } from "vitest";
-import { CHANNEL_SPECS } from "../../packages/desktop/src/ipc-surface.js";
-import { EVENT_CHANNEL, EVENTS_READY_CHANNEL } from "../../packages/desktop/src/preload/api.js";
-import { LINK_EVENT } from "../../packages/desktop/src/main/event-stream.js";
-import { invokeChannels, nodeHttpFetch, wireMain, type IpcMainLike, type SenderLike } from "../../packages/desktop/src/main/wire.js";
-import { verifyRequest } from "../../packages/hub/src/http/auth.js";
 import { encodeSseFrame } from "../../packages/contracts/src/api.js";
+import { CHANNEL_SPECS } from "../../packages/desktop/src/ipc-surface.js";
+import { LINK_EVENT } from "../../packages/desktop/src/main/event-stream.js";
+import {
+  type IpcMainLike,
+  invokeChannels,
+  nodeHttpFetch,
+  type SenderLike,
+  wireMain,
+} from "../../packages/desktop/src/main/wire.js";
+import {
+  EVENT_CHANNEL,
+  EVENTS_READY_CHANNEL,
+} from "../../packages/desktop/src/preload/api.js";
+import { verifyRequest } from "../../packages/hub/src/http/auth.js";
 
 const TOKEN = "wire-test-token-0123456789";
 
@@ -36,14 +45,18 @@ interface FakeIpc {
   ipcMain: IpcMainLike;
 }
 function fakeIpc(): FakeIpc {
-  const handlers = new Map<string, (e: unknown, a: unknown) => Promise<unknown>>();
+  const handlers = new Map<
+    string,
+    (e: unknown, a: unknown) => Promise<unknown>
+  >();
   const removed: string[] = [];
   return {
     handlers,
     removed,
     ipcMain: {
       handle: (channel, h) => {
-        if (handlers.has(channel)) throw new Error("通道 " + channel + " 被注册了两次");
+        if (handlers.has(channel))
+          throw new Error("通道 " + channel + " 被注册了两次");
         handlers.set(channel, h);
       },
       removeHandler: (channel) => {
@@ -73,7 +86,8 @@ function fakeSender(mode: "throws" | "silentlyDrops" = "throws") {
     sender: {
       send: (channel, payload) => {
         if (dead) {
-          if (mode === "throws") throw new Error("webContents.send: 对象已销毁");
+          if (mode === "throws")
+            throw new Error("webContents.send: 对象已销毁");
           return; // 静默丢掉：什么都不发生
         }
         sent.push({ channel, payload });
@@ -83,7 +97,11 @@ function fakeSender(mode: "throws" | "silentlyDrops" = "throws") {
     destroy: () => {
       dead = true;
     },
-  } as { sender: SenderLike; sent: { channel: string; payload: unknown }[]; destroy(): void };
+  } as {
+    sender: SenderLike;
+    sent: { channel: string; payload: unknown }[];
+    destroy(): void;
+  };
 }
 
 /* ─────────────────────── 一台真 Hub 形状的服务器 ─────────────────────── */
@@ -135,7 +153,10 @@ async function startServer(
   });
   await new Promise<void>((r) => srv.listen(0, "127.0.0.1", r));
   const port = (srv.address() as AddressInfo).port;
-  const rec = { srv, close: () => new Promise<void>((r) => srv.close(() => r())) };
+  const rec = {
+    srv,
+    close: () => new Promise<void>((r) => srv.close(() => r())),
+  };
   servers.push(rec);
   return { address: "127.0.0.1:" + port, requests };
 }
@@ -241,9 +262,11 @@ afterEach(async () => {
 });
 
 const tick = async (turns = 15): Promise<void> => {
-  for (let i = 0; i < turns; i++) await new Promise<void>((r) => setImmediate(r));
+  for (let i = 0; i < turns; i++)
+    await new Promise<void>((r) => setImmediate(r));
 };
-const settle = (ms = 40): Promise<void> => new Promise((r) => setTimeout(r, ms));
+const settle = (ms = 40): Promise<void> =>
+  new Promise((r) => setTimeout(r, ms));
 
 /** 手动时钟 + 手动推流口：事件流那一段不需要真 socket（它自己的文件里有真 socket 的发）。 */
 function fakeClock() {
@@ -270,19 +293,28 @@ function fakeClock() {
 
 describe("① 通道路由：一条不漏、一条不多", () => {
   it("invokeChannels() = CHANNEL_SPECS 里全部 invoke 通道，且【不含】推送通道", () => {
-    const fromSpec = CHANNEL_SPECS.filter((s) => s.kind === "invoke").map((s) => s.channel);
+    const fromSpec = CHANNEL_SPECS.filter((s) => s.kind === "invoke").map(
+      (s) => s.channel,
+    );
     expect(invokeChannels()).toEqual(fromSpec);
     // 单独钉一次推送通道不在里面：它在 CHANNEL_SPECS 里【确实存在】（kind: "push"），
     // 所以"筛了 invoke"这件事必须有一个反例在场才算数。
     expect(fromSpec).not.toContain("hub:subscribeEvents");
-    expect(CHANNEL_SPECS.map((s) => s.channel)).toContain("hub:subscribeEvents");
+    expect(CHANNEL_SPECS.map((s) => s.channel)).toContain(
+      "hub:subscribeEvents",
+    );
   });
 
   it("每一条 invoke 通道都真的注册了 handler，并且【能调通】", async () => {
     const srv = await startServer(() => ({ status: 200, body: '{"ok":true}' }));
     const ipc = fakeIpc();
     const s = fakeSender();
-    const wire = wireMain({ token: TOKEN, hubAddress: srv.address, ipcMain: ipc.ipcMain, sender: s.sender });
+    const wire = wireMain({
+      token: TOKEN,
+      hubAddress: srv.address,
+      ipcMain: ipc.ipcMain,
+      sender: s.sender,
+    });
     // 注册集 = 全部 invoke 通道 + 握手通道。握手不进 invokeChannels()
     // （它不映射 Hub 端点，见 wire.ts 里那段注释），但它的注册【同样】要在这里对账：
     // 有人把 ready handler 摘掉而这里还绿，就等于把握手闸门静默拆了。
@@ -298,11 +330,15 @@ describe("① 通道路由：一条不漏、一条不多", () => {
       "hub:decideApproval": { approvalId: "c-1", resume: "approve" },
       "hub:listBindings": undefined,
       "hub:getOrg": undefined,
+      "hub:domainRequest": { endpoint: "GET /api/v1/groups" },
     };
     for (const ch of invokeChannels()) {
       const h = ipc.handlers.get(ch);
       if (h === undefined) throw new Error(ch + " 没注册 handler");
-      const r = (await h({}, args[ch])) as { ok: boolean; error?: { message: string } };
+      const r = (await h({}, args[ch])) as {
+        ok: boolean;
+        error?: { message: string };
+      };
       // 调不通的两种形状都在这里：没注册（上一句抛）、签名不对（ok:false + 401）
       expect(r.ok, ch + " 调不通：" + (r.error?.message ?? "")).toBe(true);
     }
@@ -316,7 +352,12 @@ describe("① 通道路由：一条不漏、一条不多", () => {
     const srv = await startServer(() => ({ status: 200, body: "{}" }));
     const ipc = fakeIpc();
     const s = fakeSender();
-    const wire = wireMain({ token: TOKEN, hubAddress: srv.address, ipcMain: ipc.ipcMain, sender: s.sender });
+    const wire = wireMain({
+      token: TOKEN,
+      hubAddress: srv.address,
+      ipcMain: ipc.ipcMain,
+      sender: s.sender,
+    });
     const call = async (ch: string, a: unknown): Promise<void> => {
       const h = ipc.handlers.get(ch);
       if (h === undefined) throw new Error(ch + " 没注册");
@@ -330,7 +371,11 @@ describe("① 通道路由：一条不漏、一条不多", () => {
     // 我第一版这里写的是 "reject"，而它【不在】那三个值里 ⇒ checkArgs 直接拒了
     // 这次调用、一发请求都没发出去 ⇒ 期望的那一行永远等不到。
     // 那是我的测试错了，而它错得【很有参考价值】：参数闸门确实拦住了。
-    await call("hub:decideApproval", { approvalId: "c-9", resume: "reject_with_comment", note: "缺测试" });
+    await call("hub:decideApproval", {
+      approvalId: "c-9",
+      resume: "reject_with_comment",
+      note: "缺测试",
+    });
     await call("hub:getOrg", undefined);
     expect(srv.requests.map((r) => r.method + " " + r.target)).toEqual([
       "POST /tasks",
@@ -369,7 +414,10 @@ describe("② 生命周期", () => {
     wire.start();
     wire.start();
     await settle();
-    expect(srv.connections, "start() 调了三次而服务器上看到不止一条连接 ⇒ 多条活流").toBe(1);
+    expect(
+      srv.connections,
+      "start() 调了三次而服务器上看到不止一条连接 ⇒ 多条活流",
+    ).toBe(1);
     wire.stop();
     wire.unregister();
   });
@@ -396,7 +444,10 @@ describe("② 生命周期", () => {
     expect(srv.closed).toBe(0);
     wire.stop();
     await settle();
-    expect(srv.closed, "stop() 没真的关连接 ⇒ 窗口关了而 Hub 上挂着一条订阅").toBe(1);
+    expect(
+      srv.closed,
+      "stop() 没真的关连接 ⇒ 窗口关了而 Hub 上挂着一条订阅",
+    ).toBe(1);
     expect(wire.running).toBe(false);
     wire.unregister();
   });
@@ -428,7 +479,10 @@ describe("② 生命周期", () => {
     // 页面没了之后服务端继续推 ⇒ 闸门必须把流【关掉】
     srv.emit("TaskStateChanged", '{"n":2}', "2");
     await settle();
-    expect(srv.closed, "销毁后流没关 ⇒ 主进程一直读、一直丢，而没有任何地方看得见").toBe(1);
+    expect(
+      srv.closed,
+      "销毁后流没关 ⇒ 主进程一直读、一直丢，而没有任何地方看得见",
+    ).toBe(1);
     expect(wire.running).toBe(false);
     wire.unregister();
   });
@@ -472,7 +526,10 @@ describe("② 生命周期", () => {
     s.destroy();
     const h = ipc.handlers.get("hub:createTask");
     if (h === undefined) throw new Error("没注册");
-    const r = (await h({}, { idea: "x" })) as { ok: boolean; error?: { code: string } };
+    const r = (await h({}, { idea: "x" })) as {
+      ok: boolean;
+      error?: { code: string };
+    };
     expect(r.ok).toBe(false);
     expect(r.error?.code).toBe("unreachable");
     // 这一句才是本发的内容：请求【一条都没到 Hub】。
@@ -486,12 +543,19 @@ describe("② 生命周期", () => {
     const srv = await startServer(() => ({ status: 200, body: "{}" }));
     const ipc = fakeIpc();
     const s = fakeSender();
-    const wire = wireMain({ token: TOKEN, hubAddress: srv.address, ipcMain: ipc.ipcMain, sender: s.sender });
+    const wire = wireMain({
+      token: TOKEN,
+      hubAddress: srv.address,
+      ipcMain: ipc.ipcMain,
+      sender: s.sender,
+    });
     wire.unregister();
     expect(ipc.handlers.size).toBe(0);
     // 握手通道也在摘除名单里：漏摘的后果不是报错而是【更糟】—— handler 握着
     // 已死的 sender 还在，页面重载后的乱序 ready 会去开一条推不出去的流。
-    expect(ipc.removed.sort()).toEqual([...invokeChannels(), EVENTS_READY_CHANNEL].sort());
+    expect(ipc.removed.sort()).toEqual(
+      [...invokeChannels(), EVENTS_READY_CHANNEL].sort(),
+    );
     wire.stop();
   });
 
@@ -512,11 +576,21 @@ describe("② 生命周期", () => {
     wire.start();
     await tick();
     // 至少有过一次链路状态推送（retrying），而且走的是 EVENT_CHANNEL
-    expect(s.sent.length, "连不上的时候界面必须收得到『连不上』").toBeGreaterThan(0);
+    expect(
+      s.sent.length,
+      "连不上的时候界面必须收得到『连不上』",
+    ).toBeGreaterThan(0);
     for (const m of s.sent) expect(m.channel).toBe(EVENT_CHANNEL);
-    const payload = s.sent[0]?.payload as { event: string; seq?: number; data: string };
+    const payload = s.sent[0]?.payload as {
+      event: string;
+      seq?: number;
+      data: string;
+    };
     expect(payload.event).toBe(LINK_EVENT);
-    expect(payload.seq, "链路状态帧带 seq 会把投影游标推到错误位置").toBeUndefined();
+    expect(
+      payload.seq,
+      "链路状态帧带 seq 会把投影游标推到错误位置",
+    ).toBeUndefined();
     wire.stop();
     wire.unregister();
   });
@@ -549,12 +623,18 @@ describe("③ fetchImpl 是真发得出请求的", () => {
   it("nodeHttpFetch 把 method / path+query / body 原样送到", async () => {
     // 这一发存在的理由见文件头 ③：之前所有签名测试都用的是【抓请求头的桩】，
     // 它证不了 FetchLike 与 node:http 真的兼容（兼容这件事必须有人真的发一次）。
-    const srv = await startServer(() => ({ status: 201, body: '{"id":"t-1"}' }), { auth: false });
-    const res = await nodeHttpFetch("http://" + srv.address + "/tasks?x=1&y=%E4%B8%AD", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: '{"idea":"中文的想法"}',
-    });
+    const srv = await startServer(
+      () => ({ status: 201, body: '{"id":"t-1"}' }),
+      { auth: false },
+    );
+    const res = await nodeHttpFetch(
+      "http://" + srv.address + "/tasks?x=1&y=%E4%B8%AD",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: '{"idea":"中文的想法"}',
+      },
+    );
     expect(res.status).toBe(201);
     expect(await res.text()).toBe('{"id":"t-1"}');
     const got = srv.requests[0];
@@ -565,7 +645,9 @@ describe("③ fetchImpl 是真发得出请求的", () => {
   });
 
   it("GET 不带 body 键 ⇒ 线上不会有 content-length 的空 body 之争", async () => {
-    const srv = await startServer(() => ({ status: 200, body: "[]" }), { auth: false });
+    const srv = await startServer(() => ({ status: 200, body: "[]" }), {
+      auth: false,
+    });
     const res = await nodeHttpFetch("http://" + srv.address + "/tasks", {
       method: "GET",
       headers: { "content-type": "application/json" },
@@ -590,16 +672,25 @@ describe("③ fetchImpl 是真发得出请求的", () => {
     });
     const h = ipc.handlers.get("hub:listTasks");
     if (h === undefined) throw new Error("没注册");
-    const r = (await h({}, undefined)) as { ok: boolean; error?: { code: string; status?: number } };
+    const r = (await h({}, undefined)) as {
+      ok: boolean;
+      error?: { code: string; status?: number };
+    };
     expect(r.ok).toBe(false);
     expect(r.error?.code).toBe("unreachable");
-    expect(r.error?.status, "unreachable 不该带 status：那是『没有 HTTP 响应』的意思").toBeUndefined();
+    expect(
+      r.error?.status,
+      "unreachable 不该带 status：那是『没有 HTTP 响应』的意思",
+    ).toBeUndefined();
     wire.stop();
     wire.unregister();
   });
 
   it("4xx 的报错体【一路带到】渲染进程（不在中途换成『请求失败』）", async () => {
-    const srv = await startServer(() => ({ status: 422, body: '{"error":"idea 超过 4000 字符"}' }));
+    const srv = await startServer(() => ({
+      status: 422,
+      body: '{"error":"idea 超过 4000 字符"}',
+    }));
     const ipc = fakeIpc();
     const s = fakeSender();
     const clock = fakeClock();
@@ -612,7 +703,10 @@ describe("③ fetchImpl 是真发得出请求的", () => {
     });
     const h = ipc.handlers.get("hub:createTask");
     if (h === undefined) throw new Error("没注册");
-    const r = (await h({}, { idea: "x" })) as { ok: boolean; error?: { code: string; status?: number; message: string } };
+    const r = (await h({}, { idea: "x" })) as {
+      ok: boolean;
+      error?: { code: string; status?: number; message: string };
+    };
     expect(r.ok).toBe(false);
     expect(r.error?.code).toBe("hub_error");
     expect(r.error?.status).toBe(422);
@@ -636,7 +730,9 @@ describe("③ fetchImpl 是真发得出请求的", () => {
     const gate: { release?: () => void } = {};
     const srv = createServer((_req, res) => {
       res.writeHead(200, { "content-type": "text/event-stream" });
-      res.write(encodeSseFrame({ event: "TaskStateChanged", data: "{}", id: "1" }));
+      res.write(
+        encodeSseFrame({ event: "TaskStateChanged", data: "{}", id: "1" }),
+      );
       // 刻意不 end —— 真 SSE 就是这样一直挂着
       gate.release = () => {
         res.end();
@@ -653,13 +749,19 @@ describe("③ fetchImpl 是真发得出请求的", () => {
       },
     });
 
-    const p = nodeHttpFetch("http://127.0.0.1:" + port + "/events", { method: "GET", headers: {} });
+    const p = nodeHttpFetch("http://127.0.0.1:" + port + "/events", {
+      method: "GET",
+      headers: {},
+    });
     let settled = false;
     void p.then(() => {
       settled = true;
     });
     await settle();
-    expect(settled, "它不该在流没结束时就返回 ⇒ 红了说明有人把它用到了事件流上").toBe(false);
+    expect(
+      settled,
+      "它不该在流没结束时就返回 ⇒ 红了说明有人把它用到了事件流上",
+    ).toBe(false);
     gate.release?.();
     const res = await p;
     expect(res.status).toBe(200);

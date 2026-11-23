@@ -22,13 +22,13 @@
 import { readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vitest";
 import {
   GIVE_UP_AFTER_ATTEMPTS,
   reconnectDelayMs,
-  type TaskView,
   shouldGiveUp,
+  type TaskView,
 } from "@opc/contracts";
+import { describe, expect, it } from "vitest";
 import {
   applyApprovalSnapshot,
   applyEvent,
@@ -36,15 +36,19 @@ import {
   applySnapshot,
   emptyProjection,
   noteDisconnected,
-  pendingInbox,
   type Projection,
+  pendingInbox,
 } from "../../packages/web/src/hub/projection.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, "..", "..");
 const PROJECTION_SRC = join(REPO, "packages/web/src/hub/projection.ts");
 
-function task(id: string, status = "IN_PROGRESS", over: Partial<TaskView> = {}): TaskView {
+function task(
+  id: string,
+  status = "IN_PROGRESS",
+  over: Partial<TaskView> = {},
+): TaskView {
   return {
     id,
     title: "t-" + id,
@@ -74,8 +78,14 @@ function snapshot(asOfSeq: number, tasks: readonly TaskView[]): Projection {
 
 describe("重复投递（乱序成因 A）⇒ 幂等", () => {
   it("同一批事件喂两遍，最终状态与喂一遍【逐字段相同】", () => {
-    const base = snapshot(3, [task("a", "IN_PROGRESS"), task("b", "IN_REVIEW")]);
-    const once = [changed(4, "a", "IN_PROGRESS", "IN_REVIEW"), changed(5, "a", "IN_REVIEW", "FINAL_REVIEW")];
+    const base = snapshot(3, [
+      task("a", "IN_PROGRESS"),
+      task("b", "IN_REVIEW"),
+    ]);
+    const once = [
+      changed(4, "a", "IN_PROGRESS", "IN_REVIEW"),
+      changed(5, "a", "IN_REVIEW", "FINAL_REVIEW"),
+    ];
     let p1 = base;
     for (const e of once) p1 = applyEvent(p1, e).projection;
     let p2 = base;
@@ -143,7 +153,11 @@ describe("真丢事件（乱序成因 B）⇒ 承认不完整，而不是假装�
     expect(p.tasks.get("a")?.status).toBe("IN_REVIEW");
     expect(p.link).toBe("stale");
     // 真正的收敛长这样：
-    p = applySnapshot(p, { tasks: [task("a", "IN_REVIEW")], asOfMs: 1, asOfSeq: 5 });
+    p = applySnapshot(p, {
+      tasks: [task("a", "IN_REVIEW")],
+      asOfMs: 1,
+      asOfSeq: 5,
+    });
     expect(p.link).toBe("live");
     expect(p.resnapshotCount).toBe(0);
     expect(p.cursor).toBe(5);
@@ -165,11 +179,20 @@ describe("真丢事件（乱序成因 B）⇒ 承认不完整，而不是假装�
     // 两条路曾各自写一份 stale 标记，而后者漏了「已在 stale 就不再加计数」那一半。
     // 分开的两条用例才钉得住「三处标 stale 只有一个入口」这件事。
     let p = snapshot(1, [task("a")]);
-    p = applyEvent(p, changed(2, "new-1", "CHARTER_PENDING", "IN_PROGRESS")).projection;
+    p = applyEvent(
+      p,
+      changed(2, "new-1", "CHARTER_PENDING", "IN_PROGRESS"),
+    ).projection;
     expect(p.link).toBe("stale");
     expect(p.resnapshotCount).toBe(1);
-    p = applyEvent(p, changed(3, "new-2", "CHARTER_PENDING", "IN_PROGRESS")).projection;
-    p = applyEvent(p, changed(4, "new-3", "CHARTER_PENDING", "IN_PROGRESS")).projection;
+    p = applyEvent(
+      p,
+      changed(3, "new-2", "CHARTER_PENDING", "IN_PROGRESS"),
+    ).projection;
+    p = applyEvent(
+      p,
+      changed(4, "new-3", "CHARTER_PENDING", "IN_PROGRESS"),
+    ).projection;
     expect(p.link).toBe("stale");
     expect(p.resnapshotCount).toBe(1);
     expect(p.tasks.size).toBe(1); // 一个都没凭空造出来
@@ -179,7 +202,10 @@ describe("真丢事件（乱序成因 B）⇒ 承认不完整，而不是假装�
     // 总线的做法是把 degraded 标在现存【最早那条】上。两件事都要做：
     // 只应用不重拉 = 明知少了东西还继续显示；只重拉不应用 = 白扔一条合法事件。
     const p = snapshot(4, [task("a")]);
-    const r = applyEvent(p, { ...changed(5, "a", "IN_PROGRESS", "IN_REVIEW"), degraded: true });
+    const r = applyEvent(p, {
+      ...changed(5, "a", "IN_PROGRESS", "IN_REVIEW"),
+      degraded: true,
+    });
     expect(r.projection.tasks.get("a")?.status).toBe("IN_REVIEW");
     expect(r.projection.link).toBe("stale");
     expect(r.projection.resnapshotCount).toBe(1);
@@ -188,14 +214,35 @@ describe("真丢事件（乱序成因 B）⇒ 承认不完整，而不是假装�
   it("解不开的事件帧 ⇒ 【抛错】，而不是静默跳过", () => {
     // 契约漂移（Hub 改了字段名而前端没跟）不过 schema 的话，症状是
     // 「看板静止不动，但没有任何报错」—— 那长得像「就是没有新事件」，最难查的一类。
-    expect(() => applyEvent(snapshot(1, [task("a")]), { seq: 2, kind: "TaskStateChanged" })).toThrow();
-    expect(() => applyEvent(snapshot(1, [task("a")]), { seq: -1, kind: "x", taskId: "a" })).toThrow();
+    // 第一帧缺 kind（z.string().min(1) 必填）。它【曾经是】缺 taskId 的帧：
+    // feedItemSchema 的 taskId 改为 .optional() 后那种帧合法了（§5 那族十一个
+    // kind 就这么发），语义改到下一条用例里去钉。
+    expect(() => applyEvent(snapshot(1, [task("a")]), { seq: 2 })).toThrow();
+    expect(() =>
+      applyEvent(snapshot(1, [task("a")]), { seq: -1, kind: "x", taskId: "a" }),
+    ).toThrow();
     expect(() => applyEvent(snapshot(1, [task("a")]), null)).toThrow();
+  });
+
+  it("缺 taskId 键的 TaskStateChanged ⇒ 标 stale，【不拿缺键去查表】", () => {
+    // .optional() 之后这帧能过 schema（上层那十一个 kind 本来就不带这个键），
+    // 但状态跃迁按构造必须有任务 —— 缺键的 TaskStateChanged 是错发的形状：
+    // 游标照走（帧本身连续），link 转 stale 去重拉快照，任务表一个字不改。
+    // 这条用例接住的是旧断言（缺 taskId ⇒ 抛错）让出来的那块语义。
+    const r = applyEvent(snapshot(1, [task("a")]), {
+      seq: 2,
+      kind: "TaskStateChanged",
+    });
+    expect(r.projection.link).toBe("stale");
+    expect(r.projection.tasks.get("a")?.status).toBe("IN_PROGRESS");
   });
 
   it("没见过的新任务 ⇒ 标 stale，【不凭空造一行】", () => {
     const p = snapshot(1, [task("a")]);
-    const r = applyEvent(p, changed(2, "brand-new", "CHARTER_PENDING", "IN_PROGRESS"));
+    const r = applyEvent(
+      p,
+      changed(2, "brand-new", "CHARTER_PENDING", "IN_PROGRESS"),
+    );
     expect(r.projection.tasks.has("brand-new")).toBe(false);
     expect(r.projection.link).toBe("stale");
     // 造出来的行只有 id 与 status，其余字段要么缺要么得瞎填；
@@ -215,7 +262,10 @@ describe("断线（计划：显示降级标记且不发疯重连）", () => {
   it("放弃后 link=down，且【不再是 live/stale】", () => {
     // 这一条守的是「Hub 挂了一小时，看板还显示崩溃前的状态、且看起来像实时」。
     // 那比一个明确的断开更坏：CEO 会基于过期看板做审批决定。
-    const p = noteDisconnected(snapshot(3, [task("a")]), GIVE_UP_AFTER_ATTEMPTS);
+    const p = noteDisconnected(
+      snapshot(3, [task("a")]),
+      GIVE_UP_AFTER_ATTEMPTS,
+    );
     expect(p.link).toBe("down");
     expect(shouldGiveUp(p.attempt)).toBe(true);
   });
@@ -223,7 +273,10 @@ describe("断线（计划：显示降级标记且不发疯重连）", () => {
   it("成功收到任何一条数据，attempt 归零", () => {
     const down = noteDisconnected(snapshot(3, [task("a")]), 6);
     expect(down.attempt).toBe(6);
-    const back = applyEvent(down, changed(4, "a", "IN_PROGRESS", "IN_REVIEW")).projection;
+    const back = applyEvent(
+      down,
+      changed(4, "a", "IN_PROGRESS", "IN_REVIEW"),
+    ).projection;
     expect(back.attempt).toBe(0);
     expect(back.link).toBe("live");
   });
@@ -231,7 +284,10 @@ describe("断线（计划：显示降级标记且不发疯重连）", () => {
   it("重复帧既不收敛 stale，也不改变任何状态", () => {
     // 用一次【真的跳号】进入 stale，而不是靠某个「手动标 stale」的旁路函数：
     // 旁路函数测出来的 stale 不代表投影自己会进入那个状态。
-    const stale = applyEvent(snapshot(1, [task("a")]), changed(5, "a", "x", "y")).projection;
+    const stale = applyEvent(
+      snapshot(1, [task("a")]),
+      changed(5, "a", "x", "y"),
+    ).projection;
     expect(stale.link).toBe("stale");
     expect(stale.resnapshotCount).toBe(1);
     // seq 必须【不大于 cursor】才叫重复。这里 cursor 仍是 1（跳号那条不推进游标），
@@ -248,7 +304,11 @@ describe("快照帧的线格式接得上", () => {
   it("snapshot 帧 ⇒ 整体替换并用 as_of_seq 当游标", () => {
     const p = applyFrame(emptyProjection(), {
       event: "snapshot",
-      data: JSON.stringify({ source: "tasks", as_of_seq: 7, body: { tasks: [task("a")], asOfMs: 9 } }),
+      data: JSON.stringify({
+        source: "tasks",
+        as_of_seq: 7,
+        body: { tasks: [task("a")], asOfMs: 9 },
+      }),
     });
     expect(p.projection.cursor).toBe(7);
     expect(p.projection.asOfSeq).toBe(7);
@@ -310,7 +370,9 @@ describe("验收：渲染进程内不存在任何业务状态机", () => {
       "ARCHIVED",
     ];
     // 注释里出现【不算】违规（文档要讲清为什么不能这么写），所以先剥掉注释。
-    const code = src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, "");
+    const code = src
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .replace(/\/\/[^\n]*/g, "");
     const hits = NAMES.filter((n) => code.includes(n));
     expect(hits).toEqual([]);
   });
@@ -322,7 +384,9 @@ describe("验收：渲染进程内不存在任何业务状态机", () => {
       /* IN_PROGRESS 出现在注释里，不该被算 */
       if (to === "DELIVERED") return p;
     `;
-    const code = violating.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, "");
+    const code = violating
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .replace(/\/\/[^\n]*/g, "");
     expect(code).toContain("DELIVERED");
     expect(code).not.toContain("IN_PROGRESS");
   });
@@ -331,7 +395,10 @@ describe("验收：渲染进程内不存在任何业务状态机", () => {
     // from 字段【被忽略】是刻意的：校验 from 与当前状态是否一致 = 前端在推断，
     // 而一旦 Hub 允许 A→B 与 C→B 两种入边，前端的校验就会误报。
     const p = snapshot(1, [task("a", "IN_PROGRESS")]);
-    const r = applyEvent(p, changed(2, "a", "一个当前状态根本不是的值", "IN_REVIEW"));
+    const r = applyEvent(
+      p,
+      changed(2, "a", "一个当前状态根本不是的值", "IN_REVIEW"),
+    );
     expect(r.projection.tasks.get("a")?.status).toBe("IN_REVIEW");
     // 其余字段【不被顺手更新】：事件载荷里没有它们，填了就是猜。
     expect(r.projection.tasks.get("a")?.consumed_cents).toBe(0);
@@ -340,7 +407,13 @@ describe("验收：渲染进程内不存在任何业务状态机", () => {
 
   it("非状态类事件【不改 tasks】：待批/预算旗标不折成 status", () => {
     const p = snapshot(1, [task("a", "IN_PROGRESS")]);
-    const r = applyEvent(p, { seq: 2, kind: "ApprovalRequired", taskId: "a", interruptId: "i-1", payload: {} });
+    const r = applyEvent(p, {
+      seq: 2,
+      kind: "ApprovalRequired",
+      taskId: "a",
+      interruptId: "i-1",
+      payload: {},
+    });
     expect(r.action).toBe("applied");
     expect(r.projection.cursor).toBe(2);
     expect(r.projection.tasks.get("a")?.status).toBe("IN_PROGRESS");
@@ -371,6 +444,73 @@ describe("验收：渲染进程内不存在任何业务状态机", () => {
     expect(r.projection.resnapshotCount).toBe(0);
     // 也不改 tasks：批准不是状态跃迁（status 由 Hub 的图写，见 0010 §4）。
     expect(r.projection.tasks.get("a")?.status).toBe("IN_PROGRESS");
+  });
+
+  it("§5 那族 + 会议补票共十一个 kind 连着喂：只推 cursor，不脏任何状态、不标 stale", () => {
+    // 显式分支与 default 行为相同（都只推 cursor），但这条用例钉的是
+    // 【整族】的性质：十一个 kind、连续 seq 2..12、全部【不带 taskId 键】
+    // （feedItemSchema 的 taskId 已是 .optional()，这正是它们的线上形状）。
+    // 最要紧的仍是 action 不是 "gap"、link 不转 stale：投影层认领它们
+    // 的方式是【想过并明确放行】，而不是撞进 default。
+    const p = snapshot(1, [task("a", "IN_PROGRESS")]);
+    const family: readonly unknown[] = [
+      { seq: 2, kind: "GroupUpdated", groupId: "g-1", op: "created" },
+      {
+        seq: 3,
+        kind: "MemberHired",
+        memberId: "m-1",
+        groupId: "g-1",
+        roleId: "r-1",
+      },
+      { seq: 4, kind: "MemberUpdated", memberId: "m-1", op: "skills" },
+      {
+        seq: 5,
+        kind: "MessageReceived",
+        messageId: "msg-1",
+        conversationId: "c-1",
+        groupId: null,
+        msgKind: "message",
+      },
+      // 会议一族按【开场 → 发言 → 散会】的时间序喂，另加一场取消的会：
+      { seq: 6, kind: "MeetingOpened", meetingId: "mt-1", groupId: "g-1" },
+      { seq: 7, kind: "MeetingTurnPosted", meetingId: "mt-1", turnSeq: 1 },
+      {
+        seq: 8,
+        kind: "MeetingConcluded",
+        meetingId: "mt-1",
+        summaryDocId: null,
+      },
+      {
+        seq: 9,
+        kind: "MeetingCancelled",
+        meetingId: "mt-2",
+        reason: "开场无人到场",
+      },
+      { seq: 10, kind: "BacklogChanged", backlogItemId: "b-1", op: "create" },
+      { seq: 11, kind: "DocumentChanged", docId: "d-1", op: "saved" },
+      {
+        seq: 12,
+        kind: "ExecutorRunFinished",
+        executionId: "x-1",
+        memberHint: null,
+        ok: true,
+        executorKind: "pure-model",
+      },
+    ];
+    let cur = p;
+    for (const frame of family) {
+      const r = applyEvent(cur, frame);
+      expect(r.action).toBe("applied");
+      cur = r.projection;
+    }
+    expect(cur.cursor).toBe(12);
+    expect(cur.link).toBe("live");
+    expect(cur.resnapshotCount).toBe(0);
+    expect(cur.attempt).toBe(0);
+    // 任务表与收件箱一个字没动：没有实体存储就没有凭空造行（与 default 同一立场）。
+    expect(cur.tasks.get("a")?.status).toBe("IN_PROGRESS");
+    expect(cur.tasks.size).toBe(1);
+    expect(cur.inbox).toEqual(p.inbox);
   });
 });
 
@@ -408,7 +548,10 @@ describe("收件箱角标（§5.8 事件表：ApprovalRequired ⇒ 计数 +1）"
   it("⭐ 快照之后：只有【水位线之上】的增量才计 —— 重复投递不双计", () => {
     // pendingTotal 已经含了 (0, 10] 里那两张卡；事件流随后会把它们再推一遍
     // （SSE 建连时的续订本来就重投一段，见 sse.ts 文件头那条交错分析）。
-    let p = applyApprovalSnapshot(snapshot(10, [task("a")]), { pendingTotal: 2, asOfSeq: 10 });
+    let p = applyApprovalSnapshot(snapshot(10, [task("a")]), {
+      pendingTotal: 2,
+      asOfSeq: 10,
+    });
     expect(inbox(p)).toBe(2);
     p = applyEvent(p, req(9)).projection; // 水位线之下（重投）
     p = applyEvent(p, req(10)).projection; // 水位线之下（重投）
@@ -420,7 +563,10 @@ describe("收件箱角标（§5.8 事件表：ApprovalRequired ⇒ 计数 +1）"
   });
 
   it("⭐ 重复帧不改角标（seq <= cursor 在增量之前就被吃掉）", () => {
-    let p = applyApprovalSnapshot(snapshot(10, [task("a")]), { pendingTotal: 1, asOfSeq: 10 });
+    let p = applyApprovalSnapshot(snapshot(10, [task("a")]), {
+      pendingTotal: 1,
+      asOfSeq: 10,
+    });
     p = applyEvent(p, req(11)).projection;
     const after = inbox(p);
     const dup = applyEvent(p, req(11));
@@ -445,7 +591,10 @@ describe("收件箱角标（§5.8 事件表：ApprovalRequired ⇒ 计数 +1）"
      * 挡住是对的：它们已经在 pendingTotal 里了。少了那一挡，角标会显示 5 + 8 = 13，
      * 一次刷新凭空多出八张卡，而那种角标的下场是没人再信它。
      */
-    let p = applyApprovalSnapshot(snapshot(12, [task("a")]), { pendingTotal: 5, asOfSeq: 20 });
+    let p = applyApprovalSnapshot(snapshot(12, [task("a")]), {
+      pendingTotal: 5,
+      asOfSeq: 20,
+    });
     expect(p.cursor).toBe(12); // 游标【不】跟着审批快照走：它只管任务表那一段
     expect(p.inbox.totalAsOfSeq).toBe(20);
     for (const s of [13, 14, 15, 16]) p = applyEvent(p, req(s)).projection;
@@ -469,7 +618,10 @@ describe("收件箱角标（§5.8 事件表：ApprovalRequired ⇒ 计数 +1）"
      * 偏大只是多提醒一次，偏小到 0 会让他【不再打开收件箱】。
      * 这一发是这一整组里唯一直接对着产品后果写的断言。
      */
-    let p = applyApprovalSnapshot(snapshot(1, [task("a")]), { pendingTotal: 0, asOfSeq: 1 });
+    let p = applyApprovalSnapshot(snapshot(1, [task("a")]), {
+      pendingTotal: 0,
+      asOfSeq: 1,
+    });
     p = applyEvent(p, req(2)).projection;
     expect(inbox(p)).toBe(1);
     const gap = applyEvent(p, req(5)); // 3、4 没来
@@ -482,7 +634,10 @@ describe("收件箱角标（§5.8 事件表：ApprovalRequired ⇒ 计数 +1）"
   });
 
   it("⭐ 重新对账 ⇒ 重新可信（一次成功的 REST 读取是唯一能补上洞的东西）", () => {
-    let p = applyApprovalSnapshot(snapshot(1, [task("a")]), { pendingTotal: 0, asOfSeq: 1 });
+    let p = applyApprovalSnapshot(snapshot(1, [task("a")]), {
+      pendingTotal: 0,
+      asOfSeq: 1,
+    });
     p = applyEvent(applyEvent(p, req(2)).projection, req(6)).projection; // 出洞
     expect(inbox(p)).toBeNull();
     p = applyApprovalSnapshot(p, { pendingTotal: 4, asOfSeq: 6 });
@@ -493,7 +648,10 @@ describe("收件箱角标（§5.8 事件表：ApprovalRequired ⇒ 计数 +1）"
   it("⭐ 更旧的审批快照【整份丢掉】：旧总数 + 新水位线 = 两边都不是的数", () => {
     // 两次 await 交错就能发生（本机也会）。任务表那边允许旧快照盖回来
     // （下一份会修好，且每行自足）；角标是跨两次读取算出来的量，没有「下一份会修好」。
-    let p = applyApprovalSnapshot(snapshot(10, [task("a")]), { pendingTotal: 5, asOfSeq: 10 });
+    let p = applyApprovalSnapshot(snapshot(10, [task("a")]), {
+      pendingTotal: 5,
+      asOfSeq: 10,
+    });
     p = applyEvent(p, req(11)).projection;
     expect(inbox(p)).toBe(6);
     // applyApprovalSnapshot 直接返回 Projection（它不是一条事件，没有 applied/gap 之分）。
@@ -503,14 +661,20 @@ describe("收件箱角标（§5.8 事件表：ApprovalRequired ⇒ 计数 +1）"
   });
 
   it("⭐ 算出负数 ⇒ 「未知」而不是夹紧到 0（夹紧等于把丢事件伪装成「没有待批」）", () => {
-    let p = applyApprovalSnapshot(snapshot(1, [task("a")]), { pendingTotal: 0, asOfSeq: 1 });
+    let p = applyApprovalSnapshot(snapshot(1, [task("a")]), {
+      pendingTotal: 0,
+      asOfSeq: 1,
+    });
     p = applyEvent(p, decided(2)).projection; // 一次没配过 +1 的 −1
     expect(p.inbox.trusted).toBe(true); // 事件流本身是连续的，没人知道自己丢了东西
     expect(inbox(p)).toBeNull();
   });
 
   it("link=down 不把角标标成不可信（那是「旧」不是「错」，界面该标旧）", () => {
-    let p = applyApprovalSnapshot(snapshot(3, [task("a")]), { pendingTotal: 2, asOfSeq: 3 });
+    const p = applyApprovalSnapshot(snapshot(3, [task("a")]), {
+      pendingTotal: 2,
+      asOfSeq: 3,
+    });
     const down = noteDisconnected(p, GIVE_UP_AFTER_ATTEMPTS);
     expect(down.link).toBe("down");
     expect(down.inbox.trusted).toBe(true);
@@ -561,7 +725,11 @@ describe("收件箱角标（§5.8 事件表：ApprovalRequired ⇒ 计数 +1）"
     }
     expect(seq).toBe(6); // 四发【全都】被应用过（少一发就是回到固定 seq 那个 bug）
     // 未知 kind 同样不动角标（老客户端收到新事件是【照常显示】，不是角标乱跳）。
-    const unknown = applyEvent(p, { seq: 3, kind: "SomethingNew", taskId: "a" });
+    const unknown = applyEvent(p, {
+      seq: 3,
+      kind: "SomethingNew",
+      taskId: "a",
+    });
     expect(inbox(unknown.projection)).toBe(inbox(p));
   });
 
@@ -575,7 +743,9 @@ describe("收件箱角标（§5.8 事件表：ApprovalRequired ⇒ 计数 +1）"
      */
     const src = readFileSync(PROJECTION_SRC, "utf8");
     expect(src).toMatch(/pendingTotal/u);
-    const code = src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, "");
+    const code = src
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .replace(/\/\/[^\n]*/g, "");
     expect(code).not.toMatch(/approvals\.length/u);
     expect(code).not.toMatch(/\.filter\([^)]*pending/u);
   });

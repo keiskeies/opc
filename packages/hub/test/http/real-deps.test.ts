@@ -20,12 +20,25 @@
 import { mkdirSync, readFileSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import type { ResumeValue } from "@opc/contracts";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
+import {
+  EXECUTOR_KINDS,
+  type ExecutionTarget,
+  type ResumeValue,
+} from "@opc/contracts";
 import { fixtureTmp } from "../fixtures/fixture-dir.js";
 import type { DomainEvent } from "../../src/events/bus.js";
 import { InMemoryEventBus } from "../../src/events/bus.js";
 import { migrate } from "../../src/db/migrate.js";
+import { createExecutorRegistry } from "../../src/executors/production.js";
 import { chooseResumeInput, hasPendingInterrupt, threadConfig } from "../../src/graph/thread.js";
 import {
   applyDecision,
@@ -96,6 +109,10 @@ async function newDb(
 beforeAll(() => {
   rmSync(TMP, { recursive: true, force: true });
   mkdirSync(TMP, { recursive: true });
+});
+
+afterEach(() => {
+  vi.unstubAllEnvs();
 });
 
 afterAll(async () => {
@@ -996,5 +1013,72 @@ describe("buildHubDeps", () => {
     const decided = row(db, "w-2")?.["decided_at"];
     const created = auditRows(db, "w-2")[0]?.["created_at"];
     expect(decided).toBe(created);
+  });
+
+  it("registers all seven executor kinds and wires the real runner", async () => {
+    const { db, w } = await newDb();
+    const registry = createExecutorRegistry({ writer: w });
+    expect(registry.list()).toEqual(EXECUTOR_KINDS);
+    for (const kind of EXECUTOR_KINDS) expect(registry.get(kind)).not.toBeNull();
+
+    db.prepare(
+      "INSERT INTO members (member_id, name, role_id, persona_json, model_tier, status, hired_at, updated_at)" +
+        " VALUES (?, ?, 'dev', ?, 'execution', 'active', ?, ?)",
+    ).run(
+      "model-member",
+      "Model Member",
+      JSON.stringify({ style: "direct", values: ["evidence"], honesty: "no fabrication" }),
+      NOW,
+      NOW,
+    );
+    db.prepare(
+      "INSERT INTO member_executors (member_id, seq, kind, config_json, enabled)" +
+        " VALUES (?, 1, 'pure-model', ?, 1)",
+    ).run("model-member", JSON.stringify({ kind: "pure-model" }));
+    const deps = buildHubDeps({
+      queue: w,
+      bus: new InMemoryEventBus(),
+      token: newLocalToken(),
+      now: () => NOW,
+      driverState: () => DRIVER_OFF,
+    });
+    expect(typeof deps.executorRunner).toBe("function");
+    const target: ExecutionTarget = {
+      task_id: "task-1",
+      member_id: "model-member",
+      role_id: "dev",
+      model_tier: "execution",
+      instruction: "summarize the task",
+      role_prompt: "",
+      max_budget_usd: 0,
+      from_seq: 1,
+    };
+    const outcome = await deps.executorRunner?.(target);
+    expect(outcome).toMatchObject({
+      ok: false,
+      final: { ok: false, code: "model_unavailable" },
+    });
+  });
+
+  it("takes executor workspace only from an explicit option or the environment", async () => {
+    const { w } = await newDb();
+    const base = {
+      queue: w,
+      bus: new InMemoryEventBus(),
+      token: newLocalToken(),
+      now: () => NOW,
+      driverState: () => DRIVER_OFF,
+    };
+    vi.stubEnv("OPC_EXECUTOR_WORKSPACE", undefined);
+    const unset = buildHubDeps(base);
+    expect(unset.executorWorkspace).toBeUndefined();
+    expect(unset.executorWorkspace).not.toBe(process.cwd());
+
+    vi.stubEnv("OPC_EXECUTOR_WORKSPACE", "D:/env-workspace");
+    expect(buildHubDeps(base).executorWorkspace).toBe("D:/env-workspace");
+    expect(
+      buildHubDeps({ ...base, executorWorkspace: "D:/explicit-workspace" })
+        .executorWorkspace,
+    ).toBe("D:/explicit-workspace");
   });
 });

@@ -3,13 +3,10 @@
  * 「员工」是一个进程内内置插件（plugins 表 kind='builtin' 的授权行，行为在
  * plugins/registry.ts 的代码侧模块里）。
  *
- * ── 登记在案的限制：config 指定不了「多工具插件里的哪一个工具」────────
- * contracts/member.ts 的 executorConfigSchema 给 builtin-plugin 的格子只有
- * plugin_id 一格（platform-webhook 才有 tool_name）。这是契约的形状，执行器
- * 不改契约（本任务硬约束），于是「这个内置插件注册了 3 个工具，成员该用哪个」
- * 在配置里【无法表达】。本文件的取法：按 tool_name 字典序取第一个，并在消息里
- * 把选中了谁写出来 —— 确定性（同一份库永远选同一个），但确实是个限制，
- * 将来要给 builtin 补 tool_name 就同时改契约、招聘页与这里。
+ * ── 工具选择 ──────────────────────────────────────────────────────
+ * config.tool_name 可显式指定已授权工具；缺省才按 tool_name 字典序取第一个，
+ * 保持旧配置的确定性行为。显式指定不在授权面内时直接报 plugin_tool_not_found，
+ * 不回退到别的工具；实际工具写入 harness_result 与摘要/错误消息。
  *
  * ── 工具选择的读取点 ──────────────────────────────────────────────
  * 读 plugin_tools（= 授权面，0019 文件头：表即授权）而不是代码模块的 tools()：
@@ -107,7 +104,22 @@ export class BuiltinPluginExecutor implements Executor {
         retry_next_executor: true,
       });
     }
-    const tool = tools[0] as string;
+    const requestedTool = req.config.tool_name;
+    const tool = requestedTool ?? (tools[0] as string);
+    if (requestedTool !== undefined && !tools.includes(requestedTool)) {
+      return errRun(req, {
+        code: "plugin_tool_not_found",
+        message:
+          "内置插件 [" +
+          req.config.plugin_id +
+          "] 的指定工具 [" +
+          requestedTool +
+          "] 未授权或不存在；可用工具：" +
+          tools.join(", ") +
+          "。",
+        retry_next_executor: true,
+      });
+    }
     // 不传 connectorFactory：builtin 路不建 MCP 连接（executeTool 门⑤ 走进程内模块），
     // 传了也没有读取方。
     const r = await executeTool(this.#w, {
@@ -118,7 +130,13 @@ export class BuiltinPluginExecutor implements Executor {
     if (r.ok) {
       return okRun(req, {
         text: r.text,
-        summary: firstNonEmptyLine(r.text),
+        summary:
+          "内置插件 [" +
+          req.config.plugin_id +
+          "] 工具 [" +
+          tool +
+          "]：" +
+          firstNonEmptyLine(r.text),
         harness_result: {
           plugin_id: req.config.plugin_id,
           tool_name: tool,
@@ -129,7 +147,13 @@ export class BuiltinPluginExecutor implements Executor {
     }
     return errRun(req, {
       code: asExecutorFailureCode(r.code),
-      message: r.reason,
+      message:
+        "内置插件 [" +
+        req.config.plugin_id +
+        "] 工具 [" +
+        tool +
+        "] 执行失败：" +
+        r.reason,
       retry_next_executor: true,
     });
   }

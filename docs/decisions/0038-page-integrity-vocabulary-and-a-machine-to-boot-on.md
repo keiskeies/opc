@@ -104,7 +104,7 @@ if (report.unavailable !== undefined) {
 
 ### 2.2 备份那一侧（`maintenance.ts` + `report()`）
 
-修之前 `maintenance.ts:290` 就地内联 `page.verdict === "violated"` ——
+修之前 `maintenance.ts:298` 就地内联 `page.verdict === "violated"` ——
 **抄一份 ≠ 搬走了**：0038 改 verdict 语义时，只改 `integrity.ts`，这里会安静地变成
 「仪器故障 ⇒ 拦备份」而 Hub 那边「仪器故障 ⇒ 照常启动」—— 两边各自自洽、各自都绿，
 正是 `pageIntegrityBroken` 注释当初要防的两半没合起来。现在它调 `pageIntegrityBroken`。

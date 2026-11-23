@@ -151,6 +151,8 @@ export const KNOWN_TABLES: ReadonlySet<string> = new Set<string>([
   "groups", // 0014
   "group_members",
   "conversations", // 0015
+  // 0028 重建 conversations 时的瞬态表；同事务内 rename，不是长期业务表。
+  "conversations_new",
   "messages",
   "message_reads",
   "documents", // 0016
@@ -164,6 +166,7 @@ export const KNOWN_TABLES: ReadonlySet<string> = new Set<string>([
   "talent_market", // 0020
   "rhythm_events", // 0021
   "research_cards",
+  "cos_dispatch_rules", // 0025
 ]);
 
 /** 一句「某张表在 src 里没有写入方」的登记。 */

@@ -34,10 +34,10 @@
 import {
   API_ENDPOINTS,
   APPROVAL_STATUS_VALUES,
+  type ApiEndpoint,
   IMPLEMENTED_ENDPOINTS,
   MAX_IDEA_CHARS,
   RESUME_VALUES,
-  type ApiEndpoint,
 } from "@opc/contracts";
 
 /**
@@ -60,6 +60,7 @@ export type IpcChannel =
   | "hub:decideApproval"
   | "hub:listBindings"
   | "hub:getOrg"
+  | "hub:domainRequest"
   | "hub:subscribeEvents";
 
 export interface ChannelSpec {
@@ -73,7 +74,13 @@ export interface ChannelSpec {
    * 而 token 本身拿不到（见 http/auth.ts 的立场）。所以这一层是【真边界】，
    * 不是形式 —— 校验不能只判「有没有传」。
    */
-  readonly args: "idea" | "none" | "taskId" | "decision" | "approvalQuery";
+  readonly args:
+    | "idea"
+    | "none"
+    | "taskId"
+    | "decision"
+    | "approvalQuery"
+    | "domain";
 }
 
 /**
@@ -81,9 +88,24 @@ export interface ChannelSpec {
  * （import 了就等于把两侧又并回一处，见文件头）。
  */
 export const CHANNEL_SPECS: readonly ChannelSpec[] = [
-  { channel: "hub:createTask", endpoint: "POST /tasks", kind: "invoke", args: "idea" },
-  { channel: "hub:listTasks", endpoint: "GET /tasks", kind: "invoke", args: "none" },
-  { channel: "hub:getTask", endpoint: "GET /tasks/:id", kind: "invoke", args: "taskId" },
+  {
+    channel: "hub:createTask",
+    endpoint: "POST /tasks",
+    kind: "invoke",
+    args: "idea",
+  },
+  {
+    channel: "hub:listTasks",
+    endpoint: "GET /tasks",
+    kind: "invoke",
+    args: "none",
+  },
+  {
+    channel: "hub:getTask",
+    endpoint: "GET /tasks/:id",
+    kind: "invoke",
+    args: "taskId",
+  },
   /**
    * 收件箱那张列表。为什么要有这一条通道，而不让渲染进程自己数事件流：
    * `events/bus.ts` 里那个由 `ApprovalRequired` +1 / `ApprovalDecided` −1 累计出来的
@@ -155,7 +177,22 @@ export const CHANNEL_SPECS: readonly ChannelSpec[] = [
     kind: "invoke",
     args: "none",
   },
-  { channel: "hub:subscribeEvents", endpoint: "GET /events", kind: "push", args: "none" },
+  {
+    channel: "hub:subscribeEvents",
+    endpoint: "GET /events",
+    kind: "push",
+    args: "none",
+  },
+  /**
+   * 群角色上层统一 RPC。端点只能是 API_ENDPOINTS 里的 /api/v1 面；
+   * 路径参数、query 与 JSON body 在主进程侧过闸，渲染进程拿不到任意 fetch。
+   */
+  {
+    channel: "hub:domainRequest",
+    endpoint: "GET /api/v1/conversations",
+    kind: "invoke",
+    args: "domain",
+  },
 ];
 
 /**
@@ -185,6 +222,133 @@ export function specOf(channel: string): ChannelSpec | null {
 export function channelFor(endpoint: ApiEndpoint): IpcChannel | null {
   for (const s of CHANNEL_SPECS) if (s.endpoint === endpoint) return s.channel;
   return null;
+}
+
+export type DomainRequestInput = {
+  readonly endpoint: string;
+  readonly params?: Readonly<Record<string, string>>;
+  readonly query?: Readonly<Record<string, string | number | boolean>>;
+  readonly body?: unknown;
+};
+
+export type ParsedDomainRequest =
+  | { readonly ok: true; readonly value: DomainRequestInput }
+  | { readonly ok: false; readonly reason: string };
+
+const DOMAIN_ENDPOINTS = new Set<string>(
+  API_ENDPOINTS.filter((endpoint) => endpoint.includes("/api/v1/")),
+);
+const DOMAIN_SEGMENT_RE = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,200}$/u;
+
+/** 主进程侧的领域 RPC 参数闸；路径段不做 percent 解码，因此先拒绝 URL 分隔符。 */
+export function parseDomainRequest(args: unknown): ParsedDomainRequest {
+  if (typeof args !== "object" || args === null || Array.isArray(args)) {
+    return {
+      ok: false,
+      reason: "hub:domainRequest 需要 { endpoint, params?, query?, body? }",
+    };
+  }
+  const input = args as Record<string, unknown>;
+  const extra = Object.keys(input).filter(
+    (key) =>
+      key !== "endpoint" &&
+      key !== "params" &&
+      key !== "query" &&
+      key !== "body",
+  );
+  if (extra.length > 0) {
+    return {
+      ok: false,
+      reason: `hub:domainRequest 多出 ${extra.length} 个未登记键`,
+    };
+  }
+  if (
+    typeof input["endpoint"] !== "string" ||
+    !DOMAIN_ENDPOINTS.has(input["endpoint"])
+  ) {
+    return {
+      ok: false,
+      reason: "hub:domainRequest 的 endpoint 不在 /api/v1 白名单里",
+    };
+  }
+  const endpoint = input["endpoint"];
+  const space = endpoint.indexOf(" ");
+  const path = endpoint.slice(space + 1);
+  const required = [...path.matchAll(/:([A-Za-z0-9_]+)/gu)].map(
+    (match) => match[1] ?? "",
+  );
+  const rawParams = input["params"];
+  if (
+    required.length > 0 &&
+    (typeof rawParams !== "object" ||
+      rawParams === null ||
+      Array.isArray(rawParams))
+  ) {
+    return { ok: false, reason: "hub:domainRequest 缺少 params 对象" };
+  }
+  const params: Record<string, string> = {};
+  if (rawParams !== undefined) {
+    if (
+      typeof rawParams !== "object" ||
+      rawParams === null ||
+      Array.isArray(rawParams)
+    ) {
+      return { ok: false, reason: "hub:domainRequest 的 params 必须是对象" };
+    }
+    const supplied = rawParams as Record<string, unknown>;
+    const unknown = Object.keys(supplied).filter(
+      (key) => !required.includes(key),
+    );
+    if (unknown.length > 0) {
+      return {
+        ok: false,
+        reason: `hub:domainRequest 多出 ${unknown.length} 个未登记路径参数`,
+      };
+    }
+    for (const key of required) {
+      const value = supplied[key];
+      if (typeof value !== "string" || !DOMAIN_SEGMENT_RE.test(value)) {
+        return {
+          ok: false,
+          reason: `hub:domainRequest 的路径参数 ${key} 形状非法`,
+        };
+      }
+      params[key] = value;
+    }
+  }
+  const rawQuery = input["query"];
+  const query: Record<string, string | number | boolean> = {};
+  if (rawQuery !== undefined) {
+    if (
+      typeof rawQuery !== "object" ||
+      rawQuery === null ||
+      Array.isArray(rawQuery)
+    ) {
+      return { ok: false, reason: "hub:domainRequest 的 query 必须是对象" };
+    }
+    for (const [key, value] of Object.entries(rawQuery)) {
+      if (
+        typeof value !== "string" &&
+        typeof value !== "number" &&
+        typeof value !== "boolean"
+      ) {
+        return {
+          ok: false,
+          reason: "hub:domainRequest 的 query 值必须是字符串/数字/布尔",
+        };
+      }
+      query[key] = value;
+    }
+  }
+  return {
+    ok: true,
+    value: {
+      endpoint,
+      ...(Object.keys(params).length === 0 ? {} : { params }),
+      ...(Object.keys(query).length === 0 ? {} : { query }),
+      ...(input["body"] === undefined ? {} : { body: input["body"] }),
+    },
+  };
 }
 
 /**
@@ -221,7 +385,9 @@ export function checkArgs(spec: ChannelSpec, args: unknown): string | null {
         return `${spec.channel} 需要一个 { idea } 对象，实到 ${describe(args)}`;
       }
       const o = args as Record<string, unknown>;
-      const extra = Object.keys(o).filter((k) => k !== "idea" && k !== "parent_id");
+      const extra = Object.keys(o).filter(
+        (k) => k !== "idea" && k !== "parent_id",
+      );
       if (extra.length > 0) {
         return `${spec.channel} 只接受 idea / parent_id，多出 ${extra.length} 个未登记键`;
       }
@@ -231,8 +397,10 @@ export function checkArgs(spec: ChannelSpec, args: unknown): string | null {
       // 上限【不在这里重写一遍数字】：调 contracts 的那一份。
       // 两处各写 4000 的话，改一处会得到「IPC 放过、HTTP 拒」——
       // 渲染进程看到的是一个「我明明校验过了」的 422，最误导人那种。
-      if (o["idea"].trim().length === 0) return `${spec.channel} 的 idea 不得为空`;
-      if (o["idea"].length > MAX_IDEA) return `${spec.channel} 的 idea 超过 ${MAX_IDEA} 字符`;
+      if (o["idea"].trim().length === 0)
+        return `${spec.channel} 的 idea 不得为空`;
+      if (o["idea"].length > MAX_IDEA)
+        return `${spec.channel} 的 idea 超过 ${MAX_IDEA} 字符`;
       if (o["parent_id"] !== undefined && !ID_RE.test(String(o["parent_id"]))) {
         return `${spec.channel} 的 parent_id 形状非法`;
       }
@@ -244,7 +412,8 @@ export function checkArgs(spec: ChannelSpec, args: unknown): string | null {
       }
       const o = args as Record<string, unknown>;
       const extra = Object.keys(o).filter((k) => k !== "taskId");
-      if (extra.length > 0) return `${spec.channel} 只接受 taskId，多出 ${extra.length} 个键`;
+      if (extra.length > 0)
+        return `${spec.channel} 只接受 taskId，多出 ${extra.length} 个键`;
       if (typeof o["taskId"] !== "string" || !ID_RE.test(o["taskId"])) {
         return `${spec.channel} 的 taskId 形状非法（它会被拼进 URL 路径）`;
       }
@@ -259,7 +428,9 @@ export function checkArgs(spec: ChannelSpec, args: unknown): string | null {
           return `${spec.channel} 需要一个 { status?, limit? } 对象或干脆不传，实到 ${describe(args)}`;
         }
         const o = args as Record<string, unknown>;
-        const extra = Object.keys(o).filter((k) => k !== "status" && k !== "limit");
+        const extra = Object.keys(o).filter(
+          (k) => k !== "status" && k !== "limit",
+        );
         if (extra.length > 0) {
           return `${spec.channel} 只接受 status / limit，多出 ${extra.length} 个未登记键`;
         }
@@ -282,6 +453,10 @@ export function checkArgs(spec: ChannelSpec, args: unknown): string | null {
       }
       return null;
     }
+    case "domain": {
+      const parsed = parseDomainRequest(args);
+      return parsed.ok ? null : parsed.reason;
+    }
     case "decision": {
       if (typeof args !== "object" || args === null) {
         return `${spec.channel} 需要一个 { approvalId, resume } 对象，实到 ${describe(args)}`;
@@ -290,7 +465,8 @@ export function checkArgs(spec: ChannelSpec, args: unknown): string | null {
       const extra = Object.keys(o).filter(
         (k) => k !== "approvalId" && k !== "resume" && k !== "note",
       );
-      if (extra.length > 0) return `${spec.channel} 多出 ${extra.length} 个未登记键`;
+      if (extra.length > 0)
+        return `${spec.channel} 多出 ${extra.length} 个未登记键`;
       if (typeof o["approvalId"] !== "string" || !ID_RE.test(o["approvalId"])) {
         return `${spec.channel} 的 approvalId 形状非法（它会被拼进 URL 路径）`;
       }

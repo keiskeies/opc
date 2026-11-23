@@ -50,6 +50,41 @@ export const KIND_TO_ACTION: Record<EventKind, AuditAction> = {
   // 「agent 干了事而没做决定」的那个。role-memory 的 SQL 只捞 approval /
   // review_decision 两种 action，所以这一行天然不进记忆（那条 SQL 放宽时要回头看这里）。
   RoleTurnReported: "tool_call",
+  // 第 10–18 个 kind（实施计划 §5 的 kind→action 表逐行照抄，那边是规范源）。
+  // AUDIT_ACTIONS 仍是十个值：九个 kind 全部复用既有 action，不开第 11 个，
+  // 理由与上面两条一字不差（§22.1 十值枚举 append-only）。
+  // ⚠ 一处【刻意的分歧】要记下：执行器审计行在库里的 action 是 'tool_call'
+  // （T6 的派发语义，executors/types.ts auditExecutorRun 写的就是它，不动它），
+  // 而 ExecutorRunFinished 这条广播事件按 §5 表映射到 'harness_call'。
+  // 两者不冲突的依据：auditExecutorRun 直接走 appendAudit、不经过这张表，
+  // 库里已有的 executor_run 行保持 tool_call；这张表只在 recorder.record()
+  // 拿 action 时被查到。若将来 T8–T11 里有人把 ExecutorRunFinished 也改成
+  // 经 record() 落库，他会发现库里这一族行出现两种 action —— 那时要回头统一，
+  // 统一方向是改表还是改 auditExecutorRun 由那时的人拍板，这里先把话说明白。
+  GroupUpdated: "state_change", // §5：群档案的增删改是状态事实
+  MemberHired: "state_change", // §5：新成员进表
+  MemberUpdated: "state_change", // §5：档案字段变了
+  MessageReceived: "meeting", // §5：会话/会议同族（一条消息 = 一次发言事件）
+  MeetingTurnPosted: "meeting", // §5：会议逐字稿
+  MeetingConcluded: "meeting", // §5：散会
+  BacklogChanged: "state_change", // §5：面板行变了
+  DocumentChanged: "state_change", // §5：文档变了
+  DocumentAccessed: "state_change", // 文档读取是访问事实，不新增审计 action
+  ExecutorRunFinished: "harness_call", // §5：执行器调用完成（见上面那条分歧说明）
+  // 第 19 个 kind（会议取消）。§5 那张表没有它 —— 表只给了会议「发言/散会」两条，
+  // 而 0017 的 status 是三值。它落 'meeting' 与另两条会议 kind 同一个 action：
+  // 按 action 统计「这个群开过几场会」时，取消的那场【本来就该在分母里】
+  // （开错头而取消的会也是开过），分辨哪一种靠 payload.kind，
+  // 与 ApprovalTokenRedeemed 复用 'approval' 是同一立场。target 落 meetingId
+  // 的理由与 MeetingTurnPosted/MeetingConcluded 一字不差：三线要能 join 到同一场会。
+  MeetingCancelled: "meeting",
+  // 第 20 个 kind（开会）。与上一条同一处补票、同一个 action，理由一字不差：
+  // 按 action 数「开过几场会」时，开了又取消的那场同样该在分母里。
+  MeetingOpened: "meeting",
+  // T8 节奏与调研是团队状态事实，复用 state_change；payload.kind 区分具体动作。
+  RhythmEventRecorded: "state_change",
+  ResearchCardCreated: "state_change",
+  DispatchAssigned: "state_change",
 };
 
 /** 单条 events 插入：8 列 8 个匿名问号，单语句无分号。 */
@@ -332,6 +367,41 @@ function targetOf(e: DomainEvent): string | null {
       // 而这一行里比 taskId 更有信息量的正是【谁跑的这一轮】。taskId 在 task_id 列上，
       // 写进 target 等于把同一件事存两遍（与 HeartbeatStalled 落 node 同一取向）。
       return e.role;
+    case "GroupUpdated":
+      return e.groupId;
+    case "MemberHired":
+      return e.memberId;
+    case "MemberUpdated":
+      return e.memberId;
+    case "MessageReceived":
+      return e.messageId;
+    case "MeetingOpened":
+    case "MeetingTurnPosted":
+    case "MeetingConcluded":
+    case "MeetingCancelled":
+      // 与 ApprovalRequired/ApprovalDecided 同一手：两条事件必须能在 target 上
+      // join 起来（「这场会议说了什么」与「这场会议散了」按 meetingId 对到同一场）。
+      // 会议一族现在五个 kind，全部落 meetingId，于是同一场会议的五类行一线串起。
+      return e.meetingId;
+    case "BacklogChanged":
+      return e.backlogItemId;
+    case "DocumentChanged":
+    case "DocumentAccessed":
+      return e.docId;
+    case "RhythmEventRecorded":
+      return e.eventId;
+    case "ResearchCardCreated":
+      return e.cardId;
+    case "DispatchAssigned":
+      return e.taskId;
+    case "ExecutorRunFinished":
+      // ⚠ 这里落【裸 executionId】而不是审计层那套 "executor:<id>:<seq>" ——
+      // 同一次执行在 events 表里本就有两行、各答各的问题（bus.ts 那条注释写全了）：
+      // auditExecutorRun 的 tool_call 行按尝试计数拼 target，回答「派发过哪一次尝试」；
+      // 这行 harness_call 广播按执行会话落 target，回答「这一次跑完成没成」。
+      // 两行两 action 两 target，互不覆盖，也都别拿去替对方作答；
+      // auditExecutorRun 的拼装不动它。
+      return e.executionId;
   }
 }
 

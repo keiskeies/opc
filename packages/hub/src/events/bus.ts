@@ -56,7 +56,7 @@ export type DomainEvent =
       decision: "approved" | "rejected" | "deferred";
     }
   | { kind: "BudgetPaused"; taskId: string; spentUsdCents: number }
-  | { kind: "MeetingSummaryReady"; taskId: string; meetingId: string }
+  | { kind: "MeetingSummaryReady"; taskId: string | null; meetingId: string }
   | { kind: "HeartbeatStalled"; taskId: string; node: string }
   /**
    * 一张一次性审批 token 被烧掉（Task 4.1，http/tokens.ts）。
@@ -119,6 +119,200 @@ export type DomainEvent =
       /** 这一轮花掉的美分。带它是因为失败轮/等待轮的钱也要能被预算护栏看到，
        *  而 events.id 正是 BudgetTracker 的幂等键（同一条 seq 两用）。 */
       costCents: number;
+    }
+  /**
+   * 第 10–18 个 kind（实施计划 §5：群角色上层的事件族 —— 群/成员/会话/会议/面板/文档/执行器）。
+   *
+   * 这九个 kind 存在的理由是【同一条】，在这里说清一次，后面八条只回指：
+   * 群/成员/会话/会议/文档/执行器这些上层服务靠 appendAudit 写一行 events 留痕，
+   * 而 events.id 就是 seq（本文件头）。写了那一行而不 publishPersisted，
+   * 就是一个 seq 空洞 —— 活着的 SSE 订阅撞见空洞，投影层把 link 标成 stale
+   * 去重拉快照（ApprovalTokenRedeemed 与 RoleTurnReported 记过、0010 §4 量过的
+   * 那个失效形状，一字不差地适用）。所以对下面每一个 kind：
+   * 【要么广播它，要么别写它】。
+   *
+   * 每个 kind 映射到哪个 action、载荷带哪些字段、target 落哪个字段，以
+   * docs/design-2026-11-23-群角色上层-实施计划.md §5 那张 kind→action 表为
+   * 【规范源】（载荷只带粗粒度 id 是 A2/A3 的硬约束），recorder.ts 的
+   * KIND_TO_ACTION 与 targetOf 逐行照抄它。
+   *
+   * ⚠ 这一族【一律不带 taskId 键】—— 连建群、跑执行器这种十有八九挂在某个任务上的
+   * 动作也不带。理由分三层：
+   *  ① 这一族【没有】共同的任务归属：私聊消息、没有 task 的会议、独立文档、面板项、
+   *     群档案操作都不是 task，「顺手带上它」在语义上对半数是伪造的。
+   *  ② 缺键这条通道是现成的：recorder.ts 的 taskIdOf() 用 "taskId" in e 判定，
+   *     缺省即在可空的 events.task_id 列（0001 迁移）落 SQL NULL —— 库里
+   *     「不属于任何任务」的表示本来就是 NULL，而不是某个字符串。
+   *  ③ 连带效应：SSE 帧的 taskId 随之可能缺席，contracts 的 feedItemSchema 因此
+   *     把 taskId 从必填改成 .optional()。「没有任务」一律落成【键不存在】，绝不允许
+   *     塞 "none"/"-" 这类占位串去凑必填：占位串在 web 投影看来就是一个【真实存在的
+   *     task id】，它会拿这个并不存在的 task 当真实对象去拉详情、等跃迁 ——
+   *     这是 0010 §4 那族「用假值换类型便利」的错形：错误被一个能过类型检查的值
+   *     掩护，比缺键当场暴露坏得多。真属于某个任务的场合，生产者走 record() 的
+   *     extra.taskId 显式带 —— 带不带的答案住在生产者那一侧，不在事件形状里
+   *     预先替所有人拍板。
+   */
+  /** 群档案变了一个面。op 四值 = 建群 / 档案更新 / 解散 / 换特助（D6 每群必有特助，
+   *  换特助改的是群档案而不是任何成员）。群操作不保证属于某个任务（族级注释第 ① 条），
+   *  所以不带 taskId 键；「对哪个群」由 target = groupId 回答。 */
+  | {
+      kind: "GroupUpdated";
+      groupId: string;
+      op: "created" | "updated" | "dissolved" | "cos_changed";
+    }
+  /** 招聘一名成员（库里对应 member_hired 审计）。roleId 是档案角色 id；
+   *  groupId 冗余带上：招聘页要按群刷新名单，不带就得反查 members 表 —— 事件要能自解释。
+   *  招聘允许不落座任何群（seat_group_ids=[]），此时 groupId 是 null；空串是假群 id，禁止占位。 */
+  | {
+      kind: "MemberHired";
+      memberId: string;
+      groupId: string | null;
+      roleId: string;
+    }
+  /** 成员档案的某个面变了。op 按【变的是哪个面】分而不是全挤进一个 "updated"：
+   *  技能、执行器、档案资料、在离岗状态各是库里的独立审计问题
+   *  （member_skills_set / member_executors_set 都是既有审计的专值），并进一个值
+   *  就答不出「那次改动到底改了什么」。member_hired 不在这里 —— 它有专 kind，
+   *  一条事件两个语义等于回放时再拆一次 if。 */
+  | {
+      kind: "MemberUpdated";
+      memberId: string;
+      op: "skills" | "executors" | "profile" | "status";
+    }
+  /**
+   * 会话里来了一条消息。action 落 'meeting' 而不是新开值（§5 表；十值枚举
+   * append-only，与 ApprovalTokenRedeemed 等共用既有值是同一条立场）：
+   * 会话逐字稿与会议逐字稿是同一族「谁说了什么」，具体哪一种靠载荷的判别位分辨。
+   *
+   * ⚠ msgKind 是【D16 升级链的入口判别】：mention_boss = 老板被 @ 了、这件事
+   * 需要拍板，会话层据此把消息路由进 CoS 升级链；message = 普通发言，正常投递。
+   * 它必须是两值判别位而不是 mentions 数组里「碰巧有个 @boss」—— 升级链的触发
+   * 条件不能藏在一个要遍历才知道的形状里。键名不叫 kind：那个槽位被联合判别式
+   * 占用（一条成员里两个 kind 键是编译错），§5 表里的 payload.kind 在这一族
+   * 落在 msgKind 键上 —— 改名只发生在键名，判别语义一字未动。
+   *
+   * ⚠ role-memory 侧【天然不收这一族】：MEMORY_ROWS_SQL 只捞
+   * action IN ('approval','review_decision')，'meeting' 一条都不进 —— 与
+   * RoleTurnReported 注释里那条是同一条立场（记忆要的是决定，一句发言不是决定）。
+   * 那条 SQL 将来若放宽，这里与 RoleTurnReported 两处都要回头加显式过滤。
+   *
+   * groupId 可空是【事实】而不是兜底：私聊与老板直聊没有群，落 null 与 events 侧
+   * 可空列保持同一口径（族级注释第 ③ 条：不许用占位串凑一个假的群标识）。
+   * 只带事实不带计数：未读数由消费者自己累计，与审批卡片同一立场。
+   */
+  | {
+      kind: "MessageReceived";
+      messageId: string;
+      conversationId: string;
+      groupId: string | null;
+      msgKind: "message" | "mention_boss";
+    }
+  /** 会议里发了一轮发言。与 MeetingConcluded、MeetingSummaryReady 都落 meetingId
+   *  （target 可 join，见 recorder.ts targetOf 里那段配对注释）。turnSeq 是会议内
+   *  轮次，与全局 seq 无关 —— 它是「这个会议的第几行逐字稿」：广播顺序是全局的，
+   *  回放排序要用会议内的行号，两个序不能混用一个数。 */
+  | { kind: "MeetingTurnPosted"; meetingId: string; turnSeq: number }
+  /** 会议散会。与 MeetingTurnPosted 一对：一个记「有人说了」，一个记「说完了」。
+   *  散会 ≠ 纪要好了 —— 两者之间存在真实时间差，MeetingSummaryReady 不兼职收尾，
+   *  否则「开了会而没有纪要」这种常态就无法表达。summaryDocId 因此可空：
+   *  散会那一刻纪要文档多半还不在，null 是事实而不是缺数据。 */
+  | { kind: "MeetingConcluded"; meetingId: string; summaryDocId: string | null }
+  /** 待办面板的一行变了。op 七值是面板上的人称动词（含调优先级 priority）——
+   *  「CEO 刚点了什么」比 BACKLOG_STATES 的状态跃迁更贴近这一行的审计问题；
+   *  谁消费谁映射回状态机，投影层不替 T9 预先拍板。 */
+  | {
+      kind: "BacklogChanged";
+      backlogItemId: string;
+      op:
+        | "create"
+        | "cancel"
+        | "move"
+        | "defer"
+        | "priority"
+        | "split"
+        | "merge";
+    }
+  /** 文档变了。created/saved/restored/permission_changed/deleted 五值各答一个审计问题；
+   *  删除是软删，正文与版本仍保留；还原与权限尤其要单独问责。 */
+  | {
+      kind: "DocumentChanged";
+      docId: string;
+      op: "created" | "saved" | "restored" | "permission_changed" | "deleted";
+    }
+  /** 文档被打开或导出。读取同样要留痕，但不能伪装成文档内容发生变化。 */
+  | { kind: "DocumentAccessed"; docId: string; op: "opened" | "exported" }
+  /**
+   * 一次执行器尝试跑完了（七执行器统一回执，§5）。executorKind 用 contracts 的
+   * EXECUTOR_KINDS 词表（两套词表迟早要靠映射表对齐 —— ApprovalDecided.decision
+   * 记过的先例）；memberHint 只是给「成员头像旁提示一下」用的提示位，可以为 null
+   * （真人执行器、不挂成员的杂活），要问责归属去查审计层，别把它当权威。
+   *
+   * ⚠ 同一次执行在 events 表里会有【两行】，action 不同、各答各的问题，这不是重复写：
+   *  · executors/types.ts auditExecutorRun 写的那行 action='tool_call'
+   *    （target "executor:<execution_id>:<seq>"）—— append-only 审计，回答
+   *    「系统派发过哪一次尝试、结论如何」；它直接走 appendAudit、不经 KIND_TO_ACTION，
+   *    这次不动它；
+   *  · 这一行 harness_call 广播（target = executionId）—— 回答前端那句
+   *    「跑完了没有、成没成、哪个成员、哪种执行器」。
+   *  审计行是问责口径、可以不广播（它不是 recorder 这条路写的事件）；广播行是
+   *  投影口径、不做问责依据。若将来有人想把两行并成一行，先回头改 §5 那张表再动
+   *  auditExecutorRun，别让「按 target 查这次执行的账」查出两种答案还以为正常。
+   */
+  | {
+      kind: "ExecutorRunFinished";
+      executionId: string;
+      memberHint: string | null;
+      ok: boolean;
+      executorKind: string;
+    }
+  /**
+   * 第 19 个 kind（会议取消）。【这一 kind 是 DDL 逼出来的，不是「想让界面看到」】。
+   *
+   * 0017 的 status 是三值（open / concluded / cancelled），而实施计划 §5 那张表
+   * 只给了会议两条：发言（MeetingTurnPosted）与散会（MeetingConcluded）。
+   * 「取消」在库里是合法状态，事件族里却没有对应 kind —— 于是会议服务只剩两条路，
+   * 两条都不能走：
+   *  ① 复用 MeetingConcluded：那条的语义是【开完了】，而 0017 的列级 CHECK 规定
+   *    concluded 必须三件套全非空。一场开错头的会（拉错人、议题与在跑的会重复、
+   *    老板改主意）没有决定可填 —— 套这条 kind 就等于【为一场没开的会编造决定、
+   *    负责人和截止时间】。这是「用假值换类型便利」的 0010 §4 那族错形，
+   *    而且假的是最该问责的三个字段。
+   *  ② 不广播只写库：cancelled 那行审计写了而不 publishPersisted，就是本文件头
+   *    与族级注释量的同一条 seq 空洞 —— 活着的 SSE 订阅撞见空洞，把 link 标 stale
+   *    去重拉快照。后果是【每取消一次会议就把前端刷一次全量】，而取消恰恰发生在
+   *    「有人正盯着这场会」的时候。要么广播它，要么别写它，而留痕（为什么取消）
+   *    本身是审计要的，所以只能广播。
+   *
+   * reason 带人话短句（RoleTurnReported.note 同款先例）：会议卡片是会话流里的一行，
+   * 「这场会没了」而不说为什么，老板的下一句必然是「为什么没了」——
+   * 那一次往返本可以在帧里省掉。长度在服务层按契约上限收口，不靠这里自觉。
+   */
+  | { kind: "MeetingCancelled"; meetingId: string; reason: string }
+  /**
+   * 第 20 个 kind（开会，不是发言也不是散会）。与 MeetingCancelled 同一道补票：
+   * §5 表只给了会议「发言/散会」，而【谁在什么时候为哪个群开了这场会】是审计要答的
+   * 问题（meetings 行只有 0001 那列 created_at，没有任何「谁开的」的列 —— 0017 扩的
+   * 九列里也没有；审计行是【唯一】能记下
+   * 「老板开的」与「节奏生成器自动开的」那个区别的地方）。写了那一行就得广播它，
+   * 同族级注释第一条；不复用 MeetingTurnPosted（turnSeq 是第几行逐字稿，
+   * 开会时一行都没有，用 0 占就是让【没发生】在投影里长成【发生了一次】）。
+   */
+  | { kind: "MeetingOpened"; meetingId: string; groupId: string }
+  /** 节奏事件已发生：站会/计划会/评审/回顾各回答「团队这一刻 synchronize 了什么」。 */
+  | {
+      kind: "RhythmEventRecorded";
+      eventId: string;
+      groupId: string | null;
+      rhythmKind: "sprint_planning" | "standup" | "review" | "retro";
+    }
+  /** 每日调研卡落库；day 用本地日界文本，与 research_cards 的唯一键同源。 */
+  | { kind: "ResearchCardCreated"; cardId: string; day: string }
+  /** 派发已把来源消息变成执行任务；target 是 task id。私聊没有群，groupId 落 null。 */
+  | {
+      kind: "DispatchAssigned";
+      taskId: string;
+      memberId: string;
+      groupId: string | null;
     };
 
 export type EventKind = DomainEvent["kind"];

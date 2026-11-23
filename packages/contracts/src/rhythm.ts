@@ -39,6 +39,9 @@ export const researchCardViewSchema = z
     summary: z.string(),
     url: z.string().nullable(),
     created_at: z.number().int(),
+    group_id: z.string().nullable(),
+    backlog_item_id: z.string().nullable(),
+    doc_id: z.string().nullable(),
   })
   .strict();
 export type ResearchCardView = z.infer<typeof researchCardViewSchema>;
@@ -59,3 +62,38 @@ export const listResearchQuerySchema = z
   })
   .strict();
 export type ListResearchQuery = z.infer<typeof listResearchQuerySchema>;
+
+export const createRhythmEventRequestSchema = z
+  .object({
+    kind: z.enum(RHYTHM_EVENT_KINDS),
+    group_id: z.string().min(1).max(200).optional(),
+    at: z.number().int().positive().optional(),
+    digest_doc_id: z.string().min(1).max(200).optional(),
+    payload: z.record(z.string(), z.unknown()).default({}),
+  })
+  .strict();
+export type CreateRhythmEventRequest = z.infer<
+  typeof createRhythmEventRequestSchema
+>;
+
+export const createResearchCardRequestSchema = z
+  .object({
+    day: z.string().regex(DAY_RE).optional(),
+    source: z.string().trim().min(1).max(200),
+    title: z.string().trim().min(1).max(300),
+    summary: z.string().trim().max(8000).default(""),
+    url: z.string().url().max(2000).optional(),
+    group_id: z.string().min(1).max(200).optional(),
+  })
+  .strict()
+  .superRefine((data, ctx) => {
+    if (data.url === undefined && data.source !== "manual") {
+      ctx.addIssue({
+        code: "custom",
+        message: "没有 URL 的调研卡必须标明 source='manual'。",
+      });
+    }
+  });
+export type CreateResearchCardRequest = z.infer<
+  typeof createResearchCardRequestSchema
+>;

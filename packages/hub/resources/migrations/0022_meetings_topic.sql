@@ -1,0 +1,23 @@
+-- 0022_meetings_topic.sql —— 会议主题列（D8 / 上游 §2.4，实施计划 §2 的 0015_meetings 草图）
+--
+-- ── 为什么补这一列 ───────────────────────────────────────────────
+-- 实施计划 §2 的会议表草图里有 topic，contracts 的 meetingViewSchema 与
+-- createMeetingRequestSchema 也把它当必填（topic trim().min(1).max(200)），
+-- 而 0017 扩列时漏了它 —— 于是 meetings 服务写不出契约要求的视图：
+-- SELECT topic 会当场 no such column。这不是「契约写严了」，是 DDL 少了一列，
+-- 两边都得动，而动的正确一侧是 DDL（会议没有主题是说不过去的：
+-- 会话列表与会议卡片第一行显示的就是它）。
+--
+-- ── 为什么另起 0022 而不改 0017 ─────────────────────────────────
+-- 迁移是 append-only 的（0010 文件头同一条立场）：已登记进 schema_migrations 的
+-- 那条不会重跑，改它的正文会让「新库」与「老库」长出两种 schema，
+-- 而两种库都报同一个版本号 0017 —— 那是最难查的一类分叉（版本对得上，列对不上）。
+--
+-- ── NOT NULL DEFAULT '' 而不是可空 ──────────────────────────────
+-- 契约 topic: z.string() 非空。0001 时代的既有会议行（规格 §10 那三类纪要）
+-- 没有主题，可空就要把契约改成 .nullable()，改动会一路渗到渲染层；
+-- 空串在契约里合法、在视图里读作「没记主题」，与那些行【确实没有主题】是同一件事。
+-- 新建会议由契约保证非空（createMeetingRequestSchema min(1)），
+-- 所以空串只会出现在既有行上，不会伪装成一条有主题的会议。
+-- SQLite 侧的约束：ALTER ADD COLUMN 的 NOT NULL 只允许常量默认值，'' 是常量，成立。
+ALTER TABLE meetings ADD COLUMN topic TEXT NOT NULL DEFAULT '';

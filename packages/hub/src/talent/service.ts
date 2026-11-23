@@ -1,7 +1,5 @@
 /**
- * ⚠⚠ 今天【零生产入口】：talent/service.ts 的读写只被 test/talent/service.test.ts 调，
- * HTTP（T10）与桌面 IPC（T11）都还没接线 ⚠⚠
- * 接线那天 checkBaseline 方向 B 会红并点名基线里这一行 ⇒ 连横幅一起自删，不等谁记得改文档。
+ * 生产入口：HTTP people 路由（http/people.ts）统一调用本服务导入、导出与挂牌人才蓝图。
  *
  * 人才市场服务（T5）：talent_market 的唯一写路径（读侧导出 = 读一条过守门的视图）。
  *

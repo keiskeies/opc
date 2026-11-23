@@ -24,19 +24,19 @@
 import { readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vitest";
 import { API_ENDPOINTS, IMPLEMENTED_ENDPOINTS } from "@opc/contracts";
+import { describe, expect, it } from "vitest";
 import {
   BANNED_IN_RENDERER_FACING,
   CHANNEL_SPECS,
-  checkArgs,
   channelFor,
+  checkArgs,
   EXPOSED_ENDPOINTS,
   specOf,
 } from "../../packages/desktop/src/ipc-surface.js";
 import {
-  type MainDeps,
   dispatch,
+  type MainDeps,
   toPushPayload,
 } from "../../packages/desktop/src/main/channels.js";
 import {
@@ -52,7 +52,10 @@ const PRELOAD_SRC = join(REPO, "packages/desktop/src/preload/api.ts");
 const MAIN_SRC = join(REPO, "packages/desktop/src/main/channels.ts");
 
 /** 记录每一次 invoke 的假 ipcRenderer，兼作「渲染进程实际能触达什么」的证据。 */
-function fakeIpc(): { calls: { channel: string; args: unknown[] }[]; bridge: RendererBridge } {
+function fakeIpc(): {
+  calls: { channel: string; args: unknown[] }[];
+  bridge: RendererBridge;
+} {
   const calls: { channel: string; args: unknown[] }[] = [];
   return {
     calls,
@@ -118,8 +121,12 @@ describe("IPC 暴露面 = 白名单", () => {
     // INVOKE_METHODS 是本测试文件【自己】的手写表 —— 也就是说它自己也是一处漂移点：
     // 漏一个方法名会让第一条断言把【真实存在的方法】判成多余而变红（能发现），
     // 但把名字【写错】会让两边同时不含那个名字而【假绿】。所以这里单独对账一次。
-    const invokeChannels = CHANNEL_SPECS.filter((s) => s.kind === "invoke").map((s) => s.channel);
-    expect(new Set(Object.keys(INVOKE_METHODS))).toEqual(new Set(invokeChannels));
+    const invokeChannels = CHANNEL_SPECS.filter((s) => s.kind === "invoke").map(
+      (s) => s.channel,
+    );
+    expect(new Set(Object.keys(INVOKE_METHODS))).toEqual(
+      new Set(invokeChannels),
+    );
     const api = createExposedApi(fakeIpc().bridge) as Record<string, unknown>;
     for (const name of Object.values(INVOKE_METHODS)) {
       expect(typeof api[name]).toBe("function");
@@ -145,7 +152,11 @@ describe("通道与端点对齐", () => {
     // （ipc-surface.ts 里 hub:listBindings 那条注释的 ①②③）。
     // 同一条立场在 POST /approvals/:interruptId/token 上已经有了先例 ——
     // 那条也是「落地而不暴露」，理由在那边是「回环专用」。
-    for (const e of ["POST /bindings", "POST /bindings/verify", "POST /bindings/rebind"] as const) {
+    for (const e of [
+      "POST /bindings",
+      "POST /bindings/verify",
+      "POST /bindings/rebind",
+    ] as const) {
       expect(IMPLEMENTED_ENDPOINTS, e).toContain(e);
       expect(channelFor(e), e).toBeNull();
     }
@@ -184,10 +195,14 @@ describe("通道与端点对齐", () => {
     // 主进程那边也不许有组织【写】的 URL 拼装分支（同 bindings 那组：加通道而没加分支
     // ⇒ 拿到一次带原文的抛；加分支而 CHANNEL_SPECS 没登记 ⇒ dispatch 到不了它）。
     const mainSrc2 = readFileSync(MAIN_SRC, "utf8");
-    expect(mainSrc2).not.toMatch(/"\/org"\s*,\s*\{\s*init:\s*\{\s*method:\s*"POST"/u);
+    expect(mainSrc2).not.toMatch(
+      /"\/org"\s*,\s*\{\s*init:\s*\{\s*method:\s*"POST"/u,
+    );
     // 渲染侧【不能】有名字里带 commitOrg 的方法形状泄漏进 preload。
     const api2 = createExposedApi(fakeIpc().bridge) as Record<string, unknown>;
-    expect(Object.keys(api2).filter((k) => /commitOrg|commit_org/iu.test(k))).toEqual([]);
+    expect(
+      Object.keys(api2).filter((k) => /commitOrg|commit_org/iu.test(k)),
+    ).toEqual([]);
     // 主进程那边也不许有对应的 URL 拼装分支（两条判据各自成立：
     // 有人在 toHttpRequest 加了分支而没加通道 ⇒ dispatch 到不了它；
     // 有人加了通道而没加分支 ⇒ 拿到一次带原文的抛，指向唯一成因）。
@@ -195,7 +210,9 @@ describe("通道与端点对齐", () => {
     expect(mainSrc).not.toMatch(/"\/bindings\/(verify|rebind)"/u);
     // 而且渲染侧【不能】有名字里带 verify/rebind/bind 的方法形状泄漏进 preload。
     const api = createExposedApi(fakeIpc().bridge) as Record<string, unknown>;
-    expect(Object.keys(api).filter((k) => /verify|rebind/iu.test(k))).toEqual([]);
+    expect(Object.keys(api).filter((k) => /verify|rebind/iu.test(k))).toEqual(
+      [],
+    );
   });
 
   it("通道名不重复，且【恰好一个】推送通道", () => {
@@ -244,7 +261,8 @@ describe("通道与端点对齐", () => {
     await expect(api.createTask({ idea: "" })).rejects.toThrow("422 idea 非法");
   });
 
-  it("onHubEvent 返回的退订函数【真的摘掉】了监听器", () => {    const removed: string[] = [];
+  it("onHubEvent 返回的退订函数【真的摘掉】了监听器", () => {
+    const removed: string[] = [];
     let added = 0;
     const api = createExposedApi({
       invoke: async () => ({}),
@@ -285,7 +303,9 @@ describe("通道与端点对齐", () => {
     // toHttpRequest 的 default 抛（没有端点可映射），症状是渲染进程收到一条
     // 谁也解释不了的报错。主进程注册集里含它这件事由 wire.test.ts 钉，两边各钉一侧。
     expect(specOf(EVENTS_READY_CHANNEL)).toBeNull();
-    expect(CHANNEL_SPECS.map((s) => s.channel)).not.toContain(EVENTS_READY_CHANNEL);
+    expect(CHANNEL_SPECS.map((s) => s.channel)).not.toContain(
+      EVENTS_READY_CHANNEL,
+    );
     // 名字本身单独钉一次：它是主进程注册与渲染进程 invoke 共用的【唯一】真相，
     // 改它必须两侧一起改（两侧都 import 这个常量），而这里钉住字面量防「常量被
     // 悄悄改名而两侧跟着漂移」—— 改名应是一次显式的、跨协议的改动。
@@ -302,7 +322,9 @@ describe("参数闸门", () => {
   it("合法参数通过", () => {
     expect(checkArgs(idea, { idea: "做个接单系统" })).toBeNull();
     expect(checkArgs(task, { taskId: "task-1" })).toBeNull();
-    expect(checkArgs(decide, { approvalId: "a-1", resume: "approve" })).toBeNull();
+    expect(
+      checkArgs(decide, { approvalId: "a-1", resume: "approve" }),
+    ).toBeNull();
     expect(checkArgs(none, undefined)).toBeNull();
   });
 
@@ -331,8 +353,14 @@ describe("参数闸门", () => {
     const q = specOf("hub:listApprovals")!;
     expect(q.endpoint).toBe("GET /approvals");
     expect(q.args).toBe("approvalQuery");
-    for (const ok of [undefined, null, {}, { status: "pending" }, { limit: 20 },
-      { status: "deferred", limit: 1 }]) {
+    for (const ok of [
+      undefined,
+      null,
+      {},
+      { status: "pending" },
+      { limit: 20 },
+      { status: "deferred", limit: 1 },
+    ]) {
       expect(checkArgs(q, ok), "实到 " + JSON.stringify(ok)).toBeNull();
     }
     expect(checkArgs(q, { status: "all" })).toMatch(/status/u);
@@ -342,22 +370,39 @@ describe("参数闸门", () => {
     expect(checkArgs(q, { limit: Number.NaN })).toMatch(/整数/u);
     expect(checkArgs(q, { taskId: "t-1" })).toMatch(/多出/u);
     // 取值白名单必须是从 contracts 引进来的，不是这里手抄的（同 MAX_IDEA 那条理由）。
-    const src = readFileSync(join(REPO, "packages/desktop/src/ipc-surface.ts"), "utf8");
+    const src = readFileSync(
+      join(REPO, "packages/desktop/src/ipc-surface.ts"),
+      "utf8",
+    );
     expect(src).toMatch(/STATUS = new Set<string>\(APPROVAL_STATUS_VALUES\)/u);
   });
 
-
-
   it("id 形状非法 ⇒ 拒（它会被拼进 URL 路径）", () => {
-    for (const bad of ["", "../etc/passwd", "a/b", "a?x=1", "a b", "#frag", "x".repeat(65)]) {
+    for (const bad of [
+      "",
+      "../etc/passwd",
+      "a/b",
+      "a?x=1",
+      "a b",
+      "#frag",
+      "x".repeat(65),
+    ]) {
       expect(checkArgs(task, { taskId: bad })).toMatch(/形状非法/u);
     }
   });
 
   it("resume 取值非法 ⇒ 拒；三个合法取值都过", () => {
-    expect(checkArgs(decide, { approvalId: "a-1", resume: "approve_all" })).toMatch(/resume/u);
-    for (const r of ["approve", "reject_with_comment", "defer_deep_review"] as const) {
-      expect(checkArgs(decide, { approvalId: "a-1", resume: r, note: "n" })).toBeNull();
+    expect(
+      checkArgs(decide, { approvalId: "a-1", resume: "approve_all" }),
+    ).toMatch(/resume/u);
+    for (const r of [
+      "approve",
+      "reject_with_comment",
+      "defer_deep_review",
+    ] as const) {
+      expect(
+        checkArgs(decide, { approvalId: "a-1", resume: r, note: "n" }),
+      ).toBeNull();
     }
   });
 
@@ -367,7 +412,10 @@ describe("参数闸门", () => {
     // 「4000」这个数字必须是从 contracts 引进来的，不是这里手抄的：
     // 两处各写一遍，改一处就得到「IPC 放过、HTTP 拒」——
     // 渲染进程收到一个它【已经校验过】的东西报的 422，最误导人那种。
-    const src = readFileSync(join(REPO, "packages/desktop/src/ipc-surface.ts"), "utf8");
+    const src = readFileSync(
+      join(REPO, "packages/desktop/src/ipc-surface.ts"),
+      "utf8",
+    );
     expect(src).toMatch(/MAX_IDEA = MAX_IDEA_CHARS/u);
     expect(src).toMatch(/RESUME = new Set<string>\(RESUME_VALUES\)/u);
   });
@@ -390,7 +438,9 @@ describe("渲染进程侧的硬边界（§5.6.1）", () => {
    * 也能逐条断言「造一次违规就恰好命中它」—— 后者是这条守卫唯一的【有效性】证据。
    */
   function scan(src: string): string[] {
-    return BANNED_IN_RENDERER_FACING.filter((b) => src.includes(b.needle)).map((b) => b.needle);
+    return BANNED_IN_RENDERER_FACING.filter((b) => src.includes(b.needle)).map(
+      (b) => b.needle,
+    );
   }
 
   it("preload 与主进程分发层【零命中】", () => {
@@ -425,7 +475,10 @@ describe("渲染进程侧的硬边界（§5.6.1）", () => {
       expect(hits, `needle 未能拦住 import：${b.needle}`).toEqual([b.needle]);
       // why 必须自带完整理由。写「同上」的那一项，正是将来要加豁免的人
       // 唯一能看见的上下文，而上一条大概率已经被删了。
-      expect(b.why.length, `why 不足以支撑一次豁免判断：${b.needle}`).toBeGreaterThan(12);
+      expect(
+        b.why.length,
+        `why 不足以支撑一次豁免判断：${b.needle}`,
+      ).toBeGreaterThan(12);
       expect(b.why).not.toMatch(/^同上/u);
     }
   });
@@ -434,7 +487,9 @@ describe("渲染进程侧的硬边界（§5.6.1）", () => {
     // 上一条逐条验 needle；这条验 scan 本身（万一 filter 写成了永远 false，
     // 上一条也会跟着全绿 —— 因为它们共用它）。两条一起才把「守卫本身坏了」堵住。
     for (const b of BANNED_IN_RENDERER_FACING) {
-      expect(scan(`import { x } from "${b.needle}";`), b.needle).toEqual([b.needle]);
+      expect(scan(`import { x } from "${b.needle}";`), b.needle).toEqual([
+        b.needle,
+      ]);
     }
     expect(scan("export const nothing = 1;")).toEqual([]);
   });
@@ -452,6 +507,7 @@ const INVOKE_METHODS: Record<string, string> = {
   "hub:decideApproval": "decideApproval",
   "hub:listBindings": "listBindings",
   "hub:getOrg": "getOrg",
+  "hub:domainRequest": "domainRequest",
 };
 
 /**
@@ -462,19 +518,96 @@ const INVOKE_METHODS: Record<string, string> = {
  */
 const NON_INVOKE_METHODS = new Set(["onHubEvent", "notifyEventsReady"]);
 
+describe("领域 RPC 通道", () => {
+  it("全部 71 个 /api/v1 端点都能通过主进程参数闸", () => {
+    const spec = specOf("hub:domainRequest");
+    expect(spec).not.toBeNull();
+    if (spec === null) return;
+    for (const endpoint of API_ENDPOINTS.filter((entry) =>
+      entry.includes("/api/v1/"),
+    )) {
+      const params: Record<string, string> = {};
+      for (const match of endpoint.matchAll(/:([A-Za-z0-9_]+)/gu)) {
+        params[match[1] ?? ""] =
+          match[1] === "grantee" ? "group:g-1" : "fixture-1";
+      }
+      expect(checkArgs(spec, { endpoint, params }), endpoint).toBeNull();
+    }
+  });
+
+  it("拒绝契约外端点、路径穿越与多余路径参数", () => {
+    const spec = specOf("hub:domainRequest");
+    if (spec === null) return;
+    expect(checkArgs(spec, { endpoint: "POST /org" })).not.toBeNull();
+    expect(
+      checkArgs(spec, {
+        endpoint: "GET /api/v1/documents/:id",
+        params: { id: "../secret" },
+      }),
+    ).not.toBeNull();
+    expect(
+      checkArgs(spec, {
+        endpoint: "GET /api/v1/documents/:id",
+        params: { id: "doc-1", sql: "drop" },
+      }),
+    ).not.toBeNull();
+  });
+
+  it("把端点、路径参数、query 与 body 转成一条已签名 HTTP 请求", async () => {
+    const calls: { path: string; method: string; body?: string }[] = [];
+    const result = await dispatch(
+      {
+        signedFetch: async (path, init) => {
+          calls.push({
+            path,
+            method: init.method,
+            ...(init.body === undefined ? {} : { body: init.body }),
+          });
+          return { status: 200, bodyText: '{"ok":true}' };
+        },
+      },
+      "hub:domainRequest",
+      {
+        endpoint: "POST /api/v1/conversations/:id/messages",
+        params: { id: "conv-1" },
+        query: { dryRun: false },
+        body: { body: "hello" },
+      },
+    );
+    expect(result.ok).toBe(true);
+    expect(calls).toEqual([
+      {
+        path: "/api/v1/conversations/conv-1/messages?dryRun=false",
+        method: "POST",
+        body: JSON.stringify({ body: "hello" }),
+      },
+    ]);
+  });
+});
+
 /* ───────────────── 主进程侧分发（Task 2.2 的 src/main 半边） ───────────────── */
 
 describe("主进程分发", () => {
   const fetchReturning = (
     status: number,
     body: unknown,
-  ): { calls: { path: string; method: string; body?: string }[]; signedFetch: MainDeps["signedFetch"] } => {
+  ): {
+    calls: { path: string; method: string; body?: string }[];
+    signedFetch: MainDeps["signedFetch"];
+  } => {
     const calls: { path: string; method: string; body?: string }[] = [];
     return {
       calls,
       signedFetch: async (path, init) => {
-        calls.push({ path, method: init.method, ...(init.body === undefined ? {} : { body: init.body }) });
-        return { status, bodyText: typeof body === "string" ? body : JSON.stringify(body) };
+        calls.push({
+          path,
+          method: init.method,
+          ...(init.body === undefined ? {} : { body: init.body }),
+        });
+        return {
+          status,
+          bodyText: typeof body === "string" ? body : JSON.stringify(body),
+        };
       },
     };
   };
@@ -486,7 +619,10 @@ describe("主进程分发", () => {
     await dispatch(deps, "hub:listTasks", undefined);
     await dispatch(deps, "hub:getTask", { taskId: "t-9" });
     await dispatch(deps, "hub:listApprovals", undefined);
-    await dispatch(deps, "hub:decideApproval", { approvalId: "a-9", resume: "approve" });
+    await dispatch(deps, "hub:decideApproval", {
+      approvalId: "a-9",
+      resume: "approve",
+    });
     await dispatch(deps, "hub:listBindings", undefined);
     await dispatch(deps, "hub:getOrg", undefined);
     expect(f.calls.map((c) => c.method + " " + c.path)).toEqual([
@@ -528,24 +664,41 @@ describe("主进程分发", () => {
     // 那不只是浪费一次往返，而是让「渲染进程能以合法签名发任意请求」这件事
     // 变成可能，因为签名发生在发请求之前。
     const f = fetchReturning(200, {});
-    const res = await dispatch({ signedFetch: f.signedFetch }, "hub:getTask", { taskId: "../x" });
+    const res = await dispatch({ signedFetch: f.signedFetch }, "hub:getTask", {
+      taskId: "../x",
+    });
     expect(res.ok).toBe(false);
     expect(f.calls.length).toBe(0);
   });
 
   it("未知通道 ⇒ 拒，不转发（window 上能拼任意通道名）", async () => {
     const f = fetchReturning(200, {});
-    const res = await dispatch({ signedFetch: f.signedFetch }, "hub:anything", {});
+    const res = await dispatch(
+      { signedFetch: f.signedFetch },
+      "hub:anything",
+      {},
+    );
     expect(res.ok).toBe(false);
     expect(f.calls.length).toBe(0);
     // 推送通道也不能被 invoke（那一次 invoke 永远不 resolve）。
-    const push = await dispatch({ signedFetch: f.signedFetch }, "hub:event", {});
+    const push = await dispatch(
+      { signedFetch: f.signedFetch },
+      "hub:event",
+      {},
+    );
     expect(push.ok).toBe(false);
   });
 
   it("Hub 的 4xx【原样带上 status 与原因】，不塌成一句「请求失败」", async () => {
-    const f = fetchReturning(422, { error: "idea 非法", issues: [{ path: "idea" }] });
-    const res = await dispatch({ signedFetch: f.signedFetch }, "hub:createTask", { idea: "x" });
+    const f = fetchReturning(422, {
+      error: "idea 非法",
+      issues: [{ path: "idea" }],
+    });
+    const res = await dispatch(
+      { signedFetch: f.signedFetch },
+      "hub:createTask",
+      { idea: "x" },
+    );
     expect(res.ok).toBe(false);
     if (res.ok === true) throw new Error("不该通过");
     expect(res.error.status).toBe(422);
@@ -579,8 +732,13 @@ describe("主进程分发", () => {
       resume: "reject_with_comment",
       note: "缺压测",
     });
-    await dispatch({ signedFetch: f.signedFetch }, "hub:createTask", { idea: "x" });
-    expect(JSON.parse(f.calls[0]!.body!)).toEqual({ resume: "reject_with_comment", note: "缺压测" });
+    await dispatch({ signedFetch: f.signedFetch }, "hub:createTask", {
+      idea: "x",
+    });
+    expect(JSON.parse(f.calls[0]!.body!)).toEqual({
+      resume: "reject_with_comment",
+      note: "缺压测",
+    });
     expect(JSON.parse(f.calls[1]!.body!)).toEqual({ idea: "x" });
     expect(f.calls[1]!.body).not.toMatch(/undefined/u);
   });
@@ -598,12 +756,16 @@ describe("主进程分发", () => {
     expect(enc).toBe("a%26b%3Dc");
     expect(enc).not.toContain("&");
     const f = fetchReturning(200, {});
-    await dispatch({ signedFetch: f.signedFetch }, "hub:listApprovals", { limit: -7 });
+    await dispatch({ signedFetch: f.signedFetch }, "hub:listApprovals", {
+      limit: -7,
+    });
     expect(f.calls[0]!.path).toBe("/approvals?limit=-7");
   });
 
-    it("推送载荷：有 id 才带 seq（快照帧没有 id，编一个等于伪造游标）", () => {
-    expect(toPushPayload({ event: "TaskStateChanged", id: "7", data: "{}" })).toEqual({
+  it("推送载荷：有 id 才带 seq（快照帧没有 id，编一个等于伪造游标）", () => {
+    expect(
+      toPushPayload({ event: "TaskStateChanged", id: "7", data: "{}" }),
+    ).toEqual({
       seq: 7,
       event: "TaskStateChanged",
       data: "{}",
@@ -614,7 +776,11 @@ describe("主进程分发", () => {
 
   it("主进程【不解析事件 data】：schema 的唯一消费者是 contracts（§5.11）", () => {
     // 主进程一旦解 data，就成了事件 schema 的第二个消费者，加字段时必有一处漏。
-    const odd = toPushPayload({ event: "BudgetPaused", id: "3", data: "不是 JSON 也没关系" });
+    const odd = toPushPayload({
+      event: "BudgetPaused",
+      id: "3",
+      data: "不是 JSON 也没关系",
+    });
     expect(odd.data).toBe("不是 JSON 也没关系");
   });
 });

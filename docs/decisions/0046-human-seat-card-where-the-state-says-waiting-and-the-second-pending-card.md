@@ -331,5 +331,5 @@ TEXT 主键，`ORDER BY id` 排的是**字典序**，与插入顺序**无关**�
 - 变异（`.workbuddy/round344-statuserror-mut.mjs`）5/5：M1 stale 改抛普通 Error
   ⇒ 409 那发红、M2 note/waiver 改抛 Error ⇒ 第二道网红、M3 两段接线全删 ⇒ 两发红、
   M0/M9 对照复跑全绿，真改字节自回滚 `reverted:true`。
-- 桌面 IPC 的行为不变（`channels.ts:57` 那条「500 长成操作失败请重试」的立场
+- 桌面 IPC 的行为不变（`channels.ts:65` 那条「500 长成操作失败请重试」的立场
   少吃到两种假象：点过期卡 / 打回没理由原来是 500，现在是 409/422）。

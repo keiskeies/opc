@@ -11,11 +11,12 @@
  * ⚠ 这不是生产者成品：它是把「渲块 + 签名代理」这条链拉到这台能点的那一步；
  *    空白 token 时签名全 401，由渲块把「未配置」显示成连接错误而非假数据。
  */
-import { createServer, request as createRequest } from "node:http";
-import { readFileSync, existsSync } from "node:fs";
-import { dirname, join, extname, resolve } from "node:path";
+
+import { existsSync, readFileSync } from "node:fs";
+import { request as createRequest, createServer } from "node:http";
+import { createRequire, stripTypeScriptTypes } from "node:module";
+import { dirname, extname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { stripTypeScriptTypes, createRequire } from "node:module";
 
 const ROOT = fileURLToPath(new URL("../../..", import.meta.url));
 // public/ 是包根下的目录（不在 src/ 里，所以不会被 tsc 的 rootDir 管着、也不 emit）。
@@ -85,33 +86,64 @@ function readBody(req: import("node:http").IncomingMessage): Promise<string> {
 }
 
 const server = createServer((req, res) => {
-  const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
-  if (!url.pathname.startsWith("/api/")) { serveStatic(url.pathname, res); return; }
+  const url = new URL(
+    req.url ?? "/",
+    `http://${req.headers.host ?? "localhost"}`,
+  );
+  if (!url.pathname.startsWith("/api/")) {
+    serveStatic(url.pathname, res);
+    return;
+  }
   proxy(url, req, res);
 });
 
-/** /api/xxx → Hub 的 /xxx，带上本机部署 token 的签名。渲块永远到不了 Hub，也到不了 token。 */
-function proxy(url: URL, req: import("node:http").IncomingMessage, res: import("node:http").ServerResponse) {
+/** /api/xxx → Hub 的 /xxx；/api/v1/xxx 原样透传（群角色上层契约前缀）。 */
+function proxy(
+  url: URL,
+  req: import("node:http").IncomingMessage,
+  res: import("node:http").ServerResponse,
+) {
   // 签名用带 query 的整串 target，不是 pathname —— hub 的鉴权签的就是原始 target
   // （app.ts 里 HubRequest.target 那段：拿剥过 query 的 path 去签名 ⇒ `/events?cursor=17`
   //  恒 401 ⇒ 断线续订整条死）。所以这里不能「先把 query 摘掉再签」。
-  const target = url.pathname.slice("/api".length) + url.search;
+  // 旧控制室用 /api/tasks → /tasks；新工作台用 /api/v1/groups，前缀是契约的一部分，
+  // 不能再剥掉。两条映射按字面前缀分派，避免为了新面悄悄改坏旧看板。
+  const target =
+    url.pathname === "/api/v1" || url.pathname.startsWith("/api/v1/")
+      ? url.pathname + url.search
+      : url.pathname.slice("/api".length) + url.search;
   const m = (req.method ?? "GET").toUpperCase();
   const send = (body: string) => {
-    const up = createRequest({ host: HUB.host, port: HUB.port, path: target, method: m, headers: devSign(m, target, body) }, (r) => {
-      const ct = r.headers["content-type"] ?? "application/json; charset=utf-8";
-      // 一律按流透传（SSE 的 GET /events 靠这个才活着：先攒成字符串等于等连接关闭，
-      // 界面会一直空白。普通 JSON 也是流，多这一致性没有代价）。
-      res.writeHead(r.statusCode ?? 502, { "content-type": ct, "cache-control": "no-cache" });
-      r.pipe(res);
-      // 浏览器关掉页签 / 切走视图 ⇒ 必须把上游一起拆掉。
-      // SSE 上游是一条【长期挂着的订阅】（sse.ts 的 finally 里那次 sub.close() 是
-      // 本仓认定的唯一回收证据），而它只有在流被销毁时才走得到 finally。
-      // 漏了这一行 ⇒ 每刷新一次页泄漏一条订阅，且症状是「什么都没坏」。
-      const abort = () => { r.destroy(); up.destroy(); };
-      res.on("close", abort);
-      r.on("error", abort);
-    });
+    const up = createRequest(
+      {
+        host: HUB.host,
+        port: HUB.port,
+        path: target,
+        method: m,
+        headers: devSign(m, target, body),
+      },
+      (r) => {
+        const ct =
+          r.headers["content-type"] ?? "application/json; charset=utf-8";
+        // 一律按流透传（SSE 的 GET /events 靠这个才活着：先攒成字符串等于等连接关闭，
+        // 界面会一直空白。普通 JSON 也是流，多这一致性没有代价）。
+        res.writeHead(r.statusCode ?? 502, {
+          "content-type": ct,
+          "cache-control": "no-cache",
+        });
+        r.pipe(res);
+        // 浏览器关掉页签 / 切走视图 ⇒ 必须把上游一起拆掉。
+        // SSE 上游是一条【长期挂着的订阅】（sse.ts 的 finally 里那次 sub.close() 是
+        // 本仓认定的唯一回收证据），而它只有在流被销毁时才走得到 finally。
+        // 漏了这一行 ⇒ 每刷新一次页泄漏一条订阅，且症状是「什么都没坏」。
+        const abort = () => {
+          r.destroy();
+          up.destroy();
+        };
+        res.on("close", abort);
+        r.on("error", abort);
+      },
+    );
     up.on("error", (e: Error) => fail(res, e));
     if (body) up.end(body);
     else up.end();
@@ -124,19 +156,38 @@ function proxy(url: URL, req: import("node:http").IncomingMessage, res: import("
 }
 
 function fail(res: import("node:http").ServerResponse, e: unknown) {
-  if (res.headersSent) { res.destroy(); return; }
+  if (res.headersSent) {
+    res.destroy();
+    return;
+  }
   res.writeHead(502, { "content-type": "application/json" });
-  res.end(JSON.stringify({ error: e instanceof Error ? e.message : String(e) }));
+  res.end(
+    JSON.stringify({ error: e instanceof Error ? e.message : String(e) }),
+  );
 }
 
-function serveStatic(pathname: string, res: import("node:http").ServerResponse) {
+function serveStatic(
+  pathname: string,
+  res: import("node:http").ServerResponse,
+) {
   const mod = serveModule(pathname, res);
   if (mod) return;
-  const p = pathname === "/" ? "/index.html" : pathname;
+  const p =
+    pathname === "/" || pathname === "/admin" ? "/index.html" : pathname;
   const file = join(PUBLIC, p);
-  if (!file.startsWith(PUBLIC)) { res.writeHead(403); res.end("forbidden"); return; }
-  if (!existsSync(file)) { res.writeHead(404); res.end("not found: " + p); return; }
-  res.writeHead(200, { "content-type": MIME[extname(file)] ?? "application/octet-stream" });
+  if (!file.startsWith(PUBLIC)) {
+    res.writeHead(403);
+    res.end("forbidden");
+    return;
+  }
+  if (!existsSync(file)) {
+    res.writeHead(404);
+    res.end("not found: " + p);
+    return;
+  }
+  res.writeHead(200, {
+    "content-type": MIME[extname(file)] ?? "application/octet-stream",
+  });
   res.end(readFileSync(file));
 }
 
@@ -158,18 +209,32 @@ function serveStatic(pathname: string, res: import("node:http").ServerResponse) 
  * ⚠ 这只在【开发服务器】成立：产物是逐文件现剥的，没打包、没 tree-shake。
  *    生产那条路是 Electron + 打包器（本机装不上，见 memory），不是这里。
  */
-function serveModule(pathname: string, res: import("node:http").ServerResponse): boolean {
+function serveModule(
+  pathname: string,
+  res: import("node:http").ServerResponse,
+): boolean {
   const mount = Object.keys(MOUNTS).find((m) => pathname.startsWith(m));
   if (mount === undefined) return false;
   const dir = MOUNTS[mount];
   if (dir === undefined) return false; // noUncheckedIndexedAccess：键是刚 find 出来的，理论上到不了
   const base = resolve(dir, pathname.slice(mount.length));
-  if (!base.startsWith(dir)) { res.writeHead(403); res.end("forbidden"); return true; }
+  if (!base.startsWith(dir)) {
+    res.writeHead(403);
+    res.end("forbidden");
+    return true;
+  }
   // TS 源树里的相对 import 写的是 `./api.js`（NodeNext 的写法：源码里带 .js，
   // 因为编译产物就叫 .js）。浏览器照原样要 /vendor/contracts/api.js，而磁盘上是
   // api.ts —— 这一层 .js→.ts 的回落就是把 tsc 已经在做的那件事，原样做给浏览器看。
-  const file = existsSync(base) || !base.endsWith(".js") ? base : base.slice(0, -3) + ".ts";
-  if (!existsSync(file)) { res.writeHead(404); res.end("not found: " + pathname); return true; }
+  const file =
+    existsSync(base) || !base.endsWith(".js")
+      ? base
+      : base.slice(0, -3) + ".ts";
+  if (!existsSync(file)) {
+    res.writeHead(404);
+    res.end("not found: " + pathname);
+    return true;
+  }
   let src = readFileSync(file, "utf8");
   if (file.endsWith(".ts")) {
     src = stripTypeScriptTypes(src, { mode: "strip" });
@@ -185,5 +250,7 @@ function serveModule(pathname: string, res: import("node:http").ServerResponse):
 }
 
 server.listen(PORT, "127.0.0.1", () => {
-  console.log(`运营看板已在 http://127.0.0.1:${PORT} 启动（Hub=${HUB.port}，token 已配置=${TOKEN !== ""}）`);
+  console.log(
+    `运营看板已在 http://127.0.0.1:${PORT} 启动（Hub=${HUB.port}，token 已配置=${TOKEN !== ""}）`,
+  );
 });

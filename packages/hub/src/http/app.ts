@@ -21,38 +21,46 @@
  */
 
 import { createHash, randomUUID } from "node:crypto";
+import type { DatabaseSync } from "node:sqlite";
 import {
+  type ApiEndpoint,
+  type ApprovalDecisionRequest,
   approvalBatchRequestSchema,
   approvalDecisionRequestSchema,
   approvalOutcome,
+  type BatchResumeValue,
   batchApprovalOutcome,
   createTaskRequestSchema,
+  type ExecutionOutcome,
+  type ExecutionTarget,
   HTTP_CONFLICT,
+  HTTP_FORBIDDEN,
   HTTP_NOT_FOUND,
   HTTP_NOT_IMPLEMENTED,
-  HTTP_FORBIDDEN,
   HTTP_UNAUTHORIZED,
   HTTP_UNPROCESSABLE,
   isImplemented,
-  type ApiEndpoint,
-  type ApprovalDecisionRequest,
-  type BatchResumeValue,
   type OrgChange,
   type OrgGraph,
   type ResumeValue,
   type TaskView,
   taskViewSchema,
 } from "@opc/contracts";
-import type { DatabaseSync } from "node:sqlite";
-import type { EventBus } from "../events/bus.js";
-import { legalTransitionsFrom, type TaskState } from "../graph/status.js";
 import {
   listApprovals as listApprovalsFrom,
   readApprovalDetail as readApprovalDetailFrom,
 } from "../approvals/query.js";
-// 今日视图那几个聚合数的【判据】住在这里（不在 handler 里，也不在界面里算）。
-// 分法与 approvals/query.ts、replay/query.ts 同一条：判定住在模块，HTTP 只是一个入口。
-import { readToday } from "../overview/today.js";
+// 【又一个 type-only import】，动机与上面 tokens.ts 那一条【不一样】，值得分开说：
+// 那边是「实现在本文件，所以只要类型」；这边是「实现真在 db/write-queue.js，
+// 但 app.ts 只把它当【注入点的形状】，一次运行期调用都不发」——
+// 真正的 node() 调用全在 http/bindings.ts 里。
+// 所以这条 import 在产物里是 0 字节，而 contract.test.ts 手搓 deps 时
+// 仍然不必把整个写队列拖进测试（不传 bindingWriter ⇒ 三条写路由 501，那正是测的分支）。
+import type { HubWriter, Writer } from "../db/write-queue.js";
+import type { EventBus } from "../events/bus.js";
+import { legalTransitionsFrom, type TaskState } from "../graph/status.js";
+import type { CommitResult } from "../org/commit.js";
+import type { DriverRuntimeState } from "../overview/driver-status.js";
 // 驱动器那一格的判据（0048 §7）。⚠ 这是一条【运行期】import，而它把
 // serve/driver-pump.ts（进而 engine/*）带进了本文件的模块图 —— 这与本文件
 // 对 db/write-queue.js 的处理【不一样】（那边刻意 type-only，见 deps.bindingWriter
@@ -63,7 +71,12 @@ import { readToday } from "../overview/today.js";
 // 立过的那条规矩（0026 §0）要拦的事：同一判据两份字面写法，漂了不会有人发现。
 // 所以宁可多一条 import 边，也不要两份抄件。
 import { readDriverStatus } from "../overview/driver-status.js";
-import type { DriverRuntimeState } from "../overview/driver-status.js";
+// 今日视图那几个聚合数的【判据】住在这里（不在 handler 里，也不在界面里算）。
+// 分法与 approvals/query.ts、replay/query.ts 同一条：判定住在模块，HTTP 只是一个入口。
+import { readToday } from "../overview/today.js";
+import { buildReplayView } from "../replay/query.js";
+import { type VerifyInput, verifyRequest } from "./auth.js";
+import { isLoopbackAddress } from "./bind.js";
 // IM 绑定的四条路由**不写在下面那个 switch 附近**，单独住 http/bindings.ts。
 // 那不是为了分文件整洁：test/bindings/im.test.ts 有一条守卫扫 src，
 // 断言 `im_bindings` 这四个字只出现在 bindings/im.ts 一个文件里。
@@ -75,26 +88,16 @@ import {
   requestBindingRoute,
   verifyBindingRoute,
 } from "./bindings.js";
-import { commitOrgRoute, orgGraphRoute } from "./org.js";
-import { charterViewRoute, saveCharterRoute } from "./charter.js";
 import { budgetListRoute, putBudgetRoute } from "./budget.js";
-import type { CommitResult } from "../org/commit.js";
+import { charterViewRoute, saveCharterRoute } from "./charter.js";
+import { commitOrgRoute, orgGraphRoute } from "./org.js";
+import { buildDomainRouter } from "./registrars.js";
 import { ResumeStream, type SnapshotSource } from "./sse.js";
-import { buildReplayView } from "../replay/query.js";
-import { verifyRequest, type VerifyInput } from "./auth.js";
-import { isLoopbackAddress } from "./bind.js";
 // 【type-only import】。这一条边界值得说：tokenHttpStatus 的实现【不在】tokens.ts 而在下面，
 // 于是 app.ts 只从那边拿一个类型，运行期仍然不 import tokens.ts
 // （那边带 node:crypto 与 db/write-queue）。contract.test.ts 手搓 deps 时能构造出
 // 一个假 reason 而不是被迫把整个 token 存储拖进测试。
 import type { TokenIssueReject, TokenRejectReason } from "./tokens.js";
-// 【又一个 type-only import】，动机与上面 tokens.ts 那一条【不一样】，值得分开说：
-// 那边是「实现在本文件，所以只要类型」；这边是「实现真在 db/write-queue.js，
-// 但 app.ts 只把它当【注入点的形状】，一次运行期调用都不发」——
-// 真正的 node() 调用全在 http/bindings.ts 里。
-// 所以这条 import 在产物里是 0 字节，而 contract.test.ts 手搓 deps 时
-// 仍然不必把整个写队列拖进测试（不传 bindingWriter ⇒ 三条写路由 501，那正是测的分支）。
-import type { Writer } from "../db/write-queue.js";
 
 export interface HubRequest {
   readonly method: string;
@@ -198,6 +201,12 @@ export interface HubDeps {
    * 不是响应里某格为 null。
    */
   readonly driverState: () => DriverRuntimeState;
+  /** CoS 派发后的真实执行入口；缺席时仍派发，但不伪造“已执行”。 */
+  readonly executorRunner?: (
+    target: ExecutionTarget,
+  ) => Promise<ExecutionOutcome>;
+  /** CLI 工作区只由显式配置提供；不得用仓库根目录兜底。 */
+  readonly executorWorkspace?: string;
   readonly nonces?: VerifyInput["nonces"];
   /**
    * 把一条 CEO 决策写进 approvals 与 events。【唯一的写路径】。
@@ -268,7 +277,8 @@ export interface HubDeps {
     readonly token: string;
     readonly approvalId: string;
   }) => Promise<
-    { readonly ok: true; readonly taskId: string } | { readonly ok: false; readonly reason: TokenRejectReason }
+    | { readonly ok: true; readonly taskId: string }
+    | { readonly ok: false; readonly reason: TokenRejectReason }
   >;
   /**
    * 签一张一次性审批 token（Task 4.1 的另一半：兑换的【对面】）。
@@ -301,6 +311,8 @@ export interface HubDeps {
    * （接上 buildHubDeps 就行），不是一句「路由不存在」。
    */
   readonly bindingWriter?: Writer;
+  /** 群角色上层各面的统一写队列；读侧仍用 deps.db，写侧不得绕过单写者。 */
+  readonly domainWriter?: HubWriter;
   /**
    * 岗位书与预算的写路径（POST /charter/:roleId、POST /budget）。
    * 同 bindingWriter 一条：收 WriteQueue 的 node 而不是连接，否则两条写路由
@@ -380,6 +392,8 @@ export function titleOf(idea: string): string {
   return firstLine.slice(0, MAX_TITLE_CHARS - 1) + "…";
 }
 
+const DOMAIN_ROUTER = buildDomainRouter();
+
 /**
  * 路由分发。
  *
@@ -404,7 +418,7 @@ export async function handleRequest(
     const named =
       e instanceof Error &&
       e.name === "DecisionStatusError" &&
-      ("statusHint" in e);
+      "statusHint" in e;
     const hint =
       named &&
       ((e as { statusHint?: unknown }).statusHint === 422 ||
@@ -420,10 +434,7 @@ export async function handleRequest(
   }
 }
 
-async function route(
-  deps: HubDeps,
-  req: HubRequest,
-): Promise<HubResponse> {
+async function route(deps: HubDeps, req: HubRequest): Promise<HubResponse> {
   const method = req.method.toUpperCase();
 
   // 【鉴权在路由之前】。这一版最初是先匹路由、匹不上先回 404，理由写的是
@@ -500,10 +511,17 @@ async function dispatch(
   req: HubRequest,
 ): Promise<HubResponse> {
   const routeHit = matchRoute(method, req.path);
-  if (routeHit === null) return json(HTTP_NOT_FOUND, { error: "no such route" });
-  // 501 这一支【此刻没有活的分母】：UNIMPLEMENTED_ENDPOINTS 在 Task 3.4 之后是空的
-  // （GET /replay/:taskId 是它唯一一项，现已落地）。
-  // 分支【保留】而不是删掉，两个理由：
+  if (routeHit === null) {
+    // 旧面仍走上面的手写瀑布；群角色上层各面统一由契约端点路由器分派。
+    // router 未注册的已声明端点回 501，契约外路径才是 404；鉴权已在 route() 完成。
+    const routed = await DOMAIN_ROUTER.handle(deps, req);
+    return routed ?? json(HTTP_NOT_FOUND, { error: "no such route" });
+  }
+  // 501 这一支【曾有一段没有活的分母】：UNIMPLEMENTED_ENDPOINTS 在 Task 3.4 之后
+  // 被删空过（GET /replay/:taskId 是它唯一一项，那时刚落地）。群角色上层这一轮
+  // 它改成【从 API_ENDPOINTS 派生】（论证见 contracts/api.ts 那一段），
+  // 新登记的端点在接线完成前都从这里出去 —— 分母回来了，而且下次不会再被删空。
+  // 分支【保留】而不是删掉，两个理由不变：
   //  ① 它是「契约先行」这条做法的落地端 —— 契约里有、服务端还没做，靠它回一个
   //     与 404 可区分的答复。删掉之后再加契约先行的端点，会得到一个 404，
   //     而 404 把调用方支去检查自己的参数（这条口径见 contracts/api.ts 的状态码注释）。
@@ -650,8 +668,16 @@ export type Route =
    */
   | { kind: "list_bindings"; endpoint: "GET /bindings"; id?: undefined }
   | { kind: "request_binding"; endpoint: "POST /bindings"; id?: undefined }
-  | { kind: "verify_binding"; endpoint: "POST /bindings/verify"; id?: undefined }
-  | { kind: "rebind_binding"; endpoint: "POST /bindings/rebind"; id?: undefined }
+  | {
+      kind: "verify_binding";
+      endpoint: "POST /bindings/verify";
+      id?: undefined;
+    }
+  | {
+      kind: "rebind_binding";
+      endpoint: "POST /bindings/rebind";
+      id?: undefined;
+    }
   /**
    * 组织变更的提交（0040）。**没有 id 段**，同 bindings 那四条的形状：
    * 请求体自己带着要提交的 before 图 + change（POST /org 不像
@@ -768,7 +794,11 @@ export function matchRoute(method: string, path: string): Route | null {
   ) {
     const a = id(segs[1]);
     if (a === null) return null;
-    return { kind: "mint_token", endpoint: "POST /approvals/:interruptId/token", id: a };
+    return {
+      kind: "mint_token",
+      endpoint: "POST /approvals/:interruptId/token",
+      id: a,
+    };
   }
   if (method === "GET" && segs.length === 1 && segs[0] === "events") {
     return { kind: "events", endpoint: "GET /events" };
@@ -795,8 +825,10 @@ export function matchRoute(method: string, path: string): Route | null {
     return { kind: "request_binding", endpoint: "POST /bindings" };
   }
   if (method === "POST" && segs.length === 2 && segs[0] === "bindings") {
-    if (segs[1] === "verify") return { kind: "verify_binding", endpoint: "POST /bindings/verify" };
-    if (segs[1] === "rebind") return { kind: "rebind_binding", endpoint: "POST /bindings/rebind" };
+    if (segs[1] === "verify")
+      return { kind: "verify_binding", endpoint: "POST /bindings/verify" };
+    if (segs[1] === "rebind")
+      return { kind: "rebind_binding", endpoint: "POST /bindings/rebind" };
     return null;
   }
   if (method === "POST" && segs.length === 1 && segs[0] === "org") {
@@ -957,7 +989,8 @@ export async function mintToken(
     });
   }
   const r = await deps.issueApprovalToken({ approvalId, nowMs: deps.now() });
-  if (r.ok !== true) return json(tokenIssueStatus(r.reason), tokenIssueBody(r.reason));
+  if (r.ok !== true)
+    return json(tokenIssueStatus(r.reason), tokenIssueBody(r.reason));
   return json(201, { token: r.token, expires_at: r.expiresAt });
 }
 
@@ -1408,10 +1441,7 @@ async function decide(
  * 跑完再报。失败仍然是【响】的（500 + 原文），不是吞掉的；
  * 报的是「N 张已落库、其中 M 张图没恢复」这个完整事实，而不是「失败了」。
  */
-async function decideBatch(
-  deps: HubDeps,
-  body: string,
-): Promise<HubResponse> {
+async function decideBatch(deps: HubDeps, body: string): Promise<HubResponse> {
   const parsed = approvalBatchRequestSchema.safeParse(parseJson(body));
   if (!parsed.success) {
     return json(HTTP_UNPROCESSABLE, {
@@ -1435,7 +1465,12 @@ async function decideBatch(
         ")",
     )
     .all(...(ids as unknown as never[])) as
-    | { id: string; task_id: string | null; status: string; approval_type: string }[]
+    | {
+        id: string;
+        task_id: string | null;
+        status: string;
+        approval_type: string;
+      }[]
     | undefined;
   const outcome = batchApprovalOutcome({
     requestedIds: ids,
@@ -1501,7 +1536,8 @@ async function decideBatch(
       resume_failed: resumeFailed,
       // 明确告诉调用方【不要重发整批】：卡片已是 decided，重发只会全部读成 replayed，
       // 图仍然不恢复，而库里白多一次请求。补救路径是驱动器那一侧，不是重试。
-      retry_hint: "不要重发本批：卡片已 decided，重发只会得到 replayed 而图仍不恢复。",
+      retry_hint:
+        "不要重发本批：卡片已 decided，重发只会得到 replayed 而图仍不恢复。",
     });
   }
   return json(200, {
@@ -1559,10 +1595,10 @@ async function events(deps: HubDeps, req: HubRequest): Promise<HubResponse> {
 
 /**
  * 501 的报错文案。单独抽出来【不是为了复用】，是为了让它能被测：
- * 此刻 UNIMPLEMENTED_ENDPOINTS 为空 ⇒ 上面那个 501 分支没有活的分母，
- * 于是「未实现端点回 501 而不是 404」这条口径在 route() 里【无法】被用例触发。
- * 抽出来之后判据本身仍然可测（contract.test.ts 直接喂一个未实现端点），
- * 而不是变成一条「代码写着、而没有任何输入能走到」的死逻辑。
+ * 未实现端点由 API_ENDPOINTS 与 IMPLEMENTED_ENDPOINTS 之差派生，群角色上层
+ * 端点登记后重新有了活的分母；dispatch() 对它们回 501，未知路径仍回 404。
+ * 抽出来之后判据本身可测（contract.test.ts 直接验证文案），而 route() 的
+ * 真请求覆盖守住「已登记但未接线」不会悄悄变成 404。
  */
 export function notImplementedMessage(endpoint: ApiEndpoint): string {
   return (
@@ -1613,7 +1649,10 @@ async function replay(
    * 所以这一层必须【根本不下发】keyword，否则两者会叠成「空时间线」。
    */
   const rawKeyword = query["keyword"];
-  if (rawKeyword !== undefined && [...rawKeyword].length > MAX_REPLAY_KEYWORD_CHARS) {
+  if (
+    rawKeyword !== undefined &&
+    [...rawKeyword].length > MAX_REPLAY_KEYWORD_CHARS
+  ) {
     return json(HTTP_UNPROCESSABLE, {
       error:
         "keyword 最长 " +
@@ -1651,7 +1690,12 @@ function parseJson(text: string): unknown {
     // 返回一个必定过不了 strict 校验的形状，让上层统一报 422 并列出 issues。
     // 在这里直接抛会让「JSON 写错」和「服务内部错误」混成 500，
     // 而前者是调用方能自己修的。
-    return { __unparseable__: createHash("sha256").update(text).digest("hex").slice(0, 8) };
+    return {
+      __unparseable__: createHash("sha256")
+        .update(text)
+        .digest("hex")
+        .slice(0, 8),
+    };
   }
 }
 
@@ -1672,7 +1716,9 @@ function toTaskView(v: TaskView): TaskView {
       "库里读出的任务行不符合对外契约（id=" +
         v.id +
         "）：" +
-        r.error.issues.map((x) => x.path.join(".") + " " + x.message).join("; ") +
+        r.error.issues
+          .map((x) => x.path.join(".") + " " + x.message)
+          .join("; ") +
         "。契约与库不一致时必须当场响，静默丢行会让「任务不见了」变成一次无从排查的报障。",
     );
   }

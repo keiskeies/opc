@@ -1005,6 +1005,17 @@ function zeroProducerHas(f: Files, table: string, expects: string): string {
 }
 
 /** r7 / r8：零调用方族；judge 归 dead-modules。检查 BASELINE 里的对应模块还在。 */
+function executorProductionCheck(f: Files): string {
+  const production = f.src("executors/production.ts");
+  const dispatch = f.src("dispatch/service.ts");
+  const social = f.src("http/social.ts");
+  return production.includes("new HumanExecutor") &&
+    dispatch.includes("o.execute !== undefined") &&
+    social.includes("execute: deps.executorRunner")
+    ? ""
+    : "HumanExecutor 真人席执行器已不在生产装配/CoS 派发链上，r26 的接线主张失去证据";
+}
+
 function deadModulesHas(f: Files, rel: string): string {
   const t = f.arch("dead-modules.ts");
   return t.includes('"' + rel + '"')
@@ -2993,22 +3004,21 @@ export function nodeKeyIdentityCheck(f: Files): string {
     {
       id: "r26",
       claim:
-        "HTTP 可达口径的建卡者仍是零：executors/human.ts（T6 真人席执行器，round363）" +
-        "已把 createCard 调用方名册从 [serve/dev-seed.ts] 长到两家，但它自己今天没有任何 " +
-        "HTTP/巡检/CLI 路径可达 —— dead-modules 的 BASELINE 钉着 executors/human.ts，" +
-        "接线日（T7 dispatch / T10 HTTP）方向 B 的红会逐格点名，届时本条翻作历史。",
+        "HTTP 可达口径的真人席建卡者已接通：executors/human.ts 经 " +
+        "createExecutorRegistry → runExecutions → CoS routeGroupMessage 到达 createCard；" +
+        "dead-modules 不再登记该模块，无模型/CLI 时也能落真人待办。",
       method:
-        "test/arch/dead-modules.ts › BASELINE 里的 executors/human.ts 条目（双向：档案被摘 ⇒ " +
-        "本条红；接线真发生 ⇒ dead-modules 先红，改的是主张不是删档案）",
-      judge: "dead-modules",
+        "test/arch/claims-registry.ts › executorProductionCheck（生产装配含 HumanExecutor、" +
+        "dispatch 接收 execute、social 注入 executorRunner）",
+      judge: "claims-registry",
       checkedAt: "2026-11-23",
       source: {
         doc: "docs/decisions/0014-policy-auto-approval-and-a-module-nobody-calls.md",
         line: 335,
         sentence:
-          "2. 「HTTP 可达口径的建卡者仍是零」【仍成立】—— human.ts 今天零生产入口",
+          "2. 「HTTP 可达口径的真人席建卡者已接通」—— human.ts 经生产执行器装配与 CoS 派发到达 createCard",
       },
-      check: (f) => deadModulesHas(f, "executors/human.ts"),
+      check: executorProductionCheck,
     },
   ];
 

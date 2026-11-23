@@ -27,25 +27,28 @@
 import { createHmac } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import {
-  HEADER_NONCE,
-  HEADER_SIGNATURE,
-  HEADER_TIMESTAMP,
-  NonceGuard,
-  canonicalString,
-  signRequest,
-  verifyRequest,
-} from "../../packages/hub/src/http/auth.js";
+  dispatch,
+  type MainDeps,
+} from "../../packages/desktop/src/main/channels.js";
 import {
   HEADER_NONCE as DESKTOP_HEADER_NONCE,
   HEADER_SIGNATURE as DESKTOP_HEADER_SIGNATURE,
   HEADER_TIMESTAMP as DESKTOP_HEADER_TIMESTAMP,
   canonicalString as desktopCanonicalString,
-  makeSignedFetch,
   type FetchInitLike,
   type FetchLike,
   type FetchResponseLike,
+  makeSignedFetch,
 } from "../../packages/desktop/src/main/signed-fetch.js";
-import { type MainDeps, dispatch } from "../../packages/desktop/src/main/channels.js";
+import {
+  canonicalString,
+  HEADER_NONCE,
+  HEADER_SIGNATURE,
+  HEADER_TIMESTAMP,
+  NonceGuard,
+  signRequest,
+  verifyRequest,
+} from "../../packages/hub/src/http/auth.js";
 
 const TOKEN = "desktop-test-token-0123456789";
 const HUB = "127.0.0.1:8765";
@@ -70,7 +73,10 @@ function capture(): { calls: Captured[]; fetchImpl: FetchLike } {
       headers: init.headers,
       ...(init.body === undefined ? {} : { body: init.body }),
     });
-    const res: FetchResponseLike = { status: 200, text: async () => '{"ok":true}' };
+    const res: FetchResponseLike = {
+      status: 200,
+      text: async () => '{"ok":true}',
+    };
     return res;
   };
   return { calls, fetchImpl };
@@ -151,10 +157,19 @@ describe("① 桌面壳发出的请求，hub 自己的验签判通过", () => {
     // 而固定 nonce 配共享 guard 必然在第 2 条上 replayed_nonce。
     // 我第一版就是那么写的，红得很干净：那是替身的错，不是实现的错。
     const { calls, fetchImpl } = capture();
-    const deps = makeSignedFetch({ token: TOKEN, hubAddress: HUB, fetchImpl, now: () => NOW });
+    const deps = makeSignedFetch({
+      token: TOKEN,
+      hubAddress: HUB,
+      fetchImpl,
+      now: () => NOW,
+    });
     await dispatch(deps, "hub:listTasks", undefined);
     await dispatch(deps, "hub:listApprovals", { status: "pending", limit: 5 });
-    await dispatch(deps, "hub:decideApproval", { approvalId: "c-1", resume: "approve", note: "可以" });
+    await dispatch(deps, "hub:decideApproval", {
+      approvalId: "c-1",
+      resume: "approve",
+      note: "可以",
+    });
     expect(calls).toHaveLength(3);
     // 【共享】一个 guard 才有内容：三条各自 new 一个的话重放永远测不到。
     const guard = new NonceGuard();
@@ -224,7 +239,11 @@ describe("③ 反向：逐个承重位单独扰动 ⇒ 验签必须失败在【�
   // 我第一版写的是 hub 的那一份，于是整节在拿 hub 的规范串和它自己对账 ——
   // **抄件被改坏也一条不红**，而这一节存在的理由恰恰是「抄件可能被改坏」。
   // 下面那句「正确的这一份 = hub 算的那一份」也因为换了 want 才真的有内容。
-  const want = desktopCanonicalString({ ...base, timestamp: NOW, nonce: NONCE });
+  const want = desktopCanonicalString({
+    ...base,
+    timestamp: NOW,
+    nonce: NONCE,
+  });
 
   const sigOf = (canon: string): string =>
     // 规范串 → 签名。绕开 canonicalString 自己，直接喂 HMAC：
@@ -239,22 +258,42 @@ describe("③ 反向：逐个承重位单独扰动 ⇒ 验签必须失败在【�
       // 分隔符换成空格
       ["分隔符换成空格", segs.join(" ")],
       // method 保持小写（canonicalString 里少了那个 toUpperCase）
-      ["method 保持小写", ["post", segs[1], segs[2], segs[3], segs[4]].join("\n")],
+      [
+        "method 保持小写",
+        ["post", segs[1], segs[2], segs[3], segs[4]].join("\n"),
+      ],
       // 先把 query 摘掉再签（channels.ts 那段注释点名防的就是这个）
-      ["剥掉 query", ["POST", "/approvals", segs[2], segs[3], segs[4]].join("\n")],
+      [
+        "剥掉 query",
+        ["POST", "/approvals", segs[2], segs[3], segs[4]].join("\n"),
+      ],
       // body 摘要换成原文（少了那个 sha256）
-      ["body 用原文而非摘要", [segs[0], segs[1], base.body, segs[3], segs[4]].join("\n")],
+      [
+        "body 用原文而非摘要",
+        [segs[0], segs[1], base.body, segs[3], segs[4]].join("\n"),
+      ],
       // 时间戳与 nonce 两段互换
-      ["时间戳与 nonce 互换", [segs[0], segs[1], segs[2], segs[4], segs[3]].join("\n")],
+      [
+        "时间戳与 nonce 互换",
+        [segs[0], segs[1], segs[2], segs[4], segs[3]].join("\n"),
+      ],
     ];
     for (const [name, wrong] of variants) {
       // 先验【扰动本身有效】（这一条就是我第一版缺的那一位）
-      expect(wrong, name + "：这一发没有真的改动规范串，是个空用例").not.toBe(want);
+      expect(wrong, name + "：这一发没有真的改动规范串，是个空用例").not.toBe(
+        want,
+      );
       expect(sigOf(wrong), name).not.toBe(sigOf(want));
     }
     // 而正确的这一份【确实】是 hub 算的那一份（否则上面在比两个都错的东西）
     expect(want).toBe(
-      canonicalString({ method: "POST", target: "/approvals?status=pending&limit=5", body: base.body, timestamp: NOW, nonce: NONCE }),
+      canonicalString({
+        method: "POST",
+        target: "/approvals?status=pending&limit=5",
+        body: base.body,
+        timestamp: NOW,
+        nonce: NONCE,
+      }),
     );
   });
 
@@ -266,10 +305,21 @@ describe("③ 反向：逐个承重位单独扰动 ⇒ 验签必须失败在【�
     const calls: Captured[] = [];
     const tampered: FetchLike = async (url, init: FetchInitLike) => {
       const r = await fetchImpl(url + "&x=1", init);
-      calls.push({ url: url + "&x=1", method: init.method, headers: init.headers, ...(init.body === undefined ? {} : { body: init.body }) });
+      calls.push({
+        url: url + "&x=1",
+        method: init.method,
+        headers: init.headers,
+        ...(init.body === undefined ? {} : { body: init.body }),
+      });
       return r;
     };
-    const d2 = makeSignedFetch({ token: TOKEN, hubAddress: HUB, fetchImpl: tampered, now: () => NOW, nonce: () => NONCE });
+    const d2 = makeSignedFetch({
+      token: TOKEN,
+      hubAddress: HUB,
+      fetchImpl: tampered,
+      now: () => NOW,
+      nonce: () => NONCE,
+    });
     await d2.signedFetch("/approvals?status=pending", { method: "GET" });
     const c = calls[0];
     if (c === undefined) throw new Error("替身没抓到请求，下面那条断言会假绿");
@@ -335,7 +385,9 @@ describe("③ 反向：逐个承重位单独扰动 ⇒ 验签必须失败在【�
     const deps = makeSignedFetch({ token: TOKEN, hubAddress: HUB, fetchImpl });
     await deps.signedFetch("/tasks", { method: "GET" });
     await deps.signedFetch("/tasks", { method: "GET" });
-    expect(calls[0]?.headers[HEADER_NONCE]).not.toBe(calls[1]?.headers[HEADER_NONCE]);
+    expect(calls[0]?.headers[HEADER_NONCE]).not.toBe(
+      calls[1]?.headers[HEADER_NONCE],
+    );
   });
 });
 
@@ -349,7 +401,7 @@ describe("④ 发出的形状：body 键的有无、query 的透传、method 的
     const deps = shell(fetchImpl);
     await dispatch(deps, "hub:listTasks", undefined);
     await dispatch(deps, "hub:createTask", { idea: "x" });
-    expect(Object.prototype.hasOwnProperty.call(calls[0] as object, "body")).toBe(false);
+    expect(Object.hasOwn(calls[0] as object, "body")).toBe(false);
     expect(calls[1]?.body).toBe('{"idea":"x"}');
   });
 
@@ -391,8 +443,12 @@ describe("⑤ token 为空 ⇒ 构造时就抛，而不是签出必然 401 的�
     const { fetchImpl } = capture();
     // 这两发钉的是「没配 token」与「token 配错」必须在【形状】上可分：
     // 让它签 ⇒ 症状是 401 ⇒ 排查的人去换凭据，而真凶是启动器没传。
-    expect(() => makeSignedFetch({ token: "", hubAddress: HUB, fetchImpl })).toThrow(/空串/);
-    expect(() => makeSignedFetch({ token: "   ", hubAddress: HUB, fetchImpl })).toThrow(/空串/);
+    expect(() =>
+      makeSignedFetch({ token: "", hubAddress: HUB, fetchImpl }),
+    ).toThrow(/空串/);
+    expect(() =>
+      makeSignedFetch({ token: "   ", hubAddress: HUB, fetchImpl }),
+    ).toThrow(/空串/);
   });
 
   it("fetchImpl 是【必填】：漏传在这台机器上会以编译错误出现，而不是运行期 undefined", () => {
@@ -400,8 +456,49 @@ describe("⑤ token 为空 ⇒ 构造时就抛，而不是签出必然 401 的�
     // `?? globalThis.fetch` 会让调用点看起来什么都没做，而离线机器上
     // globalThis.fetch 甚至可能是 undefined ⇒ 第一次 invoke 就 unreachable，
     // 症状与「Hub 没起来」同形。详见 signed-fetch.ts 文件头那三条理由。
-    expect(typeof makeSignedFetch({ token: TOKEN, hubAddress: HUB, fetchImpl: capture().fetchImpl }).signedFetch).toBe(
-      "function",
-    );
+    expect(
+      typeof makeSignedFetch({
+        token: TOKEN,
+        hubAddress: HUB,
+        fetchImpl: capture().fetchImpl,
+      }).signedFetch,
+    ).toBe("function");
+  });
+});
+
+describe("⑥ 二进制响应逐字节转 base64", () => {
+  it("资产/导出响应不经过 UTF-8 text()", async () => {
+    const bytes = Buffer.from([0, 255, 128, 65, 0]);
+    const fetchImpl: FetchLike = async () => ({
+      status: 200,
+      text: async () => {
+        throw new Error("二进制路径不许调用 text()");
+      },
+      headers: {
+        get: (name) =>
+          name === "content-type" ? "application/octet-stream" : null,
+      },
+      arrayBuffer: async () => Uint8Array.from(bytes).buffer,
+    });
+    const result = await shell(fetchImpl).signedFetch("/api/v1/assets/a-1", {
+      method: "GET",
+    });
+    expect(result).toEqual({
+      status: 200,
+      bodyText: "",
+      bodyBase64: bytes.toString("base64"),
+      contentType: "application/octet-stream",
+    });
+    const dispatched = await dispatch(shell(fetchImpl), "hub:domainRequest", {
+      endpoint: "GET /api/v1/assets/:id",
+      params: { id: "a-1" },
+    });
+    expect(dispatched).toEqual({
+      ok: true,
+      data: {
+        base64: bytes.toString("base64"),
+        content_type: "application/octet-stream",
+      },
+    });
   });
 });

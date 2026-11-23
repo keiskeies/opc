@@ -30,7 +30,11 @@
  * 由 test/web/hub-projection.test.ts 从源码层面钉住这件事（见那里的守卫）。
  */
 
-import { type FeedItemView, feedItemSchema, type TaskView } from "@opc/contracts";
+import {
+  type FeedItemView,
+  feedItemSchema,
+  type TaskView,
+} from "@opc/contracts";
 
 /** 一次 GET /tasks 的快照。as_of_seq 是 Hub 报的「这份状态覆盖到 events.id = ?」。 */
 export interface TaskSnapshot {
@@ -244,7 +248,9 @@ export function applyEvent(p: Projection, raw: unknown): Applied {
     // 抛而不是忽略：见上面那段。忽略一条解不开的帧 = 亲手制造一个洞而不标 stale。
     throw new Error(
       "事件帧不符合 contracts 的 feedItemSchema，拒绝投影：" +
-        parsed.error.issues.map((i) => i.path.join(".") + " " + i.message).join("; ") +
+        parsed.error.issues
+          .map((i) => i.path.join(".") + " " + i.message)
+          .join("; ") +
         "。宁可让界面停在上一帧并报一次错，也不要静默跳过 —— " +
         "跳过就是一个【无人知晓的洞】。",
     );
@@ -355,6 +361,14 @@ function applyItem(p: Projection, item: FeedItemView): Projection {
   switch (item.kind) {
     case "TaskStateChanged": {
       const to = body["to"];
+      // taskId 键缺席 = 这帧说自己不属于任何任务。而状态跃迁按构造必须有任务
+      // （events 那一侧的跃迁审计 task_id 也从不为空），所以缺这个键的
+      // TaskStateChanged 是【错发/伪造的形状】。不拿缺键去查表、也不猜是哪条任务 ——
+      // 标 stale 去重拉快照，与下面「没见过的任务」同一立场：前端不凭空造数据。
+      // （判据从 === null 改成 === undefined：feedItemSchema 的 taskId 改为
+      // .optional() 后，「无任务」在帧上的表示从 null 改成了键缺席 —— 与库里
+      // task_id 的 NULL 同一口径，见 contracts/api.ts 与 bus.ts 族级注释第 ③ 条。）
+      if (item.taskId === undefined) return markGap(next);
       const existing = p.tasks.get(item.taskId);
       if (existing === undefined || typeof to !== "string") {
         // 没有这条任务 ⇒ 我们【没见过】它（快照之后新建的）。
@@ -375,6 +389,55 @@ function applyItem(p: Projection, item: FeedItemView): Projection {
       tasks.set(item.taskId, { ...existing, status: to });
       return { ...next, tasks };
     }
+    // 以下十一是实施计划 §5 那族「群角色上层」事件（bus.ts 第 10–20 个 kind）。
+    // 每一支都【只推进 cursor 就返回】—— 与 charter-pump 那族同款立场：
+    // 投影层没有它们的每实体存储（没有群表、成员表、会话表、会议表、面板表、
+    // 文档表、执行记录表），凭空造一行就是前端生成数据。cursor 推进是这一层
+    // 此刻唯一诚实的动作；真正的消费者在 T8–T11 各自落地时【订阅原始事件流】
+    // 去做，而不是往这张任务表里塞私货。显式列出而不是静默落 default：
+    // 少列一支不会崩（default 行为相同），但「哪个 kind 被想过了」在代码里
+    // 必须可见——这是本仓对每条事件都要被认领的口径。
+    case "GroupUpdated":
+      // 未来消费者：T8 群容器视图（左栏群列表的增删改刷新）。
+      return next;
+    case "MemberHired":
+      // 未来消费者：T8 通讯录/招聘页（新成员进名单）。
+      return next;
+    case "MemberUpdated":
+      // 未来消费者：T8 成员档案视图（改名/技能/执行器/下线）。
+      return next;
+    case "MessageReceived":
+      // 未来消费者：T7 会话视图（消息流追加、未读角标）。
+      return next;
+    case "MeetingOpened":
+    // 未来消费者： T7 会议视图（会议卡片出现）。
+    case "MeetingTurnPosted":
+      // 未来消费者：T7 会议视图（逐字稿逐轮追加）。
+      return next;
+    case "MeetingConcluded":
+      // 未来消费者：T7 会议视图（会议卡片置为已散会）。
+      return next;
+    case "MeetingCancelled":
+      // 未来消费者：T7 会议视图（会议卡片置为已取消，reason 直接上卡片）。
+      return next;
+    case "BacklogChanged":
+      // 未来消费者：T9 面板视图（待办行的增删改移）。
+      return next;
+    case "DocumentChanged":
+      // 未来消费者：T9 文档中心（文档树与版本列表刷新）。
+      return next;
+    case "RhythmEventRecorded":
+      // T8 节奏时间线；只推进 cursor，具体摘要由节奏视图拉取。
+      return next;
+    case "ResearchCardCreated":
+      // T8 每日调研卡列表；同样不折进任务表。
+      return next;
+    case "DispatchAssigned":
+      // CoS 已建执行任务；任务表由 REST 快照对账，增量只推进 cursor。
+      return next;
+    case "ExecutorRunFinished":
+      // 未来消费者：T10/T11 执行观测（成员头像旁的「干完一票」提示）。
+      return next;
     default: {
       // 其余事件类型【不改 tasks】，只推进 cursor。
       // 它们各自的显示需求（待批卡片、预算暂停横幅）由渲染层订阅原始事件流去做，
@@ -396,7 +459,10 @@ export function noteDisconnected(p: Projection, attempt: number): Projection {
  * 它的正确反应【只有】重拉快照 —— 重试当前连接、忽略它、或者按已有信息猜缺失的部分，
  * 三个都是错的，而第三个最像能工作（多数时候猜对，偶尔显示一个过期状态）。
  */
-export function applyFrame(p: Projection, frame: { event: string; id?: string; data: string }): Applied {
+export function applyFrame(
+  p: Projection,
+  frame: { event: string; id?: string; data: string },
+): Applied {
   if (frame.event === "snapshot") {
     const body = JSON.parse(frame.data) as {
       as_of_seq: number;
