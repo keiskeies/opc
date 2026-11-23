@@ -464,7 +464,14 @@ export const BASELINE: Baseline = new Map([
   // 它们今天的诚实口径不是「零调用方」而是「有读者而无写者」：
   // recordAutoApproval 在 src 里仍然零调用（query.test.ts ⑦ 那一发源码判据钉着），
   // 「存在一条被自动批准的审批」这一发今天必须红（O9 验收第 1 条）。
-  ["evidence/store.ts", "VerifyReport"],
+  // ⚠ evidence/store.ts 一条【已摘除】（round358，门 4 接线）：
+  // 证据包制品的落盘层从死模块变成存续模块 —— 链是
+  // `hub:engine`（CLI）→ engine/hub-work.ts → engine/work.ts → evidence/store.ts
+  // （work.ts:40 import `artifactsRoot`，在 `--evidence-root` 缺省时真调它），
+  // 而 turn-bundle.ts 的 produceTurnArtifact 落盘那半又引用 store.ts 的文件操作纪律。
+  // 方向 B 那条红如约出现并点了名。⏬ 但【模块活了 ≠ 整条链通了】：
+  // 真正写证据包的 EvidenceStore 类与 TurnBundle 装配（turn-bundle.ts）都要等门 4
+  // 的保存路径真跑起来；本表只判【编译期可达】，见簇一「两种粒度各守各的」那条。
   // ⚠ channels/abstraction.ts 与 channels/approval-bridge.ts 两条【已摘除】（round281，O12 动作 2）：
   // serve/im-channels.ts 装配了真飞书适配器，而 serve/assemble.ts 的 boot 每一轮心跳派发它。
   // 这两格的设计死法就是方向 B —— 与 approvals/timeout.ts、policy/auto-approve.ts 同剧本，

@@ -40,40 +40,47 @@ const ROOT: string = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
  */
 const REGISTRY: readonly ZeroClaim[] = [
   // ── 现在时，主张"没有写入方"（今天核对为真）──────────────────────
+  // ⚠ round358 门 4 接线后 review_gates 有了第一个写入方（turn-bundle.ts 的
+  //   writeGateDecision），下面 5 条当年为真的「零写入方」声明全部过期 ⇒
+  //   逐条改成各自的正确形状（historical / quoted），原话留在原地——
+  //   正是这个登记表设计要的形状（更正一句假话 = 改登记，不删登记）。
   {
     kind: "table",
     file: "packages/hub/src/db/integrity.ts",
-    anchor: "没有任何 INSERT INTO review_gates",
+    anchor: "曾经没有任何 INSERT INTO review_gates",
     table: "review_gates",
     expects: "zero",
+    historical: true,
   },
   {
     kind: "table",
     file: "packages/hub/src/db/integrity.ts",
-    anchor: "那张表【没有生产者】",
+    anchor: "那张表今天【不再是零写入方】",
     table: "review_gates",
-    expects: "zero",
+    expects: "has",
   },
   {
     kind: "table",
     file: "packages/hub/src/engine/dispatch.ts",
-    anchor: "那张表【仍然零写入方】",
+    anchor: "「`review_gates` 那张表仍然零写入方」",
     table: "review_gates",
-    expects: "zero",
+    expects: "quoted",
   },
   {
     kind: "table",
     file: "packages/hub/src/memory/role-memory.ts",
-    anchor: "表**仍然零写入方**（",
+    anchor: "表曾经零写入方",
     table: "review_gates",
     expects: "zero",
+    historical: true,
   },
   {
     kind: "table",
     file: "packages/hub/src/memory/role-memory.ts",
-    anchor: "那张表仍然零写入方。所以",
+    anchor: "那张表还是零写入方",
     table: "review_gates",
     expects: "zero",
+    historical: true,
   },
   // ── 历史时态：当年为真，今天已有写入方。原话留在原地（0044 §9.1 口径）──
   {
@@ -158,8 +165,8 @@ const REGISTRY: readonly ZeroClaim[] = [
   {
     kind: "other",
     file: "packages/hub/src/memory/role-memory.ts",
-    anchor: "那一列也零写入方",
-    about: "decision_reason 那一列在 src 的 SQL 里从没出现",
+    anchor: "那一列当年零写入方",
+    about: "decision_reason 那一列在 src 的 SQL 里当年没出现（0060 才接上）",
   },
   {
     kind: "other",
@@ -239,7 +246,7 @@ describe("零写入方声明的事实核查", () => {
     // 规模：本仓 src 有 100+ 个文件。下限写 60，防"取材 glob 坏掉"而不是充当账本。
     expect(files.length).toBeGreaterThanOrEqual(60);
     // 生产者扫描必须能扫出【已知存在】的写入方 —— 阳性对照：通路坏了先在这里红，
-    // 而不是把「review_gates 零写入方」旁边的 harness_calls 也报成零（0062 §2 同源教训）。
+    // 而不是把「card_deliveries 零写入方」旁边的 harness_calls 也报成零（0062 §2 同源教训）。
     const producers = findProducers(files);
     const tables = new Set(producers.map((p) => p.table));
     for (const must of [
@@ -250,7 +257,9 @@ describe("零写入方声明的事实核查", () => {
     ]) {
       expect(tables.has(must), "阳性对照：写入方扫不出来 " + must).toBe(true);
     }
-    expect(tables.has("review_gates")).toBe(false);
+    // 反面对照：round358 之后 review_gates 有了第一个写入方（turn-bundle.ts），
+    // 不能再用它当「必然零写入」的例子 —— 换一张今天 src 里确实零 INSERT 的表。
+    expect(tables.has("meetings")).toBe(false);
     // 声明句必须扫得出【已知存在】的句子；扫出来 0 句 = 正则坏了 = 守卫恒绿。
     expect(findZeroClaims(files).length).toBeGreaterThanOrEqual(10);
   });

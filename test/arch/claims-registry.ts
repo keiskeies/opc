@@ -2050,7 +2050,7 @@ export function nodeKeyIdentityCheck(f: Files): string {
       checkedAt: "2026-11-17",
       source: {
         doc: "docs/OPC-OS-功能优化设计.md",
-        line: 1339,
+        line: 1350,
         sentence:
           "makeChannelActorResolver（把 channelId → 平台 → 角色的那座桥）零调用方",
       },
@@ -2065,7 +2065,7 @@ export function nodeKeyIdentityCheck(f: Files): string {
       checkedAt: "2026-11-17",
       source: {
         doc: "docs/OPC-OS-功能优化设计.md",
-        line: 1059,
+        line: 1070,
         sentence:
           "BudgetTracker（全仓唯一算 breached、唯一发 BudgetPaused 的东西）没有 new 点",
       },
@@ -2074,7 +2074,7 @@ export function nodeKeyIdentityCheck(f: Files): string {
     {
       id: "r5",
       claim:
-        "review_gates 表在 src 里零 INSERT（db/integrity.ts 与 role-memory.ts 都这么说）",
+        "review_gates 表当年在 src 里零 INSERT（db/integrity.ts 与 role-memory.ts 都这么说过；round358 门 4 接线后 turn-bundle.ts 的 writeGateDecision 成为第一个写入方，该句翻作历史）",
       method:
         "test/arch/zero-producer.test.ts › REGISTRY 里的 review_gates zero 条目（双向核对）",
       judge: "zero-producer",
@@ -2113,7 +2113,7 @@ export function nodeKeyIdentityCheck(f: Files): string {
       checkedAt: "2026-11-17",
       source: {
         doc: "docs/OPC-OS-功能优化设计.md",
-        line: 1217,
+        line: 1228,
         sentence: "O9 自动批准：691 行判据，0 个调用方",
       },
       check: r7NoWriterCheck,
@@ -2128,7 +2128,7 @@ export function nodeKeyIdentityCheck(f: Files): string {
       checkedAt: "2026-11-17",
       source: {
         doc: "docs/OPC-OS-功能优化设计.md",
-        line: 901,
+        line: 912,
         sentence: "harness/ 整目录对外零 import",
       },
       check: (f) => {
@@ -2171,7 +2171,7 @@ export function nodeKeyIdentityCheck(f: Files): string {
       checkedAt: "2026-11-17",
       source: {
         doc: "docs/OPC-OS-功能优化设计.md",
-        line: 1805,
+        line: 1827,
         sentence: "本篇之外还有一份计划文档，而它的出口门前提今天不成立",
       },
       check: r10LintGuardCheck,
@@ -2190,7 +2190,7 @@ export function nodeKeyIdentityCheck(f: Files): string {
       checkedAt: "2026-11-17",
       source: {
         doc: "docs/OPC-OS-功能优化设计.md",
-        line: 1896,
+        line: 1918,
         sentence: "上一格那条计划引用守卫，落地后被自己的变异打回过一次",
       },
       check: r11PlanRefsGuardCheck,
@@ -2209,7 +2209,7 @@ export function nodeKeyIdentityCheck(f: Files): string {
       checkedAt: "2026-11-17",
       source: {
         doc: "docs/OPC-OS-功能优化设计.md",
-        line: 1927,
+        line: 1949,
         sentence: "计划的 6 道出口门禁，今天",
       },
       check: r12GatePathGuardCheck,
@@ -2231,7 +2231,7 @@ export function nodeKeyIdentityCheck(f: Files): string {
       checkedAt: "2026-11-17",
       source: {
         doc: "docs/OPC-OS-功能优化设计.md",
-        line: 1991,
+        line: 2013,
         sentence:
           "今天真的员工身上唯一生效的安全边界，此前一条守卫都没有 —— 顺带量到 `tsc -b` 从不检查测试",
       },
@@ -2254,7 +2254,7 @@ export function nodeKeyIdentityCheck(f: Files): string {
       checkedAt: "2026-11-17",
       source: {
         doc: "docs/OPC-OS-功能优化设计.md",
-        line: 2047,
+        line: 2069,
         sentence: "本篇自己的坐标从来没有门禁",
       },
       check: claimCoordsGuardCheck,
@@ -2342,7 +2342,7 @@ export function nodeKeyIdentityCheck(f: Files): string {
       checkedAt: "2026-11-19",
       source: {
         doc: "docs/OPC-OS-功能优化设计.md",
-        line: 2088,
+        line: 2110,
         sentence: "O8 那条端到端验收写出来了",
       },
       check: orgAddNodeGapCheck,
@@ -2388,7 +2388,7 @@ export function nodeKeyIdentityCheck(f: Files): string {
       checkedAt: "2026-11-17",
       source: {
         doc: "docs/OPC-OS-功能优化设计.md",
-        line: 1467,
+        line: 1478,
         sentence:
           "里那条真的变成 `approved`，且审计行 actor 是绑定的那个角色而不是",
       },
@@ -2429,7 +2429,7 @@ export function nodeKeyIdentityCheck(f: Files): string {
       checkedAt: "2026-11-17",
       source: {
         doc: "docs/OPC-OS-功能优化设计.md",
-        line: 1430,
+        line: 1441,
         sentence: "round283：动作 4 落地了",
       },
       check: cardDeliveryLedgerCheck,
@@ -2480,7 +2480,7 @@ export function nodeKeyIdentityCheck(f: Files): string {
       checkedAt: "2026-11-17",
       source: {
         doc: "docs/OPC-OS-功能优化设计.md",
-        line: 1403,
+        line: 1414,
         sentence: "这一格现在【有】机器判据：r18",
       },
       check: fetchDeadlineCheck,
@@ -2555,7 +2555,7 @@ export function nodeKeyIdentityCheck(f: Files): string {
       checkedAt: "2026-11-18",
       source: {
         doc: "docs/OPC-OS-功能优化设计.md",
-        line: 2014,
+        line: 2036,
         sentence: "round285：这一格接成了门禁，形状是棘轮（登记为 r19）",
       },
       check: testTypeRatchetCheck,
@@ -2605,7 +2605,7 @@ export function nodeKeyIdentityCheck(f: Files): string {
       checkedAt: "2026-11-17",
       source: {
         doc: "docs/OPC-OS-功能优化设计.md",
-        line: 1573,
+        line: 1584,
         sentence: "round293 落地并登记为 r20",
       },
       check: censusRecomputeCheck,
@@ -2651,7 +2651,7 @@ export function nodeKeyIdentityCheck(f: Files): string {
       checkedAt: "2026-11-17",
       source: {
         doc: "docs/OPC-OS-功能优化设计.md",
-        line: 2328,
+        line: 2350,
         sentence: "round293 第二段落地并登记为 r21",
       },
       check: gateExemptionAccountCheck,
@@ -2728,7 +2728,7 @@ export function nodeKeyIdentityCheck(f: Files): string {
       checkedAt: "2026-11-17",
       source: {
         doc: "docs/OPC-OS-功能优化设计.md",
-        line: 2452,
+        line: 2474,
         sentence: "round294 落地并登记为 r22",
       },
       check: addNodeDispatchCheck,
@@ -2796,7 +2796,7 @@ export function nodeKeyIdentityCheck(f: Files): string {
       checkedAt: "2026-11-18",
       source: {
         doc: "docs/OPC-OS-功能优化设计.md",
-        line: 2569,
+        line: 2591,
         sentence: "round298 落地并登记为 r23",
       },
       check: delegationEdgeSelfCheckCheck,
@@ -2869,7 +2869,7 @@ export function nodeKeyIdentityCheck(f: Files): string {
       checkedAt: "2026-11-18",
       source: {
         doc: "docs/OPC-OS-功能优化设计.md",
-        line: 2642,
+        line: 2664,
         sentence: "round299 落地并登记为 r24",
       },
       check: nodeKeyIdentityCheck,

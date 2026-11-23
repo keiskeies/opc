@@ -321,9 +321,9 @@ describe("死模块哨兵", () => {
      * 这一格是【防退化的下界】，不是棘轮：它只管"核对本身有没有东西可核对"，
      * 判据本体是下面那句 invalidBaselineMarks。
      *
-     * 7 = 16 − 9。登记过 16 条（那份清单搬进 `dead-modules.ts` 之前住在这里，
+     * 6 = 16 − 10。登记过 16 条（那份清单搬进 `dead-modules.ts` 之前住在这里，
      * 首提 ffae248 时表里已是 14 条 —— 下面 round281 那两条在那之前就已摘除），
-     * 摘掉的九条各自兑现了它登记的死法（方向 B 那条红如约出现，然后才删行）：
+     * 摘掉的十条各自兑现了它登记的死法（方向 B 那条红如约出现，然后才删行）：
      *  · round281（O12 动作 2）：`channels/abstraction.ts`
      *  · round281（O12 动作 2）：`channels/approval-bridge.ts`
      *  · round305（Task 6.1 接线）：`heartbeat/retry.ts` —— engine/turn-retry.ts
@@ -346,10 +346,16 @@ describe("死模块哨兵", () => {
      *    ⚠ 这是九条里【唯一一条只接上了一个函数】的：同一文件里 `gateConfigBlock`
      *    仍然 0 调用点，`selfReviewEdgeBlock` / `independentReviewerPath` 各 1 个
      *    且都在彼此内部 ⇒ 「那一族活了」在今天不成立，逐条读数在基线那一格的注释里。
+     *  · round358（门 4 接线）：`evidence/store.ts` —— 证据制品落盘层从死模块变成
+     *    存续模块（链：`hub:engine` CLI → engine/hub-work.ts → engine/work.ts →
+     *    evidence/store.ts 的 `artifactsRoot`；turn-bundle.ts 的产物路径也在它身上）。
+     *    ⚠ 「模块活了 ≠ 整条链通了」在这里再说一遍：真正写证据包的 EvidenceStore
+     *    类与 turn-bundle.ts 的装配都要等门 4 的保存路径真跑起来 —— 本表只判【模块级】
+     *    可达，O5 的「内容可信」那一半仍由岗位书标准撑（role_charters 今天 0 行）。
      * ⚠ 下一次动这个数字之前先问：这两条差额有没有一条登记过的死法对应？
      * 没有就是有人删了基线条目而没接线，那种删法正是这条下界存在的全部理由。
      */
-    expect(BASELINE.size).toBeGreaterThanOrEqual(7);
+    expect(BASELINE.size).toBeGreaterThanOrEqual(6);
     expect(invalidBaselineMarks(BASELINE, collectModules()).join("\n")).toBe(
       "",
     );

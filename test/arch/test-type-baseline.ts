@@ -442,11 +442,19 @@ export function runTypeCheck(o: RunOptions): TscRun {
   const stdout = String(check.stdout ?? "");
   const stderr = String(check.stderr ?? "");
   const merged = stdout + (stderr.trim() === "" ? "" : "\n" + stderr);
-  if (merged.trim() === "") {
+  // ⚠ 这段的判定随 B5 翻了一面。立它的时候语料恒有 291 条错，tsc【必然】有输出，
+  // 所以「空输出」只可能意味着 tsc 没真正跑 ⇒ 一律当故障抛。B5 把语料清到 0 错、
+  // 并加了一份 0 错硬门（根 tsconfig.test.json）之后，「空输出」第一次有了一种
+  // 合法读法：检查真的跑了、一条错都没有。于是按【退出码】分两支：
+  //   · 空 + exit 0 ⇒ 真干净，读成 0 条错（不再是故障）；
+  //   · 空 + 非零 exit ⇒ tsc 崩了/没跑起来，照样抛 —— 那是真故障。
+  // 判「干净」靠的是退出码不是输出：`--noEmit` 下 tsc 0 错就是静默成功，
+  // 输出里【没有】"Found 0 errors" 那句（实测），所以不能用「有没有输出」当判据。
+  if (merged.trim() === "" && (check.status ?? 1) !== 0) {
     throw new Error(
       "tsc 一句输出都没有（退出码 " +
         check.status +
-        "）。空输出与「干净」在 stdout 上长得一样，这里不当它是干净。",
+        "，非零）。空输出 + 非零退出 = tsc 没跑起来，这里不当它是干净。",
     );
   }
   const parsed = parseTscOutput(merged, root);
