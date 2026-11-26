@@ -109,27 +109,17 @@ async function seedSheet(
  * 所以判定一律配「画在某一列那一行附近」的位置条件。
  */
 async function installDrawSpy(page: Page): Promise<void> {
-  await page.addInitScript(() => {
-    const w = window as unknown as {
-      __draws: Array<{ t: string; x: number; y: number }>;
-    };
-    w.__draws = [];
+  // 页侧探针一律字符串（本仓 tsconfig lib 只有 ES2023，node 侧不认 window/
+  // CanvasRenderingContext2D；字符串在页面上下文执行，那些名字天然存在）。
+  await page.addInitScript(`(() => {
+    window.__draws = [];
     const proto = CanvasRenderingContext2D.prototype;
     const original = proto.fillText;
-    proto.fillText = function patched(
-      this: CanvasRenderingContext2D,
-      text: string,
-      x: number,
-      y: number,
-      ...rest: number[]
-    ): void {
-      w.__draws.push({ t: String(text), x: Number(x), y: Number(y) });
-      original.apply(
-        this,
-        [text, x, y, ...rest] as Parameters<typeof original>,
-      );
+    proto.fillText = function patched(text, x, y, ...rest) {
+      window.__draws.push({ t: String(text), x: Number(x), y: Number(y) });
+      original.apply(this, [text, x, y, ...rest]);
     };
-  });
+  })()`);
 }
 
 type Draw = { t: string; x: number; y: number };
@@ -143,6 +133,24 @@ async function draws(page: Page): Promise<Draw[]> {
 async function resetDraws(page: Page): Promise<void> {
   await page.evaluate("window.__draws.length = 0");
 }
+
+type Box = { w: number; h: number };
+type LayoutProbe = {
+  canvas: Box;
+  host: Box;
+  editor: Box;
+  surface: Box;
+  toolbar: boolean;
+  tabs: string[];
+};
+/** 只读态形状探针（页侧返回体的 node 侧镜像）。 */
+type ReadonlyShapeProbe = {
+  editorClass: string;
+  toolbarDisplay: string;
+  addLiDisplay: string;
+  resizerPointerEvents: string;
+  saveDisabled: boolean;
+};
 
 /**
  * 某一格的内容读数。内容格 (row r, col c) 的文字锚点在 x=5+100c、y=12+25r
@@ -160,7 +168,8 @@ function cellValue(painted: Draw[], row: number, col: number): string {
       d.y >= y0 - 3 &&
       d.y < y0 + 22,
   );
-  return inCell.length ? inCell[inCell.length - 1].t : "";
+  const last = inCell[inCell.length - 1];
+  return last === undefined ? "" : last.t;
 }
 
 /** 打开文档并等画布真出现（库在 loadData 之后才挂 canvas）。 */
@@ -259,7 +268,7 @@ test.describe("表格文档：打开就是一张完整的表", () => {
     ]);
     await installDrawSpy(page);
     await openSheet(page, docId);
-    const m = await page.evaluate(`(() => {
+    const m = await page.evaluate<LayoutProbe>(`(() => {
       const canvas = document.querySelector('.sheet-canvas canvas');
       const host = document.querySelector('.sheet-canvas');
       const editor = document.querySelector('.sheet-editor');
@@ -330,20 +339,23 @@ test.describe("表格文档：打开就是一张完整的表", () => {
       Array.isArray(parsed.sheets),
       "正文不是 {sheets:[...]} ⇒ hub 的 xlsx 导出会拒",
     ).toBe(true);
-    expect(parsed.sheets[0].name).toBe("Sheet1");
+    // noUncheckedIndexedAccess 下逐层索引是 T|undefined：先收窄再断言（禁 !）。
+    const sheet0 = parsed.sheets[0];
+    const row1 = sheet0?.rows[1];
+    if (sheet0 === undefined || row1 === undefined) {
+      throw new Error("正文缺少 sheets[0] 或 rows[1] ⇒ 回写形状不对");
+    }
+    expect(sheet0.name).toBe("Sheet1");
     // 前导零是信息，不能被「数字还原」吃掉（A00456 不是 456）。
-    expect(
-      parsed.sheets[0].rows[1][0],
-      "编号被当成数字，前导零丢了",
-    ).toBe("A00456");
-    expect(parsed.sheets[0].rows[1][1]).toBe(12.5);
+    expect(row1[0], "编号被当成数字，前导零丢了").toBe("A00456");
+    expect(row1[1]).toBe(12.5);
     // 体积：rows 必须稀疏。稠密写回 100 行 × 26 列会直接撞 hub 的 64KB 请求上限。
     expect(
       body.length,
       `正文 ${body.length} 字节 ⇒ 稀疏化没生效，稠密写回会撞 64KB 上限`,
     ).toBeLessThan(4096);
     expect(
-      parsed.sheets[0].rows.length,
+      sheet0.rows.length,
       "行数被画布的 100 行默认撑大",
     ).toBeLessThanOrEqual(3);
   });
@@ -472,7 +484,7 @@ test.describe("表格文档：只读那一档是真边界", () => {
       if (req.method() === "PATCH" && req.url().includes(`/documents/${docId}`))
         patches.push(req.postData() ?? "");
     });
-    const shape = await page.evaluate(`(() => {
+    const shape = await page.evaluate<ReadonlyShapeProbe>(`(() => {
       const host = document.querySelector('.sheet-canvas');
       const toolbar = host.querySelector('.x-spreadsheet-toolbar');
       const addLi = host.querySelector('.x-spreadsheet-bottombar .x-spreadsheet-menu > li');
@@ -499,10 +511,10 @@ test.describe("表格文档：只读那一档是真边界", () => {
     await page.keyboard.type("改名了");
     await page.keyboard.press("Enter");
     await tab.click({ button: "right" });
-    const menuItems = await page.evaluate(
+    const menuItems = await page.evaluate<number>(
       `[...document.querySelectorAll('.sheet-canvas .x-spreadsheet-contextmenu .x-spreadsheet-item')].filter((el) => el.offsetParent !== null).length`,
     );
-    const tabTexts = await page.evaluate(
+    const tabTexts = await page.evaluate<string[]>(
       `[...document.querySelectorAll('.sheet-canvas .x-spreadsheet-bottombar .x-spreadsheet-menu > li')].map((li) => li.textContent.trim())`,
     );
     // 底栏 li[0] 是隐藏的「+」新建钮（display:none，见 shape.addLiDisplay），li[1] 才是真页签。
