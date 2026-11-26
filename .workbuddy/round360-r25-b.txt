@@ -1,0 +1,33 @@
+    {
+      id: "r25",
+      claim:
+        "预算的门：上限那一侧读【列】、CLI 参数只是回落（CEO 拍板「预算列 = 生效值」，" +
+        "round360）—— 有预算行 ⇒ limit_cents 说话，POST /budget 追加预算真能把门打开；" +
+        "无预算行 ⇒ 参数说话。0045 §7 那三个候选一个都没选，拍的是第四条：门与界面共用" +
+        "同一个分母，(B) 那半「界面改读进程里的参数」随之作废。",
+      method:
+        "判据：test/arch/claims-registry.ts 的 budgetColumnGovernsCheck —— 只读一份" +
+        "【权威落点】（packages/hub/src/serve/charter-pump.ts 里 underTaskBudgetSql 那一段，" +
+        "用 sliceFrom 掐到下一条消费 SQL 之前），三格各判【剥掉注释之后】的字节：E1 上限" +
+        "那一坨含 `COALESCE((SELECT b.limit_cents FROM budgets b `；E2 比较尾巴 `, 0) < ` " +
+        "在场（防整条谓词换形状而 E1 被别处抄过去的同名字节喂绿）；E3 段内恰好 1 个 `?` ——" +
+        " 0 ⇒ 回落槽没了，≥2 ⇒ 五条 SQL 共用的绑参顺序被改（那条契约由 hub 侧拆 `?` 那一发" +
+        "钉着，测试可整份删、这格删不掉）。剥注释与切段都是必需的：那段函数头注释写的正是" +
+        "本条主张自己（旧文案的历史），判原文会被它喂绿；全文另有几十条 SQL 的绑定参数，" +
+        "不切段则 E3 恒成立。" +
+        "外加打在合成语料上的六发变异（claims-registry.test.ts 的 r25 那一族，不碰盘，" +
+        "发数以那个文件当场为准）：控制组该绿 / E1 列没了 ⇒ 红且不许红在别的格上（红因" +
+        "串扰排除）/ 只留一句「这里以前读列」的注释 ⇒ 仍红 / 比较方向翻成 `>=` ⇒ 红在 E2 / " +
+        "多一个 `?` ⇒ 红在 E3 / 函数改名（取材断掉）⇒ 红在「切不出那一段」而不是恒绿。" +
+        "生产行为那一半不在这里判：charter-pump、driver-pump、driver-status 各自的" +
+        "「⭐ 门也读【列】」那几发当场开库验放行，另有 .workbuddy 那台自回滚变异机打真字节。" +
+        "本条不重开库、不重跑那台机器，口径同 r12/r13/r21/r22/r24",
+      judge: "claims-registry",
+      checkedAt: "2026-11-23",
+      source: {
+        doc: "docs/CEO-决策简报-2026-11-22.md",
+        line: 134,
+        sentence: "### B8. 预算分母 / 追加预算按钮语义（0049 §12(B) → 0045 §7）",
+      },
+      check: budgetColumnGovernsCheck,
+    },

@@ -16,14 +16,15 @@ import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { beforeAll, describe, expect, it } from "vitest";
-import { type AppExports, loadAppJs } from "./app-loader.js";
+import { type AppExports, type LoadedApp, loadAppJs } from "./app-loader.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const APP_JS = resolve(HERE, "..", "..", "packages/web/public/app.js");
 
 let fns: AppExports;
+let loaded: LoadedApp;
 beforeAll(() => {
-  const loaded = loadAppJs(APP_JS);
+  loaded = loadAppJs(APP_JS);
   fns = loaded.fns;
   // 顶层抛不抛【不判】—— 装载器文件头那条。这里只把它说出来，让人看见跑到哪。
   // 把它判成失败会导致下一个人去把 app.js 的入口改成懒执行，那是测试形状改产品。
@@ -193,7 +194,7 @@ describe("taskCard —— 琥珀只给决策态，列成员只给灰", () => {
 
   it("⭐ 阻塞（列成员）不琥珀：规格四处明写预算暂停非琥珀", () => {
     const got = card(true, false);
-    expect(got).toContain("tk flag");
+    expect(got).toContain("admin-tk admin-flag");
     expect(got).not.toContain("decision");
   });
 
@@ -285,7 +286,7 @@ describe("evidenceLine —— 缺证据要在界面上【说破】，不是沉�
     for (const refs of [null, undefined, []]) {
       const got = line({ evidence_refs: refs });
       expect(got).toContain("无证据包");
-      expect(got).toContain("ev-none");
+      expect(got).toContain("admin-ev-none");
     }
   });
 
@@ -385,7 +386,7 @@ describe("budgetHtml —— 那根条与那句近似声明", () => {
       declared_scopes: 1,
     });
     expect(got).toContain("budgetover");
-    expect(got).toContain("meter over");
+    expect(got).toContain("admin-meter admin-over");
     expect(got).toContain("累计");
   });
 
@@ -405,7 +406,7 @@ describe("budgetHtml —— 那根条与那句近似声明", () => {
       declared_task_limits_cents: 100,
     });
     expect(got).toContain("警报已哑");
-    expect(got).toContain("s-gray");
+    expect(got).toContain("admin-s-gray");
     expect(got).not.toContain("s-amber");
   });
 
@@ -419,10 +420,10 @@ describe("statusClass —— 呈现映射的边界（它拿不到琥珀的决定
   const f = (s: string) => (fns.statusClass as (x: string) => string)(s);
 
   it("四档色调各自命中", () => {
-    expect(f("DELIVERED")).toBe("s-green");
-    expect(f("ARCHIVED")).toBe("s-gray");
-    expect(f("REJECTED_DOWNWARD")).toBe("s-red");
-    expect(f("IN_REVIEW")).toBe("s-blue");
+    expect(f("DELIVERED")).toBe("admin-s-green");
+    expect(f("ARCHIVED")).toBe("admin-s-gray");
+    expect(f("REJECTED_DOWNWARD")).toBe("admin-s-red");
+    expect(f("IN_REVIEW")).toBe("admin-s-blue");
   });
 
   it("⭐ 任何输入都不许产出琥珀 —— 连 BUDGET_PAUSED / ESCALATED_TO_CEO 也不行", () => {
@@ -1331,8 +1332,8 @@ describe("paramSnapshotHtml —— 那一格的形状（等宽 + 左缩进，不
 
   it("⭐ 每一行带 .mono（§9.2/Task 2.6 那句「等宽字体」），且整个块【不画框线】", () => {
     const got = h({ amount_cents: 1250, impact_scope: "生产库" });
-    expect(got).toContain('class="snap"');
-    expect(got.split('class="mono"').length - 1).toBe(2); // 两行 ⇒ 两个 .mono
+    expect(got).toContain('class="admin-snap"');
+    expect(got.split('class="admin-mono"').length - 1).toBe(2); // 两行 ⇒ 两个 .mono
     // 框线由 CSS 类给（.snap 只有 padding-left，写在 index.html 那条注释旁边）；
     // 渲块这边【不许】顺手加 border/style —— 那是 §19.4 那一族（层级靠缩进与色阶，不靠线）。
     expect(got).not.toContain("border");
@@ -1342,10 +1343,10 @@ describe("paramSnapshotHtml —— 那一格的形状（等宽 + 左缩进，不
   });
 
   it("「读不出来 / 为空」那一行用 .snap-none（它是这一格的主角，不是脚注）", () => {
-    expect(h(null)).toContain('class="snap-none meta"');
-    expect(h({})).toContain('class="snap-none meta"');
+    expect(h(null)).toContain('class="admin-snap-none admin-meta"');
+    expect(h({})).toContain('class="admin-snap-none admin-meta"');
     // 反向：正常参数不许落到 snap-none 那个类上（否则正常卡长得像出错了）。
-    expect(h({ impact_scope: "x" })).not.toContain("snap-none");
+    expect(h({ impact_scope: "x" })).not.toContain("admin-snap-none");
   });
 
   it("⭐ 标签与值都过 esc：参数是从库里读出来的文本，不是可信标记", () => {
@@ -1426,7 +1427,7 @@ describe("reviewIndependenceBand —— 只念服务端算好的数", () => {
     ]) {
       const got = h(p);
       // .need 是琥珀那一档，.err 是硬失败 —— 两个都不该出现在这一格。
-      expect(got).not.toContain('class="banner err"');
+      expect(got).not.toContain('class="admin-banner admin-err"');
       expect(got).not.toContain("need");
       expect(got).not.toContain("flag");
     }
@@ -1512,12 +1513,12 @@ describe("reviewIndependenceBand —— 只念服务端算好的数", () => {
   it("⭐ 全绿那一支不发警告色，也不许出现「同族」字样（否则干净图长得像出事了）", () => {
     const clean = h(prev({}));
     const dirty = h(prev({ pairs_ok: 3, pairs_same_family: 3 }));
-    // 正向对照在先：`banner("warn", …)` 真的会产出 `class="banner warn"`，
+    // 正向对照在先：`banner("warn", …)` 真的会产出 `class="admin-banner admin-warn"`，
     // 所以下面那条 not.toContain 是【有刻度】的 —— 若 banner 根本不加类名，
     // 那条否定会恒真（本仓那条「一条不认违例的守卫比没有守卫更坏」）。
-    expect(dirty).toContain('class="banner warn"');
-    expect(clean).not.toContain("banner warn");
-    expect(clean).toContain('class="banner "');
+    expect(dirty).toContain('class="admin-banner admin-warn"');
+    expect(clean).not.toContain("admin-warn");
+    expect(clean).toContain('class="admin-banner "');
     expect(clean).toContain("两两不同族");
     expect(clean).not.toContain("要你批准");
   });
@@ -1746,7 +1747,7 @@ describe("edgeChip —— 一条委派边的门控状态（round339：那个布�
     // 这一发钉的是【没有新增视觉档位】：§19.2 那张色表里没有「门控关着」那一档，
     // 所以门控状态是 chip 上的一句【话】，不是一种颜色。
     const got = h({ from: "a", to: "b", review_gate: false });
-    expect(got).toContain('class="edge mono"');
+    expect(got).toContain('class="admin-edge admin-mono"');
     expect(got).not.toContain("need");
     expect(got).not.toContain("banner");
     // 正向对照：approvalCard 在【真该琥珀】时确实吐 need（见本节第一条同款对照）。
@@ -1791,22 +1792,22 @@ describe("navLink —— 导航链接一枚（aria-current 只给当前视图）
   it('⭐ 当前视图那一枚带 aria-current="page"，且 class 里有 act', () => {
     const got = h(r(), "board");
     expect(got).toContain('aria-current="page"');
-    expect(got).toContain('class="act"');
-    expect(got).toContain('href="#/board"');
+    expect(got).toContain('class="admin-act"');
+    expect(got).toContain('href="#/admin/board"');
     expect(got).toContain('data-r="board"');
   });
 
   it("⭐ 非当前视图那一枚【不】带 aria-current（视觉 .act 与语义 aria 同一把尺）", () => {
     const got = h(r(), "today");
     expect(got).not.toContain("aria-current");
-    expect(got).not.toContain('class="act"');
+    expect(got).not.toContain('class="admin-act"');
     // 双向对照：不是"本函数永远不写 aria-current"，上面一发证明它写得出。
-    expect(got).toContain('href="#/board"');
+    expect(got).toContain('href="#/admin/board"');
   });
 
   it("⭐ id 与 label 都照原样进链接（nav 原实现同样不转义：ROUTES 是页面写死的七枚常量，不在用户输入路径上）", () => {
     const got = h({ id: "b&d", label: "<x>预算" }, "b&d");
-    expect(got).toContain('href="#/b&d"');
+    expect(got).toContain('href="#/admin/b&d"');
     expect(got).toContain('data-r="b&d"');
     expect(got).toContain("<x>预算");
     expect(got).toContain('aria-current="page"');
@@ -2194,7 +2195,7 @@ describe("checkpointDegradedNote —— checkpoints_unavailable 降级提示（r
     expect(got).toContain("断点解码失败，仅显示数量");
     expect(got).toContain("读不到 checkpoints：no such table");
     expect(got).toContain("实际断点 3 个");
-    expect(got).toContain("banner warn");
+    expect(got).toContain("admin-banner admin-warn");
   });
 
   it("⭐ unavailable 为假（undefined / null / 空串）⇒ 空串，断点区不凭空多一条", () => {
@@ -2436,7 +2437,7 @@ describe("eventRow —— target 渲染（round341，内置 eventTargetText 接�
       target: "card-7",
     });
     expect(got).toContain("→ card-7");
-    expect(got).toContain('class="tag mono"');
+    expect(got).toContain('class="admin-tag admin-mono"');
   });
 
   it("⭐ target 为空/缺 ⇒ 事件行不占那一格（不出现 → / target）", () => {
@@ -2622,33 +2623,39 @@ describe("stat —— 顶部四个大数字格（首页唯一渲染层，round34
 
   it("⭐ 常态：无 tone ⇒ stat 类不带后缀", () => {
     const got = f("活跃任务", 3, "", "没到终点的任务数");
-    expect(got).toContain('class="stat"');
-    expect(got).toContain('<div class="num mono">3</div>');
-    expect(got).toContain('<div class="lbl">活跃任务</div>');
+    expect(got).toContain('class="admin-stat"');
+    expect(got).toContain('<div class="admin-num admin-mono">3</div>');
+    expect(got).toContain('<div class="admin-lbl">活跃任务</div>');
     expect(got).toContain('title="没到终点的任务数"');
     // ⚠ 顺序判据（变异机 M4 抓出来的盲区）：唯一 `toContain` 逐条查不查次序，
     // div 骨架把 num 与 lbl 互换后照样绿。t01 断言「数字在上、标签在下」——
     // stat 的 DOM 顺序就是屏幕上的顺序（大数字在上、说明在下），互换是结构变异。
-    expect(got.indexOf("num mono")).toBeGreaterThan(-1);
-    expect(got.indexOf("lbl")).toBeGreaterThan(got.indexOf("num mono"));
+    // round370：类名带 admin- 前缀后，字形整块换掉。这里【不能】留 "num mono"
+    // 那种子串 —— 它在新形状里匹配不到（indexOf 得 -1），而下面那条 ">" -1
+    // 次序判据会因两侧同为 -1 而恒真，等于把 M4 那把尺子悄悄卸了。
+    expect(got.indexOf("admin-num admin-mono")).toBeGreaterThan(-1);
+    expect(got.indexOf("admin-lbl")).toBeGreaterThan(
+      got.indexOf("admin-num admin-mono"),
+    );
   });
 
   it("⭐ 琥珀（§19.2 唯一给 stat 用的色调）：tone=statbad ⇒ class 带后缀", () => {
     const got = f("待你决策", 1, "statbad", "审批收件箱里的待批张数");
-    expect(got).toContain('class="stat statbad"');
-    expect(got).not.toContain('class="stat"');
+    expect(got).toContain('class="admin-stat admin-statbad"');
+    expect(got).not.toContain('class="admin-stat"');
   });
 
   it("⭐ tone 是【条件】加后缀，不是【无条件】拼（变异机 M2 抓出的盲区）", () => {
     // M2 把 `tone ? " " + tone : ""` 改成 `" " + tone`（无条件拼）后，t02 原有断言
-    //（有 tone 时 class="stat statbad"）照样通过 —— 蒙对了。真正的判据是：
+    //（有 tone 时 class="admin-stat admin-statbad"）照样通过 —— 蒙对了。真正的判据是：
     // 无 tone / tone 是空串时 class 【不得】带任何后缀空格或类名。
-    // ⚠ 负向字形是 `class="stat `（stat 后带空格）—— 原版 tone="" 输出 `class="stat"`
-    //（stat 后直接右引号），那正是合法常态；M2 无条件拼在 tone="" 时输出
-    // `class="stat "`（尾空格），才是要抓的形状。
-    expect(f("活跃任务", 3, "", "t")).not.toMatch(/class="stat /);
-    expect(f("活跃任务", 3, undefined, "t")).not.toMatch(/class="stat /);
-    expect(f("活跃任务", 3, null, "t")).not.toMatch(/class="stat /);
+    // ⚠ 负向字形是 `class="admin-stat `（stat 后带空格）—— 原版 tone="" 输出
+    // `class="admin-stat"`（stat 后直接右引号），那正是合法常态；M2 无条件拼在
+    // tone="" 时输出 `class="admin-stat "`（尾空格），才是要抓的形状。
+    // round370 前这里是 /class="stat /：admin- 前缀一加，M2 复活也抓不到（恒过）。
+    expect(f("活跃任务", 3, "", "t")).not.toMatch(/class="admin-stat /);
+    expect(f("活跃任务", 3, undefined, "t")).not.toMatch(/class="admin-stat /);
+    expect(f("活跃任务", 3, null, "t")).not.toMatch(/class="admin-stat /);
   });
 
   it("⭐ 数字进 HTML 过 esc（自由文本不假设上游干净）", () => {
@@ -2675,7 +2682,7 @@ describe("stat —— 顶部四个大数字格（首页唯一渲染层，round34
     expect(f("活跃任务", 2, "", "没到终点的任务数")).toContain("活跃任务");
     expect(f("被阻塞", 1, "", "卡在等人处理的状态")).toContain("被阻塞");
     expect(f("待你决策", 2, "statbad", "审批收件箱里的待批张数")).toContain(
-      "stat statbad",
+      "admin-stat admin-statbad",
     );
   });
 });
@@ -2903,7 +2910,7 @@ describe("banner —— 提示条（round351 补执行证据：37 次调用零�
 
   it("⭐ 有消息 ⇒ class 带 type + 消息被 esc", () => {
     expect(f("warn", "有 <问题>")).toBe(
-      '<div class="banner warn">有 &lt;问题&gt;</div>',
+      '<div class="admin-banner admin-warn">有 &lt;问题&gt;</div>',
     );
   });
 
@@ -3048,11 +3055,116 @@ describe("replayTimeline —— 回放时间线壳（round351 补执行证据）
 
   it("⭐ 有事件 ⇒ tl 容器（委托 eventRow 渲染）", () => {
     const html = f([{ action: "approval_created" }]) as string;
-    expect(html).toContain('<div class="tl">');
+    expect(html).toContain('<div class="admin-tl">');
     expect(html).toContain("</div>");
   });
 
   it("⭐ 空 ⇒ 「还没有事件。」", () => {
-    expect(f([])).toBe('<div class="meta">还没有事件。</div>');
+    expect(f([])).toBe('<div class="admin-meta">还没有事件。</div>');
+  });
+});
+
+describe("parseAdminHash —— 两个入口共用的唯一 hash 解析（round370）", () => {
+  const f = (h: unknown): { page: string; query: string } =>
+    (fns.parseAdminHash as (x: unknown) => { page: string; query: string })(h);
+
+  it("⭐ 独立页与工作台两种前缀认同一个页名（少一支就是两套路由表）", () => {
+    expect(f("#/today")).toEqual({ page: "today", query: "" });
+    expect(f("#/admin/today")).toEqual({ page: "today", query: "" });
+    expect(f("#/admin/board")).toEqual({ page: "board", query: "" });
+    expect(f("budget")).toEqual({ page: "budget", query: "" });
+  });
+
+  it("⭐ query 从页名里剥出来（window / id 那一半的落点）", () => {
+    expect(f("#/today?window=7d")).toEqual({
+      page: "today",
+      query: "window=7d",
+    });
+    expect(f("#/admin/replay?id=ev-1")).toEqual({
+      page: "replay",
+      query: "id=ev-1",
+    });
+    // 独立页形状也要能拆出 query（原来只有工作台需要，两条分支都得通）。
+    expect(f("#/today?window=30d")).toEqual({ page: "today", query: "window=30d" });
+  });
+
+  it("⭐ 前缀只在开头剥一次，页名里再出现 admin/ 不许被吃掉", () => {
+    // 失效形状：把 replace 写成不带 ^ 的全局替换 ⇒ "#/admin/x/admin/y" 少一段。
+    expect(f("#/admin/x/admin/y")).toEqual({ page: "x/admin/y", query: "" });
+  });
+
+  it("⭐ 空 / null / 只有前缀 ⇒ 空页名（由调用方回到 today，这里不猜）", () => {
+    expect(f("")).toEqual({ page: "", query: "" });
+    expect(f(null)).toEqual({ page: "", query: "" });
+    expect(f("#/admin/")).toEqual({ page: "", query: "" });
+    expect(f("#/admin")).toEqual({ page: "", query: "" });
+  });
+
+  it("⭐ 页名不认得时【不在这里判】—— 名单归 ROUTES，这里只拆串", () => {
+    // 这一发钉的是职责边界：若有人在这里加「不认识就返回 today」，
+    // syncAdminFromHash 的 return false（= 这条 hash 不归管理视图）就永远不为真，
+    // 工作台切到 #/messages 时会把消息路由误吞成管理视图。
+    expect(f("#/messages")).toEqual({ page: "messages", query: "" });
+    const pages = (loaded.api.ROUTES as { id: string }[]).map((r) => r.id);
+    expect(pages).not.toContain("messages");
+  });
+});
+
+describe("windowMsOfHash —— 挂载后传的是裸 query（round370）", () => {
+  const f = (h: unknown): unknown =>
+    (fns.windowMsOfHash as (...a: unknown[]) => unknown)(h);
+
+  it("⭐ 不带 ? 的裸 query 也要认（renderToday 现在传 parseAdminHash 的 query 半）", () => {
+    expect(f("window=7d")).toBe(7 * 86400000);
+    expect(f("window=30d")).toBe(30 * 86400000);
+    // 空 query ⇒ undefined（走服务端默认 24h），不是 0 也不是 NaN。
+    expect(f("")).toBe(undefined);
+  });
+
+  it("⭐ 两种形状同时通 ⇒ 少一种会当场红，而不是静默恒 24h", () => {
+    // 正向对照：带 ? 的整条 hash 仍旧解析（独立页那条路没被换掉）。
+    expect(f("#/today?window=7d")).toBe(7 * 86400000);
+    // 反向对照：裸 query 里键名不对照样不认（证明不是"退化成宽泛匹配"）。
+    expect(f("win=7d")).toBe(undefined);
+  });
+});
+
+describe("挂载 API —— 工作台 import 得到的是四个真家伙（round370）", () => {
+  it("⭐ 文件末尾的 export 块里有这四个名字（少了＝工作台 import 到 undefined）", () => {
+    expect(loaded.exportedNames).toContain("mountAdmin");
+    expect(loaded.exportedNames.includes("unmountAdmin")).toBe(true);
+    expect(loaded.exportedNames.includes("syncAdminFromHash")).toBe(true);
+    // 第四个是 `ROUTES as ADMIN_PAGES`：装载器取的是【本地名】，
+    // 所以这里查 ROUTES —— 查 ADMIN_PAGES 会红，而那条红是假的。
+    expect(loaded.exportedNames.includes("ROUTES")).toBe(true);
+    // 第五个是 currentPage：中间列表栏的选中态要跟【真正渲染着】的那一页，
+    // 手打的未知页名不算。少了这个 export，宿主拿 undefined、选中态退回 hash
+    // 读数 —— 屏幕在今日页、列表却高亮着一行没有的页。
+    expect(loaded.exportedNames.includes("currentPage")).toBe(true);
+  });
+
+  it("⭐ 运行时形状：三个是函数，ROUTES 是非空数组（挂载点靠它渲染中间栏）", () => {
+    expect(typeof loaded.api.mountAdmin).toBe("function");
+    expect(typeof loaded.api.unmountAdmin).toBe("function");
+    expect(typeof loaded.api.syncAdminFromHash).toBe("function");
+    expect(typeof loaded.api.currentPage).toBe("function");
+    // 装载器的 location.hash 是 "#/today" ⇒ 初始页必须是 today。这一发把「导出了
+    // 一个名字但返回的不是当前页」（比如恒 "today" 的常量替身）也一起钉住。
+    expect((loaded.api.currentPage as () => string)()).toBe("today");
+    expect(Array.isArray(loaded.api.ROUTES)).toBe(true);
+    // 七页都在，且 id 唯一：中间列表栏直接吃这份名单。
+    const pages = (loaded.api.ROUTES as { id: string; label: string }[]).map(
+      (r) => r.id,
+    );
+    expect(pages).toEqual([
+      "today",
+      "board",
+      "inbox",
+      "org",
+      "charter",
+      "budget",
+      "replay",
+    ]);
+    expect(new Set(pages).size).toBe(pages.length);
   });
 });

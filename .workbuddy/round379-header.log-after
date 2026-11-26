@@ -1,0 +1,200 @@
+
+@@@@ 1440x900 #/messages
+  topbar h=52 align=center pad=0px 20px 最高子元素占=9.5 纯余量=42.5  brand h39@6 global-search h34@8.5 create-wrap h34.1@8.4 icon-button h34@8.5 connection h34@8.5 profile-wrap h43@4
+  header h=69.5 mb=12px 标题列底=69.5 标题下方空=0
+    列 .DIV h=69.5 w=247 wrap=nowrap gap=normal 距右731
+      第1排 n=1: OPC WORKSP(eyebrow 247x17)
+      第2排 n=1: 今天从哪里开始？( 247x24.3)
+      第3排 n=1: 所有项目、成员与会议(tw:text-balance 247x20.1)
+    列 .actions h=34.1 w=308 wrap=wrap gap=8px 距右0
+      第1排 n=3: 发起会议(btn 80x34.1) 新建文档(btn 80x34.1) 私聊成员（老板）(btn 132x34.1)
+  list h=848 头部 .list-heading=64.2 条目=2 .conversation-section=260.4/pad 0px .conversation-section=98.4/pad 6px 0px 0px ⇒ 底部死区=409(48%)
+
+@@@@ 1440x900 #/contacts
+  topbar h=52 align=center pad=0px 20px 最高子元素占=9.5 纯余量=42.5  brand h39@6 global-search h34@8.5 create-wrap h34.1@8.4 icon-button h34@8.5 connection h34@8.5 profile-wrap h43@4
+  header h=69.5 mb=12px 标题列底=69.5 标题下方空=0
+    列 .DIV h=69.5 w=273 wrap=nowrap gap=normal 距右705
+      第1排 n=1: OPC WORKSP(eyebrow 273x17)
+      第2排 n=1: 通讯录( 273x24.3)
+      第3排 n=1: 从角色汇报线到项目群(tw:text-balance 273x20.1)
+    列 .actions h=34.1 w=132 wrap=wrap gap=8px 距右0
+      第1排 n=1: 私聊成员（老板）(btn 132x34.1)
+  list h=848 头部 .list-heading=64.2 条目=4 .org-group=121.1/pad 0px .org-group=121.1/pad 0px .org-group=121.1/pad 0px ⇒ 底部死区=231.4(27%)
+
+@@@@ 1440x900 #/documents
+  topbar h=52 align=center pad=0px 20px 最高子元素占=9.5 纯余量=42.5  brand h39@6 global-search h34@8.5 create-wrap h34.1@8.4 icon-button h34@8.5 connection h34@8.5 profile-wrap h43@4
+  header h=69.5 mb=12px 标题列底=69.5 标题下方空=0
+    列 .DIV h=69.5 w=299 wrap=nowrap gap=normal 距右679
+      第1排 n=1: OPC WORKSP(eyebrow 299x17)
+      第2排 n=1: 文档中心( 299x24.3)
+      第3排 n=1: 模板、在线编辑、版本(tw:text-balance 299x20.1)
+    列 .actions h=34.1 w=142 wrap=wrap gap=8px 距右0
+      第1排 n=2: 导入(btn 54x34.1) 新建文档(btn 80x34.1)
+  list h=848 头部 .list-heading=64.2 条目=1 .doc-tree=1501/pad 0px ⇒ 底部死区=-802.4(-95%)
+
+@@@@ 1440x900 #/backlog
+  topbar h=52 align=center pad=0px 20px 最高子元素占=9.5 纯余量=42.5  brand h39@6 global-search h34@8.5 create-wrap h34.1@8.4 icon-button h34@8.5 connection h34@8.5 profile-wrap h43@4
+  header h=69.5 mb=12px 标题列底=69.5 标题下方空=0
+    列 .DIV h=69.5 w=304.4 wrap=nowrap gap=normal 距右673.6
+      第1排 n=1: OPC WORKSP(eyebrow 304.4x17)
+      第2排 n=1: 任务面板( 304.4x24.3)
+      第3排 n=1: 待办、团队节奏与每日(tw:text-balance 304.4x20.1)
+    列 .actions h=34.1 w=142 wrap=wrap gap=8px 距右0
+      第1排 n=2: 刷新(btn 54x34.1) 新建待办(btn 80x34.1)
+  list h=848 头部 .list-heading=64.2 条目=1 .doc-list-item=87.1/pad 13px 10px ⇒ 底部死区=652.5(77%)
+
+@@@@ 1440x900 #/talent
+  topbar h=52 align=center pad=0px 20px 最高子元素占=9.5 纯余量=42.5  brand h39@6 global-search h34@8.5 create-wrap h34.1@8.4 icon-button h34@8.5 connection h34@8.5 profile-wrap h43@4
+  header h=69.5 mb=12px 标题列底=69.5 标题下方空=0
+    列 .DIV h=69.5 w=299 wrap=nowrap gap=normal 距右679
+      第1排 n=1: OPC WORKSP(eyebrow 299x17)
+      第2排 n=1: 人才市场( 299x24.3)
+      第3排 n=1: 人才蓝图可导出、导入(tw:text-balance 299x20.1)
+    列 .actions h=34.1 w=282 wrap=wrap gap=8px 距右0
+      第1排 n=3: 导入蓝图(btn 80x34.1) 发布在职成员(btn 106x34.1) 开始招聘(btn 80x34.1)
+  list h=848 头部 .list-heading=64.2 条目=4 .doc-list-item=66.6/pad 13px 10px .doc-list-item=66.6/pad 13px 10px .doc-list-item=66.6/pad 13px 10px ⇒ 底部死区=460.1(54%)
+
+@@@@ 1440x900 #/settings/member
+  topbar h=52 align=center pad=0px 20px 最高子元素占=9.5 纯余量=42.5  brand h39@6 global-search h34@8.5 create-wrap h34.1@8.4 icon-button h34@8.5 connection h34@8.5 profile-wrap h43@4
+  header h=69.5 mb=12px 标题列底=69.5 标题下方空=0
+    列 .DIV h=69.5 w=260 wrap=nowrap gap=normal 距右718
+      第1排 n=1: OPC WORKSP(eyebrow 260x17)
+      第2排 n=1: 设置( 260x24.3)
+      第3排 n=1: 管理成员的人设、模型(tw:text-balance 260x20.1)
+    列 .actions h=34.1 w=80 wrap=wrap gap=8px 距右0
+      第1排 n=1: 招聘成员(btn 80x34.1)
+  list h=848 头部 .list-heading=64.2 条目=1 .member-row=54.7/pad 8px ⇒ 底部死区=633.8(75%)
+
+@@@@ 1440x900 #/settings/groups
+  topbar h=52 align=center pad=0px 20px 最高子元素占=9.5 纯余量=42.5  brand h39@6 global-search h34@8.5 create-wrap h34.1@8.4 icon-button h34@8.5 connection h34@8.5 profile-wrap h43@4
+  header h=69.5 mb=12px 标题列底=69.5 标题下方空=0
+    列 .DIV h=69.5 w=273 wrap=nowrap gap=normal 距右705
+      第1排 n=1: OPC WORKSP(eyebrow 273x17)
+      第2排 n=1: 群组设置( 273x24.3)
+      第3排 n=1: 改名与目标、调整成员(tw:text-balance 273x20.1)
+    列 .actions h=34.1 w=67 wrap=wrap gap=8px 距右0
+      第1排 n=1: 新建群(btn 67x34.1)
+  list h=848 头部 .list-heading=64.2 条目=4 .member-row=54.7/pad 8px .member-row=54.7/pad 8px .member-row=54.7/pad 8px ⇒ 底部死区=503.7(59%)
+
+@@@@ 1440x900 #/settings/roles
+  topbar h=52 align=center pad=0px 20px 最高子元素占=9.5 纯余量=42.5  brand h39@6 global-search h34@8.5 create-wrap h34.1@8.4 icon-button h34@8.5 connection h34@8.5 profile-wrap h43@4
+  header h=69.5 mb=12px 标题列底=69.5 标题下方空=0
+    列 .DIV h=69.5 w=377 wrap=nowrap gap=normal 距右601
+      第1排 n=1: OPC WORKSP(eyebrow 377x17)
+      第2排 n=1: 岗位设置( 377x24.3)
+      第3排 n=1: 维护公司树：新建岗位(tw:text-balance 377x20.1)
+    列 .actions h=34.1 w=80 wrap=wrap gap=8px 距右0
+      第1排 n=1: 新建岗位(btn 80x34.1)
+  list h=848 头部 .list-heading=64.2 条目=13 .member-row=54.7/pad 8px .member-row=54.7/pad 8px .member-row=54.7/pad 8px ⇒ 底部死区=11.1(1%)
+
+@@@@ 1440x900 #/settings/plugins
+  topbar h=52 align=center pad=0px 20px 最高子元素占=9.5 纯余量=42.5  brand h39@6 global-search h34@8.5 create-wrap h34.1@8.4 icon-button h34@8.5 connection h34@8.5 profile-wrap h43@4
+  header h=69.5 mb=12px 标题列底=69.5 标题下方空=0
+    列 .DIV h=69.5 w=268.1 wrap=nowrap gap=normal 距右709.9
+      第1排 n=1: OPC WORKSP(eyebrow 268.1x17)
+      第2排 n=1: 插件设置( 268.1x24.3)
+      第3排 n=1: 登记 MCP 服务与(tw:text-balance 268.1x20.1)
+    列 .actions h=34.1 w=80 wrap=wrap gap=8px 距右0
+      第1排 n=1: 安装插件(btn 80x34.1)
+  list h=848 头部 .list-heading=64.2 条目=1 .state=210/pad 30px ⇒ 底部死区=512.6(60%)
+
+@@@@ 1280x720 #/messages
+  topbar h=52 align=center pad=0px 20px 最高子元素占=9.5 纯余量=42.5  brand h39@6 global-search h34@8.5 create-wrap h34.1@8.4 icon-button h34@8.5 connection h34@8.5 profile-wrap h53.9@-1.4
+  header h=69.5 mb=12px 标题列底=69.5 标题下方空=0
+    列 .DIV h=69.5 w=247 wrap=nowrap gap=normal 距右571
+      第1排 n=1: OPC WORKSP(eyebrow 247x17)
+      第2排 n=1: 今天从哪里开始？( 247x24.3)
+      第3排 n=1: 所有项目、成员与会议(tw:text-balance 247x20.1)
+    列 .actions h=34.1 w=308 wrap=wrap gap=8px 距右0
+      第1排 n=3: 发起会议(btn 80x34.1) 新建文档(btn 80x34.1) 私聊成员（老板）(btn 132x34.1)
+  list h=668 头部 .list-heading=64.2 条目=2 .conversation-section=260.4/pad 0px .conversation-section=98.4/pad 6px 0px 0px ⇒ 底部死区=229(34%)
+
+@@@@ 1280x720 #/contacts
+  topbar h=52 align=center pad=0px 20px 最高子元素占=9.5 纯余量=42.5  brand h39@6 global-search h34@8.5 create-wrap h34.1@8.4 icon-button h34@8.5 connection h34@8.5 profile-wrap h53.9@-1.4
+  header h=69.5 mb=12px 标题列底=69.5 标题下方空=0
+    列 .DIV h=69.5 w=273 wrap=nowrap gap=normal 距右545
+      第1排 n=1: OPC WORKSP(eyebrow 273x17)
+      第2排 n=1: 通讯录( 273x24.3)
+      第3排 n=1: 从角色汇报线到项目群(tw:text-balance 273x20.1)
+    列 .actions h=34.1 w=132 wrap=wrap gap=8px 距右0
+      第1排 n=1: 私聊成员（老板）(btn 132x34.1)
+  list h=668 头部 .list-heading=64.2 条目=4 .org-group=121.1/pad 0px .org-group=121.1/pad 0px .org-group=121.1/pad 0px ⇒ 底部死区=51.4(8%)
+
+@@@@ 1280x720 #/documents
+  topbar h=52 align=center pad=0px 20px 最高子元素占=9.5 纯余量=42.5  brand h39@6 global-search h34@8.5 create-wrap h34.1@8.4 icon-button h34@8.5 connection h34@8.5 profile-wrap h53.9@-1.4
+  header h=69.5 mb=12px 标题列底=69.5 标题下方空=0
+    列 .DIV h=69.5 w=299 wrap=nowrap gap=normal 距右519
+      第1排 n=1: OPC WORKSP(eyebrow 299x17)
+      第2排 n=1: 文档中心( 299x24.3)
+      第3排 n=1: 模板、在线编辑、版本(tw:text-balance 299x20.1)
+    列 .actions h=34.1 w=142 wrap=wrap gap=8px 距右0
+      第1排 n=2: 导入(btn 54x34.1) 新建文档(btn 80x34.1)
+  list h=668 头部 .list-heading=64.2 条目=1 .doc-tree=1501/pad 0px ⇒ 底部死区=-982.4(-147%)
+
+@@@@ 1280x720 #/backlog
+  topbar h=52 align=center pad=0px 20px 最高子元素占=9.5 纯余量=42.5  brand h39@6 global-search h34@8.5 create-wrap h34.1@8.4 icon-button h34@8.5 connection h34@8.5 profile-wrap h53.9@-1.4
+  header h=69.5 mb=12px 标题列底=69.5 标题下方空=0
+    列 .DIV h=69.5 w=304.4 wrap=nowrap gap=normal 距右513.6
+      第1排 n=1: OPC WORKSP(eyebrow 304.4x17)
+      第2排 n=1: 任务面板( 304.4x24.3)
+      第3排 n=1: 待办、团队节奏与每日(tw:text-balance 304.4x20.1)
+    列 .actions h=34.1 w=142 wrap=wrap gap=8px 距右0
+      第1排 n=2: 刷新(btn 54x34.1) 新建待办(btn 80x34.1)
+  list h=668 头部 .list-heading=64.2 条目=1 .doc-list-item=87.1/pad 13px 10px ⇒ 底部死区=472.5(71%)
+
+@@@@ 1280x720 #/talent
+  topbar h=52 align=center pad=0px 20px 最高子元素占=9.5 纯余量=42.5  brand h39@6 global-search h34@8.5 create-wrap h34.1@8.4 icon-button h34@8.5 connection h34@8.5 profile-wrap h53.9@-1.4
+  header h=69.5 mb=12px 标题列底=69.5 标题下方空=0
+    列 .DIV h=69.5 w=299 wrap=nowrap gap=normal 距右519
+      第1排 n=1: OPC WORKSP(eyebrow 299x17)
+      第2排 n=1: 人才市场( 299x24.3)
+      第3排 n=1: 人才蓝图可导出、导入(tw:text-balance 299x20.1)
+    列 .actions h=34.1 w=282 wrap=wrap gap=8px 距右0
+      第1排 n=3: 导入蓝图(btn 80x34.1) 发布在职成员(btn 106x34.1) 开始招聘(btn 80x34.1)
+  list h=668 头部 .list-heading=64.2 条目=4 .doc-list-item=66.6/pad 13px 10px .doc-list-item=66.6/pad 13px 10px .doc-list-item=66.6/pad 13px 10px ⇒ 底部死区=280.1(42%)
+
+@@@@ 1280x720 #/settings/member
+  topbar h=52 align=center pad=0px 20px 最高子元素占=9.5 纯余量=42.5  brand h39@6 global-search h34@8.5 create-wrap h34.1@8.4 icon-button h34@8.5 connection h34@8.5 profile-wrap h53.9@-1.4
+  header h=69.5 mb=12px 标题列底=69.5 标题下方空=0
+    列 .DIV h=69.5 w=260 wrap=nowrap gap=normal 距右558
+      第1排 n=1: OPC WORKSP(eyebrow 260x17)
+      第2排 n=1: 设置( 260x24.3)
+      第3排 n=1: 管理成员的人设、模型(tw:text-balance 260x20.1)
+    列 .actions h=34.1 w=80 wrap=wrap gap=8px 距右0
+      第1排 n=1: 招聘成员(btn 80x34.1)
+  list h=668 头部 .list-heading=64.2 条目=1 .member-row=54.7/pad 8px ⇒ 底部死区=453.8(68%)
+
+@@@@ 1280x720 #/settings/groups
+  topbar h=52 align=center pad=0px 20px 最高子元素占=9.5 纯余量=42.5  brand h39@6 global-search h34@8.5 create-wrap h34.1@8.4 icon-button h34@8.5 connection h34@8.5 profile-wrap h53.9@-1.4
+  header h=69.5 mb=12px 标题列底=69.5 标题下方空=0
+    列 .DIV h=69.5 w=273 wrap=nowrap gap=normal 距右545
+      第1排 n=1: OPC WORKSP(eyebrow 273x17)
+      第2排 n=1: 群组设置( 273x24.3)
+      第3排 n=1: 改名与目标、调整成员(tw:text-balance 273x20.1)
+    列 .actions h=34.1 w=67 wrap=wrap gap=8px 距右0
+      第1排 n=1: 新建群(btn 67x34.1)
+  list h=668 头部 .list-heading=64.2 条目=4 .member-row=54.7/pad 8px .member-row=54.7/pad 8px .member-row=54.7/pad 8px ⇒ 底部死区=323.7(48%)
+
+@@@@ 1280x720 #/settings/roles
+  topbar h=52 align=center pad=0px 20px 最高子元素占=9.5 纯余量=42.5  brand h39@6 global-search h34@8.5 create-wrap h34.1@8.4 icon-button h34@8.5 connection h34@8.5 profile-wrap h53.9@-1.4
+  header h=69.5 mb=12px 标题列底=69.5 标题下方空=0
+    列 .DIV h=69.5 w=377 wrap=nowrap gap=normal 距右441
+      第1排 n=1: OPC WORKSP(eyebrow 377x17)
+      第2排 n=1: 岗位设置( 377x24.3)
+      第3排 n=1: 维护公司树：新建岗位(tw:text-balance 377x20.1)
+    列 .actions h=34.1 w=80 wrap=wrap gap=8px 距右0
+      第1排 n=1: 新建岗位(btn 80x34.1)
+  list h=668 头部 .list-heading=64.2 条目=13 .member-row=54.7/pad 8px .member-row=54.7/pad 8px .member-row=54.7/pad 8px ⇒ 底部死区=-168.9(-25%)
+
+@@@@ 1280x720 #/settings/plugins
+  topbar h=52 align=center pad=0px 20px 最高子元素占=9.5 纯余量=42.5  brand h39@6 global-search h34@8.5 create-wrap h34.1@8.4 icon-button h34@8.5 connection h34@8.5 profile-wrap h53.9@-1.4
+  header h=69.5 mb=12px 标题列底=69.5 标题下方空=0
+    列 .DIV h=69.5 w=268.1 wrap=nowrap gap=normal 距右549.9
+      第1排 n=1: OPC WORKSP(eyebrow 268.1x17)
+      第2排 n=1: 插件设置( 268.1x24.3)
+      第3排 n=1: 登记 MCP 服务与(tw:text-balance 268.1x20.1)
+    列 .actions h=34.1 w=80 wrap=wrap gap=8px 距右0
+      第1排 n=1: 安装插件(btn 80x34.1)
+  list h=668 头部 .list-heading=64.2 条目=1 .state=210/pad 30px ⇒ 底部死区=332.6(50%)
+
+FFFD_COUNT 0

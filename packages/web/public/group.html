@@ -3,9 +3,61 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="color-scheme" content="light">
+  <!-- light dark：让原生控件（下拉、日期框、滚动条）跟随当前主题底色。
+       实际是日间还是夜间由 <html data-theme> 决定（见下方内联脚本 + group.css）。 -->
+  <meta name="color-scheme" content="light dark">
+  <!-- 主题首帧前落档：这段内联脚本先于任何 <link> 样式表执行，把偏好（localStorage
+       opc:theme，无则跟随系统）写成 <html data-theme>。group.css 的 [data-theme="dark"]
+       块靠它命中 —— 没有它，暗色用户会先闪一帧浅色再切过去（FOUC）。键名必须与
+       theme.js 的 THEME_KEY 一致，别改成两个。 -->
+  <script>
+    (function () {
+      var t;
+      try { t = localStorage.getItem("opc:theme"); } catch (e) {}
+      if (t !== "dark" && t !== "light") {
+        t = matchMedia && matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+      }
+      if (t === "dark") document.documentElement.dataset.theme = "dark";
+    })();
+  </script>
   <title>OPC · 群角色工作台</title>
+  <!-- 富文本正文用 vendored Quill 2.0.3（Apache-2.0，源码在 public/vendor/quill/）。
+       本地打包不走 CDN：e2e 与桌面壳都要能离线跑。
+       只带 quill.core.css —— 它给排版（ql-align-* / ql-indent-* / 引用 / 代码）打底，
+       不注入任何工具栏外观；snow.css 刻意不引，样式一律走我们自己的 .editor-toolbar。
+       ⚠ 必须在 group.css【之前】：.ql-editor 与我们的 .rich-editor 同为单类选择器，
+       同权重时后到的赢（padding/height/line-height 都会翻）。
+       脚本放在 group.js 之前：它是带 defer 语义的 module，晚于所有经典脚本执行，
+       所以 group.js 一进来 window.Quill 必然已就位。 -->
+  <link rel="stylesheet" href="/vendor/quill/quill.core.css">
+  <!-- 表格正文用 vendored x-data-spreadsheet 1.1.9（MIT，见 vendor/xspreadsheet/LICENSE）。
+       同样本地打包不走 CDN：e2e 与桌面壳都要离线跑。
+       这条必须在 group.css【之前】：库的样式全是 .x-spreadsheet-* 前缀，与我们的 .sheet-* 不重名，
+       但它给 canvas 宿主定的尺寸纪律要能被我们覆盖，同权重时后到的赢（与上面 Quill 同理）。
+       ⚠ 工具栏图标是 css 里 url(58eaeb4e...svg) 那张雪碧图，相对 css 自己的路径解析 ——
+       vendor 目录里必须带上那个 svg，且 dev-server 要认 .svg 的 MIME，否则图标全哑。 -->
+  <link rel="stylesheet" href="/vendor/xspreadsheet/xspreadsheet.css">
   <link rel="stylesheet" href="/group.css">
+  <!-- 管理视图挂进内容区后与工作台同处一份文档，样式靠 .admin-root 作用域隔离；
+       这条 link 必须在 group.css 之后（同特异度按文档顺序决胜），且它是管理视图
+       唯一的样式来源 —— 少了它，右侧内容区会渲染出一堆没皮的裸标记。 -->
+  <link rel="stylesheet" href="/admin.css">
+  <!-- 夜间主题补丁：只在 <html data-theme="dark"> 下给「管理视图」那棵 .admin-root
+       子树换一组夜间 token。必须排在本文件所有其它样式表之后（同是重值，后到者赢）。
+       工作台三栏的夜间值已经在 group.css 里，这里只管 admin 那半。 -->
+  <link rel="stylesheet" href="/theme.css">
+  <!-- Tailwind v4 预编译产物（devDependencies 里的 CLI 生成，运行时零构建，与
+       vendor 同理：离线可用）。放最后【不】是因为要靠顺序决胜 —— 它的 utilities 全在
+       @layer utilities 里，上面三张表是未分层规则，级联里未分层永远赢分层，放哪儿都
+       压不住它们。放最后只是为了读起来「它是补充，不是地基」。
+       它只补现有 CSS 没管的格子；这条性质由 test/web/tailwind-wiring.test.ts 在浏览器里量。 -->
+  <link rel="stylesheet" href="/tw.css">
+  <script src="/vendor/quill/quill.js"></script>
+  <!-- 同上顺序纪律：经典脚本先于带 defer 语义的 module 执行，group.js 一进来
+       window.x_spreadsheet 必然已就位。locale 文件自挂到 window.x_spreadsheet.$messages，
+       主包只内置英文，所以 zh-cn.js 必带；不认得它也不会报错，只会退回英文工具栏。 -->
+  <script src="/vendor/xspreadsheet/xspreadsheet.js"></script>
+  <script src="/vendor/xspreadsheet/locale/zh-cn.js"></script>
   <script src="/group.js" type="module"></script>
 </head>
 <body>
@@ -59,6 +111,7 @@
       </div>
     </div>
     <div class="top-spacer"></div>
+    <button id="themeToggleButton" class="icon-button theme-toggle" type="button" data-theme-toggle aria-label="切换日夜间模式" title="日 / 夜"></button>
     <button id="reconnectButton" class="connection" type="button" title="点击重新连接事件流"><span id="connectionDot" class="status-dot connecting"></span><span id="connectionText">连接中…</span></button>
     <div class="profile-wrap">
       <button class="profile-button" type="button" data-nav="settings" aria-label="打开个人设置"><span id="profileStatusDot" class="status-dot online" aria-hidden="true"></span><span class="avatar boss-avatar">B</span><span class="profile-copy"><strong>老板</strong><small id="profileStatusText">在线 · 本机 · 决策人</small></span><svg class="icon"><use href="#i-down"/></svg></button>
@@ -75,10 +128,10 @@
         <div class="nav-entry" draggable="true"><button class="nav-item" type="button" data-nav="backlog" title="任务面板"><svg class="icon"><use href="#i-board"/></svg><span>任务面板</span></button><span class="nav-grip" aria-hidden="true"><svg class="icon"><use href="#i-grip"/></svg></span></div>
         <div class="nav-entry" draggable="true"><button class="nav-item" type="button" data-nav="talent" title="人才市场"><svg class="icon"><use href="#i-talent"/></svg><span>人才市场</span></button><span class="nav-grip" aria-hidden="true"><svg class="icon"><use href="#i-grip"/></svg></span></div>
         <div class="nav-entry" draggable="true"><button class="nav-item" type="button" data-nav="settings" title="设置"><svg class="icon"><use href="#i-settings"/></svg><span>设置</span></button><span class="nav-grip" aria-hidden="true"><svg class="icon"><use href="#i-grip"/></svg></span></div>
+        <div class="nav-entry" draggable="true"><button class="nav-item" type="button" data-nav="admin" title="管理视图"><svg class="icon"><use href="#i-admin"/></svg><span>管理视图</span></button><span class="nav-grip" aria-hidden="true"><svg class="icon"><use href="#i-grip"/></svg></span></div>
       </div>
       <div class="rail-bottom">
         <p id="navReorderHint" class="rail-hint">拖拽排序<br>Alt + ↑ / ↓</p>
-        <a class="nav-item" href="/admin" title="旧运营控制室"><svg class="icon"><use href="#i-admin"/></svg><span>管理视图</span></a>
         <button id="collapseNav" class="icon-button rail-collapse" type="button" aria-label="折叠导航" aria-expanded="true" title="折叠导航"><svg class="icon"><use href="#i-panel"/></svg></button>
       </div>
     </nav>

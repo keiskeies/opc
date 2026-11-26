@@ -46,7 +46,7 @@
 少了它们，界面只能自己抄一份清单，而**那份抄件没有任何测试能发现它和这里不一致**
 （变异测试跑在 hub 侧，看不见 web 侧）。发出判据之后，看板那一页是**拿着服务端给的清单在筛**：
 
-`packages/web/public/app.js:739` —— `attention.includes(tk.status) || overBudget(tk)`，
+`packages/web/public/app.js:845` —— `attention.includes(tk.status) || overBudget(tk)`，
 左边是服务端发的状态集合，右边是两个服务端给的数比一下（算术，不构成状态机判定，所以留在界面）。
 
 **⚠ 这一句在本篇内被修正过一次**：第一版只发**三份**清单，而且把 `active_statuses`

@@ -1,0 +1,41 @@
+/*
+ * 日 / 夜间主题的「夜间值」补丁。管理视图挂在 group.html 三栏里（旧 index.html
+ * 独立控制室页已于 2026-11-25 删除，主题切换按钮走 group.css 的 .theme-toggle，
+ * 不在本文件射程里）。
+ *   - 工作台三栏那批 :root token 的夜间值直接写在 group.css 的
+ *     html[data-theme="dark"] 块里；本文件只管「管理视图」那一棵子树。
+ *
+ * 为什么单独成文件、不动 admin.css：admin.css 的两条机器约定（选择器全冠
+ * .admin-root、--amber 全仓只许一处定义）被 test/web 双向钉死。这里用
+ * html[data-theme="dark"] .admin-root（特异度 0,2,1 稳压 .admin-root 的 0,1,0）
+ * 只在暗色下重值，不新增第二份 --amber 定义（renderer-criteria 只扫 admin.css，
+ * 本文件不在它的射程里），也不破坏 admin.css 的类名作用域。
+ *
+ * 加载顺序：group.html 里本 link 必须在 admin.css 之后 —— 同是重值，后到的这条
+ * 要能赢。
+ */
+
+html[data-theme="dark"] .admin-root {
+  --bg: #14171e;
+  --card: #1c2029;
+  --ink: #e6e9f0;
+  --muted: #9aa4b8;
+  --line: #2c3240;
+  --blue: #5b83e6;
+  /* 暗色下 --blue 是【提亮】档（暗底上的主色必须亮才跳得出来），于是两件事同时翻转：
+     ① 实心蓝按钮上的字不能是白（白压 #5b83e6 只有 3.60）—— 翻成正文墨 #14171e 得 4.98；
+     ② 蓝当文字色用时不能就用 #5b83e6（压在 --chip-active #21305a 上只有 3.57）——
+        再提亮一档到 #7597ea（chip-active 4.51 / chip 5.17 / card 5.72）。
+     浅色下这三者方向相反，所以 --blue-ink / --on-blue 在 admin.css 各有一份浅色值。 */
+  --blue-ink: #7597ea;
+  --on-blue: #14171e;
+  --green: #46b38a;
+  --amber: #d79a34;
+  --gray: #66718a;
+  --chip: #232834;
+  --chip-active: #21305a;
+  --err: #e26a6a;
+  --pill-red: #d98a8a;
+  --err-soft: #3a2125;
+  --shadow-drawer: -14px 0 40px rgba(0, 0, 0, .5);
+}

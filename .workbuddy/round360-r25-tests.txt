@@ -1,0 +1,111 @@
+describe("主张登记表：变异 r25（预算上限那一侧读列，round360）", () => {
+  /* 判据只读一份文件，所以夹具只有一个键。⚠ 纪律同 r1/r22 那两段：每一发都必须经
+   * r25Good() 交出这个键 —— 判据把读它包在 try 里，缺键抛的错误会被那个 catch 收成
+   * 「那份文件不在了」，于是「门没了」与「夹具少给一个键」在断言上逐字一样。
+   * 真字节一律从真仓库取，不在这里抄一份谓词形状（抄的那份会在生产改动后继续绿着）。
+   */
+  const R25_PUMP = "serve/charter-pump.ts";
+  const r25Good = (over: Record<string, string> = {}): Record<string, string> => ({
+    [R25_PUMP]: realFiles.src(R25_PUMP),
+    ...over,
+  });
+
+  /** 把分母退回【裸参数】（列不再参与），E2 的尾巴与那唯一一条 `?` 都原样留着。 */
+  const backToParam = (src: string): string =>
+    src.replace(
+      /"COALESCE\(\(SELECT b\.limit_cents FROM budgets b " \+\s*\n\s*"WHERE b\.scope_type = 'task' AND b\.scope_id = " \+\s*\n\s*t \+\s*\n\s*"\.id AND b\.period = 'per_task'\), \?\)"/u,
+      '"?"',
+    );
+
+  it("变异 r25 之一：控制组该绿，而分母退回裸 `?` ⇒ 红在 E1 且不许红在别的格上", () => {
+    const f = fakeFiles(r25Good());
+    expect(checkOne("r25", f)).toBe(""); // 真仓库字节原样 ⇒ 空
+    const mutated = backToParam(realFiles.src(R25_PUMP));
+    // 前提自证：变异真抹掉了那串字节，而【尾巴与绑参没动】——
+    // 少了这两行，「红在 E1」分不出是抹对了还是顺带把另两格也打坏了。
+    expect(mutated).not.toContain("SELECT b.limit_cents FROM budgets b");
+    expect(mutated).toContain(", 0) < ");
+    const msg = checkOne("r25", fakeFiles(r25Good({ [R25_PUMP]: mutated })));
+    expect(msg).toContain("limit_cents");
+    expect(msg).toContain("分母");
+    // 红因串扰排除：这一发测的是 E1。
+    expect(msg).not.toContain("尾巴");
+    expect(msg).not.toContain("切不出");
+  });
+
+  it("⭐ 变异 r25 之二：抹掉代码而只留一句「这里以前读列」的注释 ⇒ 仍红", () => {
+    // 这一发是 E1 那一格的【方向证据】：判【原文】的实现在这一发上会绿，
+    // 因为那串字节确实在文件里（只是出现在注释里）。两种读法只在这一发上分得出。
+    const base = realFiles.src(R25_PUMP);
+    const anchor = base.indexOf("export function underTaskBudgetSql");
+    const at = base.indexOf("SELECT b.limit_cents FROM budgets b");
+    expect(at).toBeGreaterThan(-1);
+    expect(anchor).toBeLessThan(at); // 注在函数头之前的话切段取不到，那一发会恒绿空转
+    const withNote =
+      "/* 历史：这里以前读 COALESCE((SELECT b.limit_cents FROM budgets b 那句 */\n" +
+      backToParam(base);
+    expect(checkOne("r25", fakeFiles(r25Good({ [R25_PUMP]: withNote })))).toContain(
+      "不再 SELECT",
+    );
+    // 而只【加一句注释】、代码一字不动 ⇒ 该绿（判据对无关文案不敏感）。
+    expect(
+      checkOne(
+        "r25",
+        fakeFiles(
+          r25Good({
+            [R25_PUMP]: "/* 这里解释过为什么上限读列而不读参数 */\n" + base,
+          }),
+        ),
+      ),
+    ).toBe("");
+  });
+
+  it("变异 r25 之三：比较方向翻成 >= ⇒ 红在 E2（E1 那格会被留在原地的 limit_cents 喂绿）", () => {
+    const base = realFiles.src(R25_PUMP);
+    const mutated = base.replace(", 0) < ", ", 0) >= ");
+    expect(mutated).not.toBe(base);
+    expect(mutated).toContain("SELECT b.limit_cents FROM budgets b"); // E1 照样满足
+    const msg = checkOne("r25", fakeFiles(r25Good({ [R25_PUMP]: mutated })));
+    expect(msg).toContain("尾巴");
+    expect(msg).not.toContain("不再 SELECT");
+  });
+
+  it("变异 r25 之四：多绑一条 `?` ⇒ 红在 E3（五条 SQL 共用的绑参顺序是契约）", () => {
+    const base = realFiles.src(R25_PUMP);
+    const mutated = base.replace("'per_task'), ?)", "'per_task', ?), ?)");
+    expect(mutated).not.toBe(base);
+    const msg = checkOne("r25", fakeFiles(r25Good({ [R25_PUMP]: mutated })));
+    expect(msg).toContain("2 个 `?`");
+    expect(msg).not.toContain("尾巴");
+  });
+
+  it("变异 r25 之五：回落槽没了（0 个 `?`）⇒ 同样红在 E3", () => {
+    // 与上一发同格、反方向：那一发证「多一个」红，这一发证「少一个」红。
+    // 只登记一半的话，实现写成 `binds < 1` 或 `binds > 1` 都能过剩下的那一半。
+    const base = realFiles.src(R25_PUMP);
+    const mutated = base.replace("per_task'), ?)", "per_task'), 0)");
+    expect(mutated).not.toBe(base);
+    const msg = checkOne("r25", fakeFiles(r25Good({ [R25_PUMP]: mutated })));
+    expect(msg).toContain("0 个 `?`");
+    expect(msg).not.toContain("尾巴");
+  });
+
+  it("变异 r25 之六：函数改名 ⇒ 红在「切不出那一段」，而不是退回全文继续绿", () => {
+    const base = realFiles.src(R25_PUMP);
+    const mutated = base.split("underTaskBudgetSql").join("budgetGateSql");
+    expect(mutated).not.toContain("underTaskBudgetSql");
+    const msg = checkOne("r25", fakeFiles(r25Good({ [R25_PUMP]: mutated })));
+    expect(msg).toContain("切不出");
+    // 取材失败不许伪装成「判过了」：那一段全文另有几十条 SQL 的绑定参数，
+    // 退回全文搜的话 E3 恒成立 —— 这一发钉的就是「宁可响一声」。
+    expect(msg).not.toContain("个 `?`");
+  });
+
+  it("变异 r25 之七：那份文件整份不见 ⇒ 红在「不在了」而不是恒绿", () => {
+    const without = r25Good();
+    delete without[R25_PUMP];
+    const msg = checkOne("r25", fakeFiles(without));
+    expect(msg).toContain("charter-pump.ts 不在了");
+    expect(msg).not.toContain("切不出");
+  });
+});

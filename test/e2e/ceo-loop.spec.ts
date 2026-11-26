@@ -212,6 +212,8 @@ test.beforeAll(async () => {
   );
   // 等代理真能答话。等一个端口比 sleep 可靠：sleep 在慢机器上是 flaky，
   // 而这里的失败形状（ECONNREFUSED）指向的是"没起来"，不是"没等够"。
+  // 管理视图只有一个入口：工作台 group.html 的 #/admin/<页名>，旧 /admin 独立页
+  // 已删（2026-11-25 决策），所以这里轮询的是工作台根路由 /。
   for (let i = 0; i < 100; i++) {
     try {
       const r = await fetch(`http://127.0.0.1:${WEB_PORT}/`);
@@ -229,27 +231,56 @@ test.afterAll(async () => {
   if (dbPath !== "") rmSync(dirname(dbPath), { recursive: true, force: true });
 });
 
-const board = (): string => `http://127.0.0.1:${WEB_PORT}/#/board`;
+const board = (): string => `http://127.0.0.1:${WEB_PORT}/#/admin/board`;
+
+/**
+ * 页面侧探针（字符串形态，理由见 CEO 一圈里那条注释）：
+ * 量回放时间线里每一枚 chip 的【最近 painted 祖先】，以及那一面是否就是页背景。
+ */
+const REPLAY_CHIP_PROBE = `(() => {
+  const root = document.querySelector(".admin-root");
+  if (!root) throw new Error("没有 .admin-root ⇒ 管理视图没挂载");
+  const pageBg = getComputedStyle(root).backgroundColor;
+  const chips = [];
+  for (const el of document.querySelectorAll(".admin-tl .admin-pill, .admin-tl .admin-tag")) {
+    let host = "（身后没有 painted 的面）";
+    let onPageBg = false;
+    for (let n = el.parentElement; n; n = n.parentElement) {
+      const c = getComputedStyle(n).backgroundColor;
+      const a = /[\\d.]+\\s*,\\s*[\\d.]+\\s*,\\s*[\\d.]+\\s*(?:,\\s*([\\d.]+))?/u.exec(c.slice(c.indexOf("(") + 1));
+      if (a === null || (a[1] !== undefined && Number(a[1]) <= 0.02)) continue;
+      host = n.className || n.tagName.toLowerCase();
+      onPageBg = c === pageBg;
+      break;
+    }
+    chips.push({ txt: (el.textContent ?? "").trim().slice(0, 10), host, onPageBg });
+  }
+  return JSON.stringify({ chips, pageBg });
+})()`;
 
 test("CEO 一圈：想法 → 看板卡片 → 流转 → 收件箱批准 → 看板更新，全程只用浏览器", async ({
   page,
 }) => {
   test.setTimeout(240_000);
 
-  // ① 输入想法（今日页那个输入框）。
-  await page.goto(`http://127.0.0.1:${WEB_PORT}/#/today`);
-  await page.locator("[data-idea]").fill(IDEA);
-  await page.locator("[data-create]").click();
-  await expect(page.locator("[data-idea-state]")).toContainText("已收到");
+  // ① 输入想法（今日页那个输入框）。管理视图只有一个入口：工作台 #/admin/<页名>，
+  //    旧 /admin 独立页已删（2026-11-25 决策）。所有管理侧交互都圈在管理挂载区
+  //    .admin-mount-view 内 —— 工作台顶栏自带一枚带 data-create 的下拉菜单（群/文档/
+  //    会议/私聊…），裸 [data-create] 会同时命中它们与今日页的提交按钮。
+  await page.goto(`http://127.0.0.1:${WEB_PORT}/#/admin/today`);
+  const adminView = page.locator(".admin-mount-view");
+  await adminView.locator("[data-idea]").fill(IDEA);
+  await adminView.locator("[data-create]").click();
+  await expect(adminView.locator("[data-idea-state]")).toContainText("已收到");
 
   // ② 看板出现卡片。重新 goto：看板每次渲染重读 REST，而这里要的是"从服务端读出来的那一行"，
   //    不是页面自己塞的一行（渲块的投影纪律，app.js:363 那条）。
   await page.goto(board());
-  const card = page.locator("[data-task]", {
+  const card = adminView.locator("[data-task]", {
     hasText: "做一个面向独立开发者的 AI 笔记应用",
   });
   await expect(card).toHaveCount(1);
-  await expect(card.locator(".pill")).toHaveText("CHARTER_PENDING");
+  await expect(card.locator(".admin-pill")).toHaveText("CHARTER_PENDING");
 
   // ③ 流转：叫一轮心跳，让章程泵起草出卡片。
   if (hub === null || !hub.ok) throw new Error("前一步之后 Hub 没了");
@@ -275,17 +306,54 @@ test("CEO 一圈：想法 → 看板卡片 → 流转 → 收件箱批准 → �
     .toBeGreaterThan(0);
 
   // ④ 收件箱出现审批，并真的【点一次批准】。
-  await page.goto(`http://127.0.0.1:${WEB_PORT}/#/inbox`);
-  await expect(page.locator("body")).toContainText("章程提案");
-  await page.locator("select").first().selectOption("approve");
-  await page.locator("[data-decide]").first().click();
-  await expect(page.locator("[data-res]").first()).toContainText("已决定");
+  await page.goto(`http://127.0.0.1:${WEB_PORT}/#/admin/inbox`);
+  // 管理视图嵌在工作台 #/admin 里（独立页已删），决策 select 圈在管理挂载区内
+  // —— 工作台顶栏那枚 #personalStatus 才是文档里第一个 select，不能拿它去批。
+  await expect(adminView).toContainText("章程提案");
+  await adminView.locator("select").first().selectOption("approve");
+  await adminView.locator("[data-decide]").first().click();
+  await expect(adminView.locator("[data-res]").first()).toContainText("已决定");
 
   // ⑤ 看板更新：批准把人边那一跳走完（CHARTER_PENDING → CHARTER_APPROVED）。
   //    等的是页面自己的 600ms 自重渲染，不是 sleep 撞窗口。
   await page.goto(board());
-  const flowed = page.locator("[data-task]", {
+  const flowed = adminView.locator("[data-task]", {
     hasText: "做一个面向独立开发者的 AI 笔记应用",
   });
-  await expect(flowed.locator(".pill")).toHaveText("CHARTER_APPROVED");
+  await expect(flowed.locator(".admin-pill")).toHaveText("CHARTER_APPROVED");
+
+  // ⑥ 完整回放页：时间线那一排的 chip 不许坐在页背景上（round377 两皮合一）。
+  //    症状量出来的：管理浅皮 --chip 与 --bg 同值 #f3f5f8，而回放页是【唯一】没套
+  //    .admin-card 的那一段（标题卡 app.js:3050、断点卡 app.js:3061 都套），于是 34 枚
+  //    chip 的圆角形状在屏幕上不存在（自底比 1.000）。工作台那一侧从不把默认 chip 放在
+  //    页背景上，所以两皮要合一，动的是【落点】不是 --chip 色值 —— 换色值会连带击穿
+  //    test/web/color-scale.test.ts 的 green/blue-ink/gray 行（round377-chip-sweep.log：
+  //    现值是唯一两皮全过的取值）。
+  const taskId = await flowed.getAttribute("data-task");
+  expect(taskId, "看板卡片没带 data-task ⇒ 后面那发量不到东西").toBeTruthy();
+  await page.goto(
+    `http://127.0.0.1:${WEB_PORT}/#/admin/replay?id=${encodeURIComponent(taskId as string)}`,
+  );
+  const firstPill = adminView.locator(".admin-tl .admin-pill").first();
+  // 先等这排真的渲染出来再量：不等就是【空集合上的 every】—— 恒真，判据不考任何东西。
+  await expect(firstPill).toBeVisible();
+  // 探针是【字符串】不是闭包：.workbuddy/tsconfig.tests.json 的 types 只有 node，
+  // 闭包里每一处 document/getComputedStyle 都会红在类型棘轮上（tw-cascade.spec.ts:273 同口径）。
+  const landing = JSON.parse(
+    (await page.evaluate(REPLAY_CHIP_PROBE)) as string,
+  ) as {
+    chips: Array<{ txt: string; host: string; onPageBg: boolean }>;
+    pageBg: string;
+  };
+  const chips = landing.chips;
+  expect(
+    chips.filter((c) => c.onPageBg),
+    `页背景 ${landing.pageBg} 上的 chip：形状读不出来`,
+  ).toEqual([]);
+  // 反向承重：这一发的底必须是卡片本身。只断「不等于页背景」的话，把 .admin-card
+  // 整个删掉也会绿（那时身后最接近的 painted 面就【是】页背景 —— 但万一哪天中间
+  // 插进别的面，判据就又空了）。钉住「坐在 .admin-card 上」才咬得住这次的修法。
+  for (const c of chips) {
+    expect(c.host, `「${c.txt}」不在卡片上`).toContain("admin-card");
+  }
 });

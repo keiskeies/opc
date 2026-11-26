@@ -8991,3 +8991,1488 @@ round365（2026-11-23）— 群角色上层 T7–T10 后端全量接线 + T12 �
 迁移、测试或真实浏览器证据；71 条新面端点 + 21 条 legacy 路由有全覆盖测试；
 自动沉淀、七执行器、私聊、文档保真、真人感与 /admin 旧看板无已知未接线缺口。
   未 commit（用户未要求提交）。
+
+【round366：工作台排版/图标/文字收敛（用户反馈「有点乱」）—— 纯表现层，无行为变更】
+
+【病因（先量再改，不靠观感）】
+  · 「图标没对齐」= .rail-top/.rail-bottom 没有 align-items: center：nav-item 是 flex item，
+    宽度随标签字数收缩（2 字 26px / 4 字 44px），于是每行 icon 的 x 都不一样。
+    实测 .nav-item box.w 26 -> 63 后消除。
+  · 「文字乱」= 一屏 13 档字号 + 550/600/650/750 四种临时字重，每组件自带一号。
+  · 「图标乱」两处：① 置顶是 40px 宽、带「置顶/取消」文字的常驻竖条，一屏十几行同喊一句；
+    ② emptyState 把 icon 写死成 "doc"，22 处空状态（消息/待办/成员/会议/模板/故障）全画同一张文档。
+  · 「文字重复」：群会话 title 就是群名，chat-header 副标题又写一遍 `${groupName} · ${tab}`
+    （hub groups/service.ts 的 INSERT_GROUP_CONV_SQL 把群名写进 conversations.title，实证重复）。
+
+【落地面】
+  · group.css：新增字阶 --fs-xs/sm/md/lg/xl/2xl 与字重 --fw-medium(500)/--fw-strong(650)
+    和 --shadow-card/--shadow-lift；body 13px/1.55 + antialiased。
+    109 处 font-size/font-weight 逐对归一（脚本 css-tokens.mjs，全或无：任一对非唯一命中即整批不写）；
+    卡片外壳统一（.card/.summary-cell/.turn-card/.task-card/.group-document-card/.talent-card/.entry-card
+    上阴影、hover 抬起；.group-task-group 由 surface-soft 改 surface+阴影、.group-task-card 反向，
+    解决「白卡压白卡」看不出层级）。
+  · group.css 导航栏：rail 居中 + nav-item 定高 60px 满宽 + active 白底阴影；
+    置顶按钮收成 28×28 纯图标（> span { display: none }，语义留在 aria-label/title），
+    只有已置顶上主色；conversation-item 选中态改左侧 3px 主色条。
+  · group.js：emptyState 加第 4 参 iconName（默认 doc），22 处调用点按各自语义给图标
+    （chat/users/board/talent/meeting/clock/search/upload/admin/settings/refresh/doc）；
+    chat-header 副标题去重为「N 位成员 · 当前页签」（新增 groupSeatSummary，取不到群行回空串由分隔符兜住）；
+    消息时间戳只留时分（日期已由 .message-day 分隔条说过），完整时间落 title。
+
+【⚠ 踩到并写进注释的陷阱】
+  · 置顶按钮不能用 display:none / width:0 做 hover 显现：group-workbench.spec.ts:778/791
+    在未 hover 的行上就要点它，Playwright 可点击性判定要求非空 bounding box。
+    变异证据：round366 mutate-pin-hidden.mjs 把 .conversation-pin 改 display:none
+    -> 该用例真红（waiting for locator ... 取消置顶）；逐字节还原后 1/1 绿。
+  · 脚本改 CJK 字面量会把中文写坏：empty-icons.mjs 首轮把「服务返回错误…」写成 3 个 U+FFFD，
+    靠 git HEAD 原文复原；现全库 group.{js,css} U+FFFD=0（css 本为 0）。
+    写这些批量替换脚本时，命中数为 0 就要停下来读源码，不要猜标点（? / : 抄错即 0 命中）。
+  · 改完 4 行参数换行后 biome format 会重排；先确认改动前该文件 biome check 干净，
+    再 biome format --write，净新增错误仍为 0。
+
+【实测】
+  · node --check group.js 通过；biome check group.js group.css：0 error。
+  · 计算样式指纹（style-fp.mjs / fp-diff.mjs，1512×950，30 选择器）：14/30 变化且每条都在预期内
+    （.nav-item 10->11px、w 26->63；.conversation-pin 40×44->28×28；.conversation-item 高 62->60；
+    .chat-header h2 16/700 -> 15/650；.message-meta 10->11px；.bubble 行高 20.15->22.1；
+    .btn.primary 字重 550->500；.pill 新入表）。
+  · 空状态图标读 DOM 的 <use href>，不看截图：通讯录 -> #i-talent、设置 -> #i-settings，34×34，无 console error。
+  · 移动端不变量：390 视口 scrollWidth === innerWidth === 390，errors: none。
+  · pnpm test：189 文件 / 3995 通过 / 6 跳过（4001），81.50s 全绿（含 doc-refs、lint-baseline 等 arch 守卫）。
+  · pnpm test:e2e：11/11 全绿（ceo-loop 1 + group-workbench 9 + mobile-approval 2）。
+  · 文档正文（.rich-editor h1/h2/h3、markdown/sheet/mindmap 正文、.watermark、.avatar.large）
+    刻意不套 UI 字阶——正文排版尺度不归 UI 标度管。
+  · 未 commit（用户未要求提交；上一次提交 e7b56fb 是「提交并推送」那次的产物）。
+
+round367（2026-11-24）— 文档正文换成真富文本（vendored Quill 2.0.3）+ 权限搬进右侧抽屉 + 文档树三级
+（用户诉求两面：「像 wps/飞书那样直接编辑，权限排到右侧抽屉，文件进来就是查看/编辑，自己上网找开源工具」
+ 「左侧文档导航做成树状有层级的」；按「自行决断、不缩水」执行）
+
+【选型】
+  · vendored Quill 2.0.3（Apache-2.0）：packages/web/public/vendor/quill/{quill.js 209274 字节、
+    quill.core.css 10229 字节, LICENSE}。本地打包不走 CDN —— e2e 与桌面壳要离线跑。
+    只引 quill.core.css（给 ql-align-*/ql-indent-*/引用/代码打底），snow.css 刻意不引：
+    工具栏外观一律走仓里自己的 .editor-toolbar / .rich-editor-tool。
+    ⚠ 顺序两处硬约束：core.css 必须在 group.css【之前】（.ql-editor 与 .rich-editor 同权重单类，
+    后到的赢 padding/height/line-height）；quill.js 必须在 group.js 之前（module 有 defer 语义）。
+  · theme:"core" 在 2.0.3 会抛（core 构建不注册 theme），实例只建一次跨文档复用 —— Quill 2
+    没有 destroy()，重建会把剪贴板 matcher 与撤销栈的接线全丢。
+  · biome.json 增 "!packages/web/public/vendor/**"：第三方压缩产物不进 lint 口径，
+    否则 format 基线一夜 +N 条且无人能修。
+
+【实现中挖出的四个真缺陷（都不是测试脚手架问题，逐个用 DOM/几何探针证实后改的产品）】
+  1. 存量 <br> 静默吃内容（group.js:3718）：DOCX 导入的软换行原先被换成 "\n"，
+     HTML 空白折叠压成空格 ⇒ 「尾段<br>换行」渲成一行「尾段 换行」，一行没了。
+     现按位置分派：段内 <br> 拆新段落（文字一个不少）；单元格里的 <br> 折成空格。
+     ⚠ 单元格这条不是排版偏好：Quill 原生把 <td> 里的 <br> 读成「换一格」，
+     2 列变 3 列（实测 ["甲","乙","续","丙","丁"]），那是改版式不是排版差异。
+  2. hash 深链打开列表外文档 ⇒ 渲「文档不存在」（group.js:3631）：openDocument 只
+     map state.documents，别的会话新建的、翻页翻不到的文档不在列表里，
+     于是拿着已经取到的 detail 渲空状态，刷新才出来。改成 upsert。
+  3. 加粗按钮永远不亮（group.js:3970 iconTool）：iconTool 从不注册 stateTools，
+     paint() 点不亮它，而 applyFormat 是 toggle 语义 ⇒ 按下去零反馈，用户只能再按一次猜。
+     补齐 aria-pressed + stateTools 注册（和 textTool 同一条路）。
+  4. 折叠光标加粗静默无操作（group.js:3891）：Delta 会丢掉 formatText 的零长 retain，
+     旧写法 formatText(range) 在「不选字直接点加粗再打字」这一步没任何效果；
+     只有 quill.format() 插的 ql-cursor 能让后打的字继承格式。
+  5. seed 期间剪贴板 matcher 会跑 ⇒ 打开一篇带 data: 图的文档就上传一张没人要的图、
+     还把内容搬到光标处、还顺手写一个版本。IMG matcher 加 settling 门（group.js:4186）。
+  6. 跨文档撤销栈残留：实例复用 ⇒ seed 不清栈，新文档 Ctrl+Z 把上一篇的段落搬回来（group.js:3821）。
+
+【抽屉（右半边诉求）】
+  · 抽屉宿主在 #mainPane 而非 #view（#view 是滚动容器，放进去抽屉跟着正文滚走），
+    所以它有独立生命周期：renderMain 换路由时必须显式拆（group.js:1489-1490），
+    否则离开文档后右滑面还挂着上一篇的权限列表。
+  · 宽屏占位不浮盖：.main-pane.drawer-open .doc-page { padding-right: 368px }（断点对齐仓内既有 1180），
+    窄屏没余量可挤才退回真浮层。1280 视口实测：闭合 left=1283/w=340，展开 left=940，正文 right=894。
+
+【测试】test/e2e/rich-editor.spec.ts 新建，6 条，判据全取渲染 DOM 与真 HTTP 往返（不看截图不读源码）：
+  ①打开即编辑+打开≠脏 ②存量 <br>（含 hash 换文档主路径）③折叠光标加粗落库有 <strong>+跨文档栈干净
+  ④data: 图打开零副作用/真粘才转资产 ⑤抽屉开合·不压正文·换文档不留旧面板 ⑥反向对照（选择器改名即全红）
+  · 单开一个文件的原因：那边 beforeAll 拉 12 个重用例共用的 Hub，这里每案要新建一篇带特定正文的
+    文档并观察它自己的 PATCH 流量，塞进去两边互相等。Playwright testMatch 自动认领，无需登记。
+
+【变异自检】.workbuddy/scratch/round367-rich-mutations.mjs，10 发全部真抹字节 + SHA-256 还原 + 每发复跑控制组：
+  M1 <br> 单元格规则 / M2 IMG settling 门 / M3 history.clear / M4 quill.format 退回 formatText
+  / M5 去掉 getFormat 的 null 守卫 / M6 撤掉 bold 的 stateTools / M7 upsert 退回 map
+  / M8 摘掉抽屉 aria-controls / M9 摘掉 drawer-open 类切换 / M10 摘掉 renderMain 的抽屉拆除
+  ⇒ killed 10/10，SHA 还原一致 10/10，每发控制组 exit 0。
+  锚点先过 .workbuddy/scratch/check-mutation-anchors.mjs（10/10 hit+unique）再跑，
+  不靠「跑挂了再说」——M2 首轮就因写成两行而 FROM 不命中，等于那发没跑。
+
+【踩到的坑（值得留下）】
+  · Chromium 里 new ClipboardEvent 造的 clipboardData 是只读空壳：dispatch 后 onCapturePaste
+    读到 html=null、资产请求 0 次。这是浏览器对剪贴板的信任模型，不是接线缺陷，
+    拿它当判据等于把测试钉死在平台行为上。改用 clipboard.dangerouslyPasteHTML(i, html, 'user')：
+    它和粘贴的 onPaste 走同一个 convert()，matcher 在同一条链上，source=USER 与真粘贴同权。
+  · 只换 hash 时 Chromium 不重载、不发 load ⇒ page.goto(waitUntil:"load") 一直挂到执行超时（实测 240s）。
+    SPA 里 hash 才是路由，用 location.hash 赋值才是诚实的用户动作等价物。
+  · 宿主节点跨文档复用 ⇒ waitForSelector 可能命中【上一篇】的编辑器，下一步点的还是旧正文。
+    先 waitForRequest 该文档的详情 GET，再等编辑器。
+  · 裸超时只告诉你「editor 没出现」，分不清错误横幅/loading/kind 不对。把 #view 前 160 字塞进
+    报错串后，第 2 条一次就看清是「文档不存在」，才挖出缺陷 2。
+  · 自动保存是 900ms 计时器：贴图后前两条 poll 一到就返回，PATCH 计数裸断言实测拿到 0，必须也 poll。
+  · 又一次自己写坏中文：改标题时把「几」写成 3 个 U+FFFD（Edit 的 old_string/new_string 都会中招）。
+    本轮起固定动作为：任何含中文的编辑后立即 grep -c $'\ufffd'，本轮扫 5 个改动文件全 0。
+  · ⚠ 台账里写字节数别用「数字紧跟单位 B」：整串小写后正好凑成 7 位纯 hex（本例 6 位数字 + 单位），
+    verify-open-invariants 的「prose 里的哈希引用必须可解析」把 round367 刚写的那行读成悬空提交引用
+    ⇒ exempt-pierce 整套红 3 发（基线 / canary / 还原后）。改写成「209274 字节」即绿。
+    这条与「探针注释里的 7 位 hex 把脚本扫红」（round346）同形：.workbuddy/ 与 docs/ 在被扫面上，
+    任何 7+ 位纯 [0-9a-f] 串（大小写都算，含带单位后缀的数字）都会被当对象 id 采走
+    ⇒ 数量一律写中文单位，或把数字与字母用空格隔开。
+
+【实测】
+  · node --check group.js 通过；biome check group.js / rich-editor.spec.ts：0 error。
+    group-workbench.spec.ts 本轮补了 format（HEAD 那份是干净的，是我加的树用例弄脏的）：
+    连跑两次 biome format --write 才收敛（第一次改出来的形状第二次还要改），之后 check 干净。
+  · 棘轮读数（.workbuddy/round274-lint-baseline.mjs）：format 142 ≤ 161、organizeImports 97 ≤ 117、
+    noAssignInExpressions 1 ≤ 1 ⇒ lint-baseline.test.ts 12/12 绿（含 doc-refs 2/2、test-inventory 12/12）。
+    ⚠ 口径提醒：表是【上限】不是期望值，143→142 是顺手修出来的，不许反向读成「还能再加一条」。
+  · tsc -p tsconfig.test.json --noEmit：干净（两处 page.evaluate 返回值按仓规用 as 收窄，未用 !）。
+  · 本 spec 单跑：6 passed (14.4s)；全量 Playwright 18/18 (30.0s)，改动前后各一次
+    （.workbuddy/scratch/e2e-full-367a.log / -367b.log）。
+  · pnpm test：第一次（本轮代码落完、台账未写）189 文件 / 3995 通过 / 6 跳过，79.68s 全绿
+    （full-test-367a.log）。写完成交说明后复跑（367b）红 1 文件 3 发 = exempt-pierce，
+    病因是【本条台账正文自己】（见上一条坑），不是代码；改写后 verify-open-invariants.mjs exit 0，
+    全量复跑结论记在下一条（round367b 收尾）。
+  · 未 commit（用户未要求提交；上一次提交 e7b56fb）。
+
+round367c（2026-11-24）— 全仓第一条跨模块黄金路径 e2e + 专打接线的剪线探针
+--------------------------------------------------------------------------------
+
+【为什么只加这一条】此前 18 条 e2e 全是逐功能的（任务面板 / 派发 / 招聘 / 私聊 / 文档树 / 抽屉…各测一格）。
+  那种形状证明每块砖是好的，不证明墙是垒着的：把「树叶子 → openDocument」或
+  「自动保存 → PATCH 正文」之间的接线剪断，那 18 条一条都不会红。本轮补上这条，
+  并把它钉死成【唯一】一条（第二条 golden path 的边际价值低于它每天拖慢全量的成本）。
+  位置：test/e2e/group-workbench.spec.ts 最后一条，复用该文件已有的 Hub 拉起与建群助手，不单开文件。
+
+【判据形状】只在【服务端往返】处断言：详情 GET 的响应、PATCH 的响应、以及
+  page.evaluate(fetch) 从服务端读回的正文与权限；中间 DOM 一律不钉（钉了每次改版式都要来改这条）。
+  链路：建群 → 树上点开建群自带的立项章程 → 新建 kind=doc 正文（创建自带打开）→
+  树上点回章程 → 再点回新建那篇 → 真打字触发 900ms 自动保存 → PATCH 落到服务端 →
+  右侧抽屉给「刚建出来的那个群」授 editor → POST 落到服务端 → 服务端读回该权限。
+
+【剪线探针】.workbuddy/scratch/round367-golden-wire-mutations.mjs。与富文本那份分开：
+  那份打引擎内部的点、跑 rich-editor.spec.ts；这份打模块之间的线、跑这条 golden path，两套射程不同别并。
+  4 发全真抹字节 + SHA-256 还原 + 每发复跑控制组 ⇒ killed 4/4、还原一致 4/4
+  （.workbuddy/round367-golden-wire-mutations-2.log；首份 log 是改测试前跑的，留着记 G1 存活那一段）：
+  · G1 把树叶子的 onClick: () => openDocument(doc.doc_id) 抹成空操作
+  · G2 把自动保存请求体里的 body_text 整行抹掉 ⇒ PATCH 照发、照 2xx（服务端按「没带正文」
+    走元数据分支），只有 golden path 那句「服务端读回的正文 == 敲进去的」抓得住 ⇒ 盲区实锤
+  · G3 把授权表单的 onsubmit: setPermission 抹成只 preventDefault
+  · G4 把权限请求体的 tier 抹成常量 reader ⇒ 请求照发照 2xx，只有读回里那句 editor 红
+
+【第一轮 G1 活了下来 —— 本节最值得留的一条】第一版把「树上点开」放在新建文档之后，看着像覆盖了树，
+  其实不承重：那个弹窗的按钮写着「创建并打开」，文档早已被打开，剪掉树那根线测试照绿。
+  改法：先在树上点开建群自带的立项章程（它是 kind=markdown，宿主是 Markdown 正文那个 textarea，
+  Quill 只挂 kind=doc），再点回新建那篇。教训一句话：
+  【每根线要有属于它自己的那一次动作】，两根线共用一次动作时，被剪的那根等于没测。
+
+【本轮另几个坑】
+  · 抽屉里 fill 完 grantee/tier 就等 POST ⇒ 干等到 240s 执行超时：授权走 form 的 submit，
+    必须真点【保存权限】。顺手把两处 waitForResponse 显式设 20s，剪线时报「请求根本没发」，
+    而不是让人对着默认 4 分钟超时干等。
+  · waitForRequest / waitForResponse 要挂在触发它那个动作【之前】：详情 GET 就在 click 那一下发出去，
+    反过来写会错过已经跑完的请求（实测 20s 超时一回）。
+  · grantee 不能用合成 member_id：服务端 validateGrantee 要求被授权对象真实存在，
+    合成 id 被 member_not_found 整单挡回（那条拒绝路径归服务端测试管）。改用刚建出来的那个群。
+  · 又一次自己写坏中文（本轮第 4 次，两处）：含中文的编辑后立刻 grep -c $'\ufffd' 这条纪律每次都抓到了。
+
+【实测】
+  · 本条单跑 passed（4.3s）；biome check 干净（format 连跑两次收敛）；
+    tsc -p tsconfig.test.json --noEmit 干净（page.evaluate 返回值按仓规用 as 收窄，未用 !）。
+  · node --check group.js 通过；剪线脚本跑完后 onClick 那行 0 处残留、SHA 与开跑前一致。
+  · 台账写完复跑：verify-open-invariants.mjs exit 0、pnpm test 全量、全量 Playwright（本轮起 19 条）见下。
+  · verify-open-invariants.mjs exit 0（新写的这段没有 7+ 位纯 hex 形状的数字，写完即扫）。
+  · 棘轮读数与本轮改动前一致：format 142 ≤ 161、organizeImports 97 ≤ 117、noAssignInExpressions 1 ≤ 1
+    ⇒ lint-baseline.test.ts 12/12 绿；test-inventory 12/12、doc-refs 2/2 同绿。
+  · 全量 Playwright：19 passed (31.9s)（.workbuddy/scratch/e2e-full-367c.log）—— 本轮起 e2e 从 18 条变 19 条。
+  · pnpm test：189 文件 / 3995 通过 / 6 跳过（full-test-367c.log），台账写完前后各一次结论相同。
+  · 未 commit（用户未要求提交；上一次提交 e7b56fb）。
+
+round368（2026-11-24）— 文档中心排版落地 + 第一根【自己看着绿其实没接线】的判据被抓出来
+--------------------------------------------------------------------------------
+
+【症状与两根独立的根】用户截图指「排版很乱，包括左侧文档层级树」。量出来是两个互不相干的缺陷，
+  别并成一条讲：
+  · 容器：`.workspace` 是 grid 但只写了 height:calc(100vh - 64px)，隐式行停在默认的 auto。
+    grid item 的 min-height 起始值也是 auto ⇒ 内容超一屏时三栏跟着内容长（900 高视口实测
+    #view 与 #listPane 836 → 1408，#listContent 的 clientHeight 676 → 1247 = 它自己的内容高），
+    没有一栏是「视口高 + 自己滚」，滚的变成整个文档（documentElement 900 → 1472）。
+    【坐标重钉 · round379】那行 height 现在是 calc(100vh - var(--topbar-height))（group.css:581），
+      --topbar-height 已从 64 收到 52（:235）；640 窄档另有一条刻意的 57px 配对（.topbar:1528 与
+      .workspace:1543 同档同值），「顶栏只有一处来源」由 test/web/compact-scale.test.ts ① 承重。
+    修法一行：grid-template-rows:minmax(0,1fr)。
+  · 空白：`.doc-page` 是 grid 且 `.page` 带 min-height:100%，矮文档配高视口时这一格仍比内容高，
+    align-content 留 normal(=stretch) 把余量摊进【行高】：三个子项 85/540/372 被拉成
+    164/619/451，最后一个块下面本该剩的 237px 归 0。修法一行：align-content:start。
+  另有第三处不是 grid 的锅：gap:14 与改版前遗留的 `.doc-head{margin-bottom:16}` /
+  `.card + .card{margin-top:12}` 叠加 ⇒ 声明 14、量到 30 和 26，两条 margin 在 .doc-page 里归零。
+  左树：叶子原本 h3 + 「作者 · 日期」副行 + 「已水印」pill，一屏 28 篇摊成两千多像素高、
+  每行 59~86px。副行收进叶子 title（正文页头 .doc-sub 本来就写着同一串），水印缩成行尾一个点，
+  筛选条改成搜索独占一行 + 两个下拉并排（头部从 115px 降到 71px）。
+
+【W2 第一版判据是假绿 —— 本轮最值得留的一条】剪线探针第一轮：W1/W3a/W3b/L1/L2/Q/P 全 killed，
+  唯独 W2（抹掉 align-content:start）SURVIVED，控制组绿。病因在判据不在代码：那一发只用
+  「相邻子项的 top - 前项 bottom」量间距，而 stretch 摊的是行高、不是 gap —— gap 恒为 14，
+  那把尺子从原理上就看不见这根线。补量两个真会变的量（每个子项自己多高、最后一个块下面剩多少
+  空白）后同一发变异 KILLED。教训一句话：
+  【判据的尺子必须与被剪的那根线有因果】，「看起来相关的数字」不是判据，只有剪下去会红的才是。
+
+【另一处诚实修正】W1 第一版写了 expect(m.workspace.h <= 视口-顶栏)：`.workspace` 自己带 height，
+  量它的 rect 恒等于 836，这一格写什么判据都不会红。删掉，改量它的三个 item 与 documentElement。
+  两条 CSS 注释里「实测 836 的视口撑成 2456」那句也是早期误记（2456 是当时整页高，不是行高），
+  已按复测数字重写 —— 注释里的数字错了比没数字更坏，下一个人会拿它当基线。
+
+【判据形状】test/e2e/doc-layout.spec.ts（5 发，新建文件，自带 Hub + dev-server）。全部只量几何
+  （getBoundingClientRect / scrollHeight / clientHeight），不读源码、不比像素截图：改类名换实现
+  不会假红，抹掉承重那行必红。两发容器判据要【相反的内容/视口比例】，故拆两个 describe 各带视口：
+  900 高配「内容超一屏」、1400 高配「内容不足一屏」。后者是 W2 唯一的观测窗口，用例里先自证
+  「这一屏确实有余量可摊」，窗口消失时报「观测窗口消失」而不是静默绿。
+  长文档样本用 kind=doc 不用 markdown：markdown 的宿主是固定 470px 高的 textarea（整页 1099px，
+  比左栏的 1247 还矮），那种样本里最高的永远是左栏，第二发用例就退化成第一发的副本，
+  剪掉 W1 之外的那根线谁都不会红。富文本宿主按内容长（.editor-card 4507、#view 内容 5066）。
+  树的判据两条正向两条反向：叶子只剩 1 个块且高 ≤36px、副行必须在 title 里；同名两群各带 ID 尾号
+  且尾号互不相同，唯一名那群【必须没有】尾号。
+
+【剪线探针】.workbuddy/scratch/round368-layout-mutations.mjs：8 发全真抹字节 + SHA-256 还原 +
+  每发复跑控制组 ⇒ killed 8/8、还原一致 8/8（.workbuddy/round368-layout-mutations.log）。
+  W1 抹 grid-template-rows 声明；W2 抹 align-content 声明；W3a/W3b 各抹一条 margin 归零覆盖；
+  L1 把叶子 padding 覆盖退回基础 .doc-list-item；L2 把「作者」副行加回叶子；
+  Q 取消「只在撞名时加尾号」的条件；P 把同名计数从按显示名改成按 group_id（这一版最初就写错在
+  这里：按 id 数恒为 1，尾号永远不出现，判据看着在、从来不会触发）。
+
+【两个用来定数字的一次性探针】round368-row-probe.mjs（运行时把行改回 auto，量三栏各变成多少）、
+  round368-align-probe.mjs（运行时把 align-content 改回 normal，量 gap / 行高 / 底部余量各变了什么）。
+  这两个脚本是上面所有「实测」数字的出处，留着，别当垃圾删。
+
+【本轮另几个坑】
+  · 又一次自己写坏中文（本轮 4 处）：Edit 写含中文的块时会把 3 字节字符打成 3 个 U+FFFD；
+    而 grep -c $'\ufffd' 数的是【行】不是字符，1 行里 3 个只报 1 ⇒ 计数一律在 node 里数。
+    本轮最阴的一处坏在 test("…") 的【标题字符串】里：5 条 e2e 全绿、biome 干净，只有全量里的
+    类型棘轮与肉眼对不上 —— 标题坏字不影响任何判据，所以它只能靠【扫】，不能靠跑。
+  · 【本轮最值钱的一条坑】我按老习惯跑 `npx tsc --noEmit -p tsconfig.json` 得到「干净」，
+    但根 tsconfig.json 是 `{"files": [], "references": [...]}` 那个 solution 文件，
+    它【一个文件都不检查】—— 那句「干净」是零条文件意义上的干净。测试面的类型自证有两把尺子：
+    tsconfig.test.json 是 0 错硬门（进 pnpm verify 的 typecheck 链尾），
+    .workbuddy/tsconfig.tests.json 是目录棘轮（test/arch/test-type-baseline.test.ts 真跑的是它）。
+    新 spec 因此带着 6 条 TS18046/TS7006 进了全量才被棘轮点名：page.evaluate 传【字符串】时
+    返回 unknown，仓内可复制的写法是页面里 JSON.stringify、外面 JSON.parse(raw as string) as T
+    （rich-editor.spec.ts 两处就是这个形状），而不是给它加一条 TYPE_BASELINE 豁免。
+    以后测试面的类型自证一律跑 tsconfig.test.json（round367 那两条记的就是它，是我这次串错了文件）。
+  · 新 spec 的 hubFetch 返回类型写成 Record<string, never> 后还要取 document.doc_id ⇒ 只能靠 !，
+    改 Record<string, unknown> + 一个 createdDocId() 取值器（仓规：禁 `!`，用 as）。
+  · 尾号那格最初按 group_id 统计（恒 1），修成按显示名统计后，又踩一次「调用点再拼一次 #」
+    导致 # 双写；node --check 在跑任何东西之前抓到（那条纪律救过不止一回）。
+  · 截图是拼接的长截图，里面的绝对偏移和重复 icon 不是真实几何 —— 别拿它当量具，量要进浏览器量。
+
+【实测】（每条都是本轮真跑过的，命令与结论一一对得上；全量与 verify 系一律串行，没有并发）
+  · doc-layout.spec.ts 单跑 5 passed；全量 Playwright 24 passed（33.2s，.workbuddy/scratch/e2e-full-368.log）。
+    e2e 条数从 19 变 24：上一版全量 e2e-full-367c.log 的结论行就是「19 passed」，新文件被 testMatch
+    自动认领（test/e2e/*.spec.ts），没有登记表可漏。
+  · 剪线探针 round368-layout-mutations.mjs exit 0：killed 8/8、SHA 还原一致 8/8，每发还原后控制组
+    exit 0（.workbuddy/round368-layout-mutations.log）。开局与收摊两文件的 SHA 逐字符相同。
+  · pnpm test 全量：189 files passed、3995 passed / 6 skipped（4001，.workbuddy/scratch/full-test-368b.log）。
+    同一条命令修类型前跑过一次红：1 failed | 3994 passed，红的是 test/arch/test-type-baseline.test.ts
+    点名新 spec 的 6 条 TS18046/TS7006（full-test-368.log）。两次都留着，别只留绿的那份。
+  · 测试面类型自证：npx tsc -p tsconfig.test.json --noEmit exit 0；node --check group.js 通过。
+    根 tsconfig.json 是 solution 文件（files: []），在它上面跑 tsc 得到的「干净」不指任何文件。
+  · biome 棘轮读数与本轮改动前一致：format 142 ≤ 161、organizeImports 97 ≤ 117、
+    noAssignInExpressions 1 ≤ 1（按 lint-baseline.ts 的 runBiomeJson 同一条命令重算，非引用旧数）。
+    group.js 那一条本轮自己加的长行是手折的，没跑 --write 全文件，免得棘轮读数混进无关重排；
+    group.css 不在 biome.json 的 files.includes 里，它不在射程内（改它不会动上面任何一条读数）。
+  · verify-open-invariants.mjs exit 0（采集 666 个 token、分项和 == token 数、腐烂 0）。
+    剪线日志落 .workbuddy/*.log 才安全：walk 只收 .txt/.md/.mjs，SHA 摘要形状的 .log 不会被采；
+    留存的三个 .mjs 探针里 7 位以上 hex 形状的数字为 0（它们用运行时 slice 打，不写死摘要）。
+  · 改动的三个文件 U+FFFD 计数全 0；剪线脚本收摊时再扫一遍仍是 0。
+  · 一次性探针（量行高的、量 align-content 的、查缺字的、截图的几个）已清，只台账点名的三个 .mjs 留着：
+    layout-mutations（剪线）+ row-probe / align-probe（上面所有「实测」数字的出处）。截图留作症状与修后对照。
+  · 未 commit（用户未要求提交；上一次提交 e7b56fb）。
+
+round369（2026-11-24）— 把上一轮的判据往外推，抓出【绿了几轮但从没成立过】的那一条
+--------------------------------------------------------------------------------
+
+【这一轮做什么】round368 的判据只覆盖 2 档视口 × 1 条路由。这一轮不写新特性，做三件事：
+  ① 把排版判据外推到 6 条路由 × 6 档视口（含用户截图那档 2240×1232、1181/1180 媒体查询两侧、移动端）；
+  ② 复核上一轮为「让某条判据变绿」顺手写下的产品声明，看它自己有没有变成回归；
+  ③ 对同域另一处「量几何 + 等动画」的判据（右侧抽屉）做一次自查：违反它时这个数会怎么变。
+  ②③ 各抓出一个真东西，而且都不是外推本身抓到的 —— 是外推逼出来的复测抓到的。
+
+【②自己写回来的坑：max-width:none】round368 我给 `.doc-page` 加过一句 `max-width:none`，
+  当时的理由是「正文列应该尽量用满宽度」。实测它制造的是全站唯一的例外：2240 宽下正文宿主撑到
+  1760，13px 字号一行约 135 个汉字，而其余路由全吃 `.page` 的 1540 上限（那一版在 2240/1796/1852
+  几档量到 1760~1852 的正文宽，只有文档页超线）。删掉那句，文档页回到共用上限。
+  配套的 W4 判据是新写的（视口取 2240×1232）：先自证「主区确实比 1540 宽」，否则整发是恒真空判据；
+  再断 `.doc-page` 宽 == 1540、左右余量差 ≤1（margin:0 auto 失效时是左 0 右 312）、
+  正文宿主 ≤ 1484（= 1540 − 2×28 内边距）。
+  【探针方向和其余各发相反】别的发剪线是【抹掉声明】，W4 是把那句 max-width:none【加回去】
+  （from = 当前那行、to = 带 max-width 的那行）—— 它防的是「将来有人为了填白又把上限解掉」。
+  教训一句话：为了让判据绿而放宽的东西，判据本身要能把「放宽的那一步」剪红，
+  否则它不叫判据，叫永久豁免。
+  【坐标重钉 · round379】上面 W4 三断里的第三断「正文宿主 ≤ 1484（= 1540 − 2×28 内边距）」
+    已不存在：round370 铺满翻向后 W4 改成「文档页宽 == 主区宽」（doc-layout.spec.ts:587–589），
+    1540 上限只剩反向那一发在其余路由上守（maxW == "1540px" 且 ≤1540，:714–716）。
+    别照这段旧文去 spec 里找 1484。
+
+【①外推的结果】.workbuddy/scratch/round369-route-sweep.mjs：6 条路由 messages / contacts / documents /
+  backlog / talent / settings × 6 档视口 1440×900、1024×800、390×780、2240×1232、1181×720、1180×720
+  ⇒ 36 组读数、0 条问题（.workbuddy/scratch/round369-route-sweep.log 留档，每行带 ws/view/page 的
+  offsetHeight 与 clientHeight、.page 的 display 与 align-content、子项间距）。
+  外推没抓到容器层的漏：W1/W2 的修法是通用的，换路由换视口都成立。但它把复测的注意力引到了
+  同域另一处「量几何 + 等动画」的判据上 —— 下一条就是复测时红的。
+
+【③本轮最值钱的一条：一条从没成立过的判据】rich-editor.spec.ts ⑤ 写的是「抽屉贴在主区右边缘」，
+  原来的断言是 `paneRight - drawerLeft <= 1`。这个关系是【反的】：抽屉打开、真的贴右边缘时，
+  主区右边缘减抽屉【左】边缘恒等于抽屉自己的宽度 340；只有收起态（translateX(101%) 滑出主区）
+  那个差才接近 0（实测 −3）。也就是说它绿的唯一条件是「量到还没滑进来的抽屉」——判据在证伪自己。
+  为什么一直没红：`.doc-drawer-wrap` 带 `transition: transform .2s`，而 Playwright 的 `toBeVisible()`
+  只判 visibility —— class 一摘 visibility 立刻翻成可见，transform 还要滑 200ms，取数落点由机器
+  快慢决定。单跑本 spec 绿，全量里（前面二十多条用例之后）红成 72，正是滑动过程中的中间值；
+  补上「等动画停下」之后当场红回真值 340。两份红的 log 都留着：
+  .workbuddy/scratch/e2e-full-369.log（Received 72）、e2e-full-369b.log（Received 340）。
+  修法两条，都没动产品代码：
+  · 取几何数字之前先 poll 位移归零：`getComputedStyle(...).transform` 解析成
+    `new DOMMatrixReadOnly(t).e`，poll 到 0 再量。写成 poll 而不是 setTimeout —— 动画坏了要红，
+    不许「慢一点就蒙过去」。
+  · 断言换成 `paneRight - drawerRight === 0`。实测 1100 / 1181 / 1280 / 1440 / 2240 五档全为 0
+    （round369-drawer-probe.mjs 是这串数字的出处：真开抽屉、等 settle、逐档打印左右缘与各档差值，留着）。
+  【关键取舍】红回 340 之后最省事的收场是把阈值改成 340 让它重新绿。没有改。
+  自查：违反「贴右边缘」时（改成贴左缘、或让位不彻底），drawerRight 会小于 paneRight ⇒
+  这个数从 0 变大 ⇒ 判据只能是 `=== 0`，放宽到 340 等于把这条判据删掉。
+  自查形状已写进记忆：任何「A 贴 B / A 在 B 之内」的判据，动手前先答「违反它时这个数变大还是变小」，
+  答不出就说明从没见它红过。配套剪线两发：D1 把 `inset: 0 0 0 auto` 改成贴左缘，
+  D2 把占位让位的 `padding-right: 368px` 退回 28px（340 抽屉 + 28 列内边距 = 368，
+  正文靠 padding 让位而不是被浮层压掉末几个字，`editorRight < drawerLeft` 也一起断着）。
+
+【另一处真缺陷：思维导图大纲树多缩的 40px】剪线全绿之后顺手做了一次孤儿类名扫描（派子 agent 跑的），
+  `.tree-root` 在 CSS 里【没有任何规则】，而它是 outlineTree() 渲染的根 `<ul>`。浏览器 UA 默认给 ul
+  `padding-left:40px` + `list-style:disc` ⇒ 一棵已经用 `.tree-children` 的左 border 画层级的树，
+  行首还多缩 40px、每行带一个圆点（实测第一层标签 left 408 → 448）。仓里的规矩本来就写着
+  （group.css:336 那句「层级线用左 border 画，而不是靠缩进空一格」），这条属于漏了归零。
+  补 `.tree-root { margin: 0; padding-left: 0; list-style: none; }`，复测 408 / 442 / 476、
+  list-style 归 none（round369-outline-probe.mjs 是数字出处：把同样的 DOM 形状注进 .mindmap-preview、
+  量完摘掉，不往 dev 库里写样本，留着）。
+  子 agent 另外两条报的是误报，核过没动：`.sheet-table` 由 `.sheet-grid table` 命中、
+  `.editor-surface` 承的是 `.watermark`。第三条 `.sheet-json-details` 确实没样式
+  （同族的 `.sheet-conditional-details` 有），但那是 sheet-editor 的射程、不在「文档中心排版」
+  这条任务里 ⇒ 记在这里、本轮没动，别当已修。
+
+【判据形状（第 7 条用例）】两条腿，一正一反：正向断第一层标签相对正文左沿的净缩进 == 0
+  （多出来就是那 40px 回来了）且 `list-style` 在 ul 与 li 两处都是 none；反向断每级步骤 ≥20px 且
+  各层相等 ⇒ 不许为了「贴左沿」把 `.tree-children` 的缩进一起归掉（那 34px = 20 margin + 13 padding
+  + 1 border 就是层级本身，归掉之后树散成一层平铺）。配套 T1（抹掉 .tree-root 归零）与
+  T2（把 .tree-children 的 margin/padding 归掉、border 留着），两发指向同一条用例、红的不同一格。
+  思维导图样本在 beforeAll 里建：body_text 用 ["顶层","  中层","    底层"].join(NL)，
+  NL = String.fromCharCode(10) —— 行尾符不能写字面量转义，heredoc 会把 \\n 压成裸换行（TS1002/TS1005）。
+
+【本轮三次自己写坏中文】三处全在「不影响任何判据」的地方，也就是说全是绿着坏的：
+  · Edit 写含中文的块把 3 字节字符打成 3 个 U+FFFD（老毛病，本轮一次）。
+  · heredoc 插探针时把 `const only = ` 的空格吃掉 ⇒ 锚点写太紧，下一个人改一行就 ANCHOR MISSING。
+  · 【最阴的一次】T1/T2 的 `expect:` grep 串里进了 3 个 U+FFFD。那个串是拿去 `-g` 匹配【用例标题】的：
+    坏字不影响 node --check、不影响 SHA 扫描、不影响任何断言，只有真跑剪线时才表现为
+    「这条用例没匹配上」。修法是不再手打中文：从 spec 自己的标题里取子串并断言它在文件里唯一。
+    凡是「拿去匹配中文」的字面量，来源应该是被匹配的那个文件，不是我的记忆。
+
+【实测】（每条都是本轮真跑过的，命令与结论一一对得上；全量与 verify 系一律串行，没有并发）
+  · 剪线探针 round368-layout-mutations.mjs 13 发 exit 0：killed 13/13、SHA 还原一致 13/13，
+    每发还原后控制组 exit 0（.workbuddy/round368-layout-mutations.log 已被这一版覆盖）。
+    开局与收摊两个文件的 SHA 逐字符相同（摘要由脚本运行时打印，台账里不写死）；
+    两文件 U+FFFD 计数全 0。新增 5 发：W4（加回 max-width:none）、D1/D2（抽屉）、T1/T2（大纲树）。
+    顺序：W1 W2 W4 W3a W3b L1 L2 Q P D1 D2 T1 T2。round368 记的是 8 发全 killed，本轮外扩到 13。
+  · doc-layout.spec.ts 单跑 7 passed（.workbuddy/scratch/e2e-doclayout-369.log）；
+    全量 Playwright 26 passed（36.6s，e2e-full-369d.log）。上一轮记的 24/5 是本轮加 W4、W5 之前的数。
+    中间两次红留着：e2e-full-369.log（⑤ 断言未修，Received 72）、e2e-full-369b.log（补 settle 后 Received 340）、
+    e2e-full-369c.log（修完 25 passed，加第 7 条之前）。
+  · pnpm test 全量：189 files passed、3995 passed / 6 skipped（4001，full-test-369c.log），
+    与 round368 同数 —— 本轮只动 CSS/JS/e2e，没动被测源码，计数不该变，变了就要解释。
+  · 测试面类型自证：npx tsc -p tsconfig.test.json --noEmit exit 0（tsc-369.log）。
+    新用例取数组下标处补了 3 个 `as number`（noUncheckedIndexedAccess 开着，仓规禁 `!`）。
+  · biome 棘轮按守卫【自己的】runBiomeJson 重算：format 142 ≤ 161、organizeImports 97 ≤ 117、
+    noAssignInExpressions 1 ≤ 1，diffLintBaseline 空（round369-biome-read.mjs，非引用旧数）。
+    新用例刚落盘时 format 报过 1 条诊断，棘轮正好顶在 142 ⇒ 吸不下，对那一个文件跑 --write
+    （改前副本比过再删），重算读数不变。group.css 不在 biome.json 的 files.includes 里，改它不动读数。
+  · verify-open-invariants.mjs exit 0（verify-369b.log：提交引用全部可解析，摘要类逐条豁免）。
+    剪线日志放 .workbuddy/*.log 才安全：walk 只收 .txt/.md/.mjs，SHA 形状的 .log 不会被采；
+    留存的探针里 hex 摘要一律运行时 slice 打印，不写死字面量。
+  · 一次性脚本清理：修 seed / 补下标 / 插探针 / 修 grep 串 / 补格式化 那 8 个已删。
+    台账点名的四个 .mjs 全留着，它们是上面「实测」数字的出处：round368-layout-mutations（剪线）、
+    round369-route-sweep（36 组外推）、round369-drawer-probe（五档右差）、round369-outline-probe（40px）、
+    另留 round369-biome-read（用守卫自己的函数读棘轮，避免引用旧数）。
+
+【状态】全部未 commit（用户未要求提交，上一次提交仍是 e7b56fb）。
+  本轮改动：packages/web/public/group.css（删 max-width:none + 加 .tree-root 归零）、
+  test/e2e/doc-layout.spec.ts（未跟踪新文件，5 → 7 条）、test/e2e/rich-editor.spec.ts（⑤ 判据修正）。
+  仍有一处待办不是本轮射程：`.sheet-json-details` 无样式（见上）。
+
+round370（2026-11-24）— 文档页「打开即铺满」+ 左栏可折叠 + 关联进抽屉；一支剪线探针
+              用【自己看着绿】的方式抓出了搬家后复发的老病
+--------------------------------------------------------------------------------
+
+【这一轮做什么】用户带截图来：「这个文档编辑怎么还是这样，表格打开就是一个完整的 excel，
+  所有文档进来就是铺满的直接展示/编辑，权限什么的都可以放到右侧抽屉」。三条诉求拆成
+  三根各自独立的线，全部与「换电子表格库」无关，所以先把这一半落地，库那一半留在门禁后：
+  ① 文档页吃全站 `.page` 的 1540 上限 + 居中 ⇒ 2240 宽下两侧各留 156 空白；
+  ② `.sheet-grid` 带 `max-height:550px` ⇒ 表格恒是那条横条（截图上那一条）；
+  ③ 正文宿主按内容高 ⇒ 头部以下全是空白。
+  另加两条产品形状：左栏可折叠（用户选「保留，可折叠」）、权限/设置 + 关联全部进右侧抽屉。
+
+【两条历史判据被有意翻掉（不是回归，写明防以后误「修」回来）】
+  · W2：`.doc-page` 从 `display:grid; align-content:start` 改成 flex 列。旧判据断「最后一个
+    块下面还剩 ≥60px 余量」——那是「正文按内容长」时代的语义；新语义下正文宿主就是被 flex
+    拉长去吃余量的那一个，底部余量归 0 才对。判据翻向时尺子保持与那根线有因果：改断
+    「间隔恒等于声明的 gap + 底部 slack ≤ 2 + 宿主高度吃掉余量」，谁把正文退回内容高立刻红。
+  · W4：文档页写 `max-width:none`（round369 我刚删掉的那句，这一轮被产品要求加回来）。
+    反向判据同步改写：不再断「文档页 ≤1540」，改成钉【其余路由仍守 1540】——backlog /
+    contacts / talent / messages 四条逐个量 max-width 与实宽。放开宽度这件事的失控形状
+    是「别的页面也跟着散」，所以判据守的是那一半。
+  教训一句话：翻判据要连【它防的失控方向】一起翻，只把断言取反会守一个不会发生的事。
+
+【本轮最值钱的一条：探针 SURVIVED 抓出搬家复发的老病】
+  W3b 那一发剪的是 `.doc-page > .card + .card { margin-top:0 }`（round368 为「gap 14 却量到
+  26」加的覆盖）。这一轮它【SURVIVED，控制组绿】。第一反应是判据坏了，实测是线搬家了：
+  关联区块 round370 从正文流搬进右侧抽屉后，`.doc-page` 里只剩一张 `.card`，
+  `.card + .card` 这个相邻选择器不再命中任何东西 —— 覆盖还在，但没东西可盖。
+  而基础 `.card + .card { margin-top:12px }` 的病跟着关联一起搬进了抽屉：`.doc-drawer-body`
+  的 gap 写 12，实测卡片之间 24（各卡 margin-top 一路 0/12/12/12）。同一条判据新写一发：
+  尺子用【声明的 gap】量【实测间隔】，所以它测「叠加没叠加」而不是「等于 12」这个数，
+  将来改 gap 判据跟着走；窗口自证先数卡片张数与 gap 声明（只剩一张时那条 for 一次不跑 =
+  绿得毫无内容）。修法是把覆盖搬到 `.doc-drawer-body > .card + .card`（权重 0,3,0 稳过基础
+  0,2,0，不靠文件序）。
+  可复用的判据形状：一条覆盖的【选择器命中集】会随 DOM 搬家而清空，而覆盖本身看着毫发无伤。
+  SURVIVED 不一定是判据没接线，也可能是线换了地方 —— 两者都要实测区分，别默认是测试写坏了。
+
+【探针脚本自身的两道自门禁（本轮补上，两支脚本都加）】
+  ① 每发跑前先 `--list` 数 grep 命中的用例数，不等于 1 就停。病因：用例标题改名/删除后
+     `-g` 命中 0 条，Playwright 以「no tests found」退非零，会被记成 KILLED —— 探针在报
+     「这根线守住了」，而它连被测对象都没找到。本轮 W3b/W2/W4 三发的标题全动过，没这道
+     门禁就会假绿一片。
+  ② 剪完先比对字节：mutated === original 就停（防止 from/to 写成一坨后静默空变异）。
+  另配一个离线核对器 .workbuddy/scratch/probe-from-check.cjs：不跑 Playwright，纯字符串
+  统计每发 from 在当前工作树里命中几次 + 是否空变异，改完 CSS/JS 先跑它（秒级），
+  再跑分钟级的变异套件。踩过的坑：跨探针的非贪婪正则会抓错 from 而假报命中 0，
+  核对器已改成按 `},\n  {` 探针边界切块。
+
+【左栏折叠的取舍】折叠手法用 `--list-width:0px` + `visibility:hidden`，不用 display:none：
+  栏里的搜索框与树叶子仍在布局与无障碍树里，只是宽 0 —— 所以 C2 那一发（只删 visibility）
+  必须红，红了才对：宽度归零但内容仍可见可聚焦，等于把一屏内容压进 0 宽的洞里。
+  作用域只认「route === documents 且选中了文档」，C3 把条件翻向后误伤聊天/通讯录/待办
+  （同一个 .workspace）；判据用「折叠偏好开着时导航到 backlog，左栏仍 >150 宽」钉住。
+  偏好写 localStorage，C4 剪掉写回 ⇒ 刷新即丢。⚠ 测试自己的坑：原本是「展开后再刷新」，
+  那写回的就是 false，量的根本不是「偏好丢没丢」—— 顺序改成先刷新再展开。
+
+【实测数字（都是判据里用的那个，不是事后补的）】2240×1232：#view 1852×1168、
+  .editor-card 1820×1043、表头 85、内层编辑器 973；1440×1400（矮文档）：#view 1052×1336；
+  其余路由 .page 一律 1540/1540px。抽屉四张卡修前实测间隔 24、修后 12。
+
+【证据】
+  · 剪线两支（变异基 = 工作树原态，不是 HEAD）：
+    .workbuddy/round370-fill-mutations.log —— F1/F1b/F2/F3/F4、S1/S2、C1~C4、A1/A2，
+      killed 13/13、SHA 还原一致 13/13，每发还原后控制组 exit 0。
+    .workbuddy/round368-layout-mutations.log —— 该脚本本轮改钉后 killed 11/11、SHA 11/11。
+      其中 W2/W4 两发已删（那两根线被本轮翻掉，from 在新 CSS 里不存在）；W3a 的 from 跟着
+      那行新增的 `flex: 0 0 auto` 一起改钉，且改成【只删 margin 声明、留着 flex】——
+      否则一发剪两根线，红了不知道是哪根。W3b 改打抽屉那一发。
+  · doc-layout.spec.ts 单跑 11 passed（scratch/e2e-doclayout-370.log）；
+    全量 Playwright 30 passed / 1 failed（e2e-full-370.log）。
+  · 那条红【不是本轮的】，且不是「一直红」：ceo-loop.spec.ts:252/290 钉 `.pill`，
+    而工作树的 app.js 已把 18 处 `class="pill"` 全改名 `admin-pill`（HEAD 上仍是 pill ⇒ HEAD 绿）。
+    admin.css（未跟踪）用 `.admin-root .admin-pill` 接上了新名，index.html 也挂了 admin.css，
+    所以改名是自洽的，缺的是那两条测试尾巴。本轮没动 app.js / index.html / ceo-loop，
+    也没替它补 —— 那是并发进行中的管理视图重构自己的收尾，等它的主人收。
+  · 同一批并发改动还带着 test/web/app-loader.ts（自述 round370 的 hashPrefix 改造），
+    它当前在 `tsc -p tsconfig.test.json --noEmit` 上报 2 条（214 行 possibly undefined、
+    320 行 (string|undefined)[]）。本轮的 typecheck 读数因此【不是 0】：本轮自己写的
+    doc-layout.spec.ts 在该门禁上 0 条（错误清单里没有它）。没动那个文件。
+  · biome：本轮四个文件单独 check --write 后复跑 0 诊断。CSS 不在 biome.files.includes 里。
+  · verify-open-invariants.mjs exit 0（verify-370.log）：台账追加后提交引用仍全部可解析，
+    腐烂 0；本轮新写的日志名一律 .log 后缀（walk 只收 .txt/.md/.mjs，别把日志立成引用）。
+  · pnpm test 全量：Test Files 3 failed | 186 passed (189)；Tests 3 failed | 4003 passed |
+    6 skipped (4012)（full-test-370.log）。round369 是 189 files 全过、3995 passed / 6 skipped
+    (4001) —— 文件数没变、用例数 +11，差的那一份全在并发改动的 test/web 里：
+    app-pure.test.ts 首行 test(/it( 从 232 涨到 241、renderer-criteria.test.ts 从 37 涨到 39，
+    本轮自己动的是 Playwright（doc-layout 10 → 11），vitest 侧 +0 条。三条红的归因：
+    ① doc-refs.test.ts「完整形态引用与快照一致」—— 快照钉的是 app.js / renderer-criteria
+       的坐标，那两个文件被并发改动改了行号；该守卫对 group.js / group.css 的引用为 0 条
+       （grep 过：doc-refs.test.ts 里 group. 一条没有），本轮换行的 CSS/JS 不在其射程；
+    ② no-null-bytes.test.ts U+FFFD —— 全量那一次命中 app-pure.test.ts:3096，是并发写入自带
+       的脏字节；本轮收尾单独复跑守卫时【同一发已换成命中 admin-style-scope.test.ts:4/28/148】
+       （那期间该文件刚出现）。脏字节在别人的文件里边写边跑，读数会跳，所以这里记的是
+       「命中集只落在 test/web 的 admin* 系列」而不是钉某一个行号；本轮四个文件单独扫 0；
+    ③ app-pure.test.ts parseAdminHash（用例标题自述 round370）—— 同一批管理视图重构的新用例
+       （实跑读数：{page:'/admin/board'} 对不上期望的 {page:'board'}，解析没剥前缀）。
+    · 主张链同步（四件套之④）：test/arch 里跟坐标有关的四个守卫单跑 —— claim-coords、
+      claims-registry、doc-coords 三支全绿；doc-refs 那条红的快照键是 INDEX.md>app.js:1023
+      （pill → admin-pill 那处），对 group.js / group.css 的引用 0 条 ⇒ 本轮换行的坐标没有
+      被任何主张链钉住，无需重钉。五支合跑 191 passed / 2 failed（两支即上述①②）。
+    本轮对这三处均未动手（不替别人的进行中改动收尾），也没让红变成「已知忽略」：
+    台账记的是【谁的红、凭什么】，不是【红了几个】。
+
+【一次性脚本】留着 3 个，都是上面数字的出处：round370-fill-mutations（剪线）、
+  probe-from-check（离线核 from）、round370-drawer-gap-test（新判据落盘前的草稿，
+  与 spec 里那条逐字一致，留作对账）。
+
+【状态】全部未 commit（用户未要求提交，上一次提交仍是 e7b56fb）。
+  本轮改动：packages/web/public/group.css（.doc-page 改 flex 列 + max-width:none、
+  去 .sheet-grid 的 550 上限、card/doc-head 覆盖搬家到抽屉、折叠的 --list-width 与 visibility）、
+  packages/web/public/group.js（docListCollapsed 状态 + 持久化读写 + applyDocListCollapse、
+  关联区块进 drawerBody、折叠开关按钮）、test/e2e/doc-layout.spec.ts（10 → 11 条）、
+  test/e2e/group-workbench.spec.ts（两条关联断言补「先开抽屉再断可见」）。
+  待办：① `.sheet-json-details` 仍无样式（老 TODO，非本轮射程）；
+  ② 换电子表格库这一半【停在门禁后】——已查明自研引擎把 sort/filter/conditional 存进
+     body_text（group.js serializeSheet，5237 附近），hub 侧 formats.ts 的 SheetBody 只认
+     name/rows/styles，不认识这三个键。换库要先定这两件事的答复，未动。
+
+round370b（2026-11-24）— 管理视图拆进 group.js 视图体系：侧栏入口 + 右侧内容区挂载；
+              一支 7 发剪线探针，其中两发 SURVIVED 各抓出一枚【假守卫】与一枚
+              【够不着症状的防御门】—— 存活的那两发才是本轮最值钱的输出
+--------------------------------------------------------------------------------
+与并发的 round370（doc-layout 那一篇）同轮不同事：那一篇的证据是 fill-mutations，
+本篇的是 wire-mutations。两篇共用的文件名前缀都是 round370-*，对账时按内容认。
+
+【本轮落地的是什么】用户三条硬要求：管理视图入口进侧边栏（与消息/通讯录/文档中心同列，
+  且参与 .rail-top 拖拽排序与 Alt+↑↓ 持久化）、不许弹独立页、渲染在右侧内容区。
+  嵌法用户原话「按我原来写的彻底做」= 否决 iframe 中转，app.js 拆成可挂载模块：
+  export { currentPage, mountAdmin, ROUTES as ADMIN_PAGES, syncAdminFromHash,
+  unmountAdmin }（排序是 biome 的 organizeImports 逼出来的，见下文归因段），
+  group.js 动态 import 一次缓存到底，宿主现造 nav/dot/connText/view 四枚节点交进去。
+  ⚠ 这是对 §19.1「控制室深色气质」的一次有意偏离：嵌进工作台后 admin.css 的 --bg 取
+  #f3f5f8（与 group.css 同色，浅色），深色那套只在独立页 /admin 还魂 —— 两个入口一份 CSS，
+  配色漂移没有可能，代价是 §19.1 的「降低长时间扫视疲劳」那半句在工作台里不再成立。
+  §19.2 的琥珀纪律（全局仅用于「需要 CEO 决策」）逐条守住，落点名单见
+  renderer-criteria ②。独立页 A5「不显示但可进入」不变（e2e 第二条钉 /admin 的 title）。
+
+【7 发剪线（.workbuddy/round370-wire-mutations.mjs）】killed 7/7、SHA 还原一致 7/7。
+  第一轮跑出来是 4/6 —— M1、M6 两发 SURVIVED，复算后各是一个独立的故事：
+
+  ◆ M6 SURVIVED ⇒ 抓出一条【从没承过重的假规则】。原尺子剪的是 group.css 的
+    `.admin-mount .admin-mount-nav{display:none}`，注释声称它「0,2,1 压住 admin.css 的
+    .admin-root nav{display:flex}」。剪掉照样绿，实测两枚地面事实：① 那条规则特异度
+    是 0,2,0 不是 0,2,1（注释连数都数错）；② 真正藏住 nav 的是另一对线 —— group.js
+    造节点自带的 hidden:true 属性 + group.css:46 的 `[hidden]{display:none !important}`，
+    !important 稳压那条 flex，0,2,0 那条排在它后面永远量不到失败。一条「看起来在守、
+    实际永远不可能判红」的规则比没规则更坏：它让下一个人以为线在。处理：规则整条拆除，
+    group.css/group.js 两处注释改成说真相，e2e「侧栏入口」那发补 toHaveJSProperty
+    ("hidden", true)（属性断言，摘属性当场红），真承重的两枚线各钉一发源码守门
+    （renderer-criteria ①新增两发），并把 M6 重剪成【摘 hidden 属性】、新增 M7
+    【去掉 !important】—— 两发都红，且单根复核（round370-verify-kill-reason.mjs）
+    证明红在该红的断言上：M6 红在 toHaveJSProperty，M7 红在更早的 #listAction
+    （!important 是全工作台 shared 的线，剪它连 listAction 的 hidden 都藏不住 ——
+    顺带量出了这条线的影响面比管理视图大一圈）。
+    ⚠ 顺带发现：admin-style-scope.test.ts 的扫描集是 admin.css/app.js/index.html，
+    不含 group.css —— 想把 M6 尺子换成它的当场扑空。group.css 里的 admin-mount 规则
+    只有 e2e 与本轮这两枚新源码钉在管。
+
+  ◆ M1 SURVIVED ⇒ 门是真的，但【在现行页名空间下够不着症状】。剪掉 app.js hashchange
+    的 `if (!mounted && !standalone.nav) return;`，全绿。复算：宿主六个 data-nav
+    （messages/contacts/documents/backlog/talent/settings）与 ROUTES 七页
+    （today/board/inbox/org/charter/budget/replay）交集为空，而 syncAdminFromHash
+    第一行的 ROUTES.some 已经 return false —— 这道门是第二道门，症状需要一个撞名页
+    才出得来。这不是测试写松了，是行为在当前形状下不可观测。处理：不硬造一条能踩到
+    它的假路径（那等于为守卫发明需求），把它如实钉成【源码守门 + 台账记复发判据】：
+    复发触发条件是「有人往 ROUTES 或 data-nav 加了撞名页」，复发症状是「未挂载时宿主
+    每换一次菜单，脱离文档的 view 里就被画一遍」。renderer-criteria ①新增那条源码钉
+    剪掉门体当场红（M1 重跑 KILLED）。
+
+  ◆ M2~M5 一发入魂（第一轮就 KILLED）：M2 窗口 chip 的 `includes("?")` 分支 → 新写的
+    chip e2e（红在 URL 出现 %3F）；M3 hashId 页名携带 → 「直达保住页名」；M4 getToday
+    命中分支解包 → renderer-criteria 源码钉（含正向对照）；M5 export 块摘 currentPage
+    → app-pure 的 exportedNames 钉。
+
+【本轮 e2e 抓到的一发真 bug（HEAD 就在，与嵌入无关）】getToday 命中分支原来对两份缓存
+  都 `return c.data` —— todayCache 存的是响应体本身（没有 data 键），恒返回 undefined；
+  todayWindowCache 存的才是 {windowMs,data}。症状被三重巧合盖住：今日页永远 force=true
+  不走命中；看板/收件箱读缓存要先有人在别的窗口查过；且崩溃点在 items.map 的回调里，
+  空清单的 fixture 根本不进回调。此前所有测试（含全量 e2e）没有一条走
+  「今日页 → 切看板」这一跳 —— 跳了且任务非空才炸。修成按缓存各自形状解包
+  （`windowMs === undefined ? c : c.data`，app.js:164），renderer-criteria 钉住
+  「恒 c.data 的写法不得还魂」＋正向对照。形状记这儿：一条被 N 个入口共用的取数函数，
+  命中路径比未命中路径【更老更没人走】，这类「缓存解包错位」是纯函数测试
+  （todayCacheHit 只判何时命中）与强制刷新测试都照不到的盲区。
+
+【窗口 chip 与宿主的接缝（M2 那发线本身的来历）】chip 写的是 #/admin/today?window=7d，
+  query 住在 id 段里；group.js 的 setRoute 会对 id 做 encodeURIComponent —— 若 chip 那发
+  hashchange 也走 setRoute，地址变成 today%3Fwindow%3D7d，parseAdminHash 解出不存在的
+  页名，窗口判据静默蒸发而 URL 看着仍像回事。chip 分支（group.js:8739 那道 if）绕开 setRoute
+  只镜像页名进中栏选中态。这条分支【写出来时就没有任何测试】（M2 第一轮用 renderer-criteria
+  量它，量不到 —— 它管的是 app.js）；本轮补的 chip e2e 是它的第一次承重：断 URL 形状、
+  断 hash 里无 %3F、断中栏选中态仍是今日页、断 chip 活动态跟 7 天读数走。
+
+【#/admin 空白屏的修复（同轮前半落地，此处补记坐标）】parseAdminHash 剥前缀原来只认
+  #/admin/today 一种，裸 #/admin（侧栏刚点进去、页名还没写进 hash 的那一瞬）剥不掉 ⇒
+  page="admin" 不在 ROUTES ⇒ 挂载首屏空白。现认三种形状（app.js:256），app-pure 的
+  parseAdminHash 一节四发把它钉住（含「前缀只在开头剥，不许把 administrator 削成
+  istrator」那条结构判断）。这条的判据形状：剥前缀用【整段相等 ∥ 后紧跟 "/"】两步判，
+  不用一条聪明正则 —— 正则那支的失败模式是悄悄多剥。
+
+【三个孤儿类名 + paramSnapshotHtml 前缀（同轮前半，补记）】app.js 发的 chip/ghost/ev-none
+  三枚类名在 CSS 里【从无规则】（chip 的高亮此前写的是 .admin-act，而那条限定在 nav 里 ⇒
+  选中窗口的那枚 chip 从来没有高亮过）；admin-style-scope 双向钉把这三枚连同
+  paramSnapshotHtml 的 cls（"snap-none meta" → "admin-snap-none admin-meta"）一起逼成
+  admin- 前缀并补 CSS。这半段没有新剪线，双向钉本身就是剪线替代品：类名从 CSS 消失即红。
+
+【自己给自己挖的坑（记一笔防复发）】① hashId 携带页名落地后，e2e 的 URL 断言还写着
+  `/#\/admin$/` —— 接线改了旧断言必须同批改，本轮的 M3 第一轮就是被这条旧断言顶红的
+  （那不是回归，是断言腐烂；改成 today 那半句注释一起写进去）。② renderer-criteria 的
+  stripComments 锚点在 doc-refs SNAP 里钉着行号，本轮对它跑了一次 biome --write ⇒
+  60→58 又漂一次 ⇒ 同一天同一发坐标重钉两遍。教训：对【被 SNAP 钉住坐标的文件】先跑
+  formatter 再钉坐标，别反过来。
+
+【中文过 argv 的第三、四次复发】group.js 的 chip 分支注释与 group.css:146 各被烤出过
+  U+FFFD（前者本轮重写，后者本轮修 3 枚）；Edit 工具对含 U+FFFD 的 old_string 匹配不上
+  （字节层面就对不上），修法是纯 ASCII 的 `\uXXXX` 转义 node replace。本轮起探针脚本自带
+  预热门（每把 -g 尺子剪线前先空跑一次，0 匹配即 exit 3 不碰源码）—— 这是对 round370
+  （doc-layout 篇）「--list 数用例数」那道门的同族升级：门放在【剪线之前】，失败时
+  连一根线都没动过。7 发全 KILLED 的读数因此可信。
+
+【doc-refs 九键重钉（主张链同步，四件套之④）】本轮 app.js 大改把文档引用坐标顶漂：
+  INDEX.md>app.js:1023 → 1136、INDEX.md 与 0058 的 renderer-criteria:53 → 58（两遍，见上）、
+  0042:739 → 852、0050:853 → 966、0050:1023 → 1136、0060:273 → 374、0060:387 → 493。
+  顺序照 round353d 那条流程走（先改文档正文，再改 SNAP 键，值只在 pill→admin-pill 那两处
+  随代码同步，余皆值不动）。0050 正文里那行逐字引文也跟着改成 admin-pill —— 快照值改了
+  而引文没改，等于守卫在替一个已经不存在的字符串作证。
+
+【ceo-loop 收尾（并发的 round370 篇点名「等它的主人收」的那两条）】ceo-loop.spec.ts:252/290
+  的 .pill 断言是本轮 pill→admin-pill 改名漏掉的尾巴，本轮收：两处改成 .admin-pill，
+  复跑 1 passed。全量 e2e 从此没有【已知别人欠的】红。
+
+【biome 棘轮归因（净新增 0 的证据链）】用「把 HEAD 版本复制成 biome includes 射程内的
+  __head* 临时名 → 同配置扫描 → 逐文件对比」做的归因（--stdin-file-path 不可信：同一文件
+  stdin 测 0 条、落盘测一堆，别拿它当归因工具）。差分结果：本轮新增三处 —— app.js export
+  块 organizeImports（已按 biome 自己的排序修，名字集合与语义不动，M5 尺子复跑仍 KILLED）、
+  renderer-criteria 与 admin-style-scope 的 format（各 --write 修净，stripComments 坐标随之
+  重钉）；group.js 的 format 与 app.js 其余 lint 类目经差分确认【HEAD 同款】，在表
+  （format 146≤161、organizeImports 98≤117、noAssign 1≤1）。renderer-criteria 的 htmlSrc
+  是本轮 CSS 搬家后留下的死声明（11 处引用全迁 cssSrc），连 INDEX_HTML 一起删 —— 那发
+  noUnusedVariables 不是豁免掉的，是删掉的。admin-style-scope 的 noTemplateCurlyInString
+  是 fixture【故意】用普通字符串装模板发射形状（改成模板串会把插值真算出来，测的就不是
+  提取器了），就地 biome-ignore 并写明理由。warning 类目不在棘轮内，归因按 error 走。
+
+【证据】
+  · .workbuddy/round370-wire-mutations.log —— killed 7/7、还原 SHA 一致 7/7（reverted:true
+    语义由逐发 SHA 核对承担，任何一发还原失败脚本 exit 2 停手）。
+  · .workbuddy/round370-wire-mutations-recheck.log —— 对本轮触碰的 group.js/renderer-criteria
+    跑过 biome --write【之后】重跑一整支：仍 killed 7/7、SHA 一致 7/7 —— 锚点没被 formatter
+    挪走（上面那条「formatter 在前、坐标在后」的教训由此拿到正向证据，而不只是口头规矩）。
+  · .workbuddy/round370-verify-kill-reason.mjs + 本轮终端读数 —— M6/M7 单根复核的失败断言原文。
+  · .workbuddy/round370-e2e-all2.log —— pnpm 全量 e2e 33 passed（修 pill 尾巴前是
+    round370-e2e-all.log 的 1 failed / 32 passed，前后都留着做对照）。
+  · .workbuddy/round370-full-test3.log —— pnpm test 全量：190 files 全绿、4019 passed |
+    6 skipped (4025)。round370（doc-layout 篇）全量时的三条红（doc-refs / no-null-bytes /
+    app-pure parseAdminHash）全部在本轮收口：①即上文九键重钉；②U+FFFD 清零（本轮触碰的
+    20 个文件终扫 0，git status 60 文件里剩的 3 枚 U+FFFD 全在 .workbuddy 的一次性脚本里，
+    no-null-bytes 只扫源码树）；③app-pure 的 parseAdminHash 是本轮自己写的用例，绿。
+    与上一篇的对照：文件数 190 不变、用例 +11（chip e2e、renderer-criteria 源码钉两发、
+    app-pure 深链那批发在上一轮），本轮动过的 e2e 单跑 13/13。
+  · .workbuddy/round370-vitest-web2.log —— test/web 6 files 339 passed。
+  · pnpm typecheck exit 0。app-loader.ts 的两条类型错（noUncheckedIndexedAccess）与
+    admin-style-scope 的三条同型，都是本轮新代码自己的欠账，全部 `?? ""` 收窄修净
+    （没有用 `!`）。doc-refs 单跑 2 passed。
+  · claim-coords / claims-registry 单跑 176 passed —— app.js 大改没有撞翻任何一条
+    钉在 app.js 坐标上的主张（钉的是函数名与内容，不是行号）。
+
+【状态】全部未 commit（用户未要求提交，HEAD 仍是 e7b56fb）。
+  本轮改动（管理视图这条线）：packages/web/public/app.js（挂载 API export、
+  mountAdmin/unmountAdmin/startFeed/stopFeed、parseAdminHash 三形状、hashchange 门、
+  getToday 命中解包修复、hashPrefix、孤儿类名 admin- 化）、group.js（renderAdmin 挂载
+  替换 iframe、ensureAdminMounted、chip 分支、deep-link 页名、hashId 携带、
+  renderMain 离开即 unmount）、group.css（.admin-mount 隔离 + 那枚假规则的拆除记录注释）、
+  group.html（侧栏管理视图入口 + admin.css link）、index.html（挂 admin.css）、
+  admin.css（未跟踪新文件：全仓唯一一份控制室样式，两入口共用）、
+  test/web/app-loader.ts / admin-style-scope.test.ts（未跟踪新文件）/ app-pure.test.ts /
+  renderer-criteria.test.ts（源码钉与装载器）、test/e2e/group-workbench.spec.ts
+  （管理视图三条 e2e）、test/e2e/ceo-loop.spec.ts（.pill 尾巴）。
+  待办：① §19.1 的深色气质在嵌入口径下是否还要求独立页保留（现状：独立页深色照旧、
+  工作台浅色）—— 这是 CEO 可翻的决策，不是工程欠账；② chip e2e 没覆盖「30 天」那枚
+  （判据与 7 天同一发剪线可杀，非缺口）。
+
+round371（2026-11-25）— 前端响应式 + 骨架屏 + 刻度收口：一条「缩略图看着像坏了」的误判与七发变异
+────────────────────────────────────────────────────────────────────────────
+【本轮范围】用户指令：优化响应式布局与骨架屏、逐组件打磨字体/按钮/边框/圆角。
+  框架决策（用户未答复，按推荐默认执行并在此留痕）：【不】引入新框架 —— 零构建 +
+  离线 vendored 依赖是本仓立过的约束，Tailwind/Preact 会把 renderer-criteria /
+  admin-style-scope / doc-refs 三支守卫连根拔掉。做法是加深既有 CSS 令牌体系。
+
+【接地的四件事】
+  ① 刻度收口：admin.css 的 font-weight 写死值全量令牌化（--fw-medium/heavy，
+    400 那一处是 reset 保留）；admin.css 里 radius/z-index/backdrop/drop-ok 共
+    6 处换 var()。biome 净新增 0（见证据）。
+  ② 断点补齐：641–1180 中间档（三格摘要 3→2 列）、860 档补 .field-grid/.payload-grid
+    收单列（列数跟主栏宽度走而不是视口宽度：860–641 仍是三栏骨架）、640 档改
+    --fs-watermark 令牌【值】46→28（而不是在使用处另写数 —— 令牌注释立的契约）、
+    admin.css 尾部 .admin-root 作用域的窄屏块。tabs 用 flex-wrap 而不是
+    overflow-x：border-bottom 是一整条线，横滚会把最右页签推出界外且无线索。
+  ③ 骨架屏：chatSkeleton()/docSkeleton() 两族新工厂 + 4 处 loadingState 调用点升级
+    （聊天流/文档打开/节奏/研究），admin.css 整页 .admin-skel 复用 group.css 的
+    skeleton-sweep（admin.css 自己立过「@keyframes 只许住 group.css 一份」）。
+  ④ 组件规格：四类卡片 padding 统一 --space-4、控件 34px 同行同高（含
+    .global-search 38→34）、.skeleton-row 38px 头像对齐真实列表行。
+
+【⭐ 一条截图误判，及它为什么值得记】验收 768-light-documents 时全页缩略图里文档列表
+  的标题「变成了一排灰条」—— 判成回归，查了一圈布局（.doc-list-item 计算样式、
+  DOM rect、三栏 grid 列宽）全部正常，最后 3x deviceScaleFactor 局部截图才看清
+  【文字好好地在那】：灰条是 220px 宽的列表项在缩略图缩放下的混叠。教训：
+  【缩略图只能看布局，不能判内容】—— 判「渲染坏了」之前要么局部放大要么量
+  getComputedStyle；否则下一轮会把一个不存在的回归「修」出来。
+  同法复核 390 管理页「没响应」：甘特是内部滚动画布，before 同形，非本轮缺口。
+
+【守卫同步（四件套之②）】renderer-criteria.test.ts 新增 ⑦ 节「响应式断点与骨架屏」
+  六发：mediaBlock 花括号配平取块（含夹具正对照，沿 fnBody 同一立场）、641–1180
+  中间档在场 + 860 档收列、水印使用处必须走 var()（禁的是「在令牌层之外另写数」）、
+  skeleton-sweep 全仓一份 + admin.css 只引用不定义、两族骨架工厂的调用点坐标、
+  admin-skel 底色走 --skeleton-base 且有暗色族。admin-style-scope 的双向半边已
+  覆盖 admin-skel 的发/收对账，本节不重复钉。
+
+【变异自证（四件套之③）】.tmp/mutate-round371.mjs 七发，逐发真抹字节 → 守卫红 →
+  逐字节还原 → md5 复原核对：M1 删中间档那行 / M2 水印脱令牌 / M3+M4 两处首帧退
+  回转圈 / M5 骨架底色写死 / M6 动画名漂一字母 / M7 多抄一份关键帧 —— killed 7/7，
+  每条红在预期的那发守卫上（FAIL 名比对见证据），文件校验和 3/3 复原。
+  第一版抓 FAIL 名的正则没剥 ANSI 码，抓到空串 —— 「红了」不等于「红对了地方」，
+  剥码重跑一遍才有归因。
+
+【doc-refs 九键重钉（四件套之④）】本轮触碰 renderer-criteria（⑦ 节插在第 58 行附近）
+  把工作区既有的九处文档坐标又顶漂了一档：INDEX.md>app.js:1136→1129（两处）、
+  INDEX/0058 的 renderer-criteria:58→60、0050 的 966→959 与 1136→1129、0042 的
+  852→845、0060 的 374→367 与 493→486。顺序照 round353d 流程：先改文档正文，再改
+  SNAP 键，值逐字不动。改前先 sed 核过每一发新坐标的真实行内容（不是按差值推算 ——
+  本轮 app.js 有两段不同步的位移，差值 -7 与 -2 不等量）。
+
+【biome 归因（净新增 0）】app.js 当前 3 errors/5 warnings 与本轮开始前快照
+  （.tmp/baseline/app.js）逐字同数 —— 本轮对它只加过 4 行；与 HEAD 基线差的那一发
+  是工作区既有的（本轮开始前的未提交改动）。group.js 两态皆干净。教训沿用 round370：
+  归因基线必须是【本轮开始前】的快照，不是 HEAD —— 工作区里躺着一整轮未提交改动时，
+  对 HEAD 差分会把别人的账算到本轮头上。
+
+【证据】
+  · .workbuddy/round371-ui-polish-mutations.log —— killed 7/7、还原 md5 一致 3/3、
+    每条红的 FAIL 名归因。
+  · .workbuddy/round371-screenshot-sweep.log —— 42 shots（3 视口 × 明暗 × 7 路由）
+    0 溢出 0 pageerror。截图本体在 .tmp/shots/after/（不进仓）。
+  · .tmp/shots-probe.mjs / shots-adminskel.mjs / probe-cssband.mjs —— 骨架出现性、
+    控件 34px 实测、注入探针量各档 computed grid 列数/watermark 字号，终端读数
+    已抄进上面 ②③。
+  · test/web 6 files 345 passed（含 ⑦ 节六发）；test/arch 35 files 550 passed
+    +2 failed —— 那两红（test-inventory 的 .workbuddy/scratch/probe-sheet.spec.ts、
+    test-type-baseline 的 test/e2e=29）归因【非本轮】：两处都是 2026-11-24 夜里
+    另一摊未提交工作（sheet-editor）落下的，mtime 19:32/23:27 均早于本轮开工，
+    本轮没有碰过这两个文件。台账只记归因与复发判据，不替别人收账。
+  · pnpm typecheck exit 2 —— 唯一红源是 test/e2e/sheet-editor.spec.ts（同上，非本轮），
+    本轮触碰的文件（app.js/group.js 不在 tsc 射程、renderer-criteria ⑦ 节）无一红。
+
+【状态】全部未 commit（用户未要求提交，HEAD 仍是 e7b56fb）。
+  本轮改动：group.css（中间档/860/640 三档、骨架样式、卡片与控件规格、死类
+  .field-grid.three 清除）、admin.css（字重/刻度令牌化 + 窄屏块 + .admin-skel）、
+  group.js（chatSkeleton/docSkeleton 工厂 + 4 处调用点 + selectGroup 先画选中态 +
+  研究按钮防重入）、app.js（admin 整页骨架首帧 4 行）、test/web/renderer-criteria.test.ts
+  （⑦ 节）、docs/INDEX.md + 0042/0050/0058/0060（坐标重钉）、test/arch/doc-refs.test.ts
+  （SNAP 九键）。
+  待办：① 甘特图窄屏标签重叠 —— before 同形的既有问题，属 admin 今日页画布，
+  非本轮范围；② test-inventory / test-type-baseline 两红等 sheet-editor 那摊收口时
+  一起清（复发判据：只要 .workbuddy/scratch/*.spec.ts 或 test/e2e 未登记目录还在，
+  这两发就继续红，与前端无关）。
+
+round372（2026-11-25）— 色值刻度：第一批【只改值不改结构】的改动，与一份专门量值的守卫
+────────────────────────────────────────────────────────────────────────────
+【本轮范围】round371 收的是结构与刻度，本轮收的是【颜色值本身】。触发点是一句自检：
+  把 --muted 从 #616c7b 改成 #cccccc（读不动的浅灰）—— 全仓没有任何一发测试会红。
+  结构有 admin-style-scope / renderer-criteria 守着，值【一发都没有】。色值就是这么漂
+  回去的：一次改一个数，每次都有理由，三次之后没有人记得那把尺子是什么。
+  落地 test/web/color-scale.test.ts：72 行「前景 × 落点」对照 + 48 条带理由的豁免。
+
+【⭐ 两把尺子不是一把，而【落点】只能量出来】
+  text = 4.5（WCAG 1.4.3，正文与有含义的文字）；ui = 3.0（WCAG 1.4.11【非文字】对比：
+  识别交互组件所必需的信息 —— 控件描边、滚动条拇指、拖拽把手、焦点环）。混用两头都错：
+  拿 4.5 量发丝线，每张卡都要描重（§19.1「信息密度优先于装饰」当场作废）；拿 3.0 量
+  正文，浅灰小字全过但读不动。
+  真正值钱的是【落点】二字：一枚 token 合不合格，只取决于它真实渲染时压在哪些底上。
+  本轮第一版凭源码推落点，推出 22 条「不合格」，其中真的只有 5 条 —— 剩下 17 条错法
+  各不相同，全部由真实 DOM 量回（探针 .tmp/probe-ph-real.mjs / probe-backdrop.mjs /
+  probe-chain.mjs，逐路由 × 明暗各跑一遍）：
+    · --placeholder 推给 --surface-soft，实测每枚输入框的占位压在【输入框自己】的
+      --surface / --surface-soft 上（.global-search 那枚透传壳底），从不落 --bg；
+    · --tagline 推给 --rail-bg（4.40，看着不合格），实测 .persona-tagline 在
+      .message-meta 里、整条祖先链 transparent，第一个不透明底是 .main-pane 的 --bg
+      （4.57，本来就合格，改它反而动了一张没病的脸）；
+    · --blue-ink 推给 --chip-active，实测那条规则发的是 --ink，两者同屏但不重叠；
+    · --err 推给 --err-soft，实测那格是 .admin-meter 的【轨道】，压在上面的是填充条。
+  反过来，两条被「理论底」洗白的真缺陷也是量出来的：滚动条 thumb 的轨写 transparent，
+  所以拇指直接压在 --surface 上（1.50）；.nav-grip 只在 hover 时 opacity:1，所以它
+  可见那一刻的底是 --nav-hover 而不是 --rail-bg（1.80）。
+  ⇒ 判据尺子必须与被剪的那根线有因果。这轮把这句从口号变成了 17 条错账。
+
+【接地的四件事】
+  ① 值整改（每枚把实测读数写进 CSS 注释，改的人与下一个人看同一把尺子）：
+    --scroll 浅 #cdd3de→#888e99（1.50→3.29@surface）、暗 #3a4355→#64718d；
+    --nav-grip 浅→#7e8594（3.01@nav-hover）、暗 #6b7588→#6e798d（2.85→3.01，边界那枚）；
+    --placeholder 浅→#6a717e（4.66@surface-soft 是那一格最差底）、暗→#8b94a6；
+    --muted 浅 #616c7b（原 3.40→4.54@neutral）；--control-border 浅 #878d98、暗 #6b7c9d；
+    暗 --on-accent #ffffff→#14171e；admin --gray #8a93a3→#7f8898（2.83→过 3.0）。
+  ② 1.4.11 只收【交互组件边界】那一族：--control-border / --control-border-hover /
+    --scroll / --nav-grip（admin 侧 --gray）。发丝线一族（--line / --border /
+    --border-soft）全部留在豁免里并各写一句理由，且有一发判据反向钉住「ui 档收的正好是
+    这五枚」—— 放进一次，下一轮就有人拿 3:1 去量每张卡的描边。
+  ③ 色值只能住在 token 块里：花括号配平取块 → 把块抹成等长空格 → 扫块外裸色值。
+    抹成空格而不是删除，是为了长度不变、行号不漂（报错里的 file:line 要指得准）。
+  ④ 提取器自己的失效形状（4 发反向对照）：洗注释、配平取块、抹空找块外 —— 三个动作
+    任何一个「坏得太彻底」都会把守卫变成常绿（整段洗没了 / 只取到半个块 / 把整份文件
+    抹平）。所以每个动作先在合成样本上证明它【能】抓到东西，再信它在真文件上报的 0。
+    顺带一条：带 g 的正则不用 .test()，只用 matchAll —— .test() 会把 lastIndex 留在串上，
+    跨样本残留会让前一次命中把后一次判成「没有」，那也是一种常绿。
+
+【变异自证（四件套之③）】.tmp/mutate-round372.mjs 13 发，killed 13/13、存活 0（逐发真抹
+  字节 → 守卫红 → 逐字节还原 → md5 复原核对）：M1 浅灰 --muted / M2 控件描边退回发丝线
+  浅值 / M3+M4 两档滚动条拇指退回旧值 / M5 拖拽把手退回「只差一点」那枚 / M6 占位退回
+  旧值 / M7 暗 --on-accent 退回白 / M8 admin --gray 退回 2.83 / M9 新加一枚无主颜色
+  （既不进表也不豁免）/ M10 删一枚造 light-dark 不对称 / M11+M12 规则里写死 hex 与 rgba /
+  M13 把 --kind-bg 改名（对照表那行指向不存在的底）。锚点命中次数每发都核（要 1 次），
+  命中 0 次或多次直接判「变异未生效、先修探针」，不算 killed。
+
+【证据】test/web/color-scale.test.ts 12 passed；
+  .workbuddy/round372-color-scale-mutations.log —— 共 13 发，存活 0，还原后 md5 全数复原。
+  诚实账：这份文件当时在 tsconfig.test.json 的 0-error 硬门上有 5 处类型错
+  （noUncheckedIndexedAccess 下的正则捕获组与解构），round374 清 —— 把这句写在这里，是为了
+  让「12 passed」与「tsc 红」并存时没有人以为读数为自己在撒谎。
+
+【状态】全部未 commit（用户未要求提交，HEAD 仍是 e7b56fb）。本轮新增
+  test/web/color-scale.test.ts（untracked）；改动 group.css / admin.css / theme.css 的
+  【值】，结构未动。
+
+round373（2026-11-25）— Tailwind v4 以「预编译 + vendored」接进零构建离线仓：16 发接线钉子
+────────────────────────────────────────────────────────────────────────────
+【框架决策（推翻 round371 的默认）】round371 记的是「用户未答复，按推荐默认【不】引入
+  新框架」。本轮用户明确选定【引入 Tailwind（预编译）】，该主张作废、以本条为准。
+  接法不是「装个 Tailwind」，而是让它服从本仓两条既有约束：
+    · 运行时零构建：Tailwind 只进 devDependencies，产物 packages/web/public/tw.css
+      与 group.css 一样签进仓库、由 dev server 静态 serve。不用 cdn 的 <script>：那要在
+      浏览器里现编，桌面壳离线起不来，还给页面塞进几百 KB 解释器。
+    · 不引 base（preflight）：一套全局 reset 会改动每个元素的默认外观，与「现有渲染
+      挤不动」直接冲突。只 import theme + utilities。
+  层语义是这套接法的全部依据：utilities 全落 @layer utilities，而 group/admin/theme.css
+  是【未分层】手写规则 —— 级联逐条声明决胜时「未分层永远赢过分层」，不看特异度也不看
+  先后。所以接 utility 只可能补上「现有 CSS 没管的格子」，不可能把已渲染的挤走。
+  ⚠ 本轮只在 node 里证了这条律的【前提】（工具类确实进了 @layer utilities）；律本身
+  归 round374 在真浏览器里量。
+
+【prefix(tw) 是必需的，不是风格偏好】前缀同时加在类名与生成的 CSS 变量上（--tw-*）。
+  本仓 :root 已有 --radius-md / --fs-md 这一族；丢前缀后产物是
+  `--radius-md: var(--radius-md)` —— 左边同名、层级又低于未分层的 group.css，永远解不出
+  值，圆角/间距/颜色【静默全没】（不是红，是页面长得「朴素」）。带前缀出的是
+  `--tw-radius-md: var(--radius-md)`：名字不撞、右侧仍是 group.css 那一枚，暗色翻转照旧。
+
+【一把尺子，而且不许成环】@theme 先把 Tailwind 自带的 radius / text / font-weight /
+  color / shadow / breakpoint 用 `--*: initial` 清空，再按 group.css 的令牌重铺：radius
+  走 --radius-*、字号走 --fs-*（并额外钉 line-height: inherit —— Tailwind 每个 text-*
+  默认附一条 line-height，不钉就凭空改动现有行距，inherit 是「与不写这条等价」的值）、
+  间距只补第 7 档（Tailwind 按等差给 28px、本仓刻度是 32px，不覆盖就会出现两个「7 档」）、
+  断点名对齐手写 @media 的三档（sm=641 / md=861 / lg=1181；多铺一档就出现「类名里写得出、
+  媒体查询里找不到对应」）。于是「顺手用一把不在刻度上的尺子」在类名层面就不成立，
+  而不是靠自觉。
+  暗色用 @custom-variant dark 指向 theme.js 给 <html> 落的 data-theme，而不是
+  prefers-color-scheme —— 后者在本仓根本不是暗色的开关。
+  一条使用边界：颜色类不伸进 .admin-root 子树（--tw-color-* 声明在 :root，admin 的暗色
+  值重定义在 .admin-root 上，伸进去会取到工作台的值而不是管理视图的）。
+
+【⭐ 本轮自己被证伪的两条主张（都改写进了入口文件头）】
+  ① 曾主张「用 @theme inline 会让产物成环」。实测否：inline 出的是
+    `border-radius: var(--radius-md)`，直接把 group.css 那枚引用写进 utility，既不在
+    :root 铺同名声明、也就不成环。不选 inline 的真实理由是【取舍】：它把「读哪枚令牌」
+    烘进每条 utility，将来重映射某档只改 @theme 会静默不生效。
+  ② 曾主张 source(none) 挂在 theme.css 那条 import 上就够。实测否：只挂一条时自动探测
+    仍开着（仓库里随手放的一个 .html，里面的 tw:blur / tw:z-50 照样被编进产物）。两条
+    都要挂 —— 这类「写错不报错、只是静默多生成/少生成」的开关，只能靠产物字节钉。
+
+【守卫同步（四件套之②）】test/web/tailwind-wiring.test.ts 16 发：两条 import 各带
+  prefix(tw) + source(none)，且 theme→theme / utilities→utilities；入口写死 @theme inline
+  那六个字就红；产物里不许有同名自引用（那是丢前缀的形状，只在编译结果里看得见）；
+  @theme 右侧每枚令牌在 group.css :root 真实存在；断点与手写 @media 同档且清过自带刻度；
+  每条工具类都在 @layer utilities 里；产物无外链（离线自足）；源里 class 位置的每个
+  tw:* 都在产物里有规则（忘了 pnpm tw:build 就红）；@source 登记的文件真实存在；tw.css
+  挂在三份手写样式之后；tailwindcss 只在 devDependencies 且有 tw:build。再加 4 发反向
+  对照：类名提取器看得见注入的类且不被注释与模板插值骗到、同步判据在产物缺规则时会红
+  （不是恒绿的空集合）、层外扫描与自引用扫描真报得出注入的那一发、@theme 与断点两条的
+  取值确实来自文件而不是硬编码。
+
+【变异自证（四件套之③）】.tmp/mutate-round373.mjs 18 发，killed 18/18、存活 0。两类：
+  · 文本级 M1–M14：丢 prefix / 丢 source(none) / 把 preflight 接回来 / @theme 引用一枚
+    group.css 没有的令牌 / 断点挪出手写 @media 的分界 / 不清 Tailwind 自带刻度 /
+    产物出现一条层外工具类 / 产物塞一个外链 / 源里用一枚产物没有的 utility（正是「忘了
+    tw:build」那一发）/ @source 指错文件 / tw.css 挪到三份手写样式之前 / 被引两次 /
+    tailwindcss 挪进 dependencies / tw:build 的产物路径写错。
+  · 【真编译】级 M15–M18：两条 import 都丢 prefix / 摘掉 layer(utilities) /
+    utilities 挂错层 layer(theme) / 改成 @theme inline —— 只有真喂 CLI 重出才量得到，
+    用来证明「成环」那把尺子读的是编译结果而不是入口文本。
+  每发按【哪条断言红】验收，不按红了几条；一发只该打一发时，锚点设计要让【别的】判据
+  保持绿（M11b / M12 的分工就是这么设计的）。M18 的标签本轮改过一次：旧标签写「层扫描
+  那发不该红」，与它自己打印的读数矛盾 —— 产物里工具类物理落在 theme 层内，按「必须
+  落在 @layer utilities」的判据同样红。
+
+【证据】test/web/tailwind-wiring.test.ts 16 passed；
+  .workbuddy/round373-tailwind-wiring-mutations.log —— 共 18 发，存活 0；
+  产物 tw.css 内容摘要基线（md5 前 8）a96a90cf（149 B，一枚 .tw\:text-balance{text-wrap:balance}）。
+  诚实账：工具类实际只落地 2 处（app.js / group.js 各一枚 tw:text-balance）—— @theme
+  里那批颜色映射是先铺的轨道，还没有 utility 骑上去。
+
+【状态】全部未 commit（HEAD 仍是 e7b56fb）。本轮新增 packages/web/styles/tw-input.css、
+  packages/web/public/tw.css（vendored 产物）、test/web/tailwind-wiring.test.ts；改动
+  group.html（挂 /tw.css，在三份手写样式之后）、package.json（tailwindcss 进 devDeps +
+  tw:build 脚本）、app.js / group.js（tw:text-balance）。
+
+round374（2026-11-25）— 把级联律搬到真浏览器里量：一把四刻度的尺子，和一条【只有一条该红】的归因
+────────────────────────────────────────────────────────────────────────────
+【本轮范围】round373 的入口把「零像素回归」写成散文，16 发钉子量的是【入口文本与产物
+  字节】—— 它们能保证「工具类确实进了 @layer utilities」，也就是那条级联律的【前提】
+  成立；但 vitest 跑在 node 里，读不到浏览器到底怎么决胜。前提 + 这条律才等于
+  「现有渲染挤不动」，缺这条律就等于没证。落地 test/e2e/tw-cascade.spec.ts 四发全绿。
+
+【⭐ 四刻度，不是两刻度：观测窗口必须能分辨所有候选解释】
+  光判「决斗里拿到手写那条的值」不够：窗口若只有两个可分辨取值，「手写赢」与
+  「utility 根本没生效」是同一个字符串。所以刻意让四种形状各给一个【互不相同】的读数
+  （实测 text-wrap 这三档互不相同）：#init 两条都不挂 → wrap（属性的 initial）/
+  #hand 只挂手写 → nowrap / #control 只挂 utility → balance / #duel 两条都挂 → 看谁赢。
+  只有 #duel=nowrap 且 #control=balance，才叫「手写赢下了 utility」。我第一版只有决斗 +
+  utility 两发，缺 initial 一档；补上之后「这个读数来自哪条规则」才是唯一解，而不是
+  两条候选共用一个读数。
+  配套的绿侧守卫：另有一发直接断 INITIAL / HAND / UTIL 三个字面量互不相同（且都是
+  text-wrap 真取得出的值）。这条不是形式主义 —— 若哪天有人把 HAND 改成 "wrap"（与
+  initial 同值），所有断言照样【全绿】而尺子已从三格塌成两格。塌了却不红，是这一族
+  判据最贵的失效形状，所以当场拦。
+
+【⭐ 手写那条必须比特异度【更低】，否则量的不是级联律】决斗的手写规则是 `div { … }`
+  （0,0,1），工具类是 (0,1,0)。我先前那版写的是 `.duel { … }` = (0,1,1)，与工具类同权、
+  改由「文档顺序」决胜 —— 判据看着绿，赢的却是特异度，尺子接错了地方。只有「特异度更低、
+  却仍然赢」这一种形状才证明救场的是那条律本身。
+  反向眼睛：第二发把同一批字节剥掉 @layer 包裹再喂浏览器，此时 (0,1,0) 正面对决
+  (0,0,1)，赢家必须换成 balance；同时用 CSSOM 问浏览器「这条 utility 落在哪个 @layer」
+  —— 第一发答 utilities，第二发答「不在任何层里」。量的是浏览器自己的层模型
+  （CSSLayerBlockRule.name），不是我自己正则数出来的字符串。剥之前先断言
+  `@layer utilities{` 本来【在】：否则产物早已不分层时 replace 空转，会把「layer
+  (utilities) 掉了」这个真事故报成「反向判据坏了」—— 红要红在正确的因上。
+
+【为什么前两发把字节内联、第三发才走真 HTTP】file:// 的 <link> 样式表能正常参与级联，
+  但读它的 cssRules 会被同源策略挡（实测抛 SecurityError），问不出层归属；而 setContent
+  落在 about:blank，file:// 相对链接【解析得不加载】，等于拿一个不存在的观测窗口判
+  「生效」。第三发另用真 dev-server + 真 <link> 量接线形状：MIME 认不出 .css、路径指错、
+  link 漏挂这些故障只有这一发放得进来（判据形状：styleSheets.length 必须等于 link 数，
+  少一张就是「有某张表根本没成为样式表」）。它故意把 HUB_PORT 指到没监听的端口 —— 这一发
+  绝不打后端，也就绝不会把请求打到开发中的 hub 上；等的是 waitUntil: commit +
+  waitForSelector("body")：head 里的样式表是渲染阻塞的，解析器能走到 body 就说明它们都
+  已就位，这正是要的观测窗口（而 load 会去等后端往返，白等到 240s 超时）。
+
+【⭐ 又一条自己被证伪的主张：前缀是【全局登记一次】的】round373 的入口（和我写的变异
+  预期）都暗示「哪条 import 丢 prefix 都会成环」。三档实测（必须在 packages/web/styles/
+  下跑，@source 才解析得对；第一版在 .tmp 临时目录里跑出 336 / 105 B 的胡话）：
+    · 只丢 theme 那条 → 1530 B + `--radius-md:var(--radius-md)` 同名自引用 + 混进
+      .flex / .grid / .border 这族 base utility；
+    · 只丢 utilities 那条 → 产物与基线【逐字节相同】（内容摘要相同：md5 前 8 a96a90cf、Buffer.compare=0）；
+    · 两条都丢 → 与只丢 theme 那条相同。
+  ⇒ 真凶是 theme 那条；顺手把台账与注释里那个「1711 B」也改成实测的 1530 B。两条都照写
+  prefix(tw) 是纪律不是必需（tailwind-wiring 把两条都钉住，免得后来人读到注释就把冗余
+  那枚当装饰删掉）。A3b 因此留在变异清单里标成【预期存活】并写明理由 ——「只丢冗余那条
+  不红」是【正确行为】，不是漏判。
+
+【接地的四件事】
+  ① 判据：tw-cascade 四发（尺子自证 / 级律 / 剥层反向 / 真页面接线），约 0.8 s，
+    不带 hub、不碰 .opc-os/dev.db.lock。
+  ② 同步：入口文件头两处主张按实测改写（成环归因收窄到 theme 那条；1711→1530 B；
+    补「前缀全局登记一次」那段），round373 的 M18 标签改正。
+  ③ 类型账：color-scale.test.ts 那 5 处类型错清零，全程未用 `!` 与 `as` 糊 ——
+    正则捕获组在 noUncheckedIndexedAccess 下显式判 undefined 再 continue；contrast()
+    不 destructuring 排序结果（两个数的数组解构会变成 number | undefined，而
+    Math.max / Math.min 本来就把「谁大谁小」说得更直白）。
+  ④ 全量回归读数（见证据节）。
+
+【变异自证（四件套之③）】.tmp/mutate-round374.mjs 13 发，未达预期 0 发、还原后基线全绿。
+  三组：
+  · A 被测系统：A1 产物剥掉 @layer utilities 包裹 / A2 入口那条 utilities import 丢
+    layer(utilities) 并【真重出】/ A3 theme 那条丢 prefix 并真重出 / A4 摘掉 /tw.css
+    那条 link / A5 把 link 挪到 /group.css 之前 / A6 dev-server 把 .css 的 MIME 换成
+    octet-stream / A7 group.css 追加 `p { text-wrap: nowrap }` 污染整页窗口 /
+    A8 产物里没有这枚 utility（判据该说「没有对手」而不是「没生效」）。
+  · B 判据自面（量「判据的眼睛」）：B1 把「手写值」写成与 initial 同值 / B2 把 initial
+    读数与手写值撞车 —— 两发都只该红「尺子自证」那一发 / B3 手写那条抬到 id 特异度反超
+    工具类。
+  · C 已知不挡（预期存活）。
+  两处刻意的窄归因值得记：
+    · B3 的选择器写成 `div#duel, div#hand` 而【留着 div】—— 否则 handLayers 那发探针
+      读空、四把尺子塌位，级律那一发会红在错误的因上；留着 div 才做到「只有反向那一发红」。
+    · C1（tw.css 挪到 group.css 之后、admin/theme 之前）【预期存活】且要让它存活：本
+      spec 只比「/tw.css 晚于 /group.css」。挡那一发的是 tailwind-wiring 的「挂在三份
+      手写样式之后」。这同时证明本 harness 的存活分支不是摆设。
+  A3b 与 C1 是本轮记下的两条【已知不挡】，各自写明由谁挡或为什么不挡 —— 把「不挡」写进
+  台账比假装全挡值钱。
+
+【证据】
+  · .workbuddy/round374-tw-cascade-mutations.log —— 共 13 发（含 1 发刻意预期存活），
+    未达预期 0；还原后基线全绿；每发按用例名片段归因（list reporter 的
+    `x N 文件:行 › 标题`，正则先剥 ANSI）。
+  · .tmp/round374-full-test.log —— 全量 vitest：Test Files 190 passed / 2 failed（192），
+    Tests 4051 passed / 2 failed / 6 skipped，75.97 s。两红仍是 test-inventory 的
+    .workbuddy/scratch/probe-sheet.spec.ts 与 test-type-baseline 的 test/e2e=29，
+    归因沿用 round371：sheet-editor 那摊未登记目录，与前端无关（复发判据同前）。
+  · test/web/tailwind-wiring.test.ts 16 passed（入口 prose 改动后复跑）；
+    test/web/color-scale.test.ts 12 passed；test/e2e/tw-cascade.spec.ts 4 passed。
+  · 非 sheet-editor 的类型错本轮清到 0；剩余 29 发全在 test/e2e/sheet-editor.spec.ts
+    （arrow-function 形式的 page.evaluate 带来的 unknown、lib 缺 DOM 导致的
+    window / CanvasRenderingContext2D 找不到名字），属另一摊。
+
+【状态】全部未 commit（用户未要求提交，HEAD 仍是 e7b56fb）。
+  基线校验和工作区原始字节（不是 HEAD）：以下五枚均为文件内容摘要（md5 前 8 位），不是提交引用 ——
+  摘要 349ead12 = tw-input.css；摘要 a96a90cf = tw.css；摘要 1c3dc29b = group.html；
+  摘要 74be1ae7 = tw-cascade.spec.ts；摘要 1af7aaef = mutate-round374.mjs。
+  事故一笔，值得记：本轮清理时用 `git checkout --` 想把 tw-input.css 退回原状，而它正
+  带着本轮未提交的改动 —— 直接抹掉了工作区成果。靠 .tmp/tw-input.layer-bak（内容摘要前 8 位 08d73614）
+  与 .tmp/tw.good（摘要前 8 位 a96a90cf）逐字节复原，并按内容摘要 + 锚点双重核过才继续。教训：
+  工作区脏时永远不要 `git checkout --`；要退回就退回自己存的那份原始字节。
+
+round375（2026-11-25）— 落地八处 text-balance 之后，被抓出来的两条：一条是我自己写的 `!`，
+  一条是【我拿高度去量一个不改高度的性质】—— 后者差点让我把有效的改动报成「没收益」
+────────────────────────────────────────────────────────────────────────────
+【本轮范围】把 round373/374 接好的 Tailwind 管线真正用起来（四件套之①落地），
+  并按「接线落地要同步旧断言」把回归拉回基线。改动面：
+  · packages/web/public/group.js 五处 —— :287 emptyState 标题、:405 页头副标题、
+    :2090 待办卡标题、:2173 文档卡标题、:3221 研究条目卡标题；
+  · packages/web/public/app.js 三处 —— :1127 看板任务标题、:1207 管理抽屉标题、
+    :1698 摘要（:1698 是本轮之前就有的先例）；
+  · test/e2e/group-workbench.spec.ts 三发落点断言 + 一发窗口干净度对照；
+  · test/web/color-scale.test.ts 清掉我自己写进去的 3 发 `!`。
+  产物 packages/web/public/tw.css 重算后【逐字节未变】（149 B）：八处使用全是同一枚
+  tw:text-balance，utility 面 harvested 出 tw:bg-surface / tw:flex / tw:sm 这些【文档与
+  注释里的字面串】而非真挂件的类名 —— 采集面按 @source 三文件走，产物只留真正挂上的那枚。
+
+【接地的四件事】
+  ① 八处落地：见上；刻意跳过第七处候选 .doc-list-item h3（group.js:1509 一族）——
+     .doc-tree-leaf .doc-list-item h3 写着 white-space:nowrap，挂上 balance 是半死的类。
+  ② 守卫同步：三发 e2e 落点断言 + 一发【未挂 utility 的同类兄弟必须读到 wrap】的对照，
+     防「整页样式根本没生效却全绿」（tw-cascade 已钉级联律，这几钉的是具体那一个元素）。
+  ③ 变异自证：round374b 剪线（只抹类名、绝不碰 tw.css ⇒ 红只能意味着「类名没接上」）
+     4 发，加本轮台账散文措辞 4 发（见下），合计 8 发，未达预期 0 发。
+  ④ 回归拉回基线：全量 vitest 从【3 红文件 / 14 红】回到 2 failed | 190 passed
+     （4051 passed | 2 failed | 6 skipped），那 2 发是 sheet-editor 那一摊的既有红。
+
+【⭐ 我自己违反了一条硬规矩，并当场抓回来】
+  test/web/color-scale.test.ts 里我写了 3 发 `covered.get(scope)!.add(fg)` 非空断言 ——
+  用户禁令明确写着「禁 `!`」。修法不是在 `!` 外面加保护，是换掉【需要保护的那个形状】：
+  Map<Scope, Set<string>> 的 get 天然可能落空，而这张表本来只要回答「这个作用域的这个
+  token 被 PAIRS 覆盖过没有」—— 换成扁复合键 Set<string>（`${scope}/${token}`）之后，
+  落空这个状态压根不存在，`!` 与「只为喂类型检查的分支」一起消失。
+  教训：当我发现自己在给一个 Map 补 `!`，先怀疑的是【这张表为什么要是嵌套的】。
+
+【⭐ biome 的净新增 0 差点是在一个量不到的地方量的】
+  .tmp/baseline/ 里存着本轮起点的 app.js/group.js 快照。直接
+  `npx biome check .tmp/baseline/app.js` 报「干净」—— 那是假的：biome.json 的
+  includes 是 ["packages/**/*.{ts,tsx,js,mjs,json}", …]，.tmp 根本不在采集面里，
+  对它跑 check 等于对零个文件跑 check。归因改成把基线副本临时复制进
+  packages/web/public/__b_<name>（进采集面）→ 量 → 立刻删；并按规则名逐条比，
+  不只看总数。实测 app.js：current 与 baseline 同为
+  organizeImports 1 + useOptionalChain 5 + noAssignInExpressions 1，delta 0；
+  group.js / admin.css / group.css / theme.css 两侧皆 0；theme.js 是本仓新文件
+  （不在基线快照里），单独跑 0 诊断。
+  教训：「干净」必须先证明【量到了东西】，否则它和「没量」同形。
+
+【⭐ 14 发红，但没有一发是「我的落地剪断了渲染」】
+  首轮全量：Test Files 3 failed | Tests 14 failed。12 发集中在
+  test/arch/exempt-pierce.test.ts（含它 spawn 的 gate 复算），另 2 发是既有红。
+  按「红了多少个文件」归因会把这 12 发读成 Tailwind 接线把守卫打坏了 —— 真因在
+  我自己写进台账的散文：round372–374 那三条条目把文件内容摘要（tw.css 的 md5 一族）
+  写成裸 token，verify-open-invariants 的 ③ 桶（CLAIMS_TRANSIENT：token 左边 40 字符
+  内是否声明「这是摘要/对照」）扫不到声明 ⇒ 9 处判成腐烂。
+  修在【写法】一侧，不动判据（这是该脚本自己写在注释里的规矩）：把每枚摘要就近声明，
+  且每枚都得在【它自己左边 40 字符】里 —— 块首那一句管不到第二行的 token。
+  腐烂 9→0，豁免 56→58 只是桶位移，token 总数 682 与分项和 682 不变（桶求和那条断言
+  专防「加豁免把数算重」）。
+  ⚠ 同族旧账：exempt-pierce 启动时抓 ORIGINAL，并发窗口里被别处写脏的时序在
+  round353c 已登记；本轮那 12 发【不是】该污染复发 —— 事后核查 EXEMPT 段
+  grep zzzzzzz = 0，且 21 发全绿（含 12 发逐 key 穿透 + 全还原复跑）。
+
+【变异自证（四件套之③）—— 这次剪的是【台账措辞】这条线】
+  台账散文是判据承重的输入，若不证明「这层措辞真在挡」，「我把 gate 修绿了」等于没测。
+  4 发整行替换，归因按 gate 点名的 token 【集合】精确比（上一发用截断打印做子串匹配，
+  把那枚摘要 1af7aaef 也算成命中，是假达预期 —— 当场换成集合判据）：
+    W1 抹掉行首「摘要 」前缀           ⇒ 红，只点名 349ead12          达预期
+    W2 一发抹掉同行两枚声明           ⇒ 红，点名两枚摘要 {74be1ae7,1af7aaef}   达预期（一发抹两处必须点两处）
+    W3 把声明搬到 token 右侧           ⇒ 红，点名那枚摘要 a96a90cf             达预期（③ 只往左看 40 字符）
+    W4 摘要 → 内容摘要（同义换词）     ⇒ 绿                            预期存活（判据认「声明在场」不认字数）
+  还原后复跑 exit=0。证据：.workbuddy/round375-ledger-wording-mutations.log。
+
+【⭐⭐ 本轮最贵的一条：我拿【高度】去量一个【不改高度】的性质，差点把有效改动报成无效】
+  落地之后要回答「这八处到底有没有用」。第一版 .workbuddy/round375-carrier-effect.mjs 的尺子是
+  元素高度：量挂上时的高度 → 摘掉类 → 再量 → 差 > 0.5px 算「真改动过」。
+  读数：57 枚载体，0 枚高度变化。我当场把它读成「utility 接上了，但没有视觉收益」。
+  这句【是错的】，而且错法正是本仓反复记的那一族 —— 判据的尺子与被测性质没有因果：
+  text-wrap:balance 的定义性效果是【把各行拉齐】，它通常保持行数不变、只挪断词点，
+  所以盒高本来就不该动。用高度量 balance，等于拿米尺量温度：读数恒定，恒的不是温度，
+  是米尺。
+  换成对刻度（Range.getClientRects() 逐行取墨迹宽度，比较「最长行 − 最短行」的参差量），
+  并且用【同元素开关】而不是两份指纹对比（指纹的键里带类名，加类本身就改键，差异里混着
+  在场性变化，分不清是几何动了还是键动了）。实测 3 视口 × 7 路由：
+    载体 57 枚：参差变小 37｜不变 20｜更参差 0。
+  20 枚「不变」全是单行载体（参差恒为 0px）—— 那是【数据的性质】（这些标题够短），
+  不是【改动的性质】。样例：768/contacts 副标题 2 行参差 221px→13px，
+  768/admin/today 审批卡标题 3 行 145px→10px，1440/admin/today 2 行 356px→40px。
+  配套正对照（同环境同法，先证尺子有分辨力再读那个 0）：CJK 与拉丁各造天然不平衡的标题，
+  390/768 档参差全数变小（390/cjk 52px→0px，768/cjk 263px→17px），1440 档单行故恒 0。
+  ⇒ 「0 变化」若为真，也来自数据而非改动；而参差刻度显示改动本身在干活。
+  证据：.workbuddy/round375-carrier-effect.log、round375-balance-positive-control.log。
+  ⚠ 顺带把 group.js:400–404 那段注释里「行数与盒高一格未变」这句的【依据】换了：
+     这句话本身是对的，但我当时是【从量错属性的探针里推出来的】—— 现在它由参差刻度
+     与同元素开关双重撑住。原话不改，改的是撑它的那根线。
+
+【落点三档（不把「库里没数据」报成失败）】
+  .workbuddy/round375-landing-probe.mjs 对六个站点分 RENDERED / GATED / BROKEN 三档：
+  RENDERED 1（contacts 空态）｜GATED 5｜BROKEN 0。
+  GATED 那五档补一发 binding 断言（把该站点自己的 class 串挂进真页面读一次），
+  证的是「这个类名组合在这套真样式表下产出 balance」，【不】证「这条渲染路径会渲染」。
+  两件事分开的理由：本地 9797 那个库里 backlog/documents/talent/admin 的条数为 0，
+  若只给「通过/失败」两档，「库里没数据」与「类名根本没接上」在报告里长得一模一样。
+  其中 4 处（空态标题 / 文档卡 / 待办卡 / 管理载体）已由 e2e 用真数据在流程里钉住
+  （spec 里那 3 发 toHaveCSS + 黄金路径造数据），standalone 探针的 GATED 是它的补集，
+  不是它的替代。诚实账：talent 条目卡与 admin 两处仍是 binding-only，未证到渲染路径。
+
+【指纹差异逐条归因，不笼统说「无影响」】
+  指纹对比（.tmp/fingerprint-tw.json 落地前 vs .tmp/fingerprint-375.json 落地后；
+  ⚠ 这两份是【可再生的临时件】，不在 .workbuddy 存证 —— 生成器 .tmp/fingerprint.mjs /
+    fingerprint-diff.mjs，重跑即可复算，别把这份归因当永久档案读）：
+  8518 元素数不变，72 处差异，全部可归因，无一发是我没解释的：
+    · 24 处 = 键名本身（h3#2 → h3.tw:text-balance#2），加类即改键，只在旧侧 12 + 只在新侧 12；
+    · 24 处 = admin 容器高度（如 1440 档 2940→3224），归因是【两次抓拍之间用户那个真库
+      的行数漂了】：同一时刻对 .admin-cols 开关类，delta 在 390/768/1440 三档都是【0.0px】，
+      且 .admin-tk 当时实测 0 行 ⇒ 版面由别的块撑开。改动不可能影响它。
+  自噪底：同一份代码连拍两次 diff = 0 处，所以那 72 处不是采集抖动。
+
+【状态】全部未 commit（用户未要求提交，HEAD 仍是 e7b56fb）。
+  回归读数：全量 vitest 2 failed | 190 passed（2 发均为 sheet-editor 那一摊：
+  .workbuddy/scratch/probe-sheet.spec.ts 未被 include 收 = test-inventory，
+  与 test-type-baseline）；全量 Playwright 43 passed；
+  42 张截图（390/768/1440 × 明暗 × 7 路由）问题 0，--bg 浅=#f3f5f8 暗=#14171e，
+  暗色拍到位 21/21，tw.css 挂载 42/42；
+  tsc -b exit 0，tsconfig.test.json 29 发错全在 test/e2e/sheet-editor.spec.ts（既有，属另一摊）。
+  本轮证据（.log 与被扫 walk 同目录，但 verify 的 walk 只收 .txt/.md/.mjs ⇒ .log 不进采集，
+  摘要写在 .log 里安全；生成器同名换 .mjs 后缀，已从 .tmp 迁到 .workbuddy 落成可复算存证）：
+  round375-ledger-wording-mutations.log（4 发，未达预期 0，还原后绿）、
+  round375-carrier-effect.log + round375-carrier-effect.mjs、
+  round375-balance-positive-control.log + 同名 .mjs、
+  round375-landing-probe.log + round375-landing-probe.mjs、
+  round374b-balance-landing-mutations.log + round374b-balance-landing-mut.mjs（承前）、
+  round374-shots.mjs（42 张截图的拍摄机，产物 .tmp/shots/after-374/ 属可再生临时件）。
+
+round376（2026-11-26）— 「群聊这个文字有点乱」拆成两件事落地：一条【静默失效的排序】，
+  一条【被 38px 地板吞掉的几何判据】。后者让一发本该红的变异存活了下来
+────────────────────────────────────────────────────────────────────────────
+【本轮范围】用户指着一张群聊/私聊列表截图说「文字有点乱」，选了「顺序乱（排序 bug）」与
+  「排版乱（字号/间距/截断）」两摊（第三摊「同名分不清」未选 ⇒ 不在范围）。改动面：
+  · 排序 packages/web/public/group.js:548 conversationRecency —— 原实现走 Date.parse(
+    String(last_message_at || created_at || ""))；契约 packages/contracts/src/conversation.ts:32
+    里这两枚时刻是 z.number().int()（epoch 毫秒【数字】），Date.parse 只吃字符串、喂数字恒
+    NaN ⇒ 每条 recency 落 0 ⇒ 整条倒序静默失效，列表按【接口返回顺序】摆。改成直接取数字 +
+    Number.isFinite 守卫，缺 last_message_at 时兜底到 created_at。
+  · 排版 packages/web/public/group.css —— --list-width 306→340（窄档 media 275→305）；
+    .conversation-preview 字号 11px→--fs-sm(12px) + line-height:1.35 + display:block；
+    段标签 .list-section（group.css:516）摘掉 letter-spacing:.08em + text-transform:uppercase；
+    .conversation-time 9px→--fs-xs(11px) + tabular-nums。字号阶梯补齐：标题 13 / 预览 12 / 时间 11。
+  · 测试 test/e2e/group-workbench.spec.ts —— 排序一发（:871）+ 排版 T1–T5 一 describe
+    （宽档 1440:1075，窄档 1100:1132），判据形状见下面「为什么量放得下几个字」。
+
+【⭐ 最贵的一条：几何判据管不到被地板吸收的那根线，一发变异当场存活】
+  T4 用「行盒高度 < 60」当预算判据。我照「剪线变异必须真抹字节」抹掉了预览的 margin-top:2px，
+  变异【存活】了 —— 行盒高度压根没动。探针（round376-rowbox.log strutKilled 档）揭示原因：
+  这一行的【真正高度由 .kind-icon{height:38px}（group.css:560）兜底】。grid 行 align-items:center，
+  内容列（copy = 标题 20 + margin-top 2 + 预览 16.19 = 38.33）只比那颗 38px 头像多出 0.33px，
+  行盒 58 一直是「padding 20 + 地板 38」撑出来的，不是 copy 撑的。证据：给 .conversation-item
+  写 line-height:0 之后标题塌成 0、copy 只剩 18.19，行盒仍读 58（round376-rowbox.log / round376-rowowner.log）。
+  【坐标重钉 · round379】.kind-icon 现在在 group.css:718（写这段时在 :560）；该行的 padding 已收到
+    8px 9px ⇒ 原语「padding 20 + 地板 38 = 行盒 58」现为「16 + 38 = 54」（地板 38 未动）。round379
+    之后 T4 拆成两根：T4b 整行 <60 只兜地板总量，T4a 用 prevH ≤ fontSize×1.45 直接量预览盒
+    （spec 文件头有归因；证据 round379-rowbox-after.log + round379-t4-mutations.log Q1–Q3）。
+  ⇒ margin-top:2px 落在地板以下，几何判据对它天然失明 —— 这不是断言写错，是【判据的尺子
+    与那根线之间没有因果】（接 round375「判据尺子须与被剪线有因果」那条：量高度抓不到一个
+    在地板以下的位移）。
+  处置（两条都做，不假装 T4 能抓 margin-top）：
+    ① T4 真正承重的是【预览行高跟着字号走】那一根：line-height:1.35 摘掉后预览退回继承 body
+      的 1.55 ⇒ 行高 18.6 ⇒ 整行 60.73 ⇒ 红（M2 实测抓到）。这一根在地板【以上】，几何判据管得到。
+    ② margin-top 这根承认「几何上不可断言」，不再假立判据；它的存在由 rowbox 探针存证，
+      并在 spec 文件头（:1041–1044）写明地板归因，下一个人不会再把存活误读成「没接线」。
+  ⚠ 别把「删掉 line-height 声明」当成 line-height:normal —— 删声明退回继承值 1.55（body 上写的），
+    normal 是另一回事（rowbox.log 里 inheritBody 60.73 vs noLineHeight(normal) 58.14，差 2.6px）。
+
+【⭐ T3b 排在 T3a 之前：让「inline 化」这一发红在真正承重的那句上】
+  预览原是裸 <span>（group.js:1023）—— inline 盒上 overflow/text-overflow/white-space 三条
+  【一条都不生效】（CSS 2.1 §11.1.1）。display:block 摘掉后实测（round376-headrow.log，1440 塞 41 字）：
+  clientWidth 量出 0 ⇒ 「放得下」那行恒真、「放不下」那条压根不截断。所以把窗口自证 T3b
+  （「更长的必须仍然截断」）排在「这一条放得下」T3a 之前 —— inline 化时 T3a 恒真挡不住，
+  T3b 会当场以「窗口消失」红。M9（删 display:block）实测同时红在宽档与窄档的 T3b，认领命中。
+
+【为什么量「放得下几个字」而不是量轨道宽】
+  轨道宽 189px 这种断言只钉一个数、钉不住它为什么是那个数，且与真症状（预览切成半句话）隔一层。
+  换成「同一条轨道里 N 字必须完整、N+3 字必须省略号」后，判据【就是症状本身】：改窄栏宽、
+  加宽 padding、加宽 tail 列、加大字号全都抓得住（M4/M7/M8 三发分别用这三种方式让它红，全抓到）。
+
+【变异自证（四件套之③）】round376-typo-order-mutations.mjs 11 发（9 应红 + 2 预期存活），
+  未达预期 0 发、还原后基线全绿（reverted:true，css/js 逐字节还原）：
+  M1 预览字号退回 11px（阶梯塌一级）→ 红在 T1 声明判据；M2 摘 line-height:1.35 → 红在 T4 超预算；
+  M3 段标签恢复 letter-spacing+uppercase → 红在 T2；M4 宽档栏宽退回 306（轨道 155，14 字放不下）
+  → 红在 T3a；M5 摘 created_at 兜底 → 红在排序；M6 时刻改走 Date.parse（恒 NaN）→ 红在排序；
+  M7 宽档放宽到 360（17 字也不截断 = 窗口自证失效）→ 红在 T3b；M8 窄档 305 退回 275（轨道只剩
+  124px）→ 红在窄档；M9 摘 display:block → 红在两档 T3b。
+  P1【预期存活】只抹 margin-top:2px（被 38px 地板吸收，见上）—— 这是【本轮唯一一发主动声明
+  会存活的变异】，存活即证据：证「几何判据对地板以下的位移失明」这条主张为真。
+  P2【预期存活】宽档放宽到 350（14 字仍放得下、17 字仍截断）—— 证 T3 的窗口没被贴死，
+  留一档正常余量不会误红。
+  ⚠ M3 连带把「招聘落座」那发（spec:513 用 getByRole(checkbox) 点选群）也弄红了 —— 段标签恢复
+    uppercase 后 aria 名变了。这是【真实的连带红、非误报】：M3 的抹字节确实改了用户可读的标签，
+    还原后两发一起回绿（log 里 M3 那行同时列两发红）。归因写死在此，下人不需重查。
+
+【落地读数的诚实账】
+  T4 阈值取 60 不取 58：58.33 离 38px 地板只差 0.33px，贴 60 边取整会因亚像素抖动随机红（round376-rowbox.log）。
+  【round379 更新】此处的 58.33 是当时 padding 20 的账；padding 收到 16 后同式读 54.33，
+    阈值 60 原样保留作地板余量档。摘 line-height 在整行只差 0.19px（54.33→54.14，见
+    round379-rowbox-after.log），那一根已移交 T4a 量预览盒本身（Q1–Q3 KILLED、Q4 预期存活，
+    round379-t4-mutations.log）。
+  窄档 305 单独一条测试守（退回 275 时轨道只剩 124px，连 11 字=132px 都放不下）；860 档（245px，
+  7 字）【不进断言】—— 那档窄到再挤就顶出横向滚动，预算只留在 round376-budget.log，不当守卫。
+
+【状态】全部未 commit（用户未要求提交，HEAD 仍是 e7b56fb）。
+  回归读数（2026-11-26，本轮改后全量）：vitest 2 failed | 190 passed | 6 skipped
+  （4051 passed），那 2 发 = test-inventory 的 scratch/probe-sheet 未被 include 收 +
+  test-type-baseline（test/e2e=29 基线外）—— 两发红全在 sheet-editor 那一摊，逐条核过
+  「非 sheet-editor 的类型错」grep 计数为 0（round376-vitest-full.log）；
+  全量 Playwright 46 passed（含本轮新 3 发 + 承前，round376-e2e-all.log）；
+  biome check 两改动文件 no fixes applied；
+  doc-refs / claim-coords arch 守卫在 spec 文件头坐标重钉到 round376-rowbox.log 后回绿。
+  本轮证据（.log 与被扫 walk 同目录，verify walk 只收 .txt/.md/.mjs ⇒ .log 不进采集）：
+  round376-typo-order-mutations.log + 同名 .mjs（11 发变异机）、
+  round376-rowbox.log + 同名 .mjs（行盒分解：baseline/noMarginTop/strutKilled 七档，钉地板归因）、
+  round376-rowowner.log + 同名 .mjs（行盒 58 是谁撑的：item/pin/tail 三件同框）、
+  round376-headrow.log + 同名 .mjs（display:block 摘除后 inline 盒的 clientWidth=0 + 横向溢出 +171px）、
+  round376-budget.log + 同名 .mjs（两档逐字宽预算表，860 档预算留此不进断言）。
+
+【round377：前端风格统一 A–E 五级全量 + 四件套验收（用户：「按钮/布局/圆角/字体大小/色彩，都仔细看看」）】
+
+【范围（用户三问答定）】A vendored 暗色 + 死 .btn.active / B 同行同高 / C 同列表内参差 /
+  D 工作台↔admin 两皮合一 / E 间距散档归 --space-* 全量都要；.btn.small 保留、只禁与 34 并排；
+  验收 = 全套四件套（真浏览器逐视口明暗截图 + vitest 全量 + e2e 全量 + 守卫同步 + 变异自证 + 台账）。
+
+【A 级】vendored 表格（x-data-spreadsheet）画布格/纸面格/外壳换皮接进 token（group.css:375/:381/:1076），
+  暗色块里同名两枚键集对称由 color-scale 守卫钉；工作台里从不承重、admin 侧也从没渲染过的
+  .btn.active 死样式清掉（verify-unify 探针里 .btn.active 底/字=null 那几列就是它的现场读数）。
+
+【B 级：同行同高】刻度三档 34/29/32 收进 --control-h/--control-h-sm（group.css:131-142 注释写了为什么
+  是三档而不是一个数），「同排升档」用结构性选择器而不是名单式（group.css:438-463）：
+  名单每排都要补一行，漏的那一排正是缺陷本体。三向（后向兄弟/嵌套子组/前向 :has）+ 图标钮同判。
+  五处混高现场：聊天头部刷新 32‖私聊成员 29、文档工具条、admin-row 复选框行、conversation-row、
+  editor-toolbar。反向自证：整排都是 small 的紧凑区【不许】被升档 —— verify-unify 的
+  「仍保持 29 的 small=N」列就是这一发的读数（文档页 2~7 枚保持 29 才是对的）。
+
+【C 级：同列表内参差】文档树叶子行 32/33 抖动的成因量到才动手（treeJitter 探针：行高由最高内联盒
+  决定，h3 20.14 + pad 12 + watermark 决定档）；统一后叶子行高集合 = {34}（verify-unify 读数）。
+
+【D 级：两皮合一 —— 动的是落点，不是色值】
+  症状：admin 浅皮 --chip(#f3f5f8) 与 --bg 同值 ⇒ 默认 chip 压页背景对比度 1.000，圆角形状在屏幕上
+  不存在。全仓扫下来唯一破例处 = 回放时间线（全 app 唯一没套 .admin-card 的块，标题卡/断点卡都套着），
+  34 枚 chip 全裸坐在页背景上（round377-chip-host.log 祖先链 .admin-tl[transparent]←admin-root[243,245,248]）。
+  修法 app.js:3061 时间线套 .admin-card（与相邻两张卡同一形状逻辑，抽屉侧本来就在 --card 上）。
+  ⚠ 为什么不改 --chip：round377-chip-sweep.log 把 #f3f5f8..#e9edf3 全带扫过，现值是唯一两皮所有
+  PAIRS 行都过的取值（挪一档击穿 green/blue-ink 浅档或 gray 暗档）⇒ 这是【落点纪律】不是漏改，
+  处置写进 admin.css:59 的 token 注释，下一个人不会「顺手对齐成 --neutral」。
+  承重：ceo-loop.spec.ts 第 ⑥ 步双断言 —— ⑴chip 不许坐页背景 ⑵每枚 chip 的最近 painted 祖先
+  必须含 admin-card（反向承重：只断⑴的话，中间垫别的面也绿）。变异自证 round377-tl-card-mutant.mjs
+  2/2（抹外层卡⇒红⑴；给 .admin-tl 垫异色面⇒红⑵），字节复原=是。
+  判据面同步：隐形面全仓复扫 round377-invisible-face-after.log 20 屏 244 次 0 种（改前 4 种）；
+  前景×背景穷举 round377-render-pairs.log 1626 组 0 个 <4.5（含白压白/黑压白双向自证夹具）。
+
+【E 级：gap 散档归 --space-*】92 处散档折进 4/8/12/16/20/24/32 + 两枚语义别名，守卫
+  space-scale.test.ts 双向（散值红 + 名单不许比现实活得久 + 合成反对照 + 分母>80），6/6 绿；
+  残留豁免 5 条全 <4px 且各写理由。JS 里从不写 var(--space)（grep 0 命中）⇒ 无 token 化连带面。
+
+【⭐ 本轮最大的坑：E 级把 .doc-page gap:14 折进 --space-3(12) 后，doc-layout.spec.ts:479 的
+  toBe(14) 红了 —— 它是钉死一时取值的旧断言，不是行为回归】
+  修法不是把 14 换成 12（那只是换个数字继续钉死，下次换档再红一遍）。判据换成同文件 :876 那发
+  早已用对的口径：①先自证声明的 gap>0（否则 for 环比的是 0==0，margin 叠上来照样「等于」），
+  ②实测间隔 == 声明值（parseFloat(rowGap)，字符串探针里读 computed 行距）。
+  变异自证 round377-docgap-mutant.mjs 2/2：①.doc-head 塞回 margin-bottom:6 ⇒ 实测 18≠声明 12 红
+  （真症状「margin 叠上来」仍在射程）；②抹掉 gap ⇒ 声明读 0 被①拦红（尺子自证不是装饰）。
+  教训并入落地纪律：判据里写死的字面几何值，在「值本身是本轮改动对象」的轮次里必红 ——
+  改判据时要把尺子从【取值】换成【取值与声明的因果】，而不是把数字跟着改一遍。
+
+【另一个坑（接 round375 那条「判据不考任何东西」家族）：types:["node"] 让 e2e 页内闭包全红】
+  .workbuddy/tsconfig.tests.json 只有 node 类型 ⇒ page.evaluate 闭包里每处 document/getComputedStyle
+  都是类型错（29→41 那轮 12 条全属我的两枚新测）。修法=页侧探针一律字符串 IIFE + JSON.parse 出参
+  （tw-cascade.spec.ts:273 同口径），回到 29 条全 sheet-editor。⚠ 正则里的反斜杠在模板字符串里要双写。
+
+【验收四件套读数】
+  ① 截图：.workbuddy/round377-shots.mjs 3 视口(1440/640/390)×明暗×9 面=54 张全出，逐张横向溢出
+    全 0（≤640 档列表是抽屉，click 前先点 #mobileListButton 滑出 —— 第一发就是「element is outside
+    of the viewport」×58 重试，这不是页面缺陷是测量姿势，探针脚本自己要先懂响应式）。
+  ② vitest 全量：2 failed | 191 passed（4057 passed），2 红 = probe-sheet 未被 include 收 +
+    test-type-baseline test/e2e=29 —— 逐条核过「非 sheet-editor 类型错」grep 计数 0，与 round376 基线一致；
+    passed 文件 190→191 差值 = 本轮新守卫文件，非红。arch 复跑（格式化后坐标重验）352/353，唯一红
+    即同一条 type-baseline（round377-arch-final.log）。
+  ③ e2e 全量：47 passed（首跑 1 红即 :479 取值钉死，换尺子后全绿，round377-e2e-all.log）。
+  ④ 守卫 + biome：color-scale 12、admin-style-scope 10、space-scale 6、renderer-criteria/app-pure 全绿；
+    biome 对 app.js 用【重建归因法】（临时抹掉本轮唯一改动 → 诊断集合逐行 diff 为空 ⇒ 净新增 0；
+    ⚠ 不能用 HEAD 基线 —— 工作树领先 HEAD 多轮未提交，HEAD 比对会把前几轮的账算到本轮头上）；
+    三个 spec 文件 biome format --write 后 check 干净；CSS 两文件不在 biome includes 射程（非漏检）。
+
+【状态】全部未 commit（用户未要求提交，HEAD 仍 e7b56fb）。
+  本轮证据（.workbuddy/）：
+  round377-render-pairs.log + .mjs（前景×背景穷举 1626 组 + 双向夹具，判据面的判据）；
+  round377-chip-host.log / -after.log + .mjs（chip 祖先链逐层底色，D 级症状与修后对照）；
+  round377-chip-sweep.log + .mjs（--chip 候选全带扫描，「不改色值」的证据）；
+  round377-invisible-face.log / -after.log + .mjs（隐形面全仓扫描 4 种→0 种）；
+  round377-tl-card-mutant.log + .mjs（D 级承重 2/2，字节复原）；
+  round377-btn-pad-mutant-r2.log + .mjs（同排升档 2/2，字符串探针重写后复证）；
+  round377-docgap-mutant.log + .mjs（gap 判据换尺子 2/2）；
+  round377-geom-report.log + .mjs / round377-geom-before.json / -after.json（改前后几何对照）；
+  round377-sibling-law.log、round377-list-uniform.log、round377-tab.log、round377-pill-skin.log、
+  round377-token-dupes.log、round377-vendor-css-inventory.mjs（各级改前的穷举账）；
+  round377-shots.log + 同名 .mjs + round377-shots/（54 张明暗截图 + 溢出记账）；
+  round377-vitest-full.log、round377-e2e-all.log、round377-arch-final.log（全量三件）；
+  .tmp/verify-unify.mjs → .tmp/verify-unify-round377-final.log（同排规则正向命中 + 反向自证 + 溢出，
+  残留 8 类逐项为非缺陷：品牌行盒 39 / profile 外壳 43 / conversation-item 容器 58 / 原生复选框 13
+  / doc-back 链接 19 / fs15 图标字形 / fs22 标题输入）。
+
+
+round378（2026-11-26）— 文档编辑器分栏预览落地；一支探针的【变异自己不是那件坏事】被抓两次
+--------------------------------------------------------------------------------
+
+【需求与落地】用户：「文档的编辑页面, 文档区域太小了…markdown需要有 预览 以及分两栏的
+  左边编辑右边预览」。落地形状（全部零构建、离线 vendored）：
+  · packages/web/public/markdown.js —— 新渲染器：标题/列表/代码块/引用/链接白名单。
+    :26 的 [\u0000-\u0020\u007f] 剥控制符是 safeHref 的【防线】（javascript: 协议拆分绕过），
+    :38/:66 的 \u0000(\d+)\u0000 是行内码占位哨兵的写读两端成对。
+  · group.css .editor-panes[data-mode] —— 源码面/预览面同挂一层弹性容器，谁显示由 CSS 分派；
+    栏基准写 50% 而不是 1 1 50%（内距差会从另一栏借，:1073 注释有实测 487.5/496.5 的账）。
+  · group.js mountPanes 把分栏容器【装进】水位面：.editor-surface 同时是 queueDraft 读
+    data-draftBody（:4783）与 restoreDraft 找 textarea（:5861）的锚点，顶替它=草稿整条静默失效。
+  · 页签条/草稿条各是一条 flex:0 0 auto 的带，正文吃剩下的分（.editor-panes flex:1 1 auto）。
+  · 新测试 test/e2e/doc-preview.spec.ts（形态记忆/aria-pressed/草稿链）+ test/web/markdown.test.ts
+    （23 发，含 javascript: 协议落回 # 的反面断言）。
+
+【⭐ 最贵的一条：P9 存活 ⇒ 顺着「先怀疑判据」查到第三步，发现问题在【变异】不在判据】
+  P9-mount-replaces-surface 的线是「分栏装进水位面而不是顶替它」。三刀：
+    第一刀 append→replaceChildren：【存活】。查 group.js 才看清：watermark 在 :4693 现造，
+      markdown/mindmap 两支走到 mountPanes 时一子未挂（挂 toolbar 的是互斥的 doc 支、挂
+      sheetHost 的是 sheet 支）⇒ paneHost 是当时唯一子节点，两种写法产出同一棵树。
+      等价变异 —— 判据再准也量不到不存在的差别。这不是「声明不承重」（round376 margin-top
+      那种），是【变异不承重】：变异自己不是那件坏事。
+    第二刀 append→replaceWith：会把编辑面整个弄没（此刻 watermark 还没挂进 editor-card，
+      装配在 :5249；无父节点的 replaceWith 按规范直接 return）⇒ 判据会以「页面没了」这种
+      【不相干的理由】变红。这种红比存活更糟：它让你以为防线接住了。
+    第三刀 append→watermark.after(paneHost)：分栏照旧渲染、照旧能打字，但 input 冒泡不到
+      水位面 ⇒ captureDraft 从不触发 ⇒ data-draftBody 停在初始正文 —— 正是注释里那件坏事，
+      判据按【它自己的那条消息】变红。
+  教训一句话：剪线变异要过的标准不是「删了字节」，是【产出真·那件坏事的状态】；
+  等价变异（两写法同树）与湮灭变异（页面塌了红得理直气壮）都算不合格刀具。
+  证据：.workbuddy/round378-pane-mutations-r3.log（17 发全 KILLED，SHA 还原一致 17/17；
+  r2 里 P8 填全锚点后 KILLED、P9 存活触发本节）。
+
+【探针退役：P5-min-width-zero】剪的是 .editor-panes>* 的 min-width:0 —— 那条声明本身在
+  round379 被实测判成重言（同规则 overflow:auto 已让它成为滚动容器，滚动容器的自动最小尺寸
+  按规范就是 0；1440/1000/700 三档 × 长代码 × 宽表实测 0 与 auto 逐像素相同，
+  round379-minwidth-narrow.mjs + group.css:1075 注释）。剪线存活 ⇒ 先怀疑声明：声明已抹，
+  探针随行删除、「豁免不许比现实活得久」。锚点预检器（round378-check-pane-anchors.mjs）
+  从此对 17 发报「全部锚点可用」。
+
+【lint 基线登记一条】lint-baseline.ts 加 noControlCharactersInRegex atMost:3 ——
+  全部在 markdown.js（见上），三条都是【刻意】。处置选登记不选就地 biome-ignore：
+  markdown.js 正是 P15/P16/P17 的锚点文件，往里面插注释会让已落的证据 log 与坐标失效。
+
+【状态】全部未 commit（用户未要求提交，HEAD 仍是 e7b56fb）。
+  回归读数：vitest 2 failed | 4111 passed | 6 skipped（4119，round379-vitest-full.log 同态）；
+  e2e 全量 55 passed（round378-e2e-full.log）；markdown.test.ts 23 发单跑全绿。
+
+round379（2026-11-26）— 全站紧凑化（重档）：一把【量关系不量取值】的新尺子，与地板吸收第二次复发
+--------------------------------------------------------------------------------
+
+【需求与定盘】用户：「其他页面呢? 我希望稍微再紧凑一点, 当前所有页面的空白地方太多了」。
+  AskUserQuestion 两问答复：力度=【重档：再加密度刻度 + 动 topbar】；空态=【保留空态卡，
+  只收外围】⇒ .state{min-height:210px} / .board-column{min-height:220px} 一律不动。
+
+【落地】group.css 一张改动 + 一份新守卫：
+  · --topbar-height 64→52（640 窄档另有一条刻意 57px：.topbar:1528 sticky 与 .workspace:1543
+    同档配对，:233 注释在案）；.topbar/.workspace 两处全部只吃 var，字面值清零。
+  · .page padding 24/28/50 → 16/20/32；.card 内距、块缝刻度（页头/英雄区/页签/横幅的
+    margin-bottom 全等一个「分段缝」，相邻卡 margin-top 严格小于它 = 「分组缝」）；
+    --fs-* 密度刻度收一档；.conversation-item padding 收到 8px 9px。
+  · 穷举在案：round379-scope-map.mjs / round379-detail.mjs（逐页量改前留白，
+    round379-whitespace-audit-before.out / -after.out 前后对账 —— 收的是顶栏/页边距/缝，
+    空态尾部死区按用户答复【不动】，所以「尾部」读数不因本轮变小，别把它误读成漏改）。
+    ——【坐标重钉 · round379 收尾】这句说得不够准：实测尾部不是「不变小」，是【变大】（messages-welcome @1440×900
+    的外围死区 481.2 → 546.6）。原因是两相冲的变化叠在一起：顶栏让出的 12px 让 #view 变高，而内距/缝把内容变矩得更短，
+    内容不满一屏时两者都落到尾部。所以判紧凑化要看分量（顶栏/内距/块高/缝），别看余量。
+
+【⭐ 新守卫 test/web/compact-scale.test.ts（31 发）：为什么长这样】
+  改完 e2e 56 发全绿且【一条没动过】—— 这恰好证明没有任何既有判据承重这些关系。
+  紧凑化最容易复发的不是改坏，是下一轮被悄悄改回去，而那种改法全都不会让现有测试红。
+  尺子取【关系】不取取值（①~⑥）：顶栏单一来源 / 断点越窄越紧单调 / 卡片内距≥外距 /
+  页边距>块缝 / 分段缝全等且分组缝严格小于 / 选中条随内距内缩 0~4px —— 一条都不钉字面像素，
+  否则就犯 round377 那条（判据写死的值在「值本身可改」的轮次必红）。
+  关系判据对【整体等比放松】天然失明 ⇒ 再加两道【单向】绝对闸：⑧ 顶部合计 ≤28px、
+  ⑨ 刻度上限表只许收不许放（往回放才红；动表唯一正当写法=在那行写理由）。
+  ⑦ 空态地板单向着色（只许变大）—— 用户「保留空态卡」那条答复的机器可读形式。
+  每条 src=>string[] 纯函数都先在故意做坏的合成 CSS 上自证能报问题（提取器坏了守卫会常绿）。
+  变异机 round379-compact-mutations.mjs 22/22 KILLED、SHA 还原 22/22
+  （注释改后在新基线 sha256 ceb32a94c97b 重跑：round379-compact-mutations-after-comments.log）。
+
+【地板吸收第二次复发：T4 拆成 T4a/T4b】round376 立的「整行行盒 <60」在这轮 padding
+  20→16 之后被【悄悄解除武装】：当年照它标定的变异（摘 line-height）现在整行只走 54.14
+  （round379-rowbox-after.log inheritBody 也才 56.73，全在 60 之下）。阈值是【别的输入的旧函数】
+  —— 与 round376「绿了几轮从没成立过」同族。处置不是把 60 改成 55（那是把尺子重新钉在
+  本轮取值上，重蹈覆辙），是换尺子形状：
+    T4a 量那根线【直接吹胀的那一格】：prevH ≤ fontSize×1.45（绿 16.19 / 摘声明 18.59 红），
+      对 padding 怎么动都免疫；
+    T4b 整行 <60 保留、只兜地板总量，注释里【明写】它已抓不到 padding 回退与 line-height 回退。
+  变异机 round379-t4-mutations.mjs 4/4 符合期望：Q1 摘声明/Q2 放宽 1.5/Q3 窄档摘声明 全 KILLED；
+  Q4（padding 8→10 期望【存活】）是【反向探针】——它 falsify-or-confirm 的正是我上面那句
+  「T4b 管不到 padding」的职责边界声明。反向探针的用处：文档里的免责条款从此有了判据。
+
+【坐标重钉四条（四件套之④，原地加批注不改旧文）】round379-ledger-repin.mjs 在四处旧主张
+  紧随块插「坐标重钉 · round379」：上文 round368 的 calc(100vh - 64px)（现 var(--topbar-height)
+  在 group.css:581）、round369 W4 的「正文宿主 ≤1484」（该断言已随 round370 翻向不存在，
+  1540 只剩反向那发在 doc-layout.spec.ts:714-716 守其余路由）、round376 的 .kind-icon:560
+  （现 :718）与「padding 20 + 地板 38 = 58」（现 16+38=54，地板 38 未动）、
+  T4 阈值账 58.33（现 54.33，阈值 60 原样）。
+
+【状态】全部未 commit（用户未要求提交，HEAD 仍是 e7b56fb）。
+  回归读数（2026-11-27 凌晨全量）：vitest 2 failed | 4111 passed | 6 skipped（4119，
+  round379-vitest-full.log）—— 两发红都是 sheet-editor 那一摊：.workbuddy/scratch/probe-sheet.spec.ts
+  不被任何 runner 收（test-inventory 报）+ test/e2e 的 29 个类型错在 TYPE_BASELINE 之外
+  （test-type-baseline 报，棘轮按设计工作，【不许】为让它绿把 test/e2e 登进表 —— 要先跟用户对齐）；
+  全量 Playwright 56 passed（round379-e2e-full-2.log，含 doc-preview 14 发）；
+  biome 净新增 0（新类目 3 条已登记，见 round378 条）；compact-scale 单跑 31/31。
+
+【复量与守卫收尾（2026-11-27 凌晨，两台变异机全停之后）】
+  · 文档编辑区预算复量：round379-budget-after.log（复用只读探针 round378-budget.mjs，
+    9797、视口 1440×900、暗色）。表格画布 h=714.8 占视口高 79.4% / Markdown 编辑面 668.8
+    占 74.3% / 富文本 .ql-editor 574.8 占 63.9%；Markdown 四档视口 1440/1100/900/640 的
+    横向溢出全为 0。⚠ 「占视口高百分之几」【不立守卫】：它是 #view 高与 .doc-page 内距
+    两路输入的商，任何一路动一下它就必须动 —— 钉住它就重蹈 round377 那条。
+  · verify-open-invariants 先【红】后绿，红的是我自己刚写的台账散文：新条目里
+    「新基线」后面那枚 sha256 前缀被 ③ 判成腐烂提交引用。③ 只看 token 左边 40 字符内
+    有没有「sha256/摘要/对照」声明 —— 块首那句声明管不到第二行（round375 那条纪律的
+    第四次复发）。而本收尾块第一版把那枚【原样复述】了一遍，于是同一判据又红一次：
+    复述裸 token = 再要一次就近声明，所以这里改成指称、不再抄字节。修在【写法】侧不动判据：ledger-append.mjs 与台账
+    两处各补一行内 sha256 声明，复扫 SUCCESS（按声明跳过 58→60）。这一红本身是那条
+    判据仍在承重的证据。
+  · 守卫族 test/arch 全跑 35 文件：550 passed，两发失败都是 sheet-editor 那一摊
+    （probe-sheet.spec.ts 不被任何 runner 收 + test/e2e 的 29 个类型错在 TYPE_BASELINE 外，
+    见上），本轮的台账写入与 doc-preview / compact-scale 新文件没有新增红；
+    lint-baseline 单跑 12/12。
+  · 全量在当前字节上复现（两台变异机全停之后重跑，日志 sha 与「收摊」行对得上）：
+    vitest 2 failed | 4111 passed | 6 skipped（4119，round379-vitest-full-2.log）、
+    Playwright 56 passed（round379-e2e-full-3.log）——与 round379-vitest-full.log / -e2e-full-2.log
+    逐数相同。之所以重跑：旧那两份抓在注释类改动之前，而它们正好落在变异机窗口之间
+    （vitest 全量 00:27:59–00:29:39，前有 t4、后有 pane r2，两头都不重叠，已核）。
+  · biome 归因按【规则名逐条比】不看总计数：app.js 当前对 HEAD 是 -1 条（noUnusedImports
+    那发在 round377 落地时就没了），useOptionalChain 5 / noAssignInExpressions 1 逐条同 HEAD；
+    本轮新文件带的 format 与 organizeImports 落在 LINT_BASELINE 的 format=161 /
+    organizeImports=117 上限内（那张表按类目上限判、不要求追平计数）⇒ 净新增 0 成立。
+  · 紧凑化分量前后对账（round379-whitespace-audit-before.out / -after.out，60 面板 × 明暗两皮）：
+    topbar h 64→52（60 面板全部，无一例外）· .page padding 24/28/50 → 16/20/32 · 块合计平均收 11.7px ·
+    块间距合计平均收 8.8px。【反向读数】同一批面板的「外围死区」平均反而变大 57.4px：
+    内容不满一屏时，顶栏让出的高度与内距/块高省下的高度一律沉到尾部（两相冲，尾部取其差）。
+    这是 round375 那条的反向形状：「该动的那个量」是分量（顶栏/内距/块高/缝），不是余量——
+    拿余量判紧凑化会把一轮真生效的改动读成回退。本批 54 个可比面板全部 scrollH ≤ main 高（内容不满一屏），所以这里只量到「沉到尾部」那一侧；
+    内容超一屏时尾部应该变小【属预测】、本批数据里没有这一侧的样本；admin 那 6 个面板无「外围死区」读数（另一套布局）。
+  · 快照对账：group.css 的 sha256 ceb32a94c97b、group.js 的 sha256 df73e97b03b7、
+    markdown.js 的 sha256 9470aa5fb256 与 r3 变异机「收摊」行逐字一致；
+    round379-whitespace-audit-after.out 在注释类改动落地之后重跑【逐字节相同】⇒ 前后对账
+    仍是同一对可信抓拍，不必重抓（这条不是偷懒：注释改了字节，SHA 与抓拍都得重新对得上）。

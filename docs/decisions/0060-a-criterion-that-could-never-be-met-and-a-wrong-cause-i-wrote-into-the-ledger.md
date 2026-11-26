@@ -213,7 +213,7 @@ AssertionError: expected '你在这个 hub 里做过 1 次可参考的决定，�
 - <s>**探针那三个数还没有 UI**：它们进响应（`GET /today` 的 `memory` 那一格，
   键名集合被钉住），而 desktop 侧还没渲染它们。</s>
   **【已落地 · round345】** 界面那一半补上了：`memoryBandHtml`
-  （`app.js:273`）读三个键、渲染在今日视图右栏（接线 `app.js:387`），
+  （`app.js:367`）读三个键、渲染在今日视图右栏（接线 `app.js:486`），
   `gate` 为 0 时明说「这一档在等它的生产者」而不是「角色还没做过决定」、
   `gate_unattributed_rows > 0` 时补「按 actor_id 分桶，【不会】进任何角色的提示词」。
   测试：`test/web/app-pure.test.ts` 五发（常规 / 三数全 0 / 空档 / 形状防御 / esc、

@@ -160,6 +160,11 @@ const EXPORTS = [
   // 不碰 fetch / DOM；取数那一层（getToday 的 /today?window_ms=N）【故意不列】。
   "todayWindows",
   "windowMsOfHash",
+  // round370：管理视图挂进工作台后 hash 多一段 #/admin/ 前缀。解析这一段的
+  // parseAdminHash 是纯的（吃串 → {page, query}），两个入口共用它 —— 所以它是
+  // 现在【唯一】的 hash 解析处，必须有直测。routeToHash 故意【不列】：它读
+  // hashPrefix 那个可变态（独立页 "#/" / 工作台 "#/admin/"），不是纯函数。
+  "parseAdminHash",
   // round352：getToday 的缓存命中判据（function 声明，见 app.js:…）。纯的：
   // force ⇒ 恒 miss；无窗口只命中默认缓存；有窗口只命中 windowMs 完全相同的
   // 那一份（7 天与 30 天互不命中）。fetch 那一层（getToday 本体）【故意不列】。
@@ -178,6 +183,16 @@ export type LoadedApp = {
   readonly topError: Error | null;
   /** 被访问过的替身元素（调试用）。 */
   readonly els: Map<string, unknown>;
+  /** app.js 末尾 `export {…}` 里列出的名字（本地名，不含 `as` 后的对外名）。 */
+  readonly exportedNames: string[];
+  /** 挂载 API 的**运行时**形状：五个名字各自在 vm 里到底是什么。 */
+  readonly api: {
+    readonly mountAdmin?: unknown;
+    readonly unmountAdmin?: unknown;
+    readonly syncAdminFromHash?: unknown;
+    readonly currentPage?: unknown;
+    readonly ROUTES?: unknown;
+  };
 };
 
 export function loadAppJs(appJsPath: string): LoadedApp {
@@ -187,6 +202,24 @@ export function loadAppJs(appJsPath: string): LoadedApp {
   if (/^\s*import\s/mu.test(body)) {
     throw new Error(
       "app.js 里还有没剥掉的 import ⇒ 装载器的替身不可信，这条测试现在是假的",
+    );
+  }
+  // round370：文件末尾多了一个 export 块（挂载 API，给 group.js 用）。经典脚本里
+  // `export` 是语法错，必须一起剥掉 —— 但**先记下导出了哪些名字**，让测试能钉
+  // 「宿主拿得到这四个」。不这么做的话这条守卫就只剩「app.js 里有这四个函数」，
+  // 而真正的失效恰恰是「函数在、忘了 export ⇒ 工作台 import 到 undefined」。
+  const exportBlock = /export\s*\{([\s\S]*?)\}\s*;?\s*$/u.exec(body);
+  const exportedNames =
+    exportBlock === null
+      ? []
+      : (exportBlock[1] ?? "")
+          .split(",")
+          .map((s) => s.trim().split(/\s+as\s+/u)[0] ?? "")
+          .filter((s) => s !== "");
+  const bodyNoExport = body.replace(/export\s*\{[\s\S]*?\}\s*;?\s*$/u, "\n;\n");
+  if (/^\s*export\s/mu.test(bodyNoExport)) {
+    throw new Error(
+      "app.js 里还有没剥掉的 export ⇒ 装载器当经典脚本跑它会当场语法错，这条测试现在是假的",
     );
   }
   const els = new Map<string, unknown>();
@@ -259,7 +292,11 @@ export function loadAppJs(appJsPath: string): LoadedApp {
   ctx["globalThis"] = ctx;
   vm.createContext(ctx);
   const withExports =
-    body + "\n;globalThis.__ex = {" + EXPORTS.join(",") + "};";
+    bodyNoExport +
+    "\n;globalThis.__ex = {" +
+    EXPORTS.join(",") +
+    "};" +
+    "\n;globalThis.__api = { mountAdmin, unmountAdmin, syncAdminFromHash, currentPage, ROUTES };";
   let topError: Error | null = null;
   try {
     vm.runInContext(withExports, ctx, { filename: "app.js" });
@@ -274,5 +311,11 @@ export function loadAppJs(appJsPath: string): LoadedApp {
         `${topError?.message ?? "无"}）⇒ 要么函数被改名/删了，要么装载器的剥 import 把它带走了`,
     );
   }
-  return { fns: ex as AppExports, topError, els };
+  return {
+    fns: ex as AppExports,
+    topError,
+    els,
+    exportedNames,
+    api: (ctx["__api"] ?? {}) as Record<string, unknown>,
+  };
 }

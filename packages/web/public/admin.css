@@ -1,0 +1,307 @@
+/*
+ * 管理视图 (控制室) 的样式 -- 全仓唯一一份, 由 group.js 的管理视图那一格
+ * (工作台文档里的 .admin-root 子树) 使用。旧 /admin 独立页 index.html 已于
+ * 2026-11-25 删除, 管理视图只经工作台 #/admin/<页名> 一个入口。
+ * 为什么单独成文件: 内联在页面里时, 工作台要用它就得再抄一份进
+ * group.html -- 两份配色纪律必然漂移, 而 19.2 那条琥珀扫视承诺漂得最快.
+ *
+ * 两个机械约定, 改这个文件时请一起守住:
+ *  1. 每条选择器都以 .admin-root 开头. 少了它, 这条规则会漏进工作台那三栏
+ *     (.btn / .card / .row / .grid 这些名字两边都有).
+ *  2. 类名一律 admin- 前缀. app.js 发类名与这里收类名靠同一个前缀对齐,
+ *     test/web/admin-style-scope.test.ts 双向钉: CSS 里有而 app.js 不发的类,
+ *     与 app.js 发了而 CSS 没有的类, 都会红.
+ *  3. 值层【对齐】工作台: 字号 / 圆角 / 按钮形状这些"刻度"不自己定数字,
+ *     一律指回 group.css :root 那份共用 token —— 字号 var(--fs-xs…fs-3xl)、
+ *     圆角 var(--radius-xs…pill)、字重 var(--fw-medium), 按钮 min-height
+ *     var(--control-h) 对齐 .btn, 字族 var(--font-sans) / 等宽 var(--font-mono)
+ *     也各只有一份. 这些尺寸 token 定义在 :root, 会从 <html> 一路继承进
+ *     .admin-root 子树, 所以这里【不用】再定义一份(两份必漂). 只有"色值"
+ *     才在 .admin-root 上单独抄一份(见下条). 谁往这里写死 13px/8px 这种
+ *     裸数字, 就是让两套体系重新漂开的起点 —— 守的是"同一屏里两套字/圆角"
+ *     不再出现这件事.
+ * 颜色变量定义在 .admin-root 上而不是 :root, 所以工作台那三栏继续吃
+ * group.css 的 :root, 两边互不影响. 19 章那套语义 (琥珀 / 红 / 蓝 / 绿)
+ * 逐条搬过来, 只在 19.2 的机器可读名单里改名 -- 落点一个不多一个不少.
+ */
+/* ── §19.2 配色落点，逐字抄自【规格】那张表 ─────────────────────────
+   * 琥珀那条规则是这一页最硬的一条：「全局仅用于『需要 CEO 决策』
+   * 这一种状态」。它不是装饰色 —— 规格要的是「眼睛在任何页面一扫，
+   * 琥珀色出现处就是需要你动手的地方」。所以本文件里 --amber 只出现在
+   * 待批卡片与「需要你决策」那一片；进行中的任务、选中的导航、按钮
+   * 一律不许用它（用一次，那条扫视规则就废一次）。
+   * 原来那套深色底整块换成工作台那套浅色 token 的抄件（值抄自 group.css 的
+   * :root）：管理视图现在挂在 group.html 的三栏里，同一屏出现两套底色比
+   * §19.1 那句「控制室长时间扫视」的原意更糟。⚠ §19.2 锁的是【落点】——
+   * 哪些选择器用琥珀 / 红 —— 不是色相。三份机器可读名单一个字没动，
+   * 见 test/web/renderer-criteria.test.ts。独立页 /admin 没有 group.css，
+   * 所以浅色值必须写在这里，不能只靠 :root 继承。
+   */.admin-root {
+    --bg: #f3f5f8;         /* 背景（= group.css --bg） */
+    --card: #ffffff;       /* 卡片（= group.css --surface） */
+    --amber: #9d630f;      /* ⚠ 仅「需要 CEO 决策」（= group.css --amber） */
+    --blue: #3867d6;       /* 进行中【填充】（= group.css --primary） */
+    /* 蓝当【文字/图标色】用时的另一档（= group.css --primary-ink）。拆两条的原因和
+       工作台那一侧一样：--blue 既要当 pill 底（上面压 --card 白字）又要当 pill 字
+       （压在 --chip 上），一个数管不了两边。暗色下 --blue 是提亮档、白字压不住，
+       所以 --on-blue 在 theme.css 里翻成深色墨。取值尺子 = WCAG AA 4.5:1，
+       按它真实落到的最差那格反解，不是挑个「看着更黑」的。 */
+    --blue-ink: #3867d6;
+    --on-blue: #ffffff;
+    --green: #237e5e;      /* 已完成（4.56@chip，原 #258563 只有 4.17） */
+    --gray: #7f8898;       /* 已归档 / 低对比度（UI 组件边界，按 3:1 那一档取，原 2.58）；
+                              原 #8a93a3 在 --card #fff 上是 3.10 勉强过，但同一条色还画在
+                              --bg #f3f5f8 上（待批卡片的左边框、回放时间轴落点），那里只剩
+                              2.83 —— 一把尺子要按它真实落到的最差那格过，不是按最亮那格。 */
+    --ink: #202735;
+    --muted: #616c7b;      /* = group.css --muted（原 3.66@bg，读不动） */
+    --line: #e4e8ef;
+    --chip: #f3f5f8;       /* 与 --bg 同值【不是漏改】，是一条落点纪律：chip 是【卡内】的填充，
+                              和它的工作台对应物 --neutral(#e9edf3，压 --bg 也只剩 1.08) 同一形状逻辑。
+                              不许直接坐在页背景上（圆角形状读不出，比=1.000）：全仓唯一破例的
+                              回放时间线已在 round377 套上 .admin-card，由 ceo-loop.spec.ts 第 ⑥ 步
+                              承重（变异自证 round377-tl-card-mutant.log 2/2）。
+                              ⚠ 别把它对齐成 --neutral：round377-chip-sweep.log 量过 #f3f5f8..#e9edf3
+                              全带，现值是【唯一】两皮所有 PAIRS 行都过的取值（挪一档就击穿
+                              green/blue-ink(浅) 或 gray(暗)）。 */
+    --chip-active: #eaf0fb;
+    --err: #c74848;      /* ⚠ 硬失败 / §7.4 预算条 —— 落点名单在 renderer-criteria */
+    --pill-red: #a94f4f;   /* 状态色「已驳回」：浅底上的中调红。【不用 --err】：那是「硬失败」专用（落点名单机械钉死），四档状态色挤进去就是稀释那条红 */
+    --err-soft: #fff0f0;
+    --shadow-drawer: -14px 0 40px rgba(32, 39, 53, .12);
+  }
+.admin-root * { box-sizing: border-box; }
+/* 字族走 group.css :root 的 --font-sans，不再在这里重抄一份。
+   原先这条自带 `-apple-system,"PingFang SC","Microsoft YaHei",system-ui,sans-serif`，
+   比工作台那份少了 Inter：同一屏切「工作台 ↔ 控制室」时正文换了字族，字面宽度跟着跳。
+   本文件头部立的契约是「刻度值只住 group.css :root，两份会漂」—— 字族就是漂得最远的那一项。 */
+.admin-root { margin:0; font:var(--fs-md)/1.55 var(--font-sans); background:var(--bg); color:var(--ink); }
+/* §19.3：任务 ID / 金额 / 时间戳用等宽，正文用无衬线。混排会让「扫一屏数字」变成读散文。
+   等宽栈同样指回 --font-mono：此前这里写 `"SF Mono",Menlo`、.mono 写 `SFMono-Regular,Consolas`，
+   同一概念两条栈，Mac 上会解析成不同的字面。 */
+.admin-root .admin-mono { font-family:var(--font-mono); font-variant-numeric: tabular-nums; }
+/* 预算卡里「7日内 $x」那一行：原先是 app.js 上的内联 style="font-size:15px" ——
+   本文件头部契约第 3 条说的「谁写死 15px 就是两套体系重新漂开的起点」，指的就是这种。
+   归到 var(--fs-lg)（=15px，一个像素没动）：它是「读一句结论」不是「读一个大数」，
+   所以不是 .admin-num(30px) 那一档；相邻的 .admin-lbl 是 --fs-xs、.admin-meta 是 --fs-sm，
+   三档在同一张卡里各管一层，去掉内联值后这条层级仍然完整。 */
+.admin-root .admin-figure { font-size:var(--fs-lg); margin-top:var(--space-1); }
+.admin-root header { background:var(--card); border-bottom:1px solid var(--line); padding:0 20px; height:52px; display:flex; align-items:center; gap:var(--space-4); position:sticky; top:0; z-index:var(--z-sticky); }
+.admin-root header h1 { font-size:var(--fs-lg); margin:0; white-space:nowrap; }
+.admin-root nav { display:flex; gap:var(--space-1); }
+.admin-root nav a { padding:6px 12px; border-radius:var(--radius-sm); color:var(--muted); text-decoration:none; font-size:var(--fs-md); }
+.admin-root nav a.admin-act { color:var(--ink); background:var(--chip); font-weight:var(--fw-medium); }
+/* 导航上的待批角标用琥珀：它说的正是「这一页里有需要你动手的东西」。 */
+.admin-root nav a .admin-badge { background:var(--amber); color:var(--ink); border-radius:var(--radius-pill); padding:0 6px; font-size:var(--fs-xs); font-weight:var(--fw-heavy); margin-left:6px; }
+.admin-root .admin-conn { margin-left:auto; font-size:var(--fs-sm); color:var(--muted); display:flex; align-items:center; gap:var(--space-1); }
+.admin-root .admin-dot { width:8px; height:8px; border-radius:50%; background:var(--green); display:inline-block; }
+.admin-root .admin-dot.admin-off { background:var(--err); }
+/* 内距走刻度（round379 紧凑化）：22/80 是两枚散档，其中底 80 实测是这一面【唯一】的
+   纯空白来源之一（.admin-mount-view 实测 padV=102 = 22+80，占 4148 高内容的 2%。
+   收底不是裁内容，是滚到底时那段「什么都没有」的行程：80 → 32 = --space-7（刻度 4/8/12/16/20/24/32 的最后一档），与全站 .page 底部同一枚刻度（不是随手挑的数，是「同一语义同一档」）。
+   顶部 22 → 20 = --space-5：它下面紧跟 .admin-toolbar 的 mb 16，两枚同档才读得出层次。 */
+.admin-root main { max-width:1180px; margin:0 auto; padding:var(--space-5) 20px var(--space-7); }
+.admin-root .admin-toolbar { display:flex; gap:var(--gap-control); align-items:center; margin-bottom:16px; flex-wrap:wrap; }
+/* 控件描边走 --control-border（group.css :root + 暗色块各一份，从 <html> 继承进本作用域）。
+   本文件的 --line 仍是【结构发丝线】（卡片/表格/分隔），两者不同尺子，理由见 group.css 那条。 */
+.admin-root .admin-btn { border:1px solid var(--control-border); border-radius:var(--radius-sm); min-height:var(--control-h); padding:6px 13px; font-size:var(--fs-md); font-weight:var(--fw-medium); cursor:pointer; background:var(--card); color:var(--ink); }
+.admin-root .admin-btn:hover { border-color:var(--blue); }
+/* 琥珀【不】给通用按钮：主按钮的"主"是操作强度，不是"这要你决策"。 */
+.admin-root .admin-btn.admin-primary { background:var(--blue); border-color:var(--blue); color:var(--on-blue); }
+.admin-root .admin-btn:disabled { opacity:.5; cursor:not-allowed; }
+/* padding 6 与 .admin-btn 同格（不是 group.css 那条的副本 —— 这条特异度更高，
+   .admin-root 里的输入框走的是这里，只改 group.css 时 admin 侧仍高一截）。
+   病同一个：line-height:1.55 在 13px 上给 20.15 行盒，7px 上下 padding 把自然高
+   顶到 36.14，压过 min-height:34，于是 .admin-row 里「输入框比按钮高 2px」（实测
+   today / inbox / org / roles / budget / replay 六页的筛选条都中招）。 */
+.admin-root input[type=text], .admin-root select, .admin-root textarea { border:1px solid var(--control-border); border-radius:var(--radius-sm); padding:6px 10px; font-size:var(--fs-md); font-family:inherit; background:var(--card); color:var(--ink); }
+.admin-root input[type=text]:focus, .admin-root textarea:focus { border-color:var(--blue); }
+/* ── 焦点可见（Task 2.6 验收句「键盘可完成全部审批操作」的前提）────────────
+   * 上面那一行原来带 `outline:none` —— 键盘走到哪一格【看不出来】，那句验收
+   * 就只剩"控件 tabindex 都在"，没有"人看得见自己在哪"。这条补的是焦点环。
+   * ⚠ 为什么是 :focus-visible 而不是 :focus：鼠标点一下输入框也算 :focus，
+   *   那会在每一次点击之后留一个环 —— 而 §19.1 要的是「控制室，信息密度优先于
+   *   装饰性」。:focus-visible 只在【键盘/程序化】聚焦时出现，正是要的那一半。
+   * ⚠ 为什么用 --blue：§19.2 锁死的是琥珀（=需要 CEO 决策）与那几处红色落点，
+   *   机器可读的落点名单在 test/web/renderer-criteria.test.ts 里，扫的是
+   *   var(--amber) 与 var(--err) 两份 —— 焦点环不是业务状态色，两份都不该动。
+   *   蓝在本页已经是「可交互/进行中」那一档（.btn:hover、.tk:hover、
+   *   .node.pick 都是它），而焦点说的正是"这一格可交互"。
+   *   这里【不许】换成琥珀：焦点环随按键满屏跑，用琥珀等于让「这里需要你决策」
+   *   每按一次 Tab 撒一次谎 —— 那条扫视规则就是这么废掉的。
+   */
+.admin-root :focus-visible { outline:2px solid var(--blue); outline-offset:2px; }
+.admin-root .admin-err { color:var(--err); font-size:var(--fs-md); }
+.admin-root .admin-ok { color:var(--green); font-size:var(--fs-md); }
+.admin-root .admin-card { background:var(--card); border:1px solid var(--line); border-radius:var(--radius-lg); padding:14px 16px; margin-bottom:12px; }
+/* 待批但是【运营事件】那张：灰左边框。§7.4 明写「非琥珀色的『预算暂停』卡片」。 */
+.admin-root .admin-card.admin-flag { border-left:3px solid var(--gray); }
+.admin-root .admin-card h3 { margin:0 0 4px; font-size:var(--fs-lg); }
+.admin-root .admin-meta { color:var(--muted); font-size:var(--fs-sm); }
+.admin-root .admin-row { display:flex; gap:var(--gap-control); align-items:center; flex-wrap:wrap; }
+.admin-root .admin-grow { flex:1; min-width:200px; }
+.admin-root .admin-tag { display:inline-block; background:var(--chip); color:var(--muted); border-radius:var(--radius-pill); padding:1px 9px; font-size:var(--fs-xs); margin:2px 4px 2px 0; }
+.admin-root .admin-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(160px,1fr)); gap:var(--space-3); }
+.admin-root .admin-node { background:var(--card); border:1px solid var(--line); border-radius:var(--radius-md); padding:10px 12px; }
+.admin-root .admin-node .admin-role { font-weight:var(--fw-medium); }
+.admin-root .admin-node .admin-rpto { font-size:var(--fs-sm); color:var(--muted); }
+.admin-root .admin-edge { background:var(--chip); padding:2px 8px; border-radius:var(--radius-sm); font-size:var(--fs-sm); margin:0 6px 6px 0; display:inline-block; }
+.admin-root .admin-banner { padding:10px 16px; border-radius:var(--radius-md); margin-bottom:14px; font-size:var(--fs-md); background:var(--card); border:1px solid var(--line); }
+/* ⚠ 降级/取不到数据的横幅**不用琥珀**：§19.2 那条规则是「全局仅用于需要 CEO 决策」，
+   * 而「判据取不到」「组织图为空」不是等 CEO 决策的事 —— 用蓝（本表里的"进行中"那一档，
+   * 语义就是"信息"）。硬失败仍旧红（.banner.err）。少这一改，琥珀在同一屏上出现两次，
+   * 「琥珀出现处就是需要你动手的地方」这条扫视承诺当场作废。 */
+.admin-root .admin-banner.admin-warn { border-color:var(--blue); color:var(--blue-ink); }
+.admin-root .admin-banner.admin-err { border-color:var(--err); color:var(--err); }
+.admin-root .admin-hidden { display:none; }
+.admin-root details { background:var(--card); border:1px solid var(--line); border-radius:var(--radius-md); padding:10px 14px; }
+.admin-root summary { cursor:pointer; color:var(--blue-ink); font-size:var(--fs-md); }
+.admin-root pre { background:var(--chip); color:var(--ink); padding:12px; border-radius:var(--radius-md); font-size:var(--fs-xs); overflow:auto; max-height:260px; }
+/* 参数快照（§9.2 第二行 + 计划 Task 2.6 那句「等宽字体 + 左缩进（不画框线）」）。
+   *
+   * ⚠ 为什么【不用现成的 pre】：pre 带着 `background` + `border-radius` = 画了一个框，
+   * 而那一格明写不画框线 —— 本仓的层级一律靠缩进与色阶表达（§19.4 同一族，
+   * 看板那三层折叠也刻意不用竖线）。所以这块只有左缩进，别的什么都没有。
+   * ⚠ 等宽【不在这个类里重复一份字体栈】：那格由 `.mono` 提供（元素带两个 class），
+   * 这里再抄一遍栈就是两份会漂的抄件 —— 与本仓对 money() 那句话同一条理由。
+   */
+.admin-root .admin-snap { padding-left:18px; margin-top:6px; font-size:var(--fs-sm); }
+.admin-root .admin-snap .admin-k { display:inline-block; min-width:196px; color:var(--muted); }
+/* 读不出来 / 空：同一处缩进，用 .meta 的灰。这一行是这一格的主角，见 paramSnapshotLines。 */
+.admin-root .admin-snap-none { padding-left:18px; margin-top:6px; }
+/* 形状（padding / 字重 / 行高 / 撑不满时的 display）指回工作台 .pill 那一档：
+   原先这里 padding:1px 10px + fw-medium，那边 padding:2px 8px + fw-strong —— 同一屏
+   切两个视图时「状态标签」忽大忽忽小、忽粗忽细。颜色仍各走各的（本文件只单独抄色值，
+   见文件头第 3 条），但色【不改形状】：下面那四档 admin-s-* 只动 color。 */
+.admin-root .admin-pill { display:inline-flex; align-items:center; gap:var(--space-1); border-radius:var(--radius-pill); padding:2px 8px; font-size:var(--fs-xs); font-weight:var(--fw-strong); line-height:1.5; white-space:nowrap; background:var(--chip); color:var(--muted); }
+.admin-root .admin-pill.admin-s-blue { color:var(--blue-ink); }
+.admin-root .admin-pill.admin-s-green { color:var(--green); }
+.admin-root .admin-pill.admin-s-gray { color:var(--muted); }
+.admin-root .admin-pill.admin-s-red { color:var(--pill-red); }
+/* ⚠ .pill.s-amber 唯一合法用途 = 「这一件现在等你动手」。
+   * 「阻塞 / 预算警报已哑」这类**运营事件**不许用它：§7.4 明写预算暂停是
+   * 「运营事件，不是战略决策」且**非琥珀色**，而 §19.2 那句「琥珀色出现处就是
+   * 需要你动手的地方」是一扫即得的承诺 —— 每多用一次，扫视就废一次。
+   * 运营异常的红色是规格自己给的：§7.4「日消耗条变红」。 */
+.admin-root .admin-pill.admin-s-amber { color:var(--amber); }
+.admin-root .admin-s { font-weight:var(--fw-medium); }
+/* ── 今日视图（§16.3：左 2/3、右 1/3）────────────────────────────── */
+.admin-root .admin-cols { display:grid; grid-template-columns:2fr 1fr; gap:var(--space-4); align-items:start; }
+  @media (max-width:900px) {
+.admin-root .admin-cols { grid-template-columns:1fr; } }
+.admin-root .admin-sect { font-size:var(--fs-sm); letter-spacing:.08em; text-transform:uppercase; color:var(--muted); margin:0 0 8px; }
+/* 琥珀【左边框】是 §16.3 逐字要求的形态：待决策卡片靠左一道色条，
+   * 不用整圈描边 —— 一圈琥珀会把整张卡染成"警示"，而这里要说的是"这一件等你"。 */
+.admin-root .admin-need { border-left:3px solid var(--amber); }
+.admin-root .admin-need .admin-sect { color:var(--amber); }
+.admin-root .admin-lowcontrast { opacity:.62; }
+.admin-root .admin-lowcontrast:hover { opacity:1; }
+.admin-root .admin-num { font-size:var(--fs-3xl); font-weight:var(--fw-heavy); line-height:1.1; }
+.admin-root .admin-stat { background:var(--card); border:1px solid var(--line); border-radius:var(--radius-lg); padding:12px 14px; }
+.admin-root .admin-stat .admin-lbl { font-size:var(--fs-xs); color:var(--muted); }
+.admin-root .admin-statbad .admin-num { color:var(--amber); }
+/* 全规格唯一明写的红：§7.4「日消耗条变红」。所以 --err 今天只用在这一根条上。
+   * 「被阻塞」那一格今天回到默认墨色 —— 它既不是"等 CEO 动手"（琥珀不合法），
+   * 规格也没给它别的颜色（那张色表只有六档，没有"异常色"）。理由写在 app.js 的 stat() 旁边。 */
+.admin-root .admin-budgetover .admin-meter.admin-over { background:var(--err-soft); }
+.admin-root .admin-budgetover .admin-meter.admin-over i { background:var(--err); }
+.admin-root .admin-meter { height:6px; border-radius:var(--radius-xs); background:var(--chip); margin-top:8px; overflow:hidden; }
+.admin-root .admin-meter i { display:block; height:100%; background:var(--blue); }
+.admin-root .admin-stats { display:grid; grid-template-columns:1fr 1fr; gap:var(--space-2); }
+.admin-root .admin-idea { position:sticky; bottom:16px; }
+/* ── 任务看板（§16.4：水平滚动多列）─────────────────────────────── */
+.admin-root .admin-board { display:flex; gap:var(--space-3); overflow-x:auto; padding-bottom:12px; align-items:flex-start; }
+.admin-root .admin-col { min-width:242px; width:242px; flex:0 0 auto; }
+.admin-root .admin-colhead { display:flex; justify-content:space-between; font-size:var(--fs-sm); color:var(--muted); padding:0 2px 6px; border-bottom:1px solid var(--line); margin-bottom:8px; }
+.admin-root .admin-tk { background:var(--card); border:1px solid var(--line); border-radius:var(--radius-md); padding:9px 11px; margin-bottom:8px; cursor:pointer; }
+.admin-root .admin-tk:hover { border-color:var(--blue); }
+/* 「需要我注意」那一列的成员（§16.4）—— 灰左边框，不是琥珀。
+   * 成员身份本来就靠"过滤器按下去只剩它们"来表达，位置已经是信息；
+   * 若整列涂琥珀，琥珀就从「这一件等你动手」退化成「这一列的东西」，
+   * §19.2 那条扫视承诺就废了（而预算暂停这类**运营事件**规格明写非琥珀）。 */
+.admin-root .admin-tk.admin-flag { border-left:3px solid var(--gray); }
+.admin-root .admin-tk.admin-decision { border-left:3px solid var(--amber); }
+/* 详情抽屉：§16.4 明写「不离开看板上下文」，所以是覆盖在右侧的抽屉而不是跳页。 */
+.admin-root .admin-drawer { position:fixed; top:0; right:0; bottom:0; width:min(560px,92vw); background:var(--card);
+            border-left:1px solid var(--line); z-index:var(--z-drawer); overflow:auto; padding:20px; box-shadow:var(--shadow-drawer); }
+.admin-root .admin-scrim { position:fixed; inset:0; background:var(--modal-backdrop); z-index:var(--z-scrim); }
+/* ── 回放（§16.7：垂直事件流）──────────────────────────────────── */
+.admin-root .admin-tl { border-left:1px solid var(--line); padding-left:16px; margin-left:6px; }
+.admin-root .admin-ev { position:relative; margin-bottom:10px; }
+.admin-root .admin-ev::before { content:""; position:absolute; left:-21px; top:7px; width:8px; height:8px; border-radius:50%; background:var(--gray); }
+.admin-root .admin-ev.admin-auto::before { background:var(--blue); }
+/* ⚠ 这里以前是琥珀，改掉了：回放里的"人工决定"是【已经拍过板】的记录，
+   * 而 §19.2 的琥珀是「需要你动手的地方」—— 回放视图里没有任何东西在等谁。
+   * 规格 §16.7 那三条特殊标注（蒸馏 skill / 自动批准 / harness 版本）是**文字标注**，
+   * 不是颜色授权，所以这里用色必须落回那张色表的语义：
+   * 绿 = 已定（这条决定已经做了），蓝 = 机器自动（信息性），灰 = 其余。 */
+.admin-root .admin-ev.admin-decide::before { background:var(--green); }
+/* ── 组织页拖拽（reparent）──────────────────────────────────────
+   * 拖影 = 原卡的缩小复制（position:fixed + transform 跟手）。
+   * 目标高亮用蓝（信息/可选目标），不可投用 err 边框：都不碰琥珀 ——
+   * 拖拽本身不是「等 CEO 决策」。 */
+.admin-root .admin-node[draggable], .admin-root .admin-orgdrag .admin-node { cursor:grab; }
+.admin-root .admin-orgdrag .admin-node.admin-dragging { opacity:.45; }
+.admin-root .admin-orgdrag .admin-node.admin-dropok { border-color:var(--blue); box-shadow:0 0 0 2px var(--drop-ok); }
+/* 不可投用灰 + 文字说明，【不用红】：红色的落点被 test/web/renderer-criteria.test.ts
+   * 逐处钉死（硬失败 + §7.4 预算条两类），「这一下拖不对」不在名单里，也不该挤进去。 */
+.admin-root .admin-orgdrag .admin-node.admin-dropbad { border-color:var(--gray); opacity:.6; }
+.admin-root .admin-orgdrag .admin-node.admin-pick { border-color:var(--blue); outline:1px dashed var(--blue); }
+.admin-root .admin-org-ghost { position:fixed; z-index:var(--z-popover); pointer-events:none; background:var(--card);
+               border:1px solid var(--blue); border-radius:var(--radius-md); padding:8px 10px; font-size:var(--fs-md); opacity:.9; }
+.admin-root .admin-dragrow { border-left:3px solid var(--blue); }
+/* ── 岗位书页：左角色清单 + 右表单 ──────────────────────────────── */
+.admin-root .admin-charter-cols { display:grid; grid-template-columns:180px 1fr; gap:var(--space-4); align-items:start; }
+  @media (max-width:900px) {
+.admin-root .admin-charter-cols { grid-template-columns:1fr; } }
+.admin-root .admin-rolelist { display:flex; flex-direction:column; gap:var(--space-1); position:sticky; top:66px; }
+.admin-root .admin-rolebtn { text-align:left; }
+.admin-root .admin-rolebtn.admin-act { border-color:var(--blue); background:var(--chip-active); }
+.admin-root label { font-size:var(--fs-sm); color:var(--muted); display:block; }
+.admin-root label input, .admin-root label select { margin-top:3px; }
+.admin-root [data-err] { margin-top:4px; }
+/* ── 预算页表格 ──────────────────────────────────────────────────
+   * 超限行的进度条用 --err（§7.4 唯一明写的红就在消耗条上）；
+   * 整表与表单不出现琥珀 —— 预算超限是运营事件，不是战略决策。 */
+/* 表格自带的滚动壳。为什么不给 .admin-card 加 overflow-x：卡片是通用件，那一下会把
+   每张卡的 :focus-visible 焦点环（outline-offset:2px，画在盒子外）齐边裁掉，键盘审批
+   时「焦点在哪一格」直接看不见。溢出只发生在这一张表上（390 档 456px 表落进 306px 卡，
+   实测右溢 167px 且 overflow:visible ⇒ 内容真的画到卡外），所以壳也只加这一处。 */
+.admin-root .admin-table-wrap { overflow-x: auto; }
+.admin-root .admin-btable { width:100%; border-collapse:collapse; font-size:var(--fs-md); }
+.admin-root .admin-btable th { text-align:left; color:var(--muted); font-size:var(--fs-xs); font-weight:var(--fw-medium); padding:4px 8px; border-bottom:1px solid var(--line); }
+.admin-root .admin-btable td { padding:6px 8px; border-bottom:1px solid var(--line); vertical-align:middle; }
+.admin-root .admin-btable .admin-meter { margin-top:0; }
+
+/* ── round370 补：三个【此前根本没有规则】的类名 ───────────────────────
+   * 它们是 test/web/admin-style-scope.test.ts 那条双向钉（app.js 发了而 CSS 没有
+   * ⇒ 红）当场抓出来的：.chip / .ghost / .ev-none 在 HEAD 的 index.html <style>、
+   * admin.css、group.css 三处都没有规则 —— 样式一直【静默不生效】。
+   * 最实在的一条是窗口 chip：选中态写的是 .admin-act，而那条规则限定在 nav 里，
+   * 所以「看的是哪个窗口」在屏幕上从来没有读数。三条一起落成 admin- 前缀类。
+   */
+.admin-root .admin-chip { border:1px solid var(--control-border); border-radius:var(--radius-pill); padding:1px 9px; font-size:var(--fs-xs); text-decoration:none; color:var(--muted); }
+.admin-root .admin-chip.admin-chip-active { background:var(--chip-active); color:var(--ink); border-color:var(--blue); }
+/* 次级按钮：与 .admin-btn 同形但去掉底与边（重读那一枚不与「批量批准」同强度）。 */
+.admin-root .admin-btn.admin-ghost { border-color:transparent; background:transparent; color:var(--muted); }
+/* 「无证据包」是缺数据声明 ⇒ 灰。不挤红色落点名单（renderer-criteria 机械钉）。 */
+.admin-root .admin-ev-none { color:var(--muted); font-weight:400; }
+/* ── 窄屏（管理视图嵌在工作台三栏里，390 档整屏宽度与工作台同源）────────
+ * 此前全文件只有两条 900 列坍缩 —— 顶栏在手机上先横出血，统计格挤成一条。
+ * 选择器照文件头的机器约定：一律 .admin-root 开头、类名一律 admin- 前缀
+ * （admin-style-scope.test.ts 双向钉机械扫）。 */
+@media (max-width:860px) {
+.admin-root header { padding:0 12px; gap:var(--space-3); }
+.admin-root nav { overflow-x:auto; }
+.admin-root nav a { padding:6px 9px; white-space:nowrap; }
+/* 窄屏三值全部严格小于桌面档的 20/20/32：同样的「越小越紧」纪律：16 / 12 / 24。 */
+.admin-root main { padding:var(--space-4) 12px var(--space-6); }
+.admin-root .admin-snap .admin-k { min-width:0; display:block; }
+}
+/* ── 整页占位（app.js load() 的第一帧）─────────────────────────────
+ * 一屏三张卡的高度，扫光复用 group.css 的 --skeleton-base/hi 与 --dur-loop
+ * （那两枚住在 :root，admin 作用域直接继承 —— 在这再抄一份就是两份会漂的扫光）。 */
+.admin-root .admin-skel { display:grid; gap:var(--space-3); padding:8px 0; }
+.admin-root .admin-skel i { position:relative; overflow:hidden; display:block; height:96px; border-radius:var(--radius-lg); background:var(--skeleton-base); }
+.admin-root .admin-skel i::after { content:""; position:absolute; inset:0; transform:translateX(-100%); background:linear-gradient(90deg,transparent,var(--skeleton-hi),transparent); animation:skeleton-sweep var(--dur-loop) ease-in-out infinite; }
+

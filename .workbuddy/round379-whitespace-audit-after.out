@@ -1,0 +1,770 @@
+
+@@ dark 1440x900 messages-welcome
+  chrome: topbar h=52 rail w=null list w=340 main w=1018 collapsed=false
+
+### page
+  main 1018x848 scrollH=848 | page w=1018 maxW=1540px h=848 | pad t16 l20 b32 | gap=normal display=block
+  块合计=229.4 占 main 高 27.1% | 块间距合计=24 | 尾部(main底-末块底)=578.6 其中 padding-bottom 外=546.6
+  header h=69.5 mb=12px | toolbar mb=null | 横向：最宽块 978 / 内容宽 978 ⇒ 横向留白 0
+    - header.page-header  h=69.5 w=978 mt=0px mb=12px
+    - div.meeting-summary  h=68.5 w=978 mt=12px mb=12px
+    - section.card  h=91.4 w=978 mt=0px mb=0px
+  list: w=340 h=848 pad=0px 8px 16px gap=normal 条目=2 条目高=260.4/98.4 合计=358.8 死区=409 填=42.3% 可滚=false
+
+@@ dark 1440x900 contacts
+  chrome: topbar h=52 rail w=null list w=340 main w=1018 collapsed=false
+
+### page
+  main 1018x848 scrollH=848 | page w=1018 maxW=1540px h=848 | pad t16 l20 b32 | gap=normal display=block
+  块合计=576.6 占 main 高 68% | 块间距合计=12 | 尾部(main底-末块底)=243.4 其中 padding-bottom 外=211.4
+  header h=69.5 mb=12px | toolbar mb=null | 横向：最宽块 978 / 内容宽 978 ⇒ 横向留白 0
+    - header.page-header  h=69.5 w=978 mt=0px mb=12px
+    - div.people-layout  h=507.1 w=978 mt=0px mb=0px
+  list: w=340 h=848 pad=0px 8px 16px gap=normal 条目=4 条目高=121.1/121.1/121.1 合计=484.4 死区=231.4 填=57.1% 可滚=false
+
+### page(after list0 click)
+  main 1018x848 scrollH=848 | page w=1018 maxW=1540px h=848 | pad t16 l20 b32 | gap=normal display=block
+  块合计=576.6 占 main 高 68% | 块间距合计=12 | 尾部(main底-末块底)=243.4 其中 padding-bottom 外=211.4
+  header h=69.5 mb=12px | toolbar mb=null | 横向：最宽块 978 / 内容宽 978 ⇒ 横向留白 0
+    - header.page-header  h=69.5 w=978 mt=0px mb=12px
+    - div.people-layout  h=507.1 w=978 mt=0px mb=0px
+
+@@ dark 1440x900 documents-home
+  chrome: topbar h=52 rail w=null list w=340 main w=1018 collapsed=false
+
+### page
+  main 1018x848 scrollH=848 | page w=1018 maxW=1540px h=848 | pad t16 l20 b32 | gap=normal display=block
+  块合计=295.1 占 main 高 34.8% | 块间距合计=12 | 尾部(main底-末块底)=524.9 其中 padding-bottom 外=492.9
+  header h=69.5 mb=12px | toolbar mb=null | 横向：最宽块 978 / 内容宽 978 ⇒ 横向留白 0
+    - header.page-header  h=69.5 w=978 mt=0px mb=12px
+    - div.talent-grid  h=139.3 w=978 mt=0px mb=0px
+    - section.card  h=86.3 w=978 mt=0px mb=0px
+  list: w=340 h=848 pad=0px 8px 16px gap=normal 条目=1 条目高=1501 合计=1501 死区=0 填=177% 可滚=true
+
+@@ dark 1440x900 backlog
+  chrome: topbar h=52 rail w=null list w=340 main w=1018 collapsed=false
+
+### page
+  main 1018x848 scrollH=848 | page w=1018 maxW=1540px h=848 | pad t16 l20 b32 | gap=normal display=block
+  块合计=400.9 占 main 高 47.3% | 块间距合计=28 | 尾部(main底-末块底)=403.1 其中 padding-bottom 外=371.1
+  header h=69.5 mb=12px | toolbar mb=null | 横向：最宽块 978 / 内容宽 978 ⇒ 横向留白 0
+    - header.page-header  h=69.5 w=978 mt=0px mb=12px
+    - div.tabs.task-tabs  h=39.1 w=978 mt=0px mb=16px
+    - section#taskPanel  h=292.3 w=978 mt=0px mb=0px
+  list: w=340 h=848 pad=0px 8px 16px gap=normal 条目=1 条目高=87.1 合计=87.1 死区=652.5 填=10.3% 可滚=false
+
+### page(after list0 click)
+  main 1018x848 scrollH=848 | page w=1018 maxW=1540px h=848 | pad t16 l20 b32 | gap=normal display=block
+  块合计=372.9 占 main 高 44% | 块间距合计=12 | 尾部(main底-末块底)=447.1 其中 padding-bottom 外=415.1
+  header h=69.5 mb=12px | toolbar mb=null | 横向：最宽块 978 / 内容宽 978 ⇒ 横向留白 0
+    - header.page-header  h=69.5 w=978 mt=0px mb=12px
+    - article.card  h=303.4 w=978 mt=0px mb=0px
+
+@@ dark 1440x900 talent
+  chrome: topbar h=52 rail w=null list w=340 main w=1018 collapsed=false
+
+### page
+  main 1018x848 scrollH=848 | page w=1018 maxW=1540px h=848 | pad t16 l20 b32 | gap=normal display=block
+  块合计=310.4 占 main 高 36.6% | 块间距合计=24 | 尾部(main底-末块底)=497.6 其中 padding-bottom 外=465.6
+  header h=69.5 mb=12px | toolbar mb=null | 横向：最宽块 978 / 内容宽 978 ⇒ 横向留白 0
+    - header.page-header  h=69.5 w=978 mt=0px mb=12px
+    - div.banner.info  h=38 w=978 mt=0px mb=12px
+    - div.talent-grid  h=202.9 w=978 mt=0px mb=0px
+  list: w=340 h=848 pad=0px 8px 16px gap=normal 条目=4 条目高=66.6/66.6/66.6 合计=266.4 死区=460.1 填=31.4% 可滚=false
+
+@@ dark 1440x900 settings-member
+  chrome: topbar h=52 rail w=null list w=340 main w=1018 collapsed=false
+
+### page
+  main 1018x848 scrollH=848 | page w=1018 maxW=1540px h=848 | pad t16 l20 b32 | gap=normal display=block
+  块合计=313.6 占 main 高 37% | 块间距合计=12 | 尾部(main底-末块底)=506.4 其中 padding-bottom 外=474.4
+  header h=69.5 mb=12px | toolbar mb=null | 横向：最宽块 978 / 内容宽 978 ⇒ 横向留白 0
+    - header.page-header  h=69.5 w=978 mt=0px mb=12px
+    - div.state  h=210 w=978 mt=0px mb=0px
+    - div.actions  h=34.1 w=978 mt=0px mb=0px
+  list: w=340 h=848 pad=0px 8px 16px gap=normal 条目=1 条目高=54.7 合计=54.7 死区=633.8 填=6.5% 可滚=false
+
+@@ dark 1440x900 settings-groups
+  chrome: topbar h=52 rail w=null list w=340 main w=1018 collapsed=false
+
+### page
+  main 1018x848 scrollH=848 | page w=1018 maxW=1540px h=848 | pad t16 l20 b32 | gap=normal display=block
+  块合计=313.6 占 main 高 37% | 块间距合计=12 | 尾部(main底-末块底)=506.4 其中 padding-bottom 外=474.4
+  header h=69.5 mb=12px | toolbar mb=null | 横向：最宽块 978 / 内容宽 978 ⇒ 横向留白 0
+    - header.page-header  h=69.5 w=978 mt=0px mb=12px
+    - div.state  h=210 w=978 mt=0px mb=0px
+    - div.actions  h=34.1 w=978 mt=0px mb=0px
+  list: w=340 h=848 pad=0px 8px 16px gap=normal 条目=4 条目高=54.7/54.7/54.7 合计=218.8 死区=503.7 填=25.8% 可滚=false
+
+@@ dark 1440x900 settings-roles
+  chrome: topbar h=52 rail w=null list w=340 main w=1018 collapsed=false
+
+### page
+  main 1018x848 scrollH=848 | page w=1018 maxW=1540px h=848 | pad t16 l20 b32 | gap=normal display=block
+  块合计=313.6 占 main 高 37% | 块间距合计=12 | 尾部(main底-末块底)=506.4 其中 padding-bottom 外=474.4
+  header h=69.5 mb=12px | toolbar mb=null | 横向：最宽块 978 / 内容宽 978 ⇒ 横向留白 0
+    - header.page-header  h=69.5 w=978 mt=0px mb=12px
+    - div.state  h=210 w=978 mt=0px mb=0px
+    - div.actions  h=34.1 w=978 mt=0px mb=0px
+  list: w=340 h=848 pad=0px 8px 16px gap=normal 条目=13 条目高=54.7/54.7/54.7 合计=711.1 死区=11.1 填=83.9% 可滚=true
+
+@@ dark 1440x900 settings-plugins
+  chrome: topbar h=52 rail w=null list w=340 main w=1018 collapsed=false
+
+### page
+  main 1018x848 scrollH=848 | page w=1018 maxW=1540px h=848 | pad t16 l20 b32 | gap=normal display=block
+  块合计=313.6 占 main 高 37% | 块间距合计=12 | 尾部(main底-末块底)=506.4 其中 padding-bottom 外=474.4
+  header h=69.5 mb=12px | toolbar mb=null | 横向：最宽块 978 / 内容宽 978 ⇒ 横向留白 0
+    - header.page-header  h=69.5 w=978 mt=0px mb=12px
+    - div.state  h=210 w=978 mt=0px mb=0px
+    - div.actions  h=34.1 w=978 mt=0px mb=0px
+  list: w=340 h=848 pad=0px 8px 16px gap=normal 条目=1 条目高=210 合计=210 死区=512.6 填=24.8% 可滚=false
+
+@@ dark 1440x900 admin
+  chrome: topbar h=52 rail w=null list w=340 main w=1018 collapsed=false
+
+### page
+  !! no .page main-pane
+  list: w=340 h=848 pad=0px 8px 16px gap=normal 条目=7 条目高=49.6/49.6/49.6 合计=347.2 死区=426.6 填=40.9% 可滚=false
+
+@@ dark 1920x1080 messages-welcome
+  chrome: topbar h=52 rail w=null list w=340 main w=1498 collapsed=false
+
+### page
+  main 1498x1028 scrollH=1028 | page w=1498 maxW=1540px h=1028 | pad t16 l20 b32 | gap=normal display=block
+  块合计=229.4 占 main 高 22.3% | 块间距合计=24 | 尾部(main底-末块底)=758.6 其中 padding-bottom 外=726.6
+  header h=69.5 mb=12px | toolbar mb=null | 横向：最宽块 1458 / 内容宽 1458 ⇒ 横向留白 0
+    - header.page-header  h=69.5 w=1458 mt=0px mb=12px
+    - div.meeting-summary  h=68.5 w=1458 mt=12px mb=12px
+    - section.card  h=91.4 w=1458 mt=0px mb=0px
+  list: w=340 h=1028 pad=0px 8px 16px gap=normal 条目=2 条目高=260.4/98.4 合计=358.8 死区=589 填=34.9% 可滚=false
+
+@@ dark 1920x1080 contacts
+  chrome: topbar h=52 rail w=null list w=340 main w=1498 collapsed=false
+
+### page
+  main 1498x1028 scrollH=1028 | page w=1498 maxW=1540px h=1028 | pad t16 l20 b32 | gap=normal display=block
+  块合计=576.6 占 main 高 56.1% | 块间距合计=12 | 尾部(main底-末块底)=423.4 其中 padding-bottom 外=391.4
+  header h=69.5 mb=12px | toolbar mb=null | 横向：最宽块 1458 / 内容宽 1458 ⇒ 横向留白 0
+    - header.page-header  h=69.5 w=1458 mt=0px mb=12px
+    - div.people-layout  h=507.1 w=1458 mt=0px mb=0px
+  list: w=340 h=1028 pad=0px 8px 16px gap=normal 条目=4 条目高=121.1/121.1/121.1 合计=484.4 死区=411.4 填=47.1% 可滚=false
+
+### page(after list0 click)
+  main 1498x1028 scrollH=1028 | page w=1498 maxW=1540px h=1028 | pad t16 l20 b32 | gap=normal display=block
+  块合计=576.6 占 main 高 56.1% | 块间距合计=12 | 尾部(main底-末块底)=423.4 其中 padding-bottom 外=391.4
+  header h=69.5 mb=12px | toolbar mb=null | 横向：最宽块 1458 / 内容宽 1458 ⇒ 横向留白 0
+    - header.page-header  h=69.5 w=1458 mt=0px mb=12px
+    - div.people-layout  h=507.1 w=1458 mt=0px mb=0px
+
+@@ dark 1920x1080 documents-home
+  chrome: topbar h=52 rail w=null list w=340 main w=1498 collapsed=false
+
+### page
+  main 1498x1028 scrollH=1028 | page w=1498 maxW=1540px h=1028 | pad t16 l20 b32 | gap=normal display=block
+  块合计=295.1 占 main 高 28.7% | 块间距合计=12 | 尾部(main底-末块底)=704.9 其中 padding-bottom 外=672.9
+  header h=69.5 mb=12px | toolbar mb=null | 横向：最宽块 1458 / 内容宽 1458 ⇒ 横向留白 0
+    - header.page-header  h=69.5 w=1458 mt=0px mb=12px
+    - div.talent-grid  h=139.3 w=1458 mt=0px mb=0px
+    - section.card  h=86.3 w=1458 mt=0px mb=0px
+  list: w=340 h=1028 pad=0px 8px 16px gap=normal 条目=1 条目高=1501 合计=1501 死区=0 填=146% 可滚=true
+
+@@ dark 1920x1080 backlog
+  chrome: topbar h=52 rail w=null list w=340 main w=1498 collapsed=false
+
+### page
+  main 1498x1028 scrollH=1028 | page w=1498 maxW=1540px h=1028 | pad t16 l20 b32 | gap=normal display=block
+  块合计=400.9 占 main 高 39% | 块间距合计=28 | 尾部(main底-末块底)=583.1 其中 padding-bottom 外=551.1
+  header h=69.5 mb=12px | toolbar mb=null | 横向：最宽块 1458 / 内容宽 1458 ⇒ 横向留白 0
+    - header.page-header  h=69.5 w=1458 mt=0px mb=12px
+    - div.tabs.task-tabs  h=39.1 w=1458 mt=0px mb=16px
+    - section#taskPanel  h=292.3 w=1458 mt=0px mb=0px
+  list: w=340 h=1028 pad=0px 8px 16px gap=normal 条目=1 条目高=87.1 合计=87.1 死区=832.5 填=8.5% 可滚=false
+
+### page(after list0 click)
+  main 1498x1028 scrollH=1028 | page w=1498 maxW=1540px h=1028 | pad t16 l20 b32 | gap=normal display=block
+  块合计=372.9 占 main 高 36.3% | 块间距合计=12 | 尾部(main底-末块底)=627.1 其中 padding-bottom 外=595.1
+  header h=69.5 mb=12px | toolbar mb=null | 横向：最宽块 1458 / 内容宽 1458 ⇒ 横向留白 0
+    - header.page-header  h=69.5 w=1458 mt=0px mb=12px
+    - article.card  h=303.4 w=1458 mt=0px mb=0px
+
+@@ dark 1920x1080 talent
+  chrome: topbar h=52 rail w=null list w=340 main w=1498 collapsed=false
+
+### page
+  main 1498x1028 scrollH=1028 | page w=1498 maxW=1540px h=1028 | pad t16 l20 b32 | gap=normal display=block
+  块合计=310.4 占 main 高 30.2% | 块间距合计=24 | 尾部(main底-末块底)=677.6 其中 padding-bottom 外=645.6
+  header h=69.5 mb=12px | toolbar mb=null | 横向：最宽块 1458 / 内容宽 1458 ⇒ 横向留白 0
+    - header.page-header  h=69.5 w=1458 mt=0px mb=12px
+    - div.banner.info  h=38 w=1458 mt=0px mb=12px
+    - div.talent-grid  h=202.9 w=1458 mt=0px mb=0px
+  list: w=340 h=1028 pad=0px 8px 16px gap=normal 条目=4 条目高=66.6/66.6/66.6 合计=266.4 死区=640.1 填=25.9% 可滚=false
+
+@@ dark 1920x1080 settings-member
+  chrome: topbar h=52 rail w=null list w=340 main w=1498 collapsed=false
+
+### page
+  main 1498x1028 scrollH=1028 | page w=1498 maxW=1540px h=1028 | pad t16 l20 b32 | gap=normal display=block
+  块合计=313.6 占 main 高 30.5% | 块间距合计=12 | 尾部(main底-末块底)=686.4 其中 padding-bottom 外=654.4
+  header h=69.5 mb=12px | toolbar mb=null | 横向：最宽块 1458 / 内容宽 1458 ⇒ 横向留白 0
+    - header.page-header  h=69.5 w=1458 mt=0px mb=12px
+    - div.state  h=210 w=1458 mt=0px mb=0px
+    - div.actions  h=34.1 w=1458 mt=0px mb=0px
+  list: w=340 h=1028 pad=0px 8px 16px gap=normal 条目=1 条目高=54.7 合计=54.7 死区=813.8 填=5.3% 可滚=false
+
+@@ dark 1920x1080 settings-groups
+  chrome: topbar h=52 rail w=null list w=340 main w=1498 collapsed=false
+
+### page
+  main 1498x1028 scrollH=1028 | page w=1498 maxW=1540px h=1028 | pad t16 l20 b32 | gap=normal display=block
+  块合计=313.6 占 main 高 30.5% | 块间距合计=12 | 尾部(main底-末块底)=686.4 其中 padding-bottom 外=654.4
+  header h=69.5 mb=12px | toolbar mb=null | 横向：最宽块 1458 / 内容宽 1458 ⇒ 横向留白 0
+    - header.page-header  h=69.5 w=1458 mt=0px mb=12px
+    - div.state  h=210 w=1458 mt=0px mb=0px
+    - div.actions  h=34.1 w=1458 mt=0px mb=0px
+  list: w=340 h=1028 pad=0px 8px 16px gap=normal 条目=4 条目高=54.7/54.7/54.7 合计=218.8 死区=683.7 填=21.3% 可滚=false
+
+@@ dark 1920x1080 settings-roles
+  chrome: topbar h=52 rail w=null list w=340 main w=1498 collapsed=false
+
+### page
+  main 1498x1028 scrollH=1028 | page w=1498 maxW=1540px h=1028 | pad t16 l20 b32 | gap=normal display=block
+  块合计=313.6 占 main 高 30.5% | 块间距合计=12 | 尾部(main底-末块底)=686.4 其中 padding-bottom 外=654.4
+  header h=69.5 mb=12px | toolbar mb=null | 横向：最宽块 1458 / 内容宽 1458 ⇒ 横向留白 0
+    - header.page-header  h=69.5 w=1458 mt=0px mb=12px
+    - div.state  h=210 w=1458 mt=0px mb=0px
+    - div.actions  h=34.1 w=1458 mt=0px mb=0px
+  list: w=340 h=1028 pad=0px 8px 16px gap=normal 条目=13 条目高=54.7/54.7/54.7 合计=711.1 死区=191.1 填=69.2% 可滚=false
+
+@@ dark 1920x1080 settings-plugins
+  chrome: topbar h=52 rail w=null list w=340 main w=1498 collapsed=false
+
+### page
+  main 1498x1028 scrollH=1028 | page w=1498 maxW=1540px h=1028 | pad t16 l20 b32 | gap=normal display=block
+  块合计=313.6 占 main 高 30.5% | 块间距合计=12 | 尾部(main底-末块底)=686.4 其中 padding-bottom 外=654.4
+  header h=69.5 mb=12px | toolbar mb=null | 横向：最宽块 1458 / 内容宽 1458 ⇒ 横向留白 0
+    - header.page-header  h=69.5 w=1458 mt=0px mb=12px
+    - div.state  h=210 w=1458 mt=0px mb=0px
+    - div.actions  h=34.1 w=1458 mt=0px mb=0px
+  list: w=340 h=1028 pad=0px 8px 16px gap=normal 条目=1 条目高=210 合计=210 死区=692.6 填=20.4% 可滚=false
+
+@@ dark 1920x1080 admin
+  chrome: topbar h=52 rail w=null list w=340 main w=1498 collapsed=false
+
+### page
+  !! no .page main-pane
+  list: w=340 h=1028 pad=0px 8px 16px gap=normal 条目=7 条目高=49.6/49.6/49.6 合计=347.2 死区=606.6 填=33.8% 可滚=false
+
+@@ dark 1280x720 messages-welcome
+  chrome: topbar h=52 rail w=null list w=340 main w=858 collapsed=false
+
+### page
+  main 858x668 scrollH=668 | page w=858 maxW=1540px h=668 | pad t16 l20 b32 | gap=normal display=block
+  块合计=229.4 占 main 高 34.3% | 块间距合计=24 | 尾部(main底-末块底)=398.6 其中 padding-bottom 外=366.6
+  header h=69.5 mb=12px | toolbar mb=null | 横向：最宽块 818 / 内容宽 818 ⇒ 横向留白 0
+    - header.page-header  h=69.5 w=818 mt=0px mb=12px
+    - div.meeting-summary  h=68.5 w=818 mt=12px mb=12px
+    - section.card  h=91.4 w=818 mt=0px mb=0px
+  list: w=340 h=668 pad=0px 8px 16px gap=normal 条目=2 条目高=260.4/98.4 合计=358.8 死区=229 填=53.7% 可滚=false
+
+@@ dark 1280x720 contacts
+  chrome: topbar h=52 rail w=null list w=340 main w=858 collapsed=false
+
+### page
+  main 858x668 scrollH=668 | page w=858 maxW=1540px h=668 | pad t16 l20 b32 | gap=normal display=block
+  块合计=576.6 占 main 高 86.3% | 块间距合计=12 | 尾部(main底-末块底)=63.4 其中 padding-bottom 外=31.4
+  header h=69.5 mb=12px | toolbar mb=null | 横向：最宽块 818 / 内容宽 818 ⇒ 横向留白 0
+    - header.page-header  h=69.5 w=818 mt=0px mb=12px
+    - div.people-layout  h=507.1 w=818 mt=0px mb=0px
+  list: w=340 h=668 pad=0px 8px 16px gap=normal 条目=4 条目高=121.1/121.1/121.1 合计=484.4 死区=51.4 填=72.5% 可滚=false
+
+### page(after list0 click)
+  main 858x668 scrollH=668 | page w=858 maxW=1540px h=668 | pad t16 l20 b32 | gap=normal display=block
+  块合计=576.6 占 main 高 86.3% | 块间距合计=12 | 尾部(main底-末块底)=63.4 其中 padding-bottom 外=31.4
+  header h=69.5 mb=12px | toolbar mb=null | 横向：最宽块 818 / 内容宽 818 ⇒ 横向留白 0
+    - header.page-header  h=69.5 w=818 mt=0px mb=12px
+    - div.people-layout  h=507.1 w=818 mt=0px mb=0px
+
+@@ dark 1280x720 documents-home
+  chrome: topbar h=52 rail w=null list w=340 main w=858 collapsed=false
+
+### page
+  main 858x668 scrollH=668 | page w=858 maxW=1540px h=668 | pad t16 l20 b32 | gap=normal display=block
+  块合计=446.5 占 main 高 66.8% | 块间距合计=11.9 | 尾部(main底-末块底)=193.6 其中 padding-bottom 外=161.6
+  header h=69.5 mb=12px | toolbar mb=null | 横向：最宽块 818 / 内容宽 818 ⇒ 横向留白 0
+    - header.page-header  h=69.5 w=818 mt=0px mb=12px
+    - div.talent-grid  h=290.7 w=818 mt=0px mb=0px
+    - section.card  h=86.3 w=818 mt=0px mb=0px
+  list: w=340 h=668 pad=0px 8px 16px gap=normal 条目=1 条目高=1501 合计=1501 死区=0 填=224.7% 可滚=true
+
+@@ dark 1280x720 backlog
+  chrome: topbar h=52 rail w=null list w=340 main w=858 collapsed=false
+
+### page
+  main 858x668 scrollH=668 | page w=858 maxW=1540px h=668 | pad t16 l20 b32 | gap=normal display=block
+  块合计=400.9 占 main 高 60% | 块间距合计=28 | 尾部(main底-末块底)=223.1 其中 padding-bottom 外=191.1
+  header h=69.5 mb=12px | toolbar mb=null | 横向：最宽块 818 / 内容宽 818 ⇒ 横向留白 0
+    - header.page-header  h=69.5 w=818 mt=0px mb=12px
+    - div.tabs.task-tabs  h=39.1 w=818 mt=0px mb=16px
+    - section#taskPanel  h=292.3 w=818 mt=0px mb=0px
+  list: w=340 h=668 pad=0px 8px 16px gap=normal 条目=1 条目高=87.1 合计=87.1 死区=472.5 填=13% 可滚=false
+
+### page(after list0 click)
+  main 858x668 scrollH=668 | page w=858 maxW=1540px h=668 | pad t16 l20 b32 | gap=normal display=block
+  块合计=372.9 占 main 高 55.8% | 块间距合计=12 | 尾部(main底-末块底)=267.1 其中 padding-bottom 外=235.1
+  header h=69.5 mb=12px | toolbar mb=null | 横向：最宽块 818 / 内容宽 818 ⇒ 横向留白 0
+    - header.page-header  h=69.5 w=818 mt=0px mb=12px
+    - article.card  h=303.4 w=818 mt=0px mb=0px
+
+@@ dark 1280x720 talent
+  chrome: topbar h=52 rail w=null list w=340 main w=858 collapsed=false
+
+### page
+  main 858x668 scrollH=668 | page w=858 maxW=1540px h=668 | pad t16 l20 b32 | gap=normal display=block
+  块合计=525.4 占 main 高 78.7% | 块间距合计=24 | 尾部(main底-末块底)=102.6 其中 padding-bottom 外=70.6
+  header h=69.5 mb=12px | toolbar mb=null | 横向：最宽块 818 / 内容宽 818 ⇒ 横向留白 0
+    - header.page-header  h=69.5 w=818 mt=0px mb=12px
+    - div.banner.info  h=38 w=818 mt=0px mb=12px
+    - div.talent-grid  h=417.9 w=818 mt=0px mb=0px
+  list: w=340 h=668 pad=0px 8px 16px gap=normal 条目=4 条目高=66.6/66.6/66.6 合计=266.4 死区=280.1 填=39.9% 可滚=false
+
+@@ dark 1280x720 settings-member
+  chrome: topbar h=52 rail w=null list w=340 main w=858 collapsed=false
+
+### page
+  main 858x668 scrollH=668 | page w=858 maxW=1540px h=668 | pad t16 l20 b32 | gap=normal display=block
+  块合计=313.6 占 main 高 46.9% | 块间距合计=12 | 尾部(main底-末块底)=326.4 其中 padding-bottom 外=294.4
+  header h=69.5 mb=12px | toolbar mb=null | 横向：最宽块 818 / 内容宽 818 ⇒ 横向留白 0
+    - header.page-header  h=69.5 w=818 mt=0px mb=12px
+    - div.state  h=210 w=818 mt=0px mb=0px
+    - div.actions  h=34.1 w=818 mt=0px mb=0px
+  list: w=340 h=668 pad=0px 8px 16px gap=normal 条目=1 条目高=54.7 合计=54.7 死区=453.8 填=8.2% 可滚=false
+
+@@ dark 1280x720 settings-groups
+  chrome: topbar h=52 rail w=null list w=340 main w=858 collapsed=false
+
+### page
+  main 858x668 scrollH=668 | page w=858 maxW=1540px h=668 | pad t16 l20 b32 | gap=normal display=block
+  块合计=313.6 占 main 高 46.9% | 块间距合计=12 | 尾部(main底-末块底)=326.4 其中 padding-bottom 外=294.4
+  header h=69.5 mb=12px | toolbar mb=null | 横向：最宽块 818 / 内容宽 818 ⇒ 横向留白 0
+    - header.page-header  h=69.5 w=818 mt=0px mb=12px
+    - div.state  h=210 w=818 mt=0px mb=0px
+    - div.actions  h=34.1 w=818 mt=0px mb=0px
+  list: w=340 h=668 pad=0px 8px 16px gap=normal 条目=4 条目高=54.7/54.7/54.7 合计=218.8 死区=323.7 填=32.8% 可滚=false
+
+@@ dark 1280x720 settings-roles
+  chrome: topbar h=52 rail w=null list w=340 main w=858 collapsed=false
+
+### page
+  main 858x668 scrollH=668 | page w=858 maxW=1540px h=668 | pad t16 l20 b32 | gap=normal display=block
+  块合计=313.6 占 main 高 46.9% | 块间距合计=12 | 尾部(main底-末块底)=326.4 其中 padding-bottom 外=294.4
+  header h=69.5 mb=12px | toolbar mb=null | 横向：最宽块 818 / 内容宽 818 ⇒ 横向留白 0
+    - header.page-header  h=69.5 w=818 mt=0px mb=12px
+    - div.state  h=210 w=818 mt=0px mb=0px
+    - div.actions  h=34.1 w=818 mt=0px mb=0px
+  list: w=340 h=668 pad=0px 8px 16px gap=normal 条目=13 条目高=54.7/54.7/54.7 合计=711.1 死区=0 填=106.5% 可滚=true
+
+@@ dark 1280x720 settings-plugins
+  chrome: topbar h=52 rail w=null list w=340 main w=858 collapsed=false
+
+### page
+  main 858x668 scrollH=668 | page w=858 maxW=1540px h=668 | pad t16 l20 b32 | gap=normal display=block
+  块合计=313.6 占 main 高 46.9% | 块间距合计=12 | 尾部(main底-末块底)=326.4 其中 padding-bottom 外=294.4
+  header h=69.5 mb=12px | toolbar mb=null | 横向：最宽块 818 / 内容宽 818 ⇒ 横向留白 0
+    - header.page-header  h=69.5 w=818 mt=0px mb=12px
+    - div.state  h=210 w=818 mt=0px mb=0px
+    - div.actions  h=34.1 w=818 mt=0px mb=0px
+  list: w=340 h=668 pad=0px 8px 16px gap=normal 条目=1 条目高=210 合计=210 死区=332.6 填=31.4% 可滚=false
+
+@@ dark 1280x720 admin
+  chrome: topbar h=52 rail w=null list w=340 main w=858 collapsed=false
+
+### page
+  !! no .page main-pane
+  list: w=340 h=668 pad=0px 8px 16px gap=normal 条目=7 条目高=49.6/49.6/49.6 合计=347.2 死区=246.6 填=52% 可滚=false
+
+@@ light 1440x900 messages-welcome
+  chrome: topbar h=52 rail w=null list w=340 main w=1018 collapsed=false
+
+### page
+  main 1018x848 scrollH=848 | page w=1018 maxW=1540px h=848 | pad t16 l20 b32 | gap=normal display=block
+  块合计=229.4 占 main 高 27.1% | 块间距合计=24 | 尾部(main底-末块底)=578.6 其中 padding-bottom 外=546.6
+  header h=69.5 mb=12px | toolbar mb=null | 横向：最宽块 978 / 内容宽 978 ⇒ 横向留白 0
+    - header.page-header  h=69.5 w=978 mt=0px mb=12px
+    - div.meeting-summary  h=68.5 w=978 mt=12px mb=12px
+    - section.card  h=91.4 w=978 mt=0px mb=0px
+  list: w=340 h=848 pad=0px 8px 16px gap=normal 条目=2 条目高=260.4/98.4 合计=358.8 死区=409 填=42.3% 可滚=false
+
+@@ light 1440x900 contacts
+  chrome: topbar h=52 rail w=null list w=340 main w=1018 collapsed=false
+
+### page
+  main 1018x848 scrollH=848 | page w=1018 maxW=1540px h=848 | pad t16 l20 b32 | gap=normal display=block
+  块合计=576.6 占 main 高 68% | 块间距合计=12 | 尾部(main底-末块底)=243.4 其中 padding-bottom 外=211.4
+  header h=69.5 mb=12px | toolbar mb=null | 横向：最宽块 978 / 内容宽 978 ⇒ 横向留白 0
+    - header.page-header  h=69.5 w=978 mt=0px mb=12px
+    - div.people-layout  h=507.1 w=978 mt=0px mb=0px
+  list: w=340 h=848 pad=0px 8px 16px gap=normal 条目=4 条目高=121.1/121.1/121.1 合计=484.4 死区=231.4 填=57.1% 可滚=false
+
+### page(after list0 click)
+  main 1018x848 scrollH=848 | page w=1018 maxW=1540px h=848 | pad t16 l20 b32 | gap=normal display=block
+  块合计=576.6 占 main 高 68% | 块间距合计=12 | 尾部(main底-末块底)=243.4 其中 padding-bottom 外=211.4
+  header h=69.5 mb=12px | toolbar mb=null | 横向：最宽块 978 / 内容宽 978 ⇒ 横向留白 0
+    - header.page-header  h=69.5 w=978 mt=0px mb=12px
+    - div.people-layout  h=507.1 w=978 mt=0px mb=0px
+
+@@ light 1440x900 documents-home
+  chrome: topbar h=52 rail w=null list w=340 main w=1018 collapsed=false
+
+### page
+  main 1018x848 scrollH=848 | page w=1018 maxW=1540px h=848 | pad t16 l20 b32 | gap=normal display=block
+  块合计=295.1 占 main 高 34.8% | 块间距合计=12 | 尾部(main底-末块底)=524.9 其中 padding-bottom 外=492.9
+  header h=69.5 mb=12px | toolbar mb=null | 横向：最宽块 978 / 内容宽 978 ⇒ 横向留白 0
+    - header.page-header  h=69.5 w=978 mt=0px mb=12px
+    - div.talent-grid  h=139.3 w=978 mt=0px mb=0px
+    - section.card  h=86.3 w=978 mt=0px mb=0px
+  list: w=340 h=848 pad=0px 8px 16px gap=normal 条目=1 条目高=1501 合计=1501 死区=0 填=177% 可滚=true
+
+@@ light 1440x900 backlog
+  chrome: topbar h=52 rail w=null list w=340 main w=1018 collapsed=false
+
+### page
+  main 1018x848 scrollH=848 | page w=1018 maxW=1540px h=848 | pad t16 l20 b32 | gap=normal display=block
+  块合计=400.9 占 main 高 47.3% | 块间距合计=28 | 尾部(main底-末块底)=403.1 其中 padding-bottom 外=371.1
+  header h=69.5 mb=12px | toolbar mb=null | 横向：最宽块 978 / 内容宽 978 ⇒ 横向留白 0
+    - header.page-header  h=69.5 w=978 mt=0px mb=12px
+    - div.tabs.task-tabs  h=39.1 w=978 mt=0px mb=16px
+    - section#taskPanel  h=292.3 w=978 mt=0px mb=0px
+  list: w=340 h=848 pad=0px 8px 16px gap=normal 条目=1 条目高=87.1 合计=87.1 死区=652.5 填=10.3% 可滚=false
+
+### page(after list0 click)
+  main 1018x848 scrollH=848 | page w=1018 maxW=1540px h=848 | pad t16 l20 b32 | gap=normal display=block
+  块合计=372.9 占 main 高 44% | 块间距合计=12 | 尾部(main底-末块底)=447.1 其中 padding-bottom 外=415.1
+  header h=69.5 mb=12px | toolbar mb=null | 横向：最宽块 978 / 内容宽 978 ⇒ 横向留白 0
+    - header.page-header  h=69.5 w=978 mt=0px mb=12px
+    - article.card  h=303.4 w=978 mt=0px mb=0px
+
+@@ light 1440x900 talent
+  chrome: topbar h=52 rail w=null list w=340 main w=1018 collapsed=false
+
+### page
+  main 1018x848 scrollH=848 | page w=1018 maxW=1540px h=848 | pad t16 l20 b32 | gap=normal display=block
+  块合计=310.4 占 main 高 36.6% | 块间距合计=24 | 尾部(main底-末块底)=497.6 其中 padding-bottom 外=465.6
+  header h=69.5 mb=12px | toolbar mb=null | 横向：最宽块 978 / 内容宽 978 ⇒ 横向留白 0
+    - header.page-header  h=69.5 w=978 mt=0px mb=12px
+    - div.banner.info  h=38 w=978 mt=0px mb=12px
+    - div.talent-grid  h=202.9 w=978 mt=0px mb=0px
+  list: w=340 h=848 pad=0px 8px 16px gap=normal 条目=4 条目高=66.6/66.6/66.6 合计=266.4 死区=460.1 填=31.4% 可滚=false
+
+@@ light 1440x900 settings-member
+  chrome: topbar h=52 rail w=null list w=340 main w=1018 collapsed=false
+
+### page
+  main 1018x848 scrollH=848 | page w=1018 maxW=1540px h=848 | pad t16 l20 b32 | gap=normal display=block
+  块合计=313.6 占 main 高 37% | 块间距合计=12 | 尾部(main底-末块底)=506.4 其中 padding-bottom 外=474.4
+  header h=69.5 mb=12px | toolbar mb=null | 横向：最宽块 978 / 内容宽 978 ⇒ 横向留白 0
+    - header.page-header  h=69.5 w=978 mt=0px mb=12px
+    - div.state  h=210 w=978 mt=0px mb=0px
+    - div.actions  h=34.1 w=978 mt=0px mb=0px
+  list: w=340 h=848 pad=0px 8px 16px gap=normal 条目=1 条目高=54.7 合计=54.7 死区=633.8 填=6.5% 可滚=false
+
+@@ light 1440x900 settings-groups
+  chrome: topbar h=52 rail w=null list w=340 main w=1018 collapsed=false
+
+### page
+  main 1018x848 scrollH=848 | page w=1018 maxW=1540px h=848 | pad t16 l20 b32 | gap=normal display=block
+  块合计=313.6 占 main 高 37% | 块间距合计=12 | 尾部(main底-末块底)=506.4 其中 padding-bottom 外=474.4
+  header h=69.5 mb=12px | toolbar mb=null | 横向：最宽块 978 / 内容宽 978 ⇒ 横向留白 0
+    - header.page-header  h=69.5 w=978 mt=0px mb=12px
+    - div.state  h=210 w=978 mt=0px mb=0px
+    - div.actions  h=34.1 w=978 mt=0px mb=0px
+  list: w=340 h=848 pad=0px 8px 16px gap=normal 条目=4 条目高=54.7/54.7/54.7 合计=218.8 死区=503.7 填=25.8% 可滚=false
+
+@@ light 1440x900 settings-roles
+  chrome: topbar h=52 rail w=null list w=340 main w=1018 collapsed=false
+
+### page
+  main 1018x848 scrollH=848 | page w=1018 maxW=1540px h=848 | pad t16 l20 b32 | gap=normal display=block
+  块合计=313.6 占 main 高 37% | 块间距合计=12 | 尾部(main底-末块底)=506.4 其中 padding-bottom 外=474.4
+  header h=69.5 mb=12px | toolbar mb=null | 横向：最宽块 978 / 内容宽 978 ⇒ 横向留白 0
+    - header.page-header  h=69.5 w=978 mt=0px mb=12px
+    - div.state  h=210 w=978 mt=0px mb=0px
+    - div.actions  h=34.1 w=978 mt=0px mb=0px
+  list: w=340 h=848 pad=0px 8px 16px gap=normal 条目=13 条目高=54.7/54.7/54.7 合计=711.1 死区=11.1 填=83.9% 可滚=true
+
+@@ light 1440x900 settings-plugins
+  chrome: topbar h=52 rail w=null list w=340 main w=1018 collapsed=false
+
+### page
+  main 1018x848 scrollH=848 | page w=1018 maxW=1540px h=848 | pad t16 l20 b32 | gap=normal display=block
+  块合计=313.6 占 main 高 37% | 块间距合计=12 | 尾部(main底-末块底)=506.4 其中 padding-bottom 外=474.4
+  header h=69.5 mb=12px | toolbar mb=null | 横向：最宽块 978 / 内容宽 978 ⇒ 横向留白 0
+    - header.page-header  h=69.5 w=978 mt=0px mb=12px
+    - div.state  h=210 w=978 mt=0px mb=0px
+    - div.actions  h=34.1 w=978 mt=0px mb=0px
+  list: w=340 h=848 pad=0px 8px 16px gap=normal 条目=1 条目高=210 合计=210 死区=512.6 填=24.8% 可滚=false
+
+@@ light 1440x900 admin
+  chrome: topbar h=52 rail w=null list w=340 main w=1018 collapsed=false
+
+### page
+  !! no .page main-pane
+  list: w=340 h=848 pad=0px 8px 16px gap=normal 条目=7 条目高=49.6/49.6/49.6 合计=347.2 死区=426.6 填=40.9% 可滚=false
+
+@@ light 1920x1080 messages-welcome
+  chrome: topbar h=52 rail w=null list w=340 main w=1498 collapsed=false
+
+### page
+  main 1498x1028 scrollH=1028 | page w=1498 maxW=1540px h=1028 | pad t16 l20 b32 | gap=normal display=block
+  块合计=229.4 占 main 高 22.3% | 块间距合计=24 | 尾部(main底-末块底)=758.6 其中 padding-bottom 外=726.6
+  header h=69.5 mb=12px | toolbar mb=null | 横向：最宽块 1458 / 内容宽 1458 ⇒ 横向留白 0
+    - header.page-header  h=69.5 w=1458 mt=0px mb=12px
+    - div.meeting-summary  h=68.5 w=1458 mt=12px mb=12px
+    - section.card  h=91.4 w=1458 mt=0px mb=0px
+  list: w=340 h=1028 pad=0px 8px 16px gap=normal 条目=2 条目高=260.4/98.4 合计=358.8 死区=589 填=34.9% 可滚=false
+
+@@ light 1920x1080 contacts
+  chrome: topbar h=52 rail w=null list w=340 main w=1498 collapsed=false
+
+### page
+  main 1498x1028 scrollH=1028 | page w=1498 maxW=1540px h=1028 | pad t16 l20 b32 | gap=normal display=block
+  块合计=576.6 占 main 高 56.1% | 块间距合计=12 | 尾部(main底-末块底)=423.4 其中 padding-bottom 外=391.4
+  header h=69.5 mb=12px | toolbar mb=null | 横向：最宽块 1458 / 内容宽 1458 ⇒ 横向留白 0
+    - header.page-header  h=69.5 w=1458 mt=0px mb=12px
+    - div.people-layout  h=507.1 w=1458 mt=0px mb=0px
+  list: w=340 h=1028 pad=0px 8px 16px gap=normal 条目=4 条目高=121.1/121.1/121.1 合计=484.4 死区=411.4 填=47.1% 可滚=false
+
+### page(after list0 click)
+  main 1498x1028 scrollH=1028 | page w=1498 maxW=1540px h=1028 | pad t16 l20 b32 | gap=normal display=block
+  块合计=576.6 占 main 高 56.1% | 块间距合计=12 | 尾部(main底-末块底)=423.4 其中 padding-bottom 外=391.4
+  header h=69.5 mb=12px | toolbar mb=null | 横向：最宽块 1458 / 内容宽 1458 ⇒ 横向留白 0
+    - header.page-header  h=69.5 w=1458 mt=0px mb=12px
+    - div.people-layout  h=507.1 w=1458 mt=0px mb=0px
+
+@@ light 1920x1080 documents-home
+  chrome: topbar h=52 rail w=null list w=340 main w=1498 collapsed=false
+
+### page
+  main 1498x1028 scrollH=1028 | page w=1498 maxW=1540px h=1028 | pad t16 l20 b32 | gap=normal display=block
+  块合计=295.1 占 main 高 28.7% | 块间距合计=12 | 尾部(main底-末块底)=704.9 其中 padding-bottom 外=672.9
+  header h=69.5 mb=12px | toolbar mb=null | 横向：最宽块 1458 / 内容宽 1458 ⇒ 横向留白 0
+    - header.page-header  h=69.5 w=1458 mt=0px mb=12px
+    - div.talent-grid  h=139.3 w=1458 mt=0px mb=0px
+    - section.card  h=86.3 w=1458 mt=0px mb=0px
+  list: w=340 h=1028 pad=0px 8px 16px gap=normal 条目=1 条目高=1501 合计=1501 死区=0 填=146% 可滚=true
+
+@@ light 1920x1080 backlog
+  chrome: topbar h=52 rail w=null list w=340 main w=1498 collapsed=false
+
+### page
+  main 1498x1028 scrollH=1028 | page w=1498 maxW=1540px h=1028 | pad t16 l20 b32 | gap=normal display=block
+  块合计=400.9 占 main 高 39% | 块间距合计=28 | 尾部(main底-末块底)=583.1 其中 padding-bottom 外=551.1
+  header h=69.5 mb=12px | toolbar mb=null | 横向：最宽块 1458 / 内容宽 1458 ⇒ 横向留白 0
+    - header.page-header  h=69.5 w=1458 mt=0px mb=12px
+    - div.tabs.task-tabs  h=39.1 w=1458 mt=0px mb=16px
+    - section#taskPanel  h=292.3 w=1458 mt=0px mb=0px
+  list: w=340 h=1028 pad=0px 8px 16px gap=normal 条目=1 条目高=87.1 合计=87.1 死区=832.5 填=8.5% 可滚=false
+
+### page(after list0 click)
+  main 1498x1028 scrollH=1028 | page w=1498 maxW=1540px h=1028 | pad t16 l20 b32 | gap=normal display=block
+  块合计=372.9 占 main 高 36.3% | 块间距合计=12 | 尾部(main底-末块底)=627.1 其中 padding-bottom 外=595.1
+  header h=69.5 mb=12px | toolbar mb=null | 横向：最宽块 1458 / 内容宽 1458 ⇒ 横向留白 0
+    - header.page-header  h=69.5 w=1458 mt=0px mb=12px
+    - article.card  h=303.4 w=1458 mt=0px mb=0px
+
+@@ light 1920x1080 talent
+  chrome: topbar h=52 rail w=null list w=340 main w=1498 collapsed=false
+
+### page
+  main 1498x1028 scrollH=1028 | page w=1498 maxW=1540px h=1028 | pad t16 l20 b32 | gap=normal display=block
+  块合计=310.4 占 main 高 30.2% | 块间距合计=24 | 尾部(main底-末块底)=677.6 其中 padding-bottom 外=645.6
+  header h=69.5 mb=12px | toolbar mb=null | 横向：最宽块 1458 / 内容宽 1458 ⇒ 横向留白 0
+    - header.page-header  h=69.5 w=1458 mt=0px mb=12px
+    - div.banner.info  h=38 w=1458 mt=0px mb=12px
+    - div.talent-grid  h=202.9 w=1458 mt=0px mb=0px
+  list: w=340 h=1028 pad=0px 8px 16px gap=normal 条目=4 条目高=66.6/66.6/66.6 合计=266.4 死区=640.1 填=25.9% 可滚=false
+
+@@ light 1920x1080 settings-member
+  chrome: topbar h=52 rail w=null list w=340 main w=1498 collapsed=false
+
+### page
+  main 1498x1028 scrollH=1028 | page w=1498 maxW=1540px h=1028 | pad t16 l20 b32 | gap=normal display=block
+  块合计=313.6 占 main 高 30.5% | 块间距合计=12 | 尾部(main底-末块底)=686.4 其中 padding-bottom 外=654.4
+  header h=69.5 mb=12px | toolbar mb=null | 横向：最宽块 1458 / 内容宽 1458 ⇒ 横向留白 0
+    - header.page-header  h=69.5 w=1458 mt=0px mb=12px
+    - div.state  h=210 w=1458 mt=0px mb=0px
+    - div.actions  h=34.1 w=1458 mt=0px mb=0px
+  list: w=340 h=1028 pad=0px 8px 16px gap=normal 条目=1 条目高=54.7 合计=54.7 死区=813.8 填=5.3% 可滚=false
+
+@@ light 1920x1080 settings-groups
+  chrome: topbar h=52 rail w=null list w=340 main w=1498 collapsed=false
+
+### page
+  main 1498x1028 scrollH=1028 | page w=1498 maxW=1540px h=1028 | pad t16 l20 b32 | gap=normal display=block
+  块合计=313.6 占 main 高 30.5% | 块间距合计=12 | 尾部(main底-末块底)=686.4 其中 padding-bottom 外=654.4
+  header h=69.5 mb=12px | toolbar mb=null | 横向：最宽块 1458 / 内容宽 1458 ⇒ 横向留白 0
+    - header.page-header  h=69.5 w=1458 mt=0px mb=12px
+    - div.state  h=210 w=1458 mt=0px mb=0px
+    - div.actions  h=34.1 w=1458 mt=0px mb=0px
+  list: w=340 h=1028 pad=0px 8px 16px gap=normal 条目=4 条目高=54.7/54.7/54.7 合计=218.8 死区=683.7 填=21.3% 可滚=false
+
+@@ light 1920x1080 settings-roles
+  chrome: topbar h=52 rail w=null list w=340 main w=1498 collapsed=false
+
+### page
+  main 1498x1028 scrollH=1028 | page w=1498 maxW=1540px h=1028 | pad t16 l20 b32 | gap=normal display=block
+  块合计=313.6 占 main 高 30.5% | 块间距合计=12 | 尾部(main底-末块底)=686.4 其中 padding-bottom 外=654.4
+  header h=69.5 mb=12px | toolbar mb=null | 横向：最宽块 1458 / 内容宽 1458 ⇒ 横向留白 0
+    - header.page-header  h=69.5 w=1458 mt=0px mb=12px
+    - div.state  h=210 w=1458 mt=0px mb=0px
+    - div.actions  h=34.1 w=1458 mt=0px mb=0px
+  list: w=340 h=1028 pad=0px 8px 16px gap=normal 条目=13 条目高=54.7/54.7/54.7 合计=711.1 死区=191.1 填=69.2% 可滚=false
+
+@@ light 1920x1080 settings-plugins
+  chrome: topbar h=52 rail w=null list w=340 main w=1498 collapsed=false
+
+### page
+  main 1498x1028 scrollH=1028 | page w=1498 maxW=1540px h=1028 | pad t16 l20 b32 | gap=normal display=block
+  块合计=313.6 占 main 高 30.5% | 块间距合计=12 | 尾部(main底-末块底)=686.4 其中 padding-bottom 外=654.4
+  header h=69.5 mb=12px | toolbar mb=null | 横向：最宽块 1458 / 内容宽 1458 ⇒ 横向留白 0
+    - header.page-header  h=69.5 w=1458 mt=0px mb=12px
+    - div.state  h=210 w=1458 mt=0px mb=0px
+    - div.actions  h=34.1 w=1458 mt=0px mb=0px
+  list: w=340 h=1028 pad=0px 8px 16px gap=normal 条目=1 条目高=210 合计=210 死区=692.6 填=20.4% 可滚=false
+
+@@ light 1920x1080 admin
+  chrome: topbar h=52 rail w=null list w=340 main w=1498 collapsed=false
+
+### page
+  !! no .page main-pane
+  list: w=340 h=1028 pad=0px 8px 16px gap=normal 条目=7 条目高=49.6/49.6/49.6 合计=347.2 死区=606.6 填=33.8% 可滚=false
+
+@@ light 1280x720 messages-welcome
+  chrome: topbar h=52 rail w=null list w=340 main w=858 collapsed=false
+
+### page
+  main 858x668 scrollH=668 | page w=858 maxW=1540px h=668 | pad t16 l20 b32 | gap=normal display=block
+  块合计=229.4 占 main 高 34.3% | 块间距合计=24 | 尾部(main底-末块底)=398.6 其中 padding-bottom 外=366.6
+  header h=69.5 mb=12px | toolbar mb=null | 横向：最宽块 818 / 内容宽 818 ⇒ 横向留白 0
+    - header.page-header  h=69.5 w=818 mt=0px mb=12px
+    - div.meeting-summary  h=68.5 w=818 mt=12px mb=12px
+    - section.card  h=91.4 w=818 mt=0px mb=0px
+  list: w=340 h=668 pad=0px 8px 16px gap=normal 条目=2 条目高=260.4/98.4 合计=358.8 死区=229 填=53.7% 可滚=false
+
+@@ light 1280x720 contacts
+  chrome: topbar h=52 rail w=null list w=340 main w=858 collapsed=false
+
+### page
+  main 858x668 scrollH=668 | page w=858 maxW=1540px h=668 | pad t16 l20 b32 | gap=normal display=block
+  块合计=576.6 占 main 高 86.3% | 块间距合计=12 | 尾部(main底-末块底)=63.4 其中 padding-bottom 外=31.4
+  header h=69.5 mb=12px | toolbar mb=null | 横向：最宽块 818 / 内容宽 818 ⇒ 横向留白 0
+    - header.page-header  h=69.5 w=818 mt=0px mb=12px
+    - div.people-layout  h=507.1 w=818 mt=0px mb=0px
+  list: w=340 h=668 pad=0px 8px 16px gap=normal 条目=4 条目高=121.1/121.1/121.1 合计=484.4 死区=51.4 填=72.5% 可滚=false
+
+### page(after list0 click)
+  main 858x668 scrollH=668 | page w=858 maxW=1540px h=668 | pad t16 l20 b32 | gap=normal display=block
+  块合计=576.6 占 main 高 86.3% | 块间距合计=12 | 尾部(main底-末块底)=63.4 其中 padding-bottom 外=31.4
+  header h=69.5 mb=12px | toolbar mb=null | 横向：最宽块 818 / 内容宽 818 ⇒ 横向留白 0
+    - header.page-header  h=69.5 w=818 mt=0px mb=12px
+    - div.people-layout  h=507.1 w=818 mt=0px mb=0px
+
+@@ light 1280x720 documents-home
+  chrome: topbar h=52 rail w=null list w=340 main w=858 collapsed=false
+
+### page
+  main 858x668 scrollH=668 | page w=858 maxW=1540px h=668 | pad t16 l20 b32 | gap=normal display=block
+  块合计=446.5 占 main 高 66.8% | 块间距合计=11.9 | 尾部(main底-末块底)=193.6 其中 padding-bottom 外=161.6
+  header h=69.5 mb=12px | toolbar mb=null | 横向：最宽块 818 / 内容宽 818 ⇒ 横向留白 0
+    - header.page-header  h=69.5 w=818 mt=0px mb=12px
+    - div.talent-grid  h=290.7 w=818 mt=0px mb=0px
+    - section.card  h=86.3 w=818 mt=0px mb=0px
+  list: w=340 h=668 pad=0px 8px 16px gap=normal 条目=1 条目高=1501 合计=1501 死区=0 填=224.7% 可滚=true
+
+@@ light 1280x720 backlog
+  chrome: topbar h=52 rail w=null list w=340 main w=858 collapsed=false
+
+### page
+  main 858x668 scrollH=668 | page w=858 maxW=1540px h=668 | pad t16 l20 b32 | gap=normal display=block
+  块合计=400.9 占 main 高 60% | 块间距合计=28 | 尾部(main底-末块底)=223.1 其中 padding-bottom 外=191.1
+  header h=69.5 mb=12px | toolbar mb=null | 横向：最宽块 818 / 内容宽 818 ⇒ 横向留白 0
+    - header.page-header  h=69.5 w=818 mt=0px mb=12px
+    - div.tabs.task-tabs  h=39.1 w=818 mt=0px mb=16px
+    - section#taskPanel  h=292.3 w=818 mt=0px mb=0px
+  list: w=340 h=668 pad=0px 8px 16px gap=normal 条目=1 条目高=87.1 合计=87.1 死区=472.5 填=13% 可滚=false
+
+### page(after list0 click)
+  main 858x668 scrollH=668 | page w=858 maxW=1540px h=668 | pad t16 l20 b32 | gap=normal display=block
+  块合计=372.9 占 main 高 55.8% | 块间距合计=12 | 尾部(main底-末块底)=267.1 其中 padding-bottom 外=235.1
+  header h=69.5 mb=12px | toolbar mb=null | 横向：最宽块 818 / 内容宽 818 ⇒ 横向留白 0
+    - header.page-header  h=69.5 w=818 mt=0px mb=12px
+    - article.card  h=303.4 w=818 mt=0px mb=0px
+
+@@ light 1280x720 talent
+  chrome: topbar h=52 rail w=null list w=340 main w=858 collapsed=false
+
+### page
+  main 858x668 scrollH=668 | page w=858 maxW=1540px h=668 | pad t16 l20 b32 | gap=normal display=block
+  块合计=525.4 占 main 高 78.7% | 块间距合计=24 | 尾部(main底-末块底)=102.6 其中 padding-bottom 外=70.6
+  header h=69.5 mb=12px | toolbar mb=null | 横向：最宽块 818 / 内容宽 818 ⇒ 横向留白 0
+    - header.page-header  h=69.5 w=818 mt=0px mb=12px
+    - div.banner.info  h=38 w=818 mt=0px mb=12px
+    - div.talent-grid  h=417.9 w=818 mt=0px mb=0px
+  list: w=340 h=668 pad=0px 8px 16px gap=normal 条目=4 条目高=66.6/66.6/66.6 合计=266.4 死区=280.1 填=39.9% 可滚=false
+
+@@ light 1280x720 settings-member
+  chrome: topbar h=52 rail w=null list w=340 main w=858 collapsed=false
+
+### page
+  main 858x668 scrollH=668 | page w=858 maxW=1540px h=668 | pad t16 l20 b32 | gap=normal display=block
+  块合计=313.6 占 main 高 46.9% | 块间距合计=12 | 尾部(main底-末块底)=326.4 其中 padding-bottom 外=294.4
+  header h=69.5 mb=12px | toolbar mb=null | 横向：最宽块 818 / 内容宽 818 ⇒ 横向留白 0
+    - header.page-header  h=69.5 w=818 mt=0px mb=12px
+    - div.state  h=210 w=818 mt=0px mb=0px
+    - div.actions  h=34.1 w=818 mt=0px mb=0px
+  list: w=340 h=668 pad=0px 8px 16px gap=normal 条目=1 条目高=54.7 合计=54.7 死区=453.8 填=8.2% 可滚=false
+
+@@ light 1280x720 settings-groups
+  chrome: topbar h=52 rail w=null list w=340 main w=858 collapsed=false
+
+### page
+  main 858x668 scrollH=668 | page w=858 maxW=1540px h=668 | pad t16 l20 b32 | gap=normal display=block
+  块合计=313.6 占 main 高 46.9% | 块间距合计=12 | 尾部(main底-末块底)=326.4 其中 padding-bottom 外=294.4
+  header h=69.5 mb=12px | toolbar mb=null | 横向：最宽块 818 / 内容宽 818 ⇒ 横向留白 0
+    - header.page-header  h=69.5 w=818 mt=0px mb=12px
+    - div.state  h=210 w=818 mt=0px mb=0px
+    - div.actions  h=34.1 w=818 mt=0px mb=0px
+  list: w=340 h=668 pad=0px 8px 16px gap=normal 条目=4 条目高=54.7/54.7/54.7 合计=218.8 死区=323.7 填=32.8% 可滚=false
+
+@@ light 1280x720 settings-roles
+  chrome: topbar h=52 rail w=null list w=340 main w=858 collapsed=false
+
+### page
+  main 858x668 scrollH=668 | page w=858 maxW=1540px h=668 | pad t16 l20 b32 | gap=normal display=block
+  块合计=313.6 占 main 高 46.9% | 块间距合计=12 | 尾部(main底-末块底)=326.4 其中 padding-bottom 外=294.4
+  header h=69.5 mb=12px | toolbar mb=null | 横向：最宽块 818 / 内容宽 818 ⇒ 横向留白 0
+    - header.page-header  h=69.5 w=818 mt=0px mb=12px
+    - div.state  h=210 w=818 mt=0px mb=0px
+    - div.actions  h=34.1 w=818 mt=0px mb=0px
+  list: w=340 h=668 pad=0px 8px 16px gap=normal 条目=13 条目高=54.7/54.7/54.7 合计=711.1 死区=0 填=106.5% 可滚=true
+
+@@ light 1280x720 settings-plugins
+  chrome: topbar h=52 rail w=null list w=340 main w=858 collapsed=false
+
+### page
+  main 858x668 scrollH=668 | page w=858 maxW=1540px h=668 | pad t16 l20 b32 | gap=normal display=block
+  块合计=313.6 占 main 高 46.9% | 块间距合计=12 | 尾部(main底-末块底)=326.4 其中 padding-bottom 外=294.4
+  header h=69.5 mb=12px | toolbar mb=null | 横向：最宽块 818 / 内容宽 818 ⇒ 横向留白 0
+    - header.page-header  h=69.5 w=818 mt=0px mb=12px
+    - div.state  h=210 w=818 mt=0px mb=0px
+    - div.actions  h=34.1 w=818 mt=0px mb=0px
+  list: w=340 h=668 pad=0px 8px 16px gap=normal 条目=1 条目高=210 合计=210 死区=332.6 填=31.4% 可滚=false
+
+@@ light 1280x720 admin
+  chrome: topbar h=52 rail w=null list w=340 main w=858 collapsed=false
+
+### page
+  !! no .page main-pane
+  list: w=340 h=668 pad=0px 8px 16px gap=normal 条目=7 条目高=49.6/49.6/49.6 合计=347.2 死区=246.6 填=52% 可滚=false
+
+FFFD_COUNT 0

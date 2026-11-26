@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, rmSync } from "node:fs";
+import { mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import { afterAll, describe, expect, it } from "vitest";
@@ -440,13 +440,5 @@ describe("群角色上层验收链", () => {
     } finally {
       subscription.close();
     }
-
-    // 旧控制室仍是独立入口，群角色 UI 不覆盖它。
-    expect(
-      readFileSync(
-        join(process.cwd(), "packages/web/public/index.html"),
-        "utf8",
-      ),
-    ).toContain("<html");
   });
 });

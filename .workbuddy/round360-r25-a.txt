@@ -1,0 +1,74 @@
+/**
+ * r25：预算上限那一侧读【列】、CLI 参数只是回落（CEO 拍板「预算列 = 生效值」，round360）。
+ *
+ * 这条与 r1 是同一条 SQL 的两半：r1 盯 OR 那半条（hard_stop = 0 放行 + 最外层括号），
+ * 这里盯 < 右侧那一坨（分母读谁）。
+ *
+ * 三格全判【剥掉注释之后、且切到函数那一段】的字节。剥注释的理由同 r22 那段：
+ * 这个函数的函数头今天正躺着一整段「上限读列」的解释文字（round360 落地时从旧文案
+ * 改过来的），判原文会被那种诚实的历史注释喂绿。切段的理由见 sliceFrom 自己的红话。
+ *  · E1 上限那一坨真去 SELECT b.limit_cents ⇒ 缺 ⇒ 红。这条主张的正面格。
+ *  · E2 比较尾巴 `, 0) < ` 在场 ⇒ 缺 ⇒ 红。防的是整条谓词换成别的形状（比如改到
+ *    别处算好再传布尔）：那种改法如果别处恰好抄了 limit_cents 那串字节，E1 单独
+ *    存在会被喂绿 —— E2 钉的是【这条 SQL 里】那次比较还在。
+ *  · E3 段内恰好 1 个 `?`。0 = 回落槽没了（要么列变唯一分母 ⇒ 库里没预算行的任务
+ *    从此没有分母；要么参数变唯一分母 ⇒ 退回 0045 §7 的 (C)）；≥2 = 五条 SQL 共用
+ *    的绑参顺序被改，那条契约由 packages/hub/test/budget/hard-stop-gate.test.ts 的
+ *    拆 `?` 一发钉着 —— 测试文件可以整份删掉，登记表这一格删不掉（口径同 r1 E2）。
+ *
+ * ⚠ 射程（比三格加起来重要）：
+ *  · 这里【不判】五条消费 SQL 还引不引用这个函数 —— 那半由 hub 侧测试判
+ *    （charter-pump / driver-pump / driver-status 各自「门也读【列】」那几发当场开库）。
+ *    这里只核对那五条 SQL 共同的【分母】读谁。
+ *  · 这里【不判】最外层那层括号（r1 E2 判它）、hard_stop 那半条（r1 E1 判它），
+ *    也不判 POST /budget 真把列写进去了（r1 写侧名单 + http/budget 测试）。
+ *  · 这里【不判】屏幕预算条读的是不是同一个数 —— 这格拦死的是「门退回参数」；
+ *    反向（门读列而屏幕抄参数）不在射程内。
+ *  · E1/E2 是【字节近似】不是语义等价：把子查询改写成 JOIN 之类的等价形状会让
+ *    两格红而那可能是对的写法 —— 那种时候改这一格，别把它改成恒真。
+ */
+function budgetColumnGovernsCheck(f: Files): string {
+  let pump: string;
+  try {
+    pump = f.src("serve/charter-pump.ts");
+  } catch {
+    return (
+      "packages/hub/src/serve/charter-pump.ts 不在了 —— 那条读预算的门连同它的分母一起没了，" +
+      "「上限那一侧读列」这一半主张失去执行者"
+    );
+  }
+  const code = withoutComments(pump);
+  const fn = sliceFrom(code, "export function underTaskBudgetSql", "export const CHARTER_CANDIDATES_SQL");
+  if (fn === null) {
+    return (
+      "切不出 underTaskBudgetSql → CHARTER_CANDIDATES_SQL 那一段（函数被改名或五条消费 SQL " +
+      "搬出了这份文件）—— 判据【不退回全文搜】：全文另有几十条 SQL 的绑定参数，" +
+      "退回全文等于让取材失败自己把 E3 喂绿"
+    );
+  }
+  if (!fn.includes("COALESCE((SELECT b.limit_cents FROM budgets b ")) {
+    return (
+      "分母那一侧不再 SELECT budgets.limit_cents —— 上限退回【只有 CLI 参数说话】，" +
+      "POST /budget 的追加预算只改屏幕（today.ts 那条 SUM）而门一个字都不响应 ⇒ " +
+      "「点完按钮门真的放行」重新变成一句没人验过的主张（0045 §7 的 (C) 复活）"
+    );
+  }
+  if (!fn.includes(", 0) < ")) {
+    return (
+      "那条谓词的比较尾巴 `, 0) < ` 不在了 —— consumed 与上限的那次比较被换掉了" +
+      "（整条谓词换形状 / 挪去别处算）。E1 会被别处抄过去的同名字节喂绿，" +
+      "这一格钉的是【这条 SQL 里】那次比较还在"
+    );
+  }
+  const binds = (fn.match(/\?/gu) ?? []).length;
+  if (binds !== 1) {
+    return (
+      "那段谓词剥注释后有 " +
+      binds +
+      " 个 `?`，而契约是恰好 1 个 —— 0 个 = 回落槽没了（没预算行的任务没有分母，" +
+      "或列被换回参数）；≥2 个 = 五条 SQL 共用的绑参顺序被改。两种都不在" +
+      "「列说话」那一侧，而绑参顺序那半的测试（拆 `?` 一发）整份删得掉、这格删不掉"
+    );
+  }
+  return "";
+}

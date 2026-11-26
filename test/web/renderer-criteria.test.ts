@@ -34,10 +34,17 @@ import { TASK_STATES } from "../../packages/hub/src/graph/status.js";
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, "..", "..");
 const APP_JS = join(REPO, "packages/web/public/app.js");
-const INDEX_HTML = join(REPO, "packages/web/public/index.html");
+// round370：样式从 index.html 的 <style> 里搬进了单一源 admin.css —— 当时两个入口
+// （独立页 /admin 与工作台挂载）各抄一份配色纪律，正是本文件整篇在防的那种漂。
+// （独立页 index.html 已于 2026-11-25 删除，管理视图只经工作台 #/admin/<页名> 一个入口，
+// 本文件扫描的规则仍住 admin.css 这一份单一源里，逐条名单一条没动。）
+// ⚠ 这一改【不是】放宽：下面 6 处扫描原来切的是 index.html 的 style 块，现在
+// 切的是同一批规则的新家，选择器名单逐条跟着改名，一条没少（琥珀 6→6、红 4→4、
+// 反向名单 5→5，机器复算见 test/web/admin-style-scope.test.ts 的双向钉）。
+const ADMIN_CSS = join(REPO, "packages/web/public/admin.css");
 
 const appSrc = readFileSync(APP_JS, "utf8");
-const htmlSrc = readFileSync(INDEX_HTML, "utf8");
+const cssSrc = readFileSync(ADMIN_CSS, "utf8");
 
 /**
  * 剥掉注释。这一刀决定这个文件是守卫还是装饰：
@@ -116,7 +123,10 @@ describe("① 渲块里不许出现判据字面量（§1「判据随响应发出
     // 而那正是 0016 §1 那一族（比较型断言失去分辨力时不会自己报）。
     expect(appCode).toContain("attention_statuses");
     expect(appCode).toContain("function taskCard");
-    expect(appCode).toContain('class="tk');
+    // round370：类名统一加 admin- 前缀 ⇒ 这一发的样本跟着换，性质不变：它仍是
+    // 【代码里】的 HTML class，不是注释里的措辞 —— 这一发的作用（证明剥注释没把
+    // 代码一起剥掉）一点没变。
+    expect(appCode).toContain('class="admin-tk');
     // 反向：注释确实被剥了（这一句用注释里独有的措辞，代码里没有）。
     expect(appCode).not.toContain("运营事件，不是战略决策");
   });
@@ -279,12 +289,17 @@ describe("① 渲块里不许出现判据字面量（§1「判据随响应发出
     ).toBe(true);
   });
 
-  it("⭐ 今日页窗口【真的接进 renderToday】：windowMsOfHash(location.hash) 那枚调用在（round352 接线半）", () => {
+  it("⭐ 今日页窗口【真的接进 renderToday】：windowMsOfHash(currentQuery) 那枚调用在（round352 接线半）", () => {
     // 纯函数 windowMsOfHash / todayCacheHit 各自有 app-pure 的直测，而这一发守的
     // 是【读了之后真有人把窗口传给 getToday】：把 hash 解析撤成写死 undefined
     // （M5 的变异体），窗口选择器还在渲染、纯函数测试也全绿 —— 只有这里会红。
-    // 真接线长这样：`const winMs = windowMsOfHash(location.hash);` 在 renderToday
+    // 真接线长这样：`const winMs = windowMsOfHash(currentQuery);` 在 renderToday
     // 顶部，随后 `getToday(true, winMs)`。译掉一字符接线就断，这条必须当场红。
+    // ⚠ round370 换的是【喂进去的那个串】，不是"读不读"这件事：原来直接读
+    // location.hash，现在读 parseAdminHash 剥好 #/admin/ 前缀的 currentQuery。
+    // 两个入口（独立页 #/today?window=7d、工作台 #/admin/today?window=7d）因此
+    // 共用同一条接线。若这里退回 location.hash，症状仍是那句「窗口永不生效」，
+    // 只是换在工作台那一半 —— 所以这条守卫换坐标但不换强度。
     const at = appCode.indexOf("function renderToday");
     expect(
       at,
@@ -293,12 +308,32 @@ describe("① 渲块里不许出现判据字面量（§1「判据随响应发出
     const body = appCode.slice(at, at + 1200);
     expect(
       body,
-      "renderToday 里没有 windowMsOfHash(location.hash) ⇒ 窗口永不生效（恒 24h）",
-    ).toContain("windowMsOfHash(location.hash)");
+      "renderToday 里没有 windowMsOfHash(currentQuery) ⇒ 窗口永不生效（恒 24h）",
+    ).toContain("windowMsOfHash(currentQuery)");
     expect(
       body.indexOf("getToday(true, winMs)") > -1,
       "窗口解析出来后必须传进 getToday —— 断开就回到永远默认 24h",
     ).toBe(true);
+  });
+
+  it("⭐ 两个入口共用一份 hash 解析：syncAdminFromHash 真读 location.hash 并喂给 load（round370 接线半）", () => {
+    // 挂载化之后最省事【也最错】的写法是 group.js 自己解析一段 hash：那就得到
+    // 两份「#/ 后面是什么」的判据，而漂移的表现是「独立页好、工作台不好」。
+    // 所以这里钉三件事：解析函数认 admin/ 前缀；hashchange 走它；它改完状态真 load。
+    const parse = fnBody("parseAdminHash");
+    expect(parse, "必须剥掉工作台那一段 #/admin/ 前缀").toContain(
+      "ADMIN_PREFIX",
+    );
+    const sync = fnBody("syncAdminFromHash");
+    expect(sync, "解析结果必须落到 current / currentQuery").toContain(
+      "current = page",
+    );
+    expect(sync).toContain("currentQuery = query");
+    expect(sync).toContain("void load()");
+    expect(
+      appCode,
+      "hashchange 必须整体交给 syncAdminFromHash：自己再解析一遍就是第二份判据",
+    ).toContain("syncAdminFromHash(location.hash)");
   });
 
   it("⭐ 窗口参数【真的拼进请求】：getToday 里的 `?window_ms=\u0024{windowMs}` 在代码里（round352 接线半）", () => {
@@ -317,6 +352,73 @@ describe("① 渲块里不许出现判据字面量（§1「判据随响应发出
       body.indexOf("async") > -1 || body.indexOf("await api") > -1,
       "取体器没取对：fnBody('getToday') 拿到的不像 getToday 本体",
     ).toBe(true);
+  });
+
+  it("⭐ 缓存命中返回【按缓存各自形状】解包：恒 `c.data` 的写法不得还魂（round370）", () => {
+    // 失效形状（本轮 e2e 真抓到过，不是假想）：todayCache 存响应体本身、
+    // todayWindowCache 存 { windowMs, data }，而命中路径原来两处都 return c.data
+    // ⇒ 无窗口那份恒返回 undefined（响应体里没有 data 键）。今日页 force=true
+    // 从不走命中，所以症状被推迟到【第二张读缓存的页】：看板 / 收件箱在
+    // 「今日页已看过」之后必崩（t.as_of_ms 读在 undefined 上）。
+    // 纯函数 todayCacheHit 测的是【何时命中】，命中之后解包解错它管不着 ——
+    // 这一发钉的是命中分支返回的是哪一半。
+    const body = fnBody("getToday");
+    expect(
+      body,
+      "getToday 命中分支不该对两份缓存都读 c.data ⇒ 无窗口缓存返回 undefined，" +
+        "第二张读缓存的页当场崩（round370 的 e2e 红过这一发）",
+    ).not.toContain("return c.data;");
+    expect(
+      body,
+      "命中分支必须按 windowMs 分开取：无窗口拿 c 本身，有窗口拿 c.data",
+    ).toContain("return windowMs === undefined ? c : c.data;");
+  });
+
+  it("⭐ hashchange 的「未挂载且不在独立页 ⇒ 闭嘴」门必须在场（round370 防御层）", () => {
+    // round370 剪线变异 M1 存活后复算出来的事实：这道门在【现行页名空间】下够不着
+    // 症状 —— 宿主那六个 data-nav（messages/contacts/documents/backlog/talent/
+    // settings）没有一个撞得上 ROUTES 的七个页名，syncAdminFromHash 自己第一行
+    // （ROUTES.some）就 return false 了。所以它是第二道门（defense-in-depth），
+    // 行为断言钉不住它 ⇒ 只能用源码钉。⚠ 它不是可以随手删的冗余：谁把第一道门的
+    // 页名集合改成与宿主相撞（比如加一枚 #/inbox 宿主路由），删了这道门的文档就会
+    // 在未挂载时往脱离文档的 $view 里画 —— 症状是「谁都没点它，它自己动了」。
+    // （独立页 /admin 已删：standalone.nav 那把尺子没了，这道门退化成纯 !mounted。）
+    const at = appCode.indexOf('window.addEventListener("hashchange"');
+    expect(
+      at,
+      "app.js 里找不到 hashchange 监听器本体 ⇒ 这一发起码要先红在这里",
+    ).toBeGreaterThan(-1);
+    const body = appCode.slice(at, at + 400);
+    expect(
+      body,
+      "「!mounted ⇒ return」这道门不许拆（拆了未挂载时宿主每次换菜单都进 sync）",
+    ).toContain("if (!mounted) return;");
+  });
+
+  it("⭐ 挂载态页眉导航的承重线是 hidden 属性 + [hidden]!important 那一对（round370 M6）", () => {
+    // 两条线一对，藏的是 mountAdmin 写进宿主页眉的那份重复菜单。M6 原变异剪的是
+    // .admin-mount .admin-mount-nav{display:none} —— 剪掉照样绿：它排在 hidden 属性
+    // 之后，【永远量不到失败】，已整条拆除（死规则比没规则更坏：它让下一个人以为
+    // 线在）。承重的两枚在这里各钉一发，e2e「侧栏入口…」的 toBeHidden 是行为半。
+    const groupCode = stripComments(
+      readFileSync(join(REPO, "packages/web/public/group.js"), "utf8"),
+    );
+    const at = groupCode.indexOf('class: "admin-mount-nav"');
+    expect(
+      at,
+      "group.js 里找不到挂载态页眉导航节点 ⇒ 这一发起码要先红在这里",
+    ).toBeGreaterThan(-1);
+    expect(
+      groupCode.slice(at, at + 120),
+      "adminNodes.nav 不许丢 hidden:true —— 丢了它，admin.css 的 .admin-root nav{display:flex}(0,1,1) 稳压 UA 的 [hidden]，顶栏下面多一条能点的重复菜单",
+    ).toContain("hidden: true");
+    const groupCss = stripCssComments(
+      readFileSync(join(REPO, "packages/web/public/group.css"), "utf8"),
+    );
+    expect(
+      groupCss,
+      "group.css 的 [hidden]{display:none !important} 不许丢 —— 它是压住 .admin-root nav{display:flex} 的那枚 !important，丢了 hidden 属性就藏不住任何东西",
+    ).toMatch(/\[hidden\]\s*\{\s*display:\s*none\s*!important/u);
   });
 
   it("⭐ auto_approved 标注【真的按对象读】：eventRow 里不再是 === true（round346）", () => {
@@ -381,46 +483,61 @@ describe("② 琥珀色落点名单（§19.2「全局仅用于需要 CEO 决策�
   });
 
   it("var(--amber) 只出现在名单里那几个选择器上（多一处就红，并指名是哪一处）", () => {
-    const css = htmlSrc.slice(
-      htmlSrc.indexOf("<style>"),
-      htmlSrc.indexOf("</style>"),
-    );
-    const got = amberSelectors(stripCssComments(css)).sort();
+    const got = amberSelectors(stripCssComments(cssSrc)).sort();
     // 这份名单是【琥珀语义】的机器可读版本。往里加一项 = 让琥珀多表示一种意思，
     // 而 §19.2 那条「琥珀出现处就是需要你动手的地方」是一次一否的承诺：
     // 每多一个合法落点，"扫一眼就知道在哪动手"就弱一分。所以要加得有意识。
+    // ⚠ round370 逐条改名（.badge → .admin-badge，并全部冠上 .admin-root 作用域），
+    // 【没有】去掉这一份名单里的任何一项，也【没有】改成"前缀模糊匹配"。名单仍是
+    // 六个落点、六个语义，一个不多一个不少；改名是为了让 CSS 与 app.js 的发/收
+    // 类名对齐（test/web/admin-style-scope.test.ts 双向钉那一半）。
     expect(got).toEqual(
       [
-        "nav a .badge", // 收件箱角标：待批张数 = 等你按按钮的张数
-        ".pill.s-amber", // 「这一件现在等你动手」那一档 pill
-        ".need", // 今日页 / 收件箱的待批卡（琥珀左边框，§16.3 逐字要求的形态）
-        ".need .sect",
-        ".statbad .num", // 今日页那个「待你决策」的数字
-        ".tk.decision", // 看板上 status ∈ ceo_decision_statuses 的那张卡
+        ".admin-root nav a .admin-badge", // 收件箱角标：待批张数 = 等你按按钮的张数
+        ".admin-root .admin-pill.admin-s-amber", // 「这一件现在等你动手」那一档 pill
+        ".admin-root .admin-need", // 今日页 / 收件箱的待批卡（§16.3 逐字要求的形态）
+        ".admin-root .admin-need .admin-sect",
+        ".admin-root .admin-statbad .admin-num", // 今日页那个「待你决策」的数字
+        ".admin-root .admin-tk.admin-decision", // 看板上 status ∈ ceo_decision_statuses
       ].sort(),
     );
-    // :root 那一行是【定义】（`--amber: #E8A33D`），不是【使用】—— 上面那条
-    // 正则找的是 `var(--amber)`，所以定义处天然不在名单里。这一发单独钉它存在，
-    // 否则"把 --amber 定义删了"会让上面那条空名单断言以错误的方式通过。
-    expect(stripCssComments(css)).toContain("--amber: #E8A33D");
+    // 定义那一行（`--amber: …`）不是【使用】—— 上面那条正则找的是 `var(--amber)`，
+    // 所以定义处天然不在名单里。这一发单独钉它存在，否则"把 --amber 定义删了"会让
+    // 上面那条名单断言以错误的方式通过（空 CSS 也算"没有多余落点"）。
+    // ⚠ 色值 round370 从 #E8A33D 换成工作台那一份 #b97512（管理视图挂进三栏后
+    // 共用浅色主题）；round372 再换 #9d630f —— 那一份在 --bg #f3f5f8 上只有 3.42，
+    // 「等你动手」那一档 pill 的 11px 字够不到 AA 4.5，等于强调色自己看不清。
+    // ⚠ §19.2 锁的是【哪些落点用琥珀】（上面那份名单），从来不是色相：#E8A33D → #b97512
+    // 已经改过一次色值而名单一条没动，这一改同理。全仓只许有一处定义，钉在下面那条。
+    expect(stripCssComments(cssSrc)).toContain("--amber: #9d630f");
+  });
+
+  it("⭐ --amber 的定义全仓只有一处（两份定义 = 两个入口各画一种琥珀）", () => {
+    const n = (stripCssComments(cssSrc).match(/--amber\s*:/gu) ?? []).length;
+    expect(n).toBe(1);
   });
 
   it("⚠ 反向名单：这几处【不许】是琥珀（本轮真实违反过的那三处）", () => {
-    const css = stripCssComments(
-      htmlSrc.slice(htmlSrc.indexOf("<style>"), htmlSrc.indexOf("</style>")),
-    );
+    const css = stripCssComments(cssSrc);
     // 每条都是「选择器 → 不许出现的属性值」。写成数据而不是三条 expect，
     // 是因为报错要能指回规格那一句。
+    // ⚠ round370 与上面那份名单同一批改名（5 → 5，一条没少，也没改成前缀匹配）。
     const banned: Array<[string, string]> = [
       [
-        ".tk.flag",
+        ".admin-root .admin-tk.admin-flag",
         "成员身份不是「等你动手」（§16.4 那一列含预算暂停，规格明写非琥珀）",
       ],
-      [".card.flag", "运营事件卡片（§7.4 原话：非琥珀色的预算暂停卡片）"],
-      [".banner.warn", "取不到数据不是等谁决策"],
-      [".ev.decide::before", "回放里的人工决定是【已经拍过板】的记录"],
       [
-        ".pill.s-gray",
+        ".admin-root .admin-card.admin-flag",
+        "运营事件卡片（§7.4 原话：非琥珀色的预算暂停卡片）",
+      ],
+      [".admin-root .admin-banner.admin-warn", "取不到数据不是等谁决策"],
+      [
+        ".admin-root .admin-ev.admin-decide::before",
+        "回放里的人工决定是【已经拍过板】的记录",
+      ],
+      [
+        ".admin-root .admin-pill.admin-s-gray",
         "警报已哑那一格：它本身就是「警报没了」，配警报色自相矛盾",
       ],
     ];
@@ -441,9 +558,7 @@ describe("② 琥珀色落点名单（§19.2「全局仅用于需要 CEO 决策�
   });
 
   it("红色的落点逐处钉住（§19.2 那张色表里【没有】「异常色」这一档）", () => {
-    const css = stripCssComments(
-      htmlSrc.slice(htmlSrc.indexOf("<style>"), htmlSrc.indexOf("</style>")),
-    );
+    const css = stripCssComments(cssSrc);
     const users = [...css.matchAll(/([^{}\s][^{}]*)\{([^{}]*)\}/gu)]
       .filter((m) => String(m[2]).includes("var(--err)"))
       .map((m) => String(m[1]).replace(/\s+/gu, " ").trim())
@@ -458,16 +573,18 @@ describe("② 琥珀色落点名单（§19.2「全局仅用于需要 CEO 决策�
     // 往里加第三种"看起来不太好就涂红"的用法，就是把 §19.1 要的「一眼扫到该动手的那处」
     // 换成「一整屏都在喊」。
     expect(users).toEqual(
-      [".banner.err", ".budgetover .meter.over i", ".dot.off", ".err"].sort(),
+      [
+        ".admin-root .admin-banner.admin-err",
+        ".admin-root .admin-budgetover .admin-meter.admin-over i",
+        ".admin-root .admin-dot.admin-off",
+        ".admin-root .admin-err",
+      ].sort(),
     );
   });
 });
 
 describe("③ 焦点可见（Task 2.6「键盘可完成全部审批操作」的前提）", () => {
-  const css = () =>
-    stripCssComments(
-      htmlSrc.slice(htmlSrc.indexOf("<style>"), htmlSrc.indexOf("</style>")),
-    );
+  const css = () => stripCssComments(cssSrc);
 
   it("⭐ CSS 里不许出现 outline:none / outline:0（键盘走到哪一格必须看得出来）", () => {
     const got = [...css().matchAll(/outline\s*:\s*(?:none|0)\b/giu)].map((m) =>
@@ -533,10 +650,7 @@ describe("③ 焦点可见（Task 2.6「键盘可完成全部审批操作」的�
  *      而漂了以后屏幕上两个数不一样，任务预算列与审批卡各说一套）。
  */
 describe("④ 参数快照：等宽 + 左缩进 + 不画框线，金额只有一份格式化", () => {
-  const css = () =>
-    stripCssComments(
-      htmlSrc.slice(htmlSrc.indexOf("<style>"), htmlSrc.indexOf("</style>")),
-    );
+  const css = () => stripCssComments(cssSrc);
 
   it("⭐ 正向对照：配平取体真的只取到本函数（越界会被抓到）", () => {
     // 这一发是这一节的前提，driverLine 那一节的正向对照同一立场：提取函数本身
@@ -558,23 +672,26 @@ describe("④ 参数快照：等宽 + 左缩进 + 不画框线，金额只有一
   });
 
   it("⭐ .snap 只有左缩进，没有边框 / 背景 / 圆角（那一条明写「不画框线」）", () => {
-    const m = /\.snap\s*\{([^{}]*)\}/u.exec(css());
+    // round370：类名带 admin- 前缀 + .admin-root 作用域，所以匹配 `.admin-snap {`。
+    // 整条选择器仍逐字定（不是"扫到含 snap 的规则就行"），下面那四条
+    // not.toContain 一条没减。
+    const m = /\.admin-snap\s*\{([^{}]*)\}/u.exec(css());
     expect(
       m,
-      "CSS 里找不到 .snap 规则 ⇒ 参数快照那一格没有样式了",
+      "CSS 里找不到 .admin-snap 规则 ⇒ 参数快照那一格没有样式了",
     ).not.toBeNull();
     const body = String(m?.[1]);
     expect(body).toContain("padding-left");
     for (const box of ["border", "background", "outline", "box-shadow"]) {
       expect(
         body,
-        `.snap 不许有 ${box}：那一格靠缩进与色阶表达层级（§19.4 同族）`,
+        `.admin-snap 不许有 ${box}：那一格靠缩进与色阶表达层级（§19.4 同族）`,
       ).not.toContain(box);
     }
     // ⚠ 正向对照：上面那四条真的认得出违例 —— 恒不匹配的写法（把 not.toContain
     // 写成扫不到东西的正则）在这一格上长得和通过一模一样。
     expect(
-      /border/.test(".snap { padding-left:18px; border:1px solid red }"),
+      /border/.test(".admin-snap { padding-left:18px; border:1px solid red }"),
     ).toBe(true);
   });
 
@@ -782,14 +899,13 @@ describe("⑥ edgeChip 与那条边上的门控：可见性 + 散文抄件对着
     // 只是在念「app.js 不写这几个词」，而 need 明明写在 app.js 里。
     expect(appCode).toContain("need");
     // .edge 那条规则全仓只有一条 ⇒ chip 上多出来的只能是【字】，不可能是色。
-    const css = htmlSrc.slice(
-      htmlSrc.indexOf("<style>"),
-      htmlSrc.indexOf("</style>"),
-    );
-    const edgeRules = [...css.matchAll(/[^{}\n]*\.edge[^{}\n]*\{/gu)].map((m) =>
-      m[0].trim(),
-    );
-    expect(edgeRules).toEqual([".edge {"]);
+    // ⚠ round370 改名：`.edge` → `.admin-edge`，并冠上 `.admin-root` 作用域，所以
+    // 期望值跟着换。这里仍是【整条选择器逐字等值】（toEqual 一条数组），不是
+    // "扫到含 edge 的规则就行" —— 多出一条带色的 .edge 规则照样红。
+    const edgeRules = [
+      ...cssSrc.matchAll(/[^{}\n]*\.admin-edge[^{}\n]*\{/gu),
+    ].map((m) => m[0].trim());
+    expect(edgeRules).toEqual([".admin-root .admin-edge {"]);
   });
 
   it("⭐ 那条假承诺不许回来：「不勾也会被那三判断掉」是错的", () => {
@@ -960,5 +1076,143 @@ describe("⑥ edgeChip 与那条边上的门控：可见性 + 散文抄件对着
     expect(orgRoute).toMatch(
       /\{[\s\S]{0,40}error:\s*r\.reason,\s*code:\s*r\.code\s*\}/u,
     );
+  });
+});
+
+/* ═════════ ⑦ 响应式断点与骨架屏：本轮（2026-11-25）新接线的钉子 ═════════
+ * 三件事实各钉一发，全部扫源码而不是跑函数 —— 与本篇开头同一个理由：
+ * group.js / app.js 在 node 里 import 即抛（没有 DOM），而 CSS 的媒体查询
+ * 根本没有"函数"可跑。颜色与焦点那一族教训在这里同样成立：
+ * 断点与骨架只在屏幕上存在，code review 看不见，屏幕今天没有第二双眼睛。
+ */
+describe("⑦ 响应式断点与骨架屏", () => {
+  const groupCss = () =>
+    stripCssComments(
+      readFileSync(join(REPO, "packages/web/public/group.css"), "utf8"),
+    );
+  const groupJsCode = () =>
+    stripComments(
+      readFileSync(join(REPO, "packages/web/public/group.js"), "utf8"),
+    );
+
+  /** 取 `@media (…) { … }` 整块的正文（花括号配平，与 fnBody 同一立场：
+   *  往后数 N 个字符会被隔壁块的内容污染或漏掉）。 */
+  function mediaBlock(css: string, condition: string): string {
+    const at = css.indexOf(`@media ${condition} {`);
+    expect(
+      at,
+      `CSS 里找不到 @media ${condition} ⇒ 这一发起码要先红在这里`,
+    ).toBeGreaterThan(-1);
+    const open = css.indexOf("{", at);
+    let depth = 0;
+    for (let i = open; i < css.length; i++) {
+      if (css[i] === "{") depth += 1;
+      else if (css[i] === "}") {
+        depth -= 1;
+        if (depth === 0) return css.slice(open + 1, i);
+      }
+    }
+    throw new Error(`@media ${condition} 的花括号没配平`);
+  }
+
+  it("⭐ 正向对照：mediaBlock 只取到自己那块（越界会被抓到）", () => {
+    const mid = mediaBlock(
+      groupCss(),
+      "(min-width: 641px) and (max-width: 1180px)",
+    );
+    expect(mid).toContain(".meeting-summary");
+    // 860 档独有的那条（.global-search kbd）不许漏进 641–1180 这块里。
+    expect(mid).not.toContain(".global-search kbd");
+    // 夹具反证：嵌套块配平后在闭合处停住，不把整份 CSS 吞回来。
+    const fixture =
+      "@media (max-width: 1px) { .a { color:red; } } .b { top:9px; }";
+    expect(mediaBlock(fixture, "(max-width: 1px)")).toBe(" .a { color:red; } ");
+  });
+
+  it("⭐ 641–1180 中间档在场：三格摘要在这一档减到两列", () => {
+    // 1180 那档原来只管三栏布局坍缩，没管页面内部网格 —— 三格摘要每格
+    // 容不下一行读数加一枚标签（截图 1440 侧溢出的那一段）。
+    const mid = mediaBlock(
+      groupCss(),
+      "(min-width: 641px) and (max-width: 1180px)",
+    );
+    expect(mid).toContain(
+      ".meeting-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }",
+    );
+    // 860 档必须仍收成一列：两档各管一段，删掉任何一档都是把坍缩留成洞。
+    const narrow = mediaBlock(groupCss(), "(max-width: 860px)");
+    expect(narrow).toContain(
+      ".meeting-summary { grid-template-columns: 1fr; }",
+    );
+    expect(narrow).toContain(
+      ".field-grid, .payload-grid { grid-template-columns: 1fr; }",
+    );
+  });
+
+  it("⭐ 窄屏改的是令牌的值，不是在使用处另写一个数", () => {
+    // --fs-watermark 的令牌注释立过这条契约：桌面两档读 :root 的 46px，
+    // 640 以下在 640 档改值。若有人把水印规则改成 `font-size:28px`，
+    // 使用处脱离令牌 ⇒ 两档漂成两套，这条红。
+    const css = groupCss();
+    expect(/:root\s*\{[^{}]*--fs-watermark: 46px/u.test(css)).toBe(true);
+    expect(mediaBlock(css, "(max-width: 640px)")).toContain(
+      "--fs-watermark: 28px",
+    );
+    expect(css).toMatch(
+      /\.watermark\.internal::before[^{]*\{[^{}]*font-size: var\(--fs-watermark\)/u,
+    );
+    // 正向对照：把使用处换成裸数值，尺子立刻不给 var。
+    expect(/font-size: var\(--fs-watermark\)/u.test("font-size: 28px")).toBe(
+      false,
+    );
+  });
+
+  it("⭐ 骨架的扫光关键帧全仓只在 group.css 一份", () => {
+    // admin.css 文件头立的契约：刻度值只住 group.css :root，两份会漂。
+    // @keyframes 同族 —— admin 端整页骨架复用同名动画而不是再抄一条
+    //（admin-style-scope 另有一条把 admin.css 里出现的 @keyframes 判成裸选择器泄漏，
+    //  这一发钉的是【正向引用】那一半：动画名在 admin.css 有消费者）。
+    expect((groupCss().match(/@keyframes skeleton-sweep/gu) ?? []).length).toBe(
+      1,
+    );
+    expect(cssSrc).not.toContain("@keyframes");
+    expect(cssSrc).toContain("animation:skeleton-sweep");
+    // 正向对照：动画名写错一个字母，浏览器静默不播（骨架变成一块死灰）——
+    // 上面那发 toContain 必须认得出那种漂。
+    expect(cssSrc).not.toContain("animation:skeleton-seep");
+  });
+
+  it("⭐ 骨架两族工厂活着且真被挂上屏：chat 流与文档打开各一处", () => {
+    // 「函数在、没人叫」是本轮之前那六个白屏的形状。两处调用点各钉一发坐标。
+    const js = groupJsCode();
+    expect(js).toMatch(/function chatSkeleton\(/u);
+    expect(js).toMatch(/function docSkeleton\(/u);
+    expect(js, "聊天流首帧不许退回转圈").toMatch(
+      /stream\.append\(chatSkeleton\(\)\)/u,
+    );
+    expect(js, "打开文档首帧不许退回转圈").toMatch(
+      /replaceChildren\(docSkeleton\(\)\)/u,
+    );
+    // 正向对照：剪成 loadingState 后这两条必须红（loadingState 本身仍合法存在，
+    // 钉的是这两处【换成它】，不是钉它禁现 —— 会议页/小下拉仍按文件头契约用它）。
+    expect(
+      /stream\.append\(chatSkeleton\(\)\)/u.test(
+        "stream.append(loadingState());",
+      ),
+    ).toBe(false);
+  });
+
+  it("⭐ admin 整页骨架：app.js 发的 admin-skel 有样式且有明暗两族色", () => {
+    // 双向半边（admin-style-scope）已证 admin-skel 发/收对得上；这里补语义半边：
+    // 骨架底色必须走 --skeleton-base（明暗两族都在），不许写死 #eee ——
+    // 写死的形状在深色模式下是一块刺眼的白斑，而它只在暗色截图里看得见。
+    const skel = /\.admin-root \.admin-skel i\s*\{([^{}]*)\}/u.exec(cssSrc);
+    expect(skel, "admin-skel 的块样式没了 ⇒ 首帧是一块裸灰条").not.toBeNull();
+    expect(String(skel?.[1])).toContain("var(--skeleton-base)");
+    const dark = /html\[data-theme="dark"\]\s*\{([\s\S]*?)\n\}/u.exec(
+      groupCss(),
+    );
+    expect(dark, "group.css 深色块没了").not.toBeNull();
+    expect(String(dark?.[1])).toContain("--skeleton-base: #232834");
   });
 });

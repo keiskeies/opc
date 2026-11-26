@@ -295,9 +295,9 @@ export async function runDev(
 
   io.log(
     "dev 已就绪：\n" +
-      "  · 看板      http://127.0.0.1:" +
+      "  · 工作台    http://127.0.0.1:" +
       p.webPort +
-      "\n" +
+      "/（管理视图 =/#/admin/<页名>）\n" +
       "  · Hub API   http://127.0.0.1:" +
       p.hubPort +
       "（只绑回环）\n" +

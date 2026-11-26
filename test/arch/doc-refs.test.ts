@@ -659,7 +659,7 @@ const SNAP: Record<string, string> = {
   // real-deps.ts 今天全仓唯一，但「今天唯一」在 import 图上看不见 —— 补一层目录是零成本的防线。
   // 它指向的正是 0042 §7 末尾说的那颗【已埋的假红】（那句注释只差没跟一对括号）：
   // 将来 `callersOf("insertCard")` 因为一句补了括号的注释而误报时，这条快照会先红并指回这一组注释。
-  "0042-today-view-and-putting-the-criteria-on-the-server-side.md>packages/web/public/app.js:739":
+  "0042-today-view-and-putting-the-criteria-on-the-server-side.md>packages/web/public/app.js:845":
     ": attention.includes(tk.status) || overBudget(tk);",
   // 【round272 这一组从两条变一条】：原来 0042 §2 说「两处 INSERT」，键自然两条
   // （runtime.ts:156 + tracker.ts:70；那条 runtime 坐标历史上还漂过 :135→:137→:156，
@@ -779,10 +779,10 @@ const SNAP: Record<string, string> = {
   //   而 `INDEX.md` 正是每篇都要往上插条目而**必然漂移**的那个文件：
   //   我插 0050 自己那一条的时候，就把刚登记好的那一行顶走了。
   //   行号对这个主张不是证据，正文里那段**逐字引文**才是（0048 §9 同一条判断）。
-  "0050-abandoned-task-never-resumes-and-a-knob-that-does-not-exist.md>app.js:853":
+  "0050-abandoned-task-never-resumes-and-a-knob-that-does-not-exist.md>app.js:959":
     'msg: "这台 Hub 没开驱动器：想法停在 agent 那一格之后，不会有任何东西去推它。要自动推进请带 --driver-pump 起 Hub，或手工 hub work。",',
-  "0050-abandoned-task-never-resumes-and-a-knob-that-does-not-exist.md>app.js:1023":
-    '<span class="pill ${statusClass(tk.status)}">${esc(tk.status)}</span>',
+  "0050-abandoned-task-never-resumes-and-a-knob-that-does-not-exist.md>app.js:1129":
+    '<span class="admin-pill ${statusClass(tk.status)}">${esc(tk.status)}</span>',
   // 275 → 290 与 1667 → 1904：round281 在 BootOverrides 加了 env / imFetchImpl 两格、
   // 在 BootResult 加了 imWired、在 boot 里加了 IM 装配 + 横幅 + 心跳派发三段，
   // 同一文件下方的行整体下移。⚠ 两个新坐标都是 `sed -n '<N>p'` 读过原文才写的，
@@ -914,7 +914,7 @@ const SNAP: Record<string, string> = {
   // 那条披露就变成一句读不出真假的往事（本仓抓过的那族：注释承诺了实现已不再具备的性质）。
   "0058-a-restore-that-restored-the-mutant-and-three-reverse-assertions-searching-for-strings-that-do-not-exist.md>bindings/im.test.ts:102":
     "function stripComments(text: string): string {",
-  "0058-a-restore-that-restored-the-mutant-and-three-reverse-assertions-searching-for-strings-that-do-not-exist.md>web/renderer-criteria.test.ts:53":
+  "0058-a-restore-that-restored-the-mutant-and-three-reverse-assertions-searching-for-strings-that-do-not-exist.md>web/renderer-criteria.test.ts:60":
     "function stripComments(src: string): string {",
   // ── 0059（播种命令报成功而角色叫不到）两格，同轮登记（0006 §7-40）──────────
   // 抄法同上面那五格：先在目标文件里读出**当前那一行的原文**再抄，不从 0059 正文复制。
@@ -1015,8 +1015,8 @@ const SNAP: Record<string, string> = {
   // 直接打印（守卫比的是 trim 后整行，23 条手抄 = 23 次打错的机会，而打错的快照比没快照更坏 ——
   // 它会把「引用漂了」读成「代码变了」）。判断仍留在坐标里：生成器只回答"这一行现在写了什么"。
   "INDEX.md>0001_init.sql:249": "CREATE TABLE im_bindings (",
-  "INDEX.md>app.js:1023":
-    '<span class="pill ${statusClass(tk.status)}">${esc(tk.status)}</span>',
+  "INDEX.md>app.js:1129":
+    '<span class="admin-pill ${statusClass(tk.status)}">${esc(tk.status)}</span>',
   "INDEX.md>app.ts:603": "const impossible: never = routeHit;",
   "INDEX.md>approvals/cards.ts:291":
     '"INSERT INTO approvals (id, task_id, approval_type, summary, parameters, " +',
@@ -1066,7 +1066,7 @@ const SNAP: Record<string, string> = {
     "* 之间夹一次写入会得到一份自相矛盾的摘要条」的立场，只是这里跨了端点）。",
   "INDEX.md>tokens.ts:208":
     '"INSERT INTO im_tokens (token, approval_id, expires_at, used) VALUES (?, ?, ?, ?)";',
-  "INDEX.md>web/renderer-criteria.test.ts:53":
+  "INDEX.md>web/renderer-criteria.test.ts:60":
     "function stripComments(src: string): string {",
 
   // ── round311 两处「零调用方」改口带的坐标（INDEX.md + delegation-rules.md）──
@@ -1114,9 +1114,9 @@ const SNAP: Record<string, string> = {
   // 活坐标：函数被删/改名（^ 那条「三键被读」守门会先红）或接线被撤（renderToday 里
   // 那枚调用没了），0060 §8 落地块说的事实就假了，快照须红。两行内容 trims：本体行
   // 是函数声明、接线行是右栏右半边那枚调用夹在 budgetHtml/notesHtml 之间。
-  "0060-a-criterion-that-could-never-be-met-and-a-wrong-cause-i-wrote-into-the-ledger.md>app.js:273":
+  "0060-a-criterion-that-could-never-be-met-and-a-wrong-cause-i-wrote-into-the-ledger.md>app.js:367":
     "function memoryBandHtml(m) {",
-  "0060-a-criterion-that-could-never-be-met-and-a-wrong-cause-i-wrote-into-the-ledger.md>app.js:387":
+  "0060-a-criterion-that-could-never-be-met-and-a-wrong-cause-i-wrote-into-the-ledger.md>app.js:486":
     "$" + "{memoryBandHtml(t.memory)}",
   "0047-topmost-asks-its-name-when-it-should-ask-its-shape.md>engine/work.ts:483":
     "const r: AdvanceResult = await advance(rt, (o) => dispatch(o), {",

@@ -1,0 +1,158 @@
+/*
+ * Tailwind v4 入口 —— 只在开发期用 CLI 产出 ../public/tw.css，运行时仍是零构建静态文件。
+ *
+ * 为什么是「预编译 + vendored」而不是运行时 JIT：cdn 版 <script> 要在浏览器里现编，
+ * 桌面壳离线起不来，还给页面塞进几百 KB 解释器。所以 Tailwind 只进 devDependencies，
+ * 产物 tw.css 和 group.css 一样签进仓库、由 dev server 静态 serve。
+ *
+ * ── 层语义：这套接法为什么能「零像素回归」────────────────────────────────
+ * 只 import theme + utilities，utilities 全部落在 @layer utilities；而 group.css /
+ * admin.css / theme.css 是【未分层】手写规则。级联是逐条声明决胜的，规矩是「未分层
+ * 声明永远赢过分层声明」——不看特异度也不看先后。所以现有每一条规则都压得过同一元素
+ * 上的 tw-*：接 utility 只可能补上「现有 CSS 没管的格子」，不可能把已渲染的挤走。
+ * 这条性质不靠散文保证，test/web/tailwind-wiring.test.ts 里有一发在真浏览器里量它。
+ *
+ * 不 import base（preflight）：那是一套全局 reset，会改动每个元素的默认外观。
+ *
+ * ── prefix(tw) 是必需的，不是风格偏好 ───────────────────────────────────
+ * 前缀同时加在类名和生成的 CSS 变量上（--tw-*）。本仓 :root 已有 --radius-md /
+ * --fs-md 这一族，不加前缀就会撞名。类名形状是 tw:flex / tw:sm:max-lg:grid
+ * （前缀在最前，变体跟在它后面）。
+ *
+ * ── 一把尺子，而且不许成环 ──────────────────────────────────────────────
+ * 刻度以 group.css 的 :root 为准：Tailwind 自带的 radius / text / font-weight /
+ * color / shadow / breakpoint 先 initial 清空，再按 group.css 的令牌重铺。于是
+ * 「顺手用一把不在刻度上的尺子」在类名层面就不成立，而不是靠自觉。
+ *
+ * ⚠ 会成环的是【丢掉 prefix(tw)】，不是「用了 @theme inline」。实测：丢前缀后产物
+ *   是 `@layer theme{:root,:host{--radius-md: var(--radius-md); …}}` —— 左边同名、层级
+ *   又低于 group.css 的未分层声明，永远解不出值，圆角/间距/颜色【静默全没】（不是红，
+ *   是页面长得「朴素」）。带前缀时出的是 `--tw-radius-md: var(--radius-md)`：名字不撞、
+ *   不成环，右侧仍是 group.css 那一枚，暗色翻转照旧生效。
+ *   顺带两笔实测账：没前缀时产物里还会混进一批 base utility（149B 变 1530B，多出
+ *   .flex / .grid / .border 这族），且类名与手写工具类撞名，层语义那条前提一起失效。
+ *   ⚠ 前缀是【全局登记一次】的：实测只丢 theme 那条的 prefix ⇒ 1530B 成环；只丢
+ *   utilities 那条的 ⇒ 产物与基线【逐字节相同】；两条都丢 ⇒ 与只丢 theme 相同。所以
+ *   真凶是 theme 那条。两条都照写不误是纪律不是必需 —— 少写那条冗余的不会坏，但它一旦
+ *   被当成冗余删掉，下一个改到这行的人就没有第二处可抄了（tailwind-wiring 把两条都钉住，
+ *   round374 的 A3b 记录了「只丢冗余那条不红」是【正确行为】，不是漏判）。
+ *
+ * 仍不用 @theme inline，但理由不是防环 —— 实测 inline 出的是
+ * `border-radius: var(--radius-md)`（直接把 group.css 那枚引用写进 utility），既不在
+ * :root 铺同名声明、也就不成环。不选它是因为它把「读哪枚令牌」烘进每条 utility：将来
+ * 重映射某档只改 @theme 就静默不生效。这一条是取舍，不是失效面。
+ *
+ * 字号额外钉 line-height: inherit —— Tailwind 每个 text-* 默认附带一条 line-height，
+ * 不钉就会凭空改动现有行距；inherit 是「与不写这条等价」的那个值。
+ *
+ * spacing 只覆盖第 7 档：Tailwind 的 1 档 = 0.25rem = 4px，与 --space-1..6 同格，
+ * 唯独第 7 档它按等差给 28px、本仓刻度是 32px —— 不覆盖就会出现两个「7 档」。
+ *
+ * 断点名对齐 group.css 里手写媒体查询的档位（sm=641 / md=861 / lg=1181），于是
+ * 「641–1180 这一中间档」在类名里写得出：tw:sm:max-lg:...。
+ *
+ * ── 一条使用边界：颜色类不要伸进 .admin-root 子树 ───────────────────────
+ * --tw-color-* 声明在 :root，而 admin 那棵子树的暗色值是 theme.css 重定义在
+ * .admin-root 上的。tw:bg-surface 伸进去会取到工作台的值而不是管理视图的。
+ * admin 侧着色继续走 admin.css（未分层，本来就赢），颜色类只用在工作台侧。
+ *
+ * ── 两个实测事实（写错不报错，只会静默少生成）───────────────────────────
+ * source(none) 要挂在【两条 import】上。只挂 theme.css 那条时自动探测仍然开着
+ * （实测：仓库里随手放的一个 .html，里面的 tw:blur / tw:z-50 照样被编进产物）。
+ *
+ * ── 改了样式之后 ────────────────────────────────────────────────────────
+ * 改这个文件、或改任何源里的 tw-* 类名，都要 pnpm tw:build 重出 tw.css。
+ * 忘了会红：test/web/tailwind-wiring.test.ts 把源里出现的每个 tw-* 对着 tw.css 逐个核。
+ */
+
+@layer theme, base, components, utilities;
+@import "tailwindcss/theme.css" layer(theme) prefix(tw) source(none);
+@import "tailwindcss/utilities.css" layer(utilities) prefix(tw) source(none);
+
+/* 自动探测已关，这里只登记真正发类名的文件。 */
+@source "../public/app.js";
+@source "../public/group.js";
+@source "../public/group.html";
+
+@theme {
+  --radius-*: initial;
+  --text-*: initial;
+  --font-weight-*: initial;
+  --color-*: initial;
+  --shadow-*: initial;
+  --breakpoint-*: initial;
+
+  /* 只铺 group.css 手写 @media 真有的三个分界。多出来的档位（比如 380 / 1441）在
+     类名里写得出、在媒体查询里找不到对应，同一个「档」两处不同宽 —— tailwind-wiring
+     量这条对齐，多铺一枚就红。要用新分界，先在手写样式里把它写出来。 */
+  --breakpoint-sm: 641px;
+  --breakpoint-md: 861px;
+  --breakpoint-lg: 1181px;
+
+  --radius-xs: var(--radius-xs);
+  --radius-sm: var(--radius-sm);
+  --radius-md: var(--radius-md);
+  --radius-lg: var(--radius-lg);
+  --radius-xl: var(--radius-xl);
+  --radius-2xl: var(--radius-pill);
+
+  --text-xs: var(--fs-xs);
+  --text-xs--line-height: inherit;
+  --text-sm: var(--fs-sm);
+  --text-sm--line-height: inherit;
+  --text-base: var(--fs-md);
+  --text-base--line-height: inherit;
+  --text-lg: var(--fs-lg);
+  --text-lg--line-height: inherit;
+  --text-xl: var(--fs-xl);
+  --text-xl--line-height: inherit;
+  --text-2xl: var(--fs-2xl);
+  --text-2xl--line-height: inherit;
+  --text-3xl: var(--fs-3xl);
+  --text-3xl--line-height: inherit;
+
+  --font-weight-medium: var(--fw-medium);
+  --font-weight-strong: var(--fw-strong);
+  --font-weight-heavy: var(--fw-heavy);
+
+  --spacing-7: var(--space-7);
+
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-soft: var(--surface-soft);
+  --color-ink: var(--ink);
+  --color-muted: var(--muted);
+  --color-line: var(--line);
+  --color-border: var(--border);
+  --color-neutral: var(--neutral);
+  --color-neutral-ink: var(--neutral-ink);
+  --color-faint: var(--faint);
+  --color-meta: var(--meta);
+  --color-label: var(--label);
+  --color-primary: var(--primary);
+  --color-primary-ink: var(--primary-ink);
+  --color-primary-soft: var(--primary-soft);
+  --color-control-border: var(--control-border);
+  --color-control-border-hover: var(--control-border-hover);
+  --color-on-accent: var(--on-accent);
+  --color-green: var(--green);
+  --color-green-soft: var(--green-soft);
+  --color-amber: var(--amber);
+  --color-amber-soft: var(--amber-soft);
+  --color-red: var(--red);
+  --color-red-soft: var(--red-soft);
+  --color-purple: var(--purple);
+  --color-purple-soft: var(--purple-soft);
+  --color-skeleton: var(--skeleton-base);
+  --color-skeleton-hi: var(--skeleton-hi);
+  --color-rail: var(--rail-bg);
+
+  --shadow-card: var(--shadow-card);
+  --shadow-lift: var(--shadow-lift);
+  --shadow-deep: var(--shadow);
+
+  --ease-out-soft: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* 本仓的暗色不是 prefers-color-scheme，而是 theme.js 给 <html> 落的 data-theme。 */
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));

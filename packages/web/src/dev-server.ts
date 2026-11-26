@@ -66,6 +66,9 @@ const MIME: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
   ".js": "text/javascript; charset=utf-8",
   ".css": "text/css; charset=utf-8",
+  // svg 必须显式给类型：浏览器对 svg【不做 MIME 嗅探】（里面能塞脚本），
+  // 落成 octet-stream 的话 vendor/xspreadsheet 那张工具栏雪碧图整个不渲染 —— 图标全哑但不报错。
+  ".svg": "image/svg+xml",
 };
 
 /**
@@ -166,14 +169,35 @@ function fail(res: import("node:http").ServerResponse, e: unknown) {
   );
 }
 
+/**
+ * 页面路由表：URL 是路由，不是磁盘文件名。
+ * public/ 下真实存在的 html 只经这里暴露；旧的文件名 URL 301 收敛到规范路由，
+ * 免得书签与历史链接散成两套入口（301 而非 302：路由是稳定的，缓存该记住）。
+ * 管理视图只有一个入口：工作台 group.html 的 #/admin/<页名>，独立页已删
+ * （2026-11-25 决策），/admin 这条 URL 不再存在，落到 404 而不是重定向。
+ */
+const PAGES: Record<string, string> = {
+  "/": "group.html",
+};
+const PAGE_ALIASES: Record<string, string> = {
+  "/group.html": "/",
+};
+
 function serveStatic(
   pathname: string,
   res: import("node:http").ServerResponse,
 ) {
   const mod = serveModule(pathname, res);
   if (mod) return;
-  const p =
-    pathname === "/" || pathname === "/admin" ? "/index.html" : pathname;
+  const alias = PAGE_ALIASES[pathname];
+  if (alias !== undefined) {
+    res.writeHead(301, { location: alias });
+    res.end();
+    return;
+  }
+  const page = PAGES[pathname];
+  // 资源（app.js/group.css/vendor/…）仍按文件名直出，页面只认路由表。
+  const p = page ?? pathname.slice(1);
   const file = join(PUBLIC, p);
   if (!file.startsWith(PUBLIC)) {
     res.writeHead(403);
@@ -251,6 +275,6 @@ function serveModule(
 
 server.listen(PORT, "127.0.0.1", () => {
   console.log(
-    `运营看板已在 http://127.0.0.1:${PORT} 启动（Hub=${HUB.port}，token 已配置=${TOKEN !== ""}）`,
+    `工作台已在 http://127.0.0.1:${PORT}/ 启动（管理视图 =/#/admin/<页名>，Hub=${HUB.port}，token 已配置=${TOKEN !== ""}）`,
   );
 });

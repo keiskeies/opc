@@ -53,7 +53,6 @@ import {
 // contracts 的注释原话是「两份退避策略的漂移表现是桌面端 15 秒放弃、Web 无限重试」。
 // 岗位书表单里的三个枚举同理：在浏览器里抄一份合法值清单 = 服务端加档位而下拉框还认旧的。
 import {
-  ACCEPTANCE_ACTIONS,
   BUDGET_PERIOD_VALUES,
   BUDGET_SCOPE_VALUES,
   decodeSseFrame,
@@ -62,11 +61,17 @@ import {
   reconnectDelayMs,
   shouldGiveUp,
 } from "/vendor/contracts/index.js";
+// 日 / 夜主题切换由宿主负责（group.js 调 mountThemeToggle），独立控制室页已删，
+// 本模块不再自己接按钮。
 
-const $view = document.getElementById("view");
-const $nav = document.getElementById("nav");
-const $dot = document.getElementById("dot");
-const $connText = document.getElementById("connText");
+// let 而不是 const：这四个是【宿主】交进来的节点（group.js mountAdmin 那一路）。
+// 没有独立页可查：管理视图只有一个入口 —— 工作台 group.html 的 #/admin/<页名>，
+// 宿主把【自己的】三枚节点显式交进来，本模块不做任何 getElementById。初始值全 null，
+// mountAdmin 之前没人用它们；唯一的自启动门（文件末尾）已随独立页一起删掉。
+let $view = null;
+let $nav = null;
+let $dot = null;
+let $connText = null;
 
 /** 前五页顺序即 §16.2；「岗位书」「预算」是后加的两页可配置界面（today 仍是默认页）。
  *  ⚠ charter 那一格把 e 写成转义：路由名与审批类型名恰好同词，而
@@ -146,7 +151,13 @@ function todayCacheHit(cache, force, windowMs) {
 }
 async function getToday(force, windowMs) {
   const c = windowMs === undefined ? todayCache : todayWindowCache;
-  if (todayCacheHit(c, force, windowMs)) return c.data;
+  // 命中时取的是【各自那一份的形状】：todayCache 存的就是响应体本身，
+  // todayWindowCache 存的是 { windowMs, data }。原来两处都写 c.data ⇒ 无窗口那份
+  // 恒返回 undefined（body 里没有 data 这个键）。今日页 force=true 从不走命中，
+  // 所以症状是「今日页看过一次之后，看板/预算页必崩」—— 独立页 /admin 一直如此，
+  // 只是原先没有一条 e2e 走「今日 → 看板」这一跳。
+  if (todayCacheHit(c, force, windowMs))
+    return windowMs === undefined ? c : c.data;
   const q = windowMs === undefined ? "" : `?window_ms=${windowMs}`;
   const { status, data } = await api("GET", "/today" + q);
   if (status !== 200)
@@ -175,8 +186,16 @@ function onChange(f) {
   return () => listeners.delete(f);
 }
 
+// type 是【语义档位】("err" / "warn" / "")，前缀在这里加：调用点写的是档位，
+// 不是类名 —— 于是 40 多处调用不必跟着 CSS 改名一起动（改一处 vs 扫全文件）。
+// 档位 → 类名写成一张表，而不是 "admin-" + 档位 的拼串：拼串让类名在源码里【不
+// 存在】，admin-style-scope 那条双向钉就看不见它 —— 而这一族恰恰出过 chip 那件事
+// （拼出来的类名 CSS 里没有，静默 no-op 全仓无人报）。表在这里，档位与类名一眼对得上。
+const BANNER_CLS = { "": "", err: "admin-err", warn: "admin-warn" };
 const banner = (type, msg) =>
-  msg ? `<div class="banner ${type}">${esc(msg)}</div>` : "";
+  msg
+    ? `<div class="admin-banner ${BANNER_CLS[type ?? ""] ?? ""}">${esc(msg)}</div>`
+    : "";
 
 /* ───────────────── 连接状态灯 ─────────────────
  * link 的四个值里 stale 与 down 是「要人处理」的，界面必须分开说：
@@ -185,7 +204,7 @@ const banner = (type, msg) =>
  */
 function setConn(link, extra) {
   const bad = link === "stale" || link === "down" || link === "connecting";
-  $dot.classList.toggle("off", bad);
+  $dot.classList.toggle("admin-off", bad);
   $connText.textContent =
     extra ??
     {
@@ -196,7 +215,10 @@ function setConn(link, extra) {
     }[link] ??
     link;
 }
-onChange((p) => setConn(p.link));
+/* 状态灯原先直接在这里 onChange(...) 订阅一条【永不摘】的监听。现在订阅落在
+ * startFeed() 里（独立页启动与工作台挂载都走那一条路），卸载时摘掉 —— 否则每次
+ * 进出管理视图多一条永久监听，而它引用的 $dot 那时早就不在文档里了。 */
+let offConnSub = null;
 
 /* ───────────────── 签名代理的 fetch 封装 ───────────────── */
 async function api(method, path, body) {
@@ -216,38 +238,110 @@ async function api(method, path, body) {
 }
 
 /* ───────────────── 导航 ───────────────── */
-let current = location.hash.replace(/^#\//, "").split("?")[0] || "today";
-if (!ROUTES.some((r) => r.id === current)) current = "today";
+/**
+ * 这一段 hash 解析是【两个入口共用的一份】：
+ *   · 独立页 /admin：`#/today?window=7d`（§16.2 那七页直接挂在 # 上）
+ *   · 工作台挂载：  `#/admin/today?window=7d`（#/<route>/<page>，与工作台
+ *                    其它路由 #/<route>/<id> 同形，hash 仍由 group.js 统一拥有）
+ * ⚠ 为什么解析函数在这里而不是 group.js：query 的语义（?window= 只认整数天、
+ * ?id= 选中哪条回放）本来就是渲块的事，windowMsOfHash 已经住在这里。搬去
+ * group.js 就是「窗口判据有两份」—— 0006 §7 那一整篇讲的正是这个。
+ * 所以 group.js 只把 location.hash 原样交给 syncAdminFromHash，自己不懂 query。
+ */
+const ADMIN_PREFIX = "admin/";
+function parseAdminHash(hash) {
+  // 剥前缀要认三种形状：`#/today`（独立页，没前缀）、`#/admin/today`（工作台）、
+  // `#/admin`（侧边栏刚点进去，还没带页名）。第三种原来剥不掉 ⇒ page 得 "admin"，
+  // 它不在 ROUTES 里，挂载首屏就是一片空白而不是今日页。
+  // 前缀只在开头剥，且要么整段就是 "admin"、要么后面紧跟 "/"：用一条正则把
+  // "(?:admin/?)?" 写在一起会削掉将来某个以 admin 开头的页名（"administrator"
+  // 变 "istrator"）。结构判断比一条聪明正则更难写错。
+  const stem = ADMIN_PREFIX.replace(/\/$/u, "");
+  let raw = String(hash ?? "").replace(/^#\/?/u, "");
+  if (raw === stem) raw = "";
+  else if (raw.startsWith(ADMIN_PREFIX)) raw = raw.slice(ADMIN_PREFIX.length);
+  const i = raw.indexOf("?");
+  return {
+    page: i < 0 ? raw : raw.slice(0, i),
+    query: i < 0 ? "" : raw.slice(i + 1),
+  };
+}
+/** 链接前缀：独立页写 `#/board`，工作台写 `#/admin/board`。挂载时改掉。 */
+const hashPrefix = () => "#/admin/";
+function routeToHash(page, query) {
+  return hashPrefix() + page + (query ? "?" + query : "");
+}
+const parsed0 = parseAdminHash(location.hash);
+let current = ROUTES.some((r) => r.id === parsed0.page)
+  ? parsed0.page
+  : "today";
+/** 当前页的 query（"window=7d" / "id=T-1"）。独立页从 hash 起，挂载后由 group.js 喂。 */
+let currentQuery = parsed0.query;
 
-/** 导航上的琥珀角标 = 待批张数。它是这一屏上唯一一处非"卡片内"的琥珀，
+/** 导航上的琥珀角标 = 待张数。它是这一屏上唯一一处非"卡片内"的琥珀，
  *  因为它说的正是「有一整页都在等你」。 */
 let navPending = 0;
 // 当前页链接带 aria-current="page"（给读屏指"我在哪一页"）；.act 是视觉那一份，
 // aria 是语义那一份，两个都只在当前视图那一枚上出现。
-const navLink = (view, cur) =>
-  `<a href="#/${view.id}" data-r="${view.id}" class="${view.id === cur ? "act" : ""}"` +
+// ⚠ 第三个参数【必须有默认值】：test/web/app-pure.test.ts 按两参调用。独立页已删，
+// 管理视图唯一入口是 #/admin/<页名>，默认前缀就是它；nav() 也显式传 hashPrefix()。
+const navLink = (view, cur, prefix = "#/admin/") =>
+  `<a href="${prefix}${view.id}" data-r="${view.id}" class="${view.id === cur ? "admin-act" : ""}"` +
   (view.id === cur ? ` aria-current="page"` : "") +
   `>${view.label}` +
   (view.id === "inbox" && navPending > 0
-    ? `<span class="badge">${esc(navPending)}</span>`
+    ? `<span class="admin-badge">${esc(navPending)}</span>`
     : "") +
   `</a>`;
 function nav() {
-  $nav.innerHTML = ROUTES.map((r) => navLink(r, current)).join("");
+  $nav.innerHTML = ROUTES.map((r) => navLink(r, current, hashPrefix())).join(
+    "",
+  );
   for (const a of $nav.querySelectorAll("a")) {
     a.addEventListener("click", (e) => {
       e.preventDefault();
-      location.hash = "#/" + a.dataset.r;
+      goPage(a.dataset.r, "");
     });
   }
 }
-window.addEventListener("hashchange", () => {
-  const h = location.hash.replace(/^#\//, "").split("?")[0];
-  if (ROUTES.some((r) => r.id === h)) {
-    current = h;
+/**
+ * 换页：把 hash 写出去，然后【等 hashchange 接住】—— 但同一枚 hash 不会再发
+ * hashchange（带 ?window= 的窗口 chip 连点两次就是这条路径），所以写之前先比一次，
+ * 相同就自己走一遍。少了这一支，第二次点同一个窗口 chip 界面不动。
+ */
+function goPage(page, query = "") {
+  if (!ROUTES.some((r) => r.id === page)) return;
+  const h = routeToHash(page, query);
+  if (location.hash === h) {
+    current = page;
+    currentQuery = query;
     nav();
     void load();
+    return;
   }
+  location.hash = h;
+}
+/**
+ * hash → 界面。group.js 在挂载后与每次 hashchange 都调它（它自己不解析 query，
+ *  parseAdminHash 那段）。返回布尔只为了给调用方一个「这一段归不归我」的答复。
+ */
+function syncAdminFromHash(hash) {
+  const { page, query } = parseAdminHash(hash);
+  if (!ROUTES.some((r) => r.id === page)) return false;
+  if (page === current && query === currentQuery) return true;
+  current = page;
+  currentQuery = query;
+  nav();
+  void load();
+  return true;
+}
+window.addEventListener("hashchange", () => {
+  // hash 归 group.js。【未挂载】时这一份必须闭嘴：否则宿主每次换菜单
+  //（#/messages、#/documents…）都会走到这里，把 current 换成一个不在 ROUTES
+  // 边界的页名并往已脱离文档的 $view 里画 —— 挂载方【已】把 current 交还给原地，
+  // 这一份却还在替宿主作答。
+  if (!mounted) return;
+  void syncAdminFromHash(location.hash);
 });
 
 /**
@@ -280,21 +374,21 @@ function memoryBandHtml(m) {
   let body = "";
   if (gate === 0) {
     body +=
-      '<div class="meta" style="margin-top:6px">· 审阅判定那一档是【空的】（库里另有 ' +
+      '<div class="admin-meta" style="margin-top:6px">· 审阅判定那一档是【空的】（库里另有 ' +
       `${esc(scope)} 条其它记忆口径的审计，它们不是审阅判定）。` +
       '规格 §24 风险 2 要的是「历史审阅决定与理由」⇒ 这一档在等它的生产者，不是「角色还没做过决定」。</div>';
   } else {
     body +=
-      '<div class="meta" style="margin-top:6px">· 审阅判定 ' +
+      '<div class="admin-meta" style="margin-top:6px">· 审阅判定 ' +
       `${esc(gate)} 条，其中未署名（actor_type=system）${esc(unatt)} 条。</div>`;
   }
   if (unatt > 0) {
     body +=
-      '<div class="meta" style="margin-top:6px">· 那 ' +
+      '<div class="admin-meta" style="margin-top:6px">· 那 ' +
       `${esc(unatt)} 条按 actor_id 分桶，所以【不会】进任何角色的提示词。` +
       "不是「没人做过判定」，是做过而没署上名。</div>";
   }
-  return `<div style="margin-top:10px"><span class="sect">角色记忆</span>${body}</div>`;
+  return `<div style="margin-top:10px"><span class="admin-sect">角色记忆</span>${body}</div>`;
 }
 
 /* ═════════════════ 页面 1：今日视图（§16.3） ═════════════════
@@ -304,9 +398,13 @@ function memoryBandHtml(m) {
  * 没有 agent 头像、没有任何"谁在说话"的东西。
  */
 async function renderToday() {
-  // round352：今日页的窗口从 hash 读（#/today?window=7d，走既有 hashchange →
-  // void load() 重渲染，不新增事件绑定）。默认 undefined = 24 小时（服务端默认）。
-  const winMs = windowMsOfHash(location.hash);
+  // round352：今日页的窗口从 hash 读（独立页 #/today?window=7d，工作台
+  // #/admin/today?window=7d，走既有 hashchange → syncAdminFromHash → void load()
+  // 重渲染，不新增事件绑定）。默认 undefined = 24 小时（服务端默认）。
+  // ⚠ 读 currentQuery 而不是 location.hash：挂载后 hash 多了一段 #/admin/ 前，
+  // 而 currentQuery 是 parseAdminHash 已经剥好前缀的那一份 —— 两处都直接 split("?")
+  // 就是「query 解析有两份」，而这两份的漂移正好表现为「前缀一变窗口就永不生效」。
+  const winMs = windowMsOfHash(currentQuery);
   const t = await getToday(true, winMs);
   if (t.error) {
     $view.innerHTML = banner("err", t.error);
@@ -334,9 +432,9 @@ async function renderToday() {
   const opsCards = cards.filter(isOp);
   const needHtml = need.length
     ? need.map((a) => approvalCard(a, t.as_of_ms, true, true)).join("")
-    : `<div class="card"><div class="meta">没有等你决定的事。</div></div>`;
+    : `<div class="admin-card"><div class="admin-meta">没有等你决定的事。</div></div>`;
   const opsHtml = opsCards.length
-    ? `<p class="sect" style="margin-top:18px">运营事件${` · ${esc(opsCards.length)}`}</p>` +
+    ? `<p class="admin-sect" style="margin-top:18px">运营事件${` · ${esc(opsCards.length)}`}</p>` +
       opsCards.map((a) => approvalCard(a, t.as_of_ms, true, false)).join("")
     : "";
 
@@ -348,36 +446,37 @@ async function renderToday() {
   const focusPrevIds = anchorList($view, "data-approval-id");
 
   $view.innerHTML = `
-    <div class="cols">
+    <div class="admin-cols">
       <div>
-        <p class="sect">需要你决策${need.length ? ` · ${esc(need.length)}` : ""}</p>
+        <p class="admin-sect">需要你决策${need.length ? ` · ${esc(need.length)}` : ""}</p>
         ${ap.status !== 200 ? banner("err", `GET /approvals → ${ap.status}`) : needHtml}
         ${opsHtml}
 
-        <details class="lowcontrast" style="margin-top:18px">
+        <details class="admin-lowcontrast" style="margin-top:18px">
           <summary>自动决策摘要 · 过去 ${esc(windowLabel(t))}</summary>
-          <div class="meta" style="margin-top:8px">${esc(strategyLine(t))}</div>
+          <div class="admin-meta" style="margin-top:8px">${esc(strategyLine(t))}</div>
         </details>
 
-        <details class="lowcontrast" style="margin-top:10px">
+        <details class="admin-lowcontrast" style="margin-top:10px">
           <summary>活动流（投影自身的轨迹）</summary>
-          <div class="meta" style="margin:8px 0">游标 #<span data-cur>${proj.cursor}</span> · ${linkText(proj)}</div>
+          <div class="admin-meta" style="margin:8px 0">游标 #<span data-cur>${proj.cursor}</span> · ${linkText(proj)}</div>
           <div id="feed"></div>
         </details>
       </div>
 
       <div>
-        <p class="sect">组织状态 · 窗口
+        <p class="admin-sect">组织状态 · 窗口
           ${todayWindows()
             .map(
               (w) =>
-                `<a data-win-ms="${w.ms ?? ""}" href="#/today${
-                  w.ms === undefined ? "" : "?window=" + Math.round(w.ms / DAY_MS) + "d"
-                }" class="chip${w.ms === winMs ? " act" : ""}" style="margin-left:6px">${esc(w.label)}</a>`,
+                `<a data-win-ms="${w.ms ?? ""}" href="${routeToHash(
+                  "today",
+                  w.ms === undefined ? "" : "window=" + Math.round(w.ms / DAY_MS) + "d",
+                )}" class="admin-chip${w.ms === winMs ? " admin-chip-active" : ""}" style="margin-left:6px">${esc(w.label)}</a>`,
             )
             .join("")}
         </p>
-        <div class="stats">
+        <div class="admin-stats">
           ${stat("活跃任务", t.active_tasks, "", "没到终点的任务数")}
           ${stat(windowLabel(t) + " 完成", t.delivered_in_window, "", "窗口内出现过一次交付跃迁的任务数")}
           ${stat("被阻塞", t.blocked_tasks, "", blockedTitle(t))}
@@ -434,15 +533,15 @@ function budgetHtml(t) {
     b.declared_scopes > 0 &&
     b.consumed_total_cents >= b.declared_task_limits_cents;
   return `
-    <div class="stat${over ? " budgetover" : ""}" style="margin-top:10px">
-      <div class="lbl">预算</div>
-      <div class="mono" style="font-size:15px;margin-top:2px">${esc(windowLabel(t))}内 ${esc(money(b.consumed_in_window_cents))}</div>
-      <div class="meter${over ? " over" : ""}"><i style="width:${esc(meterPct(b))}"></i></div>
-      <div class="meta mono">累计 ${esc(money(b.consumed_total_cents))} · 已声明上限合计 ${esc(money(b.declared_task_limits_cents))}${
+    <div class="admin-stat${over ? " admin-budgetover" : ""}" style="margin-top:10px">
+      <div class="admin-lbl">预算</div>
+      <div class="admin-figure admin-mono">${esc(windowLabel(t))}内 ${esc(money(b.consumed_in_window_cents))}</div>
+      <div class="admin-meter${over ? " admin-over" : ""}"><i style="width:${esc(meterPct(b))}"></i></div>
+      <div class="admin-meta admin-mono">累计 ${esc(money(b.consumed_total_cents))} · 已声明上限合计 ${esc(money(b.declared_task_limits_cents))}${
         b.declared_scopes === 0 ? " <b>(一行都没设过)</b>" : ""
       }</div>
-      ${over ? `<div class="meta" style="margin-top:4px">累计已花 ≥ 已声明上限合计 <b>⇒ 条变红</b>（§7.4 要的是「日消耗条」，这里分母只有累计口径，口径见下）</div>` : ""}
-      ${b.silent_over_scopes > 0 ? `<div class="pill s-gray" style="margin-top:6px"><b>${esc(b.silent_over_scopes)} 格已超限而警报已哑</b></div>` : ""}
+      ${over ? `<div class="admin-meta" style="margin-top:4px">累计已花 ≥ 已声明上限合计 <b>⇒ 条变红</b>（§7.4 要的是「日消耗条」，这里分母只有累计口径，口径见下）</div>` : ""}
+      ${b.silent_over_scopes > 0 ? `<div class="admin-pill admin-s-gray" style="margin-top:6px"><b>${esc(b.silent_over_scopes)} 格已超限而警报已哑</b></div>` : ""}
     </div>`;
 }
 
@@ -467,10 +566,10 @@ function meterPct(b) {
  */
 const notesHtml = (notes) =>
   notes && notes.length
-    ? `<details class="lowcontrast" style="margin-top:10px"><summary>口径说明 · ${esc(notes.length)} 条</summary>` +
+    ? `<details class="admin-lowcontrast" style="margin-top:10px"><summary>口径说明 · ${esc(notes.length)} 条</summary>` +
       notes
         .map(
-          (n) => `<div class="meta" style="margin-top:6px">· ${esc(n)}</div>`,
+          (n) => `<div class="admin-meta" style="margin-top:6px">· ${esc(n)}</div>`,
         )
         .join("") +
       `</details>`
@@ -509,9 +608,10 @@ const blockedTitle = (t) => {
  * 「被阻塞」那个数字回到默认墨色。给每个"看起来不太好"的数字各配一种颜色，
  * 是把「一眼扫到该动手的那一处」换成「一整屏都在喊」，正是 §19.1 要的反面。
  */
+const STAT_TONE_CLS = { statbad: "admin-statbad" };
 const stat = (label, n, tone, title) =>
-  `<div class="stat${tone ? " " + tone : ""}" title="${esc(title)}">
-     <div class="num mono">${esc(n)}</div><div class="lbl">${esc(label)}</div>
+  `<div class="admin-stat${STAT_TONE_CLS[tone] ? " " + STAT_TONE_CLS[tone] : ""}" title="${esc(title)}">
+     <div class="admin-num admin-mono">${esc(n)}</div><div class="admin-lbl">${esc(label)}</div>
    </div>`;
 
 /**
@@ -539,8 +639,14 @@ const todayWindows = () => [
   { label: "7 天", ms: 7 * DAY_MS },
   { label: "30 天", ms: 30 * DAY_MS },
 ];
-const windowMsOfHash = (hash) => {
-  const v = new URLSearchParams((hash ?? "").split("?")[1] ?? "").get("window");
+const windowMsOfHash = (hashOrQuery) => {
+  // 两种输入都要认：独立页传整条 hash（#/today?window=7d），工作台挂载后传
+  // parseAdminHash 剥过 #/admin/ 的那一份 query（window=7d）。原来只认带 ? 的那
+  // 一种，少这一改的症状是「挂载后窗口 chip 永不生效」—— 而且是静默的（恒 24h，
+  // 屏幕上看不出来）。
+  const s = String(hashOrQuery ?? "");
+  const q = s.indexOf("?");
+  const v = new URLSearchParams(q < 0 ? s : s.slice(q + 1)).get("window");
   if (v === null) return undefined;
   // 只接受「整数天」的三种写法（7d / 7天 / 裸 7）。小数点、负数、非数字一律
   // undefined（走服务端默认 24h）—— 把「7.5 天」try 出来等服务端截断，
@@ -569,15 +675,15 @@ const isCtrlEnter = (e) => !!(e && (e.ctrlKey || e.metaKey) && e.key === "Enter"
  * 而是"收件箱里出现一张章程提案卡"。所以这里不自己往任何列表塞一行（投影纪律）。
  */
 const ideaBox = () => `
-  <div class="card idea" style="margin-top:14px">
-    <p class="sect">扔个想法</p>
-    <textarea data-idea class="grow" rows="3" style="width:100%"
+  <div class="admin-card admin-idea" style="margin-top:14px">
+    <p class="admin-sect">扔个想法</p>
+    <textarea data-idea class="admin-grow" rows="3" style="width:100%"
       placeholder="例：做一个面向独立开发者的 AI 笔记应用，目标月收入 100 万"></textarea>
-    <div class="row" style="margin-top:8px">
-      <button class="btn primary" data-create>提交</button>
-      <span class="meta" data-idea-state></span>
+    <div class="admin-row" style="margin-top:8px">
+      <button class="admin-btn admin-primary" data-create>提交</button>
+      <span class="admin-meta" data-idea-state></span>
     </div>
-    <div class="err" data-err style="margin-top:6px"></div>
+    <div class="admin-err" data-err style="margin-top:6px"></div>
   </div>`;
 
 async function bindIdea() {
@@ -757,21 +863,21 @@ async function renderBoard() {
   // 不重写 innerHTML。所以"焦点停在卡上时被数据冲掉"在看板上不发生，
   // 加一套恢复是【没有触发路径的死码】。真出现自动重画那天再补。
   $view.innerHTML = `
-    <div class="toolbar">
-      <button class="btn${boardFilter === "all" ? " primary" : ""}" data-f="all">全部</button>
-      <button class="btn${boardFilter === "attention" ? " primary" : ""}" data-f="attention"
+    <div class="admin-toolbar">
+      <button class="admin-btn${boardFilter === "all" ? " admin-primary" : ""}" data-f="all">全部</button>
+      <button class="admin-btn${boardFilter === "attention" ? " admin-primary" : ""}" data-f="attention"
         ${attention === null ? "disabled title='判据取不到（GET /today 失败），这一维今天判不了'" : ""}>需要我注意</button>
-      <span class="meta">${esc(shown.length)} / ${esc(tasks.length)} 条 · 游标 #${proj.cursor} · ${linkText(proj)}</span>
+      <span class="admin-meta">${esc(shown.length)} / ${esc(tasks.length)} 条 · 游标 #${proj.cursor} · ${linkText(proj)}</span>
     </div>
     ${org.status !== 200 ? banner("warn", "组织图取不到 ⇒ 层级列退化成单列（列由 reports_to 派生，不是写死的六列）。") : ""}
     ${attention === null ? banner("warn", "「需要我注意」的判据来自 GET /today，此刻取不到 ⇒ 该过滤器已置灰。") : ""}
     ${drvNotice ? banner(drvNotice.level, drvNotice.msg) : ""}
-    <div class="board">
+    <div class="admin-board">
       ${byKey
         .map(
-          (c) => `<div class="col">
-            <div class="colhead"><span>${esc(c.label)}</span><span class="mono">${esc(c.items.length)}</span></div>
-            ${c.items.map((tk) => taskCard(tk, attentionTask(tk), decideTask(tk), driverLine(tk.id, drv, t.as_of_ms))).join("") || `<div class="meta">—</div>`}
+          (c) => `<div class="admin-col">
+            <div class="admin-colhead"><span>${esc(c.label)}</span><span class="admin-mono">${esc(c.items.length)}</span></div>
+            ${c.items.map((tk) => taskCard(tk, attentionTask(tk), decideTask(tk), driverLine(tk.id, drv, t.as_of_ms))).join("") || `<div class="admin-meta">—</div>`}
           </div>`,
         )
         .join("")}
@@ -1017,14 +1123,14 @@ function taskCard(tk, isAttention, isDecision, stoppedNote) {
   // 折叠的排版靠这层 div；改成 button 要重排样式，收益一样、爆炸半径大得多。
   // ⚠ aria-label 用【卡片正面没有】的那句话（"打开详情"），不复读标题 ——
   //   读屏器本来就会念卡片内容，把标题再念一遍只会把真正的新信息挤掉。
-  return `<div class="tk${isDecision ? " decision" : ""}${isAttention && !isDecision ? " flag" : ""}" data-task="${esc(tk.id)}" tabindex="0" role="button" aria-label="打开任务详情">
-    <div class="s">${esc(tk.title)}</div>
-    <div class="row" style="margin-top:6px">
-      <span class="pill ${statusClass(tk.status)}">${esc(tk.status)}</span>
-      <span class="meta">${esc(tk.assigned_role)} · ${esc(fmtAgo(tk.updated_at, todayCache ? todayCache.as_of_ms : Date.now()))}</span>
+  return `<div class="admin-tk${isDecision ? " admin-decision" : ""}${isAttention && !isDecision ? " admin-flag" : ""}" data-task="${esc(tk.id)}" tabindex="0" role="button" aria-label="打开任务详情">
+    <div class="admin-s tw:text-balance">${esc(tk.title)}</div>
+    <div class="admin-row" style="margin-top:6px">
+      <span class="admin-pill ${statusClass(tk.status)}">${esc(tk.status)}</span>
+      <span class="admin-meta">${esc(tk.assigned_role)} · ${esc(fmtAgo(tk.updated_at, todayCache ? todayCache.as_of_ms : Date.now()))}</span>
     </div>
-    <div class="meta mono">${esc(tk.id.slice(0, 8))} · ${esc(money(tk.consumed_cents))}${tk.budget_cents ? " / " + esc(money(tk.budget_cents)) : " / 未设上限"}</div>
-    ${stoppedNote ? `<div class="meta" data-stopped>${esc(stoppedNote)}</div>` : ""}
+    <div class="admin-meta admin-mono">${esc(tk.id.slice(0, 8))} · ${esc(money(tk.consumed_cents))}${tk.budget_cents ? " / " + esc(money(tk.budget_cents)) : " / 未设上限"}</div>
+    ${stoppedNote ? `<div class="admin-meta" data-stopped>${esc(stoppedNote)}</div>` : ""}
   </div>`;
 }
 
@@ -1039,12 +1145,12 @@ function taskCard(tk, isAttention, isDecision, stoppedNote) {
  */
 function statusClass(s) {
   const x = String(s).toLowerCase();
-  if (x.includes("deliver")) return "s-green";
-  if (x.includes("archiv")) return "s-gray";
+  if (x.includes("deliver")) return "admin-s-green";
+  if (x.includes("archiv")) return "admin-s-gray";
   if (x.includes("reject") || x.includes("fail") || x.includes("error"))
-    return "s-red";
+    return "admin-s-red";
   if (x.includes("review") || x.includes("progress") || x.includes("escalat"))
-    return "s-blue";
+    return "admin-s-blue";
   return "";
 }
 
@@ -1064,7 +1170,7 @@ async function openDrawer(id) {
   // 关下一回根本不存在的抽屉。
   if (drawerEscOff) closeDrawer();
   drawerReturnTo = opener?.isConnected ? opener : drawerReturnTo;
-  slot.innerHTML = `<div class="scrim" data-close></div><div class="drawer"><div class="meta">载入中…</div></div>`;
+  slot.innerHTML = `<div class="admin-scrim" data-close></div><div class="admin-drawer"><div class="admin-meta">载入中…</div></div>`;
   slot.querySelector("[data-close]").addEventListener("click", closeDrawer);
   // Esc 关抽屉。挂在 document 上而不是抽屉里：焦点可能落在 scrim、标题、
   // 或抽屉里任何一个不可聚焦的 div 上（那些 keydown 就不会冒泡到抽屉根）。
@@ -1085,33 +1191,33 @@ async function openDrawer(id) {
     // 原来这一支是 `slot.innerHTML = ""; return;` —— 抽屉【自己消失了】，
     // 而真相是那次请求失败了。按本仓那条「缺的东西不许被读成一个答案」：
     // "自己关了"会被读成"这一张没有详情"，而该做的下一步是去看服务端怎么了。
-    slot.innerHTML = `<div class="scrim" data-close></div><div class="drawer">
-      <div class="row"><h3 style="margin:0" class="grow">详情取不到</h3><button class="btn" data-close>关闭</button></div>
+    slot.innerHTML = `<div class="admin-scrim" data-close></div><div class="admin-drawer">
+      <div class="admin-row"><h3 style="margin:0" class="admin-grow">详情取不到</h3><button class="admin-btn" data-close>关闭</button></div>
       ${banner("err", `GET /tasks/${id} → ${status}`)}
     </div>`;
     for (const c of slot.querySelectorAll("[data-close]"))
       c.addEventListener("click", closeDrawer);
-    slot.querySelector(".drawer .btn")?.focus();
+    slot.querySelector(".admin-drawer .admin-btn")?.focus();
     return;
   }
   const entries = rp.status === 200 ? (rp.data.entries ?? []) : [];
   slot.innerHTML = `
-    <div class="scrim" data-close></div>
-    <div class="drawer">
-      <div class="row"><h3 style="margin:0" class="grow">${esc(data.title)}</h3>
-        <a class="btn" href="#/replay?id=${encodeURIComponent(id)}" data-replay>打开完整回放</a>
-        <button class="btn" data-close>关闭</button></div>
-      <div class="row" style="margin-top:6px">
-        <span class="pill ${statusClass(data.status)}">${esc(data.status)}</span>
-        <span class="meta mono">${esc(data.id)}</span>
+    <div class="admin-scrim" data-close></div>
+    <div class="admin-drawer">
+      <div class="admin-row"><h3 style="margin:0" class="admin-grow tw:text-balance">${esc(data.title)}</h3>
+        <a class="admin-btn" href="${routeToHash("replay", "id=" + encodeURIComponent(id))}" data-replay>打开完整回放</a>
+        <button class="admin-btn" data-close>关闭</button></div>
+      <div class="admin-row" style="margin-top:6px">
+        <span class="admin-pill ${statusClass(data.status)}">${esc(data.status)}</span>
+        <span class="admin-meta admin-mono">${esc(data.id)}</span>
       </div>
-      <div class="meta" style="margin-top:10px">角色 ${esc(data.assigned_role)} · 节点 ${esc(data.current_node)} · 图版本 ${esc(data.graph_version)}</div>
-      <div class="meta mono">已用 ${esc(money(data.consumed_cents))}${data.budget_cents ? " / " + esc(money(data.budget_cents)) : ""} · 建 ${esc(fmtDate(data.created_at))}</div>
-      ${data.parent_id ? `<div class="tag mono">父任务 ${esc(data.parent_id)}</div>` : ""}
-      <p class="sect" style="margin-top:16px">审阅链 / 事件（最近 ${esc(entries.length)} 条）</p>
+      <div class="admin-meta" style="margin-top:10px">角色 ${esc(data.assigned_role)} · 节点 ${esc(data.current_node)} · 图版本 ${esc(data.graph_version)}</div>
+      <div class="admin-meta admin-mono">已用 ${esc(money(data.consumed_cents))}${data.budget_cents ? " / " + esc(money(data.budget_cents)) : ""} · 建 ${esc(fmtDate(data.created_at))}</div>
+      ${data.parent_id ? `<div class="admin-tag admin-mono">父任务 ${esc(data.parent_id)}</div>` : ""}
+      <p class="admin-sect" style="margin-top:16px">审阅链 / 事件（最近 ${esc(entries.length)} 条）</p>
       ${rp.status !== 200 ? banner("err", `GET /replay → ${rp.status}`) : replayTimeline(entries)}
-      <p class="sect" style="margin-top:16px">第三层：完整产出</p>
-      <div class="meta">证据包那条链路今天仍未落地（docs 里登记为未完成项），所以这一层现在只有审计原文：</div>
+      <p class="admin-sect" style="margin-top:16px">第三层：完整产出</p>
+      <div class="admin-meta">证据包那条链路今天仍未落地（docs 里登记为未完成项），所以这一层现在只有审计原文：</div>
       <pre>${esc(JSON.stringify(entries.slice(0, 5), null, 2))}</pre>
     </div>`;
   for (const c of slot.querySelectorAll("[data-close]"))
@@ -1120,7 +1226,7 @@ async function openDrawer(id) {
   // 操作身后那块【被遮住但没被禁用】的界面 —— 看不见的那一半在收键。
   // 落点是「关闭」而不是标题行里那枚「打开完整回放」链接：默认落点该是
   // 本覆盖层里【不离开上下文】的动作，跳走是用户显式选的事。
-  slot.querySelector(".drawer [data-close]")?.focus();
+  slot.querySelector(".admin-drawer [data-close]")?.focus();
 }
 
 /** 开抽屉前那一刻的焦点；关的时候要还回去。 */
@@ -1178,15 +1284,15 @@ async function renderInbox() {
   const focusPrev = focusedAnchor($view, "data-approval-id");
   const focusPrevIds = anchorList($view, "data-approval-id");
   $view.innerHTML = `
-    <div class="banner">${esc(t && !t.error ? strategyLine(t) : "策略摘要取不到（GET /today 失败）。")}</div>
-    <div class="toolbar">
-      <span class="meta">待批 <b>${esc(ap.data.pendingTotal)}</b>
-        · 读数于 <span class="mono">${esc(fmtDate(ap.data.asOfMs))}</span>
+    <div class="admin-banner">${esc(t && !t.error ? strategyLine(t) : "策略摘要取不到（GET /today 失败）。")}</div>
+    <div class="admin-toolbar">
+      <span class="admin-meta">待批 <b>${esc(ap.data.pendingTotal)}</b>
+        · 读数于 <span class="admin-mono">${esc(fmtDate(ap.data.asOfMs))}</span>
         ${ap.data.truncated ? " · <b>已截断（只这一页）</b>" : ""}</span>
-      <button class="btn ghost" data-reload>↻ 重读</button>
-      <input type="text" data-batch-note placeholder="理由（批量打回必填，服务端 422 校验）" class="grow" />
-      <button class="btn" data-batch="approve">批量批准</button>
-      <button class="btn" data-batch="reject_with_comment">批量打回</button>
+      <button class="admin-btn admin-ghost" data-reload>↻ 重读</button>
+      <input type="text" data-batch-note placeholder="理由（批量打回必填，服务端 422 校验）" class="admin-grow" />
+      <button class="admin-btn" data-batch="approve">批量批准</button>
+      <button class="admin-btn" data-batch="reject_with_comment">批量打回</button>
     </div>
     <div data-batch-out></div>
     ${
@@ -1229,7 +1335,7 @@ async function renderInbox() {
 function evidenceLine(a) {
   const refs = a.evidence_refs;
   if (refs === null || refs === undefined || refs.length === 0) {
-    return ' · <b class="ev-none">无证据包</b>';
+    return ' · <b class="admin-ev-none">无证据包</b>';
   }
   return " · " + evidenceRefsHtml(refs);
 }
@@ -1238,12 +1344,12 @@ function evidenceLine(a) {
  * evidence_refs 明细半（round342）：路径/sha256 逐条 `<code>` 展示。
  * 纯函数：只吃 refs、拼字符串 + esc，不碰 fetch / DOM。
  * 三态：null / undefined / 空数组 ⇒ ""；否则
- * `<details><summary>证据 N 条</summary>{逐条 <div class="mono"><code>{esc}</code></div>}</details>`。
+ * `<details><summary>证据 N 条</summary>{逐条 <div class="admin-mono"><code>{esc}</code></div>}</details>`。
  */
 function evidenceRefsHtml(refs) {
   if (refs === null || refs === undefined || refs.length === 0) return "";
   const items = refs
-    .map((r) => `<div class="mono"><code>${esc(r)}</code></div>`)
+    .map((r) => `<div class="admin-mono"><code>${esc(r)}</code></div>`)
     .join("");
   return `<details><summary>证据 ${refs.length} 条</summary>${items}</details>`;
 }
@@ -1267,7 +1373,7 @@ function evidenceRefsHtml(refs) {
  */
 function policyNoteHtml(note) {
   if (note === null || note === undefined || note === "") return "";
-  return `<span class="meta">规则依据：${esc(note)}</span>`;
+  return `<span class="admin-meta">规则依据：${esc(note)}</span>`;
 }
 
 function policyShadowLine(a) {
@@ -1277,7 +1383,7 @@ function policyShadowLine(a) {
     s.decision === "auto_approved"
       ? `规则判：${esc(s.rule)} 会通过（阶段一不执行）`
       : `规则判：转人工（${esc(s.blocked_by)}${s.missing.length > 0 ? " · 缺 " + esc(s.missing.join("、")) : ""}）${policyNoteHtml(s.note)}`;
-  return `<div class="meta" style="margin-top:4px"><b>${label}</b></div>`;
+  return `<div class="admin-meta" style="margin-top:4px"><b>${label}</b></div>`;
 }
 
 /**
@@ -1413,11 +1519,13 @@ function decidedMetaHtml(approval) {
 function paramSnapshotHtml(params) {
   const rows = paramSnapshotLines(params);
   const cls =
-    rows.length === 1 && rows[0][0] === "参数快照" ? "snap-none meta" : "snap";
+    rows.length === 1 && rows[0][0] === "参数快照"
+      ? "admin-snap-none admin-meta"
+      : "admin-snap";
   const body = rows
     .map(
       (r) =>
-        `<div class="mono"><span class="k">${esc(r[0])}</span>${esc(r[1])}</div>`,
+        `<div class="admin-mono"><span class="admin-k">${esc(r[0])}</span>${esc(r[1])}</div>`,
     )
     .join("");
   return `<div class="${cls}">${body}</div>`;
@@ -1504,7 +1612,7 @@ function reviewIndependenceBand(p) {
     const rows = blocked
       .map(
         (b) =>
-          `<div class="mono meta">${esc(b.producer)} ⇄ ${esc(b.reviewer)} · ${esc(b.code)}</div>${esc(b.reason)}`,
+          `<div class="admin-mono admin-meta">${esc(b.producer)} ⇄ ${esc(b.reviewer)} · ${esc(b.code)}</div>${esc(b.reason)}`,
       )
       .join("");
     html += `<details><summary>哪 ${esc(blocked.length)} 个配对会被拦（原因原文来自服务端判据）</summary>${rows}</details>`;
@@ -1550,7 +1658,7 @@ function edgeChip(e) {
   const gate = e.review_gate;
   const label =
     gate === true ? "已门控" : gate === false ? "无门控" : "门控未知";
-  return `<span class="edge mono">${esc(e.from)} → ${esc(e.to)} · ${label}</span>`;
+  return `<span class="admin-edge admin-mono">${esc(e.from)} → ${esc(e.to)} · ${label}</span>`;
 }
 
 /**
@@ -1583,14 +1691,14 @@ function approvalCard(a, nowMs, compact, isDecision = true) {
   // 于是"重渲染后把焦点还到这一张卡"有地方落（没有这一发，focus() 落在
   // 一个不可聚焦的 div 上 = 静默回到 body，恢复这一手等于没写），
   // 而 Tab 序列一个字都没变 —— 不会把人从按钮上甩到卡根去。
-  return `<div class="card${amber ? " need" : ""}${!decided && !isDecision ? " flag" : ""}" data-approval-id="${esc(a.id)}" tabindex="-1">
-    <div class="row">
-      ${decided ? "" : `<label class="meta" style="display:flex;align-items:center;gap:4px"><input type="checkbox" data-batch-pick="${esc(a.id)}" />批量</label>`}
-      <span class="pill ${decided ? statusClass(a.status === "approved" ? "delivered" : "rejected") : amber ? "s-amber" : "s-gray"}">${esc(a.status)}</span>
-      <strong class="grow">${esc(a.summary)}</strong>
+  return `<div class="admin-card${amber ? " admin-need" : ""}${!decided && !isDecision ? " admin-flag" : ""}" data-approval-id="${esc(a.id)}" tabindex="-1">
+    <div class="admin-row">
+      ${decided ? "" : `<label class="admin-meta" style="display:flex;align-items:center;gap:4px"><input type="checkbox" data-batch-pick="${esc(a.id)}" />批量</label>`}
+      <span class="admin-pill ${decided ? statusClass(a.status === "approved" ? "delivered" : "rejected") : amber ? "admin-s-amber" : "admin-s-gray"}">${esc(a.status)}</span>
+      <strong class="admin-grow tw:text-balance">${esc(a.summary)}</strong>
     </div>
-    <div class="meta" style="margin-top:4px">
-      ${esc(a.approval_type)} · 任务 <span class="mono">${esc(a.task_id ?? "—")}</span> · 等了 ${esc(fmtAgo(a.created_at, nowMs))}
+    <div class="admin-meta" style="margin-top:4px">
+      ${esc(a.approval_type)} · 任务 <span class="admin-mono">${esc(a.task_id ?? "—")}</span> · 等了 ${esc(fmtAgo(a.created_at, nowMs))}
       ${!decided && !isDecision ? " · <b>运营事件</b>（非战略决策，§7.4）" : ""}
       ${a.timeout_at ? ` · 超时点 ${esc(fmtDate(a.timeout_at))}（${esc(a.timeout_behavior ?? "未声明")}）` : ""}
       ${evidenceLine(a)}
@@ -1608,16 +1716,16 @@ function approvalCard(a, nowMs, compact, isDecision = true) {
       !compact
         ? `<details style="margin-top:8px" data-snap="${esc(a.id)}">
              <summary>参数快照</summary>
-             <div data-snap-slot="${esc(a.id)}"><div class="snap-none meta">载入中…</div></div>
+             <div data-snap-slot="${esc(a.id)}"><div class="admin-snap-none admin-meta">载入中…</div></div>
            </details>`
         : ""
     }
     ${
       !compact && (a.recommendation || a.escalation_reason)
         ? `<details style="margin-top:8px"><summary>推荐理由 / 升级原因</summary>
-           <div class="meta" style="margin-top:6px">${esc(a.recommendation ?? "（无建议）")}</div>
-           ${a.escalation_reason ? `<div class="meta">升级原因：${esc(a.escalation_reason)}</div>` : ""}
-           ${a.recommendation_source ? `<div class="meta">建议来源：${esc(a.recommendation_source)}</div>` : ""}
+           <div class="admin-meta" style="margin-top:6px">${esc(a.recommendation ?? "（无建议）")}</div>
+           ${a.escalation_reason ? `<div class="admin-meta">升级原因：${esc(a.escalation_reason)}</div>` : ""}
+           ${a.recommendation_source ? `<div class="admin-meta">建议来源：${esc(a.recommendation_source)}</div>` : ""}
          </details>`
         : ""
     }
@@ -1631,16 +1739,16 @@ function approvalCard(a, nowMs, compact, isDecision = true) {
  * 这里刻意不提前把它拦成灰按钮：让 Hub 说那句话。渲块替前端圆场 = 同一句话
  * 有两份实现，而其中一份（浏览器里那份）可以被绕过。
  */
-const decideRow = (id) => `<div class="row" style="margin-top:10px">
+const decideRow = (id) => `<div class="admin-row" style="margin-top:10px">
     <select data-act="${esc(id)}">
       <option value="approve">批准</option>
       <option value="reject_with_comment">打回并附意见</option>
       <option value="defer_deep_review">稍后深度审阅</option>
     </select>
-    <input type="text" data-note="${esc(id)}" placeholder="意见（打回时必填，会作为约束写回节点）" class="grow" />
-    <button class="btn primary" data-decide="${esc(id)}">决定</button>
+    <input type="text" data-note="${esc(id)}" placeholder="意见（打回时必填，会作为约束写回节点）" class="admin-grow" />
+    <button class="admin-btn admin-primary" data-decide="${esc(id)}">决定</button>
   </div>
-  <div class="err" data-res="${esc(id)}" style="margin-top:6px"></div>`;
+  <div class="admin-err" data-res="${esc(id)}" style="margin-top:6px"></div>`;
 
 function bindDecide() {
   for (const b of $view.querySelectorAll("[data-decide]")) {
@@ -1852,7 +1960,7 @@ function orgDragEnabled(mode) {
 /** 组织页模式条 —— 纯函数：一句话模式 + 「编辑 / 退出编辑」按钮。 */
 function orgModeBand(mode) {
   const on = mode === "edit";
-  return `<div class="meta" data-orgmode style="margin-bottom:8px"><button class="btn" data-org-toggle>${on ? "退出编辑" : "编辑"}</button> ${on ? "编辑模式 · 拖拽改汇报关系，提交后生效（松手不出网，服务端判合法才落）" : "查看模式 · 拖拽关闭（改汇报关系：点「编辑」，或用下方表单）"}</div>`;
+  return `<div class="admin-meta" data-orgmode style="margin-bottom:8px"><button class="admin-btn" data-org-toggle>${on ? "退出编辑" : "编辑"}</button> ${on ? "编辑模式 · 拖拽改汇报关系，提交后生效（松手不出网，服务端判合法才落）" : "查看模式 · 拖拽关闭（改汇报关系：点「编辑」，或用下方表单）"}</div>`;
 }
 
 /** 切换查看/编辑：只翻模块状态并重渲（模式不碰数据）。 */
@@ -1882,7 +1990,7 @@ async function renderOrg() {
   // 审阅独立性那一格放在【空图分支之前】：空图也要能说「算不出」，
   // 而不是因为图上没人就整段消失（那样「没有读数」与「没有格子」看不出区别）。
   html += reviewIndependenceBand(data.review_independence);
-  html += `<div class="toolbar"><button class="btn" data-reload>↻ 刷新</button></div>`;
+  html += `<div class="admin-toolbar"><button class="admin-btn" data-reload>↻ 刷新</button></div>`;
   html += orgModeBand(orgMode);
   if (keys.length === 0) {
     html += banner(
@@ -1899,19 +2007,19 @@ async function renderOrg() {
   // 帮助文字要能自证与【当前模式】一致：查看模式还写着「拖一张卡」就是它自己拆台。
   const cols = hierarchyColumns(nodes);
   html +=
-    `<div class="meta" style="margin-bottom:8px">${orgMode === "edit" ? "拖一张卡到另一张卡上 = 改它的汇报关系。松手不会直接改图：合法性（成环 / 深度）由服务端判，拒了就回弹并说明原因。键盘替代：下方表单。" : "查看模式：只能看组织结构与门控状态；想改汇报关系请先点上方「编辑」。"}</div>` +
-    `<div class="orgdrag">` +
+    `<div class="admin-meta" style="margin-bottom:8px">${orgMode === "edit" ? "拖一张卡到另一张卡上 = 改它的汇报关系。松手不会直接改图：合法性（成环 / 深度）由服务端判，拒了就回弹并说明原因。键盘替代：下方表单。" : "查看模式：只能看组织结构与门控状态；想改汇报关系请先点上方「编辑」。"}</div>` +
+    `<div class="admin-orgdrag">` +
     cols
       .map(
         (c) =>
-          `<p class="sect">${esc(c.label)}</p><div class="grid">` +
+          `<p class="admin-sect">${esc(c.label)}</p><div class="admin-grid">` +
           [...c.roles]
             .map((k) => {
               const n = nodes[k] ?? {};
-              return `<div class="node" data-role="${esc(k)}" tabindex="0"><div class="role">${esc(k)}</div>
-                <div class="meta">${esc(n.model_family ?? "未配模型")}</div>
-                <div class="rpto">${n.reports_to ? "↗ " + esc(n.reports_to) : "<b>CEO（顶层）</b>"}</div>
-                ${n.can_manage ? '<div class="tag">可管理</div>' : ""}</div>`;
+              return `<div class="admin-node" data-role="${esc(k)}" tabindex="0"><div class="admin-role">${esc(k)}</div>
+                <div class="admin-meta">${esc(n.model_family ?? "未配模型")}</div>
+                <div class="admin-rpto">${n.reports_to ? "↗ " + esc(n.reports_to) : "<b>CEO（顶层）</b>"}</div>
+                ${n.can_manage ? '<div class="admin-tag">可管理</div>' : ""}</div>`;
             })
             .join("") +
           `</div>`,
@@ -1919,33 +2027,33 @@ async function renderOrg() {
       .join("") +
     `</div>` +
     // 拖完先落在这行待提交（change_summary 必填，服务端每版都要答得出「改了什么」）。
-    `<div class="card dragrow hidden" data-dragrow>
-       <div class="row">
-         <span class="grow" data-dragtext></span>
-         <input type="text" data-drag-summary class="grow" placeholder="改了什么（change_summary，必填）" />
-         <button class="btn primary" data-drag-commit>提交</button>
-         <button class="btn" data-drag-cancel>取消</button>
+    `<div class="admin-card admin-dragrow admin-hidden" data-dragrow>
+       <div class="admin-row">
+         <span class="admin-grow" data-dragtext></span>
+         <input type="text" data-drag-summary class="admin-grow" placeholder="改了什么（change_summary，必填）" />
+         <button class="admin-btn admin-primary" data-drag-commit>提交</button>
+         <button class="admin-btn" data-drag-cancel>取消</button>
        </div>
        <div data-drag-result style="margin-top:6px"></div>
      </div>
-     <div class="meta" data-dragmsg style="margin-top:4px"></div>
-     <p class="sect" style="margin-top:18px">委派边（谁能把活交给谁 · ${esc(edges.length)} 条）</p>
+     <div class="admin-meta" data-dragmsg style="margin-top:4px"></div>
+     <p class="admin-sect" style="margin-top:18px">委派边（谁能把活交给谁 · ${esc(edges.length)} 条）</p>
      <div>` +
     // 门控状态挂在 chip 上（round339）：那个布尔一直在请求体与库里，而屏幕以前不读它。
     (edges.length ? edges.map((e) => edgeChip(e)).join("") : "—") +
     `</div>
      <details style="margin-top:14px"><summary>新增一个角色（POST /org · add_node）</summary>
-       <div class="row" style="margin-top:8px;align-items:flex-start">
+       <div class="admin-row" style="margin-top:8px;align-items:flex-start">
          <input type="text" data-new-role placeholder="role_id（必填，图里的键就是它）" style="width:190px" />
-         <span class="meta">报给</span>
+         <span class="admin-meta">报给</span>
          <select data-new-parent><option value="">（顶层 · 无上级）</option>${keys.map((k) => `<option>${esc(k)}</option>`).join("")}</select>
          <input type="text" data-new-family placeholder="model_family（可空：留空=未配模型，判定上会拦）" style="width:230px" />
-         <label class="meta"><input type="checkbox" data-new-manage /> 可接收汇报（can_manage）</label>
-         <input type="text" data-new-summary class="grow" placeholder="改了什么（change_summary，必填）" />
-         <button class="btn primary" data-add-node>提交</button>
+         <label class="admin-meta"><input type="checkbox" data-new-manage /> 可接收汇报（can_manage）</label>
+         <input type="text" data-new-summary class="admin-grow" placeholder="改了什么（change_summary，必填）" />
+         <button class="admin-btn admin-primary" data-add-node>提交</button>
        </div>
        <div data-new-result style="margin-top:6px"></div>
-       <p class="meta" style="margin-top:6px">
+       <p class="admin-meta" style="margin-top:6px">
          add_node 只把人放进图里【不挂委派边】（契约 ②：边另走 add_edge，那条路上才有
          门控 / 自审 / 同家族 / 升级可达 / 深度这一套 L2 判据）。新角色进图后用下面
          「加一条委派边」那一栏挂边。契约里没有删除节点这一档，所以这里也不画删除按钮：
@@ -1953,16 +2061,16 @@ async function renderOrg() {
        </p>
      </details>
      <details style="margin-top:14px"><summary>加一条委派边（POST /org · add_edge · 全套 L2 判据在服务端）</summary>
-       <div class="row" style="margin-top:8px;align-items:flex-start">
+       <div class="admin-row" style="margin-top:8px;align-items:flex-start">
          <select data-edge-from>${keys.map((k) => `<option>${esc(k)}</option>`).join("")}</select>
-         <span class="meta">产出 → 审阅</span>
+         <span class="admin-meta">产出 → 审阅</span>
          <select data-edge-to>${keys.map((k) => `<option>${esc(k)}</option>`).join("")}</select>
-         <label class="meta"><input type="checkbox" data-edge-gate checked /> 审阅门控（review_gate）</label>
-         <input type="text" data-edge-summary class="grow" placeholder="改了什么（change_summary，必填）" />
-         <button class="btn primary" data-add-edge>提交</button>
+         <label class="admin-meta"><input type="checkbox" data-edge-gate checked /> 审阅门控（review_gate）</label>
+         <input type="text" data-edge-summary class="admin-grow" placeholder="改了什么（change_summary，必填）" />
+         <button class="admin-btn admin-primary" data-add-edge>提交</button>
        </div>
        <div data-edge-result style="margin-top:6px"></div>
-       <p class="meta" style="margin-top:6px">
+       <p class="admin-meta" style="margin-top:6px">
          勾选框【不勾】= 显式声明「这条边上的产出没人看」（review_gate: false），
          服务端以 missing_review_gate 拒这一发 —— 它是【第一个】能失败的判据
          （只有「角色不在图里」排在它前面），所以不勾时升级可达 / 自审 / 同家族
@@ -1972,15 +2080,15 @@ async function renderOrg() {
        </p>
      </details>
      <details style="margin-top:14px"><summary>改一条汇报关系（POST /org，变更前强制备份 · 也是拖拽的键盘替代）</summary>
-       <div class="row" style="margin-top:8px;align-items:flex-start">
+       <div class="admin-row" style="margin-top:8px;align-items:flex-start">
          <select data-child>${keys.map((k) => `<option>${esc(k)}</option>`).join("")}</select>
-         <span class="meta">改报给</span>
+         <span class="admin-meta">改报给</span>
          <select data-parent>${keys
            .filter((k) => k !== "ceo")
            .map((k) => `<option>${esc(k)}</option>`)
            .join("")}</select>
-         <input type="text" data-summary class="grow" placeholder="改了什么（change_summary，必填）" />
-         <button class="btn primary" data-commit>提交</button>
+         <input type="text" data-summary class="admin-grow" placeholder="改了什么（change_summary，必填）" />
+         <button class="admin-btn admin-primary" data-commit>提交</button>
        </div>
        <div data-result style="margin-top:6px"></div>
      </details>
@@ -2024,7 +2132,7 @@ function bindOrgDrag(nodes, edges) {
     dragMsg.textContent = t;
   };
   const hide = () => {
-    dragRow.classList.add("hidden");
+    dragRow.classList.add("admin-hidden");
     pending = null;
   };
   dragRow.querySelector("[data-drag-cancel]").addEventListener("click", hide);
@@ -2032,8 +2140,8 @@ function bindOrgDrag(nodes, edges) {
     .querySelector("[data-drag-commit]")
     .addEventListener("click", () => void commitDrag());
   const clearMarks = () => {
-    for (const c of $view.querySelectorAll(".orgdrag .node"))
-      c.classList.remove("dropok", "dropbad");
+    for (const c of $view.querySelectorAll(".admin-orgdrag .admin-node"))
+      c.classList.remove("admin-dropok", "admin-dropbad");
   };
   // 结构上必挂的两种（本地即时提示用；服务端仍是权威）
   const wouldCycle = (child, parent) => {
@@ -2048,9 +2156,9 @@ function bindOrgDrag(nodes, edges) {
   };
   const propose = (child, parent) => {
     pending = { child, parent };
-    dragRow.classList.remove("hidden");
+    dragRow.classList.remove("admin-hidden");
     dragRow.querySelector("[data-dragtext]").innerHTML =
-      `把 <b>${esc(child)}</b> 从 <span class="mono">${esc(nodes[child]?.reports_to ?? "顶层")}</span> 改报给 <b>${esc(parent)}</b>`;
+      `把 <b>${esc(child)}</b> 从 <span class="admin-mono">${esc(nodes[child]?.reports_to ?? "顶层")}</span> 改报给 <b>${esc(parent)}</b>`;
     dragRow.querySelector("[data-drag-summary]").value = "";
     dragRow.querySelector("[data-drag-result]").innerHTML = "";
     dragRow.querySelector("[data-drag-summary]").focus();
@@ -2059,7 +2167,7 @@ function bindOrgDrag(nodes, edges) {
 
   // 命中测试：ghost 是 pointer-events:none，elementFromPoint 直接穿过去落在卡片上。
   const hit = (x, y, child) => {
-    const el = document.elementFromPoint(x, y)?.closest(".orgdrag .node");
+    const el = document.elementFromPoint(x, y)?.closest(".admin-orgdrag .admin-node");
     if (!el || el.dataset.role === child) return { el: null };
     const parent = el.dataset.role;
     if (wouldCycle(child, parent))
@@ -2067,7 +2175,7 @@ function bindOrgDrag(nodes, edges) {
     return { el, parent };
   };
 
-  for (const card of $view.querySelectorAll(".orgdrag .node")) {
+  for (const card of $view.querySelectorAll(".admin-orgdrag .admin-node")) {
     card.addEventListener("pointerdown", (e) => {
       // 双保险：renderOrg 只在编辑模式才 bindOrgDrag，这里再挡一层 ——
       // 万一将来有人把绑定挪回无条件，查看模式下拖不拖得动仍由这格说了算。
@@ -2084,25 +2192,25 @@ function bindOrgDrag(nodes, edges) {
           if (Math.hypot(ev.clientX - x0, ev.clientY - y0) < 4) return; // 4px 内不算拖，免得误伤点击
           const r = card.getBoundingClientRect();
           ghost = document.createElement("div");
-          ghost.className = "org-ghost";
+          ghost.className = "admin-org-ghost";
           ghost.style.left = r.left + "px";
           ghost.style.top = r.top + "px";
           ghost.style.width = r.width + "px";
           ghost.textContent = "↪ " + child;
           document.body.appendChild(ghost);
-          card.classList.add("dragging");
+          card.classList.add("admin-dragging");
         }
         ghost.style.transform = `translate(${ev.clientX - x0}px, ${ev.clientY - y0}px)`;
         clearMarks();
         const t = hit(ev.clientX, ev.clientY, child);
-        if (t.el) t.el.classList.add(t.parent ? "dropok" : "dropbad");
+        if (t.el) t.el.classList.add(t.parent ? "admin-dropok" : "admin-dropbad");
       };
       const up = (ev) => {
         card.removeEventListener("pointermove", move);
         card.removeEventListener("pointerup", up);
         card.removeEventListener("pointercancel", cancel);
         ghost?.remove();
-        card.classList.remove("dragging");
+        card.classList.remove("admin-dragging");
         clearMarks();
         if (!ghost) return; // 没拖过 = 一次普通点击，什么都不做
         const t = hit(ev.clientX, ev.clientY, child);
@@ -2118,7 +2226,7 @@ function bindOrgDrag(nodes, edges) {
         card.removeEventListener("pointerup", up);
         card.removeEventListener("pointercancel", cancel);
         ghost?.remove();
-        card.classList.remove("dragging");
+        card.classList.remove("admin-dragging");
         clearMarks();
       };
       card.addEventListener("pointermove", move);
@@ -2137,7 +2245,7 @@ function bindOrgDrag(nodes, edges) {
       if (e.key !== "Enter") return;
       if (!dragPicked) {
         dragPicked = role;
-        card.classList.add("pick");
+        card.classList.add("admin-pick");
         say(`已选中 ${role}，Tab 到新的上级再按 Enter 确认（Esc 取消）`);
       } else if (dragPicked === role) {
         unpick();
@@ -2154,8 +2262,8 @@ function bindOrgDrag(nodes, edges) {
   }
   function unpick() {
     dragPicked = null;
-    for (const c of $view.querySelectorAll(".orgdrag .node.pick"))
-      c.classList.remove("pick");
+    for (const c of $view.querySelectorAll(".admin-orgdrag .admin-node.admin-pick"))
+      c.classList.remove("admin-pick");
   }
 
   async function commitDrag() {
@@ -2182,15 +2290,15 @@ function rejectHtml(status, data) {
     const lines = issues
       .map(
         (i) =>
-          `<div class="err">· ${esc(i.path ? [].concat(i.path).join(".") : "?")}：${esc(i.message ?? JSON.stringify(i))}</div>`,
+          `<div class="admin-err">· ${esc(i.path ? [].concat(i.path).join(".") : "?")}：${esc(i.message ?? JSON.stringify(i))}</div>`,
       )
       .join("");
-    return `<div class="err">✖ ${esc(status)} 服务端拒了 ${esc(issues.length)} 条（图没动）：</div>${lines}`;
+    return `<div class="admin-err">✖ ${esc(status)} 服务端拒了 ${esc(issues.length)} 条（图没动）：</div>${lines}`;
   }
   const reason = data?.reason ?? data?.error;
   if (reason)
-    return `<div class="err">✖ ${esc(status)} 服务端拒了（图没动）：${esc(reason)}</div>`;
-  return `<div class="err">✖ ${esc(status)} ${esc(JSON.stringify(data))}</div>`;
+    return `<div class="admin-err">✖ ${esc(status)} 服务端拒了（图没动）：${esc(reason)}</div>`;
+  return `<div class="admin-err">✖ ${esc(status)} ${esc(JSON.stringify(data))}</div>`;
 }
 
 /**
@@ -2203,7 +2311,7 @@ function rejectHtml(status, data) {
  */
 async function submitOrgChange(nodes, edges, change, summary, out) {
   if (!summary) {
-    out.innerHTML = `<span class="err">change_summary 必填 —— 版本历史里每一版都该答得出「改了什么」</span>`;
+    out.innerHTML = `<span class="admin-err">change_summary 必填 —— 版本历史里每一版都该答得出「改了什么」</span>`;
     return;
   }
   const { status, data } = await api("POST", "/org", {
@@ -2212,7 +2320,7 @@ async function submitOrgChange(nodes, edges, change, summary, out) {
     change_summary: summary,
   });
   if (status === 200) {
-    out.innerHTML = `<span class="ok">✔ 已提交 graph_version ${esc(data.graph_version)}${data.needs_confirmation ? " · " + esc(data.needs_confirmation) : ""}，正在刷新</span>`;
+    out.innerHTML = `<span class="admin-ok">✔ 已提交 graph_version ${esc(data.graph_version)}${data.needs_confirmation ? " · " + esc(data.needs_confirmation) : ""}，正在刷新</span>`;
     todayCache = null;
     setTimeout(() => void renderOrg(), 500);
   } else {
@@ -2227,7 +2335,7 @@ async function commitOrg(nodes, edges) {
   const summary = $view.querySelector("[data-summary]").value.trim();
   const out = $view.querySelector("[data-result]");
   if (child === parent) {
-    out.innerHTML = `<span class="err">不能报给自己（自环，L1 会拒）</span>`;
+    out.innerHTML = `<span class="admin-err">不能报给自己（自环，L1 会拒）</span>`;
     return;
   }
   await submitOrgChange(
@@ -2244,7 +2352,7 @@ async function addOrgNode(nodes, edges) {
   const roleId = $view.querySelector("[data-new-role]").value.trim();
   const out = $view.querySelector("[data-new-result]");
   if (!roleId) {
-    out.innerHTML = `<span class="err">role_id 必填</span>`;
+    out.innerHTML = `<span class="admin-err">role_id 必填</span>`;
     return;
   }
   const family = $view.querySelector("[data-new-family]").value.trim();
@@ -2272,7 +2380,7 @@ async function addOrgEdge(nodes, edges) {
   const to = $view.querySelector("[data-edge-to]").value;
   const out = $view.querySelector("[data-edge-result]");
   if (from === to) {
-    out.innerHTML = `<span class="err">自己审自己（自审，L2 会拒）</span>`;
+    out.innerHTML = `<span class="admin-err">自己审自己（自审，L2 会拒）</span>`;
     return;
   }
   await submitOrgChange(
@@ -2327,18 +2435,18 @@ async function renderCharter() {
   if (!charterRole || !keys.includes(charterRole)) charterRole = keys[0];
 
   $view.innerHTML = `
-    <div class="charter-cols">
-      <div class="rolelist">
-        <p class="sect">角色 · ${esc(keys.length)}</p>
-        ${keys.map((k) => `<button class="btn rolebtn${k === charterRole ? " act" : ""}" data-role="${esc(k)}">${esc(k)}</button>`).join("")}
+    <div class="admin-charter-cols">
+      <div class="admin-rolelist">
+        <p class="admin-sect">角色 · ${esc(keys.length)}</p>
+        ${keys.map((k) => `<button class="admin-btn admin-rolebtn${k === charterRole ? " admin-act" : ""}" data-role="${esc(k)}">${esc(k)}</button>`).join("")}
       </div>
-      <div id="charter-panel"><div class="banner">载入中…</div></div>
+      <div id="charter-panel"><div class="admin-banner">载入中…</div></div>
     </div>`;
   for (const b of $view.querySelectorAll("[data-role]")) {
     b.addEventListener("click", () => {
       charterRole = b.dataset.role;
-      for (const o of $view.querySelectorAll(".rolebtn"))
-        o.classList.toggle("act", o === b);
+      for (const o of $view.querySelectorAll(".admin-rolebtn"))
+        o.classList.toggle("admin-act", o === b);
       void loadCharter(nodes);
     });
   }
@@ -2355,7 +2463,7 @@ const joinLines = (arr) => (Array.isArray(arr) ? arr : []).join("\n");
 
 async function loadCharter(nodes) {
   const panel = document.getElementById("charter-panel");
-  panel.innerHTML = `<div class="banner">载入中…</div>`;
+  panel.innerHTML = `<div class="admin-banner">载入中…</div>`;
   const { status, data } = await api(
     "GET",
     "/charter/" + encodeURIComponent(charterRole),
@@ -2382,7 +2490,7 @@ async function loadCharter(nodes) {
     `<textarea data-f="${name}" rows="${rows ?? 3}" style="width:100%" placeholder="${esc(ph)}">${esc(val)}</textarea>`;
   const emptyAc = cfg === null;
   panel.innerHTML = `
-    <div class="card">
+    <div class="admin-card">
       <h3>岗位书 · ${esc(charterRole)}</h3>
       ${
         cfg === null
@@ -2395,7 +2503,7 @@ async function loadCharter(nodes) {
               `已有岗位书 version ${esc(cfg.version)}。表单没覆盖的字段（stance / dissent_rights / search_policy / harness_defaults 等）会原样保留提交。`,
             )
       }
-      <div class="grid" style="grid-template-columns:1fr 1fr;margin-top:10px">
+      <div class="admin-grid" style="grid-template-columns:1fr 1fr;margin-top:10px">
         <label>role_id<input type="text" data-f="role_id" value="${esc(cfg?.role_id ?? charterRole)}" style="width:100%" /></label>
         <label>display_name（显示名）<input type="text" data-f="display_name" value="${esc(cfg?.display_name ?? "")}" style="width:100%" /></label>
         <label>version（正整数）<input type="text" data-f="version" value="${esc(cfg?.version ?? 1)}" style="width:100%" /></label>
@@ -2422,13 +2530,13 @@ async function loadCharter(nodes) {
       </div>
     </div>
 
-    <div class="card"><p class="sect">honesty_boundaries（诚实边界 · 一行一条 · 至少一条）</p>
+    <div class="admin-card"><p class="admin-sect">honesty_boundaries（诚实边界 · 一行一条 · 至少一条）</p>
       ${ta("honesty_boundaries", joinLines(cfg?.honesty_boundaries), "例：不确定时说不确定，不编造数字")}
       <div data-err="honesty_boundaries"></div>
     </div>
 
-    <div class="card"><p class="sect">acceptance_criteria（验收标准 · 一行一条 · 至少一条）${emptyAc ? ' <b style="color:var(--ink)">必须由你本人写</b>' : ""}</p>
-      <div class="meta" style="margin-bottom:6px">每行格式：<span class="mono">condition | action(reject/escalate) | target(escalate 必填，可留空) | message</span></div>
+    <div class="admin-card"><p class="admin-sect">acceptance_criteria（验收标准 · 一行一条 · 至少一条）${emptyAc ? ' <b style="color:var(--ink)">必须由你本人写</b>' : ""}</p>
+      <div class="admin-meta" style="margin-bottom:6px">每行格式：<span class="admin-mono">condition | action(reject/escalate) | target(escalate 必填，可留空) | message</span></div>
       ${ta(
         "acceptance_criteria",
         emptyAc
@@ -2444,34 +2552,34 @@ async function loadCharter(nodes) {
       <div data-err="acceptance_criteria"></div>
     </div>
 
-    <div class="card"><div class="grid" style="grid-template-columns:1fr 1fr">
-      <div><p class="sect">forbidden_actions（一行一条）</p>${ta("forbidden_actions", joinLines(cfg?.forbidden_actions), "")}<div data-err="forbidden_actions"></div></div>
-      <div><p class="sect">tool_permissions（一行一条）</p>${ta("tool_permissions", joinLines(cfg?.tool_permissions), "")}<div data-err="tool_permissions"></div></div>
-      <div><p class="sect">decision_scope.autonomous（一行一条）</p>${ta("ds_autonomous", joinLines(cfg?.decision_scope?.autonomous), "")}</div>
-      <div><p class="sect">decision_scope.requires_consultation（一行一条）</p>${ta("ds_consultation", joinLines(cfg?.decision_scope?.requires_consultation), "")}</div>
-      <div><p class="sect">decision_scope.forbidden（一行一条）</p>${ta("ds_forbidden", joinLines(cfg?.decision_scope?.forbidden), "")}<div data-err="decision_scope"></div></div>
-      <div><p class="sect">escalation_triggers（一行一条 · 裸串或 JSON 对象）</p>${ta("escalation_triggers", (cfg?.escalation_triggers ?? []).map((t) => (typeof t === "string" ? t : JSON.stringify(t))).join("\n"), '例：涉及对外发布 | {"condition":"...","target":"ceo","action":"create_approval_card"}', 3)}<div data-err="escalation_triggers"></div></div>
+    <div class="admin-card"><div class="admin-grid" style="grid-template-columns:1fr 1fr">
+      <div><p class="admin-sect">forbidden_actions（一行一条）</p>${ta("forbidden_actions", joinLines(cfg?.forbidden_actions), "")}<div data-err="forbidden_actions"></div></div>
+      <div><p class="admin-sect">tool_permissions（一行一条）</p>${ta("tool_permissions", joinLines(cfg?.tool_permissions), "")}<div data-err="tool_permissions"></div></div>
+      <div><p class="admin-sect">decision_scope.autonomous（一行一条）</p>${ta("ds_autonomous", joinLines(cfg?.decision_scope?.autonomous), "")}</div>
+      <div><p class="admin-sect">decision_scope.requires_consultation（一行一条）</p>${ta("ds_consultation", joinLines(cfg?.decision_scope?.requires_consultation), "")}</div>
+      <div><p class="admin-sect">decision_scope.forbidden（一行一条）</p>${ta("ds_forbidden", joinLines(cfg?.decision_scope?.forbidden), "")}<div data-err="decision_scope"></div></div>
+      <div><p class="admin-sect">escalation_triggers（一行一条 · 裸串或 JSON 对象）</p>${ta("escalation_triggers", (cfg?.escalation_triggers ?? []).map((t) => (typeof t === "string" ? t : JSON.stringify(t))).join("\n"), '例：涉及对外发布 | {"condition":"...","target":"ceo","action":"create_approval_card"}', 3)}<div data-err="escalation_triggers"></div></div>
     </div></div>
 
-    <div class="card"><div class="row">
+    <div class="admin-card"><div class="admin-row">
       <label>judgment_mode（必填：契约里它是 required，不是可选）${sel([...JUDGMENT_MODES.map((m) => ({ v: m, t: m }))], cfg?.judgment_mode?.type ?? JUDGMENT_MODES[0], "jm_type")}</label>
     </div>
-      <div class="grid" style="grid-template-columns:1fr 1fr 1fr;margin-top:8px">
-        <div><p class="sect">strict_rules</p>${ta("jm_strict", joinLines(cfg?.judgment_mode?.strict_rules), "", 2)}</div>
-        <div><p class="sect">bounded_judgment</p>${ta("jm_bounded", joinLines(cfg?.judgment_mode?.bounded_judgment), "", 2)}</div>
-        <div><p class="sect">full_discretion</p>${ta("jm_discretion", joinLines(cfg?.judgment_mode?.full_discretion), "", 2)}</div>
+      <div class="admin-grid" style="grid-template-columns:1fr 1fr 1fr;margin-top:8px">
+        <div><p class="admin-sect">strict_rules</p>${ta("jm_strict", joinLines(cfg?.judgment_mode?.strict_rules), "", 2)}</div>
+        <div><p class="admin-sect">bounded_judgment</p>${ta("jm_bounded", joinLines(cfg?.judgment_mode?.bounded_judgment), "", 2)}</div>
+        <div><p class="admin-sect">full_discretion</p>${ta("jm_discretion", joinLines(cfg?.judgment_mode?.full_discretion), "", 2)}</div>
       </div>
       <div data-err="judgment_mode"></div>
     </div>
 
-    <div class="card">
-      <div class="row">
-        <input type="text" data-f="change_summary" class="grow" placeholder="change_summary（必填：这一版改了什么）" />
-        <button class="btn primary" data-save>${cfg === null ? "创建" : "提交新版本"}</button>
+    <div class="admin-card">
+      <div class="admin-row">
+        <input type="text" data-f="change_summary" class="admin-grow" placeholder="change_summary（必填：这一版改了什么）" />
+        <button class="admin-btn admin-primary" data-save>${cfg === null ? "创建" : "提交新版本"}</button>
       </div>
       <div style="margin-top:8px" data-save-result></div>
     </div>
-    ${cfg ? `<details class="lowcontrast"><summary>这份 config 原文（表单没覆盖的字段以这里为准，提交时原样保留）</summary><pre>${esc(JSON.stringify(cfg, null, 2))}</pre></details>` : ""}`;
+    ${cfg ? `<details class="admin-lowcontrast"><summary>这份 config 原文（表单没覆盖的字段以这里为准，提交时原样保留）</summary><pre>${esc(JSON.stringify(cfg, null, 2))}</pre></details>` : ""}`;
   panel
     .querySelector("[data-save]")
     .addEventListener("click", () => void saveCharter(cfg));
@@ -2561,19 +2669,19 @@ async function saveCharter(base) {
   // 它和「验收标准行格式不对」是两类问题，落点也不同，所以提前返回，别去碰
   // cfg.acceptance_criteria —— 那是 null。
   if (cfg === null) {
-    out.innerHTML = `<span class="err">${esc(acErrors[0] ?? "表单不完整。")}</span>`;
+    out.innerHTML = `<span class="admin-err">${esc(acErrors[0] ?? "表单不完整。")}</span>`;
     return;
   }
   let blocked = "";
   if (!summary) blocked = "change_summary 必填。";
   if (acErrors.length) {
     panel.querySelector('[data-err="acceptance_criteria"]').innerHTML = acErrors
-      .map((m) => `<div class="err">· ${esc(m)}</div>`)
+      .map((m) => `<div class="admin-err">· ${esc(m)}</div>`)
       .join("");
     blocked += " 验收标准有行格式不对。";
   }
   if (blocked) {
-    out.innerHTML = `<span class="err">${esc(blocked.trim())}</span>`;
+    out.innerHTML = `<span class="admin-err">${esc(blocked.trim())}</span>`;
     return;
   }
 
@@ -2586,7 +2694,7 @@ async function saveCharter(base) {
     },
   );
   if (status === 200) {
-    out.innerHTML = `<span class="ok">✔ 已提交 version ${esc(data.version)}（charter ${esc(data.charter_id)} · 审计 #${esc(data.audit_seq)}）</span>`;
+    out.innerHTML = `<span class="admin-ok">✔ 已提交 version ${esc(data.version)}（charter ${esc(data.charter_id)} · 审计 #${esc(data.audit_seq)}）</span>`;
     const fresh = await orgNodesForCharter(); // 重拉一次：reports_to 的下拉要用最新图
     setTimeout(() => void loadCharter(fresh), 400);
     return;
@@ -2594,7 +2702,7 @@ async function saveCharter(base) {
   // 422：按 path 第一段把每条 issue 钉回对应输入框旁边；认不出的落全局区。
   const issues = Array.isArray(data?.issues) ? data.issues : null;
   const line = (i) =>
-    `<div class="err">· ${esc([].concat(i.path ?? "?").join("."))}：${esc(i.message ?? JSON.stringify(i))}</div>`;
+    `<div class="admin-err">· ${esc([].concat(i.path ?? "?").join("."))}：${esc(i.message ?? JSON.stringify(i))}</div>`;
   const global = [];
   for (const i of issues ?? []) {
     const head = [].concat(i.path ?? []).map(String)[0];
@@ -2603,9 +2711,9 @@ async function saveCharter(base) {
     else global.push(line(i));
   }
   if (issues?.length) {
-    out.innerHTML = `<span class="err">✖ 422：${esc(issues.length)} 条字段问题，已标在对应输入框旁边。</span>${global.join("")}`;
+    out.innerHTML = `<span class="admin-err">✖ 422：${esc(issues.length)} 条字段问题，已标在对应输入框旁边。</span>${global.join("")}`;
   } else {
-    out.innerHTML = `<span class="err">✖ ${esc(status)} ${esc(data?.error ?? JSON.stringify(data))}</span>`;
+    out.innerHTML = `<span class="admin-err">✖ ${esc(status)} ${esc(data?.error ?? JSON.stringify(data))}</span>`;
   }
 }
 async function orgNodesForCharter() {
@@ -2666,41 +2774,41 @@ async function renderBudget() {
         : 0;
     const over = limit > 0 && used >= limit;
     return `<tr>
-      <td class="mono">${esc(r.scope_type)}/${esc(r.scope_id)}</td>
+      <td class="admin-mono">${esc(r.scope_type)}/${esc(r.scope_id)}</td>
       <td>${esc(r.period)}</td>
-      <td class="mono">${limit > 0 ? esc(money(limit)) : "<b>未设</b>"}</td>
-      <td class="mono">${esc(money(used))}</td>
-      <td class="meter${over ? " over" : ""}" style="min-width:90px"><i style="width:${pct}%"></i></td>
+      <td class="admin-mono">${limit > 0 ? esc(money(limit)) : "<b>未设</b>"}</td>
+      <td class="admin-mono">${esc(money(used))}</td>
+      <td class="admin-meter${over ? " admin-over" : ""}" style="min-width:90px"><i style="width:${pct}%"></i></td>
       <td>${r.hard_stop ? "硬停" : "软限"}</td>
     </tr>`;
   };
   $view.innerHTML = `
-    <div class="card">
-      <div class="row">
-        <span class="meta mono">合计：已用 ${esc(money(totals.consumed_cents))} / 上限 ${esc(money(totals.limit_cents))}
+    <div class="admin-card">
+      <div class="admin-row">
+        <span class="admin-meta admin-mono">合计：已用 ${esc(money(totals.consumed_cents))} / 上限 ${esc(money(totals.limit_cents))}
           · 未设限额的角色 <b>${esc(unset)}</b>${unset > 0 ? " —— <b>这是「没设」，不是「是 0」</b>：那些角色此刻花钱没有任何上限拦着" : unset === 0 ? "（每个角色都至少设了一行）" : "（口径未给出）"}</span>
-        <button class="btn" data-reload>↻ 刷新</button>
+        <button class="admin-btn" data-reload>↻ 刷新</button>
       </div>
     </div>
     ${
       rows.length
-        ? `<div class="card"><table class="btable"><thead><tr>
+        ? `<div class="admin-card"><div class="admin-table-wrap"><table class="admin-btable"><thead><tr>
            <th>作用域</th><th>周期</th><th>上限</th><th>已用</th><th>进度</th><th>停法</th>
-         </tr></thead><tbody>${rows.map(rowHtml).join("")}</tbody></table></div>`
+         </tr></thead><tbody>${rows.map(rowHtml).join("")}</tbody></table></div></div>`
         : banner(
             "warn",
             "一行预算都没有 —— 是「没设」，不是「都是 0」。在下面的表单里设第一行。",
           )
     }
-    <div class="card">
-      <p class="sect">新增 / 改限额（POST /budget，同键覆盖）</p>
-      <div class="row">
+    <div class="admin-card">
+      <p class="admin-sect">新增 / 改限额（POST /budget，同键覆盖）</p>
+      <div class="admin-row">
         ${enumSel("scope_type", BUDGET_SCOPE_VALUES, "role", "scope_type")}
         <input type="text" data-f="scope_id" placeholder="scope_id（如角色 id）" style="width:160px" />
         ${enumSel("period", BUDGET_PERIOD_VALUES, "daily", "period")}
         <input type="text" data-f="limit_cents" placeholder="limit_cents（整数分）" style="width:150px" />
-        <label class="meta"><input type="checkbox" data-f="hard_stop" /> 硬停</label>
-        <button class="btn primary" data-put>提交</button>
+        <label class="admin-meta"><input type="checkbox" data-f="hard_stop" /> 硬停</label>
+        <button class="admin-btn admin-primary" data-put>提交</button>
       </div>
       <div style="margin-top:6px" data-budget-result></div>
     </div>`;
@@ -2720,11 +2828,11 @@ async function putBudget() {
   const limitRaw = $view.querySelector('[data-f="limit_cents"]').value.trim();
   const limit_cents = Number(limitRaw);
   if (!scope_type || !scope_id || !period) {
-    out.innerHTML = `<span class="err">作用域/周期都要填</span>`;
+    out.innerHTML = `<span class="admin-err">作用域/周期都要填</span>`;
     return;
   }
   if (!Number.isInteger(limit_cents) || limit_cents < 0) {
-    out.innerHTML = `<span class="err">limit_cents 得是非负整数（单位是分）</span>`;
+    out.innerHTML = `<span class="admin-err">limit_cents 得是非负整数（单位是分）</span>`;
     return;
   }
   const { status, data } = await api("POST", "/budget", {
@@ -2735,7 +2843,7 @@ async function putBudget() {
     hard_stop: $view.querySelector('[data-f="hard_stop"]').checked,
   });
   if (status >= 200 && status < 300) {
-    out.innerHTML = `<span class="ok">✔ 已写入，正在刷新</span>`;
+    out.innerHTML = `<span class="admin-ok">✔ 已写入，正在刷新</span>`;
     todayCache = null; // 今日页那根预算条与这页同源同刻才对得上
     setTimeout(() => void renderBudget(), 400);
   } else out.innerHTML = rejectHtml(status, data);
@@ -2833,16 +2941,16 @@ function checkpointBlock(c) {
   // null / undefined / 没有 checkpoint_id 的空壳对象：都不构成一个断点。
   if (!c || !c.checkpoint_id) return "";
   const id = esc(c.checkpoint_id);
-  const head = `<div class="ev"><div class="row">
-    <span class="pill s-blue">断点</span>
-    <span class="meta mono">${id}${c.parent_checkpoint_id ? " · 父 " + esc(c.parent_checkpoint_id) : ""}</span>
-    <span class="meta mono">${esc(c.type ?? "?")}</span>
+  const head = `<div class="admin-ev"><div class="admin-row">
+    <span class="admin-pill admin-s-blue">断点</span>
+    <span class="admin-meta admin-mono">${id}${c.parent_checkpoint_id ? " · 父 " + esc(c.parent_checkpoint_id) : ""}</span>
+    <span class="admin-meta admin-mono">${esc(c.type ?? "?")}</span>
   </div>`;
   if (c.decoded !== true || !c.summary) {
     // 降级：不假装有摘要。给一个 type 就能看见「为什么解不开」。
     return (
       head +
-      `<div class="meta" style="margin:4px 0 8px">通道值未解码（${esc(c.type ?? "无类型")}）。</div></div>`
+      `<div class="admin-meta" style="margin:4px 0 8px">通道值未解码（${esc(c.type ?? "无类型")}）。</div></div>`
     );
   }
   const channels = c.summary
@@ -2850,7 +2958,7 @@ function checkpointBlock(c) {
       (
         s,
       ) => `<details style="margin:6px 0 0 4px"><summary>${esc(s.channel)}</summary>
-      <pre class="mono" style="margin:4px 0 6px;white-space:pre-wrap">${esc(s.valueJson)}</pre></details>`,
+      <pre class="admin-mono" style="margin:4px 0 6px;white-space:pre-wrap">${esc(s.valueJson)}</pre></details>`,
     )
     .join("");
   return head + `<div style="margin:4px 0 8px">${channels}</div></div>`;
@@ -2860,10 +2968,9 @@ let replayTask = "";
 let replayFilter = "all";
 async function renderReplay() {
   // 抽屉里的「打开完整回放」带 ?id=<task>，进来直接选中那条（不改 hash 协议：
-  // hash 还是只当 #/<route> 解析，任务 id 走 query，#/replay 里其它控件照旧）。
-  const hinted = new URLSearchParams(location.hash.split("?")[1] ?? "").get(
-    "id",
-  );
+  // hash 还是只当 #/<route>[/...] 解析，任务 id 走 query，回放页里其它控件照旧）。
+  // 读 currentQuery（parseAdminHash 剥好前缀那一份），理由见 renderToday 里同注释。
+  const hinted = new URLSearchParams(currentQuery).get("id");
   if (hinted && hinted !== replayTask) replayTask = hinted;
   const { status, data } = await api("GET", "/tasks");
   if (status !== 200) {
@@ -2873,7 +2980,7 @@ async function renderReplay() {
   const tasks = data.tasks ?? [];
   if (!replayTask && tasks.length) replayTask = tasks[0].id;
   $view.innerHTML = `
-    <div class="toolbar">
+    <div class="admin-toolbar">
       <select data-pick style="max-width:420px">
         ${tasks.map((t) => `<option value="${esc(t.id)}"${t.id === replayTask ? " selected" : ""}>${esc(t.title)} · ${esc(t.status)}</option>`).join("")}
       </select>
@@ -2881,8 +2988,8 @@ async function renderReplay() {
       <select data-filter>
         ${REPLAY_FILTER_LABELS.map(([v, label]) => `<option value="${v}"${v === replayFilter ? " selected" : ""}>${esc(label)}</option>`).join("")}
       </select>
-      <button class="btn" data-go>查时间线</button>
-      <span class="meta">${tasks.length ? "" : "还没有任务"}</span>
+      <button class="admin-btn" data-go>查时间线</button>
+      <span class="admin-meta">${tasks.length ? "" : "还没有任务"}</span>
     </div>
     <div id="replay-body">${banner("", "选一条任务看它的回放。")}</div>`;
   if (!tasks.length) return;
@@ -2935,23 +3042,27 @@ async function loadReplay() {
   const hasMore = replayHasMore(rawEntries.length, data.effective_limit);
   const moreButton = hasMore
     ? `<div style="margin:10px 0"></div>
-      <div class="toolbar"><button class="btn" data-more>加载更多（已到第 ${esc(replayOffset + rawEntries.length)} 条）</button></div>`
+      <div class="admin-toolbar"><button class="admin-btn" data-more>加载更多（已到第 ${esc(replayOffset + rawEntries.length)} 条）</button></div>`
     : "";
   /** 「加载更多」只挂在【本次请求的结账行】上：点它 = 从当前 offset 再拉 200。
    * 不是每次都从 0 开始的按钮 —— 那张牌只出现在翻页前。 */
   body.innerHTML = `
-    <div class="card">
-      <div class="row"><strong class="grow">${esc(data.task.title)}</strong>
-        <span class="pill ${statusClass(data.task.status)}">${esc(data.task.status)}</span></div>
-      <div class="meta mono" style="margin-top:4px">${esc(data.task.id)} · 角色 ${esc(data.task.assigned_role)} · 图版本 ${esc(data.task.graph_version)}${replayReportsToHtml(data.graph, data.task.assigned_role)}</div>
+    <div class="admin-card">
+      <div class="admin-row"><strong class="admin-grow">${esc(data.task.title)}</strong>
+        <span class="admin-pill ${statusClass(data.task.status)}">${esc(data.task.status)}</span></div>
+      <div class="admin-meta admin-mono" style="margin-top:4px">${esc(data.task.id)} · 角色 ${esc(data.task.assigned_role)} · 图版本 ${esc(data.task.graph_version)}${replayReportsToHtml(data.graph, data.task.assigned_role)}</div>
     </div>
     ${checkpointDegradedNote(data.checkpoints_unavailable, (data.checkpoints ?? []).length)}
     ${incompleteNote(data.complete)}
-    <div class="meta" style="margin:10px 0">事件 <span class="mono">${esc(entries.length)}</span> 条（服务端 limit ${esc(data.effective_limit)}${replayHasMore(rawEntries.length, data.effective_limit) ? " · <b>可能还有更多</b>" : ""}）
+    <div class="admin-meta" style="margin:10px 0">事件 <span class="admin-mono">${esc(entries.length)}</span> 条（服务端 limit ${esc(data.effective_limit)}${replayHasMore(rawEntries.length, data.effective_limit) ? " · <b>可能还有更多</b>" : ""}）
       · 断点 ${esc((data.checkpoints ?? []).length)} 个${kw ? ` · 关键词「${esc(kw)}」` : ""}${replayFilter !== "all" ? ` · 类型「${esc(filterLabel)}」` : ""}</div>
-    <div class="tl">${entries.length ? entries.map(eventRow).join("") : banner("", kw ? "这个关键词没命中任何事件。" : "这个任务还没有事件。")}</div>
+    ${
+      entries.length
+        ? `<div class="admin-card"><div class="admin-tl">${entries.map(eventRow).join("")}</div></div>`
+        : banner("", kw ? "这个关键词没命中任何事件。" : "这个任务还没有事件。")
+    }
     ${moreButton}
-    ${(data.checkpoints ?? []).length ? `<div class="card" style="margin-top:10px"><div class="meta" style="margin-bottom:4px">断点状态快照（每个断点的通道值，展开看）</div>${data.checkpoints.map(checkpointBlock).join("")}</div>` : ""}`;
+    ${(data.checkpoints ?? []).length ? `<div class="admin-card" style="margin-top:10px"><div class="admin-meta" style="margin-bottom:4px">断点状态快照（每个断点的通道值，展开看）</div>${data.checkpoints.map(checkpointBlock).join("")}</div>` : ""}`;
   const pick = $view.querySelector("[data-pick]");
   const kwInput = $view.querySelector("[data-kw]");
   const flt = $view.querySelector("[data-filter]");
@@ -2989,7 +3100,7 @@ function checkpointDegradedNote(unavailable, count) {
   const n =
     typeof count === "number" && Number.isFinite(count) && count > 0 ? count : 0;
   return (
-    `<div class="banner warn" style="margin:0 0 10px"><b>断点解码失败，仅显示数量</b>` +
+    `<div class="admin-banner admin-warn" style="margin:0 0 10px"><b>断点解码失败，仅显示数量</b>` +
     `（${esc(String(unavailable))}${n > 0 ? ` · 实际断点 ${esc(n)} 个` : ""}）</div>`
   );
 }
@@ -3002,7 +3113,7 @@ function checkpointDegradedNote(unavailable, count) {
 function incompleteNote(complete) {
   if (complete !== false) return "";
   return (
-    '<div class="meta" style="margin-top:6px">⚠ 这条时间线不完整：' +
+    '<div class="admin-meta" style="margin-top:6px">⚠ 这条时间线不完整：' +
     "中间有缺口（服务端只按游标截断做了分页，不是分页截断的尾部）。</div>"
   );
 }
@@ -3036,19 +3147,19 @@ function autoApprovedOf(e) {
 function eventRow(e) {
   const auto = autoApprovedOf(e);
   const decide = e.actor_type === "human";
-  const cls = auto !== null ? "auto" : decide ? "decide" : "";
-  return `<div class="ev ${cls}">
-    <div class="row">
-      ${eventTargetText(e.target) ? `<span class="tag mono">→ ${eventTargetText(e.target)}</span>` : ""}
-      <span class="pill ${auto !== null ? "s-blue" : decide ? "s-green" : ""}">${esc(e.action)}</span>
-      <span class="meta mono">${esc(e.actor_id)} · ${esc(fmtDate(e.created_at))} · #${esc(e.seq)}</span>
-      ${auto !== null ? `<span class="pill s-blue">基于模式的自动批准</span>` : ""}
-      ${e.skill_distilled === true ? '<span class="pill s-blue">蒸馏 skill 生成的判断</span>' : ""}
-      ${e.harness ? `<span class="tag mono">${esc(e.harness)}</span>` : ""}
-      ${e.degraded ? `<span class="pill s-red">降级：${esc(e.degrade_reason ?? "未知")}</span>` : ""}
+  const cls = auto !== null ? "admin-auto" : decide ? "admin-decide" : "";
+  return `<div class="admin-ev ${cls}">
+    <div class="admin-row">
+      ${eventTargetText(e.target) ? `<span class="admin-tag admin-mono">→ ${eventTargetText(e.target)}</span>` : ""}
+      <span class="admin-pill ${auto !== null ? "admin-s-blue" : decide ? "admin-s-green" : ""}">${esc(e.action)}</span>
+      <span class="admin-meta admin-mono">${esc(e.actor_id)} · ${esc(fmtDate(e.created_at))} · #${esc(e.seq)}</span>
+      ${auto !== null ? `<span class="admin-pill admin-s-blue">基于模式的自动批准</span>` : ""}
+      ${e.skill_distilled === true ? '<span class="admin-pill admin-s-blue">蒸馏 skill 生成的判断</span>' : ""}
+      ${e.harness ? `<span class="admin-tag admin-mono">${esc(e.harness)}</span>` : ""}
+      ${e.degraded ? `<span class="admin-pill admin-s-red">降级：${esc(e.degrade_reason ?? "未知")}</span>` : ""}
     </div>
     ${eventOpinionHtml(e)}
-    ${auto !== null && (auto.rule || auto.annotation) ? `<div class="meta" style="margin:2px 0 6px"><span class="pill s-blue">自动批准</span> <span class="mono">${auto.by ?? ""}${auto.rule ? " · 规则：" + auto.rule : ""}${auto.annotation ? " · " + auto.annotation : ""}</span></div>` : ""}
+    ${auto !== null && (auto.rule || auto.annotation) ? `<div class="admin-meta" style="margin:2px 0 6px"><span class="admin-pill admin-s-blue">自动批准</span> <span class="admin-mono">${auto.by ?? ""}${auto.rule ? " · 规则：" + auto.rule : ""}${auto.annotation ? " · " + auto.annotation : ""}</span></div>` : ""}
     ${e.degraded && e.raw_payload ? `<pre>${esc(e.raw_payload)}</pre>` : ""}
   </div>`;
 }
@@ -3073,7 +3184,7 @@ function eventOpinionHtml(e) {
   const text = eventNoteText(e);
   if (!text) return "";
   const who = e.action === "review_decision" ? "意见" : "理由";
-  return `<div class="meta" style="margin:2px 0 6px"><span class="pill s-blue">${who}</span> <span class="mono">${esc(text)}</span></div>`;
+  return `<div class="admin-meta" style="margin:2px 0 6px"><span class="admin-pill admin-s-blue">${who}</span> <span class="admin-mono">${esc(text)}</span></div>`;
 }
 
 /**
@@ -3147,8 +3258,8 @@ function replayReportsToHtml(graph, taskRole) {
 /** 看板抽屉里那条审阅链复用同一个渲染（少一次"两份实现必然漂移"）。 */
 const replayTimeline = (entries) =>
   entries.length
-    ? `<div class="tl">${entries.map(eventRow).join("")}</div>`
-    : `<div class="meta">还没有事件。</div>`;
+    ? `<div class="admin-tl">${entries.map(eventRow).join("")}</div>`
+    : `<div class="admin-meta">还没有事件。</div>`;
 
 /* ═════════════════ 活动流（投影自身的轨迹） ═════════════════
  * 从上一版的独立一页降级成今日页里的一条折叠区：§16.1 说得很直白 ——
@@ -3177,7 +3288,7 @@ function attachFeedSink() {
 
 function paint(rec, $feed) {
   const d = document.createElement("div");
-  d.className = "card";
+  d.className = "admin-card";
   d.innerHTML = rec;
   $feed.prepend(d);
   while ($feed.children.length > 60) $feed.lastChild.remove();
@@ -3217,13 +3328,13 @@ async function connectFeed() {
   } catch (e) {
     if (ctl.signal.aborted) return;
     feedSay(
-      `<span class="pill s-red">连不上</span> <span class="meta">${esc(e?.message ?? e)}</span>`,
+      `<span class="admin-pill admin-s-red">连不上</span> <span class="admin-meta">${esc(e?.message ?? e)}</span>`,
     );
     reconnect();
     return;
   }
   if (!res.ok || !res.body) {
-    feedSay(`<span class="pill s-red">SSE ${res.status}</span>`);
+    feedSay(`<span class="admin-pill admin-s-red">SSE ${res.status}</span>`);
     reconnect();
     return;
   }
@@ -3247,7 +3358,7 @@ async function connectFeed() {
   } catch (e) {
     if (ctl.signal.aborted) return;
     feedSay(
-      `<span class="pill s-red">流中断</span> <span class="meta">${esc(e?.message ?? e)}</span>`,
+      `<span class="admin-pill admin-s-red">流中断</span> <span class="admin-meta">${esc(e?.message ?? e)}</span>`,
     );
   }
   if (ctl.signal.aborted) return;
@@ -3284,7 +3395,7 @@ function handleFrame(frame) {
   } catch (e) {
     // applyEvent 对解不开的帧是【抛】不是忽略：忽略等于亲手造一个无人知晓的洞。
     feedSay(
-      `<span class="pill s-red">帧不合法</span> <span class="meta">${esc(e?.message ?? e)}</span>`,
+      `<span class="admin-pill admin-s-red">帧不合法</span> <span class="admin-meta">${esc(e?.message ?? e)}</span>`,
     );
     setProj({ ...proj, link: "stale" });
     void resnapshot();
@@ -3294,14 +3405,14 @@ function handleFrame(frame) {
   const item = safe(frame.data);
   if (frame.event === "snapshot") {
     feedSay(
-      `<span class="pill">快照</span> <span class="meta">覆盖到 #${esc(item?.as_of_seq)}</span>`,
+      `<span class="admin-pill">快照</span> <span class="admin-meta">覆盖到 #${esc(item?.as_of_seq)}</span>`,
     );
     return;
   }
   const badge =
     { applied: "s-blue", duplicate: "", gap: "s-red" }[applied.action] ?? "";
-  feedSay(`<span class="pill ${badge}">${esc(String(item?.seq))} ${esc(applied.action)}</span>
-    <strong>${esc(frame.event)}</strong> <span class="meta">任务 <span class="mono">${esc(item?.taskId ?? "—")}</span></span>`);
+  feedSay(`<span class="admin-pill ${badge}">${esc(String(item?.seq))} ${esc(applied.action)}</span>
+    <strong>${esc(frame.event)}</strong> <span class="admin-meta">任务 <span class="admin-mono">${esc(item?.taskId ?? "—")}</span></span>`);
   if (applied.action === "gap") void resnapshot();
   // 审批相关的帧会改「有几张卡在等」⇒ 角标重读一次。
   // 事件名的字面量来自【服务端推的 item.kind】（sse.ts:224 `event: item.kind`），
@@ -3361,7 +3472,9 @@ async function load() {
   // 所以在这里显式关一次：换视图 = 抽屉关掉，这句话由代码说，不靠"顺手被抹掉了"。
   if (drawerEscOff) closeDrawer();
   for (const f of viewCleanups.splice(0)) f();
-  $view.innerHTML = `<div class="banner">载入中…</div>`;
+  // 首屏占位用骨架而不是「载入中」五个字：这一格每次换页都要闪一下，
+  // 一行字的读数不预告形状，快网下还会闪成一条横幅。列在 admin.css 的 .admin-skel。
+  $view.innerHTML = `<div class="admin-skel" role="status" aria-label="载入中…"><i></i><i></i><i></i></div>`;
   try {
     await views[current]();
   } catch (e) {
@@ -3370,7 +3483,93 @@ async function load() {
   }
 }
 
-nav();
-setConn("connecting");
-connectFeed();
-void load();
+/* ───────────────── 挂载 / 卸载（工作台那一半）─────────────────
+ * 只有一个入口：group.html 工作台。宿主把【自己的】三个节点交进来（内容区 +
+ * 页内导航 + 状态灯），同一套 renderX / bindX 画在右侧内容区里。
+ * 独立控制室页（旧 /admin 的 index.html）已删 —— 本模块不再自启动，也不做
+ * 任何 getElementById 兜底。
+ *
+ * ⚠ 为什么落点必须由宿主传而不是这里 getElementById("view")：
+ *   group.html 第 103 行【也有一枚 #view】（工作台的内容区）。按 id 全局查会拿到
+ *   工作台那一枚，管理视图就会画进别人的格子里 —— 而症状是「切到别的菜单时我的
+ *   界面被抹了」，归属极难看出。所以挂载路径上只认显式传参。
+ *
+ * ⚠ unmount 必须真拆：SSE 是【整个会话一条连接】的 fetch 流（见 connectFeed 那段），
+ *   切走路由不拆它，它会继续往已经消失的 feedSink 里推、并且永远占着 hub 的一路
+ *   订阅；重连那条 setTimeout 更会在人已经离开这一页之后把视图拉回来。
+ */
+let mounted = false;
+
+/**
+ * 启动这一页要吃的所有【页面级】副作用：状态灯订阅 + 事件流 + 首屏。
+ * 唯一入口是 mountAdmin（工作台挂载）。
+ */
+function startFeed() {
+  offConnSub = onChange((p) => setConn(p.link));
+  nav();
+  setConn("connecting");
+  connectFeed();
+  void load();
+}
+
+function stopFeed() {
+  offConnSub?.();
+  offConnSub = null;
+  // 正在飞的 fetch 流与它的解帧循环一起断；feedSink 指向上一次渲染的 #feed，
+  // 不清的话下一次重连会往一个已经不在文档里的节点里 prepend。
+  abortCtl?.abort();
+  abortCtl = null;
+  feedSink = null;
+}
+
+/**
+ * 挂进工作台。宿主给三个节点：
+ *   view  —— 渲染目标（右侧内容区里的一格，调用方保证它是管理视图独占的）
+ *   nav   —— 七页导航的落点（宿主没有 #nav，所以这一枚通常由挂载方现造）
+ *   status—— 状态灯 {dot, connText}（宿主没有 #dot / #connText，同上）
+ * 之后每次 group.js 改 hash，它调 syncAdminFromHash(location.hash) 把变化送进来。
+ */
+function mountAdmin({ view, nav: navEl, status }) {
+  $view = view;
+  $nav = navEl;
+  $dot = status.dot;
+  $connText = status.connText;
+  mounted = true;
+  startFeed();
+}
+
+function unmountAdmin() {
+  if (!mounted) return;
+  mounted = false;
+  if (drawerEscOff) closeDrawer();
+  for (const f of viewCleanups.splice(0)) f();
+  stopFeed();
+  // 拖影挂在 document.body 上，不在 $view 里面 —— 只清 $view 会留下一枚飘在
+  // 屏幕上的幽灵卡（pointerup 再也不会来了，因为监听挂在被抹掉的卡上）。
+  for (const g of document.body.querySelectorAll(".admin-org-ghost")) g.remove();
+}
+
+/* ───────────────── 暴露给工作台宿主的挂载 API ─────────────────
+ * 本文件本来就是 type="module"，所以 export 不改变任何文档级行为。
+ * group.js 用 `await import("/app.js")` 拿这五个：
+ *   mountAdmin —— 交进三个节点并启动这一页
+ *   unmountAdmin —— 离开路由时拆连接与监听
+ *   syncAdminFromHash —— 宿主每次改 hash 把 location.hash 原样送进来
+ *   ADMIN_PAGES —— 七页清单，宿主要把它渲染成中间列表栏（「像其他功能一样」）
+ *   currentPage —— 【现在真渲染着】那一页的 id：hash 里的页名可能是手打的、ROUTES
+ *                  不认的，那时这一页停在原地，宿主要高亮的也正是原地 —— 中间
+ *                  列表栏的选中态因此跟着屏幕走，而不是跟着地址栏走。
+ * ⚠ 只暴露这五个。渲染函数、状态、取数一律留在这里 —— 宿主懂多少治理页，
+ *   治理页就得跟着改多少次（0006 §7 那一整篇讲的正是这种漂移）。
+ */
+function currentPage() {
+  return current;
+}
+
+export {
+  currentPage,
+  mountAdmin,
+  ROUTES as ADMIN_PAGES,
+  syncAdminFromHash,
+  unmountAdmin,
+};

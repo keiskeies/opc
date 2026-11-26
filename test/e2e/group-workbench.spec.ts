@@ -161,7 +161,7 @@ test.beforeAll(async () => {
   await expect
     .poll(async () => {
       try {
-        const response = await fetch(`http://127.0.0.1:${webPort}/group.html`);
+        const response = await fetch(`http://127.0.0.1:${webPort}/`);
         return response.ok;
       } catch {
         return false;
@@ -169,8 +169,7 @@ test.beforeAll(async () => {
     })
     .toBe(true);
   const admin = await fetch(`http://127.0.0.1:${webPort}/admin`);
-  expect(admin.ok).toBe(true);
-  expect(await admin.text()).toContain("<title>OPC · 控制室</title>");
+  expect(admin.status).toBe(404);
 
   webRelay = createTcpServer((client) => {
     const upstream = connect({
@@ -274,7 +273,7 @@ test("群会话视图：真实建群章程、CoS 派发后的待办与跨群隔�
 }) => {
   const browserErrors = watchBrowserErrors(page);
 
-  await page.goto(`${webOrigin}/group.html`);
+  await page.goto(`${webOrigin}/`);
   await expect(page).toHaveTitle(/群角色工作台/u);
   await expect(
     page.getByRole("navigation", { name: "应用导航" }),
@@ -310,6 +309,19 @@ test("群会话视图：真实建群章程、CoS 派发后的待办与跨群隔�
     tabs.getByRole("tab", { name: "任务流", exact: true }),
   ).toHaveAttribute("aria-selected", "true");
   await expect(page.getByRole("tabpanel")).toContainText("本群还没有待办");
+  // 落点实测（round374 · tw:text-balance）：空态标题走 emptyState()，一处改动覆盖 ~15 个
+  // 空态。这里不判「源码里加了类名」而判【真浏览器算出来的那一条声明】—— 类名拼错、h()
+  // 覆盖 class、这条渲染路径根本没走到，三种都会让「改了 8 处」与「页面上一处没生效」
+  // 同时成立。第二发是窗口干净度：未挂 utility 的同级说明文字必须仍是 initial，
+  // 否则「读到 balance」可能来自某张手写表而不是这枚 utility。
+  await expect(page.locator(".state h3.tw\\:text-balance")).toHaveCSS(
+    "text-wrap",
+    "balance",
+  );
+  await expect(page.locator(".state p:not(.tw\\:text-balance)")).toHaveCSS(
+    "text-wrap",
+    "wrap",
+  );
   await tabs
     .getByRole("tab", { name: "任务流", exact: true })
     .press("ArrowRight");
@@ -319,6 +331,11 @@ test("群会话视图：真实建群章程、CoS 派发后的待办与跨群隔�
 
   const charter = page.locator(`[data-document-id="${first.document.doc_id}"]`);
   await expect(charter).toContainText("立项：双十一大促");
+  // 落点实测：文档卡标题（.group-document-title）在这一条真渲染路径上必须算出 balance。
+  // 同一个 locator 已经证明这张卡在场上，所以这一发红只可能是「类名没接对」这一种因。
+  await expect(
+    charter.locator(".group-document-title.tw\\:text-balance"),
+  ).toHaveCSS("text-wrap", "balance");
   await expect(charter).toContainText("自动生成");
   await charter.click();
   await expect(page).toHaveURL(
@@ -372,6 +389,13 @@ test("群会话视图：真实建群章程、CoS 派发后的待办与跨群隔�
   await expect(
     page.locator('.group-task-group[data-status="backlog"]'),
   ).toContainText("大促落地页验收");
+  // 落点实测：待办卡标题。这一发刻意放在【刚创建完待办】之后 —— 前一条 toContainText
+  // 只证明文字进了 DOM，这一条证明那枚 utility 在真浏览器里算得出 balance。
+  await expect(
+    page.locator(
+      '.group-task-group[data-status="backlog"] .group-task-title.tw\\:text-balance',
+    ),
+  ).toHaveCSS("text-wrap", "balance");
   await task.click();
   await expect(page).toHaveURL(/#\/backlog\/[^/]+$/u);
   await expect(
@@ -461,7 +485,7 @@ test("招聘落座：真实入职后在群会话出现成员署名报到", async
   const browserErrors = watchBrowserErrors(page);
   const groupTitle = "招聘报到群";
   const memberName = "招聘报到验收员";
-  await page.goto(`${webOrigin}/group.html`);
+  await page.goto(`${webOrigin}/`);
   const created = await createGroupThroughUi(
     page,
     groupTitle,
@@ -534,14 +558,14 @@ test("老板成员私聊：通讯录直开、老板发消息与文档关联成�
   page,
 }) => {
   const browserErrors = watchBrowserErrors(page);
-  await page.goto(`${webOrigin}/group.html`);
+  await page.goto(`${webOrigin}/`);
   await createGroupThroughUi(
     page,
     "老板私聊验收",
     "验证默认老板成员私聊",
     true,
   );
-  await page.goto(`${webOrigin}/group.html`);
+  await page.goto(`${webOrigin}/`);
   await page.locator('[data-nav="contacts"]').click();
   const contact = page
     .locator('#listContent [data-group-row=""]')
@@ -639,7 +663,14 @@ test("老板成员私聊：通讯录直开、老板发消息与文档关联成�
     .locator("#listContent .doc-list-item")
     .filter({ hasText: "立项：老板私聊验收" })
     .click();
-  const associations = page.getByRole("region", { name: "文档关联" });
+  // 关联区块在 round370 从正文流搬进了右侧抽屉：抽屉默认收起（visibility:hidden），
+  // 收起态里 toContainText 靠 DOM 文本也会过 —— 那测的是「写进了 DOM」而不是「用户能看到」。
+  // 所以这里显式打开抽屉，并先断可见，再断内容。
+  await page.getByRole("button", { name: "权限与设置", exact: true }).click();
+  const associations = page
+    .locator("#mainPane .doc-drawer-wrap")
+    .getByRole("region", { name: "文档关联" });
+  await expect(associations).toBeVisible();
   await expect(associations).toContainText("老板私聊验收");
   await expect(associations).toContainText("产品经理");
   await expect(associations).toContainText("暂无关联任务");
@@ -677,56 +708,73 @@ interface ConversationFixture {
   title: string;
   unread_count: number;
   boss_attention_count?: number;
-  last_message_at: string;
+  /**
+   * ⚠ 形状必须与契约一致：packages/contracts/src/conversation.ts 把这两个时刻钉成
+   * `z.number().int()`（epoch 毫秒），不是 ISO 串。夹具此前写 ISO 串，而 ISO 恰好是
+   * `Date.parse` 唯一吃得进去的形状 ⇒ 「按最近时刻排序」在夹具里永远成立、在真库里
+   * 永远失效（Date.parse 喂数字恒 NaN，整条排序静默退化成按 id 排）。
+   * 谁把这里改回字符串，下面那条「段内按最近时刻倒序」用例当场红。
+   */
+  last_message_at: number | null;
   last_message_preview: string;
+  /** 时刻缺失时的兜底，同契约的 nullable 分支：null 时刻必须落回这一列。 */
+  created_at?: number;
 }
 
-async function mockConversationList(page: Page) {
-  const conversations: ConversationFixture[] = [
-    {
-      conversation_id: "attention-group",
-      kind: "group",
-      title: "急需拍板",
-      unread_count: 8,
-      boss_attention_count: 3,
-      last_message_at: "2026-11-25T09:00:00.000Z",
-      last_message_preview: "请确认预算",
-    },
-    {
-      conversation_id: "pinned-private-new",
-      kind: "private",
-      title: "私聊置顶新",
-      unread_count: 4,
-      boss_attention_count: 0,
-      last_message_at: "2026-11-25T08:00:00.000Z",
-      last_message_preview: "最新私聊",
-    },
-    {
-      conversation_id: "pinned-private-old",
-      kind: "private",
-      title: "私聊置顶旧",
-      unread_count: 0,
-      last_message_at: "2026-11-25T07:00:00.000Z",
-      last_message_preview: "较早私聊",
-    },
-    {
-      conversation_id: "ordinary-group",
-      kind: "group",
-      title: "普通未读群",
-      unread_count: 6,
-      last_message_at: "2026-11-25T06:00:00.000Z",
-      last_message_preview: "只有未读，不需要拍板",
-    },
-    {
-      conversation_id: "ordinary-private",
-      kind: "private",
-      title: "普通已读私聊",
-      unread_count: 0,
-      boss_attention_count: 0,
-      last_message_at: "2026-11-25T05:00:00.000Z",
-      last_message_preview: "普通消息",
-    },
-  ];
+const DEFAULT_CONVERSATIONS: ConversationFixture[] = [
+  {
+    conversation_id: "attention-group",
+    kind: "group",
+    title: "急需拍板",
+    unread_count: 8,
+    boss_attention_count: 3,
+    last_message_at: Date.parse("2026-11-25T09:00:00.000Z"),
+    last_message_preview: "请确认预算",
+  },
+  {
+    conversation_id: "pinned-private-new",
+    kind: "private",
+    title: "私聊置顶新",
+    unread_count: 4,
+    boss_attention_count: 0,
+    last_message_at: Date.parse("2026-11-25T08:00:00.000Z"),
+    last_message_preview: "最新私聊",
+  },
+  {
+    conversation_id: "pinned-private-old",
+    kind: "private",
+    title: "私聊置顶旧",
+    unread_count: 0,
+    last_message_at: Date.parse("2026-11-25T07:00:00.000Z"),
+    last_message_preview: "较早私聊",
+  },
+  {
+    conversation_id: "ordinary-group",
+    kind: "group",
+    title: "普通未读群",
+    unread_count: 6,
+    last_message_at: Date.parse("2026-11-25T06:00:00.000Z"),
+    last_message_preview: "只有未读，不需要拍板",
+  },
+  {
+    conversation_id: "ordinary-private",
+    kind: "private",
+    title: "普通已读私聊",
+    unread_count: 0,
+    boss_attention_count: 0,
+    last_message_at: Date.parse("2026-11-25T05:00:00.000Z"),
+    last_message_preview: "普通消息",
+  },
+];
+
+/**
+ * 用 conversations 覆盖默认夹具，而不是在每个用例里重抄一遍 route：夹具形状本身
+ * 是判据的一部分（见 ConversationFixture 的 ⚠），所以只允许这一处组装响应。
+ */
+async function mockConversationList(
+  page: Page,
+  conversations: ConversationFixture[] = DEFAULT_CONVERSATIONS,
+) {
   await page.route("**/api/v1/conversations", async (route) => {
     if (route.request().method() !== "GET") return route.continue();
     await route.fulfill({ json: { conversations } });
@@ -749,7 +797,7 @@ test("会话列表：拍板按 boss_attention_count 分组，置顶去重且持�
       );
     }
   });
-  await page.goto(`${webOrigin}/group.html`);
+  await page.goto(`${webOrigin}/`);
 
   const attention = page.locator(
     '.conversation-section[data-section="attention"]',
@@ -804,8 +852,359 @@ test("会话列表：拍板按 boss_attention_count 分组，置顶去重且持�
   ).toHaveCount(0);
 });
 
+/**
+ * 会话列表段内排序（round376）。
+ *
+ * ── 这一发为什么单独存在，而不并进上面那条分组用例 ──────────────
+ * 上面那条只数「每段几行 + 谁在哪段」，一段内两三行时**任何稳定顺序都过**：
+ * 排序整条失效（比较器恒返回 0 ⇒ 退化成 id 升序）时它照样绿。本仓的真库就是这么
+ * 静默坏的：契约把 last_message_at 钉成 epoch 毫秒，而 Date.parse 只吃字符串，
+ * 喂数字恒 NaN ⇒ 每条 recency 落 0。夹具写 ISO 串时，那个 bug 在测试里【不存在】。
+ *
+ * ── 判据的两处刻意形状 ─────────────────────────────────────────
+ * ① id 取 zz/mm/aa 前缀，让「id 升序」正好等于「时间倒序的反面」：排序一失效，
+ *    顺序整个倒过来，而不是恰好撞上同一串。
+ * ② 夹一条 last_message_at 为 null、只有 created_at 的，插在中间：
+ *    兜底链（|| created_at）摘掉 ⇒ 它 recency 落 0 掉到最后；时刻读成字符串 ⇒
+ *    四条全落 0 ⇒ id 升序。两种失效都被同一条顺序断言抓到。
+ */
+test("会话列表段内按最近时刻倒序：epoch 毫秒可读，缺最新消息时落回 created_at", async ({
+  page,
+}) => {
+  await mockConversationList(page, [
+    {
+      conversation_id: "aa-oldest",
+      kind: "group",
+      title: "最早的一群",
+      unread_count: 0,
+      boss_attention_count: 0,
+      last_message_at: 1_795_000_100_000,
+      last_message_preview: "第一条消息",
+    },
+    {
+      conversation_id: "bb-created-fallback",
+      kind: "group",
+      title: "还没有消息的群",
+      unread_count: 0,
+      boss_attention_count: 0,
+      last_message_at: null,
+      created_at: 1_795_000_900_000,
+      last_message_preview: "",
+    },
+    {
+      conversation_id: "mm-middle",
+      kind: "group",
+      title: "中间的一群",
+      unread_count: 0,
+      boss_attention_count: 0,
+      last_message_at: 1_795_000_800_000,
+      last_message_preview: "第二条消息",
+    },
+    {
+      conversation_id: "zz-newest",
+      kind: "group",
+      title: "最新的一群",
+      unread_count: 0,
+      boss_attention_count: 0,
+      last_message_at: 1_795_001_000_000,
+      last_message_preview: "第三条消息",
+    },
+  ]);
+  await page.goto(`${webOrigin}/`);
+
+  const group = page.locator('.conversation-section[data-section="group"]');
+  await expect(group.locator(".conversation-item")).toHaveCount(4);
+  await expect(group.locator(".conversation-item")).toHaveText([
+    /最新的一群/,
+    /还没有消息的群/,
+    /中间的一群/,
+    /最早的一群/,
+  ]);
+});
+
+/** 排版门共用的两行夹具：同一时刻（不让段内排序搅乱下标）+ 一短一长两条预览。 */
+function typoFixtures(
+  shortChars: number,
+  longChars: number,
+): ConversationFixture[] {
+  return [
+    {
+      conversation_id: "type-fits",
+      kind: "group",
+      title: "放得下的一行",
+      unread_count: 0,
+      boss_attention_count: 0,
+      last_message_at: 1_795_000_200_000,
+      last_message_preview: "汉".repeat(shortChars),
+    },
+    {
+      conversation_id: "type-truncates",
+      kind: "group",
+      title: "放不下的一行",
+      unread_count: 0,
+      boss_attention_count: 0,
+      last_message_at: 1_795_000_200_000,
+      last_message_preview: "汉".repeat(longChars),
+    },
+  ];
+}
+
+interface RowGeometry {
+  id: string;
+  rowH: number;
+  prevH: number;
+  prevFs: number;
+  lines: number;
+  fits: boolean;
+  track: number;
+  scroll: number;
+  overflowX: number;
+}
+
+/**
+ * 逐行取运行时几何，不读 CSS 声明值。范围锁在群段里 —— 会议行用的是同一套
+ * .conversation-item 类名，全局查会把它们一起捞进来。
+ * ⚠ lines 不能直接取 Range.getClientRects() 的条数：text-overflow:ellipsis 会在省略号处
+ * 把这一行切成两个 fragment（同 top），实测 17 字那行返回 2 条。按 top 去重后量的才是
+ * 「几个行高」。
+ */
+async function measureRows(page: Page): Promise<RowGeometry[]> {
+  const raw = await page.evaluate(`(() => {
+    const out = [];
+    const scope = document.querySelector('.conversation-section[data-section="group"]');
+    const list = document.querySelector('.list-content');
+    for (const item of scope.querySelectorAll('.conversation-item')) {
+      const prev = item.querySelector('.conversation-preview');
+      const r = document.createRange();
+      r.selectNodeContents(prev);
+      out.push({
+        id: item.dataset.conversationId,
+        rowH: Math.round(item.getBoundingClientRect().height),
+        prevH: prev.getBoundingClientRect().height,
+        prevFs: parseFloat(getComputedStyle(prev).fontSize),
+        lines: [
+          ...new Set(
+            [...r.getClientRects()]
+              .filter((x) => x.width > 0)
+              .map((x) => Math.round(x.top)),
+          ),
+        ].length,
+        fits: prev.scrollWidth <= prev.clientWidth,
+        track: Math.round(prev.clientWidth),
+        scroll: Math.round(prev.scrollWidth),
+        overflowX: Math.max(
+          document.documentElement.scrollWidth - document.documentElement.clientWidth,
+          list.scrollWidth - list.clientWidth,
+        ),
+      });
+    }
+    return JSON.stringify(out);
+  })()`);
+  return JSON.parse(raw as string) as RowGeometry[];
+}
+
+/** 预览/标题/时间的字号阶梯 + 段标签的字距声明值。 */
+async function measureTypeScale(page: Page) {
+  const raw = await page.evaluate(`(() => {
+    const item = document.querySelector('.conversation-item');
+    const px = (v) => Math.round(parseFloat(v));
+    const tok = (n) => px(getComputedStyle(document.documentElement).getPropertyValue(n));
+    const of = (sel) => px(getComputedStyle(item.querySelector(sel)).fontSize);
+    const label = getComputedStyle(document.querySelector('.list-section'));
+    return JSON.stringify({
+      title: of('.conversation-title'),
+      preview: of('.conversation-preview'),
+      time: of('.conversation-time'),
+      sm: tok('--fs-sm'),
+      labelSpacing: label.letterSpacing,
+      labelTransform: label.textTransform,
+    });
+  })()`);
+  return JSON.parse(raw as string) as {
+    title: number;
+    preview: number;
+    time: number;
+    sm: number;
+    labelSpacing: string;
+    labelTransform: string;
+  };
+}
+
+/**
+ * 会话列表的排版门（round376）：字号阶梯、段标签字距、一行的宽度预算、行高预算。
+ *
+ * ── 四条判据各钉哪根线 ────────────────────────────────────────
+ *  T1 预览字号取 --fs-sm，且严格夹在「时间(--fs-xs)」与「标题(--fs-md)」之间：
+ *     原先预览写死 11px、和时间同字号同灰度，正文与元信息之间缺一级，两层读成一坨。
+ *  T2 段标签不吃 letter-spacing / text-transform：这里的标签全是中文，uppercase 是恒等
+ *     变换，而 .08em 在 11px 上逐字加 0.88px（实测把两字标签从 22px 撑到 24px）。
+ *  T3 一行的宽度预算（行为判据，不量像素宽）：同一条轨道里某一数字放得下、+3 字放不下。
+ *     改窄 --list-width 会红、再放宽不会 —— 判据直接就是症状本身（预览被切成半句话），
+ *     所以加宽 padding、加宽 tail 列、加大字号都抓得住。
+ *     第二行是【窗口自证】：它必须仍然截断，否则第一行的绿只是因为预览不再截断了。
+ *  T4 拆成两条（T4b 整行预算 + T4a 行高跟着字号走）。原判据「rowH < 60 杀行高」的形状
+ *     在 round379 被本轮改动解除武装，行高那一格另立了判据，两边账分开写。
+ *     T4b round379 之后实测 54.33，分解：上下 padding 16 + copy 38.33
+ *     （标题行 20.14 + margin-top 2 + 预览行 16.19）。改前是 58.33 = padding 20 + 同一份 copy；
+ *     本轮把 .conversation-item 的纵向内距 10 → 8，省下的 4px 全在内距上，copy 一格没动。
+ *     ⚠ 地板仍是 .kind-icon{height:38px}：16+38=54 一直在兜着这一行，copy 只比它多出 0.33px，
+ *     所以摘掉 margin-top 行盒仍是 54（P1 那发就是这么存活的 —— margin-top 被地板吸收了，
+ *     几何判据管不到它）。地板的存在由复跑档 .workbuddy/round379-rowbox-after.log 的
+ *     strutKilled 档撑：给 .conversation-item 写 line-height:0 之后标题行塌成 0、
+ *     copy 只剩 18.19，行盒仍读 54（改前的同一档读 58，见 round376-rowbox.log）。
+ *     T4a 预览那一行的行高跟着字号走。
+ *     判据是相对量：预览盒高 ≤ 字号 × 1.45。声明 line-height:1.35 在 --fs-sm=12px 上实测
+ *     16.19px（阈值 17.4）⇒ 绿；摘掉那条声明它退回继承值 body 的 1.55 ⇒ 18.59 ⇒ 红。
+ *     为什么不再拿整行 rowH 当这把尺子：本轮把纵向内距 10 → 8 之后，同一发变异在整行上
+ *     只走到 56.73（= pad 16 + copy 40.73），而阈值是 60 —— 判据还在跑，但已经不吃这根线了
+ *     （改前那一份读的是 60.73，那才是 60 这一档的来由）。这是 memory 里「地板吸收」那一族
+ *     的第二次复发：整行 = 地板与 copy 的较大者 + padding，任何一处挪动都会让另一处的变异
+ *     量不出来 ⇒ 尺子要贴着【被那根线直接撑高的那一层】。分解复跑见
+ *     .workbuddy/round379-rowbox-after.log 的 inheritBody 档（row=56.73 / prev=18.59；
+ *     改前同档 row=60.73，见 .workbuddy/round376-rowbox.log）。这一格自己的变异证据：
+ *     .workbuddy/round379-t4-mutations.log —— Q1 全摘声明 / Q2 放松到 1.5 / Q3 窄档同线，
+ *     三发全 KILLED，而 Q4（内距 8 → 10）按【期望 SURVIVED】登记：见下面那条代价。
+ *     阈值仍是 60 而【没有】跟着内距一起收到 56：60 不是量出来的刻度，是「离地板 54 留
+ *     亚像素余量」那一档；而「内距被放回去」这一格已经有 test/web/compact-scale.test.ts
+ *     的刻度表⑨ 单向钉着（8 → 11 当场红），再在这里抄一份字面 56 属于同一条主张立两处判据
+ *     —— 下一轮真收档时得同时改两个数，那正是 round377 记过的反模式。
+ *     ⚠ 代价一起写明白：60 这一格现在【抓不住】两件事 —— 内距放回 20（改前读数 58.33 < 60）
+ *     和预览行高退回 1.55（56.73 < 60）。那两格各有其主（刻度表⑨ / 上面那条行高判据），
+ *     这一格只管「整行不许比地板 + 余量更胖」。登记在此，免得下一个人把绿当成覆盖面。
+ *     ⚠ 别把「删声明」与 line-height:normal 混为一谈：normal 在 12px 上读 16（整行 54.14），
+ *     删声明退回继承值 1.55（整行 56.73），差 2.6px。改后的行盒与条数读数见
+ *     .workbuddy/round379-rowheight.log。
+ *  T5 预览必须是块盒且真的在截断：display:block 摘掉后 <span> 退回 inline，
+ *     overflow / text-overflow / white-space 三条对 inline 盒一条都不生效（CSS 2.1
+ *     §11.1.1）。实测（.workbuddy/round376-headrow.log，1440 塞 41 字）：inline 时
+ *     行盒 60.28、clientWidth 量出 0、.list-content 横向溢出 +171px —— 症状就是那条
+ *     常年挂在中栏底下的横向滚动条。这一发不另立断言：inline 时 clientWidth 恒 0
+ *     ⇒「放得下」那行恒真、「放不下」那条不截断 ⇒ T3b 的窗口自证当场红。
+ *     所以 T3b 排在 T3a 之前，让这一发红在承重的那句上。
+ *
+ * ── 为什么量「放得下几个字」而不是量轨道宽 ──────────────────────
+ * 轨道宽 191px 这种断言只钉住一个数，钉不住它为什么是那个数；而且它和真正的症状
+ * （预览被切成半句话）之间隔着一层。换成「N 字必须完整、N+3 字必须省略号」之后，
+ * 判据直接是症状本身：把 --list-width 改窄、把 padding 加宽、把字号改大、
+ * 给 tail 列加宽 —— 任何吃掉这一轨宽度的改法都会让第一行红。
+ * 数字来源：--fs-sm=12px 的汉字是等宽全角（1 字 = 1 字号），所以字数上限 = 轨道宽 ÷ 12。
+ * 实测边界（.workbuddy/round377-budget.log，24 档逐字探，三档栏宽一次量齐）：
+ *   --list-width 340 → 轨道 191px → 放得下 15 字，16 字起截断
+ *   --list-width 305 → 轨道 156px → 放得下 13 字，14 字起截断
+ *   --list-width 245 → 轨道  96px → 放得下  8 字， 9 字起截断
+ * 每档各取「上限 − 1 / 上限 + 2」，两侧都留两字以上余量，不贴边。
+ * ⚠ 这几枚轨道数不是常数：轨道 = 栏宽 − 行内固定开销，而行内开销里含 gap 与 padding，
+ * 所以折一次间距档它们就集体挪几像素。上一版记的是 189/154（窄档上限 12），round377
+ * 把这一行的 gap 归到 var(--space-2) 后变成 191/156，窄档上限跟着从 12 抬到 13 ——
+ * 宽档上限没动（15），所以宽档那条 14/17 原样保留；改的是窄档那条。
+ * 以后动这一行的任何间距，先重跑 round377-budget 那份探针再改下面的数字。
+ * 视口必须钉死：默认 1280×720 会落进 ≤1180 那一档（305px），拿 340 档的数字去判会红。
+ */
+test.describe("会话列表排版：字号阶梯 / 标签字距 / 行宽与行高预算", () => {
+  test.use({ viewport: { width: 1440, height: 900 } });
+
+  test("T1–T4 宽档(340)：预览取 --fs-sm、段标签不加字距、14 字放得下且 17 字仍截断", async ({
+    page,
+  }) => {
+    await mockConversationList(page, typoFixtures(14, 17));
+    await page.goto(`${webOrigin}/`);
+
+    const group = page.locator('.conversation-section[data-section="group"]');
+    await expect(group.locator(".conversation-item")).toHaveCount(2);
+
+    const [fits, truncates] = (await measureRows(page)) as [
+      RowGeometry,
+      RowGeometry,
+    ];
+    expect(fits.id).toBe("type-fits");
+
+    // 声明级判据排在几何判据之前：字号一旦退回 11px，连 17 字都能在 191px 的轨道里放
+    // 下（17×11=187），几何那几条会先以「窗口消失」这种间接症状红，归因白绕一层。
+    const type = await measureTypeScale(page);
+    // T1：预览落在那一档上，而不是和时间同字号。
+    expect(type.preview).toBe(type.sm);
+    expect(type.time).toBeLessThan(type.preview);
+    expect(type.preview).toBeLessThan(type.title);
+    // T2：中文段标签既不大写化也不加字距。
+    expect(type.labelSpacing).toBe("normal");
+    expect(type.labelTransform).toBe("none");
+
+    // T3b 在前：同一条轨道必须仍然截断更长的 —— 它同时是 T5 的探针（预览一旦退回
+    // inline 盒就压根不截断）。放在 T3a 之前，是为了让「inline 化」这一发变异红在
+    // 真正承重的那句上，而不是先被 T3a 的恒真挡住。
+    expect(truncates.fits, "窗口消失：17 个汉字也不截断了").toBe(false);
+    // T3a：14 字整行放得下（改窄栏宽 / 加宽 padding / 加宽 tail 都会让这里红）。
+    expect(
+      fits.fits,
+      `14 个汉字被截断了：轨道 ${fits.track}px < 内容 ${fits.scroll}px`,
+    ).toBe(true);
+    expect(truncates.track).toBe(fits.track);
+    // T3c：截断用的是省略号而不是换行。
+    expect(fits.lines).toBe(1);
+    expect(truncates.lines).toBe(1);
+
+    // T4：预览那一行的行高跟着自己的字号走（不是整行的地板账，理由见文件头）。
+    // 1.45 = 声明值 1.35 与「退回继承 body 1.55」之间取的中档，两侧都留一档以上余量。
+    expect(
+      fits.prevH,
+      `预览行高脱离字号：${fits.prevH.toFixed(2)}px > ${fits.prevFs} × 1.45`,
+    ).toBeLessThanOrEqual(fits.prevFs * 1.45);
+    // T4b：整行守住 38px 地板之上的余量（这一格管不到内距与行高，分工见文件头）。
+    expect(fits.rowH, `行盒 ${fits.rowH}px 超出预算`).toBeLessThan(60);
+    // 抬栏宽那一档的验收条件：不许顶出横向滚动。
+    expect(
+      fits.overflowX,
+      `出现横向溢出 ${fits.overflowX}px`,
+    ).toBeLessThanOrEqual(0);
+  });
+});
+
+/**
+ * 窄档（≤1180 的 --list-width: 305px）单独一条：视口不同 ⇒ 预算不同。
+ * 这条守的是那条 media 里的 305 —— 它从 275 抬上来才有 13 字；倒回 275 时轨道只剩
+ * 126px，只放得下 10 字，下面那条 12 字当场红（这发是实测量出来的：见
+ * .workbuddy/round377-budget.log 里「倒回 275」那行，不是按 275−149 推算的）。
+ * 上限从上一版的 12 抬到 13：这一行的 gap 折档之后轨道多了 2px，所以「放得下」取 12、
+ * 「仍截断」取 15。原因见本文件上面的「量字数」段。
+ * 860 档（245px，8 字）故意不进断言：那一档窄到只能放 8 字，再从别处挤宽度就会顶出
+ * 横向滚动，所以它的预算只留在 round377-budget.log，不当守卫。
+ */
+test("会话列表排版：窄档(≤1180 → 305px) 12 字放得下且 15 字仍截断", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1100, height: 900 });
+  await mockConversationList(page, typoFixtures(12, 15));
+  await page.goto(`${webOrigin}/`);
+
+  const group = page.locator('.conversation-section[data-section="group"]');
+  await expect(group.locator(".conversation-item")).toHaveCount(2);
+
+  const [fits, truncates] = (await measureRows(page)) as [
+    RowGeometry,
+    RowGeometry,
+  ];
+  expect(fits.id).toBe("type-fits");
+  expect(truncates.fits, "窗口消失：15 个汉字也不截断了").toBe(false);
+  expect(
+    fits.fits,
+    `12 个汉字被截断了：轨道 ${fits.track}px < 内容 ${fits.scroll}px`,
+  ).toBe(true);
+  expect(truncates.track).toBe(fits.track);
+  expect(fits.lines).toBe(1);
+  // T4 同宽档那一发：行高贴着字号，整行只守地板余量。
+  expect(
+    fits.prevH,
+    `预览行高脱离字号：${fits.prevH.toFixed(2)}px > ${fits.prevFs} × 1.45`,
+  ).toBeLessThanOrEqual(fits.prevFs * 1.45);
+  expect(fits.rowH, `行盒 ${fits.rowH}px 超出预算`).toBeLessThan(60);
+  expect(
+    fits.overflowX,
+    `出现横向溢出 ${fits.overflowX}px`,
+  ).toBeLessThanOrEqual(0);
+});
+
 test("顶栏个人状态：默认在线、切换持久化且移动端可操作", async ({ page }) => {
-  await page.goto(`${webOrigin}/group.html`);
+  await page.goto(`${webOrigin}/`);
   const status = page.getByLabel("个人状态（仅本机）");
   await expect(status).toHaveValue("online");
   await expect(page.locator("#profileStatusText")).toContainText("在线 · 本机");
@@ -834,8 +1233,103 @@ test("顶栏个人状态：默认在线、切换持久化且移动端可操作",
   ).toBe(true);
 });
 
+/**
+ * 窄档（≤640）一排按钮的横向内距必须同档。
+ *
+ * 症状（round377 同列表穷举在 390/640 两档实测报出）：@media(max-width:640px) 里原先只写
+ * `.btn.primary { padding: 6px 9px }`，于是 .actions 那一排读出「主按钮 9px ‖ 同排普通
+ * 按钮 13px」—— 三处全中：待办（刷新/新建待办）、消息（发起会议/新建文档/私聊成员）、
+ * 文档（导入/新建文档）。同一排两档内距，跟同排同高是同一类病，只是量的不是高度。
+ *
+ * 判据直接是症状本身，两条各管一头：
+ *  ① 同排同档 —— 每排 ≥2 枚 .btn 的 padding-inline 只许读出一个值。
+ *     变异：把规则退回 `.btn.primary {…}` ⇒ 该排读出 {13px, 9px}，当场红。
+ *  ② 窄档真的比桌面窄 —— 同一页在 390 读到的那档必须【严格小于】1440 读到的 13px。
+ *     变异：整条媒体规则删掉 ⇒ 两档全读 13px，②红（只有①会放过「大家都用宽档」这种退回）。
+ * 反向对照（不该红的）：.chat-header .btn 的 7px 与 .btn.small 的 3px/9px 权重都高于这里的
+ * (0,1,0)，各自保留 —— 所以本条只比【同一排内部】是否同值，不比跨排。
+ * 文字截断与横向溢出这两头顺带钉住：压内距的动机是省地方，挤掉了字就得不偿失
+ * （scrollWidth > clientWidth 的那一类截断、以及文档级横向溢出，390 档都实测为 0）。
+ */
+/** 页面侧探针：字符串形态 + JSON 出参，node 侧 lib 里没有 DOM 全局（见上 test 内注释）。 */
+const PAD_PROBE = `(() => {
+  const rows = [];
+  for (const row of document.querySelectorAll(".actions")) {
+    const btns = [...row.querySelectorAll(":scope > .btn")].filter(
+      (b) => b.getBoundingClientRect().width > 1,
+    );
+    if (btns.length < 2) continue;
+    rows.push({
+      pads: [...new Set(btns.map((b) => {
+        const cs = getComputedStyle(b);
+        return cs.paddingLeft + "/" + cs.paddingRight;
+      }))].sort(),
+      clipped: btns
+        .filter((b) => b.scrollWidth > b.clientWidth + 1)
+        .map((b) => (b.textContent ?? "").trim().slice(0, 6)),
+    });
+  }
+  return JSON.stringify({ rows, overflowX: document.documentElement.scrollWidth - window.innerWidth });
+})()`;
+
+test("窄档(≤640) 一排按钮的横向内距同档且确实比桌面窄", async ({ page }) => {
+  // 探针是【字符串】不是闭包：.workbuddy/tsconfig.tests.json 的 types 只有 node，
+  // 闭包里每一处 document/window 都会红在类型棘轮上（tw-cascade.spec.ts:273 同口径）。
+  const readRows = async () =>
+    JSON.parse((await page.evaluate(PAD_PROBE)) as string) as {
+      rows: Array<{ pads: string[]; clipped: string[] }>;
+      overflowX: number;
+    };
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto(`${webOrigin}/#/backlog`);
+  await expect(page.locator(".actions > .btn").first()).toBeVisible();
+  const narrow = await readRows();
+  expect(
+    narrow.rows.length,
+    "390 档没量到 ≥2 枚 .btn 并排的那一排，判据没在考任何东西",
+  ).toBeGreaterThan(0);
+  for (const row of narrow.rows) {
+    expect(
+      row.pads,
+      `同一排按钮读出两档横向内距：${row.pads.join(" vs ")}`,
+    ).toHaveLength(1);
+    expect(
+      row.clipped,
+      `压完内距把文字挤截断了：${row.clipped.join("、")}`,
+    ).toHaveLength(0);
+  }
+  expect(
+    narrow.overflowX,
+    `390 档出现横向溢出 ${narrow.overflowX}px`,
+  ).toBeLessThanOrEqual(0);
+
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.reload();
+  // reload 后不等一下就量，会得到空的排：widePad 取 Math.max 空数组 = -Infinity，
+  // 下面那条「窄档必须严格小于桌面」就恒真 —— 判据悄悄不考任何东西。所以先等这排出来，
+  // 再显式要求量到。
+  await expect(page.locator(".actions > .btn").first()).toBeVisible();
+  const wide = await readRows();
+  expect(
+    wide.rows.length,
+    "1440 档没量到 ≥2 枚 .btn 并排的那一排，比较基准不存在",
+  ).toBeGreaterThan(0);
+  // parseFloat 读到 "/" 就停 ⇒ "9px/9px" 直接读出 9，不用再 split 下标（noUncheckedIndexedAccess）。
+  const widePad = Math.max(
+    ...wide.rows.flatMap((r) => r.pads.map((p) => Number.parseFloat(p))),
+  );
+  const narrowPad = Math.max(
+    ...narrow.rows.flatMap((r) => r.pads.map((p) => Number.parseFloat(p))),
+  );
+  expect(
+    narrowPad,
+    `窄档没真收：390 读到 ${narrowPad}px，与桌面 ${widePad}px 同档（整条媒体规则被删了？）`,
+  ).toBeLessThan(widePad);
+});
+
 test("左侧导航：键盘排序持久化并保持 data-nav 点击行为", async ({ page }) => {
-  await page.goto(`${webOrigin}/group.html`);
+  await page.goto(`${webOrigin}/`);
   await expect(page.locator("#navReorderHint")).toBeVisible();
   const messages = page.locator('[data-nav="messages"]');
   await messages.focus();
@@ -858,6 +1352,332 @@ test("左侧导航：键盘排序持久化并保持 data-nav 点击行为", asyn
     "aria-current",
     "page",
   );
+});
+
+test("管理视图：侧栏入口把控制室挂在右侧内容区，页名单走中间列表栏", async ({
+  page,
+}) => {
+  await page.goto(`${webOrigin}/`);
+  await page.locator('[data-nav="admin"]').click();
+  // 侧栏那颗按钮进去时 hash 就带页名（adminPage 初值 today）：地址永远说得出
+  // 自己在哪一页，复制这条地址给别人不会落到另一页。
+  await expect(page).toHaveURL(/#\/admin\/today$/u);
+  await expect(page.locator('[data-nav="admin"]')).toHaveAttribute(
+    "aria-current",
+    "page",
+  );
+  // 「不弹独立页」在这一发之后有了新的机械含义：内容区里不许再有 iframe。
+  // 原来这条断言查的是 iframe 的 src/title；现在查的是【它必须不存在】——
+  // 谁把嵌法退回 iframe，这里当场红。
+  await expect(page.locator("#view iframe")).toHaveCount(0);
+  await expect(page.locator("#view > .admin-root.admin-mount")).toHaveCount(1);
+  // 中间列表栏 = 控制室那七页，与消息/文档同一个形状。名单只从 /app.js 的
+  // ADMIN_PAGES 拿，所以这一条同时钉住「动态 import 真落地了」：没落地时这里
+  // 停在「正在载入控制室…」，七行永远数不齐。
+  const pages = page.locator("#listContent .doc-list-item");
+  await expect(pages).toHaveCount(7);
+  await expect(pages.first()).toContainText("今日");
+  await expect(pages.nth(1)).toContainText("任务看板");
+  // 七页没有「新建」这回事，中栏右上那颗按钮在这一格无事可做。
+  await expect(page.locator("#listAction")).toBeHidden();
+  // 中栏不再让位给内容区：三栏齐着，控制室画在第三栏里。
+  await expect(page.locator("#listPane")).toBeVisible();
+  await expect(page.locator("#mainPane")).toBeVisible();
+  // 内容区真渲染了这一页（不是停在「载入中…」）：那句段落标题来自 renderToday
+  // 本体，取数失败时那里会换成横幅 ⇒ 这一条把「挂上了但没画」也钉住。
+  await expect(page.locator(".admin-mount-view")).toContainText("需要你决策");
+  // 选中态跟着屏幕走：hash 带的是 today ⇒ 今日页那一行就是当前页。
+  await expect(pages.first()).toHaveAttribute("aria-current", "page");
+  // 模块自己写的那份页头导航【必须看不见】—— 看得见就是屏幕上有两份可点的菜单。
+  // 藏住它的线是两枚一对：group.js 造节点时自带的 hidden 属性 + group.css 里
+  // [hidden]{display:none !important} 那一条（!important 稳压 admin.css 的
+  // .admin-root nav{display:flex}）。round370 剪线变异证明曾经那条
+  // .admin-mount .admin-mount-nav{display:none} 从未承重（剪掉照样绿），已拆；
+  // 下面那枚属性断言才是这条 toBeHidden 的真承重 —— 摘掉 hidden:true，
+  // 这一发当场红，而不是等「看起来还是藏着的」那条假规则陪跑。
+  const mountNav = page.locator(".admin-mount .admin-mount-nav");
+  await expect(mountNav).toHaveJSProperty("hidden", true);
+  await expect(mountNav).toBeHidden();
+  // 点中间栏「任务看板」= 换页：hash 带上页名、选中态移动、内容区换到看板。
+  await pages.nth(1).click();
+  await expect(page).toHaveURL(/#\/admin\/board$/u);
+  await expect(pages.nth(1)).toHaveAttribute("aria-current", "page");
+  await expect(pages.first()).not.toHaveAttribute("aria-current");
+  await expect(
+    page.locator('.admin-mount-view button[data-f="all"]'),
+  ).toHaveCount(1);
+  // 换菜单要能换回来：控制室整格拆走（那条 SSE 与 hub 订阅随 unmountAdmin 一起
+  // 释放），列表栏换回消息自己的名单（不是管理视图那七页）。
+  await page.locator('[data-nav="messages"]').click();
+  await expect(page.locator("#view > .admin-root.admin-mount")).toHaveCount(0);
+  await expect(page.locator("#listPane")).toBeVisible();
+  await expect(page.locator("#listTitle")).toHaveText("消息");
+  await expect(page.locator("#listContent .doc-list-item")).toHaveCount(0);
+  await expect(page.locator(".admin-mount-view")).toHaveCount(0);
+});
+
+test("管理视图：#/admin/<页名> 直达保住页名，旧 /admin 已撤（404）", async ({
+  page,
+}) => {
+  // 直达深链：boot() 要把 hash 第三段当页名交进 setRoute，否则那句 replaceState
+  // 会把它削成 #/admin —— URL 写着看板、屏幕却是今日页。
+  await page.goto(`${webOrigin}/#/admin/board`);
+  await expect(page).toHaveURL(/#\/admin\/board$/u);
+  const pages = page.locator("#listContent .doc-list-item");
+  await expect(pages).toHaveCount(7);
+  await expect(pages.nth(1)).toHaveAttribute("aria-current", "page");
+  // 点侧栏的同名入口不许把页名冲掉（它已经在这一格了，重进应保持当前页）。
+  await page.locator('[data-nav="admin"]').click();
+  await expect(page).toHaveURL(/#\/admin\/board$/u);
+  await expect(pages.nth(1)).toHaveAttribute("aria-current", "page");
+  await pages.first().click();
+  await expect(page).toHaveURL(/#\/admin\/today$/u);
+  await expect(page.locator(".admin-mount-view")).toContainText("需要你决策");
+  // 独立页 /admin 已删（2026-11-25 决策）：这条 URL 落到 404，不再重定向也不再有
+  // 独立文档。管理视图的唯一入口就是工作台 #/admin/<页名>。
+  const standalone = await page.request.get(`${webOrigin}/admin`);
+  expect(standalone.status()).toBe(404);
+});
+
+test("管理视图：今日页窗口 chip 过一遍宿主，query 不被二次编码进页名", async ({
+  page,
+}) => {
+  // 这一发钉的是【宿主与治理页的接缝】，不是窗口功能本身（那半在 app-pure 的
+  // windowMsOfHash / todayWindows 直测里）。chip 写的是 #/admin/today?window=7d
+  // —— query 住在 hash 第三段里；group.js 的 hashchange 若把它当普通 id 走
+  // setRoute，那一段会被 encodeURIComponent 成 today%3Fwindow%3D7d。
+  // 两个判据合起来才抓得住：URL 没 %3F（编码没发生）+ 选中态仍是今日页
+  // （控制室解析出的页名没变成不存在的字符串）。
+  await page.goto(`${webOrigin}/#/admin/today`);
+  const pages = page.locator("#listContent .doc-list-item");
+  await expect(pages).toHaveCount(7);
+  await expect(page.locator(".admin-mount-view")).toContainText("需要你决策");
+  await page.locator('.admin-mount-view a[data-win-ms="604800000"]').click();
+  await expect(page).toHaveURL(/#\/admin\/today\?window=7d$/u);
+  expect(new URL(page.url()).hash).not.toContain("%3F");
+  await expect(pages.first()).toHaveAttribute("aria-current", "page");
+  // chip 的选中态跟着窗口读数走：7 天那一枚拿到 admin-chip-active、24 小时那枚没有
+  // —— 这一发证明控制室真【接到】了这一发（不是宿主自己把地址写了又自己解析）。
+  const active = page.locator(".admin-mount-view a.admin-chip-active");
+  await expect(active).toHaveCount(1);
+  await expect(active).toContainText("7 天");
+  // 窗口换过去之后页还在：看板那枚过滤器不许出现在今日页（证明不是换页换坏的）。
+  await expect(
+    page.locator('.admin-mount-view button[data-f="all"]'),
+  ).toHaveCount(0);
+});
+
+async function createDocumentThroughUi(
+  page: Page,
+  title: string,
+  kind: string,
+  groupId: string | null,
+  bodyText: string,
+): Promise<string> {
+  await page.locator("#createButton").click();
+  await page.locator('[data-create="document"]').click();
+  const dialog = page.getByRole("dialog", { name: "新建文档" });
+  await dialog.locator('input[name="title"]').fill(title);
+  await dialog.locator('select[name="kind"]').selectOption(kind);
+  if (groupId)
+    await dialog.locator('select[name="group_id"]').selectOption(groupId);
+  await dialog.locator('textarea[name="body_text"]').fill(bodyText);
+  const responsePromise = page.waitForResponse(
+    (response) =>
+      response.request().method() === "POST" &&
+      new URL(response.url()).pathname === "/api/v1/documents",
+  );
+  await dialog.getByRole("button", { name: "创建并打开", exact: true }).click();
+  const response = await responsePromise;
+  expect(response.ok()).toBe(true);
+  const created = (await response.json()) as {
+    document: { doc_id: string };
+  };
+  await expect(dialog).toBeHidden({ timeout: 15_000 });
+  return created.document.doc_id;
+}
+
+/** 树上按【群标签 + 形态标签】定位一个形态分支。 */
+function treeKind(page: Page, groupLabel: string, kindLabel: string) {
+  return page
+    .locator("#listContent .doc-tree-group")
+    .filter({
+      has: page.locator(
+        `:scope > summary .doc-tree-label:text-is("${groupLabel}")`,
+      ),
+    })
+    .locator(":scope > .doc-tree-kind")
+    .filter({
+      has: page.locator(
+        `:scope > summary > .doc-tree-label:text-is("${kindLabel}")`,
+      ),
+    });
+}
+
+function collapsedKeys(page: Page) {
+  return page.evaluate(
+    () =>
+      JSON.parse(
+        localStorage.getItem("opc:doc-tree-collapsed") || "[]",
+      ) as string[],
+  );
+}
+
+test("文档树：群→形态→文档三级、折叠态跨重渲染与跨刷新保持、选中项祖先强制展开", async ({
+  page,
+}) => {
+  const browserErrors = watchBrowserErrors(page);
+  await page.goto(`${webOrigin}/`);
+  const alpha = await createGroupThroughUi(
+    page,
+    "树形导航验收群",
+    "验证文档树层级",
+  );
+  const alphaId = alpha.group.group_id;
+
+  // 形态标签取自界面自己的下拉项，不在测试里重打一遍中文（改了 labels 不会假红）
+  await page.locator("#createButton").click();
+  await page.locator('[data-create="document"]').click();
+  const kindLabels = await page
+    .getByRole("dialog", { name: "新建文档" })
+    .locator('select[name="kind"] option')
+    .allTextContents();
+  await page
+    .getByRole("dialog", { name: "新建文档" })
+    .getByRole("button", { name: "取消", exact: true })
+    .click();
+  const labelOf = (kind: string): string =>
+    kindLabels[["doc", "sheet", "markdown", "mindmap"].indexOf(kind)] ?? "";
+  expect(labelOf("sheet")).toBeTruthy();
+  expect(labelOf("mindmap")).toBeTruthy();
+
+  const sheetDoc = await createDocumentThroughUi(
+    page,
+    "树形导航验收表格",
+    "sheet",
+    alphaId,
+    // 表格正文的存储契约是 JSON（parseSheet，group.js:4886 起），不是 CSV
+    '[["名称","数量"],["验收项",1]]',
+  );
+  await page.locator('[data-nav="documents"]').click();
+  const mindmapDoc = await createDocumentThroughUi(
+    page,
+    "树形导航验收导图",
+    "mindmap",
+    null,
+    "根节点",
+  );
+  await page.locator('[data-nav="documents"]').click();
+
+  const tree = page.locator("#listContent .doc-tree");
+  await expect(tree).toBeVisible();
+
+  // ① 三级结构 + 树外零游离（漏这条的话，「半棵树在树里、半棵在外面」是全绿）
+  expect(
+    await page.evaluate(
+      "[...document.querySelectorAll('#listContent .doc-list-item')].filter((item) => !item.closest('.doc-tree')).length",
+    ),
+  ).toBe(0);
+  const alphaBranch = tree.locator(":scope > .doc-tree-group").filter({
+    has: page.locator(
+      ':scope > summary .doc-tree-label:text-is("树形导航验收群")',
+    ),
+  });
+  await expect(alphaBranch).toHaveCount(1);
+  // 建群自带一篇立项文档，所以这个群分支下至少两个形态
+  expect(
+    await alphaBranch.locator(":scope > .doc-tree-kind").count(),
+  ).toBeGreaterThanOrEqual(2);
+  const sheetBranch = treeKind(page, "树形导航验收群", labelOf("sheet"));
+  await expect(sheetBranch).toHaveCount(1);
+  await expect(
+    sheetBranch.locator(":scope > .doc-tree-leaf .doc-list-item"),
+  ).toHaveCount(1);
+  await expect(
+    sheetBranch.locator(":scope > .doc-tree-leaf .doc-list-item").first(),
+  ).toContainText("树形导航验收表格");
+  // 形态分支的图标必须指向精灵里真有的 symbol。不能只量 svg 尺寸：<svg> 有 CSS 尺寸，
+  // 就算 <use href="#i-sheet"> 指向不存在的 symbol 也照样是个 15px 的空盒子（实测漏判过），
+  // 所以判据是【引用解析得到元素】本身。
+  const unresolvedGlyphs = await page.evaluate(`[
+    ...document.querySelectorAll("#listContent .doc-tree summary use"),
+  ]
+    .map((use) => use.getAttribute("href") || "(empty)")
+    .filter((ref) => !ref.startsWith("#") || !document.querySelector(ref))`);
+  expect(unresolvedGlyphs).toEqual([]);
+  await expect(
+    sheetBranch.locator(":scope > summary .doc-tree-count"),
+  ).toHaveText("1");
+
+  // ② 形态 pill 不再和所在分支标题重复自己
+  const leafPills = await sheetBranch
+    .locator(":scope > .doc-tree-leaf .doc-list-item .pill")
+    .allTextContents();
+  expect(leafPills).not.toContain(labelOf("sheet"));
+
+  // ③ 点开叶子 → 正文打开，路由落到这篇文档的 id 上
+  await sheetBranch
+    .locator(":scope > .doc-tree-leaf .doc-list-item")
+    .first()
+    .click();
+  await expect(page.getByLabel("文档标题")).toHaveValue("树形导航验收表格");
+  await expect(page).toHaveURL(new RegExp(`#/documents/${sheetDoc}$`, "u"));
+  await page.locator('[data-nav="documents"]').click();
+  await expect(sheetBranch).toBeVisible();
+
+  // ④ 折叠：localStorage 存真群键，且【没有】共享的 "undefined" 槽位（上一版 STORAGE_KEYS 少一个键就是这症状）
+  await alphaBranch.locator(":scope > summary").click();
+  await expect(sheetBranch).not.toBeVisible();
+  await expect
+    .poll(async () => (await collapsedKeys(page)).includes(`g:${alphaId}`))
+    .toBe(true);
+  expect(await collapsedKeys(page)).not.toContain("undefined");
+  // 兄弟分支不受牵连
+  await expect(
+    treeKind(page, "未分组", labelOf("mindmap")).locator(
+      ":scope > .doc-tree-leaf .doc-list-item",
+    ),
+  ).toHaveCount(1);
+
+  // ⑤ 折叠态跨刷新保持 + 展开后槽位真的被减掉（只加不减的话用户永远解不开）
+  await page.reload();
+  await expect(tree).toBeVisible();
+  await expect(sheetBranch).not.toBeVisible();
+  await alphaBranch.locator(":scope > summary").click();
+  await expect(sheetBranch).toBeVisible();
+  await expect
+    .poll(async () => (await collapsedKeys(page)).includes(`g:${alphaId}`))
+    .toBe(false);
+
+  // ⑥ 选中项祖先【强制】展开，压过折叠记录：先把导图所在分支折掉（用户手势），
+  //    再把【另一个】群也折上，然后直接带 hash 深链进这篇从没点过的文档 ——
+  //    点叶子选中的是已展开分支，测不出这条判据；两个群一起折才分得出「只放行选中项那条祖先链」。
+  const mindBranch = treeKind(page, "未分组", labelOf("mindmap"));
+  const mindGroup = tree.locator(":scope > .doc-tree-group").filter({
+    has: page.locator(':scope > summary .doc-tree-label:text-is("未分组")'),
+  });
+  await mindGroup.locator(":scope > summary").click();
+  await expect(mindBranch).not.toBeVisible();
+  await alphaBranch.locator(":scope > summary").click();
+  await expect(sheetBranch).not.toBeVisible();
+  await page.goto(`${webOrigin}/#/documents/${mindmapDoc}`);
+  await expect(page.getByLabel("文档标题")).toHaveValue("树形导航验收导图");
+  await page.locator('[data-nav="documents"]').click();
+  await expect(mindBranch).toBeVisible();
+  await expect(
+    mindBranch.locator(":scope > .doc-tree-leaf .doc-list-item.selected"),
+  ).toHaveCount(1);
+  // 同一屏上【没有】选中项的群仍然折叠 —— 只放行选中项那条祖先链。
+  // 断言 open 而不是数叶子：details 收起时子树仍在 DOM 里，数个数会恒为真。
+  expect(
+    await page.evaluate(`[
+      ...document.querySelectorAll("#listContent .doc-tree-group > summary .doc-tree-label"),
+    ]
+      .find((el) => el.textContent === "树形导航验收群")
+      ?.closest("details")?.open ?? null`),
+  ).toBe(false);
+
+  expectNoBrowserErrors(browserErrors);
 });
 
 interface PublishedTalent {
@@ -960,7 +1780,7 @@ test("人才市场：真实发布、重复发布刷新快照、下架后成员�
     }),
   );
 
-  await page.goto(`${webOrigin}/group.html`);
+  await page.goto(`${webOrigin}/`);
   await page.locator('[data-nav="talent"]').click();
   const publishButton = page.getByRole("button", {
     name: "发布在职成员",
@@ -1091,7 +1911,7 @@ async function verifyTaskPanel({ page }: { page: Page }) {
   const researchTitle = "真实 UI 每日调研：协作流程";
   const researchSummary = "manual 调研确认任务关联与文档沉淀闭环可用";
 
-  await page.goto(`${webOrigin}/group.html`);
+  await page.goto(`${webOrigin}/`);
   await page.locator('[data-nav="backlog"]').click();
   await expect(
     page.getByRole("heading", { level: 2, name: "任务面板", exact: true }),
@@ -1141,9 +1961,12 @@ async function verifyTaskPanel({ page }: { page: Page }) {
   await expect(standupDocumentBody).toHaveValue(
     new RegExp(standupConclusion, "u"),
   );
-  const standupAssociations = page.getByRole("region", {
-    name: "文档关联",
-  });
+  // 同 533 那条：关联已进抽屉，先开抽屉再断，避免只验「DOM 里有」。
+  await page.getByRole("button", { name: "权限与设置", exact: true }).click();
+  const standupAssociations = page
+    .locator("#mainPane .doc-drawer-wrap")
+    .getByRole("region", { name: "文档关联" });
+  await expect(standupAssociations).toBeVisible();
   await expect(standupAssociations).toContainText("暂无关联任务");
   await expect(standupAssociations).toContainText("暂无关联会议");
 
@@ -1205,3 +2028,159 @@ async function verifyTaskPanel({ page }: { page: Page }) {
   ).toHaveValue(new RegExp(researchSummary, "u"));
   expectNoBrowserErrors(browserErrors);
 }
+
+/**
+ * 黄金路径（golden path）—— 本仓【唯一】一条跨模块主路径回归门。
+ *
+ * 一句话立场：这条测的不是任何一个功能，测的是【它们之间的那几根线】。
+ * 其余每条 e2e 都是逐功能的（任务面板、派发、招聘、私聊、树、抽屉…各测一格），
+ * 那种形状证明每块砖是好的，不证明墙是垒着的：把「新建文档」和「富文本宿主」之间、
+ * 或「自动保存」和「PATCH 路由」之间的接线剪断，那些用例一条都不会红。
+ * （故意不写「其余 N 条」：那个数字每加一条用例就得改一次，写死就是在埋会烂掉的坐标。）
+ *
+ * 判据全部取【服务端读回的值 == 用户在浏览器里敲进去的值】，不钉中间步骤的内部 DOM：
+ * 钉 DOM 结构的话每次改版式都要来改这条，而它必须只有【一条】且几乎不许红，
+ * 否则第三个月就没人管它了（第二条 golden path 的边际价值远低于成本，不加）。
+ *
+ * 每根线都要有【独立的】判据，别让两根线共用一次动作：第一轮 G1（剪树叶子 → openDocument）
+ * 活了下来，因为新建弹窗自己就会把文档打开，树那次点击其实没有承重。
+ * 现在的写法是先在树上点开建群自带的章程，再点回来，剪掉树那根线就断在第 ①④ 步。
+ * 配套剪线探针：.workbuddy/scratch/round367-golden-wire-mutations.mjs（G1~G4）。
+ *
+ * 明确不在这一条里（都有别家射程，别往这里加）：派发执行、导入导出、版本还原、
+ * 图片资产、权限的读侧强制、移动端。
+ */
+test("黄金路径：建群 → 树里点开 → 富文本真打字 → 自动保存落到服务端 → 抽屉授权落到服务端", async ({
+  page,
+}) => {
+  const browserErrors = watchBrowserErrors(page);
+  await page.goto(`${webOrigin}/`);
+
+  // ① 建群自带一篇立项章程，先【从树上点开它】。这一下必须是真判据：
+  //    「新建文档」按钮自带「创建并打开」，所以整条流程若只在新建的那篇上测编辑器，
+  //    树叶子 → openDocument 这根线剪掉也没人红（round367 剪线变异 G1 第一轮就是这么放过的）。
+  //    章程是 kind=markdown，宿主是 Markdown 正文那个 textarea，不是 Quill（Quill 只挂 kind=doc）。
+  const alpha = await createGroupThroughUi(
+    page,
+    "黄金路径验收群",
+    "验证从建群一路到改正文与授权",
+  );
+  const groupId = alpha.group.group_id;
+  const charterId = alpha.document.doc_id;
+  /** 等某一篇文档自己的详情 GET：宿主节点跨文档复用，只等元素出现会命中上一篇的正文。 */
+  const detailGet = (id: string) =>
+    page.waitForRequest(
+      (request) =>
+        request.method() === "GET" &&
+        new URL(request.url()).pathname === `/api/v1/documents/${id}`,
+      { timeout: 20_000 },
+    );
+  await page.locator('[data-nav="documents"]').click();
+  const groupBranch = page.locator("#listContent .doc-tree-group").filter({
+    has: page.locator(
+      ':scope > summary .doc-tree-label:text-is("黄金路径验收群")',
+    ),
+  });
+  await expect(groupBranch).toHaveCount(1);
+  const charterLeaf = groupBranch
+    .locator(".doc-list-item")
+    .filter({ hasText: "立项：" });
+  await expect(charterLeaf).toHaveCount(1);
+  const richBody = page.getByRole("textbox", { name: "富文本正文" });
+  const charterBody = page.getByRole("textbox", { name: "Markdown 正文" });
+  // 先挂等待再点：详情 GET 就在点击那一下发出去，反过来写会错过已经跑完的请求。
+  const charterOpened = detailGet(charterId);
+  await charterLeaf.click();
+  await charterOpened;
+  await expect(charterBody).toHaveValue(/# 立项：黄金路径验收群/u);
+
+  // ② 真新建一篇富文本正文（走创建弹窗，不从 API 建：这条要覆盖的就是「人怎么开始写」）
+  const docId = await createDocumentThroughUi(
+    page,
+    "黄金路径正文",
+    "doc",
+    groupId,
+    "首段：由创建弹窗写入",
+  );
+
+  // ③ 创建自带打开 ⇒ 正文宿主直接是可编辑的富文本引擎（「文件进来就是查看/编辑」那一格）。
+  await expect(richBody).toHaveAttribute("contenteditable", "true");
+  await expect(richBody).toContainText("首段：由创建弹窗写入");
+
+  // ④ 回树上点章程 ⇒ 正文换成章程；再点回新建那篇 ⇒ 正文换回来。
+  //    这两下就是【左栏树 ↔ 正文宿主】那根线本身：中间步骤的 DOM 一律不钉，
+  //    只认「宿主里现在承载的是哪一篇」。选中项变化会牵动祖先强制展开，
+  //    那套折叠规则归文档树那条用例细测，这里只当它必然通。
+  const charterBack = detailGet(charterId);
+  await charterLeaf.click();
+  await charterBack;
+  await expect(charterBody).toHaveValue(/## 成员清单/u);
+  await expect(richBody).toHaveCount(0);
+  const docLeaf = page
+    .locator("#listContent .doc-tree .doc-list-item")
+    .filter({ hasText: "黄金路径正文" })
+    .first();
+  const docBack = detailGet(docId);
+  await docLeaf.click();
+  await docBack;
+  const body = page.getByRole("textbox", { name: "富文本正文" });
+  await expect(body).toHaveAttribute("contenteditable", "true");
+  await expect(body).toContainText("首段：由创建弹窗写入");
+
+  // ⑤ 真打字 ⇒ 900ms 自动保存 ⇒ 服务端读回的正文 == 敲进去的内容。
+  //    ⚠ 判据在【服务端的回答】里，不在「已自动保存」那行状态字里：状态字是前端自己写的，
+  //    它亮了而 PATCH 打错端点/打错 doc_id 的情况，前端看不出来。
+  await body.click();
+  await page.keyboard.press("Control+End");
+  const TYPED = "第二段：在富文本引擎里真敲进去的";
+  await page.keyboard.type(TYPED);
+  const saved = page.waitForResponse(
+    (response) =>
+      response.request().method() === "PATCH" &&
+      new URL(response.url()).pathname === `/api/v1/documents/${docId}`,
+    // 自动保存是 900ms 定时器，正常几百毫秒就回来了。给 20s 而不是默认的 240s：
+    // 接线被剪掉时（剪线变异、端点改名）要立刻报「这个请求根本没发」，别让人等满 4 分钟。
+    { timeout: 20_000 },
+  );
+  const echoed = await saved;
+  expect(echoed.ok()).toBe(true);
+  const readBack = (await page.evaluate(async (id) => {
+    const res = await fetch(`/api/v1/documents/${id}`);
+    return JSON.stringify(await res.json());
+  }, docId)) as string;
+  expect(readBack).toContain(TYPED);
+  expect(readBack).toContain("首段：由创建弹窗写入");
+
+  // ⑥ 右侧抽屉里授权 ⇒ 权限真的落到服务端（抽屉的开合与几何归 rich-editor.spec.ts ⑤，
+  //    这里只接那一根线：表单 submit → POST → 库里那条权限）
+  await page.getByRole("button", { name: "权限与设置", exact: true }).click();
+  const drawer = page.locator("#mainPane .doc-drawer-wrap");
+  await expect(drawer).toBeVisible();
+  // grantee 用刚建出来的那个群（服务端 validateGrantee 要求被授权对象真实存在，
+  // 合成 id 会被 member_not_found 挡下——那条拒绝路径有服务端测试管，别在这里测）：
+  // 这条测的是【这条线通不通】，不是被授权方真能不能看见（读侧强制归 documents 的服务端测试）。
+  const grantee = `group:${groupId}`;
+  await drawer.locator('input[name="grantee"]').fill(grantee);
+  await drawer.locator('select[name="tier"]').selectOption("editor");
+  const permissionSaved = page.waitForResponse(
+    (response) =>
+      response.request().method() === "POST" &&
+      new URL(response.url()).pathname ===
+        `/api/v1/documents/${docId}/permissions`,
+    { timeout: 20_000 },
+  );
+  // 必须真点【保存权限】：授权走的是 form 的 submit，填完字段不发请求，
+  // 只 fill 不 submit 的话 waitForResponse 会一路干等到超时。
+  await drawer.getByRole("button", { name: "保存权限" }).click();
+  const permissionEcho = await permissionSaved;
+  expect(permissionEcho.ok()).toBe(true);
+  const permissions = await page.evaluate(async (id) => {
+    const res = await fetch(`/api/v1/documents/${id}/permissions`);
+    const data = await res.json();
+    return JSON.stringify(data);
+  }, docId);
+  expect(permissions).toContain(grantee);
+  expect(permissions).toContain("editor");
+
+  expectNoBrowserErrors(browserErrors);
+});

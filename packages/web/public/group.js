@@ -6,6 +6,8 @@ import {
   personaTagline,
   speakWithBrowser,
 } from "/src/humanizer.ts";
+import { mountThemeToggle } from "/theme.js";
+import { renderMarkdown } from "/markdown.js";
 
 const API = "/api/v1";
 const $ = (selector, root = document) => root.querySelector(selector);
@@ -123,6 +125,14 @@ const faceLabels = {
   backlog: "待办",
 };
 const docKinds = ["doc", "sheet", "markdown", "mindmap"];
+// 形态 → 图标精灵里的 symbol 名。不能直接 icon(kind)：精灵里只有 i-doc/i-board/
+// i-list/i-tree，没有 i-sheet / i-markdown / i-mindmap，那样渲染出来是零尺寸的空白。
+const docKindIcons = {
+  doc: "doc",
+  sheet: "board",
+  markdown: "list",
+  mindmap: "tree",
+};
 const rhythmKinds = [
   {
     value: "sprint_planning",
@@ -262,12 +272,20 @@ function toast(message, error = false) {
   $("#toastRegion").append(item);
   setTimeout(() => item.remove(), error ? 7000 : 3500);
 }
-function emptyState(title, description, action) {
+/**
+ * 空状态。iconName 让每种空状态用自己那件事的图标 ——
+ * 原来 20 处空状态一律画同一张「文档」，消息为空、待办为空、成员为空看起来一模一样。
+ * @param {string} title
+ * @param {string} description
+ * @param {HTMLElement | null} [action]
+ * @param {string} [iconName] sprite 里的 symbol 名
+ */
+function emptyState(title, description, action, iconName = "doc") {
   return h(
     "div",
     { class: "state" },
-    icon("doc"),
-    h("h3", { text: title }),
+    icon(iconName),
+    h("h3", { class: "tw:text-balance", text: title }),
     h("p", { text: description }),
     action || null,
   );
@@ -278,6 +296,88 @@ function loadingState(text = "正在加载…") {
     { class: "state" },
     h("div", { class: "spinner" }),
     h("p", { text }),
+  );
+}
+/**
+ * 骨架屏：形状就长成它要占位的那个组件，而不是一个孤零零的转圈。
+ * 用在「列表/卡片还没回来」的场景——左中栏的会话列表、群工作区的任务/文档卡、
+ * 成员行等。尺寸对齐它们要占位的真身（见 group.css 的 .skeleton-* 规则）。
+ * 小格子（搜索下拉、群成员下拉、会议整页）仍用 loadingState 的 spinner，那格要的是
+ * 「一件事在跑」而不是「一整屏的形状预告」。
+ */
+function skeletonRow() {
+  return h(
+    "div",
+    { class: "skeleton-row", role: "presentation" },
+    h("div", { class: "skeleton skeleton-avatar" }),
+    h(
+      "div",
+      { class: "skeleton-lines" },
+      h("div", { class: "skeleton skeleton-line" }),
+      h("div", { class: "skeleton skeleton-line short" }),
+    ),
+    h("div", { class: "skeleton skeleton-time" }),
+  );
+}
+function listSkeleton(count = 8) {
+  const rows = [];
+  for (let i = 0; i < count; i += 1) rows.push(skeletonRow());
+  return h(
+    "div",
+    { class: "list-skeleton", role: "status", "aria-label": "正在加载…" },
+    ...rows,
+  );
+}
+function skeletonCard() {
+  return h(
+    "div",
+    { class: "skeleton skeleton-card" },
+    h("div", { class: "skeleton-line title" }),
+    h("div", { class: "skeleton-line" }),
+    h("div", { class: "skeleton-line short" }),
+    h("div", { class: "skeleton-block" }),
+  );
+}
+function cardSkeleton(count = 4) {
+  const cards = [];
+  for (let i = 0; i < count; i += 1) cards.push(skeletonCard());
+  return h(
+    "div",
+    { class: "skeleton-stack", role: "status", "aria-label": "正在加载…" },
+    ...cards,
+  );
+}
+/** 消息流占位：左右交替 —— 右侧那颗对应老板消息，整列都在左边会预告错的会话形状。 */
+function chatSkeleton(count = 3) {
+  const rows = [];
+  for (let i = 0; i < count; i += 1)
+    rows.push(
+      h(
+        "div",
+        { class: `skeleton-chat-row${i % 2 === 1 ? " own" : ""}` },
+        h("div", { class: "skeleton skeleton-avatar" }),
+        h("div", { class: "skeleton skeleton-bubble" }),
+      ),
+    );
+  return h(
+    "div",
+    { class: "skeleton-chat", role: "status", "aria-label": "正在加载…" },
+    ...rows,
+  );
+}
+/** 文档正文占位：一条标题 + 一段段落流，形状对着 editor-card 画。 */
+function docSkeleton() {
+  const lines = [h("div", { class: "skeleton skeleton-line title" })];
+  for (let i = 0; i < 7; i += 1)
+    lines.push(h("div", { class: "skeleton skeleton-line" }));
+  return h(
+    "div",
+    {
+      class: "skeleton-doc card editor-card",
+      role: "status",
+      "aria-label": "正在打开文档…",
+    },
+    ...lines,
   );
 }
 function banner(message, tone = "error", retry) {
@@ -298,7 +398,12 @@ function pageHeader(title, subtitle, actions = []) {
       null,
       h("p", { class: "eyebrow", text: "OPC WORKSPACE" }),
       h("h2", { text: title }),
-      h("p", { text: subtitle }),
+      // 副标题是整句人话，折行时末行常剩一两个字（实测 768 档 contacts 是 247px + 26px，
+      // 末行只有首行的 11%）。balance 把两行拉平，实测三个视口 × 六条路由共 18 个样本
+      // 行数与盒高【一格未变】—— 只推行内宽度，所以它不动版面。
+      // utility 而不是写进 group.css：.page-header p 那族规则没一条管 text-wrap，
+      // 分层规则里未分层声明恒赢，接在这上面不会挤走任何已有渲染。
+      h("p", { class: "tw:text-balance", text: subtitle }),
     ),
     h("div", { class: "actions" }, ...actions),
   );
@@ -381,6 +486,12 @@ function groupName(id) {
     state.groups.find((group) => group.group_id === id)?.title || id || "未分组"
   );
 }
+/** 群头部副标题用：拿不到群行（老数据/未加载）时返回空串，由调用方的分隔符兜住。 */
+function groupSeatSummary(id) {
+  const group = state.groups.find((entry) => entry.group_id === id);
+  const count = Number(group?.member_count);
+  return Number.isFinite(count) ? `${count} 位成员` : "";
+}
 function avatar(member, size = "") {
   const node = h("span", { class: `avatar ${size}`, "aria-hidden": "true" });
   node.append(
@@ -402,6 +513,8 @@ const STORAGE_KEYS = {
   pinned: "opc:pinned-conversations",
   navOrder: "opc:nav-order",
   personalStatus: "opc:personal-status",
+  docTreeCollapsed: "opc:doc-tree-collapsed",
+  docListCollapsed: "opc:doc-list-collapsed",
 };
 const personalStatusLabels = {
   online: "在线",
@@ -434,10 +547,10 @@ function bossAttentionCount(conversation) {
   return Number.isFinite(count) && count > 0 ? Math.floor(count) : 0;
 }
 function conversationRecency(conversation) {
-  const value = Date.parse(
-    conversation.last_message_at || conversation.created_at || "",
-  );
-  return Number.isFinite(value) ? value : 0;
+  // 契约（contracts/conversation.ts）里这两个时刻是 epoch 毫秒【数字】，不是 ISO 串：
+  // Date.parse 只吃字符串，喂数字（连 String(数字) 也一样）恒 NaN ⇒ 排序整条静默失效。
+  const value = conversation.last_message_at || conversation.created_at;
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
 }
 
 const state = {
@@ -453,6 +566,9 @@ const state = {
   pinnedConversations: new Set(storedStringArray(STORAGE_KEYS.pinned)),
   navOrder: storedStringArray(STORAGE_KEYS.navOrder),
   personalStatus: "online",
+  // 折叠偏好：true = 编辑文档时收起左栏。只影响「正在编辑文档」这一屏，见 applyDocListCollapse。
+  docListCollapsed:
+    readStoredJson(STORAGE_KEYS.docListCollapsed, false) === true,
   messages: [],
   meetings: [],
   groups: [],
@@ -462,6 +578,7 @@ const state = {
   templates: [],
   backlog: [],
   talents: [],
+  plugins: [],
   groupMembers: new Map(),
   versions: [],
   permissions: [],
@@ -486,7 +603,11 @@ const state = {
   teamWorkLoading: false,
   teamWorkError: "",
   talentTab: "market",
+  settingsSection: "member",
   settingsMember: null,
+  settingsGroup: null,
+  settingsPlugin: null,
+  settingsRole: null,
   draft: null,
 };
 let renderToken = 0;
@@ -516,6 +637,17 @@ const snapshotEventKinds = new Set([
   "ResearchCardCreated",
 ]);
 let activeDocumentSession = null;
+// 管理视图挂进工作台后的运行时状态。app.js 把渲染目标记在【模块级】的 $view 里，
+// 所以宿主节点必须跨 renderMain 复用同一枚 —— renderMain 每次先 view.replaceChildren()，
+// 若这里每次新建宿主，上一次的 $view 就成了不在文档里的孤儿节点：SSE 照常推数，
+// 屏幕一个像素不动，症状与「页面卡死」一模一样。
+let adminApi = null;
+let adminHost = null;
+let adminNodes = null;
+let adminImport = null;
+let adminMounted = false;
+/** hash 第三段的镜像（#/admin/board ⇒ "board"），只是中间栏选中态的读数。 */
+let adminPage = "today";
 
 const routes = {
   messages: ["消息", "群聊、私聊与会议"],
@@ -523,8 +655,21 @@ const routes = {
   documents: ["文档中心", "知识、模板与版本"],
   backlog: ["任务面板", "待办流转与拆分"],
   talent: ["人才市场", "招聘与人才蓝图"],
-  settings: ["设置", "成员档案与偏好"],
+  settings: ["设置", "成员、群组、岗位与插件"],
+  admin: ["管理视图", "底层治理控制室"],
 };
+
+/**
+ * 设置页的分区。id 同时是 hash 的 id 段（#/settings/plugins），所以不能与
+ * member_id 同形：成员 id 走带前缀的雪花串，这里全部是纯字母单词。
+ * 判据用「名单先命中」而不是「带不带前缀」—— 将来加成员 id 形态不需要回改这里。
+ */
+const SETTINGS_SECTIONS = [
+  { id: "member", label: "成员", hint: "人设、模型、语音、头像" },
+  { id: "groups", label: "群组", hint: "改名、目标、席位与归档" },
+  { id: "roles", label: "岗位", hint: "公司树、汇报线与模型档位" },
+  { id: "plugins", label: "插件", hint: "能力源登记与探活" },
+];
 
 function navEntries() {
   return $$(".nav-entry", $(".rail-top"));
@@ -608,7 +753,24 @@ function setRoute(route, id = null) {
     state.selectedConversation = null;
   }
   if (route === "documents" && id) state.selectedDocument = id;
-  if (route === "settings" && id) state.settingsMember = id;
+  if (route === "settings" && id) {
+    // hash 的 id 位是「分区名或条目 id」二义：分区名单先命中，其余按条目认领，
+    // 让 #/settings/<群 id> 这种手打地址落在群设置而不是成员总览。
+    if (SETTINGS_SECTIONS.some((s) => s.id === id)) {
+      // 落到分区名 = 回到该区总览：只放下【这一区】的条目，其它三区留着，
+      // 分区之间来回切时各自回到原来那一条。
+      state.settingsSection = id;
+      state[SETTINGS_ITEM_KEYS[id]] = null;
+    } else {
+      const section = resolveSettingsSection(id);
+      state.settingsSection = section;
+      state[SETTINGS_ITEM_KEYS[section]] = id;
+    }
+  }
+  // 管理页的页名住在 hash 的第三段（#/admin/board），走 id 这个位置进来。
+  // 镜像【照抄 hash】而不是对着名单验一遍：hash 是唯一真相；手打一个不存在的
+  // 页名时控制室本来就停在当前页，列表选中态跟着 hash 走，两边不会各说各话。
+  if (route === "admin" && id) adminPage = id;
   $("#workspace")?.classList.remove("list-open");
   $(".workspace").classList.remove("list-open");
   $$(".nav-item[data-nav]").forEach((item) => {
@@ -619,16 +781,23 @@ function setRoute(route, id = null) {
   });
   $("#listTitle").textContent = routes[route][0];
   $("#listSubtitle").textContent = routes[route][1];
-  history.replaceState(
-    null,
-    "",
-    `#/${route}${id ? `/${encodeURIComponent(id)}` : ""}`,
-  );
+  // 这一格的 hash 永远带上页名（adminPage 初值 "today"，且只被非空 id 改过）。
+  // 不这么做的话：在看板里点侧栏「管理视图」会把地址打回 #/admin —— 屏幕还在
+  // 看板，地址却说不出自己在哪一页，把这条地址复制给别人就是另一页了。
+  // ⚠ 这里用【镜像】而不是 currentAdminPageId()：页名归不归控制室认，判据只有
+  //   它那份 ROUTES；宿主若在这儿替它改写地址，「哪个页名存在」就有了两个答案。
+  const hashId = route === "admin" ? adminPage : id;
+  const hash = `#/${route}${hashId ? `/${encodeURIComponent(hashId)}` : ""}`;
+  history.replaceState(null, "", hash);
+  // 页名由 hash 带着，每次换 hash 都喂给控制室。只在【已挂载】时喂：挂载尚未
+  // 落地时这一次不算数 —— ensureAdminMounted 在 mountAdmin 之后自己会补一次
+  // sync(location.hash)，那里才是 hash 第一次真正进控制室的地方。
+  if (adminMounted && adminApi) adminApi.syncAdminFromHash(hash);
   renderList();
   renderMain();
 }
 async function loadCore() {
-  const [conversations, meetings, groups, members, roles, backlog] =
+  const [conversations, meetings, groups, members, roles, backlog, plugins] =
     await Promise.all([
       request("/conversations"),
       request("/meetings"),
@@ -636,6 +805,7 @@ async function loadCore() {
       request("/members"),
       request("/roles"),
       request("/backlog?limit=200"),
+      request("/plugins"),
     ]);
   Object.assign(state, {
     conversations: conversations.conversations || [],
@@ -644,6 +814,7 @@ async function loadCore() {
     members: members.members || [],
     roles: roles.roles || [],
     backlog: backlog.items || [],
+    plugins: plugins.plugins || [],
   });
   await Promise.allSettled(
     state.groups.map(async (group) => {
@@ -688,7 +859,14 @@ async function runRefreshAll() {
         }
       } else if (state.selectedMeeting)
         await loadMeeting(state.selectedMeeting, false);
-    } else if (state.route !== "documents" || !state.selectedDocument)
+    } else if (
+      // 控制室读的是自己那份 SSE，不吃工作台的核心快照；而 renderMain 会
+      // replaceChildren —— 宿主节点虽然复用（adminHost 在模块级缓存着，不会被重
+      // 新加载），但每次事件把整格摘下来再挂回去会丢掉滚动位置、焦点，以及抽屉
+      // 打开时挂在 body 上的遮罩。这一格没有一样东西需要工作台的快照来重画。
+      state.route !== "admin" &&
+      (state.route !== "documents" || !state.selectedDocument)
+    )
       renderMain();
   } finally {
     refreshInFlight = null;
@@ -728,8 +906,16 @@ function renderList() {
   content.replaceChildren();
   toolbar.replaceChildren();
   $("#listAction").hidden = false;
+  if (state.route === "admin") {
+    // 「像其他功能一样」在这条路由上的落点：中间栏列的就是控制室那七页，点一行换一页。
+    // 不许 coreLoaded 挡它 —— 控制室自己直连 /api，核心数据没回来时这七页照样可选。
+    // 七页没有「新建」这回事，中栏右上那颗按钮在这一格无事可做。
+    $("#listAction").hidden = true;
+    renderAdminPageList(content);
+    return;
+  }
   if (!coreLoaded) {
-    content.append(loadingState());
+    content.append(listSkeleton());
     return;
   }
   if (state.route === "messages") renderConversationList(content);
@@ -737,7 +923,7 @@ function renderList() {
   if (state.route === "documents") renderDocumentList(content, toolbar);
   if (state.route === "backlog") renderBacklogList(content, toolbar);
   if (state.route === "talent") renderTalentList(content, toolbar);
-  if (state.route === "settings") renderMemberList(content, toolbar);
+  if (state.route === "settings") renderSettingsList(content, toolbar);
 }
 function conversationKindIcon(conversation) {
   if (conversation.kind === "private") {
@@ -961,6 +1147,7 @@ function renderConversationList(content) {
         "还没有会话",
         "创建一个群或会议，工作流会在这里出现。",
         button("新建群", () => openCreateModal("group"), "primary"),
+        "chat",
       ),
     );
 }
@@ -977,7 +1164,9 @@ function renderGroupList(content, toolbar) {
   });
   toolbar.append(search);
   if (!state.groups.length) {
-    content.append(emptyState("暂无群组", "在顶栏点击“创建 → 新建群”。"));
+    content.append(
+      emptyState("暂无群组", "在顶栏点击“创建 → 新建群”。", null, "users"),
+    );
     return;
   }
   for (const group of state.groups) {
@@ -1055,7 +1244,7 @@ function renderDocumentList(content, toolbar) {
   toolbar.append(
     h(
       "div",
-      { class: "toolbar" },
+      { class: "toolbar doc-filter-search" },
       input("docSearch", state.docFilter.q, "search", {
         placeholder: "筛选标题或作者",
         "aria-label": "筛选文档",
@@ -1105,7 +1294,11 @@ function renderDocumentList(content, toolbar) {
       ),
     ),
   );
-  toolbar.append(h("div", { class: "toolbar" }, kinds, groups));
+  // 两个下拉并排（CSS 的 doc-filter-kinds）：306px 的栏里三个整行筛选器
+  // 会把头部顶到 115px 高，树本来就要滚，头部不该先吃掉一屏的五分之一。
+  toolbar.append(
+    h("div", { class: "toolbar doc-filter-kinds" }, kinds, groups),
+  );
   const filtered = state.documents.filter(
     (doc) =>
       (!state.docFilter.kind || doc.kind === state.docFilter.kind) &&
@@ -1122,31 +1315,172 @@ function renderDocumentList(content, toolbar) {
         state.documents.length
           ? "调整类型、群组或关键词筛选。"
           : "从模板创建文档，或导入本地 Word、Excel、Markdown 文件。",
+        null,
+        "upload",
       ),
     );
     return;
   }
-  for (const doc of filtered)
-    content.append(
+  content.append(docTree(filtered));
+}
+/**
+ * 文档树。层级不是文件夹：documents 表没有 parent_id / folder / path
+ * （0016_documents.sql 的列就是全部），所以能落库的层级只有【群 → 形态 → 文档】。
+ * 想要真·文件夹得先加列，客户端造一个 parent 只会在刷新后蒸发。
+ * 折叠态存 localStorage：树的展开状态属于「我这台机器的看法」，不该进业务库。
+ */
+const docTree = (docs) => {
+  const collapsed = new Set(storedStringArray(STORAGE_KEYS.docTreeCollapsed));
+  const byGroup = new Map();
+  for (const doc of docs) {
+    const key = doc.group_id || "";
+    if (!byGroup.has(key)) byGroup.set(key, []);
+    byGroup.get(key).push(doc);
+  }
+  // 未分组永远垫底（空串走上面两个 return，不进字典序），其余按名称、同名按 ID：
+  // 刻意不按「有几篇文档」排 —— 按数量排的话，新建一篇文档整棵树就重排一次，
+  // 用户刚建立的肌肉记忆当场作废。
+  const groupKeys = [...byGroup.keys()].sort((a, b) => {
+    if (!a) return 1;
+    if (!b) return -1;
+    const ta = groupName(a);
+    const tb = groupName(b);
+    if (ta !== tb) return ta < tb ? -1 : 1;
+    return a < b ? -1 : a > b ? 1 : 0;
+  });
+  // 同名群是真实存在的（本项目 dev 库里「双十一大促落地页」就有两个不同 group_id），
+  // 树上两行一模一样的字看起来像渲染坏了。悬停给群目标 + ID 尾号（groupTip），
+  // 但悬停在截图里永远看不见，所以撞名时还要把尾号直接画出来（idTail）。
+  // 统计必须按【显示名】数：按 group_id 数永远是 1，那个版本的判据从来不会触发。
+  const nameTally = new Map();
+  for (const key of groupKeys) {
+    const name = key ? groupName(key) : "未分组";
+    nameTally.set(name, (nameTally.get(name) || 0) + 1);
+  }
+  const idTail = (key) => {
+    if (!key) return "";
+    const name = groupName(key);
+    return nameTally.get(name) > 1 ? `#${key.slice(-4)}` : "";
+  };
+  const groupTip = (key) => {
+    if (!key) return "没有归群的文档";
+    const group = state.groups.find((entry) => entry.group_id === key);
+    if (!group) return key;
+    return (group.goal ? `${group.goal} · ` : "") + `群 ID ${key.slice(-8)}`;
+  };
+  const sections = groupKeys.map((groupKey) => {
+    const docsInGroup = byGroup.get(groupKey);
+    const groupKeyNode = `g:${groupKey || "none"}`;
+    const byKind = new Map();
+    for (const doc of docsInGroup) {
+      if (!byKind.has(doc.kind)) byKind.set(doc.kind, []);
+      byKind.get(doc.kind).push(doc);
+    }
+    // 选中项所在节点强制展开：点开一篇文档却还要自己找折叠的分支，是树最容易做错的地方。
+    const revealed = (nodeKey) =>
+      !collapsed.has(nodeKey) ||
+      docsInGroup.some(
+        (doc) =>
+          state.selectedDocument === doc.doc_id &&
+          (nodeKey === groupKeyNode ||
+            nodeKey === `${groupKeyNode}:${doc.kind}`),
+      );
+    // 折叠态靠原生 <details> 自己管，这里只在 toggle 时把它写回 localStorage。
+    const remember = (nodeKey) => (event) =>
+      event.target.open
+        ? forgetDocTreeCollapse(nodeKey)
+        : rememberDocTreeCollapse(nodeKey);
+    const kindNodes = docKinds
+      .filter((kind) => byKind.has(kind))
+      .map((kind) => {
+        const kindKey = `${groupKeyNode}:${kind}`;
+        return h(
+          "details",
+          {
+            class: "doc-tree-kind",
+            open: revealed(kindKey),
+            ontoggle: remember(kindKey),
+          },
+          h(
+            "summary",
+            null,
+            icon(docKindIcons[kind] ?? "doc"),
+            h("span", { class: "doc-tree-label", text: labels[kind] }),
+            h("span", {
+              class: "doc-tree-count",
+              text: String(byKind.get(kind).length),
+            }),
+          ),
+          h(
+            "div",
+            { class: "doc-tree-leaf" },
+            ...byKind.get(kind).map((doc) => docTreeLeaf(doc)),
+          ),
+        );
+      });
+    return h(
+      "details",
+      {
+        class: "doc-tree-group",
+        open: revealed(groupKeyNode),
+        ontoggle: remember(groupKeyNode),
+      },
       h(
-        "button",
-        {
-          type: "button",
-          class: `doc-list-item${state.selectedDocument === doc.doc_id ? " selected" : ""}`,
-          onClick: () => openDocument(doc.doc_id),
-        },
-        h("h3", { text: doc.title }),
-        h("p", {
-          text: `${labels[doc.kind]} · ${memberName(doc.owner)} · ${fmtDate(doc.updated_at)}`,
+        "summary",
+        { title: groupTip(groupKey) },
+        icon(groupKey ? "users" : "panel"),
+        // 标签 span 里只放群名本身：e2e 按 .doc-tree-label:text-is(群名) 定位分支，
+        // 尾号搬进去就把那条判据撒掉了。冲突标记是另一个 span。
+        h("span", {
+          class: "doc-tree-label",
+          text: groupKey ? groupName(groupKey) : "未分组",
         }),
-        h(
-          "div",
-          { class: "actions" },
-          pill(labels[doc.kind], "blue"),
-          doc.watermark_profile !== "none" ? pill("已水印", "amber") : null,
-        ),
+        idTail(groupKey)
+          ? h("span", { class: "doc-tree-tag", text: idTail(groupKey) })
+          : null,
+        h("span", {
+          class: "doc-tree-count",
+          text: String(docsInGroup.length),
+        }),
       ),
+      ...kindNodes,
     );
+  });
+  return h("div", { class: "doc-tree" }, ...sections);
+};
+function rememberDocTreeCollapse(key) {
+  const collapsed = new Set(storedStringArray(STORAGE_KEYS.docTreeCollapsed));
+  collapsed.add(key);
+  writeStoredJson(STORAGE_KEYS.docTreeCollapsed, [...collapsed]);
+}
+function forgetDocTreeCollapse(key) {
+  const collapsed = new Set(storedStringArray(STORAGE_KEYS.docTreeCollapsed));
+  if (!collapsed.delete(key)) return;
+  writeStoredJson(STORAGE_KEYS.docTreeCollapsed, [...collapsed]);
+}
+function docTreeLeaf(doc) {
+  return h(
+    "button",
+    {
+      type: "button",
+      class: `doc-list-item${state.selectedDocument === doc.doc_id ? " selected" : ""}`,
+      // 作者与日期收进 title：正文页头 .doc-sub 完整写着同一串，树里每行再占一行
+      // 就是把 28 篇摊成 2226px 的那只手。水印也并进来 —— 行尾那个点没文字，
+      // 悬停是它唯一的解释口（点自己不再挂 title，否则会盖掉这一整串）。
+      title: `${memberName(doc.owner)} · ${fmtDate(doc.updated_at)}${
+        doc.watermark_profile === "none"
+          ? ""
+          : ` · ${doc.watermark_profile === "internal" ? "内部水印" : "机密水印"}`
+      }`,
+      onClick: () => openDocument(doc.doc_id),
+    },
+    h("h3", { text: doc.title }),
+    // 不挂形态 pill：叶子就在「形态」那一层分支下面，重复一遍只是噪音。
+    // 不挂「已水印」pill：行尾一个小点说同一件事，且不会把行撑高。
+    doc.watermark_profile !== "none"
+      ? h("span", { class: "doc-leaf-watermark", "aria-hidden": "true" })
+      : null,
+  );
 }
 function renderBacklogList(content, toolbar) {
   toolbar.append(
@@ -1199,7 +1533,12 @@ function renderBacklogList(content, toolbar) {
     );
   if (!items.length)
     content.append(
-      emptyState("没有匹配的待办", "创建条目后，可在这里按群组和优先级处理。"),
+      emptyState(
+        "没有匹配的待办",
+        "创建条目后，可在这里按群组和优先级处理。",
+        null,
+        "board",
+      ),
     );
 }
 function renderTalentList(content, toolbar) {
@@ -1278,6 +1617,8 @@ function renderTalentList(content, toolbar) {
         state.talentTab === "market"
           ? "导入人才蓝图，或在在职成员页发布。"
           : "先完成一次招聘。",
+        null,
+        "talent",
       ),
     );
 }
@@ -1305,11 +1646,7 @@ function renderMemberList(content, toolbar) {
             memberRow: "",
             search: `${member.name} ${member.role_id}`.toLowerCase(),
           },
-          onClick: () => {
-            state.settingsMember = member.member_id;
-            renderList();
-            renderMain();
-          },
+          onClick: () => openSettingsItem("member", member.member_id),
         },
         avatar(member, "small"),
         h(
@@ -1324,20 +1661,161 @@ function renderMemberList(content, toolbar) {
       ),
     );
   if (!state.members.length)
-    content.append(emptyState("暂无成员", "前往人才市场完成招聘。"));
+    content.append(
+      emptyState("暂无成员", "前往人才市场完成招聘。", null, "users"),
+    );
 }
 
+/**
+ * 文档编辑页的左栏折叠：编辑一篇文档时把 306px 的列表栏整栏让给正文。
+ * 折叠偏好【只】作用于「正在编辑文档」这一屏：消息/通讯录/待办的列表是导航本身，
+ * 不许被一次文档页上的点击连带收起（所以这里每次 renderMain 都按当前路由重算，
+ * 而不是把类永久留在 .workspace 上）。
+ * 读不到偏好（隐私模式/配额）时的默认态是【展开】—— 没人点过折叠就不该默认收起一棵树。
+ */
+function applyDocListCollapse() {
+  const collapsed =
+    state.route === "documents" &&
+    state.selectedDocument !== null &&
+    state.docListCollapsed;
+  $(".workspace").classList.toggle("list-collapsed", collapsed);
+  const toggle = $("#docListToggle");
+  if (!toggle) return;
+  toggle.setAttribute("aria-expanded", collapsed ? "false" : "true");
+  const label = collapsed ? "展开文档列表" : "折叠文档列表";
+  toggle.setAttribute("aria-label", label);
+  toggle.title = label;
+  toggle.classList.toggle("is-collapsed", collapsed);
+}
+/**
+ * 管理视图【挂进】内容区：不再有 iframe，app.js 与工作台同处一份文档，样式隔离靠
+ * .admin-root 作用域 + admin- 前缀（双向钉在 test/web/admin-style-scope.test.ts）。
+ * 页导航也不在内容区里重复一份 —— 七页渲染进中间列表栏，与消息/文档同一个形状。
+ */
+function renderAdmin(view) {
+  if (!adminHost) {
+    adminNodes = {
+      // hidden 一箭双雕：读屏不该读到一份看不见的菜单（语义），而 group.css 的
+      // [hidden]{display:none !important} 靠 !important 压住 admin.css 那条
+      // .admin-root nav{display:flex}（0,1,1 稳压 UA 的 [hidden]）。round370 剪线
+      // 证实过：另写一条按类名藏形的规则永远量不到失败，是假守卫，已拆。
+      nav: h("nav", {
+        class: "admin-mount-nav",
+        "aria-label": "主导航",
+        hidden: true,
+      }),
+      dot: h("span", { class: "admin-dot" }),
+      connText: h("span", { text: "连接中…" }),
+      view: h("main", { class: "admin-mount-view" }),
+    };
+    adminHost = h(
+      "div",
+      null,
+      h(
+        "header",
+        null,
+        h("h1", { text: "OPC" }),
+        adminNodes.nav,
+        h("div", { class: "admin-conn" }, adminNodes.dot, adminNodes.connText),
+      ),
+      adminNodes.view,
+    );
+    adminHost.className = "admin-root admin-mount";
+  }
+  if (adminHost.parentNode !== view) view.append(adminHost);
+  void ensureAdminMounted();
+}
+
+/**
+ * 动态 import 一次、缓存到底；每次进这一格都复用同一份模块与同一个宿主。
+ * mountAdmin 之后【必须】补一次 syncAdminFromHash：app.js 的当前页是模块求值时
+ * 从 location.hash 认的，第二次进出时那份读数早已过期，不补这一次就是「进来还
+ * 停在上次那页」。
+ */
+function ensureAdminMounted() {
+  if (adminMounted) {
+    adminApi.syncAdminFromHash(location.hash);
+    return;
+  }
+  adminImport ??= import("/app.js");
+  void adminImport.then((api) => {
+    adminApi = api;
+    if (state.route !== "admin") return;
+    if (!adminMounted) {
+      api.mountAdmin({
+        view: adminNodes.view,
+        nav: adminNodes.nav,
+        status: { dot: adminNodes.dot, connText: adminNodes.connText },
+      });
+      adminMounted = true;
+    }
+    api.syncAdminFromHash(location.hash);
+    // 中间栏此前只能是 loadingState（名单在模块里），模块落地这一刻补渲染真清单。
+    renderList();
+  });
+}
+
+/** 当前该高亮哪一页：hash 带来的页名认得就用它，认不得退回模块报的当前页。 */
+function currentAdminPageId() {
+  if (!adminApi) return adminPage;
+  const known = adminApi.ADMIN_PAGES.some((r) => r.id === adminPage);
+  return known ? adminPage : (adminApi.currentPage?.() ?? "today");
+}
+
+/** 中间栏 = 控制室那七页。名单【只从模块拿】：这里抄一份字面量，app.js 改页时
+ *  就得跟着改两处 —— 那正是挂载 API 只暴露 ADMIN_PAGES 的原因。落地前给占位。 */
+function renderAdminPageList(content) {
+  if (!adminApi) {
+    content.append(listSkeleton(7));
+    return;
+  }
+  for (const page of adminApi.ADMIN_PAGES) {
+    content.append(
+      h(
+        "button",
+        {
+          type: "button",
+          class: "doc-list-item",
+          onClick: () => setRoute("admin", page.id),
+        },
+        h("h3", { text: page.label }),
+      ),
+    );
+    if (page.id === currentAdminPageId()) {
+      const last = content.lastElementChild;
+      last.classList.add("selected");
+      last.setAttribute("aria-current", "page");
+    }
+  }
+}
 function renderMain() {
   activeDocumentSession = null;
   const token = ++renderToken;
   const view = $("#view");
+  applyDocListCollapse();
+  // 文档抽屉住在 #mainPane 而不是 #view 里（理由见 renderDocumentEditor），
+  // 所以换路由时得自己拆 —— 否则离开文档后右滑面上还挂着一份上一个文档的权限。
+  for (const stale of $$("#mainPane .doc-drawer-wrap")) stale.remove();
+  $("#mainPane").classList.remove("drawer-open");
   const focusedId = view.contains(document.activeElement)
     ? document.activeElement.id
     : "";
   view.replaceChildren();
   $("#listPane").hidden = false;
+  if (state.route !== "admin" && adminMounted) {
+    // 离开这一格必须真拆：SSE 是整个会话一条 fetch 流，不拆它会继续往已移出
+    // 文档的节点里推，并永远占着 hub 的一路订阅。
+    adminApi.unmountAdmin();
+    adminMounted = false;
+  }
+  // 控制室不读工作台的核心数据（它自己直连 /api），所以这一格不许挡在
+  // coreLoaded 之后 —— 服务不可用时恰恰要去那一格排查。
+  if (state.route === "admin") {
+    renderAdmin(view);
+    return;
+  }
   if (!coreLoaded) {
-    view.append(loadingState("正在连接工作台…"));
+    view.append(h("div", { class: "page" }, cardSkeleton(3)));
     return;
   }
   try {
@@ -1354,8 +1832,22 @@ function renderMain() {
     if (state.route === "backlog")
       state.selectedBacklog ? renderBacklogDetail(view) : renderBacklog(view);
     if (state.route === "talent") renderTalent(view);
-    if (state.route === "settings")
-      state.settingsMember ? renderSettings(view) : renderSettingsHome(view);
+    if (state.route === "settings") {
+      if (state.settingsSection === "groups") {
+        state.settingsGroup
+          ? renderGroupSettings(view)
+          : renderSettingsHome(view);
+      } else if (state.settingsSection === "roles") {
+        state.settingsRole
+          ? renderRoleSettings(view)
+          : renderSettingsHome(view);
+      } else if (state.settingsSection === "plugins") {
+        state.settingsPlugin
+          ? renderPluginSettings(view)
+          : renderSettingsHome(view);
+      } else if (state.settingsMember) renderSettings(view);
+      else renderSettingsHome(view);
+    }
   } catch (error) {
     view.append(banner(errorMessage(error), "error", () => renderMain()));
   }
@@ -1420,6 +1912,7 @@ function welcomePage() {
           "尚未创建项目群",
           "创建群后会自动出现群会话与项目空间。",
           button("新建群", () => openCreateModal("group"), "primary"),
+          "users",
         )
       : null,
   );
@@ -1532,6 +2025,8 @@ function renderGroupTaskFlow(conversation) {
     return emptyState(
       "本群还没有待办",
       "从任务面板创建待办，或等待后续流程沉淀后在这里查看。",
+      null,
+      "board",
     );
   const tones = {
     backlog: "",
@@ -1592,7 +2087,10 @@ function renderGroupTaskFlow(conversation) {
                       setRoute("backlog", item.id);
                     },
                   },
-                  h("span", { class: "group-task-title", text: item.title }),
+                  h("span", {
+                    class: "group-task-title tw:text-balance",
+                    text: item.title,
+                  }),
                   item.detail
                     ? h("span", {
                         class: "group-task-detail",
@@ -1672,7 +2170,10 @@ function renderGroupDocuments(conversation) {
               h(
                 "span",
                 { class: "group-document-copy" },
-                h("strong", { class: "group-document-title", text: doc.title }),
+                h("strong", {
+                  class: "group-document-title tw:text-balance",
+                  text: doc.title,
+                }),
                 h(
                   "span",
                   { class: "group-document-meta" },
@@ -1688,6 +2189,7 @@ function renderGroupDocuments(conversation) {
           "本群还没有文档",
           "新建一份群文档，或等待自动章程与协作成果沉淀。",
           button("新建群文档", create, "primary"),
+          "doc",
         ),
   );
 }
@@ -1700,7 +2202,7 @@ function renderChat(view, token) {
     (c) => c.conversation_id === state.selectedConversation,
   );
   if (!conversation) {
-    view.append(emptyState("会话不存在", "刷新会话列表后重试。"));
+    view.append(emptyState("会话不存在", "刷新会话列表后重试。", null, "chat"));
     return;
   }
   const isGroup = conversation.kind === "group";
@@ -1803,8 +2305,12 @@ function renderChat(view, token) {
               : privateConversationTitle(conversation),
           }),
           h("p", {
+            // 群会话的 title 就是群名，副标题再写一遍等于同一行字出现两次。
+            // 副标题只补标题没说的信息：成员数 + 当前页签（私聊保留原来的一句话说明）。
             text: isGroup
-              ? `${groupName(conversation.group_id)} · ${tab}`
+              ? [groupSeatSummary(conversation.group_id), tab]
+                  .filter(Boolean)
+                  .join(" · ")
               : bossPrivate
                 ? "老板 · 私聊成员（老板）"
                 : "成员间私聊",
@@ -1830,11 +2336,13 @@ function renderChat(view, token) {
   }
   panel.append(stream, composer);
   if (state.messageLoading) {
-    stream.append(loadingState());
+    stream.append(chatSkeleton());
     return;
   }
   if (!state.messages.length) {
-    stream.append(emptyState("还没有消息", "发出第一条消息，开始这段协作。"));
+    stream.append(
+      emptyState("还没有消息", "发出第一条消息，开始这段协作。", null, "chat"),
+    );
     return;
   }
   let day = "";
@@ -1898,7 +2406,10 @@ function messageNode(message) {
       h("time", {
         class: "mono",
         datetime: new Date(message.created_at).toISOString(),
-        text: fmtDateTime(message.created_at),
+        // 日期已由上方的 .message-day 分隔条说过，这里只留「几点几分」，
+        // 一行消息头从「2026/11/24 上午10:32:00」瘦成「10:32」。
+        title: fmtDateTime(message.created_at),
+        text: fmtTime(message.created_at),
       }),
     ),
     replied
@@ -2070,7 +2581,9 @@ function renderMeeting(view) {
     (m) => m.meeting_id === state.selectedMeeting,
   );
   if (!meeting) {
-    view.append(emptyState("会议不存在", "返回会议列表选择其他记录。"));
+    view.append(
+      emptyState("会议不存在", "返回会议列表选择其他记录。", null, "meeting"),
+    );
     return;
   }
   const participants = (state.groupMembers.get(meeting.group_id) || []).map(
@@ -2123,7 +2636,12 @@ function renderMeeting(view) {
           ),
         ),
       )
-    : emptyState("尚未开始发言", "只有当前下一位发言者可以提交本轮发言。");
+    : emptyState(
+        "尚未开始发言",
+        "只有当前下一位发言者可以提交本轮发言。",
+        null,
+        "meeting",
+      );
   const turnForm = h(
     "form",
     { class: "card", onsubmit: postMeetingTurn },
@@ -2636,7 +3154,7 @@ function renderRhythmView() {
     state.teamWorkError
       ? banner(state.teamWorkError, "error", () => loadTeamPanel("rhythm"))
       : null,
-    state.teamWorkLoading ? loadingState("正在加载团队节奏…") : null,
+    state.teamWorkLoading ? cardSkeleton(3) : null,
     !state.teamWorkLoading && !state.rhythmEvents.length
       ? emptyState(
           "还没有团队节奏",
@@ -2644,6 +3162,7 @@ function renderRhythmView() {
             ? "当前筛选下没有记录，调整类型或群组后再试。"
             : "从一次迭代计划或每日站会开始。请填写摘要、成果、卡点、下一步与负责人，并给出明确结论。",
           button("新增节奏", () => rhythmCreateModal(), "primary"),
+          "clock",
         )
       : null,
     ...(!state.teamWorkLoading && state.rhythmEvents.length
@@ -2672,7 +3191,10 @@ function renderRhythmView() {
       : []),
   );
 }
-async function openResearchBacklog(id) {
+async function openResearchBacklog(id, trigger) {
+  // 待办清单没这一条时要先拉 /backlog（一个来回）。按钮在飞的时候按下去：
+  // 上一行 disabled 让指针变禁、再点不重复发 —— 没有这一发，点击像没生效。
+  if (trigger) trigger.disabled = true;
   try {
     if (!state.backlog.some((item) => item.id === id)) {
       const result = await request("/backlog?limit=200");
@@ -2685,6 +3207,8 @@ async function openResearchBacklog(id) {
     setRoute("backlog", id);
   } catch (error) {
     toast(errorMessage(error), true);
+  } finally {
+    if (trigger) trigger.disabled = false;
   }
 }
 function renderResearchCard(item) {
@@ -2695,7 +3219,7 @@ function renderResearchCard(item) {
     h(
       "div",
       { class: "entry-heading" },
-      h("h3", { text: item.title }),
+      h("h3", { class: "tw:text-balance", text: item.title }),
       pill(item.source || "manual", "blue"),
     ),
     h(
@@ -2737,7 +3261,8 @@ function renderResearchCard(item) {
       item.backlog_item_id
         ? button(
             "查看任务",
-            () => openResearchBacklog(item.backlog_item_id),
+            (event) =>
+              openResearchBacklog(item.backlog_item_id, event.currentTarget),
             "small",
           )
         : h("span", {
@@ -2765,12 +3290,13 @@ function renderResearchView() {
     state.teamWorkError
       ? banner(state.teamWorkError, "error", () => loadTeamPanel("research"))
       : null,
-    state.teamWorkLoading ? loadingState("正在加载今日调研…") : null,
+    state.teamWorkLoading ? cardSkeleton(3) : null,
     !state.teamWorkLoading && !state.researchCards.length
       ? emptyState(
           "今天还没有调研",
           "登记一条外部链接或手动调研。没有 URL 时来源请填写 manual，创建后会关联调研文档和待办草稿。",
           button("新增调研", () => researchCreateModal(), "primary"),
+          "search",
         )
       : null,
     !state.teamWorkLoading && state.researchCards.length
@@ -3054,15 +3580,11 @@ function renderBacklog(view) {
         "任务面板",
         "待办、团队节奏与每日调研；所有变更由 Hub 审计。",
         [
-          button(
-            "刷新",
-            () => {
-              void refreshTaskPanel().catch((error) =>
-                toast(errorMessage(error), true),
-              );
-            },
-            "small",
-          ),
+          button("刷新", () => {
+            void refreshTaskPanel().catch((error) =>
+              toast(errorMessage(error), true),
+            );
+          }),
           createAction,
         ],
       ),
@@ -3123,7 +3645,7 @@ function renderBacklogDetail(view) {
     (entry) => entry.id === state.selectedBacklog,
   );
   if (!item) {
-    view.append(emptyState("待办不存在", "返回任务面板。"));
+    view.append(emptyState("待办不存在", "返回任务面板。", null, "board"));
     return;
   }
   view.append(
@@ -3379,7 +3901,7 @@ function renderDocumentsHome(view) {
       "div",
       { class: "page" },
       pageHeader("文档中心", "模板、在线编辑、版本、权限与水印共用同一正文。", [
-        button("导入", () => importDocument(), "small"),
+        button("导入", () => importDocument()),
         button("新建文档", () => openCreateModal("document"), "primary"),
       ]),
       h(
@@ -3426,7 +3948,12 @@ function renderDocumentsHome(view) {
         ),
       ),
       !state.templates.length
-        ? emptyState("暂无模板", "可创建空白文档，或稍后从 Hub 模板库选择。")
+        ? emptyState(
+            "暂无模板",
+            "可创建空白文档，或稍后从 Hub 模板库选择。",
+            null,
+            "upload",
+          )
         : null,
     ),
   );
@@ -3434,16 +3961,21 @@ function renderDocumentsHome(view) {
 async function openDocument(id) {
   state.selectedDocument = id;
   setRoute("documents", id);
-  $("#view").replaceChildren(loadingState("正在打开文档…"));
+  $("#view").replaceChildren(docSkeleton());
   try {
     const [detail, versions, permissions] = await Promise.all([
       request(`/documents/${encodeURIComponent(id)}`),
       request(`/documents/${encodeURIComponent(id)}/versions`),
       request(`/documents/${encodeURIComponent(id)}/permissions`),
     ]);
-    state.documents = state.documents.map((doc) =>
-      doc.doc_id === id ? detail.document : doc,
-    );
+    // upsert，不是 map：state.documents 是 boot 时那一份列表，别的标签页/会话新建的
+    // 文档、以及翻页翻不到的文档都不在里面。只 map 的话，hash 深链打开这种文档会拿
+    // 着已经取到的 detail 渲染「文档不存在」（实测：列表外文档换 hash ⇒ 空状态，刷新才出来）。
+    state.documents = state.documents.some((doc) => doc.doc_id === id)
+      ? state.documents.map((doc) =>
+          doc.doc_id === id ? detail.document : doc,
+        )
+      : [...state.documents, detail.document];
     state.versions = versions.versions || [];
     state.permissions = permissions.permissions || [];
     state.draft = readDraft(id);
@@ -3455,206 +3987,257 @@ async function openDocument(id) {
     );
   }
 }
-function editorSelectionRange(editor) {
-  const selection = window.getSelection();
-  if (!selection?.rangeCount) return null;
-  const range = selection.getRangeAt(0);
-  return editor.contains(range.commonAncestorContainer) ? range : null;
+const richEditorFormats = [
+  "header",
+  "bold",
+  "italic",
+  "underline",
+  "strike",
+  "blockquote",
+  "list",
+  "code-block",
+  "code",
+  "link",
+  "image",
+  "table",
+  "align",
+  "indent",
+];
+const richEditorTableActions = {
+  "table-row-above": ["+行", "当前表格上方插入行"],
+  "table-row-below": ["+行", "当前表格下方插入行"],
+  "table-row-delete": ["−行", "删除当前行"],
+  "table-column-left": ["+列", "当前列左侧插入列"],
+  "table-column-right": ["+列", "当前列右侧插入列"],
+  "table-column-delete": ["−列", "删除当前列"],
+  "table-delete": ["删表格", "删除整个表格"],
+};
+// Quill 2.0.3 没有 destroy()（实测 typeof quill.destroy === "undefined"），却会往 document
+// 上挂 selectionchange 监听。每次打开文档新建一个实例的话，旧实例的监听永远留着、并且指向
+// 已经丢弃的正文节点。所以全工作台只造一个 Quill：宿主节点、工具栏、正文节点跨渲染复用，
+// 换文档 = 换 editable + 重新灌正文。
+let richEditorShared = null;
+function richEditorRetag(node, tag, keepAttrs) {
+  const next = document.createElement(tag);
+  for (const attr of node.attributes)
+    if (!keepAttrs || keepAttrs.includes(attr.name))
+      next.setAttribute(attr.name, attr.value);
+  next.append(...node.childNodes);
+  node.replaceWith(next);
+  return next;
 }
-function focusEditorRange(editor, range) {
-  if (!range || !editor.contains(range.commonAncestorContainer)) {
-    range = document.createRange();
-    range.selectNodeContents(editor);
-    range.collapse(false);
+function richEditorDataUrlToFile(src) {
+  const comma = src.indexOf(",");
+  const mime = src.slice(5, src.indexOf(";")) || "image/png";
+  let binary = "";
+  try {
+    binary = atob(src.slice(comma + 1));
+  } catch {
+    return null;
   }
-  editor.focus({ preventScroll: true });
-  const selection = window.getSelection();
-  selection.removeAllRanges();
-  selection.addRange(range);
-  return range;
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+  return new File([bytes], `pasted.${mime.split("/")[1] || "png"}`, {
+    type: mime,
+  });
 }
-function richDocToolbar(editor, editable) {
-  let savedRange = null;
-  let activeCell = null;
-  let uploading = false;
-  const commandButtons = new Map();
-  const tableButtons = [];
-  const paragraphSelect = select(
-    "docParagraph",
-    [
-      ["p", "正文"],
-      ["h1", "标题 1"],
-      ["h2", "标题 2"],
-      ["h3", "标题 3"],
-    ],
-    "p",
-    {
-      class: "rich-editor-paragraph-select",
-      "aria-label": "段落层级",
-      disabled: !editable,
-      onchange: (event) => runCommand("formatBlock", event.target.value),
-    },
+async function richEditorAssetUrl(file) {
+  const asset = await uploadAssetBase64(file, "attachment");
+  const assetId = asset?.asset?.asset_id || asset?.asset_id;
+  if (typeof assetId !== "string" || !assetId)
+    throw new Error("图片上传响应缺少 asset_id。");
+  return `/api/v1/assets/${encodeURIComponent(assetId)}`;
+}
+function normalizeRichEditorHtml(html) {
+  const parsed = new DOMParser().parseFromString(
+    `<body>${html}</body>`,
+    "text/html",
   );
-  const textTool = (text, label, onClick, tone = "") => {
-    const control = button(text, onClick, "small", {
-      title: label,
-      "aria-label": label,
-      disabled: !editable,
-    });
-    control.classList.add("rich-editor-tool");
-    if (tone) control.classList.add(tone);
-    return control;
-  };
-  const iconTool = (name, label, onClick, extra = {}) =>
-    iconButton(name, label, onClick, { disabled: !editable, ...extra });
-  const commandTool = (command, control) => {
-    commandButtons.set(command, control);
-    return control;
-  };
-  const tableTool = (label, title, action) => {
-    const control = textTool(label, title, () => runTableAction(action));
-    tableButtons.push(control);
-    return control;
-  };
-  const updateToolbar = () => {
-    const range = editorSelectionRange(editor) || savedRange;
-    const anchor =
-      range && editor.contains(range.commonAncestorContainer)
-        ? range.startContainer.nodeType === Node.ELEMENT_NODE
-          ? range.startContainer
-          : range.startContainer.parentElement
-        : null;
-    const block = anchor?.closest("h1, h2, h3, blockquote, p, li");
-    paragraphSelect.value = /^H[123]$/u.test(block?.tagName || "")
-      ? block.tagName.toLowerCase()
-      : "p";
-    for (const [command, control] of commandButtons) {
-      let active = false;
-      try {
-        active = document.queryCommandState(command);
-      } catch {
-        /* command state is optional */
-      }
-      control.classList.toggle("active", active);
-      control.setAttribute("aria-pressed", String(active));
+  // <br>（DOCX 导入的软换行）按 Quill 的原生读法喂，不再替换成 \n：文本节点里的 \n
+  // 会被 HTML 空白折叠压成空格（实测「尾段<br>换行」显示成「尾段 换行」——一行字没了，
+  // 中间多了个空格），而单元格里的 <br> 会被读成「换了一个单元格」（2 列表变 3 列，吃排版）。
+  // pre 里两者实测逐字节等价（都成 code-block 行），blockquote/li 里原生 <br> 保行、
+  // \n 反而把两行并成一行。所以只在全局不动 <br>，表格里换成空格（内容不丢、列数不变）。
+  for (const cell of [...parsed.querySelectorAll("td br, th br")])
+    cell.replaceWith(" ");
+  // 表头：Quill 的表格 blot 只认 tbody>tr>td，th/thead 落不了地时会被并进相邻单元格
+  // （实测两列表头压成一个「列一列二」单元格 —— 这是吃内容，不是掉格式）。
+  // 统一降成 tbody>tr>td，文字与列数都不动。
+  for (const thead of [...parsed.querySelectorAll("thead")]) {
+    const table = thead.closest("table");
+    if (!table) {
+      thead.replaceWith(...thead.childNodes);
+      continue;
     }
-    const quoteButton = commandButtons.get("blockquote");
-    if (quoteButton) {
-      const active = block?.tagName === "BLOCKQUOTE";
-      quoteButton.classList.toggle("active", active);
-      quoteButton.setAttribute("aria-pressed", String(active));
+    let body = table.querySelector("tbody");
+    if (!body) {
+      body = document.createElement("tbody");
+      table.prepend(body);
     }
-    const tableAvailable =
-      editable && activeCell?.isConnected && editor.contains(activeCell);
-    for (const control of tableButtons) control.disabled = !tableAvailable;
-    uploadButton.disabled = !editable || uploading;
-  };
-  const captureSelection = () => {
-    const range = editorSelectionRange(editor);
-    if (!range) return;
-    savedRange = range.cloneRange();
-    const anchor =
-      range.startContainer.nodeType === Node.ELEMENT_NODE
-        ? range.startContainer
-        : range.startContainer.parentElement;
-    const cell = anchor?.closest("td, th");
-    activeCell = cell && editor.contains(cell) ? cell : null;
-    updateToolbar();
-  };
-  const runCommand = (command, value = null) => {
-    if (!editable) return;
-    focusEditorRange(editor, savedRange);
-    document.execCommand(command, false, value);
-    editor.dispatchEvent(new Event("input", { bubbles: true }));
-    captureSelection();
-  };
-  const selectCell = (cell) => {
-    if (!cell || !editor.contains(cell)) return;
-    const range = document.createRange();
-    range.selectNodeContents(cell);
-    range.collapse(false);
-    focusEditorRange(editor, range);
-    captureSelection();
-  };
-  const runTableAction = (action) => {
-    if (!editable || !activeCell || !editor.contains(activeCell)) return;
-    const table = activeCell.closest("table");
-    const row = activeCell.closest("tr");
-    if (!table || !row) return;
-    const rows = [...table.rows];
-    const rowIndex = rows.indexOf(row);
-    const columnIndex = activeCell.cellIndex;
-    let targetCell = null;
-    if (action === "row-above" || action === "row-below") {
-      const insertAt = rowIndex + (action === "row-below" ? 1 : 0);
-      const newRow = table.insertRow(insertAt);
-      for (let index = 0; index < row.cells.length; index += 1)
-        newRow.append(h("td", null, h("br")));
-      targetCell = newRow.cells[columnIndex] || newRow.cells[0];
-    } else if (action === "row-delete") {
-      if (rows.length === 1) {
-        toast("表格至少需要保留一行。", true);
-        return;
-      }
-      row.remove();
-      targetCell =
-        table.rows[Math.min(rowIndex, table.rows.length - 1)]?.cells[
-          columnIndex
-        ] || table.rows[0]?.cells[0];
-    } else if (action === "column-left" || action === "column-right") {
-      const insertAt = columnIndex + (action === "column-right" ? 1 : 0);
-      for (const currentRow of table.rows) {
-        const cell = h(
-          currentRow.cells[columnIndex]?.tagName || "TD",
-          null,
-          h("br"),
-        );
-        if (insertAt > currentRow.cells.length) currentRow.append(cell);
-        else currentRow.insertCell(insertAt).replaceWith(cell);
-      }
-      targetCell = row.cells[insertAt];
-    } else if (action === "column-delete") {
-      if (table.rows[0]?.cells.length <= 1) {
-        toast("表格至少需要保留一列。", true);
-        return;
-      }
-      for (const currentRow of table.rows)
-        currentRow.cells[columnIndex]?.remove();
-      targetCell =
-        row.cells[columnIndex] || row.cells[columnIndex - 1] || row.cells[0];
+    for (const row of [...thead.querySelectorAll("tr")]) body.prepend(row);
+    thead.remove();
+  }
+  for (const table of [...parsed.querySelectorAll("table")]) {
+    const loose = [...table.children].filter((child) => child.tagName === "TR");
+    if (!loose.length) continue;
+    let body = table.querySelector("tbody");
+    if (!body) {
+      body = document.createElement("tbody");
+      table.append(body);
     }
-    if (!targetCell) return;
-    selectCell(targetCell);
-    editor.dispatchEvent(new Event("input", { bubbles: true }));
-  };
-  const insertTable = () => {
-    const body = h("tbody");
-    for (let rowIndex = 0; rowIndex < 3; rowIndex += 1)
-      body.append(
-        h(
-          "tr",
-          null,
-          ...Array.from({ length: 3 }, () => h("td", null, h("br"))),
-        ),
+    for (const row of loose) body.append(row);
+  }
+  for (const cell of [...parsed.querySelectorAll("th")])
+    richEditorRetag(cell, "td", ["colspan", "rowspan"]);
+  // <hr> 在 Quill 里没有对应 blot，转换时会被静默丢掉；提前删掉让行为可预期。
+  for (const node of [...parsed.querySelectorAll("hr")]) node.remove();
+  // Quill 每次建表都写 inline style="border:1px solid #000"：属性级样式压过样式表，
+  // 既是白底黑边的突兀配色，也等于让文档作者往工作台外壳注入样式（存的时候
+  // sanitisedDocFragment 会抹掉 style，所以灌之前先摘 —— 所见即所存）。
+  for (const node of [...parsed.querySelectorAll("table")])
+    node.removeAttribute("style");
+  return parsed.body.innerHTML;
+}
+function richEditorCellContext(quill) {
+  const range = quill.getSelection();
+  if (!range) return null;
+  const [table, row, cell] = quill.getModule("table").getTable(range);
+  if (!table || !row || !cell) return null;
+  const node =
+    cell.domNode?.nodeType === Node.ELEMENT_NODE
+      ? cell.domNode
+      : cell.domNode?.parentElement;
+  const tableNode = node?.closest?.("table") || null;
+  const rowNode = node?.closest?.("tr") || null;
+  if (!tableNode || !rowNode) return null;
+  return { api: quill.getModule("table"), tableNode, rowNode };
+}
+function richDocEditor(editable, notify) {
+  if (!window.Quill) {
+    return {
+      toolbar: null,
+      element: banner(
+        "富文本引擎没能加载（/vendor/quill/quill.js）。刷新页面重试；此期间正文不会自动保存，以免把空内容写回文档。",
+        "error",
+      ),
+      host: { ready: false, seed() {}, read: () => "" },
+    };
+  }
+  if (!richEditorShared) richEditorShared = richEditorCreate();
+  const host = richEditorShared;
+  host.editable = editable;
+  host.notify = notify;
+  host.quill.enable(editable);
+  host.root.setAttribute("aria-readonly", editable ? "false" : "true");
+  for (const control of host.lockable) control.disabled = !editable;
+  host.paint();
+  return { toolbar: host.toolbar, element: host.element, host };
+}
+function richEditorCreate() {
+  const element = h("div", { class: "rich-editor-host" });
+  const host = {
+    element,
+    quill: null,
+    root: null,
+    toolbar: null,
+    lockable: [],
+    stateTools: [],
+    tableButtons: [],
+    ready: true,
+    editable: true,
+    settling: false,
+    notify: () => {},
+    seed(body) {
+      host.settling = true;
+      // silent：灌正文不算用户改动 —— 既不发 text-change，也不会把这篇的正文当成
+      // 上一篇的未保存修改自动 PATCH 回上一篇的 doc_id（串文档写）。
+      host.quill.setContents(
+        host.quill.clipboard.convert({
+          html: normalizeRichEditorHtml(body || ""),
+          text: "",
+        }),
+        "silent",
       );
-    const table = h("table", null, body);
-    const paragraph = h("p", null, h("br"));
-    const range = focusEditorRange(editor, savedRange);
-    range.deleteContents();
-    range.insertNode(table);
-    table.after(paragraph);
-    range.setStart(paragraph, 0);
-    range.collapse(true);
-    focusEditorRange(editor, range);
-    activeCell = table.rows[0]?.cells[0] || null;
-    editor.dispatchEvent(new Event("input", { bubbles: true }));
-    updateToolbar();
+      // 撤销栈必须跟着清：seed 发的是 TEXT_CHANGE，history 默认 userOnly:false，
+      // 会把「灌进这一篇」和「上一篇的改动」记进同一条撤销记录 —— 实例是跨文档复用的，
+      // 不清的话在新文档里按 Ctrl+Z 会把上一篇的段落搬过来。
+      host.quill.getModule("history").clear();
+      host.settling = false;
+      host.paint();
+    },
+    read() {
+      // getSemanticHTML 而不是 root.innerHTML：后者会把 Quill 自绘的列表标记
+      // （`<span class="ql-ui">`）连同 data-list 一起存进正文。
+      const safe = document.createElement("div");
+      safe.append(...sanitizedDocFragment(host.quill.getSemanticHTML()));
+      return safe.innerHTML;
+    },
+    paint() {
+      // 不能用无参的 getFormat()：它内部是 getSelection(true) —— 逼一次焦点、没焦点
+      // 返回 null，再把 null 当坐标读（实测抛 Cannot read properties of null
+      // (reading 'index')）。渲染期正文还没挂进文档，光标本来就不存在。
+      const range = host.quill.getSelection();
+      const format = range ? host.quill.getFormat(range) : {};
+      for (const tool of host.stateTools) {
+        const current = format[tool.format];
+        let active;
+        if (tool.value === undefined) active = Boolean(current);
+        else if (tool.value === false) active = !current;
+        else
+          active = Array.isArray(current)
+            ? current.includes(tool.value)
+            : current === tool.value;
+        tool.node.classList.toggle("active", active);
+        tool.node.setAttribute("aria-pressed", String(active));
+      }
+      const header = String(format.header ?? "");
+      host.paragraphSelect.value = [...host.paragraphSelect.options].some(
+        (option) => option.value === header,
+      )
+        ? header
+        : "";
+      let inTable = false;
+      try {
+        inTable = Boolean(richEditorCellContext(host.quill));
+      } catch {
+        inTable = false;
+      }
+      for (const control of host.tableButtons)
+        control.disabled = !host.editable || !inTable;
+    },
+  };
+  const applyFormat = (name, value, line) => {
+    const quill = host.quill;
+    const range = quill.getSelection(true);
+    if (!range) return;
+    const current = quill.getFormat(range)[name];
+    let next;
+    if (name === "indent") {
+      const base = Number(current) || 0;
+      next = base + (value === "-1" ? -1 : 1);
+      if (next < 0) return;
+      next = next === 0 ? false : next;
+    } else if (value === undefined) {
+      next = !current;
+    } else {
+      // 再点一次取消：靠右 → 点靠左 = 清掉对齐，点两次居中 = 回到默认。
+      const wanted = value === "" ? false : value;
+      const already = wanted === false ? !current : current === wanted;
+      if (already && wanted === false) return;
+      next = already ? false : wanted;
+    }
+    if (line) quill.formatLine(range, name, next, "user");
+    // 行内格式走 quill.format()，不走 formatText(range, …)：range 折叠时长度为 0，
+    // 而 Delta 的 retain(0, attrs) 直接返回自身（长度 0 根本不入 ops），
+    // formatText 于是静默什么都不做 —— 实测「光标停在那儿点加粗、再打字」全无效。
+    // quill.format() 内部对折叠光标插一个带格式的 ql-cursor 零宽字符，打出来的字才继承格式。
+    else quill.format(name, next, "user");
+    // 落笔后立刻重画：quill.format() 改的是光标格式态，不保证再发一次 SELECTION_CHANGE，
+    // 不主动画的话按了加粗按钮不会亮，用户只能靠再按一次猜。
+    host.paint();
   };
   const openLinkModal = () => {
-    if (!editable) return;
-    if (editorSelectionRange(editor)) captureSelection();
-    focusEditorRange(editor, savedRange);
-    savedRange = editorSelectionRange(editor)?.cloneRange() || savedRange;
+    if (!host.editable) return;
     const urlInput = input("url", "", "text", {
       required: true,
       maxlength: 2048,
@@ -3681,28 +4264,18 @@ function richDocToolbar(editor, editable) {
         const url = String(data.get("url") || "").trim();
         if (!/^(?:https?:\/\/|mailto:|#)/iu.test(url))
           throw new Error("链接必须以 http://、https://、mailto: 或 # 开头。");
+        // 等弹层关掉再落笔：Quill 的选区是离开正文时存下的快照，
+        // 弹层还开着就写会插到光标已经不在了的位置。
         $("#modal").addEventListener(
           "close",
           () => {
-            if (!editable || !editor.isConnected) return;
-            const range = focusEditorRange(editor, savedRange);
-            if (!range.collapsed) {
-              document.execCommand("createLink", false, url);
-            } else {
-              const link = h(
-                "a",
-                { href: url, rel: "noreferrer noopener", target: "_blank" },
-                url,
-              );
-              const trailing = document.createTextNode("\u00a0");
-              range.insertNode(link);
-              link.after(trailing);
-              range.setStartAfter(trailing);
-              range.collapse(true);
-              focusEditorRange(editor, range);
+            const range = host.quill.getSelection(true);
+            if (!range || !host.root.isConnected) return;
+            if (range.length) host.quill.formatText(range, "link", url, "user");
+            else {
+              host.quill.insertText(range.index, url, { link: url }, "user");
+              host.quill.setSelection(range.index + url.length, 0, "api");
             }
-            editor.dispatchEvent(new Event("input", { bubbles: true }));
-            captureSelection();
           },
           { once: true },
         );
@@ -3712,57 +4285,133 @@ function richDocToolbar(editor, editable) {
   const imagePicker = input("docImage", "", "file", {
     accept: "image/*",
     hidden: true,
-    disabled: !editable,
     "aria-label": "选择要上传的图片",
     onchange: async (event) => {
       const picker = event.currentTarget;
       const file = picker.files?.[0];
+      picker.value = "";
       if (!file) return;
       if (!/^image\//iu.test(file.type)) {
         toast("请选择有效的图片文件。", true);
-        picker.value = "";
         return;
       }
-      const uploadRange =
-        editorSelectionRange(editor)?.cloneRange() || savedRange?.cloneRange();
-      uploading = true;
-      updateToolbar();
-      try {
-        const asset = await uploadAssetBase64(file, "attachment");
-        const assetId = asset?.asset?.asset_id || asset?.asset_id;
-        if (typeof assetId !== "string" || !assetId)
-          throw new Error("图片上传响应缺少 asset_id。");
-        if (!editor.isConnected) return;
-        const range = focusEditorRange(editor, uploadRange);
-        const image = h("img", {
-          src: `/api/v1/assets/${encodeURIComponent(assetId)}`,
-          alt: file.name,
-          loading: "lazy",
-        });
-        range.deleteContents();
-        range.insertNode(image);
-        range.setStartAfter(image);
-        range.collapse(true);
-        focusEditorRange(editor, range);
-        editor.dispatchEvent(new Event("input", { bubbles: true }));
-        captureSelection();
-        toast("图片已上传并插入");
-      } catch (error) {
-        toast(errorMessage(error), true);
-      } finally {
-        uploading = false;
-        picker.value = "";
-        updateToolbar();
-      }
+      await host.storeImages(file);
     },
   });
-  const uploadButton = iconTool("upload", "上传图片", () => {
-    if (!editable) return;
-    if (editorSelectionRange(editor)) captureSelection();
-    imagePicker.value = "";
-    imagePicker.click();
-  });
-  const toolbar = h(
+  host.lockable.push(imagePicker);
+  const textTool = (text, label, tool = {}, onClick) => {
+    const item = button(
+      text,
+      onClick ||
+        (() => {
+          if (!host.editable) return;
+          applyFormat(tool.format, tool.value, tool.line);
+        }),
+      "small",
+      { title: label, "aria-label": label, disabled: !host.editable },
+    );
+    item.classList.add("rich-editor-tool");
+    if (tool.className) item.classList.add(tool.className);
+    host.lockable.push(item);
+    if (tool.format) {
+      item.setAttribute("aria-pressed", "false");
+      host.stateTools.push({
+        node: item,
+        format: tool.format,
+        value: tool.value,
+      });
+    }
+    return item;
+  };
+  const iconTool = (name, label, onClick, tool = {}) => {
+    const item = iconButton(name, label, onClick, { disabled: !host.editable });
+    item.classList.add("rich-editor-tool");
+    host.lockable.push(item);
+    // 和 textTool 一样：带 format 的按钮要进 stateTools，paint() 才点得亮它。
+    // 加粗是 toggle 语义（applyFormat 里 next = !current），不亮的话按下去没有任何
+    // 反馈，用户只能靠再按一次猜（实测折叠光标下点加粗，按钮永远不亮）。
+    if (tool.format) {
+      item.setAttribute("aria-pressed", "false");
+      host.stateTools.push({
+        node: item,
+        format: tool.format,
+        value: tool.value,
+      });
+    }
+    return item;
+  };
+  const tableTool = (action) => {
+    const [text, label] = richEditorTableActions[action];
+    const item = button(
+      text,
+      () => {
+        const context = richEditorCellContext(host.quill);
+        if (!context) {
+          toast("先把光标放到表格里，再用这几个按钮。", true);
+          return;
+        }
+        const { api, tableNode, rowNode } = context;
+        const lastOne =
+          (action === "table-row-delete" && tableNode.rows.length <= 1) ||
+          (action === "table-column-delete" && rowNode.cells.length <= 1);
+        if (lastOne) {
+          // 旧实现在这里弹「至少保留一行/一列」并让按钮一直禁着：最后一行永远删不掉，
+          // 想弃掉表格只能整段手敲删除。这里把「删掉它就是空表格」说破，另外单独给一枚
+          // 「删除整个表格」—— 两条路都通，不留死胡同。
+          toast(
+            action === "table-row-delete"
+              ? "这是最后一行，删掉它整张表格就没内容了；要弃掉表格请用「删除整个表格」。"
+              : "这是最后一列，删掉它整张表格就没内容了；要弃掉表格请用「删除整个表格」。",
+            true,
+          );
+          return;
+        }
+        if (action === "table-row-above") api.insertRowAbove();
+        else if (action === "table-row-below") api.insertRowBelow();
+        else if (action === "table-row-delete") api.deleteRow();
+        else if (action === "table-column-left") api.insertColumnLeft();
+        else if (action === "table-column-right") api.insertColumnRight();
+        else if (action === "table-column-delete") api.deleteColumn();
+        else api.deleteTable();
+      },
+      "small",
+      { title: label, "aria-label": label, disabled: true },
+    );
+    item.classList.add("rich-editor-tool");
+    host.tableButtons.push(item);
+    return item;
+  };
+  const insertTable = () => {
+    if (!host.editable) return;
+    const range = host.quill.getSelection(true);
+    if (!range) {
+      toast("先把光标放到要插入表格的位置。", true);
+      return;
+    }
+    host.quill.getModule("table").insertTable(3, 3);
+  };
+  const paragraphSelect = select(
+    "docParagraph",
+    [
+      ["", "正文"],
+      ["1", "标题 1"],
+      ["2", "标题 2"],
+      ["3", "标题 3"],
+    ],
+    "",
+    {
+      class: "rich-editor-paragraph-select",
+      "aria-label": "段落层级",
+      disabled: !host.editable,
+      onchange: (event) => {
+        const value = event.currentTarget.value;
+        applyFormat("header", value === "" ? false : Number(value), true);
+      },
+    },
+  );
+  host.paragraphSelect = paragraphSelect;
+  host.lockable.push(paragraphSelect);
+  host.toolbar = h(
     "div",
     {
       class: "editor-toolbar rich-editor-toolbar",
@@ -3779,41 +4428,53 @@ function richDocToolbar(editor, editable) {
       paragraphSelect,
     ),
     h("span", { class: "divider" }),
-    commandTool(
-      "bold",
-      iconTool("bold", "加粗", () => runCommand("bold")),
-    ),
-    commandTool(
-      "italic",
-      textTool("I", "斜体", () => runCommand("italic"), "italic"),
-    ),
-    commandTool(
-      "underline",
-      textTool("U", "下划线", () => runCommand("underline"), "underline"),
-    ),
-    commandTool(
-      "strikeThrough",
-      textTool("S", "删除线", () => runCommand("strikeThrough"), "strike"),
-    ),
+    iconTool("bold", "加粗", () => applyFormat("bold"), { format: "bold" }),
+    textTool("I", "斜体", { format: "italic", className: "italic" }),
+    textTool("U", "下划线", { format: "underline", className: "underline" }),
+    textTool("S", "删除线", { format: "strike", className: "strike" }),
+    textTool("码", "行内代码", { format: "code", className: "mono" }),
     h("span", { class: "divider" }),
-    commandTool(
-      "insertUnorderedList",
-      iconTool("list", "无序列表", () => runCommand("insertUnorderedList")),
-    ),
-    commandTool(
-      "insertOrderedList",
-      textTool("1.", "有序列表", () => runCommand("insertOrderedList")),
-    ),
-    commandTool(
-      "blockquote",
-      textTool("引用", "引用", () => runCommand("formatBlock", "blockquote")),
-    ),
-    textTool("链接", "插入链接", openLinkModal),
+    textTool("•", "无序列表", { format: "list", value: "bullet", line: true }),
+    textTool("1.", "有序列表", {
+      format: "list",
+      value: "ordered",
+      line: true,
+    }),
+    textTool("引用", "引用", { format: "blockquote", line: true }),
+    textTool("代码块", "代码块", { format: "code-block", line: true }),
     h("span", { class: "divider" }),
-    iconTool("board", "插入 3×3 表格", insertTable),
-    uploadButton,
+    textTool("靠左", "左对齐", { format: "align", value: false, line: true }),
+    textTool("居中", "居中对齐", {
+      format: "align",
+      value: "center",
+      line: true,
+    }),
+    textTool("靠右", "右对齐", { format: "align", value: "right", line: true }),
+    textTool("两端", "两端对齐", {
+      format: "align",
+      value: "justify",
+      line: true,
+    }),
+    textTool("←缩进", "减少缩进", {
+      format: "indent",
+      value: "-1",
+      line: true,
+    }),
+    textTool("缩进→", "增加缩进", {
+      format: "indent",
+      value: "+1",
+      line: true,
+    }),
+    h("span", { class: "divider" }),
+    textTool("链接", "插入链接", {}, () => openLinkModal()),
+    iconTool("upload", "上传图片", () => {
+      if (!host.editable) return;
+      imagePicker.value = "";
+      imagePicker.click();
+    }),
     imagePicker,
     h("span", { class: "divider" }),
+    textTool("表格", "插入 3×3 表格", {}, insertTable),
     h(
       "span",
       {
@@ -3821,26 +4482,91 @@ function richDocToolbar(editor, editable) {
         role: "group",
         "aria-label": "当前表格操作",
       },
-      tableTool("+行", "当前表格上方插入行", "row-above"),
-      tableTool("+行", "当前表格下方插入行", "row-below"),
-      tableTool("−行", "删除当前行", "row-delete"),
-      tableTool("+列", "当前列左侧插入列", "column-left"),
-      tableTool("+列", "当前列右侧插入列", "column-right"),
-      tableTool("−列", "删除当前列", "column-delete"),
+      ...Object.keys(richEditorTableActions).map(tableTool),
     ),
   );
-  const onSelectionChange = () => {
-    if (!editor.isConnected) {
-      document.removeEventListener("selectionchange", onSelectionChange);
-      return;
+  // 不传 theme："core" 会当场抛 Invalid theme（full bundle 只注册了 themes/snow 与
+  // themes/bubble），默认的 BaseTheme 才合用 —— 它只造正文节点，不往 DOM 里塞自带控件。
+  // 也不交 toolbar：Quill 自带工具栏按「设值」语义发指令，且 value="" 的按钮会被它算成
+  // false（实测靠左永远压不上居中/靠左），切换语义与点亮状态一律我们自己接。
+  const quill = new window.Quill(element, {
+    formats: richEditorFormats,
+    modules: {
+      table: true,
+      clipboard: { matchVisual: false },
+      history: { delay: 2000 },
+      // 走我们的资产接口，不走 Quill 默认的 FileReader → data: URI：后者会被
+      // sanitisedDocFragment 的 src 白名单整条抹掉，图片存进去就没了。
+      // mimetypes 要写全：默认只收 png/jpeg，截图工具给的 webp 会被静默丢掉。
+      uploader: {
+        mimetypes: [
+          "image/png",
+          "image/jpeg",
+          "image/gif",
+          "image/webp",
+          "image/bmp",
+        ],
+        handler(_index, files) {
+          void host.storeImages(...files);
+        },
+      },
+    },
+  });
+  quill.root.classList.add("rich-editor");
+  // 无障碍语义跟着 role/aria-label 走，不依赖内容可编辑性：只读时
+  // getByRole("textbox", { name: "富文本正文" }) 仍然要能命中。
+  quill.root.setAttribute("role", "textbox");
+  quill.root.setAttribute("aria-multiline", "true");
+  quill.root.setAttribute("aria-label", "富文本正文");
+  // 从 Word/网页粘进来的 data: 图片：不进模型（那种 src 存不下来），先落地成资产再插。
+  quill.clipboard.addMatcher("IMG", (node, delta) => {
+    const src = node.getAttribute("src") || "";
+    if (!/^data:image\//iu.test(src)) return delta;
+    // 只转用户粘进来的。seed 也走 clipboard.convert，不加这道闸的话：打开一篇存量的
+    // 老文档（正文里躺着 data: 图）就当场上传一次、把图插到光标处（内容顺序变了）、
+    // 并把这篇标脏自动写一个新版本 —— 用户什么都没做。老实现的 sanitizer 本来就
+    // 只放行 /api/v1/assets/ 的 src，那种图一直是丢弃的，这里维持丢弃，不擅自"救图"。
+    if (host.settling) return new (window.Quill.import("delta"))();
+    const file = richEditorDataUrlToFile(src);
+    if (file) {
+      const index = quill.getSelection()?.index ?? quill.getLength() - 1;
+      void host.storeImages(file, index);
     }
-    captureSelection();
+    return new (window.Quill.import("delta"))();
+  });
+  quill.on("text-change", (_delta, _oldSource, source) => {
+    // 灌正文走 silent 到不了这里；到了一定是正文变了。settling 挡的是 Quill 归一化
+    // 时补发的那一次（比如 code-block 补 data-language），不是用户改的。
+    if (host.settling) return;
+    host.notify(source === "user");
+  });
+  // 表格按钮只在光标落进单元格时可用，格式按钮要跟着选区点亮；
+  // SELECTION_CHANGE 时 Quill 已经把 DOM 选区换算成 delta 偏移，比自听 selectionchange 准。
+  quill.on("selection-change", () => host.paint());
+  host.storeImages = async (...files) => {
+    let index = quill.getLength() - 1;
+    if (files.length && typeof files[0] === "number") index = files.shift();
+    for (const file of files) {
+      if (!(file instanceof File)) continue;
+      try {
+        const url = await richEditorAssetUrl(file);
+        if (!host.root.isConnected) return;
+        const at = Math.min(index, quill.getLength() - 1);
+        quill.insertEmbed(at, "image", url, "user");
+        const node = quill.root.querySelector(`img[src="${url}"]`);
+        // alt 只能在 insertEmbed 之后补：image 是 embed，Quill 的 value() 不读任何属性，
+        // 构造时传对象反而会让 src 整个丢失（实测插出来的 img 连 src 都没有）。
+        if (node) node.setAttribute("alt", file.name);
+        quill.update("user");
+        index = at + 1;
+      } catch (error) {
+        toast(errorMessage(error), true);
+      }
+    }
   };
-  document.addEventListener("selectionchange", onSelectionChange);
-  for (const eventName of ["focus", "keyup", "mouseup", "input"])
-    editor.addEventListener(eventName, captureSelection);
-  updateToolbar();
-  return toolbar;
+  host.quill = quill;
+  host.root = quill.root;
+  return host;
 }
 function documentAssociations(doc) {
   const members = (state.groupMembers.get(doc.group_id) || [])
@@ -3934,12 +4660,21 @@ function documentAssociations(doc) {
     !meetings.length ? relation("关联会议", null, null, "暂无关联会议") : null,
   );
 }
+// 「源码 / 预览 / 分栏」这一组页签由正文形态（sourceMode）决定，不是由 kind 决定：
+// markdown 与思维导图共用同一个控件，只是词不同；表格与富文本压根没有「源码」这一说。
+const SOURCE_MODES = {
+  markdown: { source: "源码", preview: "预览", split: "分栏" },
+  mindmap: { source: "大纲", preview: "预览", split: "分栏" },
+};
+// 形态按文档记（会话内）：写完一段切去核对渲染效果，切回来还在原处，不必每篇重选一遍。
+// 用 Map 不用 localStorage —— 这是临时偏好，为它写盘会把「上次停在预览」带进下一篇。
+const docModes = new Map();
 function renderDocumentEditor(view) {
   const doc = state.documents.find(
     (entry) => entry.doc_id === state.selectedDocument,
   );
   if (!doc) {
-    view.append(emptyState("文档不存在", "返回文档中心。"));
+    view.append(emptyState("文档不存在", "返回文档中心。", null, "doc"));
     return;
   }
   const editable = doc.my_tier !== "reader";
@@ -3953,41 +4688,49 @@ function renderDocumentEditor(view) {
     "aria-label": "文档标题",
   });
   const status = h("span", { text: `基线版本 ${latestSeq}` });
+  // kind-* 类决定正文宿主的滚动归属：富文本宿主自己滚（正文按内容长），
+  // markdown/mindmap/sheet 由内部输入面滚（双层滚圈同屏是误操作源头）。见 group.css 的 .editor-surface。
   const watermark = h("div", {
-    class: `editor-surface watermark ${doc.watermark_profile}`,
+    class: `editor-surface watermark ${doc.watermark_profile} kind-${doc.kind}`,
     dataset: {
       watermark: `${memberName(doc.owner)} · ${fmtDateTime(Date.now())}\n${doc.watermark_profile === "confidential" ? "机密" : "内部"}`,
     },
   });
   let readContent = () => doc.body_text || "";
+  let richHost = null;
+  let sheetHost = null;
+  // 只有「有源码文本」的形态（markdown / 思维导图）才挂这一层：源码面与预览面同在一个
+  // 弹性容器里，谁显示由 data-mode 决定（CSS 分派，见 group.css 的 .editor-panes）。
+  // 表格与富文本没有「源码」可言，保持原形状。
+  const paneHost = h("div", { class: "editor-panes" });
+  let panes = null;
+  let paneKind = null;
+  // 恢复草稿 / 切形态后要重画的东西：markdown 是预览 HTML，思维导图是那棵树。
+  let repaintPanes = null;
+  const mountPanes = (kind, source, preview) => {
+    panes = { source, preview };
+    paneKind = kind;
+    paneHost.append(source, preview);
+    // 装进水位面而不是顶替它：.editor-surface 同时是 queueDraft() 读 data-draftBody
+    // 与 restoreDraft() 找 textarea 的那枚节点，顶替等于把草稿存取整条剪断。
+    watermark.append(paneHost);
+  };
   if (doc.kind === "doc") {
-    const editor = h("div", {
-      class: "rich-editor",
-      contenteditable: editable ? "true" : "false",
-      role: "textbox",
-      "aria-multiline": "true",
-      "aria-label": "富文本正文",
-      onpaste: (event) => {
-        event.preventDefault();
-        document.execCommand(
-          "insertText",
-          false,
-          event.clipboardData.getData("text/plain"),
-        );
-      },
-      ondrop: (event) => event.preventDefault(),
+    const editor = richDocEditor(editable, (user) => {
+      if (user) dirty = true;
+      scheduleAutosave();
     });
-    editor.replaceChildren(...sanitizedDocFragment(doc.body_text || ""));
-    readContent = () => {
-      const safe = document.createElement("div");
-      safe.append(...sanitizedDocFragment(editor.innerHTML));
-      return safe.innerHTML;
-    };
-    watermark.append(richDocToolbar(editor, editable), editor);
+    richHost = editor.host;
+    if (editor.host.ready) readContent = () => editor.host.read();
+    else readContent = () => watermark.dataset.draftBody || doc.body_text || "";
+    watermark.append(editor.toolbar, editor.element);
   } else if (doc.kind === "sheet") {
-    const sheetEditor = renderSheetEditor(doc, editable, latestSeq, status);
-    readContent = sheetEditor.readContent;
-    watermark.append(sheetEditor.element);
+    sheetHost = renderSheetEditor(doc, editable, () => {
+      dirty = true;
+      scheduleAutosave();
+    });
+    readContent = sheetHost.readContent;
+    watermark.append(sheetHost.element);
   } else if (doc.kind === "mindmap") {
     const outline = textarea("mindmapOutline", doc.body_text || "", {
       class: "mindmap-outline",
@@ -4001,26 +4744,28 @@ function renderDocumentEditor(view) {
     outline.addEventListener("input", drawTree);
     drawTree();
     readContent = () => outline.value;
-    watermark.append(
-      h(
-        "div",
-        { class: "editor-toolbar" },
-        h("span", {
-          class: "muted small-text",
-          text: "每行一个节点，用两个空格缩进表示层级",
-        }),
-      ),
-      preview,
-      outline,
-    );
+    repaintPanes = drawTree;
+    mountPanes("mindmap", outline, preview);
+    // 旧的「每行一个节点，用两个空格缩进表示层级」提示跟着页签走（见下方 modeBar），
+    // 不再单占一条 editor-toolbar —— 编辑面每一行高度都是从正文里借的。
   } else {
     const editor = textarea("markdownBody", doc.body_text || "", {
       class: "markdown-editor",
       "aria-label": "Markdown 正文",
       disabled: !editable,
     });
+    const preview = h("div", {
+      class: "markdown-preview",
+      "aria-live": "polite",
+    });
+    const paintPreview = () => {
+      preview.innerHTML = renderMarkdown(editor.value);
+    };
+    editor.addEventListener("input", paintPreview);
+    paintPreview();
     readContent = () => editor.value;
-    watermark.append(editor);
+    repaintPanes = paintPreview;
+    mountPanes("markdown", editor, preview);
   }
   watermark.dataset.draftBody = doc.body_text || "";
   let savedBody = doc.body_text || "";
@@ -4142,6 +4887,8 @@ function renderDocumentEditor(view) {
   };
   activeDocumentSession = {
     docId: doc.doc_id,
+    host: richHost,
+    sheetHost,
     isDirty,
     changed: scheduleAutosave,
     remoteChanged: () => {
@@ -4153,6 +4900,12 @@ function renderDocumentEditor(view) {
     },
     flush: () => save(true),
   };
+  // 灌正文必须在上面这套闭包（dirty / scheduleAutosave / readContent）齐活之后：
+  // 引擎在灌的过程中若发现正文和云端基线不一致，会立刻起一个 900ms 的自动保存，
+  // 把「还没渲染完的中间态」当成用户改动写回服务端。
+  // 只灌服务端正文：本地草稿仍旧走「恢复本地草稿」按钮，一打开就自动应用草稿会让
+  // 页面在用户什么都没做的情况下变脏，进而把草稿静默 PATCH 回服务端。
+  if (richHost?.ready) richHost.seed(doc.body_text || "");
   const permissionForm = h(
     "form",
     { onsubmit: setPermission },
@@ -4210,455 +4963,570 @@ function renderDocumentEditor(view) {
       ? h("p", { class: "muted small-text", text: "首次保存后产生版本。" })
       : null,
   );
-  view.append(
+  // 关联区块进抽屉（round370，用户拍板）：正文只留标题条 + 编辑面。
+  // 与上一轮「关联刻意留正文」的翻向理由记在这里，别再被顺手挪回去：
+  // 上一版的病是「正文被非正文的东西占掉一半」，而不是「关联不该在抽屉」——
+  // 这一版正文铺满之后，上下文放抽屉是可展开的；判据见 group-workbench.spec.ts
+  // 用 getByRole("region", {name:"文档关联"}) 取数（抽屉在 #view 之外，见下面的挂载点）。
+  const drawerBody = h(
+    "div",
+    {
+      class: "doc-drawer-body",
+      id: "docDrawer",
+    },
+    documentAssociations(doc),
     h(
-      "div",
-      { class: "page" },
-      pageHeader(
-        doc.title,
-        `${labels[doc.kind]} · ${memberName(doc.owner)} · 更新于 ${fmtDateTime(doc.updated_at)}`,
-        [
-          button(
-            "返回文档中心",
-            () => {
-              state.selectedDocument = null;
-              renderList();
-              renderMain();
+      "section",
+      { class: "card" },
+      h("h3", { text: "文档元数据" }),
+      field(
+        "水印配置",
+        select(
+          "watermark",
+          [
+            ["none", "无水印"],
+            ["internal", "内部"],
+            ["confidential", "机密"],
+          ],
+          doc.watermark_profile,
+          {
+            onchange: async (event) => {
+              try {
+                await request(`/documents/${encodeURIComponent(doc.doc_id)}`, {
+                  method: "PATCH",
+                  body: { watermark_profile: event.target.value },
+                });
+                toast("水印配置已更新");
+                await openDocument(doc.doc_id);
+              } catch (error) {
+                toast(errorMessage(error), true);
+              }
             },
-            "small",
-          ),
-          button("导出", () => exportDocumentModal(doc), "small"),
-          button("软删除", () => softDeleteDocument(doc), "danger small"),
-          h(
-            "button",
-            {
-              id: "saveDocument",
-              class: "btn primary",
-              type: "button",
-              disabled: !editable,
-              onclick: () => save(),
-            },
-            "保存新版本",
-          ),
-        ],
+          },
+        ),
       ),
-      state.draft
-        ? banner(
-            "检测到这份文档的本地草稿。云端基线未改变时可恢复。",
-            "warning",
-            null,
-          )
-        : null,
-      state.draft
-        ? h(
-            "div",
-            { class: "actions" },
-            button("恢复本地草稿", () =>
-              restoreDraft(doc, watermark, title, status),
-            ),
-            button("丢弃草稿", () => {
-              removeDraft(doc.doc_id);
-              state.draft = null;
-              renderMain();
-            }),
-          )
-        : null,
-      h(
-        "div",
-        { class: "doc-layout" },
-        h(
-          "section",
-          { class: "card editor-card" },
-          h(
-            "div",
-            { class: "editor-header" },
-            title,
-            h("p", {
-              class: "muted small-text",
-              text: `水印：${doc.watermark_profile === "none" ? "无" : doc.watermark_profile === "internal" ? "内部" : "机密"} · 有效权限：${labels[doc.my_tier] || "所有者"}`,
-            }),
-          ),
-          watermark,
-          h(
-            "div",
-            { class: "editor-status" },
-            status,
-            h("span", { class: "spacer" }),
-            h("span", { text: "Ctrl / Cmd + S 保存" }),
-          ),
-          h(
-            "aside",
-            { class: "side-stack" },
-            documentAssociations(doc),
-            h(
-              "section",
-              { class: "card" },
-              h("h3", { text: "文档元数据" }),
-              field(
-                "水印配置",
-                select(
-                  "watermark",
-                  [
-                    ["none", "无水印"],
-                    ["internal", "内部"],
-                    ["confidential", "机密"],
-                  ],
-                  doc.watermark_profile,
-                  {
-                    onchange: async (event) => {
-                      try {
-                        await request(
-                          `/documents/${encodeURIComponent(doc.doc_id)}`,
-                          {
-                            method: "PATCH",
-                            body: { watermark_profile: event.target.value },
-                          },
-                        );
-                        toast("水印配置已更新");
-                        await openDocument(doc.doc_id);
-                      } catch (error) {
-                        toast(errorMessage(error), true);
-                      }
-                    },
-                  },
-                ),
-              ),
-              field(
-                "所属群",
-                select(
-                  "docGroup",
-                  [
-                    ["", "未分组"],
-                    ...state.groups.map((group) => [
-                      group.group_id,
-                      group.title,
-                    ]),
-                  ],
-                  doc.group_id || "",
-                  {
-                    onchange: async (event) => {
-                      try {
-                        await request(
-                          `/documents/${encodeURIComponent(doc.doc_id)}`,
-                          {
-                            method: "PATCH",
-                            body: { group_id: event.target.value || null },
-                          },
-                        );
-                        toast("所属群已更新");
-                        await openDocument(doc.doc_id);
-                      } catch (error) {
-                        toast(errorMessage(error), true);
-                      }
-                    },
-                  },
-                ),
-              ),
-            ),
-            h(
-              "section",
-              { class: "card" },
-              h("h3", { text: "版本历史（30 天）" }),
-              versions,
-            ),
-            h(
-              "section",
-              { class: "card" },
-              h("h3", { text: "权限" }),
-              ...state.permissions.map((permission) =>
-                h(
-                  "div",
-                  { class: "permission-item" },
-                  h("strong", { text: permission.grantee }),
-                  h("p", { text: labels[permission.tier] }),
-                  button(
-                    "移除",
-                    () => removePermission(doc.doc_id, permission.grantee),
-                    "small",
-                  ),
-                ),
-              ),
-              permissionForm,
-            ),
-          ),
+      field(
+        "所属群",
+        select(
+          "docGroup",
+          [
+            ["", "未分组"],
+            ...state.groups.map((group) => [group.group_id, group.title]),
+          ],
+          doc.group_id || "",
+          {
+            onchange: async (event) => {
+              try {
+                await request(`/documents/${encodeURIComponent(doc.doc_id)}`, {
+                  method: "PATCH",
+                  body: { group_id: event.target.value || null },
+                });
+                toast("所属群已更新");
+                await openDocument(doc.doc_id);
+              } catch (error) {
+                toast(errorMessage(error), true);
+              }
+            },
+          },
         ),
       ),
     ),
+    h(
+      "section",
+      { class: "card" },
+      h("h3", { text: "版本历史（30 天）" }),
+      versions,
+    ),
+    h(
+      "section",
+      { class: "card" },
+      h("h3", { text: "权限" }),
+      ...state.permissions.map((permission) =>
+        h(
+          "div",
+          { class: "permission-item" },
+          h("strong", { text: permission.grantee }),
+          h("p", { text: labels[permission.tier] }),
+          button(
+            "移除",
+            () => removePermission(doc.doc_id, permission.grantee),
+            "small",
+          ),
+        ),
+      ),
+      permissionForm,
+    ),
   );
-}
-const SHEET_LIMITS = { sheets: 32, rows: 2000, columns: 256, cells: 100000 };
-const SHEET_COLUMN_NAME = (index) => {
-  let value = index + 1;
-  let name = "";
-  while (value > 0) {
-    value -= 1;
-    name = String.fromCharCode(65 + (value % 26)) + name;
-    value = Math.floor(value / 26);
-  }
-  return name;
-};
-const sheetRecord = (value) =>
-  value !== null && typeof value === "object" && !Array.isArray(value);
-function validateSheetName(name, sheets, current = -1) {
-  if (typeof name !== "string" || !name.trim() || name.length > 31)
-    throw new Error("工作表名称必须为非空字符串，且不超过 31 个字符。");
-  if ([...name].some((character) => character.charCodeAt(0) < 32))
-    throw new Error("工作表名称不能含控制字符。");
-  if (
-    sheets.some(
-      (sheet, index) =>
-        index !== current && sheet.name.toLowerCase() === name.toLowerCase(),
-    )
-  )
-    throw new Error("工作表名称不能重复（不区分大小写）。");
-}
-function parseSheetRows(value) {
-  if (!Array.isArray(value) || value.length > SHEET_LIMITS.rows)
-    throw new Error(`rows 必须是数组，且每表不超过 ${SHEET_LIMITS.rows} 行。`);
-  let count = 0;
-  const rows = value.map((row) => {
-    if (!Array.isArray(row) || row.length > SHEET_LIMITS.columns)
-      throw new Error(`每行必须是数组，且不超过 ${SHEET_LIMITS.columns} 列。`);
-    count += row.length;
-    if (count > SHEET_LIMITS.cells)
-      throw new Error(`单表单元格总数不能超过 ${SHEET_LIMITS.cells}。`);
-    return row.map((cell) => {
-      if (
-        cell !== null &&
-        typeof cell !== "string" &&
-        typeof cell !== "boolean" &&
-        !(typeof cell === "number" && Number.isFinite(cell))
-      )
-        throw new Error("单元格只能是字符串、有限数值、布尔值或 null。");
-      if (typeof cell === "string" && cell.includes("\0"))
-        throw new Error("单元格不能含 NUL 字符。");
-      return cell === null ? "" : String(cell);
-    });
-  });
-  const width = Math.max(3, ...rows.map((row) => row.length));
-  return rows.map((row) => [...row, ...Array(width - row.length).fill("")]);
-}
-function parseSheetMetadata(raw, columns) {
-  const metadata = {};
-  if (raw.sort !== undefined) {
-    if (
-      !sheetRecord(raw.sort) ||
-      !Number.isInteger(raw.sort.column) ||
-      raw.sort.column < 0 ||
-      raw.sort.column >= SHEET_LIMITS.columns ||
-      !["asc", "desc"].includes(raw.sort.direction)
-    )
-      throw new Error("sort 必须是 {column,direction:asc|desc}。");
-    metadata.sort = { column: raw.sort.column, direction: raw.sort.direction };
-  }
-  if (raw.filter !== undefined) {
-    if (
-      !sheetRecord(raw.filter) ||
-      !Number.isInteger(raw.filter.column) ||
-      raw.filter.column < 0 ||
-      raw.filter.column >= SHEET_LIMITS.columns ||
-      !["text", "number"].includes(raw.filter.mode) ||
-      typeof raw.filter.query !== "string" ||
-      raw.filter.query.length > 256
-    )
-      throw new Error("filter 必须是 {column,mode:text|number,query}。");
-    if (
-      raw.filter.mode === "number" &&
-      raw.filter.operator !== undefined &&
-      !["eq", "gt", "lt", "gte", "lte"].includes(raw.filter.operator)
-    )
-      throw new Error("数字筛选 operator 无效。");
-    metadata.filter = {
-      column: raw.filter.column,
-      mode: raw.filter.mode,
-      query: raw.filter.query,
-      ...(raw.filter.mode === "number"
-        ? { operator: raw.filter.operator || "eq" }
-        : {}),
-    };
-  }
-  if (raw.conditional !== undefined) {
-    if (!Array.isArray(raw.conditional) || raw.conditional.length > 64)
-      throw new Error("conditional 必须是规则数组，且不超过 64 条。");
-    metadata.conditional = raw.conditional.map((rule) => {
-      if (
-        !sheetRecord(rule) ||
-        !Number.isInteger(rule.column) ||
-        rule.column < 0 ||
-        rule.column >= columns ||
-        !["gt", "lt", "eq", "contains"].includes(rule.operator) ||
-        typeof rule.value !== "string" ||
-        rule.value.length > 256 ||
-        !/^#[0-9a-f]{6}$/iu.test(rule.color)
-      )
-        throw new Error("条件格式规则无效（column/operator/value/color）。");
-      return {
-        column: rule.column,
-        operator: rule.operator,
-        value: rule.value,
-        color: rule.color,
-      };
-    });
-  }
-  return metadata;
-}
-function parseSheetStyles(raw, rows) {
-  if (!Array.isArray(raw) || raw.length > rows.length)
-    throw new Error("styles 必须是与 rows 对齐的二维数组。");
-  return raw.map((row, rowIndex) => {
-    if (!Array.isArray(row) || row.length > rows[rowIndex].length)
-      throw new Error("styles 每行不能超过对应 rows 的列数。");
-    return row.map((value) => {
-      if (value === null) return null;
-      if (!sheetRecord(value))
-        throw new Error("styles 每格必须是对象或 null。");
-      const style = {};
-      for (const key of ["bold", "italic"])
-        if (value[key] !== undefined) {
-          if (typeof value[key] !== "boolean")
-            throw new Error(`styles.${key} 必须是布尔值。`);
-          style[key] = value[key];
-        }
-      for (const key of ["fill", "color"])
-        if (value[key] !== undefined) {
-          if (
-            typeof value[key] !== "string" ||
-            !/^#[0-9a-f]{6}(?:[0-9a-f]{2})?$/iu.test(value[key])
-          )
-            throw new Error(`styles.${key} 必须是十六进制颜色。`);
-          style[key] = value[key];
-        }
-      if (value.numFmt !== undefined) {
-        if (typeof value.numFmt !== "string" || value.numFmt.length > 100)
-          throw new Error("styles.numFmt 无效。");
-        style.numFmt = value.numFmt;
-      }
-      if (value.align !== undefined) {
-        if (!sheetRecord(value.align))
-          throw new Error("styles.align 必须是对象。");
-        const align = {};
-        for (const key of ["horizontal", "vertical"])
-          if (value.align[key] !== undefined) {
-            if (
-              ![
-                "left",
-                "center",
-                "right",
-                "justify",
-                "top",
-                "middle",
-                "bottom",
-                "distributed",
-                "fill",
-              ].includes(value.align[key])
-            )
-              throw new Error(`styles.align.${key} 无效。`);
-            align[key] = value.align[key];
-          }
-        for (const key of [
-          "wrapText",
-          "shrinkToFit",
-          "indent",
-          "textRotation",
-          "readingOrder",
-        ])
-          if (value.align[key] !== undefined) align[key] = value.align[key];
-        style.align = align;
-      }
-      if (value.border !== undefined) {
-        if (typeof value.border === "string") {
-          if (!SHEET_BORDER_STYLES.has(value.border))
-            throw new Error("styles.border 样式无效。");
-          style.border = value.border;
-        } else if (sheetRecord(value.border)) {
-          const border = {};
-          for (const side of ["top", "left", "bottom", "right"]) {
-            const rawSide = value.border[side];
-            if (rawSide === undefined) continue;
-            if (
-              !sheetRecord(rawSide) ||
-              !SHEET_BORDER_STYLES.has(rawSide.style)
-            )
-              throw new Error("styles.border 边框样式无效。");
-            border[side] = { style: rawSide.style };
-            if (rawSide.color !== undefined) {
-              if (
-                typeof rawSide.color !== "string" ||
-                !/^#[0-9a-f]{6}(?:[0-9a-f]{2})?$/iu.test(rawSide.color)
-              )
-                throw new Error("styles.border.color 无效。");
-              border[side].color = rawSide.color;
-            }
-          }
-          style.border = border;
-        } else throw new Error("styles.border 必须是边框对象或样式名。");
-      }
-      return style;
-    });
-  });
-}
-const SHEET_BORDER_STYLES = new Set([
-  "thin",
-  "dashed",
-  "dotted",
-  "medium",
-  "thick",
-  "double",
-  "hair",
-  "mediumDashed",
-  "mediumDashDot",
-  "mediumDashDotDot",
-  "slantDashDot",
-  "dashDot",
-  "dashDotDot",
-]);
-function sheetCellCss(style, highlight) {
-  if (!style && !highlight) return "";
-  const declarations = [];
-  if (style?.bold) declarations.push("font-weight:700");
-  if (style?.italic) declarations.push("font-style:italic");
-  if (style?.color) declarations.push(`color:${style.color}`);
-  if (highlight || style?.fill)
-    declarations.push(`background:${highlight || style.fill}`);
-  if (style?.align?.horizontal)
-    declarations.push(`text-align:${style.align.horizontal}`);
-  if (style?.align?.vertical)
-    declarations.push(`vertical-align:${style.align.vertical}`);
-  if (style?.align?.wrapText) declarations.push("white-space:normal");
-  else declarations.push("white-space:nowrap");
-  const widths = {
-    hair: 1,
-    thin: 1,
-    dotted: 1,
-    dashed: 1,
-    medium: 2,
-    thick: 3,
-    double: 3,
+  // 抽屉挂在 #mainPane 上而不是 .page 里：.view 是滚动容器，塞在里面就等于抽屉跟着正文
+  // 一起滚走 —— 滑到文档中段想改权限，抽屉已经滚出屏幕了。代价是 renderMain 换路由时
+  // 要显式拆掉它（那边 replaceChildren 只清 #view，清不到兄弟节点）。
+  const drawer = h(
+    "div",
+    { class: "doc-drawer-wrap closed", id: "docDrawerWrap" },
+    h(
+      "header",
+      { class: "doc-drawer-head" },
+      h("h2", { text: "权限与设置" }),
+      h(
+        "button",
+        {
+          type: "button",
+          class: "icon-button",
+          "aria-label": "收起权限面板",
+          onclick: () => setDrawer(false),
+        },
+        icon("close"),
+      ),
+    ),
+    drawerBody,
+  );
+  const setDrawer = (open) => {
+    drawer.classList.toggle("closed", !open);
+    // 宽屏上开着抽屉时把正文挤窄，而不是压在上面盖住右边十几个字；窄屏没地方挤，
+    // 才退回真正的浮层（CSS 里用同一条类分派）。
+    $("#mainPane").classList.toggle("drawer-open", open);
+    drawerToggle.setAttribute("aria-expanded", open ? "true" : "false");
   };
-  const border =
-    typeof style?.border === "string"
-      ? {
-          top: { style: style.border },
-          left: { style: style.border },
-          bottom: { style: style.border },
-          right: { style: style.border },
-        }
-      : style?.border;
-  for (const side of ["top", "left", "bottom", "right"]) {
-    const value = border?.[side];
-    if (!value) continue;
-    const line =
-      value.style.includes("Dashed") || value.style.includes("dash")
-        ? "dashed"
-        : value.style === "dotted"
-          ? "dotted"
-          : "solid";
-    declarations.push(
-      `border-${side}:${widths[value.style] || 1}px ${line} ${value.color || "#94a3b8"}`,
+  const drawerToggle = button(
+    "权限与设置",
+    () => setDrawer(drawer.classList.contains("closed")),
+    "",
+    { "aria-expanded": "false", "aria-controls": "docDrawerWrap" },
+  );
+  // 形态页签（源码/预览/分栏）：只有 markdown 与思维导图有。放在编辑卡内部的顶部而不是
+  // .doc-head —— 它是【正文的】视图开关，不是页面的操作；跟工具条同属一条外壳带。
+  let modeBar = null;
+  if (panes !== null) {
+    const labels = SOURCE_MODES[paneKind];
+    const mode = docModes.get(doc.doc_id) ?? "source";
+    const setMode = (next) => {
+      docModes.set(doc.doc_id, next);
+      paneHost.dataset.mode = next;
+      for (const [key, node] of modeButtons) {
+        const on = key === next;
+        node.classList.toggle("active", on);
+        node.setAttribute("aria-pressed", String(on));
+      }
+    };
+    const modeButtons = new Map(
+      ["source", "preview", "split"].map((key) => [
+        key,
+        h(
+          "button",
+          {
+            type: "button",
+            class: "btn small doc-mode-tab",
+            "aria-pressed": "false",
+            onclick: () => setMode(key),
+          },
+          labels[key],
+        ),
+      ]),
+    );
+    paneHost.dataset.mode = mode;
+    modeBar = h(
+      "div",
+      { class: "editor-toolbar doc-mode-bar", role: "group", "aria-label": "正文视图" },
+      ...modeButtons.values(),
+      h("span", { class: "spacer" }),
+      h("span", {
+        class: "muted small-text doc-mode-hint",
+        text:
+          paneKind === "mindmap"
+            ? "每行一个节点，用两个空格缩进表示层级"
+            : "支持标题 / 列表 / 表格 / 代码块 / 链接",
+      }),
+    );
+    // aria-pressed 与 class 一起在这里落：modeButtons 造出来时三者都还是初始态，
+    // 真正的当前形态要到下面那次 setMode 才知道，所以三态在这里统一落。
+    setMode(mode);
+  }
+  // 本地草稿：一条横幅说完「有什么 + 怎么办」，不再横幅一行 + 按钮行两行。
+  // 可关（它是提示不是流程门）。放在 .editor-card 内部顶端 ⇒ 卡片仍是唯一的外壳，
+  // 高度收缩由 flex 记账，不额外吃一次 .doc-page 的 gap。
+  let draftBar = null;
+  if (state.draft) {
+    draftBar = h(
+      "div",
+      {
+        class: "banner warning doc-draft-bar",
+        role: "status",
+        id: "docDraftBar",
+      },
+      icon("search"),
+      h("span", {
+        text: "检测到这份文档的本地草稿。云端基线未改变时可恢复。",
+      }),
+      h(
+        "div",
+        { class: "actions" },
+        button(
+          "恢复本地草稿",
+          () => restoreDraft(doc, watermark, title, status, () => repaintPanes?.()),
+          "",
+          { id: "docDraftRestore" },
+        ),
+        button("丢弃草稿", () => {
+          removeDraft(doc.doc_id);
+          state.draft = null;
+          renderMain();
+        }, "", { id: "docDraftDiscard" }),
+        iconButton("close", "关闭草稿提示", () => draftBar.remove()),
+      ),
     );
   }
-  return declarations.join(";");
+  const page = h(
+    "div",
+    { class: "page doc-page" },
+    h(
+      "header",
+      { class: "doc-head" },
+      h(
+        "div",
+        { class: "doc-head-main" },
+        h(
+          "div",
+          { class: "doc-head-line" },
+          iconButton("chevron", "返回文档中心", () => {
+            state.selectedDocument = null;
+            renderList();
+            renderMain();
+          }, { class: "icon-button doc-back" }),
+          title,
+        ),
+        h("p", {
+          class: "doc-sub",
+          text: `${labels[doc.kind]} · ${memberName(doc.owner)} · 更新于 ${fmtDateTime(doc.updated_at)} · ${doc.watermark_profile === "none" ? "无水印" : doc.watermark_profile === "internal" ? "内部水印" : "机密水印"} · 有效权限：${labels[doc.my_tier] || "所有者"}`,
+        }),
+      ),
+      h(
+        "div",
+        { class: "actions" },
+        // 左栏折叠开关：编辑面要整屏宽度，但列表得留一条回来的路 —— 所以入口在页头，
+        // 而不是藏在收起后的那条缝里（收起后栏里没东西可点，见 group.css 的 .list-collapsed）。
+        h(
+          "button",
+          {
+            type: "button",
+            class: "icon-button doc-list-toggle",
+            id: "docListToggle",
+            "aria-expanded": state.docListCollapsed ? "false" : "true",
+            "aria-controls": "listPane",
+            onclick: () => {
+              state.docListCollapsed = !state.docListCollapsed;
+              writeStoredJson(
+                STORAGE_KEYS.docListCollapsed,
+                state.docListCollapsed,
+              );
+              applyDocListCollapse();
+            },
+          },
+          icon("panel"),
+        ),
+        button("导出", () => exportDocumentModal(doc), ""),
+        drawerToggle,
+        button("软删除", () => softDeleteDocument(doc), "danger"),
+        h(
+          "button",
+          {
+            id: "saveDocument",
+            class: "btn primary",
+            type: "button",
+            disabled: !editable,
+            onclick: () => save(),
+          },
+          "保存新版本",
+        ),
+      ),
+    ),
+    h(
+      "section",
+      { class: "card editor-card" },
+      modeBar,
+      draftBar,
+      // 水印层永远是正文宿主：markdown / 思维导图在它里面再套一层分栏容器
+      // （谁是「栏」见 group.css 的 .editor-panes[data-mode]），表格 / 富文本直接装引擎。
+      watermark,
+      h(
+        "div",
+        { class: "editor-status" },
+        status,
+        h("span", { class: "spacer" }),
+        h("span", { text: "Ctrl / Cmd + S 保存" }),
+      ),
+    ),
+    // 关联区块已搬进右侧抽屉的 drawerBody（见本函数上文），正文只留标题条 + 编辑面。
+  );
+  view.append(page);
+  $("#mainPane").append(drawer);
 }
+const SHEET_LIMITS = { sheets: 32, rows: 2000, columns: 256, cells: 100000 };
+const sheetRecord = (value) =>
+  value !== null && typeof value === "object" && !Array.isArray(value);
+
+// 正文形状（hub 的 SheetPayload，packages/hub/src/documents/formats.ts:88）：
+//   {sheets:[{name, rows:[[原始值]], styles?:[[样式对象|null]]}]}
+// 库形状（vendor/xspreadsheet 1.1.9）：
+//   [{name, rows:{len,[ri]:{cells:{ci:{text,style}}}}, cols:{len,[ci]:{width}},
+//     styles:[样式对象], merges:[...], freeze:"A1"}]
+// 下面这两支转换是两边之间唯一的桥；样式在库里是「指向 styles 数组的下标」，
+// 所以去重表必须跟着每次 loadData 新建，不能跨表复用。
+const XDS_BORDER_SIDES = ["top", "right", "bottom", "left"];
+// 库只画得出 thin/medium/thick/dashed/dotted/double 六种线宽（xspreadsheet.js 的
+// border 调色板），其余 hair / mediumDashDotDot… 落回 thin：宁可线宽不准，
+// 也不要整条边框消失。
+const XDS_BORDER_STYLES = new Set([
+  "thin",
+  "medium",
+  "thick",
+  "dashed",
+  "dotted",
+  "double",
+]);
+// hub 存的是 Excel numFmt 字符串（formats.ts 原样透传），库只认固定 token。
+// 认得出的这几条双向映射；认不出的原样存在 numFmt 键上（库读样式只取自己认识的键，
+// 多余键不影响渲染，getData 时又带回来），这样导出 xlsx 仍拿得到原始格式串。
+const XDS_FORMAT_BY_NUM_FMT = new Map([
+  ["0", "number"],
+  ["0.00", "number"],
+  ["#,##0", "number"],
+  ["#,##0.00", "number"],
+  ["0%", "percent"],
+  ["0.00%", "percent"],
+  ["yyyy/m/d", "date"],
+  ["hh:mm:ss", "time"],
+  ["yyyy/m/d hh:mm", "datetime"],
+]);
+const XDS_NUM_FMT_BY_FORMAT = new Map(
+  [...XDS_FORMAT_BY_NUM_FMT].map(([numFmt, format]) => [format, numFmt]),
+);
+const XDS_ALIGN_BY_HORIZONTAL = new Map([
+  ["left", "left"],
+  ["center", "center"],
+  ["right", "right"],
+]);
+const XDS_VALIGN_BY_VERTICAL = new Map([
+  ["top", "top"],
+  ["middle", "middle"],
+  ["bottom", "bottom"],
+]);
+
+// hub 侧颜色是 AARRGGBB 十六进制、不带 #（formats.ts:1169 sheetColor 的尺子）；
+// 库直接把字符串交给 canvas，所以要还原成 #RRGGBB。alpha 丢掉：库里没有透明填充。
+function hubColorToXds(value) {
+  if (typeof value !== "string") return null;
+  const hex = value.replace(/^#/u, "").toUpperCase();
+  if (/^[0-9A-F]{8}$/u.test(hex)) return `#${hex.slice(2).toLowerCase()}`;
+  if (/^[0-9A-F]{6}$/u.test(hex)) return `#${hex.toLowerCase()}`;
+  return null;
+}
+function xdsColorToHub(value) {
+  if (typeof value !== "string") return null;
+  const hex = value.replace(/^#/u, "").toUpperCase();
+  if (/^[0-9A-F]{6}$/u.test(hex)) return `FF${hex}`;
+  if (/^[0-9A-F]{8}$/u.test(hex)) return hex;
+  return null;
+}
+
+function hubStyleToXds(style) {
+  if (!sheetRecord(style)) return null;
+  const out = {};
+  if (style.bold === true) out.font = { bold: true };
+  if (style.italic === true) out.font = { ...(out.font || {}), italic: true };
+  const color = hubColorToXds(style.color);
+  if (color) out.color = color;
+  const bgcolor = hubColorToXds(style.fill);
+  if (bgcolor) out.bgcolor = bgcolor;
+  if (sheetRecord(style.align)) {
+    const horizontal = XDS_ALIGN_BY_HORIZONTAL.get(style.align.horizontal);
+    if (horizontal) out.align = horizontal;
+    const vertical = XDS_VALIGN_BY_VERTICAL.get(style.align.vertical);
+    if (vertical) out.valign = vertical;
+    if (style.align.wrapText === true) out.textwrap = true;
+  }
+  if (typeof style.numFmt === "string") {
+    const format = XDS_FORMAT_BY_NUM_FMT.get(style.numFmt);
+    if (format) out.format = format;
+    else out.numFmt = style.numFmt;
+  }
+  const border = sheetRecord(style.border) ? style.border : null;
+  const single = typeof style.border === "string" ? style.border : null;
+  for (const side of XDS_BORDER_SIDES) {
+    const raw = single ? { style: single } : border?.[side];
+    if (!sheetRecord(raw) || typeof raw.style !== "string") continue;
+    const width = XDS_BORDER_STYLES.has(raw.style) ? raw.style : "thin";
+    out.border = {
+      ...(out.border || {}),
+      [side]: [width, hubColorToXds(raw.color) || "#000000"],
+    };
+  }
+  return Object.keys(out).length ? out : null;
+}
+
+function xdsStyleToHub(style) {
+  if (!sheetRecord(style)) return null;
+  const out = {};
+  if (style.font && style.font.bold === true) out.bold = true;
+  if (style.font && style.font.italic === true) out.italic = true;
+  const color = xdsColorToHub(style.color);
+  if (color) out.color = color;
+  const fill = xdsColorToHub(style.bgcolor);
+  if (fill) out.fill = fill;
+  const align = {};
+  const horizontal = XDS_ALIGN_BY_HORIZONTAL.get(style.align);
+  if (horizontal) align.horizontal = horizontal;
+  const vertical = XDS_VALIGN_BY_VERTICAL.get(style.valign);
+  if (vertical) align.vertical = vertical;
+  if (style.textwrap === true) align.wrapText = true;
+  if (Object.keys(align).length) out.align = align;
+  if (typeof style.numFmt === "string") out.numFmt = style.numFmt;
+  else if (typeof style.format === "string") {
+    const numFmt = XDS_NUM_FMT_BY_FORMAT.get(style.format);
+    if (numFmt) out.numFmt = numFmt;
+  }
+  if (sheetRecord(style.border)) {
+    const border = {};
+    for (const side of XDS_BORDER_SIDES) {
+      const raw = style.border[side];
+      if (!Array.isArray(raw) || typeof raw[0] !== "string") continue;
+      border[side] = {
+        style: XDS_BORDER_STYLES.has(raw[0]) ? raw[0] : "thin",
+        ...(xdsColorToHub(raw[1]) ? { color: xdsColorToHub(raw[1]) } : {}),
+      };
+    }
+    if (Object.keys(border).length) out.border = border;
+  }
+  return Object.keys(out).length ? out : null;
+}
+
+// 库里格子只有 text；回正文时按字面量还原类型，否则 xlsx 导出把数字存成文本单元格。
+// 只升「String(Number(x)) 和原文一模一样」的：00123 / 1.50 / 1e5 / " 5" 这类带信息量的
+// 写法必须原样留成字符串，否则产品编号的前导零会被静默吃掉。
+function xdsTextToPrimitive(text) {
+  if (typeof text !== "string" || text === "") return text ?? "";
+  const value = Number(text);
+  if (Number.isFinite(value) && String(value) === text) return value;
+  return text;
+}
+
+function xdsSheetsFromHub(sheets) {
+  return sheets.map((sheet) => {
+    const styles = [];
+    const styleIndex = new Map();
+    const addStyle = (style) => {
+      const key = JSON.stringify(style);
+      const found = styleIndex.get(key);
+      if (found !== undefined) return found;
+      styles.push(style);
+      styleIndex.set(key, styles.length - 1);
+      return styles.length - 1;
+    };
+    const rows = { len: Math.max(100, sheet.rows.length + 1) };
+    sheet.rows.forEach((row, rowIndex) => {
+      const cells = {};
+      row.forEach((value, columnIndex) => {
+        const text = value === null ? "" : String(value);
+        const style = hubStyleToXds(sheet.styles?.[rowIndex]?.[columnIndex]);
+        if (text === "" && !style) return;
+        const cell = {};
+        if (text !== "") cell.text = text;
+        if (style) cell.style = addStyle(style);
+        cells[columnIndex] = cell;
+      });
+      if (Object.keys(cells).length) rows[rowIndex] = { cells };
+    });
+    const width = sheet.rows.reduce(
+      (widest, row) => Math.max(widest, row.length),
+      3,
+    );
+    // cols.len 是「画到第几列」而不是「数据有几列」：照数据宽度给就出现「F 列右边一片
+    // 空白」，而 Excel/WPS 的表头是铺满视口的。取库自己的默认 26 当下限。
+    return {
+      name: sheet.name,
+      rows,
+      cols: { len: Math.max(26, width) },
+      styles,
+    };
+  });
+}
+
+function hubSheetsFromXds(data) {
+  const list = Array.isArray(data) ? data : [];
+  const sheets = [];
+  let totalCells = 0;
+  for (const raw of list) {
+    if (!sheetRecord(raw)) continue;
+    const rowsByKey = sheetRecord(raw.rows) ? raw.rows : {};
+    const rowIndexes = Object.keys(rowsByKey)
+      .filter((key) => key !== "len")
+      .map(Number)
+      .filter((value) => Number.isInteger(value) && value >= 0);
+    let height = 0;
+    let width = 0;
+    const grid = [];
+    for (const rowIndex of rowIndexes) {
+      const rowValue = rowsByKey[rowIndex];
+      const cells =
+        sheetRecord(rowValue) && sheetRecord(rowValue.cells)
+          ? rowValue.cells
+          : {};
+      const out = [];
+      for (const key of Object.keys(cells)) {
+        const columnIndex = Number(key);
+        if (!Number.isInteger(columnIndex) || columnIndex < 0) continue;
+        const cell = cells[key];
+        if (!sheetRecord(cell)) continue;
+        out[columnIndex] = xdsTextToPrimitive(cell.text);
+        if (columnIndex + 1 > width) width = columnIndex + 1;
+        totalCells += 1;
+      }
+      grid[rowIndex] = out;
+      if (rowIndex + 1 > height) height = rowIndex + 1;
+    }
+    const styleTable = Array.isArray(raw.styles) ? raw.styles : [];
+    const rows = [];
+    const styleRows = [];
+    let anyStyle = false;
+    for (let rowIndex = 0; rowIndex < height; rowIndex += 1) {
+      const source = grid[rowIndex] || [];
+      const row = [];
+      const rowStyles = [];
+      for (let columnIndex = 0; columnIndex < width; columnIndex += 1) {
+        row.push(source[columnIndex] ?? "");
+        const cell = rowsByKey[rowIndex]?.cells?.[columnIndex];
+        const style =
+          sheetRecord(cell) && cell.style !== undefined
+            ? xdsStyleToHub(styleTable[cell.style])
+            : null;
+        rowStyles.push(style);
+        if (style) anyStyle = true;
+      }
+      rows.push(row);
+      styleRows.push(rowStyles);
+    }
+    const name =
+      typeof raw.name === "string" && raw.name.trim()
+        ? raw.name.trim()
+        : `Sheet${sheets.length + 1}`;
+    const sheet = { name, rows };
+    // hub 的尺子：styles 不得超过 rows 的行数、每行不得超过对应 rows 的列数
+    // （formats.ts:1326 sheetStyles）；全空就不写这个键，省字节。
+    if (anyStyle) sheet.styles = styleRows;
+    if (rows.length > SHEET_LIMITS.rows)
+      throw new Error(`单表最多 ${SHEET_LIMITS.rows} 行。`);
+    if (width > SHEET_LIMITS.columns)
+      throw new Error(`单表最多 ${SHEET_LIMITS.columns} 列。`);
+    sheets.push(sheet);
+  }
+  if (sheets.length > SHEET_LIMITS.sheets)
+    throw new Error(`工作表数量不能超过 ${SHEET_LIMITS.sheets}。`);
+  if (totalCells > SHEET_LIMITS.cells)
+    throw new Error(`单元格总数不能超过 ${SHEET_LIMITS.cells}。`);
+  return sheets;
+}
+
+// 认 {sheets:[{name,rows}]}，也认更早的裸二维数组。旧数据里的 sort/filter/conditional
+// 直接忽略 —— 换库后没有这三样（用户已确认存量全是测试数据，不做迁移）。
 function parseSheet(text) {
   let value;
   try {
@@ -4666,1079 +5534,190 @@ function parseSheet(text) {
   } catch {
     throw new Error("表格正文必须是合法 JSON。");
   }
-  if (Array.isArray(value))
-    return [{ name: "Sheet1", rows: parseSheetRows(value) }];
-  if (
-    !sheetRecord(value) ||
-    !Array.isArray(value.sheets) ||
-    !value.sheets.length
-  )
-    throw new Error("表格正文必须是二维数组或 {sheets:[{name,rows}]}。");
-  if (value.sheets.length > SHEET_LIMITS.sheets)
+  const rawSheets = Array.isArray(value)
+    ? [{ name: "Sheet1", rows: value }]
+    : sheetRecord(value) && Array.isArray(value.sheets) && value.sheets.length
+      ? value.sheets
+      : null;
+  if (!rawSheets) throw new Error("表格正文必须是 {sheets:[{name,rows}]}。");
+  if (rawSheets.length > SHEET_LIMITS.sheets)
     throw new Error(`工作表数量不能超过 ${SHEET_LIMITS.sheets}。`);
-  const sheets = value.sheets.map((raw) => {
-    if (!sheetRecord(raw) || !("rows" in raw))
+  let total = 0;
+  const names = new Set();
+  const sheets = rawSheets.map((raw, index) => {
+    if (!sheetRecord(raw) || !Array.isArray(raw.rows))
       throw new Error("每个工作表必须包含 name 与 rows。");
-    return { name: raw.name, rows: parseSheetRows(raw.rows) };
+    if (raw.rows.length > SHEET_LIMITS.rows)
+      throw new Error(`单表最多 ${SHEET_LIMITS.rows} 行。`);
+    const rows = raw.rows.map((row) => {
+      if (!Array.isArray(row) || row.length > SHEET_LIMITS.columns)
+        throw new Error(
+          `每行必须是数组，且不超过 ${SHEET_LIMITS.columns} 列。`,
+        );
+      total += row.length;
+      return row.map((cell) => {
+        if (
+          cell !== null &&
+          typeof cell !== "string" &&
+          typeof cell !== "boolean" &&
+          !(typeof cell === "number" && Number.isFinite(cell))
+        )
+          throw new Error("单元格只能是字符串、有限数值、布尔值或 null。");
+        if (typeof cell === "string" && cell.includes("\0"))
+          throw new Error("单元格不能含 NUL 字符。");
+        return cell;
+      });
+    });
+    const name =
+      typeof raw.name === "string" && raw.name.trim()
+        ? raw.name.trim()
+        : `Sheet${index + 1}`;
+    const key = name.toLowerCase();
+    if (names.has(key))
+      throw new Error(`工作表名称不能重复（不区分大小写）：${name}。`);
+    names.add(key);
+    const styleRows = Array.isArray(raw.styles) ? raw.styles : null;
+    return { name, rows, ...(styleRows ? { styles: styleRows } : {}) };
   });
-  sheets.forEach((sheet, index) => {
-    validateSheetName(sheet.name, sheets, index);
-  });
-  return value.sheets.map((raw, index) => ({
-    ...sheets[index],
-    ...parseSheetMetadata(raw, sheets[index].rows[0]?.length || 3),
-    ...(raw.styles === undefined
-      ? {}
-      : { styles: parseSheetStyles(raw.styles, sheets[index].rows) }),
-  }));
+  if (total > SHEET_LIMITS.cells)
+    throw new Error(`单元格总数不能超过 ${SHEET_LIMITS.cells}。`);
+  return sheets;
 }
+
 function serializeSheet(sheets) {
   return JSON.stringify({
-    sheets: sheets.map(({ name, rows, sort, filter, conditional, styles }) => ({
+    sheets: sheets.map(({ name, rows, styles }) => ({
       name,
       rows,
-      ...(sort ? { sort } : {}),
-      ...(filter ? { filter } : {}),
-      ...(conditional?.length ? { conditional } : {}),
       ...(styles ? { styles } : {}),
     })),
   });
 }
-function sheetNumericValue(value) {
-  if (typeof value === "number") return value;
-  if (typeof value !== "string" || !value.trim()) return null;
-  return /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?$/iu.test(value.trim())
-    ? Number(value)
-    : null;
+
+function blankSheetRows(height, width) {
+  return Array.from({ length: height }, () =>
+    Array.from({ length: width }, () => ""),
+  );
 }
-function sheetFormulaNumber(value) {
-  const number = sheetNumericValue(value);
-  if (number === null || !Number.isFinite(number)) throw new Error("number");
-  return number;
-}
-const SHEET_CYCLE = Symbol("sheet-cycle");
-const SHEET_FORMULA_FUNCTIONS = new Set([
-  "SUM",
-  "AVERAGE",
-  "MIN",
-  "MAX",
-  "COUNT",
-  "ROUND",
-]);
-function tokenizeSheetFormula(source) {
-  const tokens = [];
-  let offset = 0;
-  const cellPattern = /^\$?([A-Za-z]{1,3})\$?([1-9]\d*)/u;
-  const cell = () => {
-    const match = cellPattern.exec(source.slice(offset));
-    if (!match) throw new Error("reference");
-    const column = match[1]
-      .toUpperCase()
-      .split("")
-      .reduce((sum, letter) => sum * 26 + letter.charCodeAt(0) - 64, 0);
-    offset += match[0].length;
-    return { column: column - 1, row: Number(match[2]) - 1 };
-  };
-  while (offset < source.length) {
-    const rest = source.slice(offset);
-    if (/^\s/u.test(rest)) {
-      offset += 1;
-      continue;
-    }
-    let match = /^(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?/iu.exec(rest);
-    if (match) {
-      tokens.push({ type: "number", value: Number(match[0]) });
-      offset += match[0].length;
-      continue;
-    }
-    if (rest.startsWith("'")) {
-      match = /^'((?:[^']|'')+)'/u.exec(rest);
-      if (!match) throw new Error("sheet reference");
-      const sheet = match[1].replaceAll("''", "'");
-      offset += match[0].length;
-      if (source[offset] !== "!") throw new Error("sheet reference");
-      offset += 1;
-      tokens.push({ type: "reference", sheet, ...cell() });
-      continue;
-    }
-    match = /^([A-Za-z_\u0080-\uffff][A-Za-z0-9_.\u0080-\uffff ]*)!/u.exec(
-      rest,
-    );
-    if (match) {
-      offset += match[0].length;
-      tokens.push({ type: "reference", sheet: match[1].trim(), ...cell() });
-      continue;
-    }
-    match = cellPattern.exec(rest);
-    if (match) {
-      tokens.push({ type: "reference", sheet: null, ...cell() });
-      continue;
-    }
-    match = /^[A-Za-z_][A-Za-z0-9_]*/u.exec(rest);
-    if (match) {
-      tokens.push({ type: "name", value: match[0].toUpperCase() });
-      offset += match[0].length;
-      continue;
-    }
-    if (/^[+\-*/():,]/u.test(rest)) {
-      tokens.push({ type: rest[0] });
-      offset += 1;
-      continue;
-    }
-    throw new Error("token");
-  }
-  if (!tokens.length || tokens.length > 512) throw new Error("formula size");
-  return tokens;
-}
-class SheetFormulaParser {
-  constructor(source) {
-    this.tokens = tokenizeSheetFormula(source);
-    this.offset = 0;
-    this.depth = 0;
-  }
-  peek(type) {
-    return this.tokens[this.offset]?.type === type;
-  }
-  take(type) {
-    if (!this.peek(type)) throw new Error(type);
-    return this.tokens[this.offset++];
-  }
-  parse() {
-    const expression = this.additive();
-    if (this.offset !== this.tokens.length) throw new Error("trailing");
-    return expression;
-  }
-  additive() {
-    let node = this.multiplicative();
-    while (this.peek("+") || this.peek("-")) {
-      const operator = this.tokens[this.offset++].type;
-      node = {
-        type: "binary",
-        operator,
-        left: node,
-        right: this.multiplicative(),
-      };
-    }
-    return node;
-  }
-  multiplicative() {
-    let node = this.unary();
-    while (this.peek("*") || this.peek("/")) {
-      const operator = this.tokens[this.offset++].type;
-      node = { type: "binary", operator, left: node, right: this.unary() };
-    }
-    return node;
-  }
-  unary() {
-    if (this.peek("+") || this.peek("-")) {
-      const operator = this.tokens[this.offset++].type;
-      if (++this.depth > 64) throw new Error("depth");
-      const node = { type: "unary", operator, value: this.unary() };
-      this.depth -= 1;
-      return node;
-    }
-    return this.primary();
-  }
-  primary() {
-    if (this.peek("(")) {
-      this.take("(");
-      if (++this.depth > 64) throw new Error("depth");
-      const node = this.additive();
-      this.depth -= 1;
-      this.take(")");
-      return node;
-    }
-    const token = this.tokens[this.offset++];
-    if (token?.type === "number") return { type: "number", value: token.value };
-    if (token?.type === "reference") {
-      if (this.peek(":")) {
-        this.take(":");
-        const end = this.take("reference");
-        if (end.sheet && end.sheet !== token.sheet)
-          throw new Error("range sheet");
-        return {
-          type: "range",
-          sheet: token.sheet,
-          start: token,
-          end,
-        };
-      }
-      return { type: "reference", sheet: token.sheet, ...token };
-    }
-    if (token?.type === "name") {
-      if (!SHEET_FORMULA_FUNCTIONS.has(token.value))
-        throw new Error("function");
-      this.take("(");
-      const args = [];
-      if (!this.peek(")")) {
-        args.push(this.additive());
-        while (this.peek(",")) {
-          this.take(",");
-          args.push(this.additive());
-        }
-      }
-      this.take(")");
-      if (
-        !args.length ||
-        args.length > 64 ||
-        (token.value === "ROUND" && (args.length < 1 || args.length > 2)) ||
-        (token.value !== "ROUND" && token.value !== "SUM" && args.length !== 1)
-      )
-        throw new Error("arguments");
-      return { type: "function", name: token.value, args };
-    }
-    throw new Error("expression");
-  }
-}
-function createSheetEvaluator(sheets) {
-  const cache = new Map();
-  const visiting = new Set();
-  let work = 0;
-  const cellValue = (sheetIndex, row, column) => {
-    const sheet = sheets[sheetIndex];
-    if (!sheet || row < 0 || column < 0) return { value: 0 };
-    const key = `${sheetIndex}:${row}:${column}`;
-    if (visiting.has(key)) throw SHEET_CYCLE;
-    if (cache.has(key)) return cache.get(key);
-    if (++work > 100000) throw new Error("formula work");
-    visiting.add(key);
-    try {
-      const raw = sheet.rows[row]?.[column] ?? "";
-      let result;
-      if (!raw.startsWith("="))
-        result = { value: sheetNumericValue(raw) ?? raw };
-      else {
-        try {
-          if (raw.length > 4096) throw new Error("formula size");
-          const ast = new SheetFormulaParser(raw.slice(1).trim()).parse();
-          const evaluate = (node) => {
-            if (node.type === "number") return node.value;
-            if (node.type === "unary") {
-              const value = sheetFormulaNumber(evaluate(node.value));
-              return node.operator === "-" ? -value : value;
-            }
-            if (node.type === "binary") {
-              const left = sheetFormulaNumber(evaluate(node.left));
-              const right = sheetFormulaNumber(evaluate(node.right));
-              if (node.operator === "+") return left + right;
-              if (node.operator === "-") return left - right;
-              if (node.operator === "*") return left * right;
-              if (right === 0) throw new Error("division");
-              return left / right;
-            }
-            if (node.type === "reference") {
-              const target = node.sheet
-                ? sheets.findIndex(
-                    (entry) =>
-                      entry.name.toLowerCase() === node.sheet.toLowerCase(),
-                  )
-                : sheetIndex;
-              if (target < 0) throw new Error("sheet");
-              const value = cellValue(target, node.row, node.column);
-              if (value.error) throw value.error;
-              return value.value;
-            }
-            if (node.type === "range") {
-              const target = node.sheet
-                ? sheets.findIndex(
-                    (entry) =>
-                      entry.name.toLowerCase() === node.sheet.toLowerCase(),
-                  )
-                : sheetIndex;
-              if (target < 0) throw new Error("sheet");
-              if (
-                node.start.row > node.end.row ||
-                node.start.column > node.end.column ||
-                (node.end.row - node.start.row + 1) *
-                  (node.end.column - node.start.column + 1) >
-                  10000
-              )
-                throw new Error("range");
-              const values = [];
-              for (let row = node.start.row; row <= node.end.row; row += 1)
-                for (
-                  let column = node.start.column;
-                  column <= node.end.column;
-                  column += 1
-                ) {
-                  const value = cellValue(target, row, column);
-                  if (value.error) throw value.error;
-                  values.push(value.value);
-                }
-              return values;
-            }
-            const evaluatedArgs = node.args.map(evaluate);
-            const args = evaluatedArgs.flat();
-            if (node.name === "ROUND") {
-              const number = sheetFormulaNumber(evaluatedArgs[0]);
-              const digits =
-                evaluatedArgs.length === 2
-                  ? sheetFormulaNumber(evaluatedArgs[1])
-                  : 0;
-              if (!Number.isInteger(digits) || digits < -15 || digits > 15)
-                throw new Error("round");
-              const factor = 10 ** digits;
-              return Math.round((number + Number.EPSILON) * factor) / factor;
-            }
-            const numbers = args
-              .map(sheetNumericValue)
-              .filter((value) => value !== null && Number.isFinite(value));
-            if (node.name === "SUM")
-              return numbers.reduce((sum, value) => sum + value, 0);
-            if (node.name === "COUNT") return numbers.length;
-            if (!numbers.length) throw new Error("aggregate");
-            if (node.name === "AVERAGE")
-              return (
-                numbers.reduce((sum, value) => sum + value, 0) / numbers.length
-              );
-            return node.name === "MIN"
-              ? Math.min(...numbers)
-              : Math.max(...numbers);
-          };
-          const value = evaluate(ast);
-          result = { value: Number.isFinite(value) ? value : String(value) };
-        } catch (error) {
-          result = { error: error === SHEET_CYCLE ? SHEET_CYCLE : "#ERROR!" };
-        }
-      }
-      cache.set(key, result);
-      return result;
-    } finally {
-      visiting.delete(key);
-    }
-  };
-  return (sheetIndex, row, column) => {
-    const result = cellValue(sheetIndex, row, column);
-    return result.error === SHEET_CYCLE
-      ? "#CYCLE!"
-      : result.error || String(result.value ?? "");
-  };
-}
-function renderSheetEditor(doc, editable, latestSeq, status) {
-  let sheets = parseSheet(doc.body_text || "[]");
-  let active = 0;
-  let selection = sheets.map(() => ({ row: 0, column: 0 }));
-  let evaluator = createSheetEvaluator(sheets);
-  const current = () => sheets[active];
-  const width = () => Math.max(3, ...current().rows.map((row) => row.length));
-  const cellCount = () =>
-    current().rows.reduce((sum, row) => sum + row.length, 0);
-  const element = h("div", { class: "sheet-editor" });
-  const tabs = h("div", {
-    class: "sheet-tabs",
-    role: "tablist",
-    "aria-label": "工作表",
-  });
-  const grid = h("div", {
-    class: "sheet-grid",
+
+// 表格编辑器 = vendor/xspreadsheet 本体铺在正文区。返回 {element, notice, readContent, seed}，
+// 调用方只管挂载与取正文，不碰库。
+function renderSheetEditor(doc, editable, onUserChange) {
+  const element = h("div", {
+    class: `sheet-editor${editable ? "" : " sheet-readonly"}`,
     role: "region",
     "aria-label": "表格数据",
   });
-  const json = textarea("sheetJson", "", {
-    class: "sheet-json",
-    "aria-label": "表格 JSON",
-    disabled: !editable,
-    spellcheck: false,
-  });
-  const columnOptions = () =>
-    Array.from({ length: width() }, (_, index) =>
-      h("option", { value: index, text: `${SHEET_COLUMN_NAME(index)} 列` }),
+  const mount = h("div", { class: "sheet-canvas" });
+  const notice = h("p", { class: "muted small-text sheet-notice" });
+  element.append(mount, notice);
+
+  let lastError = "";
+  let sheets = [];
+  try {
+    sheets = parseSheet(
+      doc.body_text || '{"sheets":[{"name":"Sheet1","rows":[[]]}]}',
     );
-  const sort = h(
-    "select",
-    { class: "sheet-control", "aria-label": "排序列", disabled: !editable },
-    h("option", { value: "", text: "不排序" }),
-    ...columnOptions(),
-  );
-  const direction = h(
-    "select",
-    { class: "sheet-control", "aria-label": "排序方向", disabled: !editable },
-    h("option", { value: "asc", text: "升序" }),
-    h("option", { value: "desc", text: "降序" }),
-  );
-  const filterColumn = h("select", {
-    class: "sheet-control",
-    "aria-label": "筛选列",
-    disabled: !editable,
-  });
-  const filterMode = h(
-    "select",
-    { class: "sheet-control", "aria-label": "筛选类型", disabled: !editable },
-    h("option", { value: "text", text: "文本包含" }),
-    h("option", { value: "number", text: "数字筛选" }),
-  );
-  const filterQuery = h("input", {
-    class: "sheet-control sheet-filter-query",
-    type: "text",
-    placeholder: "筛选值",
-    "aria-label": "筛选值",
-    disabled: !editable,
-  });
-  const filterNumber = h(
-    "select",
-    {
-      class: "sheet-control",
-      "aria-label": "数字筛选条件",
-      disabled: !editable,
-    },
-    h("option", { value: "eq", text: "等于" }),
-    h("option", { value: "gt", text: "大于" }),
-    h("option", { value: "lt", text: "小于" }),
-    h("option", { value: "gte", text: "大于等于" }),
-    h("option", { value: "lte", text: "小于等于" }),
-  );
-  const ruleColumn = h("select", {
-    class: "sheet-control",
-    "aria-label": "条件格式列",
-    disabled: !editable,
-  });
-  const ruleOperator = h(
-    "select",
-    {
-      class: "sheet-control",
-      "aria-label": "条件格式运算符",
-      disabled: !editable,
-    },
-    h("option", { value: "gt", text: "大于" }),
-    h("option", { value: "lt", text: "小于" }),
-    h("option", { value: "eq", text: "等于" }),
-    h("option", { value: "contains", text: "包含" }),
-  );
-  const ruleValue = h("input", {
-    class: "sheet-control",
-    type: "text",
-    placeholder: "阈值",
-    "aria-label": "条件格式阈值",
-    disabled: !editable,
-  });
-  const ruleColor = h("input", {
-    class: "sheet-control sheet-color",
-    type: "color",
-    value: "#fff2a8",
-    "aria-label": "条件格式高亮色",
-    disabled: !editable,
-  });
-  const rules = h("div", {
-    class: "sheet-rules",
-    "aria-label": "条件格式规则",
-  });
-  const syncJson = () => {
-    json.value = JSON.stringify(JSON.parse(serializeSheet(sheets)), null, 2);
+  } catch (error) {
+    lastError = error.message;
+    sheets = [{ name: "Sheet1", rows: blankSheetRows(3, 3) }];
+  }
+  const drawNotice = () => {
+    notice.textContent = lastError
+      ? `正文不是可识别的表格形状：${lastError}`
+      : "";
+    notice.hidden = !lastError;
   };
-  const changed = (message) => {
-    evaluator = createSheetEvaluator(sheets);
-    status.textContent = `${message} · 基线版本 ${latestSeq}`;
-    syncJson();
+
+  // 库的默认 view 取 documentElement 尺寸（整屏）。我们的宿主是 flex 格里的一格，
+  // 照默认走会溢出屏幕并把滚动条算错，所以必须显式喂容器自己的矩形。
+  const view = {
+    width: () => mount.getBoundingClientRect().width,
+    height: () => mount.getBoundingClientRect().height,
   };
-  const drawTabs = () => {
-    tabs.replaceChildren(
-      ...sheets.map((sheet, index) =>
-        h("button", {
-          type: "button",
-          class: `sheet-tab${index === active ? " active" : ""}`,
-          role: "tab",
-          "aria-selected": index === active,
-          text: sheet.name,
-          onclick: () => {
-            active = index;
-            drawAll();
-          },
-        }),
-      ),
-      button(
-        "＋ 新建",
-        () => {
-          let index = sheets.length + 1;
-          let name = `Sheet${index}`;
-          while (
-            sheets.some(
-              (sheet) => sheet.name.toLowerCase() === name.toLowerCase(),
-            )
-          )
-            name = `Sheet${++index}`;
-          sheets.push({ name, rows: [["", "", ""]] });
-          selection.push({ row: 0, column: 0 });
-          active = sheets.length - 1;
-          drawAll();
-          changed("已新建工作表");
+  // 中文不是「传个 locale 键」：库按 V（默认 ["en"]）这个名字表去查消息，
+  // locale 文件只是把自己挂进 $messages，不改变查的名字。所以必须显式调一次
+  // x_spreadsheet.locale("zh-cn") 把名字推进表头，否则界面全英文（实测）。
+  window.x_spreadsheet.locale("zh-cn");
+  const spreadsheet = window.x_spreadsheet(mount, {
+    // mode:'read' 只挡键盘改格（库里 4 处判定，全在 setCellText/paste/autofill/editor），
+    // 工具栏与右键菜单不看它 —— 实测点加粗照样写进数据并被 autosave 存回服务端。
+    // 所以只读形态是三层：关工具栏 + 藏底栏的增删入口 + readContent 直接回原文。
+    mode: editable ? "edit" : "read",
+    view,
+    showToolbar: editable,
+    showContextmenu: editable,
+  });
+  spreadsheet.loadData(xdsSheetsFromHub(sheets));
+  drawNotice();
+
+  // 宿主在没进 DOM / 折叠态下会被量成 0×0，此时画布按 0 尺寸建好、整块画歪。
+  // 库的公开方法里只有 reRender()，而它仅重绘不重算尺寸（真正的重排是内部 Sheet.reload，
+  // 库自己挂在 window resize 上）。所以尺寸一恢复就补发一次 resize 事件，走库那条重排路径。
+  if (typeof ResizeObserver === "function") {
+    let mounted = false;
+    const observer = new ResizeObserver(() => {
+      if (mounted || mount.getBoundingClientRect().width <= 0) return;
+      mounted = true;
+      window.dispatchEvent(new Event("resize"));
+    });
+    observer.observe(mount);
+  }
+
+  if (editable) {
+    spreadsheet.change(() => {
+      if (typeof onUserChange === "function") onUserChange();
+    });
+  } else {
+    // 只读不接 change：库的 mode:'read' 只挡键盘改格，页签双击改名、底栏「+」、
+    // 右键删除行列这三条写路径都不看它。接了 change 就等于给只读用户开了 autosave
+    // —— 哪怕 readContent 回的是原文，dirty=true 仍会把一次 PATCH 打成新版本。
+    // 所以这里按「事件」而不是「样式」把这三条掐掉：dblclick 改名与 contextmenu
+    // 在捕获阶段拦下（库的绑定在元素自己身上，捕获先于它），「+」由 CSS 摘掉。
+    // 页签单击切表保留 —— 那是只读用户唯一该做的动作。
+    for (const type of ["dblclick", "contextmenu"]) {
+      element.addEventListener(
+        type,
+        (event) => {
+          event.preventDefault();
+          event.stopPropagation();
         },
-        "small",
-        { disabled: !editable || sheets.length >= SHEET_LIMITS.sheets },
-      ),
-      button(
-        "重命名",
-        () => {
-          const name = window.prompt("工作表名称（1–31 字符）", current().name);
-          if (name === null) return;
-          try {
-            const trimmed = name.trim();
-            validateSheetName(trimmed, sheets, active);
-            current().name = trimmed;
-            evaluator = createSheetEvaluator(sheets);
-            drawAll();
-            changed("工作表已重命名");
-          } catch (error) {
-            toast(errorMessage(error), true);
-          }
-        },
-        "small",
-        { disabled: !editable },
-      ),
-      button(
-        "删除",
-        () => {
-          if (sheets.length <= 1) {
-            toast("至少需要保留一张工作表。", true);
-            return;
-          }
-          sheets.splice(active, 1);
-          selection.splice(active, 1);
-          active = Math.max(0, active - 1);
-          drawAll();
-          changed("工作表已删除");
-        },
-        "small",
-        { disabled: !editable || sheets.length <= 1 },
-      ),
-    );
-  };
-  const visibleRows = () => {
-    const sheet = current();
-    const result = sheet.rows.map((row, index) => ({ row, index }));
-    if (sheet.filter?.query) {
-      const filter = sheet.filter;
-      result.splice(
-        0,
-        result.length,
-        ...result.filter(({ index }) => {
-          const value = evaluator(active, index, filter.column);
-          if (filter.mode === "number") {
-            const query = sheetNumericValue(filter.query);
-            const number = sheetNumericValue(value);
-            if (query === null || number === null) return false;
-            if (filter.operator === "gt") return number > query;
-            if (filter.operator === "lt") return number < query;
-            if (filter.operator === "gte") return number >= query;
-            if (filter.operator === "lte") return number <= query;
-            return number === query;
-          }
-          return value.toLowerCase().includes(filter.query.toLowerCase());
-        }),
+        true,
       );
     }
-    if (sheet.sort) {
-      const { column, direction: order } = sheet.sort;
-      result.sort((left, right) => {
-        const a = evaluator(active, left.index, column);
-        const b = evaluator(active, right.index, column);
-        const numericA = sheetNumericValue(a);
-        const numericB = sheetNumericValue(b);
-        const compared =
-          numericA !== null && numericB !== null
-            ? numericA - numericB
-            : a.localeCompare(b, "zh-CN", { numeric: true });
-        return order === "asc" ? compared : -compared;
-      });
-    }
-    return result;
-  };
-  const ruleColorFor = (column, value) => {
-    const matching = current().conditional?.filter((rule) => {
-      if (rule.column !== column) return false;
-      if (rule.operator === "contains")
-        return value.toLowerCase().includes(rule.value.toLowerCase());
-      if (rule.operator === "eq") return value === rule.value;
-      const threshold = sheetNumericValue(rule.value);
-      const number = sheetNumericValue(value);
-      if (threshold === null || number === null) return false;
-      if (rule.operator === "gt") return number > threshold;
-      return number < threshold;
-    });
-    return matching?.at(-1)?.color || "";
-  };
-  const refreshCells = () => {
-    for (const cell of $$("td[data-row]", grid)) {
-      const row = Number(cell.dataset.row);
-      const column = Number(cell.dataset.column);
-      const value = evaluator(active, row, column);
-      const output = $(".sheet-formula-value", cell);
-      if (output) {
-        output.textContent = value;
-        output.classList.toggle(
-          "sheet-error",
-          value === "#CYCLE!" || value === "#ERROR!",
-        );
-      }
-      cell.style.backgroundColor = ruleColorFor(column, value);
-    }
-  };
-  const drawControls = () => {
-    const sheet = current();
-    const pendingColumn = filterColumn.value || "0";
-    const pendingMode = filterMode.value;
-    const pendingOperator = filterNumber.value;
-    sort.replaceChildren(
-      h("option", { value: "", text: "不排序" }),
-      ...columnOptions(),
-    );
-    ruleColumn.replaceChildren(...columnOptions());
-    filterColumn.replaceChildren(...columnOptions());
-    sort.value = sheet.sort ? String(sheet.sort.column) : "";
-    direction.value = sheet.sort?.direction || "asc";
-    filterColumn.value = String(sheet.filter?.column ?? Number(pendingColumn));
-    filterMode.value = sheet.filter?.mode || pendingMode;
-    filterNumber.value = sheet.filter?.operator || pendingOperator;
-    filterQuery.value = sheet.filter?.query || "";
-    rules.replaceChildren(
-      ...(sheet.conditional || []).map((rule, index) =>
-        h(
-          "div",
-          { class: "sheet-rule" },
-          h("span", {
-            class: "sheet-rule-swatch",
-            style: `background:${rule.color}`,
-          }),
-          h("span", {
-            text: `${SHEET_COLUMN_NAME(rule.column)} 列 ${{ gt: "大于", lt: "小于", eq: "等于", contains: "包含" }[rule.operator]} ${rule.value}`,
-          }),
-          button(
-            "删除规则",
-            () => {
-              sheet.conditional.splice(index, 1);
-              drawAll();
-              changed("条件格式已删除");
-            },
-            "small",
-            { disabled: !editable },
-          ),
-        ),
-      ),
-      ...(sheet.conditional?.length
-        ? []
-        : [h("span", { class: "muted small-text", text: "无条件格式规则" })]),
-    );
-  };
-  const drawGrid = () => {
-    const columns = width();
-    const selected = selection[active];
-    selected.column = Math.min(selected.column, columns - 1);
-    const table = h(
-      "table",
-      { class: "sheet-table" },
-      h(
-        "thead",
-        null,
-        h(
-          "tr",
-          null,
-          h("th", { text: "#", scope: "col" }),
-          ...Array.from({ length: columns }, (_, column) =>
-            h("th", {
-              scope: "col",
-              class: selection[active].column === column ? "selected" : "",
-              text: SHEET_COLUMN_NAME(column),
-              "aria-selected": selection[active].column === column,
-              onclick: () => {
-                selection[active].column = column;
-                drawGrid();
-              },
-            }),
-          ),
-        ),
-      ),
-      h(
-        "tbody",
-        null,
-        ...visibleRows().map(({ row, index }) =>
-          h(
-            "tr",
-            { class: selection[active].row === index ? "selected" : "" },
-            h("th", {
-              scope: "row",
-              text: index + 1,
-              onclick: () => {
-                selection[active].row = index;
-                drawGrid();
-              },
-            }),
-            ...Array.from({ length: columns }, (_, column) => {
-              const raw = row[column] ?? "";
-              const value = evaluator(active, index, column);
-              return h(
-                "td",
-                {
-                  dataset: { row: index, column },
-                  style: sheetCellCss(
-                    current().styles?.[index]?.[column],
-                    ruleColorFor(column, value),
-                  ),
-                  onclick: () => {
-                    selection[active] = { row: index, column };
-                    for (const entry of $$("tr", grid))
-                      entry.classList.toggle(
-                        "selected",
-                        Number(entry.querySelector("th")?.textContent) ===
-                          index + 1,
-                      );
-                  },
-                },
-                raw.startsWith("=")
-                  ? h("span", {
-                      class: `sheet-formula-value${value === "#ERROR!" || value === "#CYCLE!" ? " sheet-error" : ""}`,
-                      text: value,
-                      title: raw,
-                    })
-                  : null,
-                h("input", {
-                  type: "text",
-                  class: "sheet-cell-input",
-                  value: raw,
-                  disabled: !editable,
-                  "aria-label": `${current().name} 第 ${index + 1} 行第 ${column + 1} 列`,
-                  onfocus: () => {
-                    selection[active] = { row: index, column };
-                  },
-                  oninput: (event) => {
-                    row[column] = event.target.value;
-                    evaluator = createSheetEvaluator(sheets);
-                    refreshCells();
-                    changed("已编辑");
-                  },
-                }),
-              );
-            }),
-          ),
-        ),
-        ...(current().rows.length && !visibleRows().length
-          ? [
-              h(
-                "tr",
-                null,
-                h("td", {
-                  class: "sheet-empty",
-                  colspan: columns + 1,
-                  text: "没有符合筛选条件的行",
-                }),
-              ),
-            ]
-          : []),
-      ),
-    );
-    grid.replaceChildren(table);
-  };
-  const drawAll = () => {
-    evaluator = createSheetEvaluator(sheets);
-    drawTabs();
-    drawControls();
-    drawGrid();
-    syncJson();
-    for (const item of $$("button", toolbar)) {
-      if (item.textContent === "添加行")
-        item.disabled =
-          !editable ||
-          current().rows.length >= SHEET_LIMITS.rows ||
-          cellCount() + width() > SHEET_LIMITS.cells;
-      else if (item.textContent === "添加列")
-        item.disabled =
-          !editable ||
-          width() >= SHEET_LIMITS.columns ||
-          cellCount() + current().rows.length > SHEET_LIMITS.cells;
-    }
-    const clear = $(".sheet-view-controls button", element);
-    if (clear)
-      clear.disabled = !editable || (!current().sort && !current().filter);
-  };
-  sort.addEventListener("change", () => {
-    if (!sort.value) delete current().sort;
-    else
-      current().sort = {
-        column: Number(sort.value),
-        direction: direction.value,
-      };
-    drawAll();
-    changed("排序已更新（不改变原始数据）");
-  });
-  direction.addEventListener("change", () => {
-    if (sort.value)
-      current().sort = {
-        column: Number(sort.value),
-        direction: direction.value,
-      };
-    drawAll();
-    changed("排序已更新（不改变原始数据）");
-  });
-  const applyFilter = () => {
-    if (!filterQuery.value) delete current().filter;
-    else
-      current().filter = {
-        column: Number(filterColumn.value || 0),
-        mode: filterMode.value,
-        query: filterQuery.value,
-        ...(filterMode.value === "number"
-          ? { operator: filterNumber.value }
-          : {}),
-      };
-    drawAll();
-    changed("筛选已更新（不改变原始数据）");
-  };
-  filterColumn.addEventListener("change", applyFilter);
-  filterMode.addEventListener("change", applyFilter);
-  filterNumber.addEventListener("change", applyFilter);
-  filterQuery.addEventListener("input", applyFilter);
-  const applyJson = () => {
+  }
+
+  const readContent = () => {
+    // 只读是权限边界，不是样式：任何情况下都不回可编辑的正文。
+    if (!editable) return doc.body_text || "";
     try {
-      const parsed = parseSheet(json.value);
-      sheets = parsed;
-      active = 0;
-      selection = sheets.map(() => ({ row: 0, column: 0 }));
-      drawAll();
-      status.textContent = `JSON 已同步 · 基线版本 ${latestSeq}`;
+      const next = hubSheetsFromXds(spreadsheet.getData());
+      lastError = "";
+      return serializeSheet(next);
     } catch (error) {
-      toast(errorMessage(error), true);
+      lastError = error.message;
+      drawNotice();
+      return doc.body_text || "";
     }
   };
-  const selectedCellStyle = () => {
-    const selected = selection[active];
-    current().styles ??= [];
-    current().styles[selected.row] ??= [];
-    current().styles[selected.row][selected.column] ??= {};
-    return current().styles[selected.row][selected.column];
+
+  return {
+    element,
+    notice,
+    readContent,
+    // 恢复本地草稿 / 回到云端基线时用：重新喂一份正文。loadData 不触发 change，
+    // 所以「打开就恢复草稿」不会被记成一次编辑。
+    seed(text) {
+      try {
+        spreadsheet.loadData(xdsSheetsFromHub(parseSheet(text || "[]")));
+        lastError = "";
+      } catch (error) {
+        lastError = error.message;
+      }
+      drawNotice();
+      spreadsheet.reRender();
+    },
   };
-  const updateSelectedStyle = (patch, message) => {
-    Object.assign(selectedCellStyle(), patch);
-    drawAll();
-    changed(message);
-  };
-  const toolbar = h(
-    "div",
-    { class: "editor-toolbar sheet-toolbar" },
-    button(
-      "添加行",
-      () => {
-        if (
-          current().rows.length >= SHEET_LIMITS.rows ||
-          cellCount() + width() > SHEET_LIMITS.cells
-        ) {
-          toast(
-            `单表最多 ${SHEET_LIMITS.rows} 行、${SHEET_LIMITS.cells} 个单元格。`,
-            true,
-          );
-          return;
-        }
-        current().rows.push(Array(width()).fill(""));
-        current().styles ??= [];
-        current().styles.push(Array(width()).fill(null));
-        drawAll();
-        changed("已添加行");
-      },
-      "small",
-      {
-        disabled:
-          !editable ||
-          current().rows.length >= SHEET_LIMITS.rows ||
-          cellCount() + width() > SHEET_LIMITS.cells,
-      },
-    ),
-    button(
-      "添加列",
-      () => {
-        if (
-          width() >= SHEET_LIMITS.columns ||
-          cellCount() + current().rows.length > SHEET_LIMITS.cells
-        ) {
-          toast(
-            `单表最多 ${SHEET_LIMITS.columns} 列、${SHEET_LIMITS.cells} 个单元格。`,
-            true,
-          );
-          return;
-        }
-        current().rows.forEach((row, index) => {
-          row.push("");
-          current().styles ??= [];
-          current().styles[index] ??= [];
-          current().styles[index].push(null);
-        });
-        drawAll();
-        changed("已添加列");
-      },
-      "small",
-      {
-        disabled:
-          !editable ||
-          width() >= SHEET_LIMITS.columns ||
-          cellCount() + current().rows.length > SHEET_LIMITS.cells,
-      },
-    ),
-    button(
-      "删除选中行",
-      () => {
-        const row = selection[active].row;
-        if (!current().rows[row]) return;
-        current().rows.splice(row, 1);
-        current().styles?.splice(row, 1);
-        selection[active].row = Math.max(0, row - 1);
-        drawAll();
-        changed("已删除选中行");
-      },
-      "small",
-      { disabled: !editable },
-    ),
-    button(
-      "删除选中列",
-      () => {
-        const column = selection[active].column;
-        current().rows.forEach((row, index) => {
-          row.splice(column, 1);
-          current().styles?.[index]?.splice(column, 1);
-        });
-        if (current().conditional) {
-          current().conditional = current().conditional.filter(
-            (rule) => rule.column !== column,
-          );
-          current().conditional.forEach((rule) => {
-            if (rule.column > column) rule.column -= 1;
-          });
-        }
-        for (const key of ["sort", "filter"]) {
-          const metadata = current()[key];
-          if (!metadata) continue;
-          if (metadata.column === column) delete current()[key];
-          else if (metadata.column > column) metadata.column -= 1;
-        }
-        selection[active].column = Math.max(0, column - 1);
-        drawAll();
-        changed("已删除选中列");
-      },
-      "small",
-      { disabled: !editable },
-    ),
-    button(
-      "加粗",
-      () =>
-        updateSelectedStyle({ bold: !selectedCellStyle().bold }, "已切换加粗"),
-      "small",
-      { disabled: !editable },
-    ),
-    button(
-      "斜体",
-      () =>
-        updateSelectedStyle(
-          { italic: !selectedCellStyle().italic },
-          "已切换斜体",
-        ),
-      "small",
-      { disabled: !editable },
-    ),
-    h(
-      "label",
-      { class: "sheet-fill-control" },
-      "填充",
-      h("input", {
-        type: "color",
-        value: "#fff2a8",
-        "aria-label": "选中单元格填充色",
-        disabled: !editable,
-        onchange: (event) =>
-          updateSelectedStyle({ fill: event.target.value }, "已更新填充色"),
-      }),
-    ),
-    button(
-      "清除样式",
-      () => {
-        const selected = selection[active];
-        if (current().styles?.[selected.row])
-          current().styles[selected.row][selected.column] = null;
-        drawAll();
-        changed("已清除选中单元格样式");
-      },
-      "small",
-      { disabled: !editable },
-    ),
-    button("从 JSON 应用", applyJson, "small", { disabled: !editable }),
-  );
-  element.append(
-    tabs,
-    toolbar,
-    h(
-      "div",
-      { class: "sheet-view-controls" },
-      h("label", null, "排序", sort, direction),
-      h(
-        "label",
-        null,
-        "筛选",
-        filterColumn,
-        filterMode,
-        filterNumber,
-        filterQuery,
-      ),
-      button(
-        "清除排序/筛选",
-        () => {
-          delete current().sort;
-          delete current().filter;
-          drawAll();
-          changed("已清除排序与筛选");
-        },
-        "small",
-        { disabled: !editable || (!current().sort && !current().filter) },
-      ),
-    ),
-    h(
-      "details",
-      { class: "sheet-conditional-details" },
-      h("summary", { text: "条件格式" }),
-      h(
-        "div",
-        { class: "sheet-conditional-controls" },
-        ruleColumn,
-        ruleOperator,
-        ruleValue,
-        ruleColor,
-        button(
-          "添加规则",
-          () => {
-            const column = Number(ruleColumn.value || 0);
-            if (!ruleValue.value) {
-              toast("请输入条件格式阈值。", true);
-              return;
-            }
-            if (!/^#[0-9a-f]{6}$/iu.test(ruleColor.value)) {
-              toast("高亮色必须是六位十六进制颜色。", true);
-              return;
-            }
-            current().conditional ||= [];
-            if (current().conditional.length >= 64) return;
-            current().conditional.push({
-              column,
-              operator: ruleOperator.value,
-              value: ruleValue.value,
-              color: ruleColor.value,
-            });
-            ruleValue.value = "";
-            drawAll();
-            changed("条件格式已添加");
-          },
-          "small",
-          { disabled: !editable },
-        ),
-      ),
-      rules,
-    ),
-    grid,
-    h(
-      "details",
-      { class: "sheet-json-details" },
-      h("summary", { text: "JSON 同步（规范 sheets / 兼容旧二维数组）" }),
-      h("p", {
-        class: "muted small-text sheet-json-hint",
-        text: "sort、filter、conditional 随工作表保存；排序与筛选只影响显示。",
-      }),
-      json,
-    ),
-  );
-  drawAll();
-  return { element, readContent: () => serializeSheet(sheets) };
 }
 function outlineTree(text) {
   const root = h("ul", { class: "tree-root" });
@@ -5799,13 +5778,35 @@ function sanitizedDocFragment(html) {
     "TD",
     "HR",
   ]);
-  const attrs = new Set(["href", "title", "colspan", "rowspan", "src", "alt"]);
+  const attrs = new Set([
+    "href",
+    "title",
+    "colspan",
+    "rowspan",
+    "src",
+    "alt",
+    // class 已在上面按值筛过，这里放行才不会把刚留下的排版类又抹掉。
+    "class",
+  ]);
+  // class 必须按值收口，不能整属性放行：正文是 HTML 片段，放开 class 等于让文档作者
+  // 往工作台里注入任意样式（覆盖 .topbar/.rail 之类外壳，或造出看不见的层）。
+  // 只放行编辑器排版真正用到的那几个前缀，其余一律剥掉。
+  const classPattern =
+    /^ql-(?:align|indent|code-block|blockquote|list|ui)(?:-[a-z0-9-]+)?$/u;
   const clean = (node) => {
     for (const child of [...node.children]) {
       clean(child);
       if (!allowed.has(child.tagName)) {
         child.replaceWith(...child.childNodes);
         continue;
+      }
+      if (child.hasAttribute("class")) {
+        const kept = child
+          .getAttribute("class")
+          .split(/\s+/u)
+          .filter((name) => classPattern.test(name));
+        if (kept.length) child.setAttribute("class", kept.join(" "));
+        else child.removeAttribute("class");
       }
       for (const attr of [...child.attributes])
         if (
@@ -5847,32 +5848,29 @@ function removeDraft(id) {
     /* storage is optional */
   }
 }
-function restoreDraft(doc, watermark, title, status) {
-  title.value = state.draft.title || title.value;
-  const body =
-    doc.kind === "markdown"
-      ? $("textarea", watermark)
-      : doc.kind === "mindmap"
-        ? $("textarea", watermark)
-        : doc.kind === "sheet"
-          ? $("#sheetJson", watermark)
-          : $(".rich-editor", watermark);
-  if (doc.kind === "doc")
-    body.replaceChildren(...sanitizedDocFragment(state.draft.body_text || ""));
-  else body.value = state.draft.body_text || "";
-  watermark.dataset.draftBody = state.draft.body_text || "";
-  if (doc.kind === "sheet") {
-    const apply = $$("button", watermark).find((item) =>
-      item.textContent.includes("从 JSON 应用"),
-    );
-    apply?.click();
-    watermark.dataset.draftBody = state.draft.body_text || "";
+function restoreDraft(doc, watermark, title, status, paint) {
+  const session =
+    activeDocumentSession?.docId === doc.doc_id ? activeDocumentSession : null;
+  const richHost = doc.kind === "doc" ? session?.host : null;
+  if (doc.kind === "doc" && !richHost?.ready) {
+    toast("富文本引擎未就绪，暂时无法恢复草稿。刷新页面后重试。", true);
+    return;
   }
-  if (doc.kind === "mindmap")
-    body.dispatchEvent(new Event("input", { bubbles: true }));
+  const sheetHost = doc.kind === "sheet" ? session?.sheetHost : null;
+  title.value = state.draft.title || title.value;
+  const body = richHost || sheetHost ? null : $("textarea", watermark);
+  if (richHost) richHost.seed(state.draft.body_text || "");
+  else if (sheetHost) sheetHost.seed(state.draft.body_text || "");
+  else if (body) body.value = state.draft.body_text || "";
+  watermark.dataset.draftBody = state.draft.body_text || "";
+  // 分栏形态下只灌 textarea 不够：右侧那一栏此刻还写着旧正文，屏幕会同时说两件矛盾的事。
+  // 赋值不触发 input，所以由调用方把「重画这一形态看得见的东西」交进来，一次画全。
+  // 这里曾经另有一条 if (doc.kind === "mindmap") dispatchEvent("input")：它比 paint 早一步
+  // 到，做的是同一件事（outline 的 input 监听就是 drawTree），于是思维导图那一次重画
+  // 跑了两遍、而 markdown 只跑一遍 —— 两条线只剩一条，剪它 doc-preview 那发思维导图用例即红。
+  if (paint) paint(body);
   status.textContent = "已恢复本地草稿，保存后生成新版本";
-  if (activeDocumentSession?.docId === doc.doc_id)
-    activeDocumentSession.changed();
+  if (session) session.changed();
   toast("本地草稿已恢复");
 }
 async function restoreDocument(id, seq) {
@@ -6078,7 +6076,7 @@ function renderContacts(view) {
           h("h3", { text: "组织架构" }),
           roleTree.length
             ? roleTree
-            : emptyState("暂无角色", "Hub 返回了空组织架构。"),
+            : emptyState("暂无角色", "Hub 返回了空组织架构。", null, "admin"),
         ),
         member
           ? memberDetail(member)
@@ -6091,6 +6089,7 @@ function renderContacts(view) {
                   const first = state.members[0];
                   if (first) setRoute("settings", first.member_id);
                 }),
+                "talent",
               ),
       ),
     ),
@@ -6154,6 +6153,9 @@ async function selectMember(id) {
 async function selectGroup(id) {
   state.selectedGroup = id;
   state.selectedMember = null;
+  // 先画选中态再发请求：成员详情没缓存时这一发要一个来回，此前这一格点击后
+  // 什么都不变 —— 「点了没反应」和「按钮坏了」在屏幕上长得一样。
+  renderList();
   try {
     const response = await request(`/groups/${encodeURIComponent(id)}`);
     state.groupMembers.set(id, response.members || []);
@@ -6346,16 +6348,10 @@ function renderTalent(view) {
         h(
           "div",
           { class: "actions" },
-          button("导出蓝图", () => exportTalent(selected), "small"),
+          button("导出蓝图", () => exportTalent(selected), ""),
           ...(selected.source === "builtin"
             ? []
-            : [
-                button(
-                  "下架蓝图",
-                  () => unlistTalent(selected),
-                  "danger small",
-                ),
-              ]),
+            : [button("下架蓝图", () => unlistTalent(selected), "danger")]),
           button(
             "以此蓝图招聘",
             () => {
@@ -6848,12 +6844,97 @@ async function unlistTalent(item) {
   });
 }
 
-function renderSettingsHome(view) {
-  view.append(
+const seatLabels = { cos: "特助席", member: "普通席" };
+const categoryLabels = {
+  executive: "管理",
+  product: "产品",
+  engineering: "工程",
+  design: "设计",
+  support: "支持",
+};
+const pluginKindLabels = { mcp: "MCP 服务", builtin: "内置模块" };
+const groupStatusLabels = { active: "活跃", archived: "已归档" };
+
+function sectionHome({
+  title,
+  subtitle,
+  emptyTitle,
+  emptyDescription,
+  emptyAction = null,
+  section,
+  extra = [],
+}) {
+  return h(
+    "div",
+    { class: "page" },
+    pageHeader(title, subtitle, extra),
+    emptyState(emptyTitle, emptyDescription, emptyAction, "settings"),
     h(
       "div",
-      { class: "page" },
-      pageHeader("设置", "管理成员的人设、模型、语气、语音与头像。", [
+      { class: "actions" },
+      ...SETTINGS_SECTIONS.filter((s) => s.id !== section).map((s) =>
+        button(`${s.label}设置`, () => setRoute("settings", s.id)),
+      ),
+    ),
+  );
+}
+
+function renderSettingsHome(view) {
+  const section = state.settingsSection;
+  if (section === "groups") {
+    view.append(
+      sectionHome({
+        title: "群组设置",
+        subtitle: "改名与目标、调整成员席位、归档或恢复群组。",
+        emptyTitle: "选择要配置的群组",
+        emptyDescription: "从左侧群组列表选择，或在通讯录里打开群聊。",
+        section: "groups",
+        extra: [button("新建群", () => openCreateModal("group"), "primary")],
+      }),
+    );
+    return;
+  }
+  if (section === "roles") {
+    view.append(
+      sectionHome({
+        title: "岗位设置",
+        subtitle: "维护公司树：新建岗位、调整汇报线与模型档位、删除空缺岗位。",
+        emptyTitle: "选择要配置的岗位",
+        emptyDescription: "从左侧岗位列表选择一项开始编辑。",
+        section: "roles",
+        extra: [button("新建岗位", () => openRoleModal(null), "primary")],
+      }),
+    );
+    return;
+  }
+  if (section === "plugins") {
+    view.append(
+      sectionHome({
+        title: "插件设置",
+        subtitle: "登记 MCP 服务与内置模块，探活并管理启停。",
+        emptyTitle: "选择要配置的插件",
+        emptyDescription: "执行器引用插件提供的工具，先在左侧列表登记能力源。",
+        section: "plugins",
+        extra: [button("安装插件", () => openPluginModal(null), "primary")],
+      }),
+    );
+    return;
+  }
+  view.append(
+    sectionHome({
+      title: "设置",
+      subtitle: "管理成员的人设、模型、语气、语音与头像。",
+      emptyTitle: "选择要配置的成员",
+      emptyDescription: "从左侧成员列表选择，或通过通讯录进入成员档案。",
+      emptyAction: state.members[0]
+        ? button(
+            "配置第一位成员",
+            () => setRoute("settings", state.members[0].member_id),
+            "primary",
+          )
+        : null,
+      section: "member",
+      extra: [
         button(
           "招聘成员",
           () => {
@@ -6862,21 +6943,868 @@ function renderSettingsHome(view) {
           },
           "primary",
         ),
-      ]),
+      ],
+    }),
+  );
+}
+
+function settingsEntry(label, hint, active, onClick, trailing = null) {
+  return h(
+    "button",
+    {
+      type: "button",
+      class: `member-row${active ? " selected" : ""}`,
+      onClick,
+    },
+    h(
+      "span",
+      { class: "member-copy" },
+      h("strong", { text: label }),
+      hint === null ? null : h("small", { text: hint }),
+    ),
+    trailing,
+  );
+}
+
+function renderSettingsList(content, toolbar) {
+  const section = state.settingsSection;
+  toolbar.append(
+    h(
+      "div",
+      { class: "tabs" },
+      ...SETTINGS_SECTIONS.map((s) =>
+        h(
+          "button",
+          {
+            type: "button",
+            class: `tab${section === s.id ? " active" : ""}`,
+            title: s.hint,
+            onClick: () => setRoute("settings", s.id),
+          },
+          s.label,
+        ),
+      ),
+    ),
+  );
+  if (section === "member") {
+    renderMemberList(content, toolbar);
+    return;
+  }
+  if (section === "groups") {
+    for (const group of state.groups)
+      content.append(
+        settingsEntry(
+          group.title,
+          `${group.member_count} 位成员 · ${groupStatusLabels[group.status]}`,
+          state.settingsGroup === group.group_id,
+          () => openSettingsItem("groups", group.group_id),
+          pill(
+            groupStatusLabels[group.status],
+            group.status === "active" ? "green" : "",
+          ),
+        ),
+      );
+    if (!state.groups.length)
+      content.append(
+        emptyState("暂无群组", "在顶栏点击“创建 → 新建群”。", null, "users"),
+      );
+    return;
+  }
+  if (section === "roles") {
+    for (const role of state.roles)
+      content.append(
+        settingsEntry(
+          role.name,
+          `${categoryLabels[role.category]} · ${role.kind === "builtin" ? "内置" : "自定义"} · ${role.occupant_count} 人在任`,
+          state.settingsRole === role.role_id,
+          () => openSettingsItem("roles", role.role_id),
+        ),
+      );
+    return;
+  }
+  for (const plugin of state.plugins)
+    content.append(
+      settingsEntry(
+        plugin.name,
+        `${pluginKindLabels[plugin.kind]} · ${plugin.tools.length} 个工具`,
+        state.settingsPlugin === plugin.plugin_id,
+        () => openSettingsItem("plugins", plugin.plugin_id),
+        pill(
+          plugin.enabled ? "启用" : "停用",
+          plugin.enabled ? "green" : "red",
+        ),
+      ),
+    );
+  if (!state.plugins.length)
+    content.append(
       emptyState(
-        "选择要配置的成员",
-        "从左侧成员列表选择，或通过通讯录进入成员档案。",
-        state.members[0]
-          ? button(
-              "配置第一位成员",
-              () => setRoute("settings", state.members[0].member_id),
-              "primary",
-            )
-          : null,
+        "暂无插件",
+        "执行器引用插件提供的工具，先在这里登记能力源。",
+        null,
+        "settings",
+      ),
+    );
+}
+
+/** 每个分区把「当前条目 id」存在 state 的哪一格。 */
+const SETTINGS_ITEM_KEYS = {
+  member: "settingsMember",
+  groups: "settingsGroup",
+  roles: "settingsRole",
+  plugins: "settingsPlugin",
+};
+/** hash 的 id 段落在哪个分区：按 id 找群/岗位/插件，都找不到才当成员 id。 */
+function resolveSettingsSection(id) {
+  if (state.groups.some((g) => g.group_id === id)) return "groups";
+  if (state.roles.some((r) => r.role_id === id)) return "roles";
+  if (state.plugins.some((p) => p.plugin_id === id)) return "plugins";
+  return "member";
+}
+
+/**
+ * 打开设置里的一个条目。state.route 已经是 settings（点行只在设置页内发生），
+ * 所以这里只改状态 + 让 hash 跟上屏幕：setRoute 会按分区名/条目 id 重写地址。
+ */
+function openSettingsItem(section, id) {
+  state[SETTINGS_ITEM_KEYS[section]] = id;
+  setRoute("settings", id);
+}
+
+function renderSettingsSectionHome(view, section) {
+  state.settingsSection = section;
+  renderSettingsHome(view);
+}
+
+function renderGroupSettings(view) {
+  const group = state.groups.find((g) => g.group_id === state.settingsGroup);
+  if (!group) {
+    renderSettingsSectionHome(view, "groups");
+    return;
+  }
+  const groupId = group.group_id;
+  const seats = state.groupMembers.get(groupId) || [];
+  const seatForm = h(
+    "form",
+    { class: "field-grid", onsubmit: (event) => addGroupSeat(event, groupId) },
+    field(
+      "成员",
+      select(
+        "member_id",
+        state.members
+          .filter(
+            (m) =>
+              m.status === "active" &&
+              !seats.some((seat) => seat.member_id === m.member_id),
+          )
+          .map((m) => [m.member_id, `${m.name} · ${roleName(m.role_id)}`]),
+      ),
+    ),
+    field(
+      "任职岗位（留空 = 默认岗位）",
+      select(
+        "role_id",
+        [["", "默认岗位"], ...state.roles.map((r) => [r.role_id, r.name])],
+        "",
+      ),
+      "显式选岗即兼任：同一成员在不同群可以坐不同岗位。",
+    ),
+    h(
+      "div",
+      { class: "actions" },
+      h("button", { class: "btn", type: "submit" }, "拉人进群"),
+    ),
+  );
+  view.append(
+    h(
+      "div",
+      { class: "page" },
+      pageHeader(group.title, `群组设置 · ${groupId}`, [
+        button("回到群组总览", () => setRoute("settings", "groups")),
+        button("编辑资料", () => openGroupModal(group), "primary"),
+      ]),
+      h(
+        "div",
+        { class: "settings-layout" },
+        h(
+          "aside",
+          { class: "settings-menu" },
+          button("基本信息", () => scrollToSection("group-basic")),
+          button("席位", () => scrollToSection("group-seats")),
+        ),
+        h(
+          "div",
+          { class: "settings-sections" },
+          h(
+            "section",
+            { class: "card", id: "group-basic" },
+            h("h3", { text: "基本信息" }),
+            h("p", {
+              text: group.goal || "暂无群目标。",
+            }),
+            h("p", {
+              class: "help",
+              text: `状态：${groupStatusLabels[group.status]} · 特助 ${
+                group.cos_member_id ? memberName(group.cos_member_id) : "未就位"
+              }`,
+            }),
+          ),
+          h(
+            "section",
+            { class: "card", id: "group-seats" },
+            h("h3", { text: `席位（${seats.length}）` }),
+            ...seats.map((seat) =>
+              h(
+                "div",
+                { class: "setting-line" },
+                h(
+                  "span",
+                  { class: "setting-copy" },
+                  h("strong", { text: memberName(seat.member_id) }),
+                  h("small", {
+                    text: `${roleName(seat.role_id)} · ${seatLabels[seat.seat]}`,
+                  }),
+                ),
+                button(
+                  "移出群",
+                  () => removeGroupMember(groupId, seat),
+                  "danger",
+                ),
+              ),
+            ),
+            seatForm,
+          ),
+          h(
+            "section",
+            { class: "card", id: "group-danger" },
+            h("h3", { text: "危险操作" }),
+            h("p", {
+              class: "help",
+              text:
+                group.status === "active"
+                  ? "归档后群组只读：不再接收新消息，成员席位保留，可随时恢复。"
+                  : "这个群已归档，恢复后重新可写。",
+            }),
+            h(
+              "div",
+              { class: "actions" },
+              button(
+                group.status === "active" ? "归档群组" : "恢复群组",
+                () => setGroupStatus(group),
+                "danger",
+              ),
+            ),
+          ),
+        ),
       ),
     ),
   );
 }
+
+function renderRoleSettings(view) {
+  const role = state.roles.find((r) => r.role_id === state.settingsRole);
+  if (!role) {
+    renderSettingsSectionHome(view, "roles");
+    return;
+  }
+  view.append(
+    h(
+      "div",
+      { class: "page" },
+      pageHeader(role.name, `岗位设置 · ${role.role_id}`, [
+        button("回到岗位总览", () => setRoute("settings", "roles")),
+        button("编辑岗位", () => openRoleModal(role), "primary"),
+      ]),
+      h(
+        "div",
+        { class: "settings-layout" },
+        h(
+          "div",
+          { class: "settings-sections" },
+          h(
+            "section",
+            { class: "card" },
+            h("h3", { text: "基本信息" }),
+            h("p", {
+              text: `${categoryLabels[role.category]} · ${role.kind === "builtin" ? "内置岗位（不可删除）" : "自定义岗位"} · ${role.occupant_count} 人在任`,
+            }),
+            h("p", {
+              class: "help",
+              text: `汇报线：${role.reports_to ? roleName(role.reports_to) : "无（根节点）"} · 模型档位 ${role.model_tier}`,
+            }),
+          ),
+          h(
+            "section",
+            { class: "card" },
+            h("h3", { text: "危险操作" }),
+            h("p", {
+              class: "help",
+              text:
+                role.kind === "builtin"
+                  ? "内置岗位随系统迁移而来，不可删除。"
+                  : role.occupant_count > 0
+                    ? `还有 ${role.occupant_count} 人在任，需先为在任成员改岗。`
+                    : "这个岗位当前无人在任，可以删除。",
+            }),
+            role.kind === "builtin" || role.occupant_count > 0
+              ? null
+              : h(
+                  "div",
+                  { class: "actions" },
+                  button("删除岗位", () => deleteRole(role), "danger"),
+                ),
+          ),
+        ),
+      ),
+    ),
+  );
+}
+
+function renderPluginSettings(view) {
+  const plugin = state.plugins.find(
+    (p) => p.plugin_id === state.settingsPlugin,
+  );
+  if (!plugin) {
+    renderSettingsSectionHome(view, "plugins");
+    return;
+  }
+  const probe = plugin.last_probe_json;
+  const probeText =
+    probe === null
+      ? "从未探测"
+      : probe["ok"] === true
+        ? `上次探测成功（${fmtDateTime(probe["probed_at"])}）`
+        : `上次探测失败（${fmtDateTime(probe["probed_at"])}）：${probe["message"] || "无回执信息"}`;
+  view.append(
+    h(
+      "div",
+      { class: "page" },
+      pageHeader(plugin.name, `插件设置 · ${plugin.plugin_id}`, [
+        button("回到插件总览", () => setRoute("settings", "plugins")),
+        button("探活", () => probePlugin(plugin)),
+        button("编辑配置", () => openPluginModal(plugin), "primary"),
+      ]),
+      h(
+        "div",
+        { class: "settings-layout" },
+        h(
+          "aside",
+          { class: "settings-menu" },
+          button("基本信息", () => scrollToSection("plugin-basic")),
+          button("工具清单", () => scrollToSection("plugin-tools")),
+        ),
+        h(
+          "div",
+          { class: "settings-sections" },
+          h(
+            "section",
+            { class: "card", id: "plugin-basic" },
+            h("h3", { text: "基本信息" }),
+            h("p", {
+              text: `${pluginKindLabels[plugin.kind]} · ${plugin.enabled ? "已启用" : "已停用"}`,
+            }),
+            plugin.endpoint === null
+              ? null
+              : h("p", { class: "mono small-text", text: plugin.endpoint }),
+            h("p", { class: "help", text: probeText }),
+            h(
+              "div",
+              { class: "actions" },
+              button(
+                plugin.enabled ? "停用插件" : "启用插件",
+                () => togglePlugin(plugin),
+                plugin.enabled ? "danger" : "",
+              ),
+            ),
+          ),
+          h(
+            "section",
+            { class: "card", id: "plugin-tools" },
+            h("h3", { text: `工具（${plugin.tools.length}）` }),
+            plugin.tools.length
+              ? h(
+                  "div",
+                  null,
+                  ...plugin.tools.map((tool) =>
+                    h(
+                      "div",
+                      { class: "setting-line" },
+                      h(
+                        "span",
+                        { class: "setting-copy" },
+                        h("strong", { class: "mono", text: tool.tool_name }),
+                        h("small", { text: tool.description || "无描述" }),
+                      ),
+                    ),
+                  ),
+                )
+              : h("p", {
+                  class: "help",
+                  text: "工具清单在探活成功后才会落表；先点探活拉取一次。",
+                }),
+          ),
+          h(
+            "section",
+            { class: "card" },
+            h("h3", { text: "危险操作" }),
+            h("p", {
+              class: "help",
+              text: "删除只撤销登记：引用它工具的插件执行器会在下一次执行时报插件缺失。",
+            }),
+            h(
+              "div",
+              { class: "actions" },
+              button("删除插件", () => deletePlugin(plugin), "danger"),
+            ),
+          ),
+        ),
+      ),
+    ),
+  );
+}
+
+function parseJsonObject(text, label) {
+  let parsed;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    throw new Error(`${label}不是合法 JSON。`);
+  }
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed))
+    throw new Error(`${label}必须是一个 JSON 对象。`);
+  return parsed;
+}
+
+function scrollToSection(id) {
+  document.getElementById(id)?.scrollIntoView({ behavior: "smooth" });
+}
+
+function openGroupModal(group) {
+  openModal({
+    title: "编辑群组",
+    eyebrow: "GROUP SETTINGS",
+    build: () =>
+      formGrid(
+        field(
+          "群名称",
+          input("title", group.title, "text", {
+            required: true,
+            maxlength: 200,
+          }),
+        ),
+        fullField("群目标", textarea("goal", group.goal, { maxlength: 4000 })),
+      ),
+    submit: "保存群组",
+    onSubmit: async (data) => {
+      await request(`/groups/${encodeURIComponent(group.group_id)}`, {
+        method: "PATCH",
+        body: { title: data.get("title"), goal: data.get("goal") },
+      });
+      await loadCore();
+      renderList();
+      renderMain();
+      toast("群组已保存");
+    },
+  });
+}
+
+function setGroupStatus(group) {
+  const archiving = group.status === "active";
+  openModal({
+    title: archiving ? "归档群组" : "恢复群组",
+    eyebrow: "GROUP STATUS",
+    danger: archiving,
+    build: () =>
+      h("p", {
+        text: archiving
+          ? `「${group.title}」归档后只读：不再接收新消息，成员席位保留，可随时恢复。`
+          : `「${group.title}」恢复为活跃后重新可写。`,
+      }),
+    submit: archiving ? "确认归档" : "确认恢复",
+    onSubmit: async () => {
+      await request(`/groups/${encodeURIComponent(group.group_id)}`, {
+        method: "PATCH",
+        body: { status: archiving ? "archived" : "active" },
+      });
+      await loadCore();
+      renderList();
+      renderMain();
+      toast(archiving ? "群组已归档" : "群组已恢复");
+    },
+  });
+}
+
+async function addGroupSeat(event, groupId) {
+  event.preventDefault();
+  const data = new FormData(event.currentTarget);
+  const memberId = data.get("member_id");
+  if (!memberId) {
+    toast("没有可拉入的在职成员。", true);
+    return;
+  }
+  const roleId = data.get("role_id");
+  try {
+    await request(`/groups/${encodeURIComponent(groupId)}/members`, {
+      method: "POST",
+      body: {
+        member_id: memberId,
+        ...(roleId === "" ? {} : { role_id: roleId }),
+      },
+    });
+    await loadCore();
+    renderList();
+    renderMain();
+    toast("成员已入座");
+  } catch (error) {
+    toast(errorMessage(error), true);
+  }
+}
+
+function removeGroupMember(groupId, seat) {
+  openModal({
+    title: "移出群组",
+    eyebrow: "REMOVE SEAT",
+    danger: true,
+    build: () =>
+      h("p", {
+        text: `把「${memberName(seat.member_id)}」（${roleName(seat.role_id)} · ${seatLabels[seat.seat]}）移出本群。成员档案不受影响。`,
+      }),
+    submit: "确认移出",
+    onSubmit: async () => {
+      await request(
+        `/groups/${encodeURIComponent(groupId)}/members/${encodeURIComponent(seat.member_id)}`,
+        { method: "DELETE" },
+      );
+      await loadCore();
+      renderList();
+      renderMain();
+      toast("已移出群组");
+    },
+  });
+}
+
+function openRoleModal(role) {
+  const editing = role !== null;
+  const reports = state.roles.filter(
+    (r) => !editing || r.role_id !== role.role_id,
+  );
+  openModal({
+    title: editing ? "编辑岗位" : "新建岗位",
+    eyebrow: "ROLE SETTINGS",
+    build: () =>
+      h(
+        "div",
+        null,
+        formGrid(
+          editing
+            ? field(
+                "岗位标识",
+                input("role_id", role.role_id, "text", { disabled: true }),
+              )
+            : field(
+                "岗位标识",
+                input("role_id", "", "text", {
+                  required: true,
+                  maxlength: 200,
+                  pattern: "^[a-z][a-z0-9_]*$",
+                }),
+                "小写字母开头的蛇形标识，创建后不可改。",
+              ),
+          field(
+            "岗位名称",
+            input("name", editing ? role.name : "", "text", {
+              required: true,
+              maxlength: 100,
+            }),
+          ),
+          field(
+            "类别",
+            select(
+              "category",
+              Object.entries(categoryLabels).map(([value, text]) => [
+                value,
+                text,
+              ]),
+              editing ? role.category : "engineering",
+            ),
+          ),
+          field(
+            "汇报线",
+            select(
+              "reports_to",
+              [
+                ["boss", `${roleName("boss")}（老板直属）`],
+                ...reports.map((r) => [r.role_id, r.name]),
+              ],
+              editing ? role.reports_to || "boss" : "boss",
+            ),
+            "不能挂到自己或自己的下级，服务端会拒环。",
+          ),
+          field(
+            "模型档位",
+            select(
+              "model_tier",
+              [
+                ["management", "管理档"],
+                ["execution", "执行档"],
+              ],
+              editing ? role.model_tier : "execution",
+            ),
+          ),
+          field(
+            "头像种子",
+            input(
+              "avatar_seed",
+              editing ? role.avatar_seed || "" : "",
+              "text",
+              { maxlength: 200 },
+            ),
+          ),
+        ),
+      ),
+    submit: editing ? "保存岗位" : "创建岗位",
+    onSubmit: async (data) => {
+      const payload = {
+        name: data.get("name"),
+        category: data.get("category"),
+        reports_to: data.get("reports_to"),
+        model_tier: data.get("model_tier"),
+      };
+      const seed = data.get("avatar_seed").trim();
+      if (seed !== "") payload.avatar_seed = seed;
+      if (editing) {
+        await request(`/roles/${encodeURIComponent(role.role_id)}`, {
+          method: "PATCH",
+          body: payload,
+        });
+      } else {
+        await request("/roles", {
+          method: "POST",
+          body: { role_id: data.get("role_id"), ...payload },
+        });
+      }
+      await loadCore();
+      renderList();
+      renderMain();
+      toast(editing ? "岗位已保存" : "岗位已创建");
+    },
+  });
+}
+
+function deleteRole(role) {
+  openModal({
+    title: "删除岗位",
+    eyebrow: "DELETE ROLE",
+    danger: true,
+    build: () =>
+      h("p", {
+        text: `「${role.name}」当前无人在任。删除后该岗位从公司树移除。`,
+      }),
+    submit: "确认删除",
+    onSubmit: async () => {
+      await request(`/roles/${encodeURIComponent(role.role_id)}`, {
+        method: "DELETE",
+      });
+      state.settingsRole = null;
+      await loadCore();
+      renderList();
+      renderMain();
+      toast("岗位已删除");
+    },
+  });
+}
+
+function openPluginModal(plugin) {
+  const editing = plugin !== null;
+  // 视图契约（pluginView）不回传 config 列：编辑时若摆一个空的 config 编辑器，
+  // 保存就等于把原配置覆盖成 {}。所以编辑只改名称/端点/启停，配置随安装写入。
+  const endpointInput = input(
+    "endpoint",
+    editing ? plugin.endpoint || "" : "",
+    "text",
+    {
+      required: true,
+      maxlength: 2000,
+    },
+  );
+  const endpointField = fullField(
+    "服务端点",
+    endpointInput,
+    "MCP 服务的 HTTP(S) 端点。",
+  );
+  // display:none 不豁免原生校验：藏起来的 required 控件照样在 submit 事件
+  // 触发前把表单拦死（Chromium 连 invalid 气泡都不往隐形格子上画）。
+  // 所以哪一格跟着类型收起，就必须连里面的控件一起 disable。
+  const builtinInput = input("plugin_id", "", "text", {
+    required: true,
+    maxlength: 200,
+  });
+  const builtinField = fullField(
+    "内置插件标识",
+    builtinInput,
+    "必须是服务端已注册过的代码模块 id；内置行只是对它的授权登记。",
+  );
+  builtinField.hidden = true;
+  builtinInput.disabled = true;
+  const kindSelect = editing
+    ? null
+    : select(
+        "kind",
+        [
+          ["mcp", pluginKindLabels.mcp],
+          ["builtin", pluginKindLabels.builtin],
+        ],
+        "mcp",
+        {
+          onchange: (event) => {
+            const kind = event.target.value;
+            endpointField.hidden = kind !== "mcp";
+            endpointInput.disabled = kind !== "mcp";
+            builtinField.hidden = kind !== "builtin";
+            builtinInput.disabled = kind !== "builtin";
+          },
+        },
+      );
+  openModal({
+    title: editing ? "编辑插件" : "安装插件",
+    eyebrow: "PLUGIN SETTINGS",
+    build: () =>
+      h(
+        "div",
+        null,
+        formGrid(
+          kindSelect,
+          field(
+            "展示名",
+            input("name", editing ? plugin.name : "", "text", {
+              required: true,
+              maxlength: 200,
+            }),
+          ),
+          editing
+            ? field(
+                "启用",
+                select(
+                  "enabled",
+                  [
+                    ["1", "启用"],
+                    ["0", "停用"],
+                  ],
+                  plugin.enabled ? "1" : "0",
+                ),
+              )
+            : null,
+          editing && plugin.kind !== "mcp" ? null : endpointField,
+          editing ? null : builtinField,
+        ),
+        editing
+          ? null
+          : fullField(
+              "配置（JSON）",
+              textarea("config", "{}", { required: true }),
+              "随插件登记保存的键值配置，安装后不可在这里改写。",
+            ),
+      ),
+    submit: editing ? "保存插件" : "安装插件",
+    onSubmit: async (data) => {
+      if (editing) {
+        const body = {
+          name: data.get("name"),
+          enabled: data.get("enabled") === "1",
+        };
+        if (plugin.kind === "mcp") body.endpoint = data.get("endpoint");
+        await request(`/plugins/${encodeURIComponent(plugin.plugin_id)}`, {
+          method: "PATCH",
+          body,
+        });
+      } else if (data.get("kind") === "builtin") {
+        await request("/plugins", {
+          method: "POST",
+          body: {
+            kind: "builtin",
+            plugin_id: data.get("plugin_id"),
+            name: data.get("name"),
+            config: parseJsonObject(data.get("config"), "配置"),
+          },
+        });
+      } else {
+        await request("/plugins", {
+          method: "POST",
+          body: {
+            kind: "mcp",
+            name: data.get("name"),
+            endpoint: data.get("endpoint"),
+            config: parseJsonObject(data.get("config"), "配置"),
+          },
+        });
+      }
+      await loadCore();
+      renderList();
+      renderMain();
+      toast(editing ? "插件已保存" : "插件已安装");
+    },
+  });
+}
+
+function togglePlugin(plugin) {
+  request(`/plugins/${encodeURIComponent(plugin.plugin_id)}`, {
+    method: "PATCH",
+    body: { enabled: !plugin.enabled },
+  })
+    .then(async () => {
+      await loadCore();
+      renderList();
+      renderMain();
+      toast(plugin.enabled ? "插件已停用" : "插件已启用");
+    })
+    .catch((error) => toast(errorMessage(error), true));
+}
+
+function deletePlugin(plugin) {
+  openModal({
+    title: "删除插件",
+    eyebrow: "DELETE PLUGIN",
+    danger: true,
+    build: () =>
+      h("p", {
+        text: `「${plugin.name}」提供 ${plugin.tools.length} 个工具。删除后引用这些工具的插件执行器会在下一次执行时报插件缺失。`,
+      }),
+    submit: "确认删除",
+    onSubmit: async () => {
+      await request(`/plugins/${encodeURIComponent(plugin.plugin_id)}`, {
+        method: "DELETE",
+      });
+      state.settingsPlugin = null;
+      await loadCore();
+      renderList();
+      renderMain();
+      toast("插件已删除");
+    },
+  });
+}
+
+async function probePlugin(plugin) {
+  try {
+    const result = await request(
+      `/plugins/${encodeURIComponent(plugin.plugin_id)}/probe`,
+      { method: "POST" },
+    );
+    await loadCore();
+    renderList();
+    renderMain();
+    // 外层 result.ok 只代表「探测已记账」：连不上也落 last_probe_json 并记审计，
+    // 成败本身在 result.probe 里。拿外层当判据会把失败播报成成功。
+    const probe = result.probe;
+    toast(
+      probe?.ok
+        ? `探活成功，拉到 ${probe.tools.length} 个工具`
+        : `探活失败：${probe?.message ?? "未知原因"}`,
+      !probe?.ok,
+    );
+  } catch (error) {
+    toast(errorMessage(error), true);
+  }
+}
+
 function renderSettings(view) {
   const member = memberById(state.settingsMember);
   if (!member) {
@@ -6995,6 +7923,11 @@ function renderSettings(view) {
         { class: "skill-row" },
         input("skill_id", skill.skill_id, "text", { required: true }),
         input("skill_name", skill.name, "text", { required: true }),
+        input("skill_note", skill.note || "", "text", {
+          placeholder: "备注（可选）",
+          "aria-label": "技能备注",
+          maxlength: 2000,
+        }),
       ),
     ),
     h("button", { class: "btn small", type: "submit" }, "保存技能列表"),
@@ -7012,6 +7945,16 @@ function renderSettings(view) {
           required: true,
         }),
         h("span", { class: "pill blue", text: executor.kind }),
+        h(
+          "label",
+          { class: "check-row" },
+          h("input", {
+            type: "checkbox",
+            name: "executor_enabled",
+            ...(executor.enabled ? { checked: true } : {}),
+          }),
+          "启用",
+        ),
         textarea("executor_config", JSON.stringify(executor.config, null, 2), {
           required: true,
         }),
@@ -7060,15 +8003,7 @@ function renderSettings(view) {
         "修改将直接写入成员档案，并触发 MemberUpdated 事件。",
         [
           button("与老板私聊", () => startBossPrivate(member.member_id)),
-          button(
-            "返回设置",
-            () => {
-              state.settingsMember = null;
-              renderList();
-              renderMain();
-            },
-            "small",
-          ),
+          button("返回设置", () => setRoute("settings", "member"), ""),
         ],
       ),
       h(
@@ -7173,10 +8108,14 @@ async function updateMember(event) {
 }
 async function updateSkills(event) {
   event.preventDefault();
-  const skills = $$(".skill-row", event.currentTarget).map((row) => ({
-    skill_id: $("[name=skill_id]", row).value,
-    name: $("[name=skill_name]", row).value,
-  }));
+  const skills = $$(".skill-row", event.currentTarget).map((row) => {
+    const note = $("[name=skill_note]", row).value.trim();
+    return {
+      skill_id: $("[name=skill_id]", row).value,
+      name: $("[name=skill_name]", row).value,
+      ...(note === "" ? {} : { note }),
+    };
+  });
   try {
     await request(
       `/members/${encodeURIComponent(state.settingsMember)}/skills`,
@@ -7197,7 +8136,7 @@ async function updateExecutors(event) {
         seq: Number($("[name=executor_seq]", row).value),
         kind: $(".pill", row).textContent,
         config: JSON.parse($("textarea", row).value),
-        enabled: true,
+        enabled: $("[name=executor_enabled]", row).checked,
       }),
     );
     await request(
@@ -7967,6 +8906,9 @@ function queueDraft() {
 
 initNavigation();
 applyPersonalStatus();
+// 主题：head 的内联脚本已把首帧的 <html data-theme> 落好（防 FOUC）；这里把右上角那
+// 枚 [data-theme-toggle] 接上点击 + 系统外观跟随。幂等，重复调用无副作用。
+mountThemeToggle();
 $("#personalStatus").addEventListener("change", (event) =>
   setPersonalStatus(event.target.value),
 );
@@ -8068,6 +9010,23 @@ document.addEventListener("keydown", (event) => {
 });
 window.addEventListener("hashchange", () => {
   const [route, id] = location.hash.replace(/^#\//, "").split("/");
+  if (
+    route === "admin" &&
+    adminMounted &&
+    state.route === "admin" &&
+    (id ?? "").includes("?")
+  ) {
+    // 这一发来自控制室【自己】：今日页的窗口 chip 写的是 #/admin/today?window=7d
+    // （goPage 那条路，query 住在 id 段里）。不许走下面的 setRoute：它会把整段
+    // id encodeURIComponent 一遍，地址变成 #/admin/today%3Fwindow%3D7d，控制室再
+    // 解析就得到一个不存在的页名：窗口判据静默蒸发，而 URL 看着仍然像回事。
+    // 宿主不懂 query（那份判据在 app.js 的 parseAdminHash 里），所以这里只把页名
+    // 镜像进中间栏的选中态，然后让 app.js 自己去接这一发。
+    const page = decodeURIComponent(id.split("?")[0]);
+    if (page) adminPage = page;
+    renderList();
+    return;
+  }
   if (routes[route]) {
     state.route = route;
     if (id) {
@@ -8100,7 +9059,12 @@ setInterval(() => {
 
 async function boot() {
   const [route, id] = location.hash.replace(/^#\//, "").split("/");
-  setRoute(routes[route] ? route : "messages");
+  // admin 的 id 位置就是页名：不传的话 #/admin/board 直达会被 setRoute 里的
+  // replaceState 削成 #/admin，首屏停在今日页 —— 而 URL 明明写着任务看板。
+  setRoute(
+    routes[route] ? route : "messages",
+    route === "admin" && id ? decodeURIComponent(id) : null,
+  );
   try {
     await loadCore();
     await loadAuxiliary().catch((error) =>
@@ -8119,17 +9083,24 @@ async function boot() {
   } catch (error) {
     coreLoaded = false;
     renderList();
-    $("#view").replaceChildren(
-      h(
-        "div",
-        { class: "page" },
-        banner(errorMessage(error), "error", () => boot()),
-        emptyState(
-          "工作台暂时无法加载",
-          "服务返回错误时不会展示演示数据。请检查同源代理、Hub 与鉴权配置后重试。",
+    if (state.route === "admin") {
+      // 控制室不读工作台的核心数据（它自己直连 /api），核心加载失败不该把
+      // 已经挂载的控制室换成错误页 —— 排查服务问题恰恰要去那一格。
+      toast(`工作台数据加载失败：${errorMessage(error)}`, true);
+    } else
+      $("#view").replaceChildren(
+        h(
+          "div",
+          { class: "page" },
+          banner(errorMessage(error), "error", () => boot()),
+          emptyState(
+            "工作台暂时无法加载",
+            "服务返回错误时不会展示演示数据。请检查同源代理、Hub 与鉴权配置后重试。",
+            null,
+            "refresh",
+          ),
         ),
-      ),
-    );
+      );
     setConnection("down", "服务不可用");
   }
   void connectStream();

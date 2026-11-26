@@ -105,6 +105,17 @@ export const LINT_BASELINE: readonly BaselineEntry[] = [
   { category: "format", atMost: 161 },
   { category: "assist/source/organizeImports", atMost: 117 },
   { category: "lint/suspicious/noAssignInExpressions", atMost: 1 },
+  // round378 的 `packages/web/public/markdown.js` 带来 3 条，全部【刻意】：
+  //   :26 的 `[\u0000-\u0020\u007f]` 是 safeHref 剥控制符的那一发 —— 浏览器会忽略
+  //        URL 里的 \t，`java\tscript:` 于是能拆开协议字面量绕过白名单。这条正则
+  //        本身是【防线】，规则警告的「控制符写错了」恰是它要利用的性质；
+  //   :66 的 `\u0000(\d+)\u0000` 是行内码占位哨兵（两侧 U+0000 定界），与 :38 的
+  //        写入端成对 —— 一处改成别的字符就会与正文撞车。
+  // 处置选【登记】不选【就地 biome-ignore】：markdown.js 正是 round378 变异机
+  // P15/P16/P17 的锚点文件，现在往它里面插注释会让已落的证据 log 与台账坐标失效。
+  // ⚠ 这条豁免与那发 sanitizer 同生共死：哪天它降到 0，staleBaselineEntries 会报
+  //   「请把这条删掉」—— 那一次删行动时请先确认剥控制符那一发不是被顺手删掉的。
+  { category: "lint/suspicious/noControlCharactersInRegex", atMost: 3 },
 ];
 
 /** biome JSON 读数里本守卫要看的那几个字段。 */
