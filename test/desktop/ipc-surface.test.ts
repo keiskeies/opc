@@ -519,7 +519,7 @@ const INVOKE_METHODS: Record<string, string> = {
 const NON_INVOKE_METHODS = new Set(["onHubEvent", "notifyEventsReady"]);
 
 describe("领域 RPC 通道", () => {
-  it("全部 71 个 /api/v1 端点都能通过主进程参数闸", () => {
+  it("全部 74 个 /api/v1 端点都能通过主进程参数闸", () => {
     const spec = specOf("hub:domainRequest");
     expect(spec).not.toBeNull();
     if (spec === null) return;

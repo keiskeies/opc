@@ -1356,7 +1356,7 @@ describe("路由与视图", () => {
  *
  * 两个路由面各守一边：
  *  - 【旧面正向】21 条 legacy 端点必须命中 matchRoute，且 endpoint 一致；
- *  - 【新面正向】71 条 /api/v1 端点由 domain-route-coverage 与 matcher 往返测试守着；
+ *  - 【新面正向】74 条 /api/v1 端点由 domain-route-coverage 与 matcher 往返测试守着；
  *  - 【反向】app.ts 里每一处 endpoint 字面量都在契约全集里。
  *
  * 样例 path 生成：`:段名` 全填字面 "x"。若哪天有人把参数段名改成一个 . 都

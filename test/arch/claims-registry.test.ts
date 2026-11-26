@@ -2579,6 +2579,103 @@ describe("主张登记表：变异 r25（预算上限那一侧读列，round360�
       "executors/production.ts",
     );
   });
+
+  // ── r27：分发规则配置面接通。四格各打一种「端点在但那条线断了」──
+  const r27Good = (
+    over: Record<string, string> = {},
+  ): Record<string, string> => ({
+    "http/registrars.ts": realFiles.src("http/registrars.ts"),
+    "http/dispatch-rules.ts": realFiles.src("http/dispatch-rules.ts"),
+    "dispatch/rules.ts": realFiles.src("dispatch/rules.ts"),
+    "dispatch/co.ts": realFiles.src("dispatch/co.ts"),
+    ...over,
+  });
+
+  it("变异 r27 之一：注册函数还在但生产装配不再调用 ⇒ 红在注册格", () => {
+    const real = realFiles.src("http/registrars.ts");
+    expect(
+      checkOne("r27", fakeFiles(r27Good())),
+      "真仓库字节原样必须绿，否则下面几发红在别处",
+    ).toBe("");
+    const msg = checkOne(
+      "r27",
+      fakeFiles(
+        r27Good({
+          "http/registrars.ts": real.replace(
+            "registerDispatchRuleRoutes(router);",
+            "/* 忘了接线 */",
+          ),
+        }),
+      ),
+    );
+    expect(msg).toContain("registrars");
+    expect(msg).not.toContain("router.add");
+  });
+
+  it("变异 r27 之二：三条路由砍掉 PATCH ⇒ 红在路由数（读侧在≠写侧在）", () => {
+    const real = realFiles.src("http/dispatch-rules.ts");
+    const cut = real.replace(
+      '  router.add(\n    "PATCH',
+      "  // 摘掉 PATCH 这一条",
+    );
+    expect(cut).not.toBe(real);
+    const msg = checkOne(
+      "r27",
+      fakeFiles(r27Good({ "http/dispatch-rules.ts": cut })),
+    );
+    expect(msg).toContain("router.add");
+    expect(msg).toContain("零写入方");
+  });
+
+  it("变异 r27 之三：抹掉消费侧一处 enabled = 1 ⇒ 红在停用不生效，而不是红在路由数", () => {
+    const real = realFiles.src("dispatch/co.ts");
+    const oneLess = real.replace(
+      "WHERE enabled = 1 AND group_id IS NULL",
+      "WHERE group_id IS NULL",
+    );
+    expect(oneLess).not.toBe(real);
+    const msg = checkOne(
+      "r27",
+      fakeFiles(r27Good({ "dispatch/co.ts": oneLess })),
+    );
+    expect(msg).toContain("停用");
+    expect(msg).not.toContain("router.add");
+  });
+
+  it("变异 r27 之四：INSERT 整条改写（取材落点漂）⇒ 红在落点已漂，不许恒绿", () => {
+    const real = realFiles.src("dispatch/rules.ts");
+    const msg = checkOne(
+      "r27",
+      fakeFiles(
+        r27Good({
+          "dispatch/rules.ts": real.replace(
+            "INSERT INTO cos_dispatch_rules (rule_id",
+            "INSERT INTO dispatch_rules_v2 (rule_id",
+          ),
+        }),
+      ),
+    );
+    expect(msg).toContain("落点已漂");
+    expect(msg).not.toContain("停用");
+  });
+
+  it("变异 r27 之五：只动无关行 ⇒ 仍绿（判据认那几处接线，不是整表字数）", () => {
+    expect(
+      checkOne(
+        "r27",
+        fakeFiles(
+          r27Good({
+            "dispatch/rules.ts":
+              realFiles.src("dispatch/rules.ts") + "\n// unrelated\n",
+          }),
+        ),
+      ),
+    ).toBe("");
+  });
+
+  it("变异 r27 之六：取材文件整份不见 ⇒ 响亮抛，不静默绿", () => {
+    expect(() => checkOne("r27", fakeFiles({}))).toThrow("http/registrars.ts");
+  });
 });
 
 describe("主张登记表：出口文档渲染", () => {

@@ -1016,6 +1016,48 @@ function executorProductionCheck(f: Files): string {
     : "HumanExecutor 真人席执行器已不在生产装配/CoS 派发链上，r26 的接线主张失去证据";
 }
 
+/**
+ * r27：分发规则配置面真的接上了 —— 「规则本身可停用」这句话从 0025 起一直是做不到的。
+ *
+ * 四格各判一件事，缺一件那句主张就不成立：
+ *  E1 端点注册在【生产装配】里（registrars 真调了 registerDispatchRuleRoutes）；
+ *  E2 三条路由真的 add 上了（GET/POST/PATCH 各一条，只注册一半 = 写侧仍是零）；
+ *  E3 写侧那条字面 INSERT 还在这份文件里（取材落点，漂了要红在「落点已漂」）；
+ *  E4 消费侧仍按 enabled = 1 筛（两条 SQL 各一处）。这一格是【下游效果】：
+ *     配置面写的正是 enabled 这一列，而全仓唯一读它的地方就是那两处过滤。
+ *     过滤被抹掉 ⇒ 写进去的停用没人执行 ⇒ 「可停用」重新变成一句做不到的话，
+ *     那时这一格该红，而不是等下一次有人手改库才发现。
+ */
+function dispatchRuleConfigSurfaceCheck(f: Files): string {
+  const registrars = f.src("http/registrars.ts");
+  const routes = f.src("http/dispatch-rules.ts");
+  const rules = f.src("dispatch/rules.ts");
+  const co = f.src("dispatch/co.ts");
+  const adds = routes.split("router.add(").length - 1;
+  const filters = co.split("WHERE enabled = 1").length - 1;
+  if (!registrars.includes("registerDispatchRuleRoutes(router);")) {
+    return "http/registrars.ts 不再注册分发规则路由 ⇒ 三条 /api/v1/dispatch/rules 端点不可达，r27 的接线主张失去证据";
+  }
+  if (adds !== 3) {
+    return (
+      "http/dispatch-rules.ts 里 router.add 是 " +
+      adds +
+      " 处（该 3 处：GET/POST/PATCH）⇒ 配置面只剩读侧，enabled/priority 又回到零写入方"
+    );
+  }
+  if (!rules.includes("INSERT INTO cos_dispatch_rules (rule_id")) {
+    return "dispatch/rules.ts 里没有那条字面 INSERT ⇒ 写侧不在这份文件里，判据的取材落点已漂（先修判据的落点，别改主张）";
+  }
+  if (filters < 2) {
+    return (
+      "dispatch/co.ts 里 WHERE enabled = 1 只剩 " +
+      filters +
+      " 处 ⇒ 规划器不再执行停用，配置页关掉的规则照旧派活，r27 的下游效果断掉"
+    );
+  }
+  return "";
+}
+
 function deadModulesHas(f: Files, rel: string): string {
   const t = f.arch("dead-modules.ts");
   return t.includes('"' + rel + '"')
@@ -2261,7 +2303,7 @@ export function nodeKeyIdentityCheck(f: Files): string {
       checkedAt: "2026-11-17",
       source: {
         doc: "docs/OPC-OS-功能优化设计.md",
-        line: 1829,
+        line: 1830,
         sentence: "本篇之外还有一份计划文档，而它的出口门前提今天不成立",
       },
       check: r10LintGuardCheck,
@@ -2280,7 +2322,7 @@ export function nodeKeyIdentityCheck(f: Files): string {
       checkedAt: "2026-11-17",
       source: {
         doc: "docs/OPC-OS-功能优化设计.md",
-        line: 1920,
+        line: 1921,
         sentence: "上一格那条计划引用守卫，落地后被自己的变异打回过一次",
       },
       check: r11PlanRefsGuardCheck,
@@ -2299,7 +2341,7 @@ export function nodeKeyIdentityCheck(f: Files): string {
       checkedAt: "2026-11-17",
       source: {
         doc: "docs/OPC-OS-功能优化设计.md",
-        line: 1951,
+        line: 1952,
         sentence: "计划的 6 道出口门禁，今天",
       },
       check: r12GatePathGuardCheck,
@@ -2321,7 +2363,7 @@ export function nodeKeyIdentityCheck(f: Files): string {
       checkedAt: "2026-11-17",
       source: {
         doc: "docs/OPC-OS-功能优化设计.md",
-        line: 2015,
+        line: 2016,
         sentence:
           "今天真的员工身上唯一生效的安全边界，此前一条守卫都没有 —— 顺带量到 `tsc -b` 从不检查测试",
       },
@@ -2344,7 +2386,7 @@ export function nodeKeyIdentityCheck(f: Files): string {
       checkedAt: "2026-11-17",
       source: {
         doc: "docs/OPC-OS-功能优化设计.md",
-        line: 2071,
+        line: 2072,
         sentence: "本篇自己的坐标从来没有门禁",
       },
       check: claimCoordsGuardCheck,
@@ -2432,7 +2474,7 @@ export function nodeKeyIdentityCheck(f: Files): string {
       checkedAt: "2026-11-19",
       source: {
         doc: "docs/OPC-OS-功能优化设计.md",
-        line: 2112,
+        line: 2113,
         sentence: "O8 那条端到端验收写出来了",
       },
       check: orgAddNodeGapCheck,
@@ -2645,7 +2687,7 @@ export function nodeKeyIdentityCheck(f: Files): string {
       checkedAt: "2026-11-18",
       source: {
         doc: "docs/OPC-OS-功能优化设计.md",
-        line: 2038,
+        line: 2039,
         sentence: "round285：这一格接成了门禁，形状是棘轮（登记为 r19）",
       },
       check: testTypeRatchetCheck,
@@ -2741,7 +2783,7 @@ export function nodeKeyIdentityCheck(f: Files): string {
       checkedAt: "2026-11-17",
       source: {
         doc: "docs/OPC-OS-功能优化设计.md",
-        line: 2352,
+        line: 2353,
         sentence: "round293 第二段落地并登记为 r21",
       },
       check: gateExemptionAccountCheck,
@@ -2818,7 +2860,7 @@ export function nodeKeyIdentityCheck(f: Files): string {
       checkedAt: "2026-11-17",
       source: {
         doc: "docs/OPC-OS-功能优化设计.md",
-        line: 2476,
+        line: 2477,
         sentence: "round294 落地并登记为 r22",
       },
       check: addNodeDispatchCheck,
@@ -2886,7 +2928,7 @@ export function nodeKeyIdentityCheck(f: Files): string {
       checkedAt: "2026-11-18",
       source: {
         doc: "docs/OPC-OS-功能优化设计.md",
-        line: 2593,
+        line: 2594,
         sentence: "round298 落地并登记为 r23",
       },
       check: delegationEdgeSelfCheckCheck,
@@ -2959,7 +3001,7 @@ export function nodeKeyIdentityCheck(f: Files): string {
       checkedAt: "2026-11-18",
       source: {
         doc: "docs/OPC-OS-功能优化设计.md",
-        line: 2666,
+        line: 2667,
         sentence: "round299 落地并登记为 r24",
       },
       check: nodeKeyIdentityCheck,
@@ -3019,6 +3061,36 @@ export function nodeKeyIdentityCheck(f: Files): string {
           "2. 「HTTP 可达口径的真人席建卡者已接通」—— human.ts 经生产执行器装配与 CoS 派发到达 createCard",
       },
       check: executorProductionCheck,
+    },
+    {
+      id: "r27",
+      claim:
+        "分发规则配置面已接通：GET/POST/PATCH /api/v1/dispatch/rules 三条端点在生产装配里注册，" +
+        "0025 那句「规则本身可停用」第一次有生产写入路径（此前 enabled/priority 除 6 条种子外零写入方）。" +
+        "0030 的桌面口径顺带成立：EXPOSED_ENDPOINTS = IMPLEMENTED_ENDPOINTS 是别名 ⇒ 新端点自动可达。",
+      method:
+        "判据：test/arch/claims-registry.ts 的 dispatchRuleConfigSurfaceCheck —— 三格各判一件事，" +
+        "全用【字节在场】而不是行号：E1 http/registrars.ts 含 `registerDispatchRuleRoutes(router);`" +
+        "（注册进了生产装配，不是只写了一个没人调的注册函数）；E2 http/dispatch-rules.ts 里" +
+        " `router.add(` 恰好 3 处（只注册一半 = 写侧仍是零，而读侧那条照样 200，最容易被当成全通）；" +
+        "E3 dispatch/rules.ts 含那条字面 `INSERT INTO cos_dispatch_rules (rule_id`（写侧的取材落点，" +
+        "漂了就红在「落点已漂」而不是恒绿）；E4 dispatch/co.ts 里 `WHERE enabled = 1` ≥ 2 处 ——" +
+        " 这一格是【下游效果】：配置面写的正是 enabled 这一列，而全仓唯一读它的就是那两处过滤，" +
+        "过滤被抹掉 ⇒ 写进去的停用没人执行 ⇒ 那句「可停用」重新变成做不到的话。" +
+        "外加打在合成语料上的一族变异（claims-registry.test.ts 的 r27 那一族，不碰盘）：" +
+        "控制组该绿 / 摘掉注册 ⇒ 红在 E1 / 三条路由砍成两条 ⇒ 红在 E2 / 抹掉消费侧一处过滤 ⇒ 红在 E4 /" +
+        " 无关行改动 ⇒ 仍绿（判据认那几处接线，不是整表字数）/ 取材文件整份不见 ⇒ 响亮抛不静默绿。" +
+        "生产行为那一半不在这里判：test/dispatch/rules.test.ts（停用真的改变 planDispatch 的赢家）与" +
+        " test/http/dispatch-rules-route.test.ts（写连接写完只读连接读得到）当场开库验，" +
+        "另有 .workbuddy 那台自回滚变异机打真字节。本条不重开库，口径同 r12/r13/r21/r22/r24/r25",
+      judge: "claims-registry",
+      checkedAt: "2026-11-27",
+      source: {
+        doc: "packages/hub/resources/migrations/0025_cos_dispatch_rules.sql",
+        line: 4,
+        sentence: "规则本身可停用，但不设历史触发器",
+      },
+      check: dispatchRuleConfigSurfaceCheck,
     },
   ];
 

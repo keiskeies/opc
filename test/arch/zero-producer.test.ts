@@ -107,6 +107,16 @@ const REGISTRY: readonly ZeroClaim[] = [
     expects: "zero",
     historical: true,
   },
+  {
+    kind: "table",
+    file: "packages/hub/src/dispatch/rules.ts",
+    anchor: "为什么这张表此前是「零写入方」",
+    table: "cos_dispatch_rules",
+    // 0025 只种了 6 条规则，配置面（本文件的 INSERT）是分发规则那一轮才补的。
+    // 句子带「此前」，说的是建表到那轮之间的事实，不是今天的读数。
+    expects: "zero",
+    historical: true,
+  },
   // ── 引用：这句话是被引用/被更正的对象，不是本文件的主张 ────────────
   {
     kind: "table",

@@ -485,7 +485,7 @@ const SNAP: Record<string, string> = {
   // 快照当场红，逼人重读那段论证，而不是让文档继续指着一句 `/**` 讲 UNIMPLEMENTED。
   "0012-org-versioned-commit-and-unwritten-graph-version.md>packages/contracts/src/api.ts:41":
     "export const API_ENDPOINTS = [",
-  "0012-org-versioned-commit-and-unwritten-graph-version.md>packages/contracts/src/api.ts:269":
+  "0012-org-versioned-commit-and-unwritten-graph-version.md>packages/contracts/src/api.ts:275":
     "export const UNIMPLEMENTED_ENDPOINTS: readonly ApiEndpoint[] =",
   // 0013 §10.1 那次【撤回】的三块砖。这一组与前面几组的性质不同：前面抓的是
   // 「文档引用的那行代码挪了」，这一组抓的是「文档引用的那条**注释**不再成立」。
@@ -567,7 +567,7 @@ const SNAP: Record<string, string> = {
   // 而它是 CEO 拍不拍那一项的**唯一**依据。快照在这里红了就是逼重读 §9。
   "0030-im-binding-identity-and-three-holes-i-did-not-design.md>contracts/src/api.ts:41":
     "export const API_ENDPOINTS = [",
-  "0030-im-binding-identity-and-three-holes-i-did-not-design.md>contracts/src/api.ts:156":
+  "0030-im-binding-identity-and-three-holes-i-did-not-design.md>contracts/src/api.ts:159":
     "export const IMPLEMENTED_ENDPOINTS: readonly ApiEndpoint[] = [",
   "0030-im-binding-identity-and-three-holes-i-did-not-design.md>ipc-surface.ts:208":
     "export const EXPOSED_ENDPOINTS: readonly ApiEndpoint[] = IMPLEMENTED_ENDPOINTS;",

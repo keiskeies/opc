@@ -270,8 +270,9 @@ import 一个 http 模块），往下挪了 23 行。行内容一字未变。
   > 「**契约自己要求加端点这件事走一次 review**」—— 这条改的是**该找谁**（走契约变更），
   > 不是**能不能做**。
   > 顺带量到一件影响**动手顺序**的事：那张表里已经有 `GET /replay/:taskId`
-  > （`packages/contracts/src/api.ts:269` 的 `UNIMPLEMENTED_ENDPOINTS`；
-  > 行号漂移：群角色上层端点登记那轮重钉，声明已改成
+  > （`packages/contracts/src/api.ts:275` 的 `UNIMPLEMENTED_ENDPOINTS`；
+  > 行号漂移：分发规则配置面端点登记那轮重钉（该文件在 0031 之后又长了三条
+  > IMPLEMENTED 条目，声明式未变），
   > `API_ENDPOINTS` 减去 `IMPLEMENTED_ENDPOINTS` 的派生式，故快照内容也一起变了，
   > 当时注释写明「Phase 3（Task 3.4 回放时间线）填充，本期返回 501」，
   > **那句话到 Task 3.4 落地时已经不成立** —— 端点进了 IMPLEMENTED，那张表变成空的，

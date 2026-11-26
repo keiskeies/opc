@@ -142,6 +142,16 @@ export {
   sendMessageRequestSchema,
 } from "./conversation.js";
 export {
+  type CreateDispatchRuleRequest,
+  createDispatchRuleRequestSchema,
+  type DispatchRuleListResponse,
+  type DispatchRuleView,
+  dispatchRuleListResponseSchema,
+  dispatchRuleViewSchema,
+  type UpdateDispatchRuleRequest,
+  updateDispatchRuleRequestSchema,
+} from "./dispatch-rules.js";
+export {
   type CreateDocumentRequest,
   type CreateDocumentTemplateRequest,
   createDocumentRequestSchema,

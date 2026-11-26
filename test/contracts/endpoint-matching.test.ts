@@ -72,6 +72,7 @@ describe("matchContractEndpoint", () => {
       documents: 14,
       plugins: 5,
       roles: 4,
+      dispatch: 3,
       search: 1,
       assets: 2,
       rhythm: 4,
@@ -95,7 +96,7 @@ describe("matchContractEndpoint", () => {
   it("preserves the full API surface as a disjoint implemented/unimplemented union", () => {
     expect(
       API_ENDPOINTS.filter((endpoint) => endpoint.includes("/api/v1/")),
-    ).toHaveLength(71);
+    ).toHaveLength(74);
     const implemented = API_ENDPOINTS.filter((endpoint) =>
       IMPLEMENTED_ENDPOINTS.includes(endpoint),
     );

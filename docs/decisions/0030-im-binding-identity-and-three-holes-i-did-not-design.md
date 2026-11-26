@@ -426,7 +426,7 @@ verified = 0   ceo_role = 'ceo'   verified_by = 'ceo'
 1. **「三张手抄的端点表」不存在。** `contracts/src/api.ts` 的 `:35` 实测是 `API_ENDPOINTS`
    **数组中间的一个条目**、`:52` 在**一段注释里**、`:61` 又是 `IMPLEMENTED_ENDPOINTS`
    的一个条目 —— 我把「grep 命中 `POST /approvals/…` 的三行」当成了「三张表」。
-   真实的清单是 `contracts/src/api.ts:41` 与 `contracts/src/api.ts:156` **两张**，
+   真实的清单是 `contracts/src/api.ts:41` 与 `contracts/src/api.ts:159` **两张**，
    而 `UNIMPLEMENTED_ENDPOINTS`（当时同文件 `:110`）**当时是空数组**；
    （行号漂移：群角色上层端点登记那轮重钉；该表现已改为两张清单之差，不再是那张空数组。）
    桌面侧 `ipc-surface.ts:208` 的 `EXPOSED_ENDPOINTS` 是 `= IMPLEMENTED_ENDPOINTS` 的**别名**，
@@ -452,7 +452,7 @@ verified = 0   ceo_role = 'ceo'   verified_by = 'ceo'
 
 所以真实的接线代价是（**按声明处数**，不是按 grep 命中数）：
 `Route` 联合 + `handleRequest` 分支（这两处**编译期**逼你成对改）、
-`contracts/src/api.ts:41` 与 `contracts/src/api.ts:156` 两张清单、`ipc-surface.ts` 的 `CHANNEL_SPECS` 条目
+`contracts/src/api.ts:41` 与 `contracts/src/api.ts:159` 两张清单、`ipc-surface.ts` 的 `CHANNEL_SPECS` 条目
 + `INVOKE_METHODS` 映射 + 渲染侧那个方法（这三处**有断言**，漏了会红）、
 以及 `preload/api.ts` 那层转发。
 **「漏了不报错」的那一格只有「已实现而未接桌面」这一个方向**，
