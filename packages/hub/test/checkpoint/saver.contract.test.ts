@@ -26,9 +26,9 @@ import {
   SCHEDULED,
 } from "@langchain/langgraph-checkpoint";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { fixtureTmp } from "../fixtures/fixture-dir.js";
 import { SqliteWALSaver } from "../../src/checkpoint/saver.js";
 import { txScope } from "../../src/checkpoint/tx-scope.js";
+import { fixtureTmp } from "../fixtures/fixture-dir.js";
 
 const TMP = fixtureTmp("saver-contract", import.meta.url);
 

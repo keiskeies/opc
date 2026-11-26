@@ -22,24 +22,33 @@
  */
 import { mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   HTTP_NOT_IMPLEMENTED,
   HTTP_UNPROCESSABLE,
   type OrgActor,
   type OrgGraph,
 } from "@opc/contracts";
-import { fixtureTmp } from "../fixtures/fixture-dir.js";
-import { DRIVER_OFF } from "../fixtures/driver-state.js";
-import { InMemoryEventBus } from "../../src/events/bus.js";
-import { WriteQueue } from "../../src/db/write-queue.js";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { migrate } from "../../src/db/migrate.js";
-import { handleRequest, matchRoute, type HubDeps, type HubRequest } from "../../src/http/app.js";
-import { assertLoopbackOrgRoute, commitOrgRoute, orgGraphRoute } from "../../src/http/org.js";
-import { ORG_COMMIT_ACTOR } from "../../src/http/real-deps.js";
-import { readLatestGraph } from "../../src/org/commit.js";
+import { WriteQueue } from "../../src/db/write-queue.js";
+import { InMemoryEventBus } from "../../src/events/bus.js";
+import {
+  type HubDeps,
+  type HubRequest,
+  handleRequest,
+  matchRoute,
+} from "../../src/http/app.js";
 import { newLocalToken, signedHeaders } from "../../src/http/auth.js";
 import { LOOPBACK_HOST } from "../../src/http/bind.js";
+import {
+  assertLoopbackOrgRoute,
+  commitOrgRoute,
+  orgGraphRoute,
+} from "../../src/http/org.js";
+import { ORG_COMMIT_ACTOR } from "../../src/http/real-deps.js";
+import { readLatestGraph } from "../../src/org/commit.js";
+import { DRIVER_OFF } from "../fixtures/driver-state.js";
+import { fixtureTmp } from "../fixtures/fixture-dir.js";
 
 const TMP = fixtureTmp("http-org-route", import.meta.url);
 
@@ -63,10 +72,30 @@ type Db = {
 function graph(): OrgGraph {
   return {
     nodes: {
-      ceo: { role_id: "ceo", can_manage: true, reports_to: null, model_family: "o3" },
-      tech: { role_id: "tech", can_manage: true, reports_to: "ceo", model_family: "claude" },
-      dev: { role_id: "dev", can_manage: false, reports_to: "tech", model_family: "gpt" },
-      test: { role_id: "test", can_manage: false, reports_to: "tech", model_family: "gemini" },
+      ceo: {
+        role_id: "ceo",
+        can_manage: true,
+        reports_to: null,
+        model_family: "o3",
+      },
+      tech: {
+        role_id: "tech",
+        can_manage: true,
+        reports_to: "ceo",
+        model_family: "claude",
+      },
+      dev: {
+        role_id: "dev",
+        can_manage: false,
+        reports_to: "tech",
+        model_family: "gpt",
+      },
+      test: {
+        role_id: "test",
+        can_manage: false,
+        reports_to: "tech",
+        model_family: "gemini",
+      },
     },
     edges: [
       { from: "dev", to: "test", review_gate: true },
@@ -90,16 +119,24 @@ interface BackupRecorder {
 interface Harness {
   readonly deps: HubDeps;
   readonly db: Db;
-  readonly sign: (method: string, target: string, body?: string) => Record<string, string>;
-  readonly req: (o: Partial<HubRequest> & { method: string; path: string }) => HubRequest;
+  readonly sign: (
+    method: string,
+    target: string,
+    body?: string,
+  ) => Record<string, string>;
+  readonly req: (
+    o: Partial<HubRequest> & { method: string; path: string },
+  ) => HubRequest;
 }
 
-function harness(o: {
-  /** 缺 ⇒ 不装 commitOrgChange ⇒ 501。 */
-  wired?: boolean;
-  /** 假备份的结论；缺省 ok:true。 */
-  backup?: { ok: boolean; message?: string };
-} = {}): { h: Harness; recorder: BackupRecorder } {
+function harness(
+  o: {
+    /** 缺 ⇒ 不装 commitOrgChange ⇒ 501。 */
+    wired?: boolean;
+    /** 假备份的结论；缺省 ok:true。 */
+    backup?: { ok: boolean; message?: string };
+  } = {},
+): { h: Harness; recorder: BackupRecorder } {
   const path = join(TMP, "org-" + process.pid + "-" + ++fileSeq + ".db");
   const queue = new WriteQueue(path);
   queues.push(queue);
@@ -108,10 +145,17 @@ function harness(o: {
   const read = queue.readConnection() as unknown as Db;
   const token = newLocalToken();
   const clock = () => T0;
-  const sign = (method: string, target: string, body = ""): Record<string, string> =>
+  const sign = (
+    method: string,
+    target: string,
+    body = "",
+  ): Record<string, string> =>
     signedHeaders(token, { method, target, body, now: clock() });
 
-  const recorder: BackupRecorder = { calls: 0, result: o.backup ?? { ok: true } };
+  const recorder: BackupRecorder = {
+    calls: 0,
+    result: o.backup ?? { ok: true },
+  };
 
   const base: HubDeps = {
     db: read as never,
@@ -139,9 +183,11 @@ function harness(o: {
             // 查 running tasks（空），再用真 actor 提交 —— 与 real-deps 的
             // makeCommitOrgChange 同方向的编排，但这儿把备份 replace 成假的。
             const db2 = queue.readConnection() as unknown as Db;
-            const rows = db2.prepare(
-              "SELECT id FROM tasks WHERE status NOT IN ('DELIVERED','ARCHIVED') ORDER BY id",
-            ).all() as Row[];
+            const rows = db2
+              .prepare(
+                "SELECT id FROM tasks WHERE status NOT IN ('DELIVERED','ARCHIVED') ORDER BY id",
+              )
+              .all() as Row[];
             const runningTasks = rows.map((r) => String(r.id));
             const { commitOrgGraph } = await import("../../src/org/commit.js");
             const actor: OrgActor = ORG_COMMIT_ACTOR;
@@ -241,11 +287,23 @@ describe("① matchRoute：POST /org 只有一段字面，方法不互换，拼�
 describe("② 回环门：非回环对端 401，且不带原因", () => {
   it("⭐ 直接调 handler：非回环对端 401，未授权形状与凭据错逐字相同", async () => {
     const { h } = harness({ wired: true });
-    const req = h.req({ method: "POST", path: "/org", peer: LAN_PEER, body: REPARENT_BODY });
+    const req = h.req({
+      method: "POST",
+      path: "/org",
+      peer: LAN_PEER,
+      body: REPARENT_BODY,
+    });
     const gate = assertLoopbackOrgRoute(req);
-    expect(gate).toEqual({ status: UNAUTHORIZED, body: { error: "unauthorized" } });
+    expect(gate).toEqual({
+      status: UNAUTHORIZED,
+      body: { error: "unauthorized" },
+    });
     // 拿到 gate 就不该继续进 handler 主体 —— 反向对照：回环对端 gate 为 null。
-    expect(assertLoopbackOrgRoute(h.req({ method: "POST", path: "/org", body: REPARENT_BODY }))).toBeNull();
+    expect(
+      assertLoopbackOrgRoute(
+        h.req({ method: "POST", path: "/org", body: REPARENT_BODY }),
+      ),
+    ).toBeNull();
     // 未装配时（回环、可签）走 handler ⇒ 501，而不是被误放行。
     const { h: h2 } = harness({ wired: false });
     const res = await commitOrgRoute(
@@ -277,11 +335,20 @@ describe("③ 请求体严格：缺键 422，多传 actor 422，brief 只有 cha
   it("缺 change_summary ⇒ 422；change 缺 => 422；缺 graph => 422", async () => {
     const { h } = harness({ wired: true });
     for (const body of [
-      JSON.stringify({ graph: graph(), change: { kind: "reparent", child_role: "dev", new_parent_role: "ceo" } }),
+      JSON.stringify({
+        graph: graph(),
+        change: { kind: "reparent", child_role: "dev", new_parent_role: "ceo" },
+      }),
       JSON.stringify({ graph: graph(), change_summary: "x" }),
-      JSON.stringify({ change: { kind: "reparent", child_role: "dev", new_parent_role: "ceo" }, change_summary: "x" }),
+      JSON.stringify({
+        change: { kind: "reparent", child_role: "dev", new_parent_role: "ceo" },
+        change_summary: "x",
+      }),
     ]) {
-      const res = await commitOrgRoute(h.deps, h.req({ method: "POST", path: "/org", body }));
+      const res = await commitOrgRoute(
+        h.deps,
+        h.req({ method: "POST", path: "/org", body }),
+      );
       expect(res.status).toBe(HTTP_UNPROCESSABLE);
     }
   });
@@ -320,7 +387,11 @@ describe("③ 请求体严格：缺键 422，多传 actor 422，brief 只有 cha
         path: "/org",
         body: JSON.stringify({
           graph: smuggled,
-          change: { kind: "reparent", child_role: "dev", new_parent_role: "ceo" },
+          change: {
+            kind: "reparent",
+            child_role: "dev",
+            new_parent_role: "ceo",
+          },
           change_summary: "夹带一个自称别人的节点",
         }),
       }),
@@ -359,7 +430,11 @@ describe("③ 请求体严格：缺键 422，多传 actor 422，brief 只有 cha
         path: "/org",
         body: JSON.stringify({
           graph: honest,
-          change: { kind: "reparent", child_role: "dev", new_parent_role: "ceo" },
+          change: {
+            kind: "reparent",
+            child_role: "dev",
+            new_parent_role: "ceo",
+          },
           change_summary: "同一个节点，键与自称一致",
         }),
       }),
@@ -396,12 +471,19 @@ describe("④ 装配与备份编排", () => {
     expect(recorder.calls).toBe(1);
     expect(res.body).toMatchObject({ ok: true, graph_version: 1 });
     // 提交真的写进了 delegation_graphs。
-    const v = h.db.prepare("SELECT version, change_summary FROM delegation_graphs ORDER BY version DESC LIMIT 1").get();
+    const v = h.db
+      .prepare(
+        "SELECT version, change_summary FROM delegation_graphs ORDER BY version DESC LIMIT 1",
+      )
+      .get();
     expect(v).toEqual({ version: 1, change_summary: "dev 直接汇报 CEO" });
   });
 
   it("⭐ 备份失败 ⇒ 拒绝提交：库里【没有】v1，backup_failed，备份仍调了一次", async () => {
-    const { h, recorder } = harness({ wired: true, backup: { ok: false, message: "disk full" } });
+    const { h, recorder } = harness({
+      wired: true,
+      backup: { ok: false, message: "disk full" },
+    });
     const res = await commitOrgRoute(
       h.deps,
       h.req({ method: "POST", path: "/org", body: REPARENT_BODY }),
@@ -422,7 +504,10 @@ describe("④ 装配与备份编排", () => {
       change: { kind: "reparent", child_role: "dev", new_parent_role: "dev" },
       change_summary: "self-loop",
     });
-    const res = await commitOrgRoute(h.deps, h.req({ method: "POST", path: "/org", body: bad }));
+    const res = await commitOrgRoute(
+      h.deps,
+      h.req({ method: "POST", path: "/org", body: bad }),
+    );
     expect(res.status).toBe(HTTP_UNPROCESSABLE);
     // 校验发生在备份【之后】但它不写行 —— 备份还是发生了一次（§6.5：改了组织
     // 就要有快照，哪怕这次没改成）。提交没写进 delegation_graphs。
@@ -445,13 +530,20 @@ describe("⑤ GET /org：装配没接 ⇒ 501；空存 ⇒ 200 空图 v0；提�
     const { h } = harness({ wired: true });
     const res = orgGraphRoute(h.deps, h.req({ method: "GET", path: "/org" }));
     expect(res.status).toBe(200);
-    expect(res.body).toMatchObject({ graph: { nodes: {}, edges: [] }, graph_version: 0, effective_from: null });
+    expect(res.body).toMatchObject({
+      graph: { nodes: {}, edges: [] },
+      graph_version: 0,
+      effective_from: null,
+    });
   });
 
   it("⭐ 提交过一次后 ⇒ 200 取回那张图 + 版本元数据（『保存按钮的成果显示出来』这一格）", async () => {
     const { h } = harness({ wired: true });
     // 先 POST 提交，得 v1。
-    const post = await commitOrgRoute(h.deps, h.req({ method: "POST", path: "/org", body: REPARENT_BODY }));
+    const post = await commitOrgRoute(
+      h.deps,
+      h.req({ method: "POST", path: "/org", body: REPARENT_BODY }),
+    );
     expect(post.status).toBe(200);
     // 再 GET，能拿到那张图的内容 + 元数据。
     const res = orgGraphRoute(h.deps, h.req({ method: "GET", path: "/org" }));
@@ -469,7 +561,10 @@ describe("⑤ GET /org：装配没接 ⇒ 501；空存 ⇒ 200 空图 v0；提�
 
   it("只取当前生效那份：再提交一次，GET 拿 v2 不拿 v1", async () => {
     const { h } = harness({ wired: true });
-    const post1 = await commitOrgRoute(h.deps, h.req({ method: "POST", path: "/org", body: REPARENT_BODY }));
+    const post1 = await commitOrgRoute(
+      h.deps,
+      h.req({ method: "POST", path: "/org", body: REPARENT_BODY }),
+    );
     expect(post1.status).toBe(200);
     // 第二次提交：把 test 汇报到 ceo（原图里 test 汇报 tech；一次合法 reparent）。
     const body2 = JSON.stringify({
@@ -477,11 +572,17 @@ describe("⑤ GET /org：装配没接 ⇒ 501；空存 ⇒ 200 空图 v0；提�
       change: { kind: "reparent", child_role: "test", new_parent_role: "ceo" },
       change_summary: "test 直接汇报 CEO",
     });
-    const post2 = await commitOrgRoute(h.deps, h.req({ method: "POST", path: "/org", body: body2 }));
+    const post2 = await commitOrgRoute(
+      h.deps,
+      h.req({ method: "POST", path: "/org", body: body2 }),
+    );
     expect(post2.status).toBe(200);
     const res = orgGraphRoute(h.deps, h.req({ method: "GET", path: "/org" }));
     expect(res.status).toBe(200);
-    expect(res.body).toMatchObject({ graph_version: 2, change_summary: "test 直接汇报 CEO" });
+    expect(res.body).toMatchObject({
+      graph_version: 2,
+      change_summary: "test 直接汇报 CEO",
+    });
   });
 });
 
@@ -489,7 +590,10 @@ describe("⑤ GET /org：装配没接 ⇒ 501；空存 ⇒ 200 空图 v0；提�
 
 describe("⑥ GET /org 带着审阅独立性读数：算出来的、不是抄件、也不是图的一部分", () => {
   /** 提交一张【家族可配】的图（其余与夹具那张同形），留下同一个 harness 继续 GET。 */
-  async function commitWithFamilies(h: Harness, families: Record<string, string>): Promise<void> {
+  async function commitWithFamilies(
+    h: Harness,
+    families: Record<string, string>,
+  ): Promise<void> {
     const g = graph();
     for (const [role, f] of Object.entries(families)) {
       const node = g.nodes[role];
@@ -502,7 +606,11 @@ describe("⑥ GET /org 带着审阅独立性读数：算出来的、不是抄件
         path: "/org",
         body: JSON.stringify({
           graph: g,
-          change: { kind: "reparent", child_role: "dev", new_parent_role: "ceo" },
+          change: {
+            kind: "reparent",
+            child_role: "dev",
+            new_parent_role: "ceo",
+          },
           change_summary: "配家族",
         }),
       }),
@@ -576,8 +684,9 @@ describe("⑥ GET /org 带着审阅独立性读数：算出来的、不是抄件
         any_refused: false,
       },
     });
-    const p = (res.body as { review_independence: { blocked: { code: string }[] } })
-      .review_independence;
+    const p = (
+      res.body as { review_independence: { blocked: { code: string }[] } }
+    ).review_independence;
     expect(p.blocked).toHaveLength(6);
     expect(p.blocked.every((b) => b.code === "same_model_family")).toBe(true);
   });
@@ -587,12 +696,16 @@ describe("⑥ GET /org 带着审阅独立性读数：算出来的、不是抄件
     await commitWithFamilies(h, { tech: "o3" });
     const res = orgGraphRoute(h.deps, h.req({ method: "GET", path: "/org" }));
     // ① 图本身【不含】这一格 —— 它不是图的属性，是「这张图 + 那条判据」的属性。
-    const g = (res.body as { graph: OrgGraph & { review_independence?: unknown } }).graph;
+    const g = (
+      res.body as { graph: OrgGraph & { review_independence?: unknown } }
+    ).graph;
     expect(g.review_independence).toBeUndefined();
     // ② 库里那份 graph_json 里也没有它：它不进版本序列，所以改这条判据的实现
     //    【不需要】提交一个新的组织图版本（那会把一次读数改动记成一次组织变更）。
     const row = h.db
-      .prepare("SELECT graph_json FROM delegation_graphs ORDER BY version DESC LIMIT 1")
+      .prepare(
+        "SELECT graph_json FROM delegation_graphs ORDER BY version DESC LIMIT 1",
+      )
       .get() as { graph_json: string } | undefined;
     expect(row).toBeDefined();
     expect(row?.graph_json).not.toContain("review_independence");
@@ -641,7 +754,11 @@ describe("⑥ GET /org 带着审阅独立性读数：算出来的、不是抄件
     expect(p.any_refused).toBe(true);
     // refused 时 always_needs_approval 必须 false：那三次点击【买不到】放行。
     expect(p.always_needs_approval).toBe(false);
-    expect(p.blocked.filter((b) => b.code === "unknown_model_family")).toHaveLength(3);
-    expect(p.blocked.every((b) => b.producer === "test" || b.reviewer === "test")).toBe(true);
+    expect(
+      p.blocked.filter((b) => b.code === "unknown_model_family"),
+    ).toHaveLength(3);
+    expect(
+      p.blocked.every((b) => b.producer === "test" || b.reviewer === "test"),
+    ).toBe(true);
   });
 });

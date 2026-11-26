@@ -111,7 +111,7 @@
   本篇排除一个通道，不产出任何通道。今天 `im_bindings` 与 `im_tokens` 两张表是
   **零生产写入**的（与 0013 §10.1 那个「`approvals` 零 INSERT」同一格），
   【round322 复核：本句「零生产写入」已过期。两者现在都有生产写入方：
-  `bindings/im.ts:164` 的 `INSERT INTO im_bindings`、`http/tokens.ts:208` 的
+  `bindings/im.ts:168` 的 `INSERT INTO im_bindings`、`http/tokens.ts:208` 的
   `INSERT INTO im_tokens`（HTTP 绑定与令牌路径，0028 起）。原句保留为当年的读数。】
   所以「排除个人微信」此刻的实际效果是**防止未来有人从这里开始写**，而不是挡住了一条在跑的路。
 - **规格 §25 第 1 项（IM 接入优先级整体）仍未拍板**（0006 §11 那条入口条目里登着）。

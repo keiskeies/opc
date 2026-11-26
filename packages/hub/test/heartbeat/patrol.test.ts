@@ -27,7 +27,6 @@ import { mkdirSync, readFileSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
-import { fixtureTmp } from "../fixtures/fixture-dir.js";
 import { openDb } from "../../src/db/driver.js";
 import { migrate } from "../../src/db/migrate.js";
 import { WriteQueue } from "../../src/db/write-queue.js";
@@ -38,18 +37,19 @@ import {
   DEFAULT_STALL_THRESHOLD_MS,
   HEARTBEAT_INTERVAL_MS,
   HUMAN_HOLD_STATES,
-  PATROL_SQL,
-  PATROL_VERDICTS,
-  TERMINAL_STATES,
-  WATCHED_STATES,
   judgeTask,
   kindOf,
+  PATROL_SQL,
+  PATROL_VERDICTS,
   patrolTasks,
   recordStalls,
   runPatrol,
   stalledTasks,
   type TaskSignals,
+  TERMINAL_STATES,
+  WATCHED_STATES,
 } from "../../src/heartbeat/patrol.js";
+import { fixtureTmp } from "../fixtures/fixture-dir.js";
 
 const HUB = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const TMP = fixtureTmp("heartbeat", import.meta.url);
@@ -111,7 +111,10 @@ function ev(
       actorId: "hub",
       taskId,
       action: kind === "HeartbeatStalled" ? "escalation" : "state_change",
-      target: (extra["target"] as string | undefined) ?? (extra["node"] as string | undefined) ?? null,
+      target:
+        (extra["target"] as string | undefined) ??
+        (extra["node"] as string | undefined) ??
+        null,
       payload: { kind, taskId, ...extra },
       createdAt: at,
     },
@@ -122,9 +125,10 @@ function ev(
 function verdictOf(path: string, id: string, now: number, threshold?: number) {
   const db = openDb(path);
   opened.push(db);
-  const hit = patrolTasks(db, { now: () => now, ...(threshold === undefined ? {} : { thresholdMs: threshold }) }).find(
-    (j) => j.id === id,
-  );
+  const hit = patrolTasks(db, {
+    now: () => now,
+    ...(threshold === undefined ? {} : { thresholdMs: threshold }),
+  }).find((j) => j.id === id);
   if (hit === undefined) throw new Error("巡检没看到这个任务：" + id);
   return hit;
 }
@@ -162,22 +166,30 @@ describe("① 判定函数本身：六种结论各有一格，且互相是分开
   const at = (ms: number) => T0 + ms;
 
   it("活跃 + 沉默超阈值 + 没人等 = stalled", () => {
-    expect(judgeTask(base, at(DEFAULT_STALL_THRESHOLD_MS + 1)).verdict).toBe("stalled");
+    expect(judgeTask(base, at(DEFAULT_STALL_THRESHOLD_MS + 1)).verdict).toBe(
+      "stalled",
+    );
   });
 
   it("恰好等于阈值不算停滞（边界是「超过」）", () => {
-    expect(judgeTask(base, at(DEFAULT_STALL_THRESHOLD_MS)).verdict).toBe("recent");
+    expect(judgeTask(base, at(DEFAULT_STALL_THRESHOLD_MS)).verdict).toBe(
+      "recent",
+    );
   });
 
   it("终态不报，哪怕沉默了一百年", () => {
     for (const s of TERMINAL_STATES) {
-      expect(judgeTask({ ...base, status: s }, at(100 * 365 * 24 * HOUR)).verdict).toBe("terminal");
+      expect(
+        judgeTask({ ...base, status: s }, at(100 * 365 * 24 * HOUR)).verdict,
+      ).toBe("terminal");
     }
   });
 
   it("「球在人那边」的三个状态不报", () => {
     for (const s of HUMAN_HOLD_STATES) {
-      expect(judgeTask({ ...base, status: s }, at(100 * HOUR)).verdict).toBe("human_hold");
+      expect(judgeTask({ ...base, status: s }, at(100 * HOUR)).verdict).toBe(
+        "human_hold",
+      );
     }
   });
 
@@ -186,18 +198,28 @@ describe("① 判定函数本身：六种结论各有一格，且互相是分开
     expect(judgeTask(held, at(HOUR)).verdict).toBe("human_hold");
     // 反向对照：把 awaitingApproval 整个删掉，同一任务必须是 stalled。
     // 少了这一发，「永远免检」与「分支写错位置导致永不生效」看不出差别。
-    expect(judgeTask({ ...held, awaitingApproval: false }, at(HOUR)).verdict).toBe("stalled");
+    expect(
+      judgeTask({ ...held, awaitingApproval: false }, at(HOUR)).verdict,
+    ).toBe("stalled");
     // 挂了一百年也不报：这条是【选了】的口径（见 patrol.ts 里 timeout_at 那段），
     // 不是漏写。真被忘掉一张卡片今天报不出来 —— 代价记在 patrol.ts 注释与 0019。
-    expect(judgeTask(held, at(100 * 365 * 24 * HOUR)).verdict).toBe("human_hold");
+    expect(judgeTask(held, at(100 * 365 * 24 * HOUR)).verdict).toBe(
+      "human_hold",
+    );
   });
 
   it("【从未跑过】的新任务不被当成停滞（null 不能当 0）", () => {
-    const born: TaskSignals = { ...base, lastRealEventAtMs: null, createdAtMs: T0 };
+    const born: TaskSignals = {
+      ...base,
+      lastRealEventAtMs: null,
+      createdAtMs: T0,
+    };
     expect(judgeTask(born, at(10 * MIN)).verdict).toBe("never_started");
     // 反向对照：若实现把 null 折成 0，第一行就会是 stalled（1970 年起的沉默）。
     // 这里再把 created_at 也摆老，确认老任务确实会被报 —— 排除「恒不报」。
-    expect(judgeTask({ ...born, createdAtMs: at(-10 * HOUR) }, at(0)).verdict).toBe("stalled");
+    expect(
+      judgeTask({ ...born, createdAtMs: at(-10 * HOUR) }, at(0)).verdict,
+    ).toBe("stalled");
   });
 
   it("报过一次就不再报（去重），且【新建后从未动过】的那一类也去重", () => {
@@ -207,7 +229,9 @@ describe("① 判定函数本身：六种结论各有一格，且互相是分开
       lastRealEventAtMs: real,
       lastStallAtMs: real + DEFAULT_STALL_THRESHOLD_MS + 1000,
     };
-    expect(judgeTask(flagged, at(DEFAULT_STALL_THRESHOLD_MS * 3)).verdict).toBe("already_flagged");
+    expect(judgeTask(flagged, at(DEFAULT_STALL_THRESHOLD_MS * 3)).verdict).toBe(
+      "already_flagged",
+    );
 
     // 这一发是本轮写实现时【当场抓到】的洞：去重基准若用 lastRealEventAtMs，
     // 「一出生就没动过、已被报过一次」的任务永远匹配不上，每轮都重写一条事件。
@@ -217,7 +241,9 @@ describe("① 判定函数本身：六种结论各有一格，且互相是分开
       createdAtMs: T0,
       lastStallAtMs: T0 + DEFAULT_STALL_THRESHOLD_MS + 5,
     };
-    expect(judgeTask(neverMoved, at(DEFAULT_STALL_THRESHOLD_MS * 4)).verdict).toBe("already_flagged");
+    expect(
+      judgeTask(neverMoved, at(DEFAULT_STALL_THRESHOLD_MS * 4)).verdict,
+    ).toBe("already_flagged");
   });
 
   it("真实事件一到，上一轮的报告作废（停滞时钟重新起算）", () => {
@@ -226,7 +252,9 @@ describe("① 判定函数本身：六种结论各有一格，且互相是分开
       lastRealEventAtMs: at(DEFAULT_STALL_THRESHOLD_MS * 3),
       lastStallAtMs: at(MIN),
     };
-    expect(judgeTask(recovered, at(DEFAULT_STALL_THRESHOLD_MS * 3 + MIN)).verdict).toBe("recent");
+    expect(
+      judgeTask(recovered, at(DEFAULT_STALL_THRESHOLD_MS * 3 + MIN)).verdict,
+    ).toBe("recent");
   });
 
   it("心跳事件【不】把停滞时钟归零 —— 判据读的是 lastStall 与起点，不是 max(两者)", () => {
@@ -235,7 +263,11 @@ describe("① 判定函数本身：六种结论各有一格，且互相是分开
     // 而真正会被这行抓住的是：实现若用 max(real, stall) 当起点，
     // 一张已报过的卡片会退回 recent，CEO 再也看不到「已停滞多久」在涨。
     const j = judgeTask(
-      { ...base, lastRealEventAtMs: T0, lastStallAtMs: at(DEFAULT_STALL_THRESHOLD_MS + 1) },
+      {
+        ...base,
+        lastRealEventAtMs: T0,
+        lastStallAtMs: at(DEFAULT_STALL_THRESHOLD_MS + 1),
+      },
       at(DEFAULT_STALL_THRESHOLD_MS * 5),
     );
     expect(j.verdict).toBe("already_flagged");
@@ -264,14 +296,18 @@ describe("① 判定函数本身：六种结论各有一格，且互相是分开
     expect([...seen].sort()).toEqual([...PATROL_VERDICTS].sort());
     // 逐格点名。上一行只比【集合】，所以「stalled 这一格其实靠 never_started 的那次
     // 调用凑出来」这类重叠它看不出来；这一格必须能被单独复现。
-    expect(judgeTask(base, at(DEFAULT_STALL_THRESHOLD_MS + 1)).verdict).toBe("stalled");
-    expect(judgeTask({ ...base, lastRealEventAtMs: null }, at(10 * MIN)).verdict).toBe("never_started");
+    expect(judgeTask(base, at(DEFAULT_STALL_THRESHOLD_MS + 1)).verdict).toBe(
+      "stalled",
+    );
+    expect(
+      judgeTask({ ...base, lastRealEventAtMs: null }, at(10 * MIN)).verdict,
+    ).toBe("never_started");
   });
 
   it("被盯的活跃状态 = 全部状态 - 终态 - 等人态（从枚举派生，不手写清单）", () => {
-    expect(WATCHED_STATES.length + TERMINAL_STATES.length + HUMAN_HOLD_STATES.length).toBe(
-      TASK_STATES.length,
-    );
+    expect(
+      WATCHED_STATES.length + TERMINAL_STATES.length + HUMAN_HOLD_STATES.length,
+    ).toBe(TASK_STATES.length);
     // 反向对照：手写清单少一个状态时，这一格会红。自环不可能被算成活跃。
     expect(WATCHED_STATES).toContain("IN_PROGRESS");
     expect(WATCHED_STATES).not.toContain("ARCHIVED");
@@ -293,13 +329,19 @@ describe("② 真库巡检：SQL 读出来的信号与判定一致", () => {
   it("四格任务同时存在时，只有该报的那格被报", () => {
     const { db } = fix;
     addTask(db, "T-stall", "IN_PROGRESS", T0 - 10 * HOUR);
-    ev(db, "T-stall", "TaskStateChanged", T0 - 10 * HOUR, { to: "IN_PROGRESS" });
+    ev(db, "T-stall", "TaskStateChanged", T0 - 10 * HOUR, {
+      to: "IN_PROGRESS",
+    });
     addTask(db, "T-delivered", "DELIVERED", T0 - 10 * HOUR);
-    ev(db, "T-delivered", "TaskStateChanged", T0 - 10 * HOUR, { to: "DELIVERED" });
+    ev(db, "T-delivered", "TaskStateChanged", T0 - 10 * HOUR, {
+      to: "DELIVERED",
+    });
     addTask(db, "T-fresh", "IN_PROGRESS", T0 - 10 * MIN);
     ev(db, "T-fresh", "TaskStateChanged", T0 - 10 * MIN, { to: "IN_PROGRESS" });
     addTask(db, "T-ceo", "ESCALATED_TO_CEO", T0 - 10 * HOUR);
-    ev(db, "T-ceo", "TaskStateChanged", T0 - 10 * HOUR, { to: "ESCALATED_TO_CEO" });
+    ev(db, "T-ceo", "TaskStateChanged", T0 - 10 * HOUR, {
+      to: "ESCALATED_TO_CEO",
+    });
 
     const js = patrolTasks(db, { now: () => T0 });
     const by = new Map(js.map((j) => [j.id, j.verdict]));
@@ -327,7 +369,10 @@ describe("② 真库巡检：SQL 读出来的信号与判定一致", () => {
     const { db } = fix;
     addTask(db, "T1", "IN_PROGRESS", T0 - 10 * HOUR);
     ev(db, "T1", "TaskStateChanged", T0 - 10 * HOUR, { to: "IN_PROGRESS" });
-    ev(db, "T1", "ApprovalRequired", T0 - 5 * HOUR, { target: "INT-7", node: "review" });
+    ev(db, "T1", "ApprovalRequired", T0 - 5 * HOUR, {
+      target: "INT-7",
+      node: "review",
+    });
 
     expect(verdictOf(fix.path, "T1", T0).verdict).toBe("human_hold");
     expect(verdictOf(fix.path, "T1", T0).awaitingApproval).toBe(true);
@@ -337,8 +382,14 @@ describe("② 真库巡检：SQL 读出来的信号与判定一致", () => {
     const { db } = fix;
     addTask(db, "T1", "IN_PROGRESS", T0 - 10 * HOUR);
     ev(db, "T1", "TaskStateChanged", T0 - 10 * HOUR, { to: "IN_PROGRESS" });
-    ev(db, "T1", "ApprovalRequired", T0 - 5 * HOUR, { target: "INT-7", node: "review" });
-    ev(db, "T1", "ApprovalDecided", T0 - 4 * HOUR, { target: "INT-7", node: "review" });
+    ev(db, "T1", "ApprovalRequired", T0 - 5 * HOUR, {
+      target: "INT-7",
+      node: "review",
+    });
+    ev(db, "T1", "ApprovalDecided", T0 - 4 * HOUR, {
+      target: "INT-7",
+      node: "review",
+    });
 
     const j = verdictOf(fix.path, "T1", T0);
     expect(j.awaitingApproval).toBe(false);
@@ -351,7 +402,15 @@ describe("② 真库巡检：SQL 读出来的信号与判定一致", () => {
     // 故意写一条 kind 缺失的脏行：它必须被算作【真实事件】（<> 'HeartbeatStalled' 为真需非 NULL）
     appendAudit(
       db,
-      { actorType: "system", actorId: "hub", taskId: "T1", action: "state_change", target: null, payload: { note: "没有 kind" }, createdAt: T0 - HOUR },
+      {
+        actorType: "system",
+        actorId: "hub",
+        taskId: "T1",
+        action: "state_change",
+        target: null,
+        payload: { note: "没有 kind" },
+        createdAt: T0 - HOUR,
+      },
       () => T0 - HOUR,
     );
     const j = verdictOf(fix.path, "T1", T0);
@@ -388,10 +447,23 @@ describe("③ 记事件：绝不静默，且写进去的就是投影卡片要读
     expect(r.recorded).toEqual([{ taskId: "T1", seq: expect.any(Number) }]);
 
     const rows = db
-      .prepare("SELECT action, actor_type, actor_id, target, payload FROM events WHERE action = 'escalation'")
-      .all() as Array<{ action: string; actor_type: string; actor_id: string; target: string; payload: string }>;
+      .prepare(
+        "SELECT action, actor_type, actor_id, target, payload FROM events WHERE action = 'escalation'",
+      )
+      .all() as Array<{
+      action: string;
+      actor_type: string;
+      actor_id: string;
+      target: string;
+      payload: string;
+    }>;
     expect(rows).toHaveLength(1);
-    const row = rows[0] as { actor_type: string; actor_id: string; target: string; payload: string };
+    const row = rows[0] as {
+      actor_type: string;
+      actor_id: string;
+      target: string;
+      payload: string;
+    };
     expect(row.actor_type).toBe("system");
     expect(row.actor_id).toBe("heartbeat");
     // target 是节点名：与 recorder.targetOf 对 HeartbeatStalled 的口径一致
@@ -402,7 +474,11 @@ describe("③ 记事件：绝不静默，且写进去的就是投影卡片要读
     expect(payload["silentForMs"]).toBe(10 * HOUR);
 
     const first = await sub[Symbol.asyncIterator]().next();
-    expect(first.value).toMatchObject({ kind: "HeartbeatStalled", taskId: "T1", node: "implement" });
+    expect(first.value).toMatchObject({
+      kind: "HeartbeatStalled",
+      taskId: "T1",
+      node: "implement",
+    });
     sub.close();
   });
 
@@ -413,10 +489,18 @@ describe("③ 记事件：绝不静默，且写进去的就是投影卡片要读
     const bus = new InMemoryEventBus();
 
     await runPatrol(q.readConnection(), q, bus, { now: () => T0 });
-    const after1 = (db.prepare("SELECT count(*) AS c FROM events WHERE action = 'escalation'").get() as { c: number | bigint }).c;
+    const after1 = (
+      db
+        .prepare("SELECT count(*) AS c FROM events WHERE action = 'escalation'")
+        .get() as { c: number | bigint }
+    ).c;
     // now 往前推：阈值依旧超着，而上一轮的心跳事件就在 T0
     await runPatrol(q.readConnection(), q, bus, { now: () => T0 + 100 * HOUR });
-    const after2 = (db.prepare("SELECT count(*) AS c FROM events WHERE action = 'escalation'").get() as { c: number | bigint }).c;
+    const after2 = (
+      db
+        .prepare("SELECT count(*) AS c FROM events WHERE action = 'escalation'")
+        .get() as { c: number | bigint }
+    ).c;
 
     expect(Number(after1)).toBe(1);
     expect(Number(after2)).toBe(1);
@@ -431,9 +515,15 @@ describe("③ 记事件：绝不静默，且写进去的就是投影卡片要读
 
     // 任务动了（用比心跳更晚的时间戳写一条真实事件）
     ev(db, "T1", "TaskStateChanged", T0 + HOUR, { to: "IN_PROGRESS" });
-    const r = await runPatrol(q.readConnection(), q, bus, { now: () => T0 + 100 * HOUR });
+    const r = await runPatrol(q.readConnection(), q, bus, {
+      now: () => T0 + 100 * HOUR,
+    });
     expect(r.stalled).toBe(1);
-    const c = (db.prepare("SELECT count(*) AS c FROM events WHERE action = 'escalation'").get() as { c: number | bigint }).c;
+    const c = (
+      db
+        .prepare("SELECT count(*) AS c FROM events WHERE action = 'escalation'")
+        .get() as { c: number | bigint }
+    ).c;
     expect(Number(c)).toBe(2);
   });
 
@@ -448,7 +538,11 @@ describe("③ 记事件：绝不静默，且写进去的就是投影卡片要读
     const bus = new InMemoryEventBus();
     const res = await recordStalls(q, bus, js, () => T0);
     expect(res).toHaveLength(1);
-    const one = res[0] as { taskId: string; seq: number | null; error?: string };
+    const one = res[0] as {
+      taskId: string;
+      seq: number | null;
+      error?: string;
+    };
     expect(one.taskId).toBe("T1");
     expect(one.seq).toBeNull();
     expect(one.error).toBeTruthy();
@@ -458,8 +552,12 @@ describe("③ 记事件：绝不静默，且写进去的就是投影卡片要读
     const { db, q } = fix;
     addTask(db, "T1", "IN_PROGRESS", T0 - 10 * HOUR);
     ev(db, "T1", "TaskStateChanged", T0 - 10 * HOUR, { to: "IN_PROGRESS" });
-    await runPatrol(q.readConnection(), q, new InMemoryEventBus(), { now: () => T0 });
-    const row = db.prepare("SELECT status FROM tasks WHERE id = 'T1'").get() as { status: string };
+    await runPatrol(q.readConnection(), q, new InMemoryEventBus(), {
+      now: () => T0,
+    });
+    const row = db
+      .prepare("SELECT status FROM tasks WHERE id = 'T1'")
+      .get() as { status: string };
     expect(row.status).toBe("IN_PROGRESS");
   });
 
@@ -467,8 +565,14 @@ describe("③ 记事件：绝不静默，且写进去的就是投影卡片要读
     const { db, q } = fix;
     addTask(db, "T1", "IN_PROGRESS", T0 - 10 * HOUR);
     ev(db, "T1", "TaskStateChanged", T0 - 10 * HOUR, { to: "IN_PROGRESS" });
-    await runPatrol(q.readConnection(), q, new InMemoryEventBus(), { now: () => T0 });
-    const c = (db.prepare("SELECT count(*) AS c FROM approvals").get() as { c: number | bigint }).c;
+    await runPatrol(q.readConnection(), q, new InMemoryEventBus(), {
+      now: () => T0,
+    });
+    const c = (
+      db.prepare("SELECT count(*) AS c FROM approvals").get() as {
+        c: number | bigint;
+      }
+    ).c;
     expect(Number(c)).toBe(0);
   });
 });
@@ -483,7 +587,9 @@ describe("④ 分层：巡检不该把图运行时拖进来", () => {
     expect(src.includes('from "../checkpoint/saver.js"')).toBe(false);
     expect(src.includes("@langchain")).toBe(false);
     // 反向对照，防「剥光注释后整串为空」这种恒真：真 import 至少 5 条
-    const imported = [...src.matchAll(/from\s+"([^"]+)"/gu)].map((m) => m[1] ?? "");
+    const imported = [...src.matchAll(/from\s+"([^"]+)"/gu)].map(
+      (m) => m[1] ?? "",
+    );
     expect(imported.length).toBeGreaterThanOrEqual(5);
     // 而【注释里】确实写着 @langchain —— 这一发钉住「为什么必须先剥注释」。
     // 0018 §6 第 4 条记过一次（backup.ts 头注释里就有 @langchain/*），本轮原地重犯一次。
@@ -523,7 +629,9 @@ describe("⑤ 一趟巡检的开销必须是【索引区间扫】（Task 6.4「�
     const { db } = fresh();
     const names = (
       db
-        .prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'events'")
+        .prepare(
+          "SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'events'",
+        )
         .all() as { name: string }[]
     ).map((r) => r.name);
     expect(names).toContain(INDEX);
@@ -536,9 +644,11 @@ describe("⑤ 一趟巡检的开销必须是【索引区间扫】（Task 6.4「�
 
   it("计划里 SEARCH 走了那条覆盖索引，且没有 SCAN events", () => {
     const { db } = fresh();
-    const plan = (db.prepare("EXPLAIN QUERY PLAN " + PATROL_SQL).all() as { detail: string }[]).map(
-      (r) => String(r.detail),
-    );
+    const plan = (
+      db.prepare("EXPLAIN QUERY PLAN " + PATROL_SQL).all() as {
+        detail: string;
+      }[]
+    ).map((r) => String(r.detail));
     const text = plan.join("\n");
     expect(text).toContain(INDEX);
     // COVERING 这一词也要核：非覆盖索引会退化成「索引定位 + 逐行回表取 payload」，
@@ -553,7 +663,9 @@ describe("⑤ 一趟巡检的开销必须是【索引区间扫】（Task 6.4「�
           "WHERE e.task_id = t.id) x FROM tasks t",
       )
       .all() as { detail: string }[];
-    expect(bad.map((r) => String(r.detail)).join("\n")).toContain("USING COVERING INDEX idx_events_task");
+    expect(bad.map((r) => String(r.detail)).join("\n")).toContain(
+      "USING COVERING INDEX idx_events_task",
+    );
   });
 
   it("四个探测里【恰好三个】走那条索引，而第四个走 idx_events_task 不是漏配", () => {
@@ -586,9 +698,11 @@ describe("⑤ 一趟巡检的开销必须是【索引区间扫】（Task 6.4「�
     // 还可以被重新写出来，而它已经在同一份库上被证伪过一次。
     db.exec("DROP INDEX " + INDEX);
     db.exec(
-      "CREATE INDEX " + INDEX + " ON events(task_id, " +
-      "CASE WHEN json_valid(payload) THEN json_extract(payload, '$.kind') END, created_at) " +
-      "WHERE CASE WHEN json_valid(payload) THEN json_extract(payload, '$.kind') END IS NOT NULL",
+      "CREATE INDEX " +
+        INDEX +
+        " ON events(task_id, " +
+        "CASE WHEN json_valid(payload) THEN json_extract(payload, '$.kind') END, created_at) " +
+        "WHERE CASE WHEN json_valid(payload) THEN json_extract(payload, '$.kind') END IS NOT NULL",
     );
     expect(probes(PATROL_SQL)).toEqual(plan);
   });
@@ -620,7 +734,10 @@ describe("⑤ 一趟巡检的开销必须是【索引区间扫】（Task 6.4「�
     // 就是 PATROL_SQL 里那一发（第一个子查询），单独拿出来才能归因到它自己身上。
     const stmt = db.prepare(
       "SELECT max(e.created_at) FROM events e WHERE e.task_id = ? AND " +
-        kindOf("e") + " IS NOT NULL AND " + kindOf("e") + " <> 'HeartbeatStalled'",
+        kindOf("e") +
+        " IS NOT NULL AND " +
+        kindOf("e") +
+        " <> 'HeartbeatStalled'",
     );
     const median = (xs: number[]): number =>
       [...xs].sort((a, b) => a - b)[Math.floor(xs.length / 2)] ?? Number.NaN;
@@ -642,8 +759,11 @@ describe("⑤ 一趟巡检的开销必须是【索引区间扫】（Task 6.4「�
     const realMs = Math.min(...real);
     const stallMs = Math.min(...stall);
     process.stdout.write(
-      "\n[0003] 第四个探测：尾部是真实事件 " + realMs.toFixed(3) + "ms / 尾部是心跳事件 " +
-        stallMs.toFixed(3) + "ms\n",
+      "\n[0003] 第四个探测：尾部是真实事件 " +
+        realMs.toFixed(3) +
+        "ms / 尾部是心跳事件 " +
+        stallMs.toFixed(3) +
+        "ms\n",
     );
     // 判据取 3×（本机 500 行那一档实测 20× 量级）：这一发要抓的是【那条索引被删或改名】
     // 之后这一发退化成全任务扫 —— 那时两侧【同量级变慢】而比值塌到 1 附近。
@@ -666,7 +786,10 @@ describe("⑤ 一趟巡检的开销必须是【索引区间扫】（Task 6.4「�
       "INSERT INTO events (task_id, actor_type, actor_id, action, payload, state_snapshot, created_at) " +
         "VALUES ('T-a', 'system', 'hub', 'state_change', '{}', '{}', ?)",
     ).run(T0 - 1000);
-    const rows = db.prepare(PATROL_SQL).all() as { id: string; last_real_event_at: number | null }[];
+    const rows = db.prepare(PATROL_SQL).all() as {
+      id: string;
+      last_real_event_at: number | null;
+    }[];
     expect(rows.map((r) => r.id)).toEqual(["T-a"]);
     expect(Number(rows[0]?.last_real_event_at)).toBe(T0 - HOUR);
   });
@@ -786,7 +909,9 @@ describe("⑤ 一趟巡检的开销必须是【索引区间扫】（Task 6.4「�
     // 而那条索引在脏行库上会让迁移失败（上面那条用例测的正是这个失效）。
     const bare = [...ddlCode.matchAll(/json_extract\(payload/gu)];
     expect(bare).toHaveLength(1);
-    expect(ddlCode).toContain("json_valid(payload)THENjson_extract(payload,'$.kind')END");
+    expect(ddlCode).toContain(
+      "json_valid(payload)THENjson_extract(payload,'$.kind')END",
+    );
     // 而注释里【确实】多处写着未守卫的那个写法（那几段在解释为什么不能用它）——
     // 整份文件里的出现次数必须【严格多于】可执行部分那 1 次，否则说明「按行滤注释」
     // 这一步没滤掉任何东西，上面那条「恰好 1 次」是它自己造出来的假象。
@@ -802,7 +927,5 @@ function readSrc(): string {
 
 /** 剥注释。依赖与定时器的门禁只能看【可执行代码】，否则测的是文笔（0018 §6 第 4 条）。 */
 function codeOnly(text: string): string {
-  return text
-    .replace(/\/\*[\s\S]*?\*\//gu, "")
-    .replace(/^\s*\/\/.*$/gmu, "");
+  return text.replace(/\/\*[\s\S]*?\*\//gu, "").replace(/^\s*\/\/.*$/gmu, "");
 }

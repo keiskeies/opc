@@ -26,47 +26,48 @@
  * §12.7 第 4 层审计）。复用顺带把 integrity.ts 的 harness_call_recorded
  * 从恒 not_observable（0018 §9 实测 src 里零 INSERT）变成【有对象可查】。
  */
-import type { DatabaseSync } from "node:sqlite";
+
 import { randomUUID } from "node:crypto";
+import type { DatabaseSync } from "node:sqlite";
 import {
   ENGINE_REVIEW_GATE,
+  type HarnessRequest,
   harnessDefaultsFor,
   harnessRequestSchema,
-  type HarnessRequest,
   type OrgGraph,
 } from "@opc/contracts";
-import {
-  usdToCents,
-  resolveCeoRoleId,
-  type CostHook,
-  type DispatchDeps,
-  type DispatchTask,
-  type TurnOutcome,
-} from "./dispatch.js";
-import type { RoleRunResult } from "./claude.js";
-import { retryableWithoutCost } from "./claude.js";
-import { runTurnWithRetry } from "./turn-retry.js";
-import type { GatewayRunnerDeps } from "../harness/gateway-runner.js";
-import { runViaGateway } from "../harness/gateway-runner.js";
 import {
   ADD_CONSUMED_SQL,
   ENSERT_BUDGET_SQL,
   IDEMPOTENT_INSERT_SQL,
 } from "../budget/tracker.js";
+import { NO_CHARTER_LINE, renderCharterPrompt } from "../charter/prompt.js";
 import {
   assertCharterShape,
   gateCriteriaForRoleOrEmpty,
   readLatestCharter,
 } from "../charter/store.js";
-import { NO_CHARTER_LINE, renderCharterPrompt } from "../charter/prompt.js";
-import { readGraphByVersion } from "../org/commit.js";
-import { isTaskOwnerOf, readRoleMemory } from "../memory/role-memory.js";
-import { memoryPromptSections, PROMPT_MEMORY_LIMIT } from "../memory/prompt.js";
 import { requireScopeDb } from "../checkpoint/tx-scope.js";
 import type { HubWriter } from "../db/write-queue.js";
-import { appendAudit, type AuditRow } from "../events/recorder.js";
 import type { DomainEvent, EventBus } from "../events/bus.js";
+import { type AuditRow, appendAudit } from "../events/recorder.js";
 import type { TaskState } from "../graph/status.js";
+import type { GatewayRunnerDeps } from "../harness/gateway-runner.js";
+import { runViaGateway } from "../harness/gateway-runner.js";
+import { memoryPromptSections, PROMPT_MEMORY_LIMIT } from "../memory/prompt.js";
+import { isTaskOwnerOf, readRoleMemory } from "../memory/role-memory.js";
+import { readGraphByVersion } from "../org/commit.js";
+import type { RoleRunResult } from "./claude.js";
+import { retryableWithoutCost } from "./claude.js";
+import {
+  type CostHook,
+  type DispatchDeps,
+  type DispatchTask,
+  resolveCeoRoleId,
+  type TurnOutcome,
+  usdToCents,
+} from "./dispatch.js";
+import { runTurnWithRetry } from "./turn-retry.js";
 
 type Row = Record<string, unknown>;
 
@@ -310,7 +311,6 @@ export function makeRuntime(d: RuntimeDeps): EngineRuntime {
   const deps: DispatchDeps = {
     writer: d.writer,
 
-
     loadTask: (taskId): DispatchTask | null => {
       const row = read().prepare(LOAD_TASK_SQL).get(taskId) as Row | undefined;
       if (row === undefined) return null;
@@ -360,7 +360,9 @@ export function makeRuntime(d: RuntimeDeps): EngineRuntime {
       const charterBlock =
         charter === undefined
           ? NO_CHARTER_LINE
-          : renderCharterPrompt(assertCharterShape(roleId, charter)).sections.join("\n");
+          : renderCharterPrompt(
+              assertCharterShape(roleId, charter),
+            ).sections.join("\n");
       //
       // CEO 那一格【从图里读】而不再写 `?? "ceo"`（0047）：那句回退是本轮修复的一半 ——
       // 它把「顶层是谁」这件【结构事实】降级成了一个字面量，而组织图的根完全可以叫 boss。
@@ -403,7 +405,11 @@ export function makeRuntime(d: RuntimeDeps): EngineRuntime {
       });
       const memoryBlock = memoryPromptSections(memory).join("\n");
       return (
-        "你在一人公司里担任角色 [" + roleId + "]。" + ceoLine + "，" +
+        "你在一人公司里担任角色 [" +
+        roleId +
+        "]。" +
+        ceoLine +
+        "，" +
         "你的汇报对象由 hub 按组织图决定，不由你决定。\n" +
         charterBlock +
         "\n" +
@@ -412,7 +418,9 @@ export function makeRuntime(d: RuntimeDeps): EngineRuntime {
     },
 
     roleSession: (taskId, roleId) => {
-      const row = read().prepare(LAST_SESSION_SQL).get(taskId, roleId) as Row | undefined;
+      const row = read().prepare(LAST_SESSION_SQL).get(taskId, roleId) as
+        | Row
+        | undefined;
       if (row === undefined) return null;
       const s = text(row["session_id"]);
       return s === "" ? null : s;
@@ -503,7 +511,9 @@ export function makeRuntime(d: RuntimeDeps): EngineRuntime {
           maxBudgetUsd: d.maxBudgetUsd,
         },
         {
-          sleep: d.sleep ?? ((ms) => new Promise<void>((res) => setTimeout(res, ms))),
+          sleep:
+            d.sleep ??
+            ((ms) => new Promise<void>((res) => setTimeout(res, ms))),
           onRetryWarn: d.onRetryWarn ?? ((m) => console.warn("[hub] " + m)),
         },
       );
@@ -552,7 +562,10 @@ export function makeRuntime(d: RuntimeDeps): EngineRuntime {
       const rows = read().prepare(PRODUCER_SCAN_SQL).all(taskId) as Row[];
       for (const r of rows) {
         const p = payloadOf(r);
-        if (p["to"] === "EVIDENCE_SUBMITTED" && typeof p["producerRole"] === "string") {
+        if (
+          p["to"] === "EVIDENCE_SUBMITTED" &&
+          typeof p["producerRole"] === "string"
+        ) {
           return p["producerRole"];
         }
       }
@@ -561,7 +574,9 @@ export function makeRuntime(d: RuntimeDeps): EngineRuntime {
 
     rejectionCount: (taskId) => {
       // 见 REJECTION_COUNT_SQL：判据是那条 append-only 的状态边，不是 tasks 那一行。
-      const row = read().prepare(REJECTION_COUNT_SQL).get(taskId) as { n: number | bigint } | undefined;
+      const row = read().prepare(REJECTION_COUNT_SQL).get(taskId) as
+        | { n: number | bigint }
+        | undefined;
       return row === undefined ? 0 : Number(row.n);
     },
 
@@ -631,7 +646,12 @@ export function makeRuntime(d: RuntimeDeps): EngineRuntime {
           o.nowMs,
         ) as { changes: number | bigint };
       if (Number(ins.changes) === 0) return; // 幂等命中：这一笔已经记过，绝不重复扣
-      db.prepare(ADD_CONSUMED_SQL).run(o.costCents, "task", o.taskId, "per_task");
+      db.prepare(ADD_CONSUMED_SQL).run(
+        o.costCents,
+        "task",
+        o.taskId,
+        "per_task",
+      );
     }) satisfies CostHook,
 
     publish: (e: DomainEvent, seq: number): void => {
@@ -659,7 +679,10 @@ export function makeRuntime(d: RuntimeDeps): EngineRuntime {
             o.taskId,
             o.role,
             d.harnessVersion ?? "unknown",
-            JSON.stringify({ resumed: o.sessionId !== null, budget_usd: d.maxBudgetUsd }),
+            JSON.stringify({
+              resumed: o.sessionId !== null,
+              budget_usd: d.maxBudgetUsd,
+            }),
             o.sessionId,
             o.ok ? 0 : 1,
             o.costCents,
@@ -672,7 +695,9 @@ export function makeRuntime(d: RuntimeDeps): EngineRuntime {
         // 但也不能静默 —— 缺的是 §12.7 第 4 层那一条，返回一个能断言的结论。
         return {
           recorded: false,
-          why: "harness_calls 写入失败：" + (e instanceof Error ? e.message : String(e)),
+          why:
+            "harness_calls 写入失败：" +
+            (e instanceof Error ? e.message : String(e)),
         };
       }
       return { recorded: true, why: "已留痕" };

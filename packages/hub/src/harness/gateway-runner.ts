@@ -48,11 +48,7 @@
  * 所以 settle 原样透传给 GatewayDeps.settle，落哪个事务是 Step B 调用方的事。
  */
 
-import type {
-  HarnessId,
-  HarnessRequest,
-  SandboxTier,
-} from "@opc/contracts";
+import type { HarnessId, HarnessRequest, SandboxTier } from "@opc/contracts";
 import { harnessDefaultsFor } from "@opc/contracts";
 import type { RoleRunResult } from "../engine/claude.js";
 import type { AuditRow } from "../events/recorder.js";
@@ -107,7 +103,10 @@ export function buildGatewayDeps(deps: GatewayRunnerDeps): GatewayDeps {
   // 缺省口径集中在这一行：岗位书没写这一家的 sandbox ⇒ read-only（最严档）。
   // 「没接岗位书」在上面已经抛了，走到这里缺格只是「声明了默认最严」。
   // 取哪一家的列由 deps.harnessId 定（缺 claude-code = runtime 主循环既有行为）。
-  const entry = harnessDefaultsFor(deps.charterHarnessDefaults, deps.harnessId ?? "claude-code");
+  const entry = harnessDefaultsFor(
+    deps.charterHarnessDefaults,
+    deps.harnessId ?? "claude-code",
+  );
   return {
     audit: deps.audit,
     grantedSandbox: deps.grantedSandbox ?? entry?.sandbox ?? "read-only",

@@ -13,13 +13,13 @@
  * 所以本文件既有「数得出 2」也有「数得出 0」，两条缺一条都算这一组没测到东西。
  */
 import { describe, expect, it } from "vitest";
+import { searchGranted } from "../../src/search/mcp.js";
 import {
   isSearchToolName,
   observeSearchCalls,
-  toObservedSearches,
   type ToolSighting,
+  toObservedSearches,
 } from "../../src/search/observe.js";
-import { searchGranted } from "../../src/search/mcp.js";
 import { OBSERVATION_UNAVAILABLE } from "../../src/search/policy.js";
 
 const SEARCH: ToolSighting = { tool: "WebSearch", stages: ["event_stream"] };
@@ -44,7 +44,10 @@ describe("① 三态各自成立，且两两可分辨", () => {
   });
 
   it("报了搜索 ⇒ counted，数目就是命中数", () => {
-    const o = observeSearchCalls({ granted: GRANTED, sightings: [READ, SEARCH, SEARCH] });
+    const o = observeSearchCalls({
+      granted: GRANTED,
+      sightings: [READ, SEARCH, SEARCH],
+    });
     expect(o.kind === "counted" && o.searches).toBe(2);
     expect(toObservedSearches(o)).toBe(2);
   });
@@ -63,7 +66,11 @@ describe("① 三态各自成立，且两两可分辨", () => {
     const a = observeSearchCalls({ granted: GRANTED, sightings: [READ] });
     const b = observeSearchCalls({ granted: ["Read"], sightings: [READ] });
     const c = observeSearchCalls({ granted: GRANTED, sightings: [] });
-    expect([a.kind, b.kind, c.kind].sort()).toEqual(["counted", "not_granted", "silent"]);
+    expect([a.kind, b.kind, c.kind].sort()).toEqual([
+      "counted",
+      "not_granted",
+      "silent",
+    ]);
     // 三态必须落到【两个不同的入参维度】上：granted 管资格、sightings 管通路。
     // 若两态由同一个入参决定，第四种组合（无资格 + 无通路）会被随便归到某一态里。
   });
@@ -81,7 +88,12 @@ describe("① 三态各自成立，且两两可分辨", () => {
 
 describe("② 名字口径与授予同源（两处各写一份就会漂）", () => {
   it("命中面与 searchGranted 逐一致：三种形状都算", () => {
-    for (const name of ["WebSearch", "websearch", "mcp__search__web", "web_search"]) {
+    for (const name of [
+      "WebSearch",
+      "websearch",
+      "mcp__search__web",
+      "web_search",
+    ]) {
       expect(isSearchToolName(name), name).toBe(true);
       expect(isSearchToolName(name), name).toBe(searchGranted([name]));
     }
@@ -102,11 +114,15 @@ describe("③ 反向对照：这套仪器在已知有答案的输入上给得出
   it("阳性对照：silent 那一支的判据不是『sightings 恒空』", () => {
     // 若上面那发「silent」绿的成因是「取材写错了、永远拿到空数组」，
     // 那这里也应当给出 silent —— 所以它必须给 counted。
-    expect(observeSearchCalls({ granted: GRANTED, sightings: [READ] }).kind).toBe("counted");
+    expect(
+      observeSearchCalls({ granted: GRANTED, sightings: [READ] }).kind,
+    ).toBe("counted");
   });
 
   it("阳性对照：not_granted 那一支的判据不是『granted 恒不含搜索』", () => {
-    expect(observeSearchCalls({ granted: GRANTED, sightings: [READ] }).kind).not.toBe("not_granted");
+    expect(
+      observeSearchCalls({ granted: GRANTED, sightings: [READ] }).kind,
+    ).not.toBe("not_granted");
   });
 
   it("toObservedSearches 不会把 silent 折成 0（这是本模块唯一一条安全边界）", () => {

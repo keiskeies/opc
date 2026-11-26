@@ -104,7 +104,11 @@ async function seedTask(q: WriteQueue): Promise<void> {
  *    在「读不出参数」那一支一律偏严（误判成可逆的代价是开出一条不该开的通道）。
  * parameters 那五键是 `cards.ts` 的 §9.2 契约要求的，少一键建卡就抛。
  */
-async function seedCard(q: WriteQueue, irreversible = false, cardKey?: string): Promise<string> {
+async function seedCard(
+  q: WriteQueue,
+  irreversible = false,
+  cardKey?: string,
+): Promise<string> {
   const r = await createCard(
     q,
     {

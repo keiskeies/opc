@@ -25,8 +25,12 @@
 import type { DatabaseSync } from "node:sqlite";
 import { requireScopeDb } from "../checkpoint/tx-scope.js";
 import { BATCH_ROWS } from "../db/driver.js";
-import { assertParamCount, assertSingleStatement, type Writer } from "../db/write-queue.js";
-import { INSERT_EVENT_SQL, eventParams, type AuditRow } from "./recorder.js";
+import {
+  assertParamCount,
+  assertSingleStatement,
+  type Writer,
+} from "../db/write-queue.js";
+import { type AuditRow, eventParams, INSERT_EVENT_SQL } from "./recorder.js";
 
 export type BatchResult = {
   readonly written: number;

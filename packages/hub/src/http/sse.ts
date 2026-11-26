@@ -24,8 +24,8 @@
  * 而绕过时类型会缺。这是 §8.2 第 4 条同一种思路：能绕过的那条路不要留在那里。
  */
 
-import type { EventBus, EventSubscription, FeedItem } from "../events/bus.js";
 import { encodeSseFrame, type SseFrame } from "@opc/contracts";
+import type { EventBus, EventSubscription, FeedItem } from "../events/bus.js";
 
 /** 快照的形状：一个拉当前状态的函数 + 它对应的资源名（进日志与 degraded 提示）。 */
 export interface SnapshotSource<T> {
@@ -60,7 +60,6 @@ export class ResumeStream<T> {
     this.#snapshotBody = snapshotBody;
   }
 
-
   /**
    * 取游标 → 读快照。**顺序在实现里写死**：#cursor 在 await read() 【之前】定格。
    *
@@ -72,10 +71,7 @@ export class ResumeStream<T> {
     bus: EventBus,
     snapshot: SnapshotSource<U>,
   ): Promise<ResumeStream<U>> {
-    if (
-      snapshot.name.trim() === "" ||
-      typeof snapshot.read !== "function"
-    ) {
+    if (snapshot.name.trim() === "" || typeof snapshot.read !== "function") {
       throw new Error("SnapshotSource 需要非空 name 与 read()。");
     }
     const cursor = bus.latestSeq(); // ← 必须在 await 之前

@@ -33,21 +33,32 @@
 import { mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { fixtureTmp } from "../fixtures/fixture-dir.js";
-import { WriteQueue } from "../../src/db/write-queue.js";
 import { migrate } from "../../src/db/migrate.js";
+import { WriteQueue } from "../../src/db/write-queue.js";
 import { InMemoryEventBus } from "../../src/events/bus.js";
+import {
+  type HubDeps,
+  type HubRequest,
+  handleRequest,
+} from "../../src/http/app.js";
 import { newLocalToken, signedHeaders } from "../../src/http/auth.js";
-import { handleRequest, type HubDeps, type HubRequest } from "../../src/http/app.js";
 import { LOOPBACK_HOST } from "../../src/http/bind.js";
-import { readDriverStatus, type DriverRuntimeState } from "../../src/overview/driver-status.js";
+import {
+  type DriverRuntimeState,
+  readDriverStatus,
+} from "../../src/overview/driver-status.js";
 import {
   DRIVER_CLAIM_KIND,
   DRIVER_ELIGIBLE_STATES,
   DRIVER_GAVE_UP_KIND,
   driverCellTarget,
 } from "../../src/serve/driver-pump.js";
-import { DRIVER_OFF, DRIVER_ON, DRIVER_PUMP_DEAD } from "../fixtures/driver-state.js";
+import {
+  DRIVER_OFF,
+  DRIVER_ON,
+  DRIVER_PUMP_DEAD,
+} from "../fixtures/driver-state.js";
+import { fixtureTmp } from "../fixtures/fixture-dir.js";
 
 const TMP = fixtureTmp("overview-driver", import.meta.url);
 const queues: WriteQueue[] = [];
@@ -113,7 +124,12 @@ function world(): World {
     path: o.path,
     target: o.path,
     peer: LOOPBACK_HOST,
-    headers: signedHeaders(token, { method: o.method, target: o.path, body: "", now: T0 }),
+    headers: signedHeaders(token, {
+      method: o.method,
+      target: o.path,
+      body: "",
+      now: T0,
+    }),
     query: {},
     body: "",
   });
@@ -123,7 +139,13 @@ function world(): World {
 /* ───────────────── 造数据：三个形状各只有一处写法 ───────────────── */
 
 /** 一条任务。默认停在 IN_PROGRESS/dev —— agent 那一格最常见的落点。 */
-function task(db: Db, id: string, status = "IN_PROGRESS", role = "dev", at = T0 - 10 * MIN): void {
+function task(
+  db: Db,
+  id: string,
+  status = "IN_PROGRESS",
+  role = "dev",
+  at = T0 - 10 * MIN,
+): void {
   db.prepare(
     "INSERT INTO tasks (id, title, status, assigned_role, current_node, created_at, updated_at, graph_version, consumed_cents) " +
       "VALUES (?, ?, ?, ?, ?, ?, ?, 1, 0)",
@@ -137,21 +159,31 @@ function task(db: Db, id: string, status = "IN_PROGRESS", role = "dev", at = T0 
  * 读侧那一发只看 budgets.consumed_cents；tasks.consumed_cents 一起更新是
  * 【照生产的样子】，不是被测的那一格。
  */
-function budget(db: Db, taskId: string, limitCents: number, consumedCents: number): void {
+function budget(
+  db: Db,
+  taskId: string,
+  limitCents: number,
+  consumedCents: number,
+): void {
   db.prepare(
     "INSERT INTO budgets (id, scope_type, scope_id, period, limit_cents, consumed_cents, hard_stop) " +
       "VALUES (?, 'task', ?, 'per_task', ?, ?, 1)",
   ).run("b-" + taskId, taskId, limitCents, consumedCents);
-  db.prepare("UPDATE tasks SET consumed_cents = ? WHERE id = ?").run(consumedCents, taskId);
+  db.prepare("UPDATE tasks SET consumed_cents = ? WHERE id = ?").run(
+    consumedCents,
+    taskId,
+  );
 }
 
 /** 只动账面，不动上限（唯一索引那条理由见 budget 上面）。 */
 function spend(db: Db, taskId: string, consumedCents: number): void {
-  db.prepare("UPDATE budgets SET consumed_cents = ? WHERE scope_type = 'task' AND scope_id = ?").run(
+  db.prepare(
+    "UPDATE budgets SET consumed_cents = ? WHERE scope_type = 'task' AND scope_id = ?",
+  ).run(consumedCents, taskId);
+  db.prepare("UPDATE tasks SET consumed_cents = ? WHERE id = ?").run(
     consumedCents,
     taskId,
   );
-  db.prepare("UPDATE tasks SET consumed_cents = ? WHERE id = ?").run(consumedCents, taskId);
 }
 
 /**
@@ -175,7 +207,12 @@ function raw(
       "INSERT INTO events (task_id, actor_type, actor_id, action, target, payload, created_at) " +
         "VALUES (?, 'system', 'driver_pump', 'tool_call', ?, ?, ?)",
     )
-    .run(o.taskId, o.target ?? "t", o.payload ?? JSON.stringify({ kind: o.kind }), o.at ?? T0);
+    .run(
+      o.taskId,
+      o.target ?? "t",
+      o.payload ?? JSON.stringify({ kind: o.kind }),
+      o.at ?? T0,
+    );
   return Number(r.lastInsertRowid);
 }
 
@@ -184,7 +221,11 @@ function entered(db: Db, id: string, to: string, at = T0 - 5 * MIN): number {
   return raw(db, {
     taskId: id,
     kind: "TaskStateChanged",
-    payload: JSON.stringify({ kind: "TaskStateChanged", from: "CHARTER_APPROVED", to }),
+    payload: JSON.stringify({
+      kind: "TaskStateChanged",
+      from: "CHARTER_APPROVED",
+      to,
+    }),
     at,
   });
 }
@@ -195,12 +236,25 @@ function entered(db: Db, id: string, to: string, at = T0 - 5 * MIN): number {
  * 认领行今天没有读者（0048 §7 那一格只问到顶没到顶），它在这里出现是为了
  * 造出"驱动器试过而没放弃"那一档 —— 见 B 组第二条。
  */
-function claim(db: Db, id: string, state: string, role: string, attempt: number, at = T0 - 3 * MIN): number {
+function claim(
+  db: Db,
+  id: string,
+  state: string,
+  role: string,
+  attempt: number,
+  at = T0 - 3 * MIN,
+): number {
   return raw(db, {
     taskId: id,
     kind: DRIVER_CLAIM_KIND,
     target: driverCellTarget(state, role),
-    payload: JSON.stringify({ kind: DRIVER_CLAIM_KIND, state, role, attempt, max_attempts: 3 }),
+    payload: JSON.stringify({
+      kind: DRIVER_CLAIM_KIND,
+      state,
+      role,
+      attempt,
+      max_attempts: 3,
+    }),
     at,
   });
 }
@@ -211,7 +265,12 @@ function gaveUp(
   id: string,
   state: string,
   role: string,
-  o: { readonly attempts?: number; readonly max?: number; readonly at?: number; readonly payload?: string } = {},
+  o: {
+    readonly attempts?: number;
+    readonly max?: number;
+    readonly at?: number;
+    readonly payload?: string;
+  } = {},
 ): number {
   return raw(db, {
     taskId: id,
@@ -219,12 +278,20 @@ function gaveUp(
     target: driverCellTarget(state, role),
     payload:
       o.payload ??
-      JSON.stringify({ kind: DRIVER_GAVE_UP_KIND, state, role, attempts: o.attempts ?? 3, max_attempts: o.max ?? 3 }),
+      JSON.stringify({
+        kind: DRIVER_GAVE_UP_KIND,
+        state,
+        role,
+        attempts: o.attempts ?? 3,
+        max_attempts: o.max ?? 3,
+      }),
     at: o.at ?? T0 - 2 * MIN,
   });
 }
 
-const causesOf = (s: ReturnType<typeof readDriverStatus>): Record<string, string> =>
+const causesOf = (
+  s: ReturnType<typeof readDriverStatus>,
+): Record<string, string> =>
   Object.fromEntries(s.stopped.map((t) => [t.task_id, t.cause]));
 
 beforeAll(() => {
@@ -281,10 +348,16 @@ describe("A 机器级：驱动器【没开】时必须说出来，而不是画�
 
   it("task_limit_cents 跟着机器走：OFF 时是 null 而【不是 0】", () => {
     const w = world();
-    expect(readDriverStatus(w.db as never, DRIVER_OFF).task_limit_cents).toBeNull();
-    expect(readDriverStatus(w.db as never, DRIVER_ON).task_limit_cents).toBe(500);
+    expect(
+      readDriverStatus(w.db as never, DRIVER_OFF).task_limit_cents,
+    ).toBeNull();
+    expect(readDriverStatus(w.db as never, DRIVER_ON).task_limit_cents).toBe(
+      500,
+    );
     // 0 与 null 相反：前者是「一分钱都不许花」，后者是「没有上限这个数」。
-    expect(readDriverStatus(w.db as never, DRIVER_OFF).task_limit_cents).not.toBe(0);
+    expect(
+      readDriverStatus(w.db as never, DRIVER_OFF).task_limit_cents,
+    ).not.toBe(0);
   });
 
   it("⭐ 关着时【一条查询都不发】（真分支，而不是注释里声称被尊重的性质）", () => {
@@ -301,10 +374,18 @@ describe("A 机器级：驱动器【没开】时必须说出来，而不是画�
 
   it("对外形状是 snake_case（注入侧那个 camelCase 名字不许出现在响应里）", () => {
     const w = world();
-    const s = readDriverStatus(w.db as never, DRIVER_ON) as unknown as Record<string, unknown>;
+    const s = readDriverStatus(w.db as never, DRIVER_ON) as unknown as Record<
+      string,
+      unknown
+    >;
     expect(s["task_limit_cents"]).toBe(500);
     expect(s["taskLimitCents"]).toBeUndefined();
-    expect(Object.keys(s).sort()).toEqual(["enabled", "pumping", "stopped", "task_limit_cents"]);
+    expect(Object.keys(s).sort()).toEqual([
+      "enabled",
+      "pumping",
+      "stopped",
+      "task_limit_cents",
+    ]);
   });
 });
 
@@ -333,7 +414,9 @@ describe("B 到顶那一档：三个条件缺一个就会【在不该说的时�
     expect(readDriverStatus(w.db as never, DRIVER_ON).stopped).toEqual([]);
     // 分母：同一格补上放弃行就报 ⇒ 上面那句真的是"缺那一行"而不是"这一发根本不通"。
     gaveUp(w.db, "b2", "IN_PROGRESS", "dev");
-    expect(causesOf(readDriverStatus(w.db as never, DRIVER_ON))).toEqual({ b2: "at_limit" });
+    expect(causesOf(readDriverStatus(w.db as never, DRIVER_ON))).toEqual({
+      b2: "at_limit",
+    });
   });
 
   it("⭐ 打回重访：上一次那行放弃【不算这一次】（driverCellMarkerSql 那一发）", () => {
@@ -344,7 +427,9 @@ describe("B 到顶那一档：三个条件缺一个就会【在不该说的时�
     entered(w.db, "b3", "IN_PROGRESS", T0 - 60 * MIN);
     claim(w.db, "b3", "IN_PROGRESS", "dev", 3, T0 - 59 * MIN);
     gaveUp(w.db, "b3", "IN_PROGRESS", "dev", { at: T0 - 58 * MIN });
-    expect(causesOf(readDriverStatus(w.db as never, DRIVER_ON))).toEqual({ b3: "at_limit" });
+    expect(causesOf(readDriverStatus(w.db as never, DRIVER_ON))).toEqual({
+      b3: "at_limit",
+    });
     // 打回：离开这一格，再回来（新的锚点，id 更大）。库里那一行放弃记录【一行都没删】
     // —— 语义靠"它落在锚点之前"，不靠任何清理动作。
     entered(w.db, "b3", "REJECTED_DOWNWARD", T0 - 20 * MIN);
@@ -352,7 +437,9 @@ describe("B 到顶那一档：三个条件缺一个就会【在不该说的时�
     expect(readDriverStatus(w.db as never, DRIVER_ON).stopped).toEqual([]);
     // 分母：重访之后驱动器再来一轮又到顶 ⇒ 立刻重新报。
     gaveUp(w.db, "b3", "IN_PROGRESS", "dev", { at: T0 - MIN });
-    expect(causesOf(readDriverStatus(w.db as never, DRIVER_ON))).toEqual({ b3: "at_limit" });
+    expect(causesOf(readDriverStatus(w.db as never, DRIVER_ON))).toEqual({
+      b3: "at_limit",
+    });
   });
 
   it("⭐ 换了人：上一手 dev 试到上限，不算到 manager 头上", () => {
@@ -363,7 +450,9 @@ describe("B 到顶那一档：三个条件缺一个就会【在不该说的时�
     expect(readDriverStatus(w.db as never, DRIVER_ON).stopped).toEqual([]);
     // 正向对照：同一格同一时刻写成 manager 就报 ⇒ 挡住的确实是【角色】那一轴。
     gaveUp(w.db, "b4", "IN_PROGRESS", "manager", { at: T0 - MIN });
-    expect(causesOf(readDriverStatus(w.db as never, DRIVER_ON))).toEqual({ b4: "at_limit" });
+    expect(causesOf(readDriverStatus(w.db as never, DRIVER_ON))).toEqual({
+      b4: "at_limit",
+    });
   });
 
   it("⭐ 换了格子：上一格试到上限，不算到当前格头上", () => {
@@ -375,12 +464,20 @@ describe("B 到顶那一档：三个条件缺一个就会【在不该说的时�
     gaveUp(w.db, "b5", "IN_PROGRESS", "dev");
     expect(readDriverStatus(w.db as never, DRIVER_ON).stopped).toEqual([]);
     gaveUp(w.db, "b5", "IN_REVIEW", "dev", { at: T0 - MIN });
-    expect(causesOf(readDriverStatus(w.db as never, DRIVER_ON))).toEqual({ b5: "at_limit" });
+    expect(causesOf(readDriverStatus(w.db as never, DRIVER_ON))).toEqual({
+      b5: "at_limit",
+    });
   });
 
   it("不在候选集合里的状态即使有放弃行也不报（候选集与驱动器同源）", () => {
     const w = world();
-    for (const st of ["DELIVERED", "ARCHIVED", "CHARTER_PENDING", "ESCALATED_TO_CEO", "BLOCKED"]) {
+    for (const st of [
+      "DELIVERED",
+      "ARCHIVED",
+      "CHARTER_PENDING",
+      "ESCALATED_TO_CEO",
+      "BLOCKED",
+    ]) {
       task(w.db, "b6-" + st, st, "dev");
       entered(w.db, "b6-" + st, st);
       gaveUp(w.db, "b6-" + st, st, "dev");
@@ -404,7 +501,9 @@ describe("B 到顶那一档：三个条件缺一个就会【在不该说的时�
       gaveUp(w.db, id, st, "dev");
       expected[id] = "at_limit";
     }
-    expect(causesOf(readDriverStatus(w.db as never, DRIVER_ON))).toEqual(expected);
+    expect(causesOf(readDriverStatus(w.db as never, DRIVER_ON))).toEqual(
+      expected,
+    );
   });
 
   it("⭐ 坏 payload 的那一行被跳过而【不抛】（库里躺着外部改过的行不该炸看板）", () => {
@@ -416,7 +515,9 @@ describe("B 到顶那一档：三个条件缺一个就会【在不该说的时�
     expect(readDriverStatus(w.db as never, DRIVER_ON).stopped).toEqual([]);
     // 同一条任务再写一行【合法的】⇒ 照常报（坏行没把整发查询带走）。
     gaveUp(w.db, "b8", "IN_PROGRESS", "dev", { at: T0 - MIN });
-    expect(causesOf(readDriverStatus(w.db as never, DRIVER_ON))).toEqual({ b8: "at_limit" });
+    expect(causesOf(readDriverStatus(w.db as never, DRIVER_ON))).toEqual({
+      b8: "at_limit",
+    });
   });
 
   it("⭐ 同一格【两行】放弃记录：数字与时刻都取自 id 最大那一行", () => {
@@ -430,8 +531,16 @@ describe("B 到顶那一档：三个条件缺一个就会【在不该说的时�
     const w = world();
     task(w.db, "b9");
     entered(w.db, "b9", "IN_PROGRESS", T0 - 60 * MIN);
-    gaveUp(w.db, "b9", "IN_PROGRESS", "dev", { attempts: 3, max: 3, at: T0 - 40 * MIN });
-    gaveUp(w.db, "b9", "IN_PROGRESS", "dev", { attempts: 5, max: 5, at: T0 - 5 * MIN });
+    gaveUp(w.db, "b9", "IN_PROGRESS", "dev", {
+      attempts: 3,
+      max: 3,
+      at: T0 - 40 * MIN,
+    });
+    gaveUp(w.db, "b9", "IN_PROGRESS", "dev", {
+      attempts: 5,
+      max: 5,
+      at: T0 - 5 * MIN,
+    });
     const s = readDriverStatus(w.db as never, DRIVER_ON);
     expect(s.stopped).toHaveLength(1); // 一行任务，而不是"两个属性来自两行"
     expect(s.stopped[0]?.attempts).toBe(5);
@@ -453,8 +562,16 @@ describe("B 到顶那一档：三个条件缺一个就会【在不该说的时�
     const w = world();
     task(w.db, "b12");
     entered(w.db, "b12", "IN_PROGRESS", T0 - 60 * MIN);
-    gaveUp(w.db, "b12", "IN_PROGRESS", "dev", { attempts: 3, max: 3, at: T0 - 5 * MIN }); // 先写、时刻新
-    gaveUp(w.db, "b12", "IN_PROGRESS", "dev", { attempts: 7, max: 7, at: T0 - 40 * MIN }); // 后写、时刻旧
+    gaveUp(w.db, "b12", "IN_PROGRESS", "dev", {
+      attempts: 3,
+      max: 3,
+      at: T0 - 5 * MIN,
+    }); // 先写、时刻新
+    gaveUp(w.db, "b12", "IN_PROGRESS", "dev", {
+      attempts: 7,
+      max: 7,
+      at: T0 - 40 * MIN,
+    }); // 后写、时刻旧
     const s = readDriverStatus(w.db as never, DRIVER_ON);
     expect(s.stopped).toHaveLength(1);
     expect(s.stopped[0]?.attempts).toBe(7); // id 最大那一行的数字
@@ -481,7 +598,11 @@ describe("B 到顶那一档：三个条件缺一个就会【在不该说的时�
     task(w.db, "b11");
     entered(w.db, "b11", "IN_PROGRESS");
     gaveUp(w.db, "b11", "IN_PROGRESS", "dev", {
-      payload: JSON.stringify({ kind: DRIVER_GAVE_UP_KIND, attempts: "4", max_attempts: "4" }),
+      payload: JSON.stringify({
+        kind: DRIVER_GAVE_UP_KIND,
+        attempts: "4",
+        max_attempts: "4",
+      }),
     });
     const row = readDriverStatus(w.db as never, DRIVER_ON).stopped[0];
     expect(row?.attempts).toBe(4);
@@ -514,7 +635,9 @@ describe("C 「被钱挡住」与「试到上限」是两档，下一步动作�
     expect(readDriverStatus(w.db as never, DRIVER_ON).stopped).toEqual([]);
     // 分母：同一份夹具再花一分钱就报 ⇒ 上面那句是"差一分钱"而不是"这一档没接通"。
     spend(w.db, "c2", 500);
-    expect(causesOf(readDriverStatus(w.db as never, DRIVER_ON))).toEqual({ c2: "no_budget" });
+    expect(causesOf(readDriverStatus(w.db as never, DRIVER_ON))).toEqual({
+      c2: "no_budget",
+    });
   });
 
   it("⭐ 两边都不知道（无预算行而 taskLimitCents=null）⇒ 【不许】报「被钱挡住」", () => {
@@ -526,11 +649,17 @@ describe("C 「被钱挡住」与「试到上限」是两档，下一步动作�
     const w = world();
     task(w.db, "c3");
     entered(w.db, "c3", "IN_PROGRESS");
-    const unknown: DriverRuntimeState = { enabled: true, pumping: true, taskLimitCents: null };
+    const unknown: DriverRuntimeState = {
+      enabled: true,
+      pumping: true,
+      taskLimitCents: null,
+    };
     expect(readDriverStatus(w.db as never, unknown).stopped).toEqual([]);
     // 分母：同一个库同一刻，把上限告诉它就报 ⇒ 上一句真的是"因为不知道"而不是"没接通"。
     budget(w.db, "c3", 0, 0); // 有行而上限 0 ⇒ 一定挡
-    expect(causesOf(readDriverStatus(w.db as never, unknown))).toEqual({ c3: "no_budget" });
+    expect(causesOf(readDriverStatus(w.db as never, unknown))).toEqual({
+      c3: "no_budget",
+    });
   });
 
   it("⭐ 有预算而 CLI=null ⇒ 【照旧报】：库里就是分母，不是「未知」（round360）", () => {
@@ -542,8 +671,14 @@ describe("C 「被钱挡住」与「试到上限」是两档，下一步动作�
     task(w.db, "c5");
     entered(w.db, "c5", "IN_PROGRESS");
     budget(w.db, "c5", 500, 900); // 库里超了，而 CLI 没人给
-    const unknown: DriverRuntimeState = { enabled: true, pumping: true, taskLimitCents: null };
-    expect(causesOf(readDriverStatus(w.db as never, unknown))).toEqual({ c5: "no_budget" });
+    const unknown: DriverRuntimeState = {
+      enabled: true,
+      pumping: true,
+      taskLimitCents: null,
+    };
+    expect(causesOf(readDriverStatus(w.db as never, unknown))).toEqual({
+      c5: "no_budget",
+    });
     // 反向对照：把那一列抬到没超 ⇒ 同一个 null CLI 下什么都不报。
     spend(w.db, "c5", 100);
     expect(readDriverStatus(w.db as never, unknown).stopped).toEqual([]);
@@ -558,7 +693,9 @@ describe("C 「被钱挡住」与「试到上限」是两档，下一步动作�
     entered(w.db, "c4", "IN_PROGRESS");
     budget(w.db, "c4", 500, 900);
     gaveUp(w.db, "c4", "IN_PROGRESS", "dev");
-    expect(causesOf(readDriverStatus(w.db as never, DRIVER_ON))).toEqual({ c4: "at_limit" });
+    expect(causesOf(readDriverStatus(w.db as never, DRIVER_ON))).toEqual({
+      c4: "at_limit",
+    });
   });
 });
 
@@ -578,9 +715,15 @@ describe("D 与驱动器同源：target 与 kind 必须逐字对上", () => {
       taskId: "d2",
       kind: DRIVER_GAVE_UP_KIND,
       target: "DECOMPOSING/manager",
-      payload: JSON.stringify({ kind: DRIVER_GAVE_UP_KIND, attempts: 3, max_attempts: 3 }),
+      payload: JSON.stringify({
+        kind: DRIVER_GAVE_UP_KIND,
+        attempts: 3,
+        max_attempts: 3,
+      }),
     });
-    expect(causesOf(readDriverStatus(w.db as never, DRIVER_ON))).toEqual({ d1: "at_limit" });
+    expect(causesOf(readDriverStatus(w.db as never, DRIVER_ON))).toEqual({
+      d1: "at_limit",
+    });
     // 这一发的作用是【证明上面那一发不是靠字符串巧合过的】：
     // 换分隔符必须【同时】改到写侧与读侧才对得上（DRIVER_CELL_SEP 两侧共用）。
   });
@@ -591,11 +734,17 @@ describe("D 与驱动器同源：target 与 kind 必须逐字对上", () => {
     entered(w.db, "d3", "IN_PROGRESS");
     // 同一格里另一个泵写的放弃行（charter-pump 那一族），形状极像而归属不同。
     gaveUp(w.db, "d3", "IN_PROGRESS", "dev", {
-      payload: JSON.stringify({ kind: "CharterDraftAbandoned", attempts: 3, max_attempts: 3 }),
+      payload: JSON.stringify({
+        kind: "CharterDraftAbandoned",
+        attempts: 3,
+        max_attempts: 3,
+      }),
     });
     expect(readDriverStatus(w.db as never, DRIVER_ON).stopped).toEqual([]);
     gaveUp(w.db, "d3", "IN_PROGRESS", "dev", { at: T0 - MIN });
-    expect(causesOf(readDriverStatus(w.db as never, DRIVER_ON))).toEqual({ d3: "at_limit" });
+    expect(causesOf(readDriverStatus(w.db as never, DRIVER_ON))).toEqual({
+      d3: "at_limit",
+    });
   });
 });
 
@@ -607,17 +756,29 @@ describe("E GET /today 的入口", () => {
     task(w.db, "e1");
     entered(w.db, "e1", "IN_PROGRESS");
     gaveUp(w.db, "e1", "IN_PROGRESS", "dev");
-    const r = await handleRequest(w.deps, w.req({ method: "GET", path: "/today" }));
+    const r = await handleRequest(
+      w.deps,
+      w.req({ method: "GET", path: "/today" }),
+    );
     expect(r.status).toBe(200);
-    const drv = (r.body as Record<string, unknown>)["driver"] as Record<string, unknown>;
+    const drv = (r.body as Record<string, unknown>)["driver"] as Record<
+      string,
+      unknown
+    >;
     expect(drv["enabled"]).toBe(true);
     expect((drv["stopped"] as Row[]).map((x) => x["task_id"])).toEqual(["e1"]);
     // 同一份库同一刻，deps 换一台没开的机器 ⇒ 那一格必须跟着变（不是装配时算死的）。
     // 这一发挡的是"把 driverState() 在闭包里调一次存成常量"那种写法 ——
     // 它在测试里全绿而 onFatal 之后开始撒谎（0048 变异实验 M8 同一形状）。
     const off: HubDeps = { ...w.deps, driverState: () => DRIVER_OFF };
-    const r2 = await handleRequest(off, w.req({ method: "GET", path: "/today" }));
-    const drv2 = (r2.body as Record<string, unknown>)["driver"] as Record<string, unknown>;
+    const r2 = await handleRequest(
+      off,
+      w.req({ method: "GET", path: "/today" }),
+    );
+    const drv2 = (r2.body as Record<string, unknown>)["driver"] as Record<
+      string,
+      unknown
+    >;
     expect(drv2["enabled"]).toBe(false);
     expect(drv2["stopped"]).toEqual([]);
   });
@@ -627,18 +788,22 @@ describe("E GET /today 的入口", () => {
     // 多开一次事务、把某条 SQL 的 ORDER BY 顶掉）。这一发钉的是"只有 driver 那一格变了"。
     const w = world();
     task(w.db, "e2");
-    const before = (await handleRequest(w.deps, w.req({ method: "GET", path: "/today" })))
-      .body as Record<string, unknown>;
+    const before = (
+      await handleRequest(w.deps, w.req({ method: "GET", path: "/today" }))
+    ).body as Record<string, unknown>;
     gaveUp(w.db, "e2", "IN_PROGRESS", "dev");
-    const after = (await handleRequest(w.deps, w.req({ method: "GET", path: "/today" })))
-      .body as Record<string, unknown>;
+    const after = (
+      await handleRequest(w.deps, w.req({ method: "GET", path: "/today" }))
+    ).body as Record<string, unknown>;
     // 驱动那一格【该】变（分母：这一发不是"什么都没发生"）。
     expect((after["driver"] as Record<string, unknown>)["stopped"]).not.toEqual(
       (before["driver"] as Record<string, unknown>)["stopped"],
     );
     for (const k of Object.keys(before)) {
       if (k === "driver") continue;
-      expect(JSON.stringify(after[k]), "不该变的键变了：" + k).toBe(JSON.stringify(before[k]));
+      expect(JSON.stringify(after[k]), "不该变的键变了：" + k).toBe(
+        JSON.stringify(before[k]),
+      );
     }
   });
 });

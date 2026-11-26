@@ -86,7 +86,11 @@ export function isSearchToolName(name: string): boolean {
 
 /** 一次调用的搜索观测结论。每一态都带 `why`，因为它会原样进审计与验证结果。 */
 export type SearchObservation =
-  | { readonly kind: "counted"; readonly searches: number; readonly why: string }
+  | {
+      readonly kind: "counted";
+      readonly searches: number;
+      readonly why: string;
+    }
   | { readonly kind: "not_granted"; readonly why: string }
   | { readonly kind: "silent"; readonly why: string };
 
@@ -113,7 +117,9 @@ export function observeSearchCalls(o: {
     return {
       kind: "not_granted",
       why:
-        "本次调用的授权名单 [" + o.granted.join(", ") + "] 里没有任何搜索工具，" +
+        "本次调用的授权名单 [" +
+        o.granted.join(", ") +
+        "] 里没有任何搜索工具，" +
         "所以『搜过』在这条通路上**结构上不可能**成立（这是一个可证明的 0，不是没看见）。" +
         "修法不是让 Agent『下次记得搜』：要么授予搜索工具，" +
         "要么承认这个角色不该有强制搜索领域。",
@@ -135,8 +141,13 @@ export function observeSearchCalls(o: {
     kind: "counted",
     searches: hits.length,
     why:
-      "Gateway 看见 " + o.sightings.length + " 次工具调用，其中 " + hits.length +
-      " 次命中搜索类工具名 [" + hits.map((s) => s.tool).join(", ") + "]。" +
+      "Gateway 看见 " +
+      o.sightings.length +
+      " 次工具调用，其中 " +
+      hits.length +
+      " 次命中搜索类工具名 [" +
+      hits.map((s) => s.tool).join(", ") +
+      "]。" +
       "名字口径与授予那一侧同源（子串匹配 `search`，见 mcp.ts），" +
       "所以『授予了而数不到』这种漂法不会出现在这一层。",
   };

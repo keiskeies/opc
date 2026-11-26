@@ -19,9 +19,9 @@
  * 其余一律交回 next()，所以真装了的 .js（node_modules 里的）不受影响。
  */
 import { existsSync } from "node:fs";
+import { register } from "node:module";
 import { dirname, resolve as presolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { register } from "node:module";
 
 register(
   "data:text/javascript," +

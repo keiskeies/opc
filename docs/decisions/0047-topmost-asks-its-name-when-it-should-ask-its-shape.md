@@ -131,7 +131,7 @@ if (plan.move && plan.thenEscalateToCeo === true) {
    不修「谁来按下一轮」。那一个是**常驻驱动器**（【规格】§7.2 步骤 2–7
    要 CEO 什么都不做），设计见下条，本篇**没写**。
    【round321 复核：本句与 0046 §6 第 3 条同源，已一起过期 —— `advance()` 今天有两个
-   生产调用方（`engine/work.ts:483` + `serve/driver-pump.ts:780`，后经 `--driver-pump`
+   生产调用方（`engine/work.ts:597` + `serve/driver-pump.ts:868`，后经 `--driver-pump`
    每心跳派发）。「常驻驱动器」在 0048 落地；「谁来按下一轮」现在有泵回答。】
 2. **`BUDGET_PAUSED` 那一格要不要「免一轮钱」地走过去，归你拍（§7）**。
    ⚠ 本条原来写的是「驱动器替她把预算续上 = 替她做财务决定」，**前提是错的**，

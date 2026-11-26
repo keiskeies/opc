@@ -45,13 +45,12 @@ function loadRenderMarkdown(): (text: string) => string {
   ctx["globalThis"] = ctx;
   vm.createContext(ctx);
   // 不往 ctx 里塞 require / process：context 隔离即是「纯函数」的执行证据。
-  vm.runInContext(
-    `${exported}\n;globalThis.__md = renderMarkdown;`,
-    ctx,
-    { filename: "markdown.js" },
-  );
+  vm.runInContext(`${exported}\n;globalThis.__md = renderMarkdown;`, ctx, {
+    filename: "markdown.js",
+  });
   const fn = ctx["__md"];
-  if (typeof fn !== "function") throw new Error("markdown.js 没有导出 renderMarkdown");
+  if (typeof fn !== "function")
+    throw new Error("markdown.js 没有导出 renderMarkdown");
   return fn as (text: string) => string;
 }
 
@@ -108,7 +107,9 @@ describe("markdown 渲染器：块级语法", () => {
 
   it("表格要「表头 + 分隔行 + 数据行」三行一起才算，对齐按冒号落位", () => {
     const out = md("| 甲 | 乙 |\n|:---|---:|\n| 1 | 2 |");
-    expect(out).toContain("<thead><tr><th align=\"left\">甲</th><th align=\"right\">乙</th></tr></thead>");
+    expect(out).toContain(
+      '<thead><tr><th align="left">甲</th><th align="right">乙</th></tr></thead>',
+    );
     expect(out).toContain('<td align="left">1</td>');
     expect(out).toContain('<td align="right">2</td>');
     // 只有表头与分隔行 ⇒ 不是表格（否则任何含 | 的段落都会被误判）。
@@ -161,7 +162,9 @@ describe("markdown 渲染器：行内语法", () => {
   });
 
   it("外链一律 rel=noopener noreferrer", () => {
-    expect(md("[文](https://example.com/a)")).toContain('rel="noopener noreferrer"');
+    expect(md("[文](https://example.com/a)")).toContain(
+      'rel="noopener noreferrer"',
+    );
   });
 });
 
@@ -170,7 +173,10 @@ describe("markdown 渲染器：安全契约（调用方直接喂 innerHTML）", 
     const out = md("<script>alert(1)</script>");
     expect(out).not.toContain("<script>");
     expect(out).toContain("&lt;script&gt;");
-    for (const raw of ['<img src=x onerror="alert(1)">', '<a href="javascript:1">x</a>']) {
+    for (const raw of [
+      '<img src=x onerror="alert(1)">',
+      '<a href="javascript:1">x</a>',
+    ]) {
       expect(md(raw)).not.toMatch(/<(script|img|a)\b/u);
     }
   });
@@ -188,7 +194,9 @@ describe("markdown 渲染器：安全契约（调用方直接喂 innerHTML）", 
       "\u0000javascript:alert(1)",
     ]) {
       const link = md(`[点我](${href})`);
-      expect(link, `链接 ${JSON.stringify(href)} 没落回 #`).toContain('href="#"');
+      expect(link, `链接 ${JSON.stringify(href)} 没落回 #`).toContain(
+        'href="#"',
+      );
       expect(link).not.toMatch(/href="java/iu);
       const img = md(`![i](${href})`);
       expect(img, `图片 ${JSON.stringify(href)} 没落回 #`).toContain('src="#"');
@@ -201,7 +209,10 @@ describe("markdown 渲染器：安全契约（调用方直接喂 innerHTML）", 
     // safeHref，而这一发会当场红 —— 那时放宽的人就知道自己动了什么。
     for (const href of ["java\tscript:alert(1)", " java\tscript:alert(1)"]) {
       const link = md(`[点我](${href})`);
-      expect(link, `带空白的 ${JSON.stringify(href)} 竟生成了链接`).not.toContain("<a ");
+      expect(
+        link,
+        `带空白的 ${JSON.stringify(href)} 竟生成了链接`,
+      ).not.toContain("<a ");
       expect(link).not.toContain("<img");
     }
     // 换行把一行切成两段：段与段之间拼不出 URL，两半都只是文字。
@@ -243,7 +254,9 @@ describe("markdown 渲染器：安全契约（调用方直接喂 innerHTML）", 
     const out = md('[x](/a"onerror="alert(1))');
     expect(out).toContain('href="/a&quot;onerror=&quot;alert(1"');
     const href = /href="([^"]*)"/u.exec(out)?.[1] ?? "";
-    expect(href.includes('"'), `href 属性值里混进了裸引号：${href}`).toBe(false);
+    expect(href.includes('"'), `href 属性值里混进了裸引号：${href}`).toBe(
+      false,
+    );
     expect(out.match(/href=/gu)?.length).toBe(1);
   });
 
@@ -251,7 +264,10 @@ describe("markdown 渲染器：安全契约（调用方直接喂 innerHTML）", 
     const src = readFileSync(MARKDOWN_PATH, "utf8");
     const render = src.slice(src.indexOf("export function renderMarkdown"));
     const escAt = render.indexOf("escMd(lines[i])");
-    expect(escAt, "renderMarkdown 里找不到 escMd(lines[i]) ⇒ 转义入口被挪走了").toBeGreaterThan(-1);
+    expect(
+      escAt,
+      "renderMarkdown 里找不到 escMd(lines[i]) ⇒ 转义入口被挪走了",
+    ).toBeGreaterThan(-1);
     const inlineAt = render.indexOf("inlineMd(");
     expect(
       escAt,

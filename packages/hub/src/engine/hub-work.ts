@@ -24,12 +24,12 @@
  */
 import { isDirectRun } from "../internal/direct-run.js";
 import {
-  DECIDE_USAGE,
-  WORK_USAGE,
   cmdDecide,
   cmdWork,
+  DECIDE_USAGE,
   parseDecideArgs,
   parseWorkArgs,
+  WORK_USAGE,
   type WorkIo,
   type WorkResult,
 } from "./work.js";
@@ -40,7 +40,10 @@ import {
  * @returns 退出码。含义见 cmdWork / cmdDecide 各自那段（0 / 1 / 2 三条，
  *          分界线是【使用者的下一步动作不同】，不是「成功/失败」两分）。
  */
-export async function runEngineCli(argv: readonly string[], io: WorkIo): Promise<WorkResult> {
+export async function runEngineCli(
+  argv: readonly string[],
+  io: WorkIo,
+): Promise<WorkResult> {
   const verb = argv[0];
   const wantsHelp = verb === "--help" || verb === "-h" || verb === "help";
   if (wantsHelp || verb === undefined || verb === "") {
@@ -92,7 +95,9 @@ export async function runEngineCli(argv: readonly string[], io: WorkIo): Promise
 }
 
 /** stdio 版：进程入口与测试都走这一条，只是 io 不同。 */
-export async function runEngineCliOnStdio(argv: readonly string[]): Promise<WorkResult> {
+export async function runEngineCliOnStdio(
+  argv: readonly string[],
+): Promise<WorkResult> {
   const io: WorkIo = {
     write: (t) => {
       process.stdout.write(t);

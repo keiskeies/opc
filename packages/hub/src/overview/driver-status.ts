@@ -46,6 +46,7 @@
  */
 import type { DatabaseSync } from "node:sqlite";
 import { assertParamCount, assertSingleStatement } from "../db/write-queue.js";
+import { kindOf } from "../heartbeat/patrol.js";
 import { underTaskBudgetSql } from "../serve/charter-pump.js";
 import {
   DRIVER_ELIGIBLE_STATES,
@@ -53,7 +54,6 @@ import {
   driverCellMarkerSql,
   driverCellTargetSql,
 } from "../serve/driver-pump.js";
-import { kindOf } from "../heartbeat/patrol.js";
 
 /**
  * 一台 Hub 的驱动器【此刻】的真实状态，由装配层【每请求现取】。
@@ -219,9 +219,12 @@ const STOPPED_SQL =
   " AND g.id > " +
   driverCellMarkerSql("t") +
   ") AS abandoned, " +
-  gaveUpSubquery("g2", "attempts") + " AS attempts, " +
-  gaveUpSubquery("g3", "max_attempts") + " AS max_attempts, " +
-  gaveUpSubquery("g4", null) + " AS gave_up_id, " +
+  gaveUpSubquery("g2", "attempts") +
+  " AS attempts, " +
+  gaveUpSubquery("g3", "max_attempts") +
+  " AS max_attempts, " +
+  gaveUpSubquery("g4", null) +
+  " AS gave_up_id, " +
   "NOT (" +
   underTaskBudgetSql("t") +
   ") AS over_budget " +
@@ -298,12 +301,17 @@ export function readDriverStatus(
   const params: unknown[] = [state.taskLimitCents, ...DRIVER_ELIGIBLE_STATES];
   assertParamCount(STOPPED_SQL, params);
   assertSingleStatement(STOPPED_SQL);
-  const rows = db.prepare(STOPPED_SQL).all(...(params as never[])) as unknown as RawRow[];
+  const rows = db
+    .prepare(STOPPED_SQL)
+    .all(...(params as never[])) as unknown as RawRow[];
 
   const stopped: DriverStoppedTask[] = [];
   for (const r of rows) {
     if (Number(r.abandoned) === 1) {
-      const at = r.gave_up_id === null ? null : readAbandonedAt(db, Number(r.gave_up_id));
+      const at =
+        r.gave_up_id === null
+          ? null
+          : readAbandonedAt(db, Number(r.gave_up_id));
       stopped.push({
         task_id: r.id,
         state: r.status,

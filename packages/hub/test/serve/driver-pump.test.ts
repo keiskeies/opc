@@ -35,17 +35,22 @@
 import { mkdirSync, readFileSync, realpathSync, rmSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-
-import { fixtureTmp } from "../fixtures/fixture-dir.js";
-import { migrate } from "../../src/db/migrate.js";
-import { INSERT_DELEGATION_GRAPH_SQL } from "../../src/org/commit.js";
-import { InMemoryEventBus } from "../../src/events/bus.js";
-import { appendAudit } from "../../src/events/recorder.js";
 import { requireScopeDb } from "../../src/checkpoint/tx-scope.js";
+import { migrate } from "../../src/db/migrate.js";
 import { AGENT_EDGES, seatOf } from "../../src/engine/dispatch.js";
 import type { AdvanceResult, AdvanceTurnLog } from "../../src/engine/driver.js";
+import { InMemoryEventBus } from "../../src/events/bus.js";
+import { appendAudit } from "../../src/events/recorder.js";
 import type { TaskState } from "../../src/graph/status.js";
+import { TASK_STATES } from "../../src/graph/status.js";
 import {
+  DEFAULT_STALL_THRESHOLD_MS,
+  patrolTasks,
+} from "../../src/heartbeat/patrol.js";
+import { INSERT_DELEGATION_GRAPH_SQL } from "../../src/org/commit.js";
+import { readDriverStatus } from "../../src/overview/driver-status.js";
+import {
+  CLAUDE_TURN_CAP_MS,
   DEFAULT_DRIVER_MAX_ATTEMPTS,
   DEFAULT_DRIVER_MAX_TURNS,
   DEFAULT_DRIVER_TASK_LIMIT,
@@ -54,25 +59,23 @@ import {
   DRIVER_CLAIM_KIND,
   DRIVER_ELIGIBLE_STATES,
   DRIVER_GAVE_UP_KIND,
-  CLAUDE_TURN_CAP_MS,
-  driveTasks,
-  driverAttemptsSql,
-  driverBlockedSql,
-  driverCellTarget,
-  driverCandidatesSql,
-  placeholdersFor,
-  worstDriveWaitMs,
   type DriveOptions,
   type DriveRoundResult,
+  driverAttemptsSql,
+  driverBlockedSql,
+  driverCandidatesSql,
+  driverCellTarget,
+  driveTasks,
+  placeholdersFor,
+  worstDriveWaitMs,
 } from "../../src/serve/driver-pump.js";
-import { DEFAULT_STALL_THRESHOLD_MS, patrolTasks } from "../../src/heartbeat/patrol.js";
-import { readDriverStatus } from "../../src/overview/driver-status.js";
-import { TASK_STATES } from "../../src/graph/status.js";
+import { fixtureTmp } from "../fixtures/fixture-dir.js";
 
 const TMP = fixtureTmp("serve-driver-pump", import.meta.url);
 const NOW = 1_700_000_000_000;
 
 type Row = Record<string, unknown>;
+
 // 队列/库不经手搓 stub（B5）：driveTasks 要的是 HubWriter，patrolTasks 要的是
 // PatrolDb（Pick<DatabaseSync,"prepare">），手搓收窄会换来一堆 as 骨架。
 import type { DatabaseSync } from "node:sqlite";
@@ -118,10 +121,30 @@ interface World {
  */
 const GRAPH = JSON.stringify({
   nodes: {
-    ceo: { role_id: "ceo", can_manage: true, reports_to: null, model_family: "opus" },
-    manager: { role_id: "manager", can_manage: true, reports_to: "ceo", model_family: "opus" },
-    dev: { role_id: "dev", can_manage: false, reports_to: "manager", model_family: "opus" },
-    tech: { role_id: "tech", can_manage: false, reports_to: "manager", model_family: "opus" },
+    ceo: {
+      role_id: "ceo",
+      can_manage: true,
+      reports_to: null,
+      model_family: "opus",
+    },
+    manager: {
+      role_id: "manager",
+      can_manage: true,
+      reports_to: "ceo",
+      model_family: "opus",
+    },
+    dev: {
+      role_id: "dev",
+      can_manage: false,
+      reports_to: "manager",
+      model_family: "opus",
+    },
+    tech: {
+      role_id: "tech",
+      can_manage: false,
+      reports_to: "manager",
+      model_family: "opus",
+    },
   },
   edges: [],
 });
@@ -131,15 +154,28 @@ const GRAPH = JSON.stringify({
  * 【状态】，而不是「建任务那条路对不对」。与 charter-pump.test.ts 同一条理由。
  */
 async function world(
-  o: { readonly tasks?: readonly { id: string; status: string; role: string }[] } = {},
+  o: {
+    readonly tasks?: readonly { id: string; status: string; role: string }[];
+  } = {},
 ): Promise<World> {
   const { WriteQueue } = await import("../../src/db/write-queue.js");
-  const q = new WriteQueue(TMP + "/d-" + process.pid + "-" + ++fileSeq + ".db") as unknown as Queue;
+  const q = new WriteQueue(
+    TMP + "/d-" + process.pid + "-" + ++fileSeq + ".db",
+  ) as unknown as Queue;
   queues.push(q);
   const db = q.writeConnection();
   migrate(db);
-  db.prepare(INSERT_DELEGATION_GRAPH_SQL).run("g1", 1, GRAPH, NOW, "ceo", "测试用组织图");
-  const tasks = o.tasks ?? [{ id: "t1", status: "IN_PROGRESS", role: "manager" }];
+  db.prepare(INSERT_DELEGATION_GRAPH_SQL).run(
+    "g1",
+    1,
+    GRAPH,
+    NOW,
+    "ceo",
+    "测试用组织图",
+  );
+  const tasks = o.tasks ?? [
+    { id: "t1", status: "IN_PROGRESS", role: "manager" },
+  ];
   tasks.forEach((t, i) => {
     db.prepare(
       "INSERT INTO tasks (id, title, status, assigned_role, current_node, created_at, updated_at, graph_version) " +
@@ -224,10 +260,15 @@ async function drive(
     ...(o.real === true
       ? {}
       : {
-          driveTask: async (taskId: string, budget: number, maxTurns: number) => {
+          driveTask: async (
+            taskId: string,
+            budget: number,
+            maxTurns: number,
+          ) => {
             calls.push({ taskId, budget, maxTurns });
             if (o.throwWith !== undefined) throw new Error(o.throwWith);
-            if (o.moveto !== undefined) await moveTo(w, taskId, o.moveto.status, o.moveto.role, nowMs);
+            if (o.moveto !== undefined)
+              await moveTo(w, taskId, o.moveto.status, o.moveto.role, nowMs);
             return adv({
               ...(o.stopped === undefined ? {} : { stopped: o.stopped }),
               costCents: o.costCents ?? 4,
@@ -243,7 +284,13 @@ async function drive(
 }
 
 /** 把任务挪到另一格并【写下那条状态边】（marker 判的就是它）。 */
-async function moveTo(w: World, taskId: string, status: string, role: string, nowMs: number): Promise<void> {
+async function moveTo(
+  w: World,
+  taskId: string,
+  status: string,
+  role: string,
+  nowMs: number,
+): Promise<void> {
   await w.q.node(() => {
     const db = requireScopeDb("test.driver-pump.moveTo");
     appendAudit(
@@ -254,17 +301,19 @@ async function moveTo(w: World, taskId: string, status: string, role: string, no
         actorId: role,
         action: "state_change",
         target: status,
-        payload: { kind: "TaskStateChanged", taskId, to: status, summary: "测试造的边" },
+        payload: {
+          kind: "TaskStateChanged",
+          taskId,
+          to: status,
+          summary: "测试造的边",
+        },
         createdAt: nowMs,
       },
       () => nowMs,
     );
-    db.prepare("UPDATE tasks SET status = ?, assigned_role = ?, current_node = ? WHERE id = ?").run(
-      status,
-      role,
-      role,
-      taskId,
-    );
+    db.prepare(
+      "UPDATE tasks SET status = ?, assigned_role = ?, current_node = ? WHERE id = ?",
+    ).run(status, role, role, taskId);
     return null;
   });
 }
@@ -273,7 +322,11 @@ function rows(w: World, sql: string, ...a: unknown[]): Row[] {
   return w.db.prepare(sql).all(...(a as never[]));
 }
 function status(w: World, taskId: string): string {
-  return String((w.db.prepare("SELECT status FROM tasks WHERE id = ?").get(taskId) as Row)["status"]);
+  return String(
+    (w.db.prepare("SELECT status FROM tasks WHERE id = ?").get(taskId) as Row)[
+      "status"
+    ],
+  );
 }
 /** 驱动器自己写的行，按 kind 取。 */
 function driverRows(w: World, kind: string): Row[] {
@@ -293,7 +346,10 @@ function driverRows(w: World, kind: string): Row[] {
  * 同一发判据 —— 而后者会因为 updated_at 相等而不确定（同毫秒），前者不该不确定。
  * 预算同理固定成极大值：这一发只问"还有没有路"，不问"还有没有钱"（E 组问钱）。
  */
-function candidates(w: World, maxAttempts = DEFAULT_DRIVER_MAX_ATTEMPTS): string[] {
+function candidates(
+  w: World,
+  maxAttempts = DEFAULT_DRIVER_MAX_ATTEMPTS,
+): string[] {
   return (
     w.db
       .prepare(driverCandidatesSql(DRIVER_ELIGIBLE_STATES))
@@ -303,7 +359,9 @@ function candidates(w: World, maxAttempts = DEFAULT_DRIVER_MAX_ATTEMPTS): string
 /** 这条任务在【当前这一格】被认领了几次（用生产那份 SQL，不是另写一份）。 */
 function claimCount(w: World, taskId: string): number {
   const r = w.db
-    .prepare("SELECT " + driverAttemptsSql("t") + " AS n FROM tasks t WHERE t.id = ?")
+    .prepare(
+      "SELECT " + driverAttemptsSql("t") + " AS n FROM tasks t WHERE t.id = ?",
+    )
     .get(taskId) as Row | undefined;
   return Number(r?.["n"] ?? 0);
 }
@@ -324,7 +382,13 @@ function spend(w: World, taskId: string, cents: number): void {
  * 用 spend() 造出来的是"上限 99 花了 99"= 相等那一档，反向对照会退化成它自己的分母。
  * 生产形状：POST /budget 的 UPSERT 或章程批准同步都这样写这一行。
  */
-function budgetRow(w: World, taskId: string, limitCents: number, consumedCents: number, hardStop = 1): void {
+function budgetRow(
+  w: World,
+  taskId: string,
+  limitCents: number,
+  consumedCents: number,
+  hardStop = 1,
+): void {
   w.db
     .prepare(
       "INSERT INTO budgets (id, scope_type, scope_id, period, limit_cents, consumed_cents, hard_stop) " +
@@ -332,7 +396,13 @@ function budgetRow(w: World, taskId: string, limitCents: number, consumedCents: 
         "ON CONFLICT(scope_type, scope_id, period) DO UPDATE " +
         "SET limit_cents = excluded.limit_cents, consumed_cents = excluded.consumed_cents",
     )
-    .run("task|" + taskId + "|per_task", taskId, limitCents, consumedCents, hardStop);
+    .run(
+      "task|" + taskId + "|per_task",
+      taskId,
+      limitCents,
+      consumedCents,
+      hardStop,
+    );
 }
 
 /* ──────────────────────────────────────────────────────────────────────────
@@ -383,7 +453,9 @@ describe("A. 候选集合派生自边表，而不是抄一份名单", () => {
     // 今天【没有任何代码写那个状态】（0041 §7），所以这一发在真库里没有分母 ——
     // 这里造的是"如果有了，驱动器的做法是这个"。（诚实：这一发不证明今天有任务在那格。）
     expect(DRIVER_ELIGIBLE_STATES).toContain("BUDGET_PAUSED");
-    const w = await world({ tasks: [{ id: "t1", status: "BUDGET_PAUSED", role: "manager" }] });
+    const w = await world({
+      tasks: [{ id: "t1", status: "BUDGET_PAUSED", role: "manager" }],
+    });
     const r = await drive(w);
     expect(w.calls.map((c) => c.taskId)).toEqual(["t1"]);
     expect(r.driven[0]?.state).toBe("BUDGET_PAUSED");
@@ -425,10 +497,16 @@ describe("B. 认领行的 target 能被候选 SQL 数回来（两份抄件的往
     const claims = driverRows(w, DRIVER_CLAIM_KIND);
     expect(claims).toHaveLength(1);
     // ① TS 侧拼的 target
-    expect(String(claims[0]?.["target"])).toBe(driverCellTarget("IN_PROGRESS", "manager"));
+    expect(String(claims[0]?.["target"])).toBe(
+      driverCellTarget("IN_PROGRESS", "manager"),
+    );
     // ② SQL 侧拼的同一个值 —— 这两句【必须同值】，而这一发就是让它们不可能不同值。
     const sqlSide = w.db
-      .prepare("SELECT status || '" + DRIVER_CELL_SEP + "' || assigned_role AS t FROM tasks WHERE id = 't1'")
+      .prepare(
+        "SELECT status || '" +
+          DRIVER_CELL_SEP +
+          "' || assigned_role AS t FROM tasks WHERE id = 't1'",
+      )
       .get() as Row;
     expect(String(sqlSide["t"])).toBe(String(claims[0]?.["target"]));
     // ③ 数得回来。少了这一句，上面两条只证明"两边写了同一个字符串"，不证明数得到。
@@ -475,12 +553,17 @@ describe("C. 同一格试到上限 ⇒ 一次都不再推，并且【说话】",
     await drive(w, { maxAttempts: 1 });
     const gone = driverRows(w, DRIVER_GAVE_UP_KIND);
     expect(gone).toHaveLength(1);
-    const p = JSON.parse(String(gone[0]?.["payload"])) as Record<string, unknown>;
+    const p = JSON.parse(String(gone[0]?.["payload"])) as Record<
+      string,
+      unknown
+    >;
     expect(p["state"]).toBe("IN_PROGRESS");
     expect(p["role"]).toBe("manager");
     expect(Number(p["attempts"])).toBe(1);
     expect(Number(p["max_attempts"])).toBe(1);
-    expect(String(gone[0]?.["target"])).toBe(driverCellTarget("IN_PROGRESS", "manager"));
+    expect(String(gone[0]?.["target"])).toBe(
+      driverCellTarget("IN_PROGRESS", "manager"),
+    );
   });
 
   it("⭐ 放弃那一行的 actor 是【system / driver_pump】而绝不是 agent/角色名", async () => {
@@ -489,7 +572,10 @@ describe("C. 同一格试到上限 ⇒ 一次都不再推，并且【说话】",
     // append-only 库里写一句"某个角色跑了一轮"而那个角色什么都没被叫起来。
     const w = await world();
     await drive(w, { maxAttempts: 1 });
-    const all = [...driverRows(w, DRIVER_CLAIM_KIND), ...driverRows(w, DRIVER_GAVE_UP_KIND)];
+    const all = [
+      ...driverRows(w, DRIVER_CLAIM_KIND),
+      ...driverRows(w, DRIVER_GAVE_UP_KIND),
+    ];
     expect(all.length).toBeGreaterThanOrEqual(2);
     for (const row of all) {
       expect(String(row["actor_type"])).toBe(DRIVER_ACTOR.actorType);
@@ -514,7 +600,10 @@ describe("C. 同一格试到上限 ⇒ 一次都不再推，并且【说话】",
     // （真正的理由是"这一格已经被离开了，试到上限这件事不再成立"）。
     // 把两道判断调换顺序，这一发会留下一行假放弃记录 ⇒ 红。
     const w = await world();
-    await drive(w, { maxAttempts: 1, moveto: { status: "IN_REVIEW", role: "tech" } });
+    await drive(w, {
+      maxAttempts: 1,
+      moveto: { status: "IN_REVIEW", role: "tech" },
+    });
     expect(status(w, "t1")).toBe("IN_REVIEW");
     expect(driverRows(w, DRIVER_GAVE_UP_KIND)).toHaveLength(0);
     expect(driverRows(w, DRIVER_CLAIM_KIND)).toHaveLength(1);
@@ -608,9 +697,10 @@ describe("D. marker：只有【这一次来到这一格之后】的认领才算�
     await drive(w, { nowMs: NOW + 1000 }); // 认领行【同一个毫秒】而 id 更大
     const claims = driverRows(w, DRIVER_CLAIM_KIND);
     const markerId = Number(
-      (rows(w, "SELECT id FROM events WHERE json_extract(payload,'$.kind') = 'TaskStateChanged' ORDER BY id")[0]?.[
-        "id"
-      ] ?? 0) as number,
+      (rows(
+        w,
+        "SELECT id FROM events WHERE json_extract(payload,'$.kind') = 'TaskStateChanged' ORDER BY id",
+      )[0]?.["id"] ?? 0) as number,
     );
     expect(Number(claims[0]?.["id"])).toBeGreaterThan(markerId); // 判据依赖的形状
     expect(Number(claims[0]?.["created_at"])).toBe(NOW + 1000); // 时间上【分不出来】
@@ -659,10 +749,14 @@ describe("E. 绑参顺序与那道花钱的门", () => {
     // 上限写【列】、CLI 给大数：这样"相等"判的是"已花 == 生效上限"。
     const w = await world();
     budgetRow(w, "t1", 100, 100);
-    expect((await drive(w, { taskLimitCents: 100_000 })).driven).toHaveLength(0);
+    expect((await drive(w, { taskLimitCents: 100_000 })).driven).toHaveLength(
+      0,
+    );
     const w2 = await world();
     budgetRow(w2, "t1", 100, 99);
-    expect((await drive(w2, { taskLimitCents: 100_000 })).driven).toHaveLength(1);
+    expect((await drive(w2, { taskLimitCents: 100_000 })).driven).toHaveLength(
+      1,
+    );
   });
 
   it("⭐ 驱动器的门也读【列】：列小则挡，把列抬高（追加预算）则放行", async () => {
@@ -672,9 +766,13 @@ describe("E. 绑参顺序与那道花钱的门", () => {
     // 生效值改成 COALESCE(列, ?) 之后如果驱动器的绑参漂了，这里就会红。
     const w = await world();
     budgetRow(w, "t1", 50, 100);
-    expect((await drive(w, { taskLimitCents: 100_000 })).driven).toHaveLength(0);
+    expect((await drive(w, { taskLimitCents: 100_000 })).driven).toHaveLength(
+      0,
+    );
     budgetRow(w, "t1", 1000, 100);
-    expect((await drive(w, { taskLimitCents: 100_000 })).driven).toHaveLength(1);
+    expect((await drive(w, { taskLimitCents: 100_000 })).driven).toHaveLength(
+      1,
+    );
   });
 
   it("⭐ 被挡住的那条进 blocked，而且【穿过候选为空的早退】", async () => {
@@ -684,7 +782,9 @@ describe("E. 绑参顺序与那道花钱的门", () => {
     spend(w, "t1", 150);
     const r = await drive(w, { taskLimitCents: 100 });
     expect(r.driven).toHaveLength(0);
-    expect(r.blocked).toEqual([{ taskId: "t1", title: "想法 t1", consumedCents: 150 }]);
+    expect(r.blocked).toEqual([
+      { taskId: "t1", title: "想法 t1", consumedCents: 150 },
+    ]);
   });
 
   it("blocked 只数【本该成为候选而因为钱没成为候选】那批", async () => {
@@ -698,7 +798,11 @@ describe("E. 绑参顺序与那道花钱的门", () => {
     });
     spend(w, "t1", 150);
     await drive(w, { maxAttempts: 1, taskLimitCents: 100, nowMs: NOW + 1000 }); // t4 认领一次就到顶
-    const r = await drive(w, { maxAttempts: 1, taskLimitCents: 100, nowMs: NOW + 2000 });
+    const r = await drive(w, {
+      maxAttempts: 1,
+      taskLimitCents: 100,
+      nowMs: NOW + 2000,
+    });
     expect(r.blocked.map((b) => b.taskId)).toEqual(["t1"]);
   });
 
@@ -713,16 +817,19 @@ describe("E. 绑参顺序与那道花钱的门", () => {
     expect(cand.match(/\?/g)?.length).toBe(4); // 状态外：attempts / 预算 / limit
   });
 
-  it("一轮最多推 taskLimit 条（默认 " + DEFAULT_DRIVER_TASK_LIMIT + "）", async () => {
-    const many = Array.from({ length: 5 }, (_, i) => ({
-      id: "t" + i,
-      status: "IN_PROGRESS",
-      role: i % 2 === 0 ? "manager" : "dev",
-    }));
-    const w = await world({ tasks: many });
-    const r = await drive(w);
-    expect(r.driven).toHaveLength(DEFAULT_DRIVER_TASK_LIMIT);
-  });
+  it(
+    "一轮最多推 taskLimit 条（默认 " + DEFAULT_DRIVER_TASK_LIMIT + "）",
+    async () => {
+      const many = Array.from({ length: 5 }, (_, i) => ({
+        id: "t" + i,
+        status: "IN_PROGRESS",
+        role: i % 2 === 0 ? "manager" : "dev",
+      }));
+      const w = await world({ tasks: many });
+      const r = await drive(w);
+      expect(r.driven).toHaveLength(DEFAULT_DRIVER_TASK_LIMIT);
+    },
+  );
 
   it("最久没动的先推（ORDER BY updated_at，且【确定序】⇒ 不会互相饿死）", async () => {
     const w = await world({
@@ -731,7 +838,9 @@ describe("E. 绑参顺序与那道花钱的门", () => {
         { id: "older", status: "IN_PROGRESS", role: "dev" },
       ],
     });
-    w.db.prepare("UPDATE tasks SET updated_at = ? WHERE id = 'older'").run(NOW - 100_000);
+    w.db
+      .prepare("UPDATE tasks SET updated_at = ? WHERE id = 'older'")
+      .run(NOW - 100_000);
     const r = await drive(w, { taskLimit: 1 });
     expect(r.driven.map((d) => d.taskId)).toEqual(["older"]);
   });
@@ -793,7 +902,11 @@ describe("F. 认领行【先于】花钱：崩溃循环正是上限要挡的那�
     // maxAttempts=0 会让候选恒空，表现是"驱动器在跑而永远无事可做"，
     // 那不是配置错该有的样子。
     const w = await world();
-    for (const bad of [{ maxAttempts: 0 }, { taskLimit: 0 }, { maxTurns: 0 }] as const) {
+    for (const bad of [
+      { maxAttempts: 0 },
+      { taskLimit: 0 },
+      { maxTurns: 0 },
+    ] as const) {
       await expect(
         driveTasks(w.q, w.bus, {
           nowMs: NOW,
@@ -815,7 +928,10 @@ describe("F. 认领行【先于】花钱：崩溃循环正是上限要挡的那�
 describe("G. 停机原因说人话，而且不说「再去敲 hub work」", () => {
   it("停在人类席位 ⇒ 说清下一次点击在谁手上", async () => {
     const w = await world();
-    const r = await drive(w, { stopped: "human_seat", status: "CHARTER_PENDING" });
+    const r = await drive(w, {
+      stopped: "human_seat",
+      status: "CHARTER_PENDING",
+    });
     expect(r.driven[0]?.note).toContain("人类席位");
     expect(r.driven[0]?.note).toContain("点击");
   });
@@ -824,7 +940,12 @@ describe("G. 停机原因说人话，而且不说「再去敲 hub work」", () =
     // 那是引擎里 describeAdvance 给 stalled 写的那句补救话，而它出现在自动路径上
     // 正是 0043 抓过的那类「报错教的那一步跑不起来」—— 驱动器存在的全部理由
     // 就是没有人再敲那条命令。
-    const stops: AdvanceResult["stopped"][] = ["human_seat", "stalled", "limit", "gone"];
+    const stops: AdvanceResult["stopped"][] = [
+      "human_seat",
+      "stalled",
+      "limit",
+      "gone",
+    ];
     for (const stopped of stops) {
       const w = await world();
       const r = await drive(w, { stopped });
@@ -870,15 +991,23 @@ describe("G. 停机原因说人话，而且不说「再去敲 hub work」", () =
  * ────────────────────────────────────────────────────────────────────────── */
 describe("H. 与停滞巡检的相互作用：认领行只在【还在试的那几轮】里挡着巡检", () => {
   /** 只判不写（见上面那段）。返回 t1 那一格的结论。 */
-  function verdict(w: World, now: number): { verdict: string; silentForMs: number } {
+  function verdict(
+    w: World,
+    now: number,
+  ): { verdict: string; silentForMs: number } {
     const js = patrolTasks(w.q.readConnection(), { now: () => now });
     const j = js.find((x) => x.id === "t1");
-    if (j === undefined) throw new Error("巡检结果里没有 t1：" + JSON.stringify(js));
+    if (j === undefined)
+      throw new Error("巡检结果里没有 t1：" + JSON.stringify(js));
     return { verdict: String(j.verdict), silentForMs: j.silentForMs };
   }
   /** 把任务挪到"四十分钟没动静"那一档（阈值 30 分钟 ⇒ 没有认领行时它【该】被判停滞）。 */
   function aged(w: World): void {
-    w.db.prepare("UPDATE tasks SET created_at = ?, updated_at = ? WHERE id = 't1'").run(NOW - 40 * 60_000, NOW - 40 * 60_000);
+    w.db
+      .prepare(
+        "UPDATE tasks SET created_at = ?, updated_at = ? WHERE id = 't1'",
+      )
+      .run(NOW - 40 * 60_000, NOW - 40 * 60_000);
   }
 
   it("⭐ 还在试：刚写完认领行的那一刻，巡检判它【不停滞】（被自己的认领行挡着）", async () => {
@@ -904,7 +1033,10 @@ describe("H. 与停滞巡检的相互作用：认领行只在【还在试的那�
     expect(verdict(w, NOW + 60_000).verdict).toBe("recent");
     // 阈值之后：报。这就是"那一格对巡检永远沉默"这个说法【错】的证据。
     const last = driverRows(w, DRIVER_GAVE_UP_KIND)[0] as Row;
-    const later = verdict(w, Number(last["created_at"]) + DEFAULT_STALL_THRESHOLD_MS + 60_000);
+    const later = verdict(
+      w,
+      Number(last["created_at"]) + DEFAULT_STALL_THRESHOLD_MS + 60_000,
+    );
     expect(later.verdict).toBe("stalled");
     // 时长从【放弃那一行】起算而不是从任务创建起算 —— 也就是"从系统最后一次开口"起算。
     expect(later.silentForMs).toBe(DEFAULT_STALL_THRESHOLD_MS + 60_000);
@@ -920,8 +1052,13 @@ describe("I. 手抄的数字有对照物（漂了会红，而不是靠注释）"
     // 所以这一格【是】一处手抄。挡住它的不是注释而是这一发：去源码文本里数那个字面量。
     // 漂的最坏后果是关机横幅承诺的等待时间比真的短 —— 而那句话存在的唯一理由
     // 就是别让人误判成死锁去 kill -9。
-    const src = readFileSync(new URL("../../src/engine/claude.ts", import.meta.url), "utf8");
-    const hits = [...src.matchAll(/timeoutMs\s*\?\?\s*([\d_]+)/gu)].map((m) => Number(String(m[1]).replace(/_/gu, "")));
+    const src = readFileSync(
+      new URL("../../src/engine/claude.ts", import.meta.url),
+      "utf8",
+    );
+    const hits = [...src.matchAll(/timeoutMs\s*\?\?\s*([\d_]+)/gu)].map((m) =>
+      Number(String(m[1]).replace(/_/gu, "")),
+    );
     expect(hits).toHaveLength(1);
     expect(hits[0]).toBe(CLAUDE_TURN_CAP_MS);
   });
@@ -931,18 +1068,25 @@ describe("I. 手抄的数字有对照物（漂了会红，而不是靠注释）"
     // 一句偏小的等待承诺会让人在第四分钟判定死锁并 kill -9 —— 那句话会变成
     // 它自己要防的那件事的引线。
     expect(worstDriveWaitMs({ taskLimit: 1, maxTurns: 1 })).toBe("3 分钟");
-    expect(worstDriveWaitMs({ taskLimit: 3, maxTurns: 12 })).toBe("1 小时 48 分");
+    expect(worstDriveWaitMs({ taskLimit: 3, maxTurns: 12 })).toBe(
+      "1 小时 48 分",
+    );
     expect(worstDriveWaitMs({ taskLimit: 2, maxTurns: 10 })).toBe("1 小时");
     // ⭐ 默认那一档【逐字】钉住横幅会说的那句。
     // 我第一版在这里写的是 "3 小时 12 分"，而那是我【从注释里抄来的数字】不是算出来的：
     // 3 × 12 × 180 秒 = 6480 秒 = 1 小时 48 分。同一句错话还写在 assemble.ts 两处注释里
     // （已改）。这发断言留着的价值正在这里 —— 它挡的正是"横幅里的等待承诺偏小/偏大"，
     // 而我自己的第一版就是被它抓出来的。
-    expect(worstDriveWaitMs({ taskLimit: DEFAULT_DRIVER_TASK_LIMIT, maxTurns: DEFAULT_DRIVER_MAX_TURNS })).toBe(
-      "1 小时 48 分",
-    );
+    expect(
+      worstDriveWaitMs({
+        taskLimit: DEFAULT_DRIVER_TASK_LIMIT,
+        maxTurns: DEFAULT_DRIVER_MAX_TURNS,
+      }),
+    ).toBe("1 小时 48 分");
     // 顺带把"三个乘数真的来自配置"钉住：改任一默认值 ⇒ 这一发红，逼改的人重看横幅那句。
-    expect(DEFAULT_DRIVER_TASK_LIMIT * DEFAULT_DRIVER_MAX_TURNS * CLAUDE_TURN_CAP_MS).toBe(6_480_000);
+    expect(
+      DEFAULT_DRIVER_TASK_LIMIT * DEFAULT_DRIVER_MAX_TURNS * CLAUDE_TURN_CAP_MS,
+    ).toBe(6_480_000);
   });
 });
 
@@ -957,7 +1101,9 @@ describe("I. 手抄的数字有对照物（漂了会红，而不是靠注释）"
  * ⚠ 而起的是别人时这一发会【真发出一次 API 调用】：这句话只有坏掉那天才会被读到，
  * 而那时它正是最该被读到的东西。
  * ────────────────────────────────────────────────────────────────────────── */
-const FAKE_CLI = fileURLToPath(new URL("../engine/fixtures/fake-claude.mjs", import.meta.url));
+const FAKE_CLI = fileURLToPath(
+  new URL("../engine/fixtures/fake-claude.mjs", import.meta.url),
+);
 
 /** 桩那一侧的行为开关（claude.ts 是 `env: process.env` 原样透传，所以写在本进程上）。 */
 async function withFakeMode<T>(mode: string, fn: () => Promise<T>): Promise<T> {
@@ -973,7 +1119,9 @@ async function withFakeMode<T>(mode: string, fn: () => Promise<T>): Promise<T> {
 
 describe("J. 默认那一支（真 runtime + 真子进程 + 真执行日志）", () => {
   it("⭐ 真起子进程 ⇒ 状态边真的落库、账记上、执行日志两行、认领行先写", async () => {
-    const w = await world({ tasks: [{ id: "t1", status: "DECOMPOSING", role: "manager" }] });
+    const w = await world({
+      tasks: [{ id: "t1", status: "DECOMPOSING", role: "manager" }],
+    });
     const agentCwd = TMP + "/agent-cwd-probe";
     mkdirSync(agentCwd, { recursive: true });
     const r = await withFakeMode("cwd", () =>
@@ -993,11 +1141,15 @@ describe("J. 默认那一支（真 runtime + 真子进程 + 真执行日志）",
     // 换成精确值比较之后两半都成立，而且判得更死：等于【就是那个目录】，
     // 而不是"以某个目录开头"（少传 --agent-cwd 时子进程继承 Hub 的 cwd，
     // 那正是这一发要抓的坏法，而它恰好【过】前缀版那发）。
-    const edge = rows(w, "SELECT id, payload FROM events WHERE action = 'state_change' ORDER BY id")[0] as Row;
+    const edge = rows(
+      w,
+      "SELECT id, payload FROM events WHERE action = 'state_change' ORDER BY id",
+    )[0] as Row;
     const p = JSON.parse(String(edge["payload"])) as Record<string, unknown>;
     const summary = String(p["summary"]);
     const echoed = /cwd=(\S+) budget=(\S+)/u.exec(summary);
-    if (echoed === null) throw new Error("summary 里没有桩回显的那一对值：" + summary);
+    if (echoed === null)
+      throw new Error("summary 里没有桩回显的那一对值：" + summary);
     const echoedCwd = echoed[1] ?? "";
     const echoedBudget = echoed[2] ?? "";
     expect(echoedCwd).toBe(realpathSync(agentCwd));
@@ -1010,7 +1162,9 @@ describe("J. 默认那一支（真 runtime + 真子进程 + 真执行日志）",
     // ⚠ 读回来的是【8】而不是 4：这一格真的跑了【两轮】（manager 交棒给 tech，
     // tech 那一轮自交被拦 ⇒ stalled）。而 8 本身就是"第二次 spawn 真的发生了"的
     // 第二个物证 —— 少起一发是 4。
-    const t = w.db.prepare("SELECT consumed_cents FROM tasks WHERE id = 't1'").get() as Row;
+    const t = w.db
+      .prepare("SELECT consumed_cents FROM tasks WHERE id = 't1'")
+      .get() as Row;
     expect(Number(t["consumed_cents"])).toBe(8);
     // ⭐ 执行日志那【两】行是【真 recordTurn】写的（默认那一支的 recordTurn 走 runtime）。
     //
@@ -1043,14 +1197,20 @@ describe("J. 默认那一支（真 runtime + 真子进程 + 真执行日志）",
     // 不能靠回声判。能读回来的有两样，这一发把两样都读：stopped 那一格是 "limit"，
     // 以及 harness_calls 的【行数】—— 行数是子进程真的只起了 1 次的物证。
     // 只断前者的话，"循环跑了两轮而第二轮没留痕"那种坏法会绿。
-    const w = await world({ tasks: [{ id: "t1", status: "DECOMPOSING", role: "manager" }] });
-    const r = await withFakeMode("cwd", () => drive(w, { real: true, bin: FAKE_CLI, maxTurns: 1 }));
+    const w = await world({
+      tasks: [{ id: "t1", status: "DECOMPOSING", role: "manager" }],
+    });
+    const r = await withFakeMode("cwd", () =>
+      drive(w, { real: true, bin: FAKE_CLI, maxTurns: 1 }),
+    );
     expect(r.driven[0]?.stopped).toBe("limit");
     expect(Number(r.driven[0]?.turns)).toBe(1);
     expect(rows(w, "SELECT id FROM harness_calls")).toHaveLength(1);
     // 同一张图、同一个桩、只把 maxTurns 换回默认 ⇒ 两行。
     // 这一对比才是"maxTurns 真的进了那一趟"的证据；单独断 1 行只证明"跑了一轮"。
-    const w2 = await world({ tasks: [{ id: "t1", status: "DECOMPOSING", role: "manager" }] });
+    const w2 = await world({
+      tasks: [{ id: "t1", status: "DECOMPOSING", role: "manager" }],
+    });
     await withFakeMode("cwd", () => drive(w2, { real: true, bin: FAKE_CLI }));
     expect(rows(w2, "SELECT id FROM harness_calls")).toHaveLength(2);
   });
@@ -1060,7 +1220,9 @@ describe("J. 默认那一支（真 runtime + 真子进程 + 真执行日志）",
     // 而它【最危险】：留痕一坏，计数永远 0 ⇒ 上限永远不生效 ⇒
     // 每个心跳重新起一个注定失败的子进程，无限、静默、不产生账单。
     const w = await world();
-    const r = await withFakeMode("garbage", () => drive(w, { real: true, bin: FAKE_CLI }));
+    const r = await withFakeMode("garbage", () =>
+      drive(w, { real: true, bin: FAKE_CLI }),
+    );
     expect(r.driven[0]?.outcome).toBe("driven"); // advance 自己把失败轮收成 stalled
     expect(claimCount(w, "t1")).toBe(1);
     // ⭐ 执行日志那一行【在】，而这一发判的就是这个"在"。
@@ -1072,14 +1234,19 @@ describe("J. 默认那一支（真 runtime + 真子进程 + 真执行日志）",
     // 再没有第二个出口 —— 想按 exit_code 筛失败轮的人会筛不到（失败在事件的 note 里）。
     // 我没改它（同一篇里改两处既有审计语义的账不该混在一起，且 §12.7 第 4 层那一问
     // 「调过没有、花了多少」不受影响），但把这一格记进 0048。
-    const hc = rows(w, "SELECT exit_code, cost_cents, args_redacted FROM harness_calls ORDER BY id");
+    const hc = rows(
+      w,
+      "SELECT exit_code, cost_cents, args_redacted FROM harness_calls ORDER BY id",
+    );
     expect(hc).toHaveLength(1);
     expect(Number(hc[0]?.["exit_code"])).toBe(0);
     // 钱那一半仍然对：桩那一条【没给】total_cost_usd ⇒ 0。而"失败而照样有账单"
     // 那一发在 engine 层（fake-claude 的 nonzero 模式，0.042 美元）已经钉着。
     expect(Number(hc[0]?.["cost_cents"])).toBe(0);
     // 失败那一轮【不留状态边】：库里没有 state_change ⇒ 没有"钱花了而链半截"那种形状。
-    expect(rows(w, "SELECT id FROM events WHERE action = 'state_change'")).toHaveLength(0);
+    expect(
+      rows(w, "SELECT id FROM events WHERE action = 'state_change'"),
+    ).toHaveLength(0);
     expect(status(w, "t1")).toBe("IN_PROGRESS");
     // note 要说得出失败为什么发生，而不是编一个原因（那一条真在桩的原文里）。
     // O6 Step B（round312）后子进程输出先过 gateway 会话校验：garbage 桩的非 JSON

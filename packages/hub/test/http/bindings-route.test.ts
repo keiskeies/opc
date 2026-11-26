@@ -27,14 +27,23 @@
  */
 import { mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
+import {
+  HTTP_CONFLICT,
+  HTTP_NOT_FOUND,
+  HTTP_NOT_IMPLEMENTED,
+} from "@opc/contracts";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { HTTP_CONFLICT, HTTP_NOT_FOUND, HTTP_NOT_IMPLEMENTED } from "@opc/contracts";
-import { fixtureTmp } from "../fixtures/fixture-dir.js";
-import { DRIVER_OFF } from "../fixtures/driver-state.js";
-import { InMemoryEventBus } from "../../src/events/bus.js";
-import { WriteQueue } from "../../src/db/write-queue.js";
 import { migrate } from "../../src/db/migrate.js";
-import { handleRequest, matchRoute, type HubDeps, type HubRequest } from "../../src/http/app.js";
+import { WriteQueue } from "../../src/db/write-queue.js";
+import { InMemoryEventBus } from "../../src/events/bus.js";
+import {
+  type HubDeps,
+  type HubRequest,
+  handleRequest,
+  matchRoute,
+} from "../../src/http/app.js";
+import { newLocalToken, signedHeaders } from "../../src/http/auth.js";
+import { LOOPBACK_HOST } from "../../src/http/bind.js";
 import {
   assertLoopbackBindingRoute,
   listBindingsRoute,
@@ -42,8 +51,8 @@ import {
   requestBindingRoute,
   verifyBindingRoute,
 } from "../../src/http/bindings.js";
-import { newLocalToken, signedHeaders } from "../../src/http/auth.js";
-import { LOOPBACK_HOST } from "../../src/http/bind.js";
+import { DRIVER_OFF } from "../fixtures/driver-state.js";
+import { fixtureTmp } from "../fixtures/fixture-dir.js";
 
 const TMP = fixtureTmp("http-bindings-route", import.meta.url);
 
@@ -74,8 +83,14 @@ interface Harness {
   readonly db: Db;
   /** 写连接：断言【库里到底是什么形状】用它，不用 deps.db（那条是只读的）。 */
   readonly write: Db;
-  readonly sign: (method: string, target: string, body?: string) => Record<string, string>;
-  readonly req: (o: Partial<HubRequest> & { method: string; path: string }) => HubRequest;
+  readonly sign: (
+    method: string,
+    target: string,
+    body?: string,
+  ) => Record<string, string>;
+  readonly req: (
+    o: Partial<HubRequest> & { method: string; path: string },
+  ) => HubRequest;
   /** 推进时钟。返回推进后的值。 */
   readonly advance: (ms?: number) => number;
   readonly token: string;
@@ -98,7 +113,11 @@ async function harness(
   const read = queue.readConnection() as unknown as Db;
   const token = newLocalToken();
   let clock = T0;
-  const sign = (method: string, target: string, body = ""): Record<string, string> =>
+  const sign = (
+    method: string,
+    target: string,
+    body = "",
+  ): Record<string, string> =>
     signedHeaders(token, { method, target, body, now: clock });
   const deps: HubDeps = {
     db: read as never,
@@ -185,8 +204,12 @@ describe("① matchRoute：四条各归各的，拼错的段是 404 而不是体
     expect(matchRoute("POST", "/bindings/verify")?.kind).toBe("verify_binding");
     expect(matchRoute("POST", "/bindings/rebind")?.kind).toBe("rebind_binding");
     // endpoint 字段【也】点名：kind 对而 endpoint 错，isImplemented 与 501 文案都会指错端点。
-    expect(matchRoute("POST", "/bindings/verify")?.endpoint).toBe("POST /bindings/verify");
-    expect(matchRoute("POST", "/bindings/rebind")?.endpoint).toBe("POST /bindings/rebind");
+    expect(matchRoute("POST", "/bindings/verify")?.endpoint).toBe(
+      "POST /bindings/verify",
+    );
+    expect(matchRoute("POST", "/bindings/rebind")?.endpoint).toBe(
+      "POST /bindings/rebind",
+    );
   });
 
   it("⭐ 方法【不互换】：GET 打不到写路由，POST 打不到读路由", () => {
@@ -222,7 +245,10 @@ describe("① matchRoute：四条各归各的，拼错的段是 404 而不是体
 describe("② GET /bindings", () => {
   it("空表 ⇒ 200 + 空数组 + pendingTotal 0 + asOfMs 带出去", async () => {
     const h = await harness();
-    const res = await handleRequest(h.deps, h.req({ method: "GET", path: "/bindings" }));
+    const res = await handleRequest(
+      h.deps,
+      h.req({ method: "GET", path: "/bindings" }),
+    );
     expect(res.status).toBe(200);
     expect(res.body).toEqual({ bindings: [], pendingTotal: 0, asOfMs: T0 });
   });
@@ -231,11 +257,19 @@ describe("② GET /bindings", () => {
     const h = await harness({ verifier: VERIFIER });
     await handleRequest(
       h.deps,
-      h.req({ method: "POST", path: "/bindings", body: bindingBody({ external_user_id: "u1" }) }),
+      h.req({
+        method: "POST",
+        path: "/bindings",
+        body: bindingBody({ external_user_id: "u1" }),
+      }),
     );
     await handleRequest(
       h.deps,
-      h.req({ method: "POST", path: "/bindings", body: bindingBody({ external_user_id: "u2" }) }),
+      h.req({
+        method: "POST",
+        path: "/bindings",
+        body: bindingBody({ external_user_id: "u2" }),
+      }),
     );
     await handleRequest(
       h.deps,
@@ -245,7 +279,10 @@ describe("② GET /bindings", () => {
         body: JSON.stringify({ platform: "feishu", external_user_id: "u2" }),
       }),
     );
-    const res = await handleRequest(h.deps, h.req({ method: "GET", path: "/bindings" }));
+    const res = await handleRequest(
+      h.deps,
+      h.req({ method: "GET", path: "/bindings" }),
+    );
     const body = res.body as {
       bindings: { external_user_id: string; verified: boolean }[];
       pendingTotal: number;
@@ -265,11 +302,12 @@ describe("② GET /bindings", () => {
       h.deps,
       h.req({ method: "POST", path: "/bindings", body: bindingBody() }),
     );
-    const res = await handleRequest(h.deps, h.req({ method: "GET", path: "/bindings" }));
-    const row = (res.body as { bindings: Record<string, unknown>[] }).bindings[0] as Record<
-      string,
-      unknown
-    >;
+    const res = await handleRequest(
+      h.deps,
+      h.req({ method: "GET", path: "/bindings" }),
+    );
+    const row = (res.body as { bindings: Record<string, unknown>[] })
+      .bindings[0] as Record<string, unknown>;
     expect(Object.keys(row).sort()).toEqual([
       "created_at",
       "external_user_id",
@@ -289,12 +327,16 @@ describe("② GET /bindings", () => {
     // 而 DDL 第 7 条（0030 §7）拦的是「未验证的行挂着署名」——
     // 空串是那个形状的漏网之鱼（它 IS NOT NULL），所以视图层必须交 null。
     const h = await harness();
-    await handleRequest(h.deps, h.req({ method: "POST", path: "/bindings", body: bindingBody() }));
-    const res = await handleRequest(h.deps, h.req({ method: "GET", path: "/bindings" }));
-    const row = (res.body as { bindings: Record<string, unknown>[] }).bindings[0] as Record<
-      string,
-      unknown
-    >;
+    await handleRequest(
+      h.deps,
+      h.req({ method: "POST", path: "/bindings", body: bindingBody() }),
+    );
+    const res = await handleRequest(
+      h.deps,
+      h.req({ method: "GET", path: "/bindings" }),
+    );
+    const row = (res.body as { bindings: Record<string, unknown>[] })
+      .bindings[0] as Record<string, unknown>;
     expect(row["verified"]).toBe(false);
     expect(row["verified_by"]).toBeNull();
     expect(row["verified_at"]).toBeNull();
@@ -302,7 +344,10 @@ describe("② GET /bindings", () => {
 
   it("bindingWriter 缺席 ⇒ 读侧【照旧 200】（读不该被一条没接的写路径挡住）", async () => {
     const h = await harness({ writer: false });
-    const res = await handleRequest(h.deps, h.req({ method: "GET", path: "/bindings" }));
+    const res = await handleRequest(
+      h.deps,
+      h.req({ method: "GET", path: "/bindings" }),
+    );
     expect(res.status).toBe(200);
   });
 });
@@ -314,7 +359,11 @@ describe("③ POST /bindings", () => {
     const h = await harness({ verifier: VERIFIER });
     const res = await handleRequest(
       h.deps,
-      h.req({ method: "POST", path: "/bindings", body: bindingBody({ role: "dev" }) }),
+      h.req({
+        method: "POST",
+        path: "/bindings",
+        body: bindingBody({ role: "dev" }),
+      }),
     );
     expect(res.status).toBe(201);
     expect(res.body).toMatchObject({ ok: true, role: "dev", verified: false });
@@ -329,15 +378,28 @@ describe("③ POST /bindings", () => {
 
   it("⭐ 重复申请 ⇒ 409，且第二次的 role【没有】覆盖第一行", async () => {
     const h = await harness({ verifier: VERIFIER });
-    await handleRequest(h.deps, h.req({ method: "POST", path: "/bindings", body: bindingBody({ role: "dev" }) }));
+    await handleRequest(
+      h.deps,
+      h.req({
+        method: "POST",
+        path: "/bindings",
+        body: bindingBody({ role: "dev" }),
+      }),
+    );
     const again = await handleRequest(
       h.deps,
-      h.req({ method: "POST", path: "/bindings", body: bindingBody({ role: "ceo" }) }),
+      h.req({
+        method: "POST",
+        path: "/bindings",
+        body: bindingBody({ role: "ceo" }),
+      }),
     );
     expect(again.status).toBe(HTTP_CONFLICT);
     // 幂等 201 是最顺手的写法（「同一个身份再来一次，当然算成功」），
     // 而它的响应在撒谎：调用方提交了 role=ceo，生效的还是 dev。
-    expect((bindingRow(h.write, "feishu", "ou_alice") as Row)["ceo_role"]).toBe("dev");
+    expect((bindingRow(h.write, "feishu", "ou_alice") as Row)["ceo_role"]).toBe(
+      "dev",
+    );
   });
 
   it("⭐ 请求体带 verified / verified_by ⇒ 422（schema 是 strict，不是「不看它」）", async () => {
@@ -365,11 +427,17 @@ describe("③ POST /bindings", () => {
           }),
         }),
       );
-      expect(res.status, "实到 " + JSON.stringify(res.status) + "，请求体 +" + JSON.stringify(extra)).toBe(
-        UNPROCESSABLE,
-      );
+      expect(
+        res.status,
+        "实到 " +
+          JSON.stringify(res.status) +
+          "，请求体 +" +
+          JSON.stringify(extra),
+      ).toBe(UNPROCESSABLE);
     }
-    expect(h.write.prepare("SELECT COUNT(*) AS c FROM im_bindings").get()).toEqual({ c: 0 });
+    expect(
+      h.write.prepare("SELECT COUNT(*) AS c FROM im_bindings").get(),
+    ).toEqual({ c: 0 });
   });
 
   it("平台不在白名单 ⇒ 422 且【库里一行不剩】", async () => {
@@ -385,7 +453,9 @@ describe("③ POST /bindings", () => {
       );
       expect(res.status, "平台 " + JSON.stringify(p)).toBe(UNPROCESSABLE);
     }
-    expect(h.write.prepare("SELECT COUNT(*) AS c FROM im_bindings").get()).toEqual({ c: 0 });
+    expect(
+      h.write.prepare("SELECT COUNT(*) AS c FROM im_bindings").get(),
+    ).toEqual({ c: 0 });
   });
 
   it("⭐ 大小写与空白在【进判据之前】被归一化：' Feishu ' ⇒ 201，库里落的是 'feishu'", async () => {
@@ -399,7 +469,11 @@ describe("③ POST /bindings", () => {
     const h = await harness({ verifier: VERIFIER });
     const res = await handleRequest(
       h.deps,
-      h.req({ method: "POST", path: "/bindings", body: bindingBody({ platform: " Feishu " }) }),
+      h.req({
+        method: "POST",
+        path: "/bindings",
+        body: bindingBody({ platform: " Feishu " }),
+      }),
     );
     expect(res.status).toBe(201);
     // 库里那一格是归一化【之后】的值 —— 这条比状态码要紧：
@@ -411,7 +485,7 @@ describe("③ POST /bindings", () => {
 
   it("空 body / 坏 JSON ⇒ 422，而不是 500", async () => {
     const h = await harness({ verifier: VERIFIER });
-    for (const body of ["", "{", "null", "[]", "\"x\""]) {
+    for (const body of ["", "{", "null", "[]", '"x"']) {
       const res = await handleRequest(
         h.deps,
         h.req({ method: "POST", path: "/bindings", body }),
@@ -435,13 +509,19 @@ describe("③ POST /bindings", () => {
 describe("④ POST /bindings/verify", () => {
   it("未装配署名来源 ⇒ 501 且库里【一字未动】", async () => {
     const h = await harness(); // 没有 verifier
-    await handleRequest(h.deps, h.req({ method: "POST", path: "/bindings", body: bindingBody() }));
+    await handleRequest(
+      h.deps,
+      h.req({ method: "POST", path: "/bindings", body: bindingBody() }),
+    );
     const res = await handleRequest(
       h.deps,
       h.req({
         method: "POST",
         path: "/bindings/verify",
-        body: JSON.stringify({ platform: "feishu", external_user_id: "ou_alice" }),
+        body: JSON.stringify({
+          platform: "feishu",
+          external_user_id: "ou_alice",
+        }),
       }),
     );
     expect(res.status).toBe(HTTP_NOT_IMPLEMENTED);
@@ -452,18 +532,28 @@ describe("④ POST /bindings/verify", () => {
 
   it("合法 ⇒ 200，而库里 verified=1 + 署名是【装配那个名字】+ 时刻是服务端那个", async () => {
     const h = await harness({ verifier: VERIFIER });
-    await handleRequest(h.deps, h.req({ method: "POST", path: "/bindings", body: bindingBody() }));
+    await handleRequest(
+      h.deps,
+      h.req({ method: "POST", path: "/bindings", body: bindingBody() }),
+    );
     const at = h.advance();
     const res = await handleRequest(
       h.deps,
       h.req({
         method: "POST",
         path: "/bindings/verify",
-        body: JSON.stringify({ platform: "feishu", external_user_id: "ou_alice" }),
+        body: JSON.stringify({
+          platform: "feishu",
+          external_user_id: "ou_alice",
+        }),
       }),
     );
     expect(res.status).toBe(200);
-    expect(res.body).toMatchObject({ ok: true, verified: true, verified_at: at });
+    expect(res.body).toMatchObject({
+      ok: true,
+      verified: true,
+      verified_at: at,
+    });
     const row = bindingRow(h.write, "feishu", "ou_alice") as Row;
     expect(row["verified"]).toBe(1);
     expect(row["verified_by"]).toBe(VERIFIER);
@@ -477,7 +567,10 @@ describe("④ POST /bindings/verify", () => {
     // 0030 §4 那条 DDL 判据（置 1 必须交出署名）验的是「这一格有没有值」，
     // 验不了「这句话是不是真的」。所以署名只能从装配来源来。
     const h = await harness({ verifier: VERIFIER });
-    await handleRequest(h.deps, h.req({ method: "POST", path: "/bindings", body: bindingBody() }));
+    await handleRequest(
+      h.deps,
+      h.req({ method: "POST", path: "/bindings", body: bindingBody() }),
+    );
     const res = await handleRequest(
       h.deps,
       h.req({
@@ -501,14 +594,20 @@ describe("④ POST /bindings/verify", () => {
     // 时钟在这里【必须真的推进】：now() 恒定时 verified_at 两次天然相等，
     // 这一发就变成一条只会绿的装饰（0007 §4.1 那一族）。
     const h = await harness({ verifier: VERIFIER });
-    await handleRequest(h.deps, h.req({ method: "POST", path: "/bindings", body: bindingBody() }));
+    await handleRequest(
+      h.deps,
+      h.req({ method: "POST", path: "/bindings", body: bindingBody() }),
+    );
     const first = h.advance();
     await handleRequest(
       h.deps,
       h.req({
         method: "POST",
         path: "/bindings/verify",
-        body: JSON.stringify({ platform: "feishu", external_user_id: "ou_alice" }),
+        body: JSON.stringify({
+          platform: "feishu",
+          external_user_id: "ou_alice",
+        }),
       }),
     );
     const second = h.advance(3_600_000);
@@ -517,7 +616,10 @@ describe("④ POST /bindings/verify", () => {
       h.req({
         method: "POST",
         path: "/bindings/verify",
-        body: JSON.stringify({ platform: "feishu", external_user_id: "ou_alice" }),
+        body: JSON.stringify({
+          platform: "feishu",
+          external_user_id: "ou_alice",
+        }),
       }),
     );
     expect(res.status).toBe(HTTP_CONFLICT);
@@ -580,20 +682,36 @@ describe("⑤ POST /bindings/rebind", () => {
     // 少了 §7，库里会留下一行 verified=0 而 verified_by='ceo' ——
     // 一句挂在未校验身份上的假话，而它此刻在 GET /bindings 的响应里。
     const h = await harness({ verifier: VERIFIER });
-    await handleRequest(h.deps, h.req({ method: "POST", path: "/bindings", body: bindingBody({ role: "dev" }) }));
+    await handleRequest(
+      h.deps,
+      h.req({
+        method: "POST",
+        path: "/bindings",
+        body: bindingBody({ role: "dev" }),
+      }),
+    );
     await handleRequest(
       h.deps,
       h.req({
         method: "POST",
         path: "/bindings/verify",
-        body: JSON.stringify({ platform: "feishu", external_user_id: "ou_alice" }),
+        body: JSON.stringify({
+          platform: "feishu",
+          external_user_id: "ou_alice",
+        }),
       }),
     );
-    expect((bindingRow(h.write, "feishu", "ou_alice") as Row)["verified_by"]).toBe(VERIFIER);
+    expect(
+      (bindingRow(h.write, "feishu", "ou_alice") as Row)["verified_by"],
+    ).toBe(VERIFIER);
 
     const res = await handleRequest(
       h.deps,
-      h.req({ method: "POST", path: "/bindings/rebind", body: bindingBody({ role: "ceo" }) }),
+      h.req({
+        method: "POST",
+        path: "/bindings/rebind",
+        body: bindingBody({ role: "ceo" }),
+      }),
     );
     expect(res.status).toBe(200);
     expect(res.body).toMatchObject({ ok: true, role: "ceo", verified: false });
@@ -604,11 +722,12 @@ describe("⑤ POST /bindings/rebind", () => {
     expect(row["verified_at"]).toBeNull();
 
     // 而 GET 那一侧读回来【也是】这句话。库里对、响应错同样是事故（0021 §2 同族）。
-    const listed = await handleRequest(h.deps, h.req({ method: "GET", path: "/bindings" }));
-    const view = (listed.body as { bindings: Record<string, unknown>[] }).bindings[0] as Record<
-      string,
-      unknown
-    >;
+    const listed = await handleRequest(
+      h.deps,
+      h.req({ method: "GET", path: "/bindings" }),
+    );
+    const view = (listed.body as { bindings: Record<string, unknown>[] })
+      .bindings[0] as Record<string, unknown>;
     expect(view["role"]).toBe("ceo");
     expect(view["verified"]).toBe(false);
     expect(view["verified_by"]).toBeNull();
@@ -621,7 +740,9 @@ describe("⑤ POST /bindings/rebind", () => {
       h.req({ method: "POST", path: "/bindings/rebind", body: bindingBody() }),
     );
     expect(res.status).toBe(HTTP_NOT_FOUND);
-    expect(h.write.prepare("SELECT COUNT(*) AS c FROM im_bindings").get()).toEqual({ c: 0 });
+    expect(
+      h.write.prepare("SELECT COUNT(*) AS c FROM im_bindings").get(),
+    ).toEqual({ c: 0 });
   });
 });
 
@@ -630,14 +751,27 @@ describe("⑤ POST /bindings/rebind", () => {
 describe("⑥ 四条路由【全部】只开回环", () => {
   const four = [
     { name: "GET /bindings", method: "GET", path: "/bindings", body: "" },
-    { name: "POST /bindings", method: "POST", path: "/bindings", body: bindingBody() },
+    {
+      name: "POST /bindings",
+      method: "POST",
+      path: "/bindings",
+      body: bindingBody(),
+    },
     {
       name: "POST /bindings/verify",
       method: "POST",
       path: "/bindings/verify",
-      body: JSON.stringify({ platform: "feishu", external_user_id: "ou_alice" }),
+      body: JSON.stringify({
+        platform: "feishu",
+        external_user_id: "ou_alice",
+      }),
     },
-    { name: "POST /bindings/rebind", method: "POST", path: "/bindings/rebind", body: bindingBody() },
+    {
+      name: "POST /bindings/rebind",
+      method: "POST",
+      path: "/bindings/rebind",
+      body: bindingBody(),
+    },
   ] as const;
 
   it("⭐ 带【真签名】的非回环请求 ⇒ 四条全 401", async () => {
@@ -656,7 +790,9 @@ describe("⑥ 四条路由【全部】只开回环", () => {
       expect(res.status, r.name).toBe(UNAUTHORIZED);
     }
     // 而且【四条都没写进去一行】：远程连一次申请都登记不上。
-    expect(h.write.prepare("SELECT COUNT(*) AS c FROM im_bindings").get()).toEqual({ c: 0 });
+    expect(
+      h.write.prepare("SELECT COUNT(*) AS c FROM im_bindings").get(),
+    ).toEqual({ c: 0 });
   });
 
   it("⭐ 反向对照：【同一发请求】从回环发出 ⇒ 不是 401", async () => {
@@ -687,7 +823,9 @@ describe("⑥ 四条路由【全部】只开回环", () => {
     expect(unsigned.status).toBe(UNAUTHORIZED);
     expect(remote.status).toBe(UNAUTHORIZED);
     expect(remote.body).toEqual(unsigned.body);
-    expect(JSON.stringify(remote.body)).not.toMatch(/loopback|回环|bindings|peer/iu);
+    expect(JSON.stringify(remote.body)).not.toMatch(
+      /loopback|回环|bindings|peer/iu,
+    );
   });
 
   it("判据本身：assertLoopbackBindingRoute 对非回环交出一个可直发的响应", async () => {
@@ -706,8 +844,12 @@ describe("⑥ 四条路由【全部】只开回环", () => {
     const blocked = assertLoopbackBindingRoute(req);
     expect(blocked).not.toBeNull();
     expect(blocked?.status).toBe(UNAUTHORIZED);
-    expect(assertLoopbackBindingRoute({ ...req, peer: "::ffff:127.0.0.1" })).toBeNull();
-    expect(assertLoopbackBindingRoute({ ...req, peer: LOOPBACK_HOST })).toBeNull();
+    expect(
+      assertLoopbackBindingRoute({ ...req, peer: "::ffff:127.0.0.1" }),
+    ).toBeNull();
+    expect(
+      assertLoopbackBindingRoute({ ...req, peer: LOOPBACK_HOST }),
+    ).toBeNull();
   });
 
   it("IPv6 回环与 IPv4-mapped 也算本机（不然桌面端换个栈就整条读不到）", async () => {
@@ -726,7 +868,12 @@ describe("⑥ 四条路由【全部】只开回环", () => {
     // 失效方式是【下一个调用方忘了传 ⇒ 远程被当成本机】，静默。
     // 类型层面挡不住「有人加个 ?」，但能挡住【handler 签名不收 req】——
     // 不收 req 就拿不到 peer，那才是这道门消失的形状。
-    for (const f of [listBindingsRoute, requestBindingRoute, verifyBindingRoute, rebindBindingRoute]) {
+    for (const f of [
+      listBindingsRoute,
+      requestBindingRoute,
+      verifyBindingRoute,
+      rebindBindingRoute,
+    ]) {
       expect(f.length, f.name).toBe(2);
     }
     // 并且这四个函数【不 import 那张表】：判据住在 bindings/im.ts，这里是入口。
@@ -748,11 +895,18 @@ describe("⑦ 回环门【不取代】HMAC", () => {
     ]) {
       const res = await handleRequest(
         h.deps,
-        h.req({ method: r.method, path: r.path, ...(r.body === undefined ? {} : { body: r.body }), headers: {} }),
+        h.req({
+          method: r.method,
+          path: r.path,
+          ...(r.body === undefined ? {} : { body: r.body }),
+          headers: {},
+        }),
       );
       expect(res.status, r.path).toBe(UNAUTHORIZED);
     }
-    expect(h.write.prepare("SELECT COUNT(*) AS c FROM im_bindings").get()).toEqual({ c: 0 });
+    expect(
+      h.write.prepare("SELECT COUNT(*) AS c FROM im_bindings").get(),
+    ).toEqual({ c: 0 });
   });
 
   it("签名签的是【别的路径】⇒ 401（签名覆盖路径，四条都是）", async () => {
@@ -768,6 +922,8 @@ describe("⑦ 回环门【不取代】HMAC", () => {
       }),
     );
     expect(res.status).toBe(UNAUTHORIZED);
-    expect(h.write.prepare("SELECT COUNT(*) AS c FROM im_bindings").get()).toEqual({ c: 0 });
+    expect(
+      h.write.prepare("SELECT COUNT(*) AS c FROM im_bindings").get(),
+    ).toEqual({ c: 0 });
   });
 });

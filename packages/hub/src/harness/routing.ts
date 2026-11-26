@@ -57,8 +57,8 @@ import {
   type HarnessCapabilities,
   type HarnessId,
   type RiskTier,
-  type SandboxTier,
   SANDBOX_TIERS,
+  type SandboxTier,
 } from "@opc/contracts";
 import { preventionFor, toolRiskTier } from "./safety.js";
 
@@ -444,7 +444,9 @@ export function routeTask(input: RouteInput): RouteResult {
   const defaults = CATEGORY_DEFAULTS[input.category];
   // 风险轴逐段收紧（不是整份计划一个开关：只读段没有「更不可逆」这回事，
   // 给它 on-request 只会让审批队列里多出一张「读这个文件可以吗」的卡片）。
-  const stages: RouteStage[] = defaults.stages.map((s) => riskTightens(s, input.risk));
+  const stages: RouteStage[] = defaults.stages.map((s) =>
+    riskTightens(s, input.risk),
+  );
 
   const ceilingViolation = stageExceedsCeiling(stages, input.charterCeiling);
   if (ceilingViolation !== undefined) {
@@ -510,7 +512,9 @@ export function routeTask(input: RouteInput): RouteResult {
   // （【规格】§12.4 那一列）。跳过不合格者而不是拒整个路由，是因为
   // 「Claude 没接上而 Codex 接上了」是常态而不是异常。
   const chosen = input.candidates.find((c) => {
-    const capsOk = !needEnforced || preventionFor(c.capabilities, "on-request") === "enforced";
+    const capsOk =
+      !needEnforced ||
+      preventionFor(c.capabilities, "on-request") === "enforced";
     return capsOk;
   });
   if (chosen === undefined) {
@@ -618,7 +622,11 @@ export type StageGateVerdict =
  */
 export function stageWriteViolation(
   stage: RouteStage,
-  o: { readonly tool: string; readonly args: unknown; readonly executor?: StageExecutor },
+  o: {
+    readonly tool: string;
+    readonly args: unknown;
+    readonly executor?: StageExecutor;
+  },
 ): StageGateVerdict {
   if (stage.readOnly) {
     const tier: RiskTier = toolRiskTier({ tool: o.tool, args: o.args });
@@ -726,7 +734,9 @@ export function requestPolicyFor(
     approvalPolicy: stage.approvalPolicy,
     // 只读段**再收一次**白名单：沙箱档位是交给 harness 执行的（本层看不见它有没有生效），
     // 而白名单是**我们**判的。两道都用上才叫「与 harness 原生权限叠加」（【规格】§12.7 表头）。
-    allowedTools: stage.readOnly ? readOnlyTools(plan.allowedTools) : plan.allowedTools,
+    allowedTools: stage.readOnly
+      ? readOnlyTools(plan.allowedTools)
+      : plan.allowedTools,
     forbiddenFlags: plan.charterForbiddenFlags,
   };
 }
@@ -743,7 +753,8 @@ export function requestPolicyFor(
  * 剔掉它等于做不出【规格】§12.5 第 1 步那句「预检：`git status`」。
  * 兜住它的是 `stageWriteViolation`（那一条会读**参数**并判 `rm -rf` 为不可逆 ⇒ 违规）。
  */
-const WRITE_VERB = /(edit|write|delete|remove|create|add|patch|apply|push|commit|merge|deploy|move|rename)/u;
+const WRITE_VERB =
+  /(edit|write|delete|remove|create|add|patch|apply|push|commit|merge|deploy|move|rename)/u;
 
 export function readOnlyTools(tools: readonly string[]): string[] {
   return tools.filter((t) => !WRITE_VERB.test(t.toLowerCase()));

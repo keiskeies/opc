@@ -210,7 +210,7 @@ git grep --untracked -n "thread_id:" -- packages/hub/src/cli.ts
 
 git grep --untracked -n "thread_id:" -- packages/hub/src
   → graph/thread.ts:24  export function threadConfig(taskId: string): { configurable: { thread_id: string } }
-  → graph/thread.ts:25    return { configurable: { thread_id: taskId } };
+  → graph/thread.ts:27    return { configurable: { thread_id: taskId } };
     两条 = 唯一拼装点，值就是 taskId。另有 11 处命中在 saver（列名）、real-deps.ts 的
     结构类型标注与 poc/ 探针脚本里，都不是拼装点。
     搜 "thread_id:"（带冒号，即【作为键出现】）而不是 "thread_id"：后者在

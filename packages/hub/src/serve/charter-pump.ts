@@ -58,18 +58,19 @@
  * （这条链的缺口登记在源码里，不在这里假装补上）」），补它的那天那一发会红，
  * 逼改的人看见自己在改什么。
  */
-import type { DomainEvent, EventBus } from "../events/bus.js";
-import type { HubWriter } from "../db/write-queue.js";
-import { appendAudit } from "../events/recorder.js";
+
 import { requireScopeDb } from "../checkpoint/tx-scope.js";
+import type { HubWriter } from "../db/write-queue.js";
 import {
   CHARTER_CARD_KEY,
   CHARTER_DRAFT_ROLE,
-  ensureCharterCard,
   type CharterDraftOutcome,
+  ensureCharterCard,
 } from "../engine/charter.js";
-import { makeRuntime, type EngineRuntime } from "../engine/runtime.js";
 import type { CostHook, RunTurnInput } from "../engine/dispatch.js";
+import { type EngineRuntime, makeRuntime } from "../engine/runtime.js";
+import type { DomainEvent, EventBus } from "../events/bus.js";
+import { appendAudit } from "../events/recorder.js";
 import { kindOf } from "../heartbeat/patrol.js";
 
 /**
@@ -282,7 +283,10 @@ export const DEFAULT_PUMP_TASK_LIMIT = 3;
 export const DEFAULT_CHARTER_MAX_ATTEMPTS = 3;
 
 /** 放弃那一行的 actor。与 patrol 的 STALL_ACTOR / charter store 的 CHARTER_ACTOR 同一形状。 */
-export const PUMP_ACTOR = { actorType: "system", actorId: "charter_pump" } as const;
+export const PUMP_ACTOR = {
+  actorType: "system",
+  actorId: "charter_pump",
+} as const;
 
 /**
  * 放弃那一行的 payload.kind。
@@ -429,7 +433,11 @@ export type PumpRoundResult = {
    * 执行日志那一笔的结果（每条任务一格）。
    * `recorded: false` 不是失败而是一种【结论】，所以原样带出来而不是咽掉。
    */
-  readonly turns: readonly { readonly taskId: string; readonly recorded: boolean; readonly why: string }[];
+  readonly turns: readonly {
+    readonly taskId: string;
+    readonly recorded: boolean;
+    readonly why: string;
+  }[];
   /**
    * 本轮【被那道花钱的门挡住】的想法（已花的钱 + 任务 id）。
    *
@@ -439,7 +447,11 @@ export type PumpRoundResult = {
    * 这也是它不做成 cards 里一个 outcome 的原因：cards 是"本轮真去看了的"那张表，
    * 而被挡住的没被看过。
    */
-  readonly blocked: readonly { readonly taskId: string; readonly title: string; readonly consumedCents: number }[];
+  readonly blocked: readonly {
+    readonly taskId: string;
+    readonly title: string;
+    readonly consumedCents: number;
+  }[];
 };
 
 const nothingRound: PumpRoundResult = {
@@ -471,10 +483,14 @@ export async function pumpCharterCards(
   // 这两条抛在【任何读写之前】：maxAttempts=0 会让候选 SQL 恒空，
   // 表现是"泵在跑而永远无事可做"，而那不是配置错的样子。
   if (!Number.isInteger(maxAttempts) || maxAttempts < 1) {
-    throw new Error("章程泵的最大尝试次数必须是 >= 1 的整数，收到 " + String(o.maxAttempts));
+    throw new Error(
+      "章程泵的最大尝试次数必须是 >= 1 的整数，收到 " + String(o.maxAttempts),
+    );
   }
   if (!Number.isInteger(perRound) || perRound < 1) {
-    throw new Error("章程泵一轮最多补几张必须是 >= 1 的整数，收到 " + String(o.taskLimit));
+    throw new Error(
+      "章程泵一轮最多补几张必须是 >= 1 的整数，收到 " + String(o.taskLimit),
+    );
   }
 
   type Candidate = { id: string; title: string; attempts: number };
@@ -487,19 +503,31 @@ export async function pumpCharterCards(
   const candidates = w
     .readConnection()
     .prepare(CHARTER_CANDIDATES_SQL)
-    .all(CHARTER_CARD_KEY, maxAttempts, o.taskLimitCents, perRound) as unknown as Candidate[];
+    .all(
+      CHARTER_CARD_KEY,
+      maxAttempts,
+      o.taskLimitCents,
+      perRound,
+    ) as unknown as Candidate[];
 
   // 被门挡住的那一批要在【早退之前】问（理由见 PumpRoundResult.blocked 那格）。
   // 绑参顺序与候选那条【只差最后没有 limit】—— 两条 SQL 共用同一个前缀，
   // 所以这里的参数列表就是上面那一份去掉最后一项；抄成两份会漂移，
   // 而漂移的表现是"门挡了而没人说出来"，与不报是同一种坏。
   const blocked = (
-    w.readConnection().prepare(CHARTER_BLOCKED_SQL).all(
-      CHARTER_CARD_KEY,
-      maxAttempts,
-      o.taskLimitCents,
-    ) as unknown as { id: string; title: string; consumed: number }[]
-  ).map((b) => ({ taskId: b.id, title: b.title, consumedCents: Number(b.consumed) }));
+    w
+      .readConnection()
+      .prepare(CHARTER_BLOCKED_SQL)
+      .all(CHARTER_CARD_KEY, maxAttempts, o.taskLimitCents) as unknown as {
+      id: string;
+      title: string;
+      consumed: number;
+    }[]
+  ).map((b) => ({
+    taskId: b.id,
+    title: b.title,
+    consumedCents: Number(b.consumed),
+  }));
 
   if (candidates.length === 0 && blocked.length === 0) return nothingRound;
   if (candidates.length === 0) return { ...nothingRound, blocked };
@@ -530,18 +558,31 @@ export async function pumpCharterCards(
     readonly note: string;
   }[] = [];
   const abandoned: string[] = [];
-  const turns: { readonly taskId: string; readonly recorded: boolean; readonly why: string }[] = [];
+  const turns: {
+    readonly taskId: string;
+    readonly recorded: boolean;
+    readonly why: string;
+  }[] = [];
   let costCents = 0;
 
   for (const c of candidates) {
     let outcome: PumpCardOutcome = "attempted";
     let note = "";
-    let turn: { role: string; sessionId: string | null; costCents: number; ok: boolean } | null = null;
+    let turn: {
+      role: string;
+      sessionId: string | null;
+      costCents: number;
+      ok: boolean;
+    } | null = null;
     try {
       const r = await ensureCharterCard(
         w,
         { taskId: c.id, nowMs: o.nowMs, maxBudgetUsd: o.maxBudgetUsd },
-        { ...deps, publish: (e: DomainEvent, seq: number) => bus.publishPersisted(e, seq) },
+        {
+          ...deps,
+          publish: (e: DomainEvent, seq: number) =>
+            bus.publishPersisted(e, seq),
+        },
       );
       costCents += r.costCents;
       outcome =
@@ -576,7 +617,8 @@ export async function pumpCharterCards(
     } catch (e) {
       // 见函数头：整轮不抛。原文进这一发的 note，由 io 那一层说出来。
       outcome = "attempted";
-      note = "起草那一发直接抛了：" + (e instanceof Error ? e.message : String(e));
+      note =
+        "起草那一发直接抛了：" + (e instanceof Error ? e.message : String(e));
     }
     cards.push({ taskId: c.id, outcome, note });
     if (turn !== null) {
@@ -602,11 +644,17 @@ export async function pumpCharterCards(
     // 只要这张卡存在，这一格就【已经有东西在回答了】，"不再试了"这件事就不成立。
     const hasCard = w
       .readConnection()
-      .prepare("SELECT 1 AS x FROM approvals WHERE task_id = ? AND card_key = ? LIMIT 1")
+      .prepare(
+        "SELECT 1 AS x FROM approvals WHERE task_id = ? AND card_key = ? LIMIT 1",
+      )
       .get(c.id, CHARTER_CARD_KEY) as { x: number } | undefined;
     if (hasCard !== undefined) continue;
     const after = Number(
-      (w.readConnection().prepare(CHARTER_ATTEMPTS_SQL).get(c.id) as { n: number } | undefined)?.n ?? 0,
+      (
+        w.readConnection().prepare(CHARTER_ATTEMPTS_SQL).get(c.id) as
+          | { n: number }
+          | undefined
+      )?.n ?? 0,
     );
     if (after < maxAttempts) continue;
     await writeGaveUp(w, c.id, after, maxAttempts, o.nowMs);
@@ -614,7 +662,12 @@ export async function pumpCharterCards(
     cards.push({
       taskId: c.id,
       outcome: "gave_up",
-      note: "试到第 " + after + " 次仍没有可批的章程卡，泵不再试（详见那条 " + CHARTER_GAVE_UP_KIND + " 审计）。",
+      note:
+        "试到第 " +
+        after +
+        " 次仍没有可批的章程卡，泵不再试（详见那条 " +
+        CHARTER_GAVE_UP_KIND +
+        " 审计）。",
     });
   }
 
@@ -693,7 +746,9 @@ function roleOf(w: HubWriter, taskId: string): string {
     .readConnection()
     .prepare("SELECT assigned_role FROM tasks WHERE id = ?")
     .get(taskId) as { assigned_role: string | null } | undefined;
-  return r?.assigned_role === null || r?.assigned_role === undefined || r.assigned_role === ""
+  return r?.assigned_role === null ||
+    r?.assigned_role === undefined ||
+    r.assigned_role === ""
     ? CHARTER_DRAFT_ROLE
     : r.assigned_role;
 }
@@ -708,7 +763,14 @@ function roleOf(w: HubWriter, taskId: string): string {
  */
 async function recordTurnSafe(
   fn: EngineRuntime["recordTurn"],
-  i: { taskId: string; role: string; sessionId: string | null; costCents: number; ok: boolean; nowMs: number },
+  i: {
+    taskId: string;
+    role: string;
+    sessionId: string | null;
+    costCents: number;
+    ok: boolean;
+    nowMs: number;
+  },
 ): Promise<{ recorded: boolean; why: string }> {
   try {
     return await fn(i);
@@ -734,7 +796,10 @@ function engineOf(
   o: PumpOptions,
   w: HubWriter,
   bus: EventBus,
-): { readonly deps: () => CharterCardDeps; readonly recordTurn: () => EngineRuntime["recordTurn"] } {
+): {
+  readonly deps: () => CharterCardDeps;
+  readonly recordTurn: () => EngineRuntime["recordTurn"];
+} {
   if (o.cardDeps !== undefined) {
     const d = o.cardDeps;
     return {
@@ -788,4 +853,3 @@ const noRecorder: EngineRuntime["recordTurn"] = async () => ({
   recorded: false,
   why: "这套装配没有提供执行日志的写入方（注入了假起草而没注入 recordTurn）",
 });
-

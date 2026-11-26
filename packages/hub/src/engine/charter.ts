@@ -34,20 +34,20 @@
  * 广播在提交之后，逐条（少一条就是一个 SSE seq 空洞，0010 §4）。
  */
 import type { OrgGraph } from "@opc/contracts";
-import type { HubWriter } from "../db/write-queue.js";
-import { requireScopeDb } from "../checkpoint/tx-scope.js";
-import { appendAudit, KIND_TO_ACTION } from "../events/recorder.js";
-import type { DomainEvent } from "../events/bus.js";
-import { readGraphByVersion } from "../org/commit.js";
 import {
+  type ApprovalRequiredEvent,
   approvalRequiredEvent,
   insertCard,
-  type ApprovalRequiredEvent,
   type NewCardDraft,
 } from "../approvals/cards.js";
+import { requireScopeDb } from "../checkpoint/tx-scope.js";
+import type { HubWriter } from "../db/write-queue.js";
+import type { DomainEvent } from "../events/bus.js";
+import { appendAudit, KIND_TO_ACTION } from "../events/recorder.js";
+import { readGraphByVersion } from "../org/commit.js";
+import { parseDecision, type RoleDecision } from "./claude.js";
 import type { CostHook, RunTurnInput } from "./dispatch.js";
 import { LEDGER_SQL } from "./dispatch.js";
-import { parseDecision, type RoleDecision } from "./claude.js";
 
 /** 起草章程的那个角色。与 tasks.assigned_role 的建卡初值同源（real-deps 的 intakeRole）。 */
 export const CHARTER_DRAFT_ROLE = "intake";
@@ -62,11 +62,11 @@ export const CHARTER_DRAFT_ROLE = "intake";
 export const CHARTER_CARD_KEY = "charter:proposal";
 
 /** 卡片按钮，与 contracts 的 APPROVAL_BUTTONS 同值（顺序也一致）。 */
-const CARD_BUTTONS: readonly ["approve", "reject_with_comment", "defer_deep_review"] = [
+const CARD_BUTTONS: readonly [
   "approve",
   "reject_with_comment",
   "defer_deep_review",
-];
+] = ["approve", "reject_with_comment", "defer_deep_review"];
 
 /**
  * 让角色起草章程时说的话。
@@ -82,7 +82,11 @@ export function buildCharterDraftPrompt(o: {
   readonly ceoRoleId: string;
 }): string {
   return [
-    "你是 " + o.role + "，正在为 " + o.ceoRoleId + "（公司的 CEO）起草一份【章程提案】。",
+    "你是 " +
+      o.role +
+      "，正在为 " +
+      o.ceoRoleId +
+      "（公司的 CEO）起草一份【章程提案】。",
     "",
     "CEO 的想法：" + o.title,
     "",
@@ -94,8 +98,12 @@ export function buildCharterDraftPrompt(o: {
     "建议参与的角色：",
     "",
     "规则：",
-    "· 这是【提案】，不是决定。" + o.ceoRoleId + " 才是决策者，她可以改任何一栏。",
-    "· 不知道的就写「未定」，不要编。尤其不要替 " + o.ceoRoleId + " 写验收标准 —— 那是要她认的。",
+    "· 这是【提案】，不是决定。" +
+      o.ceoRoleId +
+      " 才是决策者，她可以改任何一栏。",
+    "· 不知道的就写「未定」，不要编。尤其不要替 " +
+      o.ceoRoleId +
+      " 写验收标准 —— 那是要她认的。",
     "· 不要宣布任务状态变了，也不要批准任何东西。你只负责起草。",
   ].join("\n");
 }
@@ -131,7 +139,10 @@ function impactScopeOf(text: string): string {
   // 全文在 evidence 指针指向的那条审计里 —— 点开就在，不需要把整段塞进第一行。
   const flat = text.replace(/\s+/gu, " ").trim();
   const cut = flat.length > 600 ? flat.slice(0, 600) + "…（全文见证据）" : flat;
-  return "这份章程一旦签署就生效：它决定这件事的目标、验收口径、预算与参与角色。提案原文：" + cut;
+  return (
+    "这份章程一旦签署就生效：它决定这件事的目标、验收口径、预算与参与角色。提案原文：" +
+    cut
+  );
 }
 export interface CharterDraftOutcome {
   readonly ok: boolean;
@@ -155,8 +166,7 @@ export interface CharterOptions {
 }
 
 export interface CharterResult {
-  readonly outcome:
-    /** 卡片建出来了。 */
+  readonly outcome: /** 卡片建出来了。 */
     | "drafted"
     /** 任务不在库里。 */
     | "task_missing"
@@ -171,7 +181,10 @@ export interface CharterResult {
   readonly note: string;
   readonly costCents: number;
   readonly card: ApprovalRequiredEvent | null;
-  readonly published: readonly { readonly event: DomainEvent; readonly seq: number }[];
+  readonly published: readonly {
+    readonly event: DomainEvent;
+    readonly seq: number;
+  }[];
 }
 
 const LOAD_CHARTER_TASK_SQL =
@@ -251,33 +264,52 @@ export async function ensureCharterCard(
   };
 
   // ── 前置检查（读，不开事务）────────────────────────────────────────
-  const head = w.readConnection().prepare(LOAD_CHARTER_TASK_SQL).get(o.taskId) as
-    | Record<string, unknown>
-    | undefined;
+  const head = w
+    .readConnection()
+    .prepare(LOAD_CHARTER_TASK_SQL)
+    .get(o.taskId) as Record<string, unknown> | undefined;
   if (head === undefined) {
-    return { ...nothing, outcome: "task_missing", note: "任务不在库里，什么都没做。" };
+    return {
+      ...nothing,
+      outcome: "task_missing",
+      note: "任务不在库里，什么都没做。",
+    };
   }
   const status = String(head["status"] ?? "");
   if (status !== "CHARTER_PENDING") {
     return {
       ...nothing,
       outcome: "not_charter_pending",
-      note: "任务现在在 " + status + "，章程那一格已经过去了（这一发只管 CHARTER_PENDING）。",
+      note:
+        "任务现在在 " +
+        status +
+        "，章程那一格已经过去了（这一发只管 CHARTER_PENDING）。",
     };
   }
-  const role = o.role ?? (String(head["assigned_role"] ?? "") === "" ? CHARTER_DRAFT_ROLE : String(head["assigned_role"]));
+  const role =
+    o.role ??
+    (String(head["assigned_role"] ?? "") === ""
+      ? CHARTER_DRAFT_ROLE
+      : String(head["assigned_role"]));
 
   // 图这一关【照 dispatch 的规矩】：任务用创建时那一版（§18.4），起草角色必须在图上。
   // 不在图上就跑不了 —— 一个「组织里查无此人」的角色照样能烧钱起草一份章程，
   // 那不是「灵活」，那是没有边界。CEO 的解法是在组织图里加上这个角色，不是这里放行。
   let graph: OrgGraph | null = null;
   try {
-    graph = readGraphByVersion(w.readConnection(), Number(head["graph_version"]));
+    graph = readGraphByVersion(
+      w.readConnection(),
+      Number(head["graph_version"]),
+    );
   } catch (e) {
     return {
       ...nothing,
       outcome: "org_blocked",
-      note: "组织图版本 " + String(head["graph_version"]) + " 读不出来：" + (e instanceof Error ? e.message : String(e)),
+      note:
+        "组织图版本 " +
+        String(head["graph_version"]) +
+        " 读不出来：" +
+        (e instanceof Error ? e.message : String(e)),
     };
   }
   if (graph.nodes[role] === undefined) {
@@ -285,7 +317,11 @@ export async function ensureCharterCard(
       ...nothing,
       outcome: "org_blocked",
       note:
-        "起草角色 [" + role + "] 不在组织图 v" + String(head["graph_version"]) + " 上，所以没法让它起草章程。" +
+        "起草角色 [" +
+        role +
+        "] 不在组织图 v" +
+        String(head["graph_version"]) +
+        " 上，所以没法让它起草章程。" +
         "解法是在组织图里加上这个角色（它得是这家公司的一员），不是让这里绕过组织图。",
     };
   }
@@ -299,14 +335,18 @@ export async function ensureCharterCard(
   //    （它只让第二次建卡失败，管不了我在它之前已经花了钱）。
   const pend = w
     .readConnection()
-    .prepare("SELECT id FROM approvals WHERE task_id = ? AND card_key = ? AND status = 'pending' LIMIT 1")
+    .prepare(
+      "SELECT id FROM approvals WHERE task_id = ? AND card_key = ? AND status = 'pending' LIMIT 1",
+    )
     .get(o.taskId, CHARTER_CARD_KEY) as Record<string, unknown> | undefined;
   if (pend !== undefined) {
     return {
       ...nothing,
       outcome: "already_pending",
       note:
-        "这件事已经有一张待批的章程卡（id = " + String(pend["id"]) + "），没有再烧一次 token。" +
+        "这件事已经有一张待批的章程卡（id = " +
+        String(pend["id"]) +
+        "），没有再烧一次 token。" +
         "下一步是去收件箱点它，不是再起草一遍。",
     };
   }
@@ -335,8 +375,17 @@ export async function ensureCharterCard(
    */
   const bill = (db: Parameters<typeof appendAudit>[0], seq: number): void => {
     if (res.costCents <= 0) return;
-    deps.onCost?.({ db, taskId: o.taskId, role, seq, costCents: res.costCents, nowMs: o.nowMs });
-    db.prepare(LEDGER_SQL).run(...([res.costCents, o.nowMs, o.taskId] as never[]));
+    deps.onCost?.({
+      db,
+      taskId: o.taskId,
+      role,
+      seq,
+      costCents: res.costCents,
+      nowMs: o.nowMs,
+    });
+    db.prepare(LEDGER_SQL).run(
+      ...([res.costCents, o.nowMs, o.taskId] as never[]),
+    );
   };
   if (draft === null) {
     // ── 这一轮失败了：【留痕】与【结账】是两件事，0043 之前它们被写成了同一件 ──
@@ -369,7 +418,9 @@ export async function ensureCharterCard(
         note:
           "章程起草那一轮没交出可用的提案：" +
           String(res.error ?? "输出里没有可用的结构化提案") +
-          (cost > 0 ? "（这一轮花了 " + cost + " 美分，已入账）" : "（这一轮没花钱）"),
+          (cost > 0
+            ? "（这一轮花了 " + cost + " 美分，已入账）"
+            : "（这一轮没花钱）"),
         costCents: cost,
       };
       const seq = appendAudit(
@@ -396,9 +447,13 @@ export async function ensureCharterCard(
     return {
       outcome: "no_draft",
       note:
-        "章程起草那一轮没交出可用的提案（" + String(res.error ?? "输出里没有 <<<OPC_DECISION>>> 那一段") + "）。" +
+        "章程起草那一轮没交出可用的提案（" +
+        String(res.error ?? "输出里没有 <<<OPC_DECISION>>> 那一段") +
+        "）。" +
         "没有建卡 —— 建一张内容空白的卡会让收件箱里出现一件【点开却没有内容】的事。" +
-        (cost > 0 ? " 这一轮花的 " + cost + " 美分已入账。" : " 这一轮没花钱，但审计里留了这一行。"),
+        (cost > 0
+          ? " 这一轮花的 " + cost + " 美分已入账。"
+          : " 这一轮没花钱，但审计里留了这一行。"),
       costCents: cost,
       card: null,
       published: [],
@@ -432,7 +487,9 @@ export async function ensureCharterCard(
       },
       () => o.nowMs,
     );
-    const published: { event: DomainEvent; seq: number }[] = [{ event: turnEvt, seq: turnSeq }];
+    const published: { event: DomainEvent; seq: number }[] = [
+      { event: turnEvt, seq: turnSeq },
+    ];
 
     // 证据指针指向【刚才那条审计】的 id：提案原文就在那一行的 state_snapshot 里。
     // 为什么不用文件名/URL：这一发【没有】写任何文件，编一个路径等于给出一张点不开的证据
@@ -453,7 +510,12 @@ export async function ensureCharterCard(
       bill(db, turnSeq);
       return { created: false as const, published };
     }
-    const cardEvt = approvalRequiredEvent(o.taskId, card.approvalId, cardDraft, cardDraft.approvalType);
+    const cardEvt = approvalRequiredEvent(
+      o.taskId,
+      card.approvalId,
+      cardDraft,
+      cardDraft.approvalType,
+    );
     const cardSeq = appendAudit(
       db,
       {
@@ -497,7 +559,9 @@ export async function ensureCharterCard(
   return {
     outcome: "drafted",
     note:
-      "章程提案已进 CEO 收件箱（" + draft.summary + "）。下一步是那次点击，不是再跑一次起草。",
+      "章程提案已进 CEO 收件箱（" +
+      draft.summary +
+      "）。下一步是那次点击，不是再跑一次起草。",
     costCents: res.costCents,
     card: wrote.cardEvt,
     published: wrote.published,

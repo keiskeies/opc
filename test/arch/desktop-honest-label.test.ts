@@ -10,14 +10,13 @@ import { describe, expect, it } from "vitest";
 import {
   checkHonestLabel,
   type DesktopFacts,
+  HONEST_LABEL_MARKER,
   hasDesktopEntry,
   hasElectronDep,
-  HONEST_LABEL_MARKER,
 } from "./desktop-honest-label.js";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
-const read = (rel: string): string =>
-  readFileSync(join(ROOT, rel), "utf8");
+const read = (rel: string): string => readFileSync(join(ROOT, rel), "utf8");
 
 const facts = (): DesktopFacts => ({
   pkgJson: read("packages/desktop/package.json"),
@@ -60,9 +59,9 @@ describe("desktop 诚实标注：双向变异（合成输入）", () => {
       '"electron": "^45.0.0", "@opc/contracts"',
     );
     expect(hasElectronDep(withElectron)).toBe(true);
-    expect(
-      checkHonestLabel({ ...b, pkgJson: withElectron }),
-    ).toContain(HONEST_LABEL_MARKER);
+    expect(checkHonestLabel({ ...b, pkgJson: withElectron })).toContain(
+      HONEST_LABEL_MARKER,
+    );
   });
 
   it("方向 B②：根 scripts 加了指向本包的入口而标注还在 ⇒ 红", () => {

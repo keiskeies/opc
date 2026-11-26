@@ -8,7 +8,7 @@
   "files": {
     "includes": [
       "packages/**/*.{ts,tsx,js,mjs,json}",
-      "!packages/web/public/vendor/**",
+      "!packages/web/public/vendor",
       "docs/review/**/*.{js,mjs}",
       "test/**/*.{ts,tsx}",
       "*.json",

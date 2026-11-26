@@ -27,10 +27,10 @@
  *     与审计里有没有真的发生过搜索（**编不出来**）。两个都做，差别写在函数注释里。
  */
 import {
-  isExternalSourceRef,
-  SEARCH_MANDATORY_SOURCES_CONDITION,
   type Charter,
   type EvidenceBundle,
+  isExternalSourceRef,
+  SEARCH_MANDATORY_SOURCES_CONDITION,
 } from "@opc/contracts";
 // `metricCriteriaEvaluator` 作为**默认 fallback** 用在下面那条测试里，
 // 而类型 `CriteriaEvaluator` 是这一节的接口本体 —— 都来自门控那一层，不另写一份。
@@ -77,7 +77,9 @@ export const SEARCH_REJECT_CODES = [
 // 「有码而代码永不返回」—— Task 5.4 刚为四个这样的码删过一轮，同一个错不犯第二次。
 export type SearchRejectCode = (typeof SEARCH_REJECT_CODES)[number];
 
-export type SearchBlock = { ok: true } | { ok: false; code: SearchRejectCode; reason: string };
+export type SearchBlock =
+  | { ok: true }
+  | { ok: false; code: SearchRejectCode; reason: string };
 
 /* ═════════════════ 第 1 层：强制搜索领域 ═════════════════ */
 
@@ -127,19 +129,25 @@ export function mandatorySourceBlock(
       ok: false,
       code: "unknown_mandatory_domain",
       reason:
-        "强制搜索领域里有没听过的名字 [" + unknown.join(", ") + "]。" +
+        "强制搜索领域里有没听过的名字 [" +
+        unknown.join(", ") +
+        "]。" +
         "FAST_CHANGING_DOMAINS 是【规格】§13.3 那张表的四条，不接受现场加一项 —— " +
         "一个能现场解释的判据担不起 reject 这个后果。修法：改那张表（= 改规格），" +
         "或把这一项从岗位书里去掉。",
     };
   }
-  const sources = bundle.claims.flatMap((c) => c.evidence_refs).filter(isExternalSourceRef);
+  const sources = bundle.claims
+    .flatMap((c) => c.evidence_refs)
+    .filter(isExternalSourceRef);
   if (mandatoryDomains.length > 0 && sources.length === 0) {
     return {
       ok: false,
       code: "no_source_for_mandatory_domain",
       reason:
-        "本任务声明了强制搜索领域 [" + mandatoryDomains.join(", ") + "]，" +
+        "本任务声明了强制搜索领域 [" +
+        mandatoryDomains.join(", ") +
+        "]，" +
         "而证据包里**一条 http(s) 来源引用都没有**（【规格】§13.3 第 1 层：门控直接打回，" +
         "不是警告）。为什么是 reject 而不是 escalate：这一层的语义是" +
         "「这个领域的结论必须建立在外部来源上」，缺它就是结论没有依据 —— " +
@@ -171,8 +179,12 @@ export function mandatorySearchObservedBlock(
       ok: false,
       code: "mandatory_source_not_observed",
       reason:
-        "声明了强制搜索领域 [" + mandatoryDomains.join(", ") + "]，" +
-        "而审计里**一次搜索调用都没观测到**（observedSearches=" + observedSearches + "）。" +
+        "声明了强制搜索领域 [" +
+        mandatoryDomains.join(", ") +
+        "]，" +
+        "而审计里**一次搜索调用都没观测到**（observedSearches=" +
+        observedSearches +
+        "）。" +
         "包里也许写了 URL，但那条 URL 没有被任何一次真实搜索支撑 —— " +
         "这正是上一条判据结构性拦不住的那种写法。",
     };
@@ -181,7 +193,9 @@ export function mandatorySearchObservedBlock(
 }
 
 /** 「没有观测通路」这个状态必须是**显式**的，不能靠传 0 混过去。 */
-export function unobservedSearchBlock(mandatoryDomains: readonly string[]): SearchBlock {
+export function unobservedSearchBlock(
+  mandatoryDomains: readonly string[],
+): SearchBlock {
   if (mandatoryDomains.length === 0) return { ok: true };
   return {
     ok: false,
@@ -229,7 +243,9 @@ export function judgmentBlock(j: SearchJudgment): SearchBlock {
       ok: false,
       code: "judgment_without_reason",
       reason:
-        "声明了搜索必要性判断（needsSearch=" + j.needsSearch + "）而理由为空。" +
+        "声明了搜索必要性判断（needsSearch=" +
+        j.needsSearch +
+        "）而理由为空。" +
         "一个空的理由与没有判断等价，而且它比没有更坏：它看起来满足了一条可审计的要求。" +
         "（同 0021 那条『空理由的批准等于没有批准』。）",
     };
@@ -289,21 +305,29 @@ export function searchBudgetTier(
     return {
       tier: "unknown",
       why:
-        "阈值配置非法（ceoRatio=" + thresholds.ceoRatio + " 必须 > techLeadRatio=" +
-        thresholds.techLeadRatio + "）。配反的话 CEO 那一档**永不触发**而看起来仍在防，" +
+        "阈值配置非法（ceoRatio=" +
+        thresholds.ceoRatio +
+        " 必须 > techLeadRatio=" +
+        thresholds.techLeadRatio +
+        "）。配反的话 CEO 那一档**永不触发**而看起来仍在防，" +
         "这是【恒不命中的判据】最坏的一种：它给了两条防线的外观。",
     };
   }
   if (
-    spentCents === null || spentCents === undefined ||
-    limitCents === null || limitCents === undefined ||
+    spentCents === null ||
+    spentCents === undefined ||
+    limitCents === null ||
+    limitCents === undefined ||
     !(limitCents > 0)
   ) {
     return {
       tier: "unknown",
       why:
-        "搜索成本或任务预算上限拿不到（spent=" + String(spentCents) +
-        ", limit=" + String(limitCents) + "），无法判断是否达到降级阈值。" +
+        "搜索成本或任务预算上限拿不到（spent=" +
+        String(spentCents) +
+        ", limit=" +
+        String(limitCents) +
+        "），无法判断是否达到降级阈值。" +
         "0015 §3 记过岗位书预算与 `budgets` 表是**两个源**，所以『读不到』在今天不是罕见情况。",
     };
   }
@@ -340,7 +364,9 @@ export function prohibitedBlock(
       ok: false,
       code: "prohibited_by_charter",
       reason:
-        "岗位书**同时**声明了「禁止搜索」与强制搜索领域 [" + mandatoryDomains.join(", ") + "]，" +
+        "岗位书**同时**声明了「禁止搜索」与强制搜索领域 [" +
+        mandatoryDomains.join(", ") +
+        "]，" +
         "这是配置矛盾，按**禁止**处理并停下等人改岗位书。" +
         "不选『让强制搜索赢』的理由是资格与金额不对称：一个被认定不该联网的角色，" +
         "不能因为『这个领域需要外部信息』就联网 —— 那种组合的正确结论是" +
@@ -350,7 +376,8 @@ export function prohibitedBlock(
   return {
     ok: false,
     code: "prohibited_by_charter",
-    reason: "岗位书禁止该角色联网搜索（【规格】§13.3 挂载方式那句「由岗位书决定是否授予该权限」）。",
+    reason:
+      "岗位书禁止该角色联网搜索（【规格】§13.3 挂载方式那句「由岗位书决定是否授予该权限」）。",
   };
 }
 
@@ -382,7 +409,9 @@ export function adrEvidenceBlock(
     if (c.evidence_refs.length === 0) continue;
     const allExternal = c.evidence_refs.every(isExternalSourceRef);
     if (!allExternal) continue;
-    const hitsAdr = c.evidence_refs.some((r) => declared.has(r.split("#")[0] as string));
+    const hitsAdr = c.evidence_refs.some((r) =>
+      declared.has(r.split("#")[0] as string),
+    );
     if (!hitsAdr) bad.push(c.text);
   }
   if (bad.length > 0) {
@@ -390,8 +419,11 @@ export function adrEvidenceBlock(
       ok: false,
       code: "decision_without_adr",
       reason:
-        "有 " + bad.length + " 条主张的依据**全部**是外部搜索链接，而没有任何一条指向 ADR 制品：" +
-        "\n  - " + bad.join("\n  - ") +
+        "有 " +
+        bad.length +
+        " 条主张的依据**全部**是外部搜索链接，而没有任何一条指向 ADR 制品：" +
+        "\n  - " +
+        bad.join("\n  - ") +
         "\n【规格】§13.2 Step 3：搜索结果作为 ADR 的**支撑证据**附加，而不是作为决策本身。" +
         "技术总监不能以『最终决定』姿态绕过架构师评审。修法：把这些依据写进一份 ADR" +
         "（含备选方案与选择理由），再让 claim 引用那份 ADR。",
@@ -435,7 +467,9 @@ export function searchResultUrlBlock(o: {
   readonly bundle: Pick<EvidenceBundle, "claims" | "artifacts">;
 }): SearchBlock {
   if (!o.searched) return { ok: true };
-  const anyUrl = o.bundle.claims.some((c) => c.evidence_refs.some(isExternalSourceRef));
+  const anyUrl = o.bundle.claims.some((c) =>
+    c.evidence_refs.some(isExternalSourceRef),
+  );
   if (!anyUrl) {
     return {
       ok: false,
@@ -479,16 +513,21 @@ export function searchEvidenceGate(o: {
   // 只判其中一个会留一条绕过：只判 ①，就没人拦「随意搜索而不留来源」。
   if (o.observedSearches !== OBSERVATION_UNAVAILABLE) {
     if (o.mandatoryDomains.length > 0) {
-      const obs = mandatorySearchObservedBlock(o.mandatoryDomains, o.observedSearches);
+      const obs = mandatorySearchObservedBlock(
+        o.mandatoryDomains,
+        o.observedSearches,
+      );
       if (!obs.ok) return obs;
     } else {
-      const url = searchResultUrlBlock({ searched: o.observedSearches > 0, bundle: o.bundle });
+      const url = searchResultUrlBlock({
+        searched: o.observedSearches > 0,
+        bundle: o.bundle,
+      });
       if (!url.ok) return url;
     }
   }
   return adrEvidenceBlock(o.bundle, o.adrPaths);
 }
-
 
 /* ═════════════════ 接进门控：让「打回」真的是门控打回 ═════════════════ */
 
@@ -595,10 +634,13 @@ export function makeSearchCriteriaEvaluator(o: {
       return {
         status: "unresolved",
         why:
-          "岗位书声明的强制搜索领域里有**这层不认得**的名字 [" + unknown.join(", ") + "]，" +
+          "岗位书声明的强制搜索领域里有**这层不认得**的名字 [" +
+          unknown.join(", ") +
+          "]，" +
           "所以这条标准本身不成立（不是产出不合格）。" +
           "FAST_CHANGING_DOMAINS 是【规格】§13.3 那张表的四条：" +
-          FAST_CHANGING_DOMAINS.join(" / ") + "。" +
+          FAST_CHANGING_DOMAINS.join(" / ") +
+          "。" +
           "⚠ 已知的一处对不上：【规格】附录 B.3 给技术总监那份写的四个名字 " +
           "(framework_version_compat / api_deprecation / security_advisory / benchmark) " +
           "与这四条**一个都不相同**（0033 §2 量过：交集为空）。要么改 YAML 用上面那四条，" +
@@ -619,7 +661,10 @@ export function makeSearchCriteriaEvaluator(o: {
           "（编一条 URL 在这一判据下完全合格）。",
       };
     }
-    const obs = mandatorySearchObservedBlock(o.mandatoryDomains, o.observedSearches);
+    const obs = mandatorySearchObservedBlock(
+      o.mandatoryDomains,
+      o.observedSearches,
+    );
     return obs.ok ? { status: "satisfied" } : { status: "violated" };
   };
 }
@@ -677,10 +722,14 @@ export function matchDomains(
   declared: readonly string[],
   charter: readonly string[],
 ): FastChangingDomain[] {
-  return charter.filter(isFastChangingDomain).filter((d) => declared.includes(d));
+  return charter
+    .filter(isFastChangingDomain)
+    .filter((d) => declared.includes(d));
 }
 
-export function searchPolicy(input: SearchPolicyInput): SearchPolicyVerdict | SearchBlock {
+export function searchPolicy(
+  input: SearchPolicyInput,
+): SearchPolicyVerdict | SearchBlock {
   // `null`（没有岗位书）在这一遍按**无强制领域**走：理由与代价写在
   // `SearchPolicyInput.charterMandatoryDomains` 那一格（一句话：事前拦的是「一次合法的联网」，
   // 事后判不了吵一次才对；两处都拦会把缺装配变成整条链路停工）。
@@ -688,7 +737,11 @@ export function searchPolicy(input: SearchPolicyInput): SearchPolicyVerdict | Se
     input.taskDomains,
     input.charterMandatoryDomains ?? [],
   );
-  const budget = searchBudgetTier(input.spentCents, input.limitCents, input.thresholds);
+  const budget = searchBudgetTier(
+    input.spentCents,
+    input.limitCents,
+    input.thresholds,
+  );
 
   // 顺序是有语义的（0022 §6 第 7 条：同一个输入命中多条判据时，报哪条取决于顺序）：
   // 资格（禁止）→ 义务（强制领域）→ 成本（预算）→ 程序（显式判断）。
@@ -708,7 +761,9 @@ export function searchPolicy(input: SearchPolicyInput): SearchPolicyVerdict | Se
       mandatoryDomains: mandated,
       budgetTier: budget.tier,
       reason:
-        "强制搜索领域 [" + mandated.join(", ") + "]：本层的结论必须建立在外部来源上。" +
+        "强制搜索领域 [" +
+        mandated.join(", ") +
+        "]：本层的结论必须建立在外部来源上。" +
         "包里那条 URL 还得过 mandatorySourceBlock 那一发（这一发只证明**搜过**）。",
     };
   }
@@ -725,8 +780,11 @@ export function searchPolicy(input: SearchPolicyInput): SearchPolicyVerdict | Se
       budgetTier: budget.tier,
       approver: budget.tier,
       reason:
-        "搜索成本已达任务预算的 " + Math.round(ratio * 100) +
-        "%，后续搜索需 [" + budget.tier + "] 批准（【规格】§13.3 第 3 层）。",
+        "搜索成本已达任务预算的 " +
+        Math.round(ratio * 100) +
+        "%，后续搜索需 [" +
+        budget.tier +
+        "] 批准（【规格】§13.3 第 3 层）。",
     };
   }
   if (budget.tier === "unknown") {
@@ -736,7 +794,8 @@ export function searchPolicy(input: SearchPolicyInput): SearchPolicyVerdict | Se
       budgetTier: "unknown",
       approver: "tech_lead",
       reason:
-        "预算那一维判不了 ⇒ 按『要批』处理：" + budget.why +
+        "预算那一维判不了 ⇒ 按『要批』处理：" +
+        budget.why +
         "\n为什么不是『按没超处理』：那会让『不接预算上报』成为绕过第 3 层的通路。",
     };
   }
@@ -758,7 +817,8 @@ export function searchPolicy(input: SearchPolicyInput): SearchPolicyVerdict | Se
     mandatoryDomains: [],
     budgetTier: "within",
     reason:
-      "第 2 层：Agent 显式判断" + (needs ? "参数化知识不足 ⇒ 允许搜索" : "知识够用 ⇒ 不搜") +
+      "第 2 层：Agent 显式判断" +
+      (needs ? "参数化知识不足 ⇒ 允许搜索" : "知识够用 ⇒ 不搜") +
       "，理由进审计（【规格】§13.3 第 2 层要的就是这个可审计性）。",
   };
 }

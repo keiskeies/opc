@@ -46,8 +46,8 @@ import type {
   HarnessRequest,
 } from "@opc/contracts";
 import type {
-  Options as QoderSdkOptions,
   SDKMessage as QoderSdkMessage,
+  Options as QoderSdkOptions,
 } from "@qoder-ai/qoder-agent-sdk";
 import type { RoleRunResult } from "../../engine/claude.js";
 import { redact } from "../safety.js";
@@ -459,8 +459,7 @@ export class QoderCliAdapter implements HarnessAdapter {
       exitCode: null,
       outcome: {
         harnessId: this.id,
-        harnessVersion:
-          this.#o.version ?? this.#versionFromInit ?? "unknown",
+        harnessVersion: this.#o.version ?? this.#versionFromInit ?? "unknown",
         modelFamily: this.#familyFromInit,
         output: r.text,
         // 本层没有 diff 读数器（写盘与否不由本层观测）⇒ null 恒给，不是空串。
@@ -518,6 +517,7 @@ export class QoderCliAdapter implements HarnessAdapter {
 
 // 类型引用保活：SDKMessage 只在窄化说明里出现，编译期检查消费面子集与真类型的
 // 赋值方向（SDKMessage → Lite 必须成立，注释里那句「窄化只发生在一条缝上」靠它兜底）。
-export type QoderSdkMessageShapeCheck = QoderSdkMessage extends QoderSdkMessageLite
-  ? true
-  : { mismatch: "QoderSdkMessageLite 比 SDKMessage 更宽，装载器窄化失效" };
+export type QoderSdkMessageShapeCheck =
+  QoderSdkMessage extends QoderSdkMessageLite
+    ? true
+    : { mismatch: "QoderSdkMessageLite 比 SDKMessage 更宽，装载器窄化失效" };

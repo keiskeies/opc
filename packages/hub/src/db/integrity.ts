@@ -44,15 +44,15 @@
  */
 
 import { createHash } from "node:crypto";
-import { fileURLToPath } from "node:url";
 import type { DatabaseSync } from "node:sqlite";
+import { fileURLToPath } from "node:url";
 import { Worker } from "node:worker_threads";
 import { orgGraphSchema } from "@opc/contracts";
 import { requireScopeDb } from "../checkpoint/tx-scope.js";
 import { AUDIT_ACTIONS, type AuditAction } from "../events/recorder.js";
-import type { Writer } from "./write-queue.js";
 import { isPageOk, reportText } from "./page-check.js";
 import { selfWorkerUrl, wrappedWorkerUrl } from "./worker-entry.js";
+import type { Writer } from "./write-queue.js";
 
 /**
  * worker 入口地址：把【我自己】的后缀换成 .worker<同后缀>。
@@ -100,7 +100,12 @@ export type CheckName = (typeof CHECK_NAMES)[number];
  * 也不能并进 violated：那会让「查询抛了」和「第 137 行不在索引里」共用一个结论，
  * 而前者要修的是连接/文件，后者要修的是数据。
  */
-export const CHECK_VERDICTS = ["ok", "violated", "not_observable", "could_not_run"] as const;
+export const CHECK_VERDICTS = [
+  "ok",
+  "violated",
+  "not_observable",
+  "could_not_run",
+] as const;
 export type CheckVerdict = (typeof CHECK_VERDICTS)[number];
 
 export type CheckResult = {
@@ -189,7 +194,10 @@ export async function runIntegrityScan(
   const checks: CheckResult[] = [
     pageCheckCell(page),
     probe,
-    ...auditCoherenceReport({ db: o.db, ...(o.ftsSample === undefined ? {} : { ftsSample: o.ftsSample }) }),
+    ...auditCoherenceReport({
+      db: o.db,
+      ...(o.ftsSample === undefined ? {} : { ftsSample: o.ftsSample }),
+    }),
   ];
 
   return {
@@ -208,7 +216,9 @@ export async function runIntegrityScan(
     ms: now() - started,
     pageReport: page.pageReport,
     startedAtMs: started,
-    ...(page.unavailable === undefined ? {} : { unavailable: page.unavailable }),
+    ...(page.unavailable === undefined
+      ? {}
+      : { unavailable: page.unavailable }),
   };
 }
 
@@ -231,7 +241,10 @@ function startedAt(o: RunOptions): number {
  */
 function pageViaMainThread(db: DatabaseSync): PageOutcome {
   try {
-    const rows = db.prepare("PRAGMA integrity_check").all() as Record<string, string>[];
+    const rows = db.prepare("PRAGMA integrity_check").all() as Record<
+      string,
+      string
+    >[];
     return {
       ok: isPageOk(rows),
       pageReport: reportText(rows),
@@ -335,7 +348,10 @@ async function pageViaWorker(
 }
 
 type WorkerOk = import("./integrity.worker.js").WorkerReport;
-type WorkerBad = { readonly failure: IntegrityFailure; readonly message: string };
+type WorkerBad = {
+  readonly failure: IntegrityFailure;
+  readonly message: string;
+};
 
 function runInWorker(
   dbPath: string,
@@ -500,11 +516,11 @@ export async function probeAppendOnly(o: {
 
     // Number() 是必要的而不是装饰：类型上 run().changes 是 number | bigint，
     // 而判据要的是可与 0 比较的数。
-    const update = rejectedByTrigger(
-      () => Number(db.prepare(PROBE_UPDATE_SQL).run(PROBE_MARKER, id).changes),
+    const update = rejectedByTrigger(() =>
+      Number(db.prepare(PROBE_UPDATE_SQL).run(PROBE_MARKER, id).changes),
     );
-    const del = rejectedByTrigger(
-      () => Number(db.prepare(PROBE_DELETE_SQL).run(id).changes),
+    const del = rejectedByTrigger(() =>
+      Number(db.prepare(PROBE_DELETE_SQL).run(id).changes),
     );
     const after = db
       .prepare("SELECT payload FROM events WHERE id = ?")
@@ -734,7 +750,9 @@ export function replayFingerprint(
   for (const r of rows) {
     for (const col of FINGERPRINT_COLS) {
       const v = r[col];
-      h.update(col + "=" + (v === null || v === undefined ? "∅" : String(v)) + ";");
+      h.update(
+        col + "=" + (v === null || v === undefined ? "∅" : String(v)) + ";",
+      );
     }
     h.update("\n");
   }
@@ -766,11 +784,15 @@ export type CoherenceInput = {
  * `harness_calls` 也早已不是（见本文件头 ④ 那一节）。两条的 not_observable 因此
  * 是同一件事：生产者在，而这一份库还没跑过。）
  */
-export function auditCoherenceReport(o: CoherenceInput): readonly CheckResult[] {
+export function auditCoherenceReport(
+  o: CoherenceInput,
+): readonly CheckResult[] {
   const sample = o.ftsSample ?? DEFAULT_FTS_SAMPLE;
   return [
     guarded("action_enum", () => actionEnumCheck(o.db)),
-    guarded("state_machine_agrees_with_events", () => stateMachineAgreement(o.db)),
+    guarded("state_machine_agrees_with_events", () =>
+      stateMachineAgreement(o.db),
+    ),
     guarded("gate_evidence_reference", () => gateEvidenceCheck(o.db)),
     guarded("harness_call_recorded", () => harnessCallCheck(o.db)),
     guarded("delegation_edges_gated", () => delegationEdgeGateCheck(o.db)),
@@ -820,9 +842,9 @@ function actionEnumCheck(db: DatabaseSync): CheckResult {
     };
   }
   const allowed = new Set<string>(AUDIT_ACTIONS);
-  const rows = db
-    .prepare("SELECT DISTINCT action FROM events")
-    .all() as { action: string }[];
+  const rows = db.prepare("SELECT DISTINCT action FROM events").all() as {
+    action: string;
+  }[];
   const bad = rows.map((r) => r.action).filter((a) => !allowed.has(a));
   if (bad.length > 0) {
     return {
@@ -858,9 +880,9 @@ function actionEnumCheck(db: DatabaseSync): CheckResult {
  */
 function stateMachineAgreement(db: DatabaseSync): CheckResult {
   const name: CheckName = "state_machine_agrees_with_events";
-  const tasks = db
-    .prepare("SELECT count(*) AS c FROM tasks")
-    .get() as { c: number | bigint };
+  const tasks = db.prepare("SELECT count(*) AS c FROM tasks").get() as {
+    c: number | bigint;
+  };
   if (Number(tasks.c) === 0) {
     return {
       name,
@@ -876,7 +898,11 @@ function stateMachineAgreement(db: DatabaseSync): CheckResult {
         "ORDER BY e.id DESC LIMIT 1) AS last_state_change " +
         "FROM tasks t",
     )
-    .all() as { id: string; status: string; last_state_change: string | null }[];
+    .all() as {
+    id: string;
+    status: string;
+    last_state_change: string | null;
+  }[];
   const mismatched: string[] = [];
   let withEvents = 0;
   for (const r of rows) {
@@ -886,12 +912,19 @@ function stateMachineAgreement(db: DatabaseSync): CheckResult {
     try {
       to = (JSON.parse(r.last_state_change) as Record<string, unknown>)["to"];
     } catch {
-      mismatched.push(r.id + "（最后一条 state_change 的 payload 不是合法 JSON）");
+      mismatched.push(
+        r.id + "（最后一条 state_change 的 payload 不是合法 JSON）",
+      );
       continue;
     }
     if (to !== r.status) {
       mismatched.push(
-        r.id + "（事件说 " + String(to) + "，tasks.status 是 " + r.status + "）",
+        r.id +
+          "（事件说 " +
+          String(to) +
+          "，tasks.status 是 " +
+          r.status +
+          "）",
       );
     }
   }
@@ -937,13 +970,14 @@ function gateEvidenceCheck(db: DatabaseSync): CheckResult {
     return {
       name,
       verdict: "not_observable",
-      detail: "这些表不在这一份库里：" + missing.join(", ") + "（未跑过迁移？）。",
+      detail:
+        "这些表不在这一份库里：" + missing.join(", ") + "（未跑过迁移？）。",
       checked: 0,
     };
   }
-  const gates = db
-    .prepare("SELECT count(*) AS c FROM review_gates")
-    .get() as { c: number | bigint };
+  const gates = db.prepare("SELECT count(*) AS c FROM review_gates").get() as {
+    c: number | bigint;
+  };
   if (Number(gates.c) === 0) {
     return {
       name,
@@ -982,7 +1016,10 @@ function gateEvidenceCheck(db: DatabaseSync): CheckResult {
         " / " +
         rows.length +
         " 条门控决定没有可解析的证据包引用（前几条：" +
-        bad.slice(0, 5).map((r) => r.id + "→" + String(r.ev)).join(", ") +
+        bad
+          .slice(0, 5)
+          .map((r) => r.id + "→" + String(r.ev))
+          .join(", ") +
         "）。§22.4 要求每个门控决定都有证据；没有引用的那一行事后无法复核，" +
         "而审阅共谋（§24 风险 1）正是靠这些引用才能被分析。",
       checked: rows.length,
@@ -1008,9 +1045,9 @@ function harnessCallCheck(db: DatabaseSync): CheckResult {
       checked: 0,
     };
   }
-  const calls = db
-    .prepare("SELECT count(*) AS c FROM harness_calls")
-    .get() as { c: number | bigint };
+  const calls = db.prepare("SELECT count(*) AS c FROM harness_calls").get() as {
+    c: number | bigint;
+  };
   if (Number(calls.c) === 0) {
     return {
       name,
@@ -1030,7 +1067,12 @@ function harnessCallCheck(db: DatabaseSync): CheckResult {
         " AND b.task_id = h.task_id) AS budget_rows " +
         "FROM harness_calls h",
     )
-    .all() as { id: string; task_id: string | null; cost: number | bigint | null; budget_rows: number | bigint }[];
+    .all() as {
+    id: string;
+    task_id: string | null;
+    cost: number | bigint | null;
+    budget_rows: number | bigint;
+  }[];
   const unrecorded = rows.filter(
     (r) => Number(r.cost ?? 0) > 0 && Number(r.budget_rows) === 0,
   );
@@ -1043,7 +1085,10 @@ function harnessCallCheck(db: DatabaseSync): CheckResult {
         " / " +
         rows.length +
         " 条 harness 调用有花费但那个任务在 budget_events 里【一行都没有】：" +
-        unrecorded.slice(0, 5).map((r) => r.id).join(", ") +
+        unrecorded
+          .slice(0, 5)
+          .map((r) => r.id)
+          .join(", ") +
         "。花掉的钱没进预算账，预算突破就不会被触发（§9 那一整条防线）。",
       checked: rows.length,
     };
@@ -1107,7 +1152,8 @@ function delegationEdgeGateCheck(db: DatabaseSync): CheckResult {
     return {
       name,
       verdict: "not_observable",
-      detail: "这些表不在这一份库里：" + missing.join(", ") + "（未跑过迁移？）。",
+      detail:
+        "这些表不在这一份库里：" + missing.join(", ") + "（未跑过迁移？）。",
       checked: 0,
     };
   }
@@ -1162,26 +1208,38 @@ function delegationEdgeGateCheck(db: DatabaseSync): CheckResult {
     const parts: string[] = [];
     if (unreadable.length > 0) {
       parts.push(
-        unreadable.length + " 个版本的 graph_json 不是合法 JSON（" +
-          unreadable.slice(0, 3).join("; ") + "）",
+        unreadable.length +
+          " 个版本的 graph_json 不是合法 JSON（" +
+          unreadable.slice(0, 3).join("; ") +
+          "）",
       );
     }
     if (malformed.length > 0) {
       parts.push(
-        malformed.length + " 个版本不过 orgGraphSchema（" +
-          malformed.slice(0, 3).join("; ") + "）",
+        malformed.length +
+          " 个版本不过 orgGraphSchema（" +
+          malformed.slice(0, 3).join("; ") +
+          "）",
       );
     }
     if (ungated.length > 0) {
       parts.push(
-        ungated.length + " 条委派边没有审阅门控（" + ungated.slice(0, 5).join(", ") + "）",
+        ungated.length +
+          " 条委派边没有审阅门控（" +
+          ungated.slice(0, 5).join(", ") +
+          "）",
       );
     }
     return {
       name,
       verdict: "violated",
       detail:
-        "扫了 " + rows.length + " 个版本、" + edges + " 条边：" + parts.join("；") +
+        "扫了 " +
+        rows.length +
+        " 个版本、" +
+        edges +
+        " 条边：" +
+        parts.join("；") +
         "。§8.2 第 4 条要求门控绑在边上、不可绕过，而这条判据【只看增量】" +
         "（validate.ts 的 missing_review_gate 拿的是本次新增那条边），" +
         "整图里已躺着的边没人看 —— 且这些版本【都还活着】：任务按自己盖的 " +
@@ -1195,7 +1253,9 @@ function delegationEdgeGateCheck(db: DatabaseSync): CheckResult {
       name,
       verdict: "not_observable",
       detail:
-        "库里有 " + rows.length + " 版组织图，而它们【一条委派边都没有】—— " +
+        "库里有 " +
+        rows.length +
+        " 版组织图，而它们【一条委派边都没有】—— " +
         "「每条委派边都带审阅门控」在这里没有对象。不是通过。" +
         "（空图是合法的数据形状：orgGraphSchema 的 edges 缺省 []。）",
       checked: 0,
@@ -1205,7 +1265,9 @@ function delegationEdgeGateCheck(db: DatabaseSync): CheckResult {
     name,
     verdict: "ok",
     detail:
-      rows.length + " 个版本、" + edges +
+      rows.length +
+      " 个版本、" +
+      edges +
       " 条委派边全部带 review_gate=true。注意本条判的是【边上的标记】，" +
       "不看那个门控实际有没有跑（审阅真的发生与否归 author-reviewer / events）。",
     checked: edges,
@@ -1214,13 +1276,16 @@ function delegationEdgeGateCheck(db: DatabaseSync): CheckResult {
 
 /** zod 错误压成一句能点名的短话；读不出结构也不抛（抛会被 guarded 翻成 could_not_run，那会盖掉真正的读数）。 */
 function issueSummary(err: unknown): string {
-  const list = (err as { issues?: { path: (string | number)[]; code: string }[] })
-    ?.issues;
+  const list = (
+    err as { issues?: { path: (string | number)[]; code: string }[] }
+  )?.issues;
   if (!Array.isArray(list)) return "schema 拒绝（读不出细节）";
   return (
     list
       .slice(0, 3)
-      .map((i) => (i.path.length > 0 ? i.path.join(".") : "<根>") + ":" + i.code)
+      .map(
+        (i) => (i.path.length > 0 ? i.path.join(".") : "<根>") + ":" + i.code,
+      )
       .join(", ") + (list.length > 3 ? " 等 " + list.length + " 条" : "")
   );
 }
@@ -1250,13 +1315,16 @@ export function ftsIndexCoherence(
 ): CheckResult {
   const name: CheckName = "fts_index";
   const hasFts = db
-    .prepare("SELECT count(*) AS c FROM sqlite_master WHERE name = 'events_fts'")
+    .prepare(
+      "SELECT count(*) AS c FROM sqlite_master WHERE name = 'events_fts'",
+    )
     .get() as { c: number | bigint };
   if (Number(hasFts.c) === 0) {
     return {
       name,
       verdict: "not_observable",
-      detail: "这份库里没有 events_fts（未跑迁移，或被删过）。检索一致性无从检查。",
+      detail:
+        "这份库里没有 events_fts（未跑迁移，或被删过）。检索一致性无从检查。",
       checked: 0,
     };
   }
@@ -1291,7 +1359,8 @@ export function ftsIndexCoherence(
     const ids = hits.all('"' + tri.replaceAll('"', '""') + '"') as {
       rid: number | bigint;
     }[];
-    if (!ids.some((x) => Number(x.rid) === Number(r.id))) missing.push(Number(r.id));
+    if (!ids.some((x) => Number(x.rid) === Number(r.id)))
+      missing.push(Number(r.id));
   }
   if (scanned === 0) {
     return {
@@ -1401,7 +1470,9 @@ export function ftsIndexCoherence(
  *   assemble.ts 启动处 io.warn，maintenance.ts 两处（onWarning + report 的那句指路）。
  *   接线由 worker-entry.test.ts 之外的那三发用例钉住（integrity.test.ts ③ 节）。
  */
-export function pageIntegrityBroken(report: Pick<IntegrityReport, "checks">): boolean {
+export function pageIntegrityBroken(
+  report: Pick<IntegrityReport, "checks">,
+): boolean {
   const page = report.checks.find((c) => c.name === "page_integrity");
   return page !== undefined && page.verdict === "violated";
 }
@@ -1418,5 +1489,3 @@ function trigramOf(payload: string, id: number): string | null {
   const tri = chars.slice(offset, offset + 3).join("");
   return [...tri].length === 3 ? tri : null;
 }
-
-

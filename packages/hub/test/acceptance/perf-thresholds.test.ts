@@ -44,15 +44,15 @@
 import { mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { fixtureTmp } from "../fixtures/fixture-dir.js";
 import { openDb } from "../../src/db/driver.js";
 import { migrate } from "../../src/db/migrate.js";
 import { WriteQueue } from "../../src/db/write-queue.js";
-import { InMemoryEventBus } from "../../src/events/bus.js";
 import { appendAuditBatch } from "../../src/events/batch.js";
-import { PATROL_SQL, runPatrol } from "../../src/heartbeat/patrol.js";
-import { searchEvents, type SearchHit } from "../../src/replay/search.js";
+import { InMemoryEventBus } from "../../src/events/bus.js";
 import type { AuditRow } from "../../src/events/recorder.js";
+import { PATROL_SQL, runPatrol } from "../../src/heartbeat/patrol.js";
+import { type SearchHit, searchEvents } from "../../src/replay/search.js";
+import { fixtureTmp } from "../fixtures/fixture-dir.js";
 
 const TMP = fixtureTmp("perf", import.meta.url);
 rmSync(TMP, { recursive: true, force: true });
@@ -85,7 +85,12 @@ function rows(from: number, n: number): AuditRow[] {
       actorId: "hub",
       action: "state_change",
       target: null,
-      payload: { kind: "TaskStateChanged", taskId: id, n: from + i, note: "回放检索基准的合成正文" + (from + i) },
+      payload: {
+        kind: "TaskStateChanged",
+        taskId: id,
+        n: from + i,
+        note: "回放检索基准的合成正文" + (from + i),
+      },
     };
   });
 }
@@ -105,7 +110,11 @@ beforeAll(async () => {
   q = new WriteQueue(path);
   let written = 0;
   while (written < EVENTS) {
-    const r = await appendAuditBatch(q, rows(written, Math.min(2000, EVENTS - written)), () => 1);
+    const r = await appendAuditBatch(
+      q,
+      rows(written, Math.min(2000, EVENTS - written)),
+      () => 1,
+    );
     written += r.written;
   }
   read = q.readConnection();
@@ -117,7 +126,8 @@ afterAll(async () => {
   } catch {
     /* 已关 */
   }
-  if (lines.length > 0) process.stdout.write("\n[Task 6.4 基准实测]\n" + lines.join("\n") + "\n");
+  if (lines.length > 0)
+    process.stdout.write("\n[Task 6.4 基准实测]\n" + lines.join("\n") + "\n");
   rmSync(TMP, { recursive: true, force: true });
 });
 
@@ -127,11 +137,21 @@ function median(xs: number[]): number {
 }
 function p95(xs: number[]): number {
   const s = [...xs].sort((a, b) => a - b);
-  return s[Math.min(s.length - 1, Math.ceil(s.length * 0.95) - 1)] ?? Number.NaN;
+  return (
+    s[Math.min(s.length - 1, Math.ceil(s.length * 0.95) - 1)] ?? Number.NaN
+  );
 }
 
-function planText(db: { prepare(s: string): { all(...p: never[]): unknown[] } }, sql: string, params: readonly unknown[] = []): string {
-  return (db.prepare("EXPLAIN QUERY PLAN " + sql).all(...(params as never[])) as { detail: string }[])
+function planText(
+  db: { prepare(s: string): { all(...p: never[]): unknown[] } },
+  sql: string,
+  params: readonly unknown[] = [],
+): string {
+  return (
+    db.prepare("EXPLAIN QUERY PLAN " + sql).all(...(params as never[])) as {
+      detail: string;
+    }[]
+  )
     .map((r) => String(r.detail))
     .join("\n");
 }
@@ -151,7 +171,14 @@ describe("① 事件写入必须走批量事务（V9）", () => {
       "INSERT INTO events (task_id, actor_type, actor_id, action, target, payload, state_snapshot, created_at) " +
       "VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
     const per = data.map((r) => [
-      r.taskId, r.actorType, r.actorId, r.action, r.target, JSON.stringify(r.payload), "{}", 1,
+      r.taskId,
+      r.actorType,
+      r.actorId,
+      r.action,
+      r.target,
+      JSON.stringify(r.payload),
+      "{}",
+      1,
     ]);
     const t0 = performance.now();
     for (const p of per) await q.tx([[sql, p]]);
@@ -164,8 +191,15 @@ describe("① 事件写入必须走批量事务（V9）", () => {
       runs.push(performance.now() - s);
     }
     const batchMs = Math.min(...runs);
-    note("  批量 2000 行 " + batchMs.toFixed(1) + "ms / 逐条事务 " + perRowMs.toFixed(1) +
-      "ms / 比值 " + (perRowMs / batchMs).toFixed(1) + "×（计划阈值 < 50 ms，见 0019 §3）");
+    note(
+      "  批量 2000 行 " +
+        batchMs.toFixed(1) +
+        "ms / 逐条事务 " +
+        perRowMs.toFixed(1) +
+        "ms / 比值 " +
+        (perRowMs / batchMs).toFixed(1) +
+        "×（计划阈值 < 50 ms，见 0019 §3）",
+    );
     // 2× 而不是 4×：留一倍余量给机器噪声。抓的是「分片大小改成 1」「每行一个事务」
     // 这类改动 —— 它们的症状正是「测试全绿而写队列被 fsync 拖死」。
     expect(batchMs * 2).toBeLessThan(perRowMs);
@@ -182,7 +216,9 @@ describe("② 心跳调度不得阻塞写队列", () => {
     const w = openDb(path);
     w.exec("DROP INDEX idx_events_task_kind_created");
     try {
-      expect(planText(w, PATROL_SQL)).not.toContain("idx_events_task_kind_created");
+      expect(planText(w, PATROL_SQL)).not.toContain(
+        "idx_events_task_kind_created",
+      );
     } finally {
       w.exec(
         "CREATE INDEX idx_events_task_kind_created ON events(task_id, " +
@@ -204,16 +240,19 @@ describe("② 心跳调度不得阻塞写队列", () => {
     const done: number[] = [];
     const t0 = performance.now();
     const writes = Array.from({ length: 20 }, (_, i) =>
-      appendAuditBatch(q, rows(1_000_000 + i * 10, 10), () => Date.now()).then(() => {
-        done.push(performance.now() - t0);
-      }),
+      appendAuditBatch(q, rows(1_000_000 + i * 10, 10), () => Date.now()).then(
+        () => {
+          done.push(performance.now() - t0);
+        },
+      ),
     );
     // 同步跑几轮巡检：它【故意】占住主线程，这一发要看的就是它占多久
     for (let k = 0; k < 5; k++) read.prepare(PATROL_SQL).all();
     await Promise.all(writes);
     const worst = Math.max(...done);
     note(
-      "  5 轮巡检并发下，20 次写最晚在 " + worst.toFixed(1) +
+      "  5 轮巡检并发下，20 次写最晚在 " +
+        worst.toFixed(1) +
         "ms 落地（【历史对照，非本轮测量】摘掉同一条索引时约 1.7s 量级；" +
         "摘索引后的巡检单趟耗时见 bench-recompute.mjs §1-9 第②臂）",
     );
@@ -234,7 +273,9 @@ describe("② 心跳调度不得阻塞写队列", () => {
     expect(r.stalled).toBe(TASKS);
     // 反向对照：同一份数据把时钟拨回【此刻】，一个都不该报
     // （刚才那批并发写就是此刻的）。两发一起打，才说明报出来的是【时长】而不是常量。
-    const now = await runPatrol(read, q, new InMemoryEventBus(), { now: () => Date.now() });
+    const now = await runPatrol(read, q, new InMemoryEventBus(), {
+      now: () => Date.now(),
+    });
     expect(now.stalled).toBe(0);
   });
 });
@@ -274,7 +315,13 @@ describe("③ 回放搜索 P95 < 500 ms（10 万事件）", () => {
       return row?.t !== "T7";
     });
     expect(wrong).toEqual([]);
-    note("  回放检索 P50 " + median(ts).toFixed(2) + "ms P95 " + p95(ts).toFixed(2) + "ms（阈值 500ms）");
+    note(
+      "  回放检索 P50 " +
+        median(ts).toFixed(2) +
+        "ms P95 " +
+        p95(ts).toFixed(2) +
+        "ms（阈值 500ms）",
+    );
     expect(p95(ts)).toBeLessThan(500);
   });
 
@@ -301,7 +348,12 @@ describe("③ 回放搜索 P95 < 500 ms（10 万事件）", () => {
    */
   it("限定任务那一发的计划里【不许】有布隆过滤器 / 物化子查询", () => {
     const scoped = searchEventsSql(true);
-    const text = planText(read, scoped, ['"回放检索基准的合成正文"', "T7", 50, 0]);
+    const text = planText(read, scoped, [
+      '"回放检索基准的合成正文"',
+      "T7",
+      50,
+      0,
+    ]);
     expect(text).not.toContain("BLOOM");
     expect(text).not.toMatch(/LIST SUBQUERY/u);
     expect(text).toMatch(/INTEGER PRIMARY KEY/u);
@@ -310,7 +362,12 @@ describe("③ 回放搜索 P95 < 500 ms（10 万事件）", () => {
     const old =
       "SELECT rowid AS id FROM events_fts WHERE events_fts MATCH ? " +
       "AND rowid IN (SELECT id FROM events WHERE task_id = ?) ORDER BY rowid ASC LIMIT ? OFFSET ?";
-    const oldText = planText(read, old, ['"回放检索基准的合成正文"', "T7", 50, 0]);
+    const oldText = planText(read, old, [
+      '"回放检索基准的合成正文"',
+      "T7",
+      50,
+      0,
+    ]);
     expect(oldText).toContain("BLOOM");
   });
 });
@@ -332,18 +389,31 @@ describe("④ 回放搜索期间写队列提交不被阻塞", () => {
     const done: number[] = [];
     const t0 = performance.now();
     const writes = Array.from({ length: 20 }, (_, i) =>
-      appendAuditBatch(q, rows(2_000_000 + i * 10, 10), () => Date.now()).then(() => {
-        done.push(performance.now() - t0);
-      }),
+      appendAuditBatch(q, rows(2_000_000 + i * 10, 10), () => Date.now()).then(
+        () => {
+          done.push(performance.now() - t0);
+        },
+      ),
     );
     const s0 = performance.now();
     for (let k = 0; k < 20; k++) {
-      searchEvents(read, { keyword: "回放检索基准的合成正文", taskId: "T" + k, order: "timeline", limit: 50 });
+      searchEvents(read, {
+        keyword: "回放检索基准的合成正文",
+        taskId: "T" + k,
+        order: "timeline",
+        limit: 50,
+      });
     }
     const searchMs = performance.now() - s0;
     await Promise.all(writes);
     const worst = Math.max(...done);
-    note("  20 次回放检索共 " + searchMs.toFixed(1) + "ms 期间，20 次写最晚在 " + worst.toFixed(1) + "ms 落地");
+    note(
+      "  20 次回放检索共 " +
+        searchMs.toFixed(1) +
+        "ms 期间，20 次写最晚在 " +
+        worst.toFixed(1) +
+        "ms 落地",
+    );
     // 搜索本身必须【确实跑过 20 次】：如果它因为什么改动变成 no-op，
     // 那这一发测的就只是「只有写」那一格，白测。
     expect(searchMs).toBeGreaterThan(1);
@@ -378,7 +448,9 @@ describe("④ 回放搜索期间写队列提交不被阻塞", () => {
       const done: number[] = [];
       const t0 = performance.now();
       const writes = Array.from({ length: 20 }, (_, i) =>
-        appendAuditBatch(q, rows(3_000_000 + i * 10, 10), () => Date.now()).then(() => {
+        appendAuditBatch(q, rows(3_000_000 + i * 10, 10), () =>
+          Date.now(),
+        ).then(() => {
           done.push(performance.now() - t0);
         }),
       );
@@ -398,7 +470,8 @@ describe("④ 回放搜索期间写队列提交不被阻塞", () => {
     //   它只断言「它造成的延迟，与一段等时长空转造成的延迟同量级」。
     const kw = "回放检索基准的合成正文";
     const search = await arm(() => {
-      for (let k = 0; k < 3; k++) searchEvents(read, { keyword: kw, order: "recent", limit: 50 });
+      for (let k = 0; k < 3; k++)
+        searchEvents(read, { keyword: kw, order: "recent", limit: 50 });
     });
     const spin = await arm(() => {
       const s = performance.now();
@@ -407,8 +480,15 @@ describe("④ 回放搜索期间写队列提交不被阻塞", () => {
       }
     });
     note(
-      "  归因对照：检索占 " + search.blockMs.toFixed(1) + "ms 时写最晚 " + search.worst.toFixed(1) +
-        "ms；空转占 " + spin.blockMs.toFixed(1) + "ms 时写最晚 " + spin.worst.toFixed(1) + "ms",
+      "  归因对照：检索占 " +
+        search.blockMs.toFixed(1) +
+        "ms 时写最晚 " +
+        search.worst.toFixed(1) +
+        "ms；空转占 " +
+        spin.blockMs.toFixed(1) +
+        "ms 时写最晚 " +
+        spin.worst.toFixed(1) +
+        "ms",
     );
     // 前提：两侧【占用的时长确实配平了】。没配平的话下面那条比的是两回事。
     expect(Math.abs(spin.blockMs - search.blockMs)).toBeLessThan(
@@ -420,11 +500,17 @@ describe("④ 回放搜索期间写队列提交不被阻塞", () => {
     // 这一发【不】要求检索很快（那是上面那条的活）；它要求的是
     // 「检索慢的时候，慢的原因能被解释成占主线程」—— 如果哪天阻塞真的来自锁，
     // 检索那一侧会明显比空转那一侧更久，这里就会红。
-    expect(search.worst).toBeLessThanOrEqual(Math.max(spin.worst * 3, spin.blockMs * 3));
-    expect(spin.worst).toBeLessThanOrEqual(Math.max(search.worst * 3, search.blockMs * 3));
+    expect(search.worst).toBeLessThanOrEqual(
+      Math.max(spin.worst * 3, spin.blockMs * 3),
+    );
+    expect(spin.worst).toBeLessThanOrEqual(
+      Math.max(search.worst * 3, search.blockMs * 3),
+    );
     // 而【占用主线程确实会推迟写】这条前提也得钉住：
     // 否则上面那个「同量级」可能是「两侧都很小」凑出来的。
-    expect(Math.max(search.worst, spin.worst)).toBeGreaterThanOrEqual(search.blockMs * 0.5);
+    expect(Math.max(search.worst, spin.worst)).toBeGreaterThanOrEqual(
+      search.blockMs * 0.5,
+    );
   });
 });
 
@@ -439,7 +525,9 @@ describe("④ 回放搜索期间写队列提交不被阻塞", () => {
 function searchEventsSql(scoped: boolean): string {
   return (
     "SELECT f.rowid AS id FROM events_fts f WHERE events_fts MATCH ?" +
-    (scoped ? " AND EXISTS (SELECT 1 FROM events e WHERE e.id = f.rowid AND e.task_id = ?)" : "") +
+    (scoped
+      ? " AND EXISTS (SELECT 1 FROM events e WHERE e.id = f.rowid AND e.task_id = ?)"
+      : "") +
     " ORDER BY f.rowid ASC LIMIT ? OFFSET ?"
   );
 }

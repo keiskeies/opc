@@ -33,7 +33,7 @@
 （没有 HTTP 路由，没有 CLI，没有 IPC），运行时**生产调用点 0 处**（复算：
 `grep -rn "requestBinding\|markVerified\|listBindings\|resolveBinding\|makeChannelActorResolver\|bindings/im"
 --include="*.ts" --include="*.tsx" packages apps test` 排除本模块与自己的测试 ⇒ 空）。
-`channels/abstraction.ts:616` 那个 `actorFor?` 是**可选钩子且今天没人传**，
+`channels/abstraction.ts:630` 那个 `actorFor?` 是**可选钩子且今天没人传**，
 所以 0028 §2 那个陷阱的**运行时**路径今天仍然不存在 —— 这句话说的是现状，不是保证，
 §9 登记的就是要不要现在补那个入口。
 

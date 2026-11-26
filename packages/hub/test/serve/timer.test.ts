@@ -70,7 +70,10 @@ const drain = async (): Promise<void> => {
 };
 
 /** 推进假时钟并等这一轮真正跑完。测试里几乎每次 advance 都该用它。 */
-const advanceAndDrain = async (s: { advance(ms: number): void }, ms: number): Promise<void> => {
+const advanceAndDrain = async (
+  s: { advance(ms: number): void },
+  ms: number,
+): Promise<void> => {
   s.advance(ms);
   await drain();
 };
@@ -346,7 +349,12 @@ describe("③ 连续失败到阈值：停 + 上报", () => {
 
   it("maxConsecutiveFailures = 0 被拒（0 的意思是『一次都不许失败』，那不是这台机器上的东西）", () => {
     expect(() =>
-      createTicker({ intervalMs: 1000, job: () => {}, scheduler: createFakeScheduler(0), maxConsecutiveFailures: 0 }),
+      createTicker({
+        intervalMs: 1000,
+        job: () => {},
+        scheduler: createFakeScheduler(0),
+        maxConsecutiveFailures: 0,
+      }),
     ).toThrow(/1/);
   });
 
@@ -373,7 +381,11 @@ describe("④ stop 与参数校验", () => {
   it("stop 之后已排队的下一发也不叫", () => {
     const s = createFakeScheduler(0);
     let n = 0;
-    const t = createTicker({ intervalMs: 1000, job: () => void n++, scheduler: s });
+    const t = createTicker({
+      intervalMs: 1000,
+      job: () => void n++,
+      scheduler: s,
+    });
     s.advance(0);
     t.stop();
     s.advance(60_000);
@@ -392,7 +404,11 @@ describe("④ stop 与参数校验", () => {
   it("stop 之后 tick() 什么都不做（不能靠手动绕回运行态）", async () => {
     const s = createFakeScheduler(0);
     let n = 0;
-    const t: Ticker = createTicker({ intervalMs: 1000, job: () => void n++, scheduler: s });
+    const t: Ticker = createTicker({
+      intervalMs: 1000,
+      job: () => void n++,
+      scheduler: s,
+    });
     t.stop();
     await t.tick();
     expect(n).toBe(0);
@@ -401,7 +417,11 @@ describe("④ stop 与参数校验", () => {
   it("间隔非正数 ⇒ 当场拒，不等第一次到点", () => {
     for (const bad of [0, -1, Number.NaN]) {
       expect(() =>
-        createTicker({ intervalMs: bad, job: () => {}, scheduler: createFakeScheduler(0) }),
+        createTicker({
+          intervalMs: bad,
+          job: () => {},
+          scheduler: createFakeScheduler(0),
+        }),
       ).toThrow();
     }
   });
@@ -460,7 +480,10 @@ describe("⑤ 在飞状态：inFlight / cancelling 两个字段各自是一条�
     // 关机时【也】可能有东西在飞，那时报 in_flight 会让人以为「关机被一份备份卡住了」，
     // 而真正的语义是「别再派新活」。两个原因合成一个 false，这条就退化成
     // 「有一道门在挡」而看不出是哪一道 —— 那正是 0036 §5 说的「写成装饰」。
-    expect(w.start(async () => {})).toEqual({ started: false, reason: "cancelling" });
+    expect(w.start(async () => {})).toEqual({
+      started: false,
+      reason: "cancelling",
+    });
     expect(w.cancelling).toBe(true);
     // beginCancel 幂等：第二次要说「早就是了」，不然调用方以为自己触发了关机。
     expect(w.beginCancel()).toBe(false);
@@ -480,7 +503,10 @@ describe("⑤ 在飞状态：inFlight / cancelling 两个字段各自是一条�
         }),
     );
     w.beginCancel();
-    expect(w.start(async () => {})).toEqual({ started: false, reason: "cancelling" });
+    expect(w.start(async () => {})).toEqual({
+      started: false,
+      reason: "cancelling",
+    });
     releaseGate.fn?.();
   });
 

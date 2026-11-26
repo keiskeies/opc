@@ -22,24 +22,24 @@
  */
 import { mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   CEO_ROLE_ID,
   type OrgActor,
   type OrgChange,
   type OrgGraph,
 } from "@opc/contracts";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { migrate } from "../../packages/hub/src/db/migrate.js";
+import type { WriteQueue } from "../../packages/hub/src/db/write-queue.js";
 import { insertTask } from "../../packages/hub/src/http/real-deps.js";
-import { fixtureTmp } from "../../packages/hub/test/fixtures/fixture-dir.js";
 import {
   applyChangeToGraph,
   commitOrgGraph,
   MAX_GRAPH_VERSION_SQL,
-  readGraphByVersion,
   RUNNING_TASKS_SQL,
+  readGraphByVersion,
 } from "../../packages/hub/src/org/commit.js";
-import type { WriteQueue } from "../../packages/hub/src/db/write-queue.js";
+import { fixtureTmp } from "../../packages/hub/test/fixtures/fixture-dir.js";
 
 const TMP = fixtureTmp("org-commit", import.meta.url);
 
@@ -61,10 +61,30 @@ let fileSeq = 0;
 function graph(): OrgGraph {
   return {
     nodes: {
-      ceo: { role_id: CEO_ROLE_ID, can_manage: true, reports_to: null, model_family: "o3" },
-      tech: { role_id: "tech", can_manage: true, reports_to: CEO_ROLE_ID, model_family: "claude" },
-      dev: { role_id: "dev", can_manage: false, reports_to: "tech", model_family: "gpt" },
-      test: { role_id: "test", can_manage: false, reports_to: "tech", model_family: "gemini" },
+      ceo: {
+        role_id: CEO_ROLE_ID,
+        can_manage: true,
+        reports_to: null,
+        model_family: "o3",
+      },
+      tech: {
+        role_id: "tech",
+        can_manage: true,
+        reports_to: CEO_ROLE_ID,
+        model_family: "claude",
+      },
+      dev: {
+        role_id: "dev",
+        can_manage: false,
+        reports_to: "tech",
+        model_family: "gpt",
+      },
+      test: {
+        role_id: "test",
+        can_manage: false,
+        reports_to: "tech",
+        model_family: "gemini",
+      },
     },
     edges: [
       { from: "dev", to: "test", review_gate: true },
@@ -81,7 +101,9 @@ const REPARENT: OrgChange = {
 };
 
 async function newDb(): Promise<{ db: Db; w: any; path: string }> {
-  const { WriteQueue } = await import("../../packages/hub/src/db/write-queue.js");
+  const { WriteQueue } = await import(
+    "../../packages/hub/src/db/write-queue.js"
+  );
   const path = join(TMP, "c-" + process.pid + "-" + ++fileSeq + ".db");
   const q = new WriteQueue(path) as any;
   queues.push(q);
@@ -91,7 +113,12 @@ async function newDb(): Promise<{ db: Db; w: any; path: string }> {
 }
 
 /** 落一条任务。graph_version 走列默认值，好让「有没有被 stamp」是可分辨的。 */
-function task(db: Db, id: string, status = "IN_PROGRESS", graphVersion?: number): void {
+function task(
+  db: Db,
+  id: string,
+  status = "IN_PROGRESS",
+  graphVersion?: number,
+): void {
   const hasVersion = graphVersion !== undefined;
   const params = hasVersion
     ? ([id, "t-" + id, status, NOW, NOW, graphVersion] as (string | number)[])
@@ -107,7 +134,12 @@ function task(db: Db, id: string, status = "IN_PROGRESS", graphVersion?: number)
 }
 
 /** 落一版岗位书。config 用真 charter 的 camelCase 形状（提交路径改的是 reportsTo）。 */
-function charter(db: Db, roleId: string, version: number, reportsTo: string | null): void {
+function charter(
+  db: Db,
+  roleId: string,
+  version: number,
+  reportsTo: string | null,
+): void {
   db.prepare(
     "INSERT INTO role_charters (id, role_id, version, config, effective_from, created_by) " +
       "VALUES (?, ?, ?, ?, ?, 'ceo')",
@@ -171,7 +203,10 @@ describe("① 提交本身：版本、快照、审计", () => {
     const after1 = applyChangeToGraph(g, REPARENT);
     const b = await commitOrgGraph(w, {
       graph: after1,
-      change: { kind: "add_edge", edge: { from: "test", to: "tech", review_gate: true } },
+      change: {
+        kind: "add_edge",
+        edge: { from: "test", to: "tech", review_gate: true },
+      },
       actor: CEO,
       runningTasks: [],
       nowMs: NOW + 1,
@@ -184,7 +219,9 @@ describe("① 提交本身：版本、快照、审计", () => {
     expect(saved.nodes["dev"]?.reports_to).toBe(CEO_ROLE_ID); // 第一次的效果还在
     expect(saved.edges.length).toBe(4); // 第二次的边也在
     // v1 仍然读得出来 —— 版本化是【追加】而不是就地改（§18.4 那句「版本切换」）。
-    expect(readGraphByVersion(db, 1).nodes["dev"]?.reports_to).toBe(CEO_ROLE_ID);
+    expect(readGraphByVersion(db, 1).nodes["dev"]?.reports_to).toBe(
+      CEO_ROLE_ID,
+    );
     expect(readGraphByVersion(db, 1).edges.length).toBe(3);
   });
 
@@ -200,7 +237,9 @@ describe("① 提交本身：版本、快照、审计", () => {
       changeSummary: "dev 改汇报到 CEO",
     });
     if (!r.ok) throw new Error("应提交成功");
-    const e = db.prepare("SELECT * FROM events WHERE id = ?").get(r.auditSeq) as Row;
+    const e = db
+      .prepare("SELECT * FROM events WHERE id = ?")
+      .get(r.auditSeq) as Row;
     expect(e["action"]).toBe("state_change");
     expect(e["actor_type"]).toBe("human");
     expect(e["actor_id"]).toBe(CEO_ROLE_ID);
@@ -233,7 +272,9 @@ describe("① 提交本身：版本、快照、审计", () => {
       changeSummary: "x",
     });
     if (!r.ok) throw new Error("应提交成功");
-    const e = db.prepare("SELECT state_snapshot FROM events WHERE id = ?").get(r.auditSeq) as Row;
+    const e = db
+      .prepare("SELECT state_snapshot FROM events WHERE id = ?")
+      .get(r.auditSeq) as Row;
     const snap = JSON.parse(String(e["state_snapshot"])) as { after: OrgGraph };
     expect(JSON.stringify(snap.after)).toBe(
       JSON.stringify(readGraphByVersion(db, r.graphVersion)),
@@ -279,7 +320,10 @@ describe("① 提交本身：版本、快照、审计", () => {
     // add_edge：无门控 ⇒ 该拒（L2 判据，不是 L3）。
     const e = await commitOrgGraph(w, {
       graph: graph(),
-      change: { kind: "add_edge", edge: { from: "dev", to: "test", review_gate: false } },
+      change: {
+        kind: "add_edge",
+        edge: { from: "dev", to: "test", review_gate: false },
+      },
       actor: CEO,
       runningTasks: [],
       nowMs: NOW,
@@ -291,7 +335,10 @@ describe("① 提交本身：版本、快照、审计", () => {
     const agent: OrgActor = { type: "agent", id: CEO_ROLE_ID };
     for (const change of [
       REPARENT,
-      { kind: "add_edge", edge: { from: "dev", to: "ceo", review_gate: true } } as OrgChange,
+      {
+        kind: "add_edge",
+        edge: { from: "dev", to: "ceo", review_gate: true },
+      } as OrgChange,
     ]) {
       const r = await commitOrgGraph(w, {
         graph: graph(),
@@ -327,7 +374,9 @@ describe("② 计划 Test ①：保存失败 ⇒ 版本号不变、无半提交�
   const BOOM = "org_commit_boom";
   function armFailure(db: Db): void {
     db.exec(
-      "CREATE TRIGGER " + BOOM + " BEFORE INSERT ON role_charters " +
+      "CREATE TRIGGER " +
+        BOOM +
+        " BEFORE INSERT ON role_charters " +
         "BEGIN SELECT RAISE(ABORT, 'fixture 故意让岗位书写入失败'); END",
     );
   }
@@ -443,7 +492,9 @@ describe("② 计划 Test ①：保存失败 ⇒ 版本号不变、无半提交�
     });
     if (!r.ok) throw new Error("重试应成功");
     expect(r.graphVersion).toBe(1);
-    expect(readGraphByVersion(db, 1).nodes["dev"]?.reports_to).toBe(CEO_ROLE_ID);
+    expect(readGraphByVersion(db, 1).nodes["dev"]?.reports_to).toBe(
+      CEO_ROLE_ID,
+    );
   });
 
   /** 四张相关表的行数 + 当前版本，一次取全。 */
@@ -491,7 +542,9 @@ describe("③ 计划 Test ②：运行中任务在组织变更后仍用旧版图
     task(db, "c", "ARCHIVED");
     task(db, "d", "CHARTER_PENDING");
     task(db, "e", "BLOCKED");
-    const ids = (db.prepare(RUNNING_TASKS_SQL).all() as Row[]).map((r) => String(r["id"]));
+    const ids = (db.prepare(RUNNING_TASKS_SQL).all() as Row[]).map((r) =>
+      String(r["id"]),
+    );
     expect(ids).toEqual(["a", "d", "e"]);
     // BLOCKED / BUDGET_PAUSED 这类【暂停】必须算运行中：暂停的任务恢复时会按
     // 创建时版本继续，把它当结束会让「变更只对新任务生效」这句话漏掉它。
@@ -508,11 +561,16 @@ describe("③ 计划 Test ②：运行中任务在组织变更后仍用旧版图
       nowMs: NOW,
       changeSummary: "x",
     });
-    if (!r.ok) throw new Error("有运行中任务不是拒绝理由（§18.3 给的是 needsConfirmation）");
+    if (!r.ok)
+      throw new Error(
+        "有运行中任务不是拒绝理由（§18.3 给的是 needsConfirmation）",
+      );
     expect(r.needsConfirmation).toContain("1");
     expect(versionAt(db)).toBe(1); // 确实提交了
     // 确认话术要进审计可见的范围：payload 里有 running_task_count。
-    const e = db.prepare("SELECT payload FROM events WHERE id = ?").get(r.auditSeq) as Row;
+    const e = db
+      .prepare("SELECT payload FROM events WHERE id = ?")
+      .get(r.auditSeq) as Row;
     expect(JSON.parse(String(e["payload"]))["running_task_count"]).toBe(1);
   });
 });
@@ -520,10 +578,21 @@ describe("③ 计划 Test ②：运行中任务在组织变更后仍用旧版图
 describe("④ 计划 Test ③：新任务用新版图 + 版本缺失不静默兜底", () => {
   /** 走【真建任务路径】而不是本文件的 task() 夹具：这一节要证的正是那条路径会盖版本。 */
   async function newTask(w: any, id: string): Promise<void> {
-    await insertTask(w, { id, title: "新任务 " + id, assignedRole: "intake", nowMs: NOW });
+    await insertTask(w, {
+      id,
+      title: "新任务 " + id,
+      assignedRole: "intake",
+      nowMs: NOW,
+    });
   }
   const versionOf = (db: Db, id: string): number =>
-    Number((db.prepare("SELECT graph_version FROM tasks WHERE id = ?").get(id) as Row)["graph_version"]);
+    Number(
+      (
+        db
+          .prepare("SELECT graph_version FROM tasks WHERE id = ?")
+          .get(id) as Row
+      )["graph_version"],
+    );
 
   it("一张图都没提交过时，新任务盖的是 0 而不是列默认值 1", async () => {
     // 这一条是本文件最该存在的一条，因为它测的是【本轮补上的那个洞】。
@@ -554,7 +623,10 @@ describe("④ 计划 Test ③：新任务用新版图 + 版本缺失不静默兜
 
     const r2 = await commitOrgGraph(w, {
       graph: applyChangeToGraph(g, REPARENT),
-      change: { kind: "add_edge", edge: { from: "test", to: "tech", review_gate: true } },
+      change: {
+        kind: "add_edge",
+        edge: { from: "test", to: "tech", review_gate: true },
+      },
       actor: CEO,
       runningTasks: [],
       nowMs: NOW + 1,
@@ -565,9 +637,11 @@ describe("④ 计划 Test ③：新任务用新版图 + 版本缺失不静默兜
     expect(versionOf(db, "new-2")).toBe(2);
     // 三条任务各留各的版本。这条断言防的是「建任务时不写、查询时统一取最新」
     // 那种写法 —— 它能让本文件上面三条全绿，而运行中任务的版本坐标全是假的。
-    expect([versionOf(db, "new-0"), versionOf(db, "new-1"), versionOf(db, "new-2")]).toEqual([
-      0, 1, 2,
-    ]);
+    expect([
+      versionOf(db, "new-0"),
+      versionOf(db, "new-1"),
+      versionOf(db, "new-2"),
+    ]).toEqual([0, 1, 2]);
   });
 
   it("【同一张图】上先后建的两条任务版本相同（版本取自库而不是取自请求参数）", async () => {
@@ -627,7 +701,10 @@ describe("④ 计划 Test ③：新任务用新版图 + 版本缺失不静默兜
     });
     const r2 = await commitOrgGraph(w, {
       graph: applyChangeToGraph(g, REPARENT),
-      change: { kind: "add_edge", edge: { from: "test", to: "tech", review_gate: true } },
+      change: {
+        kind: "add_edge",
+        edge: { from: "test", to: "tech", review_gate: true },
+      },
       actor: CEO,
       runningTasks: [],
       nowMs: NOW + 1,
@@ -665,7 +742,9 @@ describe("④ 计划 Test ③：新任务用新版图 + 版本缺失不静默兜
     if (!r.ok) throw new Error("应提交成功");
     expect(r.charterBumpedRoles).toEqual(["dev"]);
     const rows = db
-      .prepare("SELECT role_id, version FROM role_charters ORDER BY role_id, version")
+      .prepare(
+        "SELECT role_id, version FROM role_charters ORDER BY role_id, version",
+      )
       .all() as Row[];
     expect(rows.map((x) => x["role_id"] + ":" + x["version"])).toEqual([
       "dev:1",
@@ -675,7 +754,10 @@ describe("④ 计划 Test ③：新任务用新版图 + 版本缺失不静默兜
     ]);
     // 新那一行的 config 里 reportsTo 必须真的变了。写错键名（reports_to）不会报错，
     // 只会得到一份「汇报关系变了而 config 没变」的行 —— 那就是伪证。
-    const v2 = db.prepare("SELECT config FROM role_charters WHERE role_id='dev' AND version=2")
+    const v2 = db
+      .prepare(
+        "SELECT config FROM role_charters WHERE role_id='dev' AND version=2",
+      )
       .get() as Row;
     expect(JSON.parse(String(v2["config"]))["reportsTo"]).toBe(CEO_ROLE_ID);
     expect(JSON.parse(String(v2["config"]))["acceptanceCriteria"]).toEqual([
@@ -739,7 +821,11 @@ describe("⑤ 组织变更留下的 seq 空洞：必须被【检出】而不是�
     // 组织那一行占掉的 id 就是 1（库里第一条事件）。
     expect(r.auditSeq).toBe(1);
 
-    let p = applySnapshot(emptyProjection(), { tasks: [], asOfMs: NOW, asOfSeq: 0 });
+    let p = applySnapshot(emptyProjection(), {
+      tasks: [],
+      asOfMs: NOW,
+      asOfSeq: 0,
+    });
     p = applyEvent(p, {
       seq: 1,
       kind: "TaskStateChanged",
@@ -753,7 +839,11 @@ describe("⑤ 组织变更留下的 seq 空洞：必须被【检出】而不是�
     // 收到 seq=1 的那条其实是它【本不该收到】的（组织那一行才是 1 号）——
     // 上面那一笔喂的是「org 之外的一条事件」，真实场景里订阅者收到的是 2 号。
     // 于是这里按真实形状重放：游标 0，第一条到达的是 seq=2。
-    let q = applySnapshot(emptyProjection(), { tasks: [], asOfMs: NOW, asOfSeq: 0 });
+    const q = applySnapshot(emptyProjection(), {
+      tasks: [],
+      asOfMs: NOW,
+      asOfSeq: 0,
+    });
     const out = applyEvent(q, {
       seq: 2,
       kind: "TaskStateChanged",
@@ -780,8 +870,16 @@ describe("⑤ 组织变更留下的 seq 空洞：必须被【检出】而不是�
     const { applyEvent, emptyProjection, applySnapshot } = await import(
       "../../packages/web/src/hub/projection.js"
     );
-    const base = applySnapshot(emptyProjection(), { tasks: [], asOfMs: NOW, asOfSeq: 0 });
-    const out = applyEvent(base, { seq: 1, kind: "OrgGraphChanged", taskId: "x" } as never);
+    const base = applySnapshot(emptyProjection(), {
+      tasks: [],
+      asOfMs: NOW,
+      asOfSeq: 0,
+    });
+    const out = applyEvent(base, {
+      seq: 1,
+      kind: "OrgGraphChanged",
+      taskId: "x",
+    } as never);
     expect(out.action).toBe("applied");
     expect(out.projection.cursor).toBe(1);
     expect(out.projection.link).not.toBe("stale");
@@ -805,7 +903,8 @@ describe("⑥ 提交时的节点级判据：拒绝的形状、零残留、与 L1
     // `noUncheckedIndexedAccess` 下是一发 TS18048，会往
     // `test/arch/test-type-baseline.ts` 那个【只许减】的棘轮里添新条。
     const dev = g.nodes["dev"];
-    if (dev === undefined) throw new Error("夹具里没有 dev 节点，这一发要判的东西不存在");
+    if (dev === undefined)
+      throw new Error("夹具里没有 dev 节点，这一发要判的东西不存在");
     delete dev.model_family;
     return g;
   }
@@ -815,7 +914,10 @@ describe("⑥ 提交时的节点级判据：拒绝的形状、零残留、与 L1
     const r = await commitOrgGraph(w, {
       graph: graphMissingFamily(),
       // 变更本身完全合法，且与那个缺家族的节点【无关】（dev 只是恰好在图上）。
-      change: { kind: "add_edge", edge: { from: "test", to: "tech", review_gate: true } },
+      change: {
+        kind: "add_edge",
+        edge: { from: "test", to: "tech", review_gate: true },
+      },
       actor: CEO,
       runningTasks: [],
       nowMs: NOW,
@@ -840,7 +942,11 @@ describe("⑥ 提交时的节点级判据：拒绝的形状、零残留、与 L1
     const { db, w } = await newDb();
     const r = await commitOrgGraph(w, {
       graph: graphMissingFamily(),
-      change: { kind: "reparent", child_role: "nope", new_parent_role: CEO_ROLE_ID },
+      change: {
+        kind: "reparent",
+        child_role: "nope",
+        new_parent_role: CEO_ROLE_ID,
+      },
       actor: CEO,
       runningTasks: [],
       nowMs: NOW,
@@ -858,7 +964,10 @@ describe("⑥ 提交时的节点级判据：拒绝的形状、零残留、与 L1
     const { db, w } = await newDb();
     const r = await commitOrgGraph(w, {
       graph: graph(),
-      change: { kind: "add_edge", edge: { from: "test", to: "tech", review_gate: true } },
+      change: {
+        kind: "add_edge",
+        edge: { from: "test", to: "tech", review_gate: true },
+      },
       actor: CEO,
       runningTasks: [],
       nowMs: NOW,

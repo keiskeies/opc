@@ -36,9 +36,9 @@ import type {
   QoderSdkMessageLite,
 } from "../../../src/harness/adapters/qoder.js";
 import {
+  QoderCliAdapter,
   qoderModelFamilyOf,
   qoderPermissionModeFor,
-  QoderCliAdapter,
 } from "../../../src/harness/adapters/qoder.js";
 import type { GatewayDeps } from "../../../src/harness/gateway.js";
 import { callHarness } from "../../../src/harness/gateway.js";
@@ -90,7 +90,12 @@ function successMsgs(): QoderSdkMessageLite[] {
       message: {
         content: [
           { type: "text", text: "先读一下。" },
-          { type: "tool_use", id: "tu-1", name: "Read", input: { path: WS + "/a.ts" } },
+          {
+            type: "tool_use",
+            id: "tu-1",
+            name: "Read",
+            input: { path: WS + "/a.ts" },
+          },
         ],
       },
     },
@@ -129,13 +134,13 @@ async function collect(
 
 describe("qoderPermissionModeFor / qoderModelFamilyOf —— 映射逐格", () => {
   it("on-request⇒default（问人）；never+read-only⇒plan；never+写档⇒bypass", () => {
-    expect(
-      qoderPermissionModeFor(req({ approval_policy: "on-request" })),
-    ).toBe("default");
+    expect(qoderPermissionModeFor(req({ approval_policy: "on-request" }))).toBe(
+      "default",
+    );
     expect(qoderPermissionModeFor(req())).toBe("plan");
-    expect(
-      qoderPermissionModeFor(req({ sandbox: "workspace-write" })),
-    ).toBe("bypassPermissions");
+    expect(qoderPermissionModeFor(req({ sandbox: "workspace-write" }))).toBe(
+      "bypassPermissions",
+    );
     expect(qoderPermissionModeFor(req({ sandbox: "danger" }))).toBe(
       "bypassPermissions",
     );
@@ -188,9 +193,9 @@ describe("QoderCliAdapter —— 事件流的形状", () => {
       path: WS + "/a.ts",
     });
     // 版本读 init 的 qodercli_version（没有装配期 version 时）。
-    expect(
-      fin?.kind === "finished" ? fin.outcome.harnessVersion : "",
-    ).toBe("1.0.59-test");
+    expect(fin?.kind === "finished" ? fin.outcome.harnessVersion : "").toBe(
+      "1.0.59-test",
+    );
     // takeRun 取走一次即清空。
     const run = a.takeRun();
     expect(run?.ok).toBe(true);
@@ -234,7 +239,9 @@ describe("QoderCliAdapter —— 事件流的形状", () => {
 
     const r3 = stubMsgs(successMsgs());
     const a3 = new QoderCliAdapter({ queryFn: r3.fn });
-    await collect(a3.execute(req({ resume_session_id: "sess-old" }), APPROVE_ALL));
+    await collect(
+      a3.execute(req({ resume_session_id: "sess-old" }), APPROVE_ALL),
+    );
     // resume 就在 QoderQueryOptionsLite 上，无需 cast：?. 从 calls[0] 一路传到
     // resume，整条链都是可选的（cast 之后再接点号才会撞 unsafe-chaining）。
     expect(r3.calls[0]?.options.resume).toBe("sess-old");
@@ -264,7 +271,12 @@ describe("QoderCliAdapter —— 事件流的形状", () => {
     expect(usage?.kind === "usage" ? usage.cost.spentCents : -1).toBe(7);
 
     const m2 = successMsgs();
-    m2[2] = { type: "result", subtype: "success", is_error: false, result: "ok" };
+    m2[2] = {
+      type: "result",
+      subtype: "success",
+      is_error: false,
+      result: "ok",
+    };
     const a2 = new QoderCliAdapter({ queryFn: stubMsgs(m2).fn });
     const evs2 = await collect(a2.execute(req(), APPROVE_ALL));
     const u2 = evs2.find((e: HarnessEvent): boolean => e.kind === "usage");
@@ -277,7 +289,13 @@ describe("QoderCliAdapter —— 事件流的形状", () => {
   it("init 没给 session 而 result 兜到 ⇒ session_started 补发在 usage 之前", async () => {
     const m: QoderSdkMessageLite[] = [
       { type: "system", subtype: "init", qodercli_version: "1.0.59-test" },
-      { type: "result", subtype: "success", is_error: false, result: "ok", session_id: "sess-late" },
+      {
+        type: "result",
+        subtype: "success",
+        is_error: false,
+        result: "ok",
+        session_id: "sess-late",
+      },
     ];
     const a = new QoderCliAdapter({ queryFn: stubMsgs(m).fn });
     const evs = await collect(a.execute(req(), APPROVE_ALL));
@@ -315,14 +333,18 @@ describe("QoderCliAdapter —— 事件流的形状", () => {
     const a = new QoderCliAdapter({ queryFn: stubMsgs(m).fn });
     const evs = await collect(a.execute(req(), APPROVE_ALL));
     const fin = evs[3];
-    expect(fin?.kind === "finished" ? fin.outcome.modelFamily : "").toBe("claude");
+    expect(fin?.kind === "finished" ? fin.outcome.modelFamily : "").toBe(
+      "claude",
+    );
 
     const a2 = new QoderCliAdapter({ queryFn: stubMsgs(successMsgs()).fn });
     const evs2 = await collect(
       a2.execute(req({ model_family: "gpt" }), APPROVE_ALL),
     );
     const fin2 = evs2[3];
-    expect(fin2?.kind === "finished" ? fin2.outcome.modelFamily : "").toBe("gpt");
+    expect(fin2?.kind === "finished" ? fin2.outcome.modelFamily : "").toBe(
+      "gpt",
+    );
   });
 
   it("版本优先级：装配期 version > init 读数 > unknown", async () => {
@@ -355,7 +377,8 @@ describe("QoderCliAdapter —— canUseTool 桥", () => {
       options?: QoderQueryOptionsLite;
     }): AsyncIterable<QoderSdkMessageLite> => {
       captured.fn =
-        (params.options as { canUseTool?: QoderCanUseToolLite }).canUseTool ?? null;
+        (params.options as { canUseTool?: QoderCanUseToolLite }).canUseTool ??
+        null;
       return (async function* (): AsyncGenerator<QoderSdkMessageLite> {
         yield* successMsgs();
       })();
@@ -366,9 +389,7 @@ describe("QoderCliAdapter —— canUseTool 桥", () => {
       return { approved: true };
     };
     const a = new QoderCliAdapter({ queryFn: fn });
-    await collect(
-      a.execute(req({ approval_policy: "on-request" }), handler),
-    );
+    await collect(a.execute(req({ approval_policy: "on-request" }), handler));
     if (captured.fn === null) throw new Error("canUseTool 没装配");
     const allow = await captured.fn(
       "Bash",
@@ -490,9 +511,7 @@ describe("QoderCliAdapter —— 三态与失败形状", () => {
 
   it("resume 没有 seedResumeRequest ⇒ 抛，而不是编一个默认工作区", () => {
     const a = new QoderCliAdapter({ queryFn: stubMsgs(successMsgs()).fn });
-    expect(() => a.resume("sess-x", APPROVE_ALL)).toThrow(
-      /seedResumeRequest/,
-    );
+    expect(() => a.resume("sess-x", APPROVE_ALL)).toThrow(/seedResumeRequest/);
   });
 
   it("getCost 如实抛：SDK 路线没有跨调用会话账，返回全零会是假话", async () => {
@@ -538,11 +557,7 @@ describe("QoderCliAdapter × callHarness —— 声明即判据", () => {
   it("on-request 发得出去（qoder 真能问人），审计行的 prevention 落 enforced", async () => {
     const a = new QoderCliAdapter({ queryFn: stubMsgs(successMsgs()).fn });
     const d = deps();
-    const g = await callHarness(
-      a,
-      req({ approval_policy: "on-request" }),
-      d,
-    );
+    const g = await callHarness(a, req({ approval_policy: "on-request" }), d);
     expect(g.ok, g.ok ? "" : g.reason).toBe(true);
     const row = d.rows[0];
     const p = row?.payload as Record<string, unknown>;
@@ -587,14 +602,15 @@ describe("QoderCliAdapter × callHarness —— 声明即判据", () => {
         // 消费方在 tool_call 之后【再来要】才会走到这一行；gateway 中断时
         // 生成器被 .return()，这个标志必须保持 false（宁停不污的适配器侧凭据）。
         pulledAfterTool = true;
-        yield { type: "result", subtype: "success", is_error: false, result: "不该被消费" };
+        yield {
+          type: "result",
+          subtype: "success",
+          is_error: false,
+          result: "不该被消费",
+        };
       })();
     const a = new QoderCliAdapter({ queryFn: fn });
-    const g = await callHarness(
-      a,
-      req({ allowed_tools: ["Read"] }),
-      deps(),
-    );
+    const g = await callHarness(a, req({ allowed_tools: ["Read"] }), deps());
     expect(g.ok).toBe(false);
     if (!g.ok) expect(g.code).toBe("violation_aborted");
     expect(pulledAfterTool).toBe(false);
@@ -640,7 +656,12 @@ describe("QoderCliAdapter × callHarness —— 声明即判据", () => {
   });
 
   it("tool_use 同一 id 重复通报 ⇒ 判定恰好一次（第二发被 emitted 吞掉）", async () => {
-    const block = { type: "tool_use", id: "tu-1", name: "NotebookEdit", input: {} };
+    const block = {
+      type: "tool_use",
+      id: "tu-1",
+      name: "NotebookEdit",
+      input: {},
+    };
     const m: QoderSdkMessageLite[] = [
       { type: "system", subtype: "init", session_id: "sess-1" },
       { type: "assistant", message: { content: [block] } },

@@ -79,7 +79,8 @@ const NAME_PATTERN = /^[a-z0-9][a-z0-9-]*[a-z0-9]$/u;
 export function fixtureRoot(callerUrl: string): string {
   if (!callerUrl.startsWith("file://")) {
     throw new Error(
-      "fixtureRoot 要的是 import.meta.url（一个 file:// URL），实得 " + callerUrl,
+      "fixtureRoot 要的是 import.meta.url（一个 file:// URL），实得 " +
+        callerUrl,
     );
   }
   return resolve(dirname(fileURLToPath(callerUrl)), FIXTURE_ROOT_REL);
@@ -182,7 +183,12 @@ function pruneStaleFixtureDirs(root: string, name: string): void {
   }
   for (const entry of staleFixtureDirs(entries, name, process.pid)) {
     try {
-      rmSync(join(root, entry), { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+      rmSync(join(root, entry), {
+        recursive: true,
+        force: true,
+        maxRetries: 5,
+        retryDelay: 20,
+      });
     } catch {
       /* 留着。它比「一次启动失败」轻，而 next 一次运行还会再试 */
     }

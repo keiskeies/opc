@@ -48,9 +48,9 @@ import { createCard } from "../../src/approvals/cards.js";
 import { markVerified, requestBinding } from "../../src/bindings/im.js";
 import { CHANNEL_QUEUE_LIMIT } from "../../src/channels/abstraction.js";
 import {
-  type FeishuCardActionEvent,
   FEISHU_DEFAULT_CHANNEL_ID,
   FEISHU_ENV,
+  type FeishuCardActionEvent,
   type FeishuFetch,
   type FeishuLongConnection,
   type FeishuMessageItem,
@@ -59,14 +59,15 @@ import { migrate } from "../../src/db/migrate.js";
 import { WriteQueue } from "../../src/db/write-queue.js";
 import { insertTask } from "../../src/http/real-deps.js";
 import {
-  assembleImChannels,
   type AssembleImOptions,
-  imBannerOf,
-  imEnvMissing,
+  assembleImChannels,
   type ImAssembly,
   type ImBundle,
+  imBannerOf,
+  imEnvMissing,
   summarize,
-} from "../../src/serve/im-channels.js";import { fixtureTmp } from "../fixtures/fixture-dir.js";
+} from "../../src/serve/im-channels.js";
+import { fixtureTmp } from "../fixtures/fixture-dir.js";
 
 const TMP = fixtureTmp("serve-im-channels", import.meta.url);
 const NOW = 1_700_000_000_000;
@@ -168,7 +169,8 @@ function fakeRemote(): FakeRemote {
     fetchImpl: async (url, init) => {
       if (isToken(url)) {
         tokenSeen += 1;
-        if (r.tokenMode === "netError") throw new Error("getaddrinfo ENOTFOUND");
+        if (r.tokenMode === "netError")
+          throw new Error("getaddrinfo ENOTFOUND");
         if (r.tokenMode === "http500")
           return { status: 500, json: async () => ({}) };
         return {
@@ -247,7 +249,10 @@ function fakeRemote(): FakeRemote {
         const c = Number(it.create_time ?? "-1");
         return c >= start && c <= end;
       });
-      return { status: 200, json: async () => ({ code: 0, data: { items: win } }) };
+      return {
+        status: 200,
+        json: async () => ({ code: 0, data: { items: win } }),
+      };
     },
   };
   return r;
@@ -436,11 +441,9 @@ function nextWindowStart(remote: FakeRemote): number {
   return Number(q.get("start_time"));
 }
 
-const kindsOf = (
-  rep: {
-    rounds: readonly { handled: readonly { verdict: { kind: string } }[] }[];
-  },
-): string[] => rep.rounds[0]?.handled.map((x) => x.verdict.kind) ?? [];
+const kindsOf = (rep: {
+  rounds: readonly { handled: readonly { verdict: { kind: string } }[] }[];
+}): string[] => rep.rounds[0]?.handled.map((x) => x.verdict.kind) ?? [];
 
 beforeAll(() => mkdirSync(TMP, { recursive: true }));
 afterAll(async () => {
@@ -458,7 +461,11 @@ afterAll(async () => {
 
 describe("① env 没配 ⇒ absent：不抛、说得出缺哪三个名字、且【不说】值", () => {
   it("空 env ⇒ absent，missing 是三项的【名字】，横幅用 log 不用 warn", () => {
-    const r = assembleImChannels({ w: null as never, publish: () => {}, env: {} });
+    const r = assembleImChannels({
+      w: null as never,
+      publish: () => {},
+      env: {},
+    });
     expect(r.kind).toBe("absent");
     if (r.kind !== "absent") return;
     expect(r.missing).toEqual([
@@ -652,7 +659,9 @@ describe("一轮心跳真的把卡推出去（round283，O12 动作 4）", () =>
   function ledger(q: WriteQueue, approvalId: string): number {
     const row = q
       .readConnection()
-      .prepare("SELECT COUNT(*) AS n FROM card_deliveries WHERE approval_id = ?")
+      .prepare(
+        "SELECT COUNT(*) AS n FROM card_deliveries WHERE approval_id = ?",
+      )
       .get(approvalId) as { n?: number } | undefined;
     return Number(row?.n ?? 0);
   }
@@ -679,8 +688,12 @@ describe("一轮心跳真的把卡推出去（round283，O12 动作 4）", () =>
     expect(first.deliver.kind === "pushed" && first.deliver.delivered).toBe(1);
     const afterFirst = h.remote.sendCalls();
     const second = await h.bundle.pollRound();
-    expect(second.deliver.kind === "pushed" && second.deliver.delivered).toBe(0);
-    expect(second.deliver.kind === "pushed" && second.deliver.alreadySent).toBe(1);
+    expect(second.deliver.kind === "pushed" && second.deliver.delivered).toBe(
+      0,
+    );
+    expect(second.deliver.kind === "pushed" && second.deliver.alreadySent).toBe(
+      1,
+    );
     // 幂等必须落在【外网调用次数】上，而不是只落在读数上：
     // 台账挡不住 send 的话，屏幕上那句「本轮推给审批人 0 张」照样说得体面，
     // 而审批人每 60 秒收到一张重复卡 —— 那比不推更坏（它把人训练成忽略这张卡）。
@@ -701,7 +714,9 @@ describe("一轮心跳真的把卡推出去（round283，O12 动作 4）", () =>
     // 【已经】是 approved 了（判决在它之前）。skippedNotPending 那一档管的是
     // 扫描与逐张读之间的那条竞态，与这里的顺序无关 —— 把两档混起来写，
     // 这一发对"顺序对了但逐张读丢了"就变瞎。
-    expect(rep.deliver.kind === "pushed" && rep.deliver.skippedNotPending).toBe(0);
+    expect(rep.deliver.kind === "pushed" && rep.deliver.skippedNotPending).toBe(
+      0,
+    );
     expect(h.remote.sendCalls()).toBe(0);
     expect(ledger(h.q, approvalId)).toBe(0);
     /**
@@ -737,7 +752,6 @@ describe("一轮心跳真的把卡推出去（round283，O12 动作 4）", () =>
 });
 
 /* ══════════════════ ④ 真链路：一轮入站真的落成决策 ══════════════════ */
-
 
 describe("④ 装配通了：env → 通道 → 一轮入站 → 桥 → 库里那一行真的变了", () => {
   it("⭐ 审批人单聊里那条批准文本，经装配点把卡批掉", async () => {

@@ -40,16 +40,16 @@
  * 就是一次 CEO 动作。schema 的 .strict() 让多传一个 actor 键变成看得见的 422。
  */
 import {
+  type CommitOrgChangeRequest,
+  commitOrgChangeRequestSchema,
   HTTP_NOT_IMPLEMENTED,
   HTTP_UNAUTHORIZED,
   HTTP_UNPROCESSABLE,
-  commitOrgChangeRequestSchema,
-  type CommitOrgChangeRequest,
 } from "@opc/contracts";
-import type { CommitResult } from "../org/commit.js";
 import { reviewIndependencePreview } from "../graph/gates/review-preview.js";
-import { isLoopbackAddress } from "./bind.js";
+import type { CommitResult } from "../org/commit.js";
 import type { HubDeps, HubRequest, HubResponse } from "./app.js";
+import { isLoopbackAddress } from "./bind.js";
 
 function res(status: number, body: unknown): HubResponse {
   return { status, body };
@@ -163,10 +163,7 @@ export async function commitOrgRoute(
  * 【抛错】（§18.4 那行注释：不能退回最新版），那条 500 语义做进 query 要再想。
  * 本篇只做「当前生效」这份 —— 它是把「保存按钮的成果显示出来」最少的一格。
  */
-export function orgGraphRoute(
-  deps: HubDeps,
-  req: HubRequest,
-): HubResponse {
+export function orgGraphRoute(deps: HubDeps, req: HubRequest): HubResponse {
   if (deps.readOrgGraph === undefined) {
     // 与 POST /org 同一形状：路由在、契约里有，是这个装配没接读侧。
     // 501 说得清修法（接上 buildHubDeps），不是 404「路由不存在」。
@@ -180,7 +177,9 @@ export function orgGraphRoute(
   // 审阅独立性的结构读数（O4 那一格「这一点在界面上必须说出来」）。
   // 空存那一支【也算】：0 个角色 ⇒ pairs_total 0，界面按「算不出」那一支念，
   // 与「算出来是零问题」是两句不同的话（见 graph/gates/review-preview.ts 文件头）。
-  const preview = reviewIndependencePreview(r.graph ?? { nodes: {}, edges: [] });
+  const preview = reviewIndependencePreview(
+    r.graph ?? { nodes: {}, edges: [] },
+  );
   if (r.versions === 0) {
     // 从没提交过组织图。这不是 404（不是「这个资源不存在」而是「还没有这个资源」），
     // 也不是 500（不是错）。空存：返回空图 + 版本 0，客户端据此显示「尚未建立组织」。
@@ -209,4 +208,3 @@ export function orgGraphRoute(
     review_independence: preview,
   });
 }
-

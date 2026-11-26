@@ -169,7 +169,6 @@ export function nonDecisionLabelOf(kind: unknown): string | null {
   return null;
 }
 
-
 /** 一条记忆。字段全为**渲染层可直接用**的形状，不塞原始 payload。 */
 export interface MemoryEntry {
   /** events.id：唯一能回到事实源的指针。 */
@@ -369,9 +368,9 @@ const MEMORY_ROWS_BY_ORDER: Record<MemoryOrder, string> = {
  * 写出一条决定，MIN 会把那一组【整组】报成非决定，而 coverage 报出的仍然
  * 是一个自洽的假分布。分开分组就没有这个耦合。
  */
-const NON_DECISION_KIND_SQL = NON_DECISION_EVENT_KINDS.map((e) => "'" + e.kind + "'").join(
-  ", ",
-);
+const NON_DECISION_KIND_SQL = NON_DECISION_EVENT_KINDS.map(
+  (e) => "'" + e.kind + "'",
+).join(", ");
 
 export const MEMORY_COVERAGE_SQL =
   "SELECT e.action, e.actor_type, e.actor_id, COUNT(*) AS n, " +
@@ -399,7 +398,11 @@ export const MEMORY_COVERAGE_SQL =
 export const MEMORY_TASK_OWNER_SQL =
   "SELECT 1 FROM tasks WHERE id = ? AND assigned_role = ?";
 
-export function isTaskOwnerOf(db: DatabaseSync, taskId: string, owner: string): boolean {
+export function isTaskOwnerOf(
+  db: DatabaseSync,
+  taskId: string,
+  owner: string,
+): boolean {
   return db.prepare(MEMORY_TASK_OWNER_SQL).get(taskId, owner) !== undefined;
 }
 
@@ -407,14 +410,20 @@ export function isTaskOwnerOf(db: DatabaseSync, taskId: string, owner: string): 
 function str(v: unknown, column: string): string {
   if (typeof v === "string") return v;
   throw new Error(
-    "role-memory: " + column + " 期望字符串，实到 " + typeof v + "。列名或表结构变了。",
+    "role-memory: " +
+      column +
+      " 期望字符串，实到 " +
+      typeof v +
+      "。列名或表结构变了。",
   );
 }
 
 function num(v: unknown, column: string): number {
   if (typeof v === "number") return v;
   if (typeof v === "bigint") return Number(v);
-  throw new Error("role-memory: " + column + " 期望数字，实到 " + typeof v + "。");
+  throw new Error(
+    "role-memory: " + column + " 期望数字，实到 " + typeof v + "。",
+  );
 }
 
 /**
@@ -447,7 +456,8 @@ function softParse(raw: unknown): Record<string, unknown> | undefined {
   if (typeof raw !== "string" || raw === "") return undefined;
   try {
     const got: unknown = JSON.parse(raw);
-    if (got === null || typeof got !== "object" || Array.isArray(got)) return undefined;
+    if (got === null || typeof got !== "object" || Array.isArray(got))
+      return undefined;
     return got as Record<string, unknown>;
   } catch {
     return undefined;
@@ -522,13 +532,17 @@ export function classifyMemoryRow(
         owner,
         scope: "gate",
         decision:
-          typeof payload?.["decision"] === "string" ? payload["decision"] : null,
+          typeof payload?.["decision"] === "string"
+            ? payload["decision"]
+            : null,
         reason: note,
         basis:
-          "审阅判定（target=" + (target ?? "?") + "）。" +
+          "审阅判定（target=" +
+          (target ?? "?") +
+          "）。" +
           (note === null
-            // 老行（0060 之前落库的）或【不带 note 的生产者】。这句话对它们仍然成立。
-            ? "⚠ 规格 §24 风险 2 要的「理由」不在这一行里（写这条事件的生产者没带它）。"
+            ? // 老行（0060 之前落库的）或【不带 note 的生产者】。这句话对它们仍然成立。
+              "⚠ 规格 §24 风险 2 要的「理由」不在这一行里（写这条事件的生产者没带它）。"
             : "理由是审阅者当轮写下的原话（payload.note），原样引用、未经改写。"),
         approval_id: null,
         approval_type: APPROVAL_TYPE_UNKNOWN,
@@ -631,7 +645,8 @@ export function classifyMemoryRow(
         // 所以这里读 snapshot 不是随手一抓；两处都读是为了兼容 policy 那一路
         // 把细节放 payload 的形状。
         reason:
-          typeof snapshot?.["note"] === "string" && snapshot["note"].trim() !== ""
+          typeof snapshot?.["note"] === "string" &&
+          snapshot["note"].trim() !== ""
             ? snapshot["note"]
             : null,
         basis: strategic
@@ -642,9 +657,13 @@ export function classifyMemoryRow(
             " 的审批卡做了决定"
           : isSelf
             ? "该角色署名的审批决策（actor_id=" + actorId + "）"
-            : "发生在该角色任务上、由 [" + actorId + "] 做的决策（不是该角色自己的决定）",
+            : "发生在该角色任务上、由 [" +
+              actorId +
+              "] 做的决策（不是该角色自己的决定）",
         approval_id:
-          typeof payload?.["approvalId"] === "string" ? payload["approvalId"] : target,
+          typeof payload?.["approvalId"] === "string"
+            ? payload["approvalId"]
+            : target,
         approval_type: approvalType,
         task_id: taskId,
         created_at: createdAt,
@@ -687,7 +706,9 @@ export function readRoleMemory(db: DatabaseSync, o: MemoryRequest): RoleMemory {
   const limit = clampLimit(o.limit);
   const offset = o.offset ?? 0;
   if (!Number.isInteger(offset) || offset < 0) {
-    throw new Error("role-memory: offset 必须是 ≥0 的整数，实到 " + String(o.offset));
+    throw new Error(
+      "role-memory: offset 必须是 ≥0 的整数，实到 " + String(o.offset),
+    );
   }
   const cross = new Set<string>(o.crossScopes ?? []);
   const self = o.owner === o.requester;
@@ -759,7 +780,8 @@ export function readRoleMemory(db: DatabaseSync, o: MemoryRequest): RoleMemory {
     entries,
     withheld,
     withheld_by_scope: withheldByScope,
-    has_more: visibleTotal > visibleBeforePage + entries.length || scanSaturated,
+    has_more:
+      visibleTotal > visibleBeforePage + entries.length || scanSaturated,
   };
 }
 
@@ -808,7 +830,10 @@ export interface MemoryCoverage {
 }
 
 export function memoryCoverage(db: DatabaseSync): MemoryCoverage {
-  const raw = db.prepare(MEMORY_COVERAGE_SQL).all() as Record<string, unknown>[];
+  const raw = db.prepare(MEMORY_COVERAGE_SQL).all() as Record<
+    string,
+    unknown
+  >[];
   const rows: MemoryCoverageRow[] = raw.map((r) => {
     // 运行枚举再核一遍：SQL 里那个 IN 列表是手写的，而 AUDIT_ACTIONS 是唯一判据。
     // 两处不一致时宁可抛 —— 静默把未知 action 当已知的处理，会让 coverage 报出一个
@@ -903,12 +928,21 @@ export function readMemoryTodayProbe(db: DatabaseSync): MemoryTodayProbe {
   const n = (v: unknown, column: string): number => {
     if (v === null || v === undefined) return 0;
     if (typeof v === "number" || typeof v === "bigint") return Number(v);
-    throw new Error("role-memory: 今日探针的 " + column + " 期望数字，实到 " + typeof v + "。");
+    throw new Error(
+      "role-memory: 今日探针的 " +
+        column +
+        " 期望数字，实到 " +
+        typeof v +
+        "。",
+    );
   };
   return {
     scope_rows: n(r["scope_rows"], "scope_rows"),
     gate_rows: n(r["gate_rows"], "gate_rows"),
-    gate_unattributed_rows: n(r["gate_unattributed_rows"], "gate_unattributed_rows"),
+    gate_unattributed_rows: n(
+      r["gate_unattributed_rows"],
+      "gate_unattributed_rows",
+    ),
   };
 }
 

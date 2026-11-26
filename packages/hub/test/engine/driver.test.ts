@@ -19,11 +19,13 @@
 import { mkdirSync, rmSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-
-import { fixtureTmp } from "../fixtures/fixture-dir.js";
-import { makeDispatch, type DispatchResult } from "../../src/engine/dispatch.js";
+import {
+  type DispatchResult,
+  makeDispatch,
+} from "../../src/engine/dispatch.js";
 import { advance, describeAdvance } from "../../src/engine/driver.js";
 import type { EngineRuntime } from "../../src/engine/runtime.js";
+import { fixtureTmp } from "../fixtures/fixture-dir.js";
 
 const TMP = fixtureTmp("engine-driver", import.meta.url);
 const NOW = 1_700_000_000_000;
@@ -31,7 +33,9 @@ const NOW = 1_700_000_000_000;
 beforeAll(() => mkdirSync(TMP, { recursive: true }));
 afterAll(() => rmSync(TMP, { recursive: true, force: true }));
 
-function result(o: Partial<DispatchResult> & { status: string }): DispatchResult {
+function result(
+  o: Partial<DispatchResult> & { status: string },
+): DispatchResult {
   return {
     taskId: "t1",
     role: "dev",
@@ -61,7 +65,11 @@ function fakeRt(o: {
   const recorded: { cents: number; role: string }[] = [];
   const loads = { n: 0 };
   const rt = {
-    recordTurn: async (x: { taskId: string; role: string; costCents: number }): Promise<{
+    recordTurn: async (x: {
+      taskId: string;
+      role: string;
+      costCents: number;
+    }): Promise<{
       recorded: boolean;
       why: string;
     }> => {
@@ -75,7 +83,13 @@ function fakeRt(o: {
       loadTask: () => {
         loads.n += 1;
         if (o.exists === false) return null;
-        return { id: "t1", title: "x", status: "IN_PROGRESS", role: "dev", graphVersion: 1 };
+        return {
+          id: "t1",
+          title: "x",
+          status: "IN_PROGRESS",
+          role: "dev",
+          graphVersion: 1,
+        };
       },
     },
   } as unknown as EngineRuntime;
@@ -102,8 +116,13 @@ function scripted(...rs: DispatchResult[]): {
 describe("advance 的停止条件", () => {
   it("角色说 wait（moved:false）⇒ 【第二轮不再烧钱】：这是防「拿钱买 wait」那条判据", async () => {
     const { rt } = fakeRt({});
-    const d = scripted(result({ status: "IN_PROGRESS", moved: false, costCents: 7 }));
-    const r = await advance(rt, () => d.fn(), { taskId: "t1", maxBudgetUsd: 0.5 });
+    const d = scripted(
+      result({ status: "IN_PROGRESS", moved: false, costCents: 7 }),
+    );
+    const r = await advance(rt, () => d.fn(), {
+      taskId: "t1",
+      maxBudgetUsd: 0.5,
+    });
     expect(r.stopped).toBe("stalled");
     expect(d.calls.n).toBe(1); // 关键：只跑了一轮
     expect(r.totalCostCents).toBe(7);
@@ -111,8 +130,18 @@ describe("advance 的停止条件", () => {
 
   it("人坐的格子 ⇒ 立刻停，并且【报 human_seat】而不是「跑完了」", async () => {
     const { rt } = fakeRt({});
-    const d = scripted(result({ status: "FINAL_REVIEW", seat: "human", moved: false, costCents: 0 }));
-    const r = await advance(rt, () => d.fn(), { taskId: "t1", maxBudgetUsd: 0.5 });
+    const d = scripted(
+      result({
+        status: "FINAL_REVIEW",
+        seat: "human",
+        moved: false,
+        costCents: 0,
+      }),
+    );
+    const r = await advance(rt, () => d.fn(), {
+      taskId: "t1",
+      maxBudgetUsd: 0.5,
+    });
     expect(r.stopped).toBe("human_seat");
     expect(d.calls.n).toBe(1);
   });
@@ -120,7 +149,11 @@ describe("advance 的停止条件", () => {
   it("连续推进时【不会】提前停；撞上限时如实报 limit 而不是停在成功的样子", async () => {
     const { rt } = fakeRt({});
     const d = scripted(result({ status: "IN_PROGRESS" }));
-    const r = await advance(rt, () => d.fn(), { taskId: "t1", maxBudgetUsd: 0.5, maxTurns: 3 });
+    const r = await advance(rt, () => d.fn(), {
+      taskId: "t1",
+      maxBudgetUsd: 0.5,
+      maxTurns: 3,
+    });
     expect(d.calls.n).toBe(3);
     expect(r.stopped).toBe("limit");
     // 三轮各 4 美分 ⇒ 12。这个数是「循环真的跑了三轮」的独立证据
@@ -133,7 +166,11 @@ describe("advance 的停止条件", () => {
     const d = scripted(result({ status: "IN_PROGRESS" }));
     for (const bad of [0, -1, 2.5, Number.NaN]) {
       await expect(
-        advance(rt, () => d.fn(), { taskId: "t1", maxBudgetUsd: 0.5, maxTurns: bad }),
+        advance(rt, () => d.fn(), {
+          taskId: "t1",
+          maxBudgetUsd: 0.5,
+          maxTurns: bad,
+        }),
       ).rejects.toThrow(/maxTurns/);
     }
     // 一次都没被调到：抛在循环之前
@@ -143,7 +180,10 @@ describe("advance 的停止条件", () => {
   it("任务不在库里 ⇒ gone，且【一次 dispatch 都不调】（不为一件不存在的事烧 token）", async () => {
     const { rt, loads } = fakeRt({ exists: false });
     const d = scripted(result({ status: "IN_PROGRESS" }));
-    const r = await advance(rt, () => d.fn(), { taskId: "t1", maxBudgetUsd: 0.5 });
+    const r = await advance(rt, () => d.fn(), {
+      taskId: "t1",
+      maxBudgetUsd: 0.5,
+    });
     expect(r.stopped).toBe("gone");
     expect(r.turns.length).toBe(0);
     expect(d.calls.n).toBe(0);
@@ -156,7 +196,10 @@ describe("advance 的停止条件", () => {
       result({ status: "IN_PROGRESS" }),
       result({ status: "IN_REVIEW", moved: false }),
     );
-    const r = await advance(rt, () => d.fn(), { taskId: "t1", maxBudgetUsd: 0.5 });
+    const r = await advance(rt, () => d.fn(), {
+      taskId: "t1",
+      maxBudgetUsd: 0.5,
+    });
     expect(r.turns.length).toBe(2);
     expect(r.turns.every((t) => t.recorded === false)).toBe(true);
     expect(r.turns[0]?.why).toContain("harness_calls");
@@ -164,20 +207,27 @@ describe("advance 的停止条件", () => {
     expect(r.totalCostCents).toBe(8);
   });
 
-  it("留痕用的是【这一轮 dispatch 交回来的角色】，不是第一轮的：缓存那份快照会让" +
-     "director 的会话挂在 dev 名下", async () => {
-    const { rt, recorded } = fakeRt({});
-    const d = scripted(
-      result({ status: "IN_PROGRESS", role: "dev" }),
-      result({ status: "IN_REVIEW", role: "director" }),
-      result({ status: "IN_REVIEW", role: "director", moved: false }),
-    );
-    await advance(rt, () => d.fn(), { taskId: "t1", maxBudgetUsd: 0.5 });
-    // 三轮分别是 dev / director / director。第一轮之后还把 role 当成 dev 的话，
-    // 症状是 harness_calls 里 director 的会话记在 dev 名下 —— 而 roleSession
-    // 按 (task, role) 查，于是下一轮 director 拿不到自己的会话，永久从零开始。
-    expect(recorded.map((r) => r.role)).toEqual(["dev", "director", "director"]);
-  });
+  it(
+    "留痕用的是【这一轮 dispatch 交回来的角色】，不是第一轮的：缓存那份快照会让" +
+      "director 的会话挂在 dev 名下",
+    async () => {
+      const { rt, recorded } = fakeRt({});
+      const d = scripted(
+        result({ status: "IN_PROGRESS", role: "dev" }),
+        result({ status: "IN_REVIEW", role: "director" }),
+        result({ status: "IN_REVIEW", role: "director", moved: false }),
+      );
+      await advance(rt, () => d.fn(), { taskId: "t1", maxBudgetUsd: 0.5 });
+      // 三轮分别是 dev / director / director。第一轮之后还把 role 当成 dev 的话，
+      // 症状是 harness_calls 里 director 的会话记在 dev 名下 —— 而 roleSession
+      // 按 (task, role) 查，于是下一轮 director 拿不到自己的会话，永久从零开始。
+      expect(recorded.map((r) => r.role)).toEqual([
+        "dev",
+        "director",
+        "director",
+      ]);
+    },
+  );
 
   it("onTurn 每轮都被调到，带着那一轮完整的 res（CLI 打进度靠它）", async () => {
     const { rt } = fakeRt({});
@@ -198,8 +248,18 @@ describe("advance 的停止条件", () => {
 describe("describeAdvance 那句收尾", () => {
   it("人席那一支说的是【去点按钮】，不是「失败了」", async () => {
     const { rt } = fakeRt({});
-    const d = scripted(result({ status: "FINAL_REVIEW", seat: "human", moved: false, note: "等人不等 agent" }));
-    const r = await advance(rt, () => d.fn(), { taskId: "t1", maxBudgetUsd: 0.5 });
+    const d = scripted(
+      result({
+        status: "FINAL_REVIEW",
+        seat: "human",
+        moved: false,
+        note: "等人不等 agent",
+      }),
+    );
+    const r = await advance(rt, () => d.fn(), {
+      taskId: "t1",
+      maxBudgetUsd: 0.5,
+    });
     const s = describeAdvance(r, null);
     expect(s).toContain("FINAL_REVIEW");
     expect(s).toContain("审批收件箱");
@@ -208,9 +268,20 @@ describe("describeAdvance 那句收尾", () => {
 
   it("stalled 那一支给出【可执行的下一步】（再推一次），而不是只报停", async () => {
     const { rt } = fakeRt({});
-    const d = scripted(result({ status: "IN_PROGRESS", moved: false, note: "等 CI 跑完" }));
-    const r = await advance(rt, () => d.fn(), { taskId: "t1", maxBudgetUsd: 0.5 });
-    const s = describeAdvance(r, { id: "t1", title: "x", status: "IN_PROGRESS", role: "dev", graphVersion: 1 });
+    const d = scripted(
+      result({ status: "IN_PROGRESS", moved: false, note: "等 CI 跑完" }),
+    );
+    const r = await advance(rt, () => d.fn(), {
+      taskId: "t1",
+      maxBudgetUsd: 0.5,
+    });
+    const s = describeAdvance(r, {
+      id: "t1",
+      title: "x",
+      status: "IN_PROGRESS",
+      role: "dev",
+      graphVersion: 1,
+    });
     expect(s).toContain("hub work");
     expect(s).toContain("负责角色：dev");
   });
@@ -224,7 +295,9 @@ describe("advance + 真 dispatch（桩 CLI，真库）", () => {
   it("真装配跑一轮：停在 stalled，钱与状态都落库", async () => {
     const { migrate } = await import("../../src/db/migrate.js");
     const { WriteQueue } = await import("../../src/db/write-queue.js");
-    const { INSERT_DELEGATION_GRAPH_SQL } = await import("../../src/org/commit.js");
+    const { INSERT_DELEGATION_GRAPH_SQL } = await import(
+      "../../src/org/commit.js"
+    );
     const { InMemoryEventBus } = await import("../../src/events/bus.js");
     const { makeRuntime } = await import("../../src/engine/runtime.js");
     type Db = ReturnType<typeof q.writeConnection>;
@@ -240,9 +313,24 @@ describe("advance + 真 dispatch（桩 CLI，真库）", () => {
       1,
       JSON.stringify({
         nodes: {
-          ceo: { role_id: "ceo", can_manage: true, reports_to: null, model_family: "opus" },
-          director: { role_id: "director", can_manage: true, reports_to: "ceo", model_family: "sonnet" },
-          dev: { role_id: "dev", can_manage: false, reports_to: "director", model_family: "claude" },
+          ceo: {
+            role_id: "ceo",
+            can_manage: true,
+            reports_to: null,
+            model_family: "opus",
+          },
+          director: {
+            role_id: "director",
+            can_manage: true,
+            reports_to: "ceo",
+            model_family: "sonnet",
+          },
+          dev: {
+            role_id: "dev",
+            can_manage: false,
+            reports_to: "director",
+            model_family: "claude",
+          },
         },
         edges: [{ from: "dev", to: "director", review_gate: true }],
       }),
@@ -257,23 +345,42 @@ describe("advance + 真 dispatch（桩 CLI，真库）", () => {
       taskLimitCents: 1000,
       cwd: TMP,
       evidenceRoot: TMP + "/artifacts",
-      bin: fileURLToPath(new URL("./fixtures/fake-claude.mjs", import.meta.url)),
+      bin: fileURLToPath(
+        new URL("./fixtures/fake-claude.mjs", import.meta.url),
+      ),
     });
     const dispatch = makeDispatch(rt.deps);
-    const r = await advance(rt, (o) => dispatch(o), { taskId: "t1", maxBudgetUsd: 0.5, maxTurns: 4 });
+    const r = await advance(rt, (o) => dispatch(o), {
+      taskId: "t1",
+      maxBudgetUsd: 0.5,
+      maxTurns: 4,
+    });
 
     // 桩 CLI 交给 "tech"，图里没这个角色 ⇒ 越权 ⇒ 不动 ⇒ stalled，且【只跑一轮】
     expect(r.stopped).toBe("stalled");
     expect(r.turns.length).toBe(1);
     expect(r.totalCostCents).toBe(4);
     // 留痕真的落库了（这条是假 runtime 测不出来的那一半）
-    const hc = db.prepare("SELECT * FROM harness_calls").all() as Record<string, unknown>[];
+    const hc = db.prepare("SELECT * FROM harness_calls").all() as Record<
+      string,
+      unknown
+    >[];
     expect(hc.length).toBe(1);
     expect(r.turns[0]?.recorded).toBe(true);
     // 账也落了：budget_events 一行 + tasks 那一列前进
-    expect((db.prepare("SELECT count(*) AS c FROM budget_events").get() as { c: number }).c).toBe(1);
     expect(
-      (db.prepare("SELECT consumed_cents AS c FROM tasks WHERE id='t1'").get() as { c: number }).c,
+      (
+        db.prepare("SELECT count(*) AS c FROM budget_events").get() as {
+          c: number;
+        }
+      ).c,
+    ).toBe(1);
+    expect(
+      (
+        db
+          .prepare("SELECT consumed_cents AS c FROM tasks WHERE id='t1'")
+          .get() as { c: number }
+      ).c,
     ).toBe(4);
     await q.close();
   });

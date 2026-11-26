@@ -46,7 +46,12 @@ const ALIASES = ["var(--gap-control)", "var(--gap-tool-cluster)"];
  * 豁免名单：住在 CSS 里的裸值，逐条给理由。
  * 全部 < 4px = 亚档微调（折档规则第 ② 条），不是「忘了改」。
  */
-const EXEMPT: ReadonlyArray<{ file: string; selector: string; value: string; why: string }> = [
+const EXEMPT: ReadonlyArray<{
+  file: string;
+  selector: string;
+  value: string;
+  why: string;
+}> = [
   {
     file: "group.css",
     selector: ".conversation-row",
@@ -79,7 +84,8 @@ const EXEMPT: ReadonlyArray<{ file: string; selector: string; value: string; why
   },
 ];
 
-const stripCssComments = (s: string): string => s.replace(/\/\*[\s\S]*?\*\//gu, "");
+const stripCssComments = (s: string): string =>
+  s.replace(/\/\*[\s\S]*?\*\//gu, "");
 
 type GapDecl = { file: string; selector: string; value: string };
 
@@ -87,8 +93,14 @@ type GapDecl = { file: string; selector: string; value: string };
 function selectorFor(src: string, declIdx: number): string {
   const open = src.lastIndexOf("{", declIdx);
   if (open < 0) return "(文件开头没有块)";
-  const guard = Math.max(src.lastIndexOf("}", open), src.lastIndexOf("{", open - 1));
-  return src.slice(guard + 1, open).replace(/\s+/gu, " ").trim();
+  const guard = Math.max(
+    src.lastIndexOf("}", open),
+    src.lastIndexOf("{", open - 1),
+  );
+  return src
+    .slice(guard + 1, open)
+    .replace(/\s+/gu, " ")
+    .trim();
 }
 
 /** 收集 gap / row-gap / column-gap 声明（注释已洗，值原样保留）。 */
@@ -98,7 +110,11 @@ function collectGaps(file: string, raw: string): GapDecl[] {
   const re = /(?:^|[;{}\s])((?:row-|column-)?gap):\s*([^;}]+)/gu;
   for (const m of src.matchAll(re)) {
     const value = (m[2] ?? "").replace(/\s+/gu, " ").trim();
-    out.push({ file, selector: selectorFor(src, (m.index ?? 0) + (m[1] ?? "").length), value });
+    out.push({
+      file,
+      selector: selectorFor(src, (m.index ?? 0) + (m[1] ?? "").length),
+      value,
+    });
   }
   return out;
 }
@@ -111,7 +127,10 @@ const isTokenSide = (side: string): boolean =>
 const sides = (value: string): string[] => value.trim().split(/\s+/u);
 
 /** 在 :root 里读自定义属性：属性名 → 第一次出现的值。 */
-function readRootTokens(raw: string, rootSelector: string): Map<string, string> {
+function readRootTokens(
+  raw: string,
+  rootSelector: string,
+): Map<string, string> {
   const src = stripCssComments(raw);
   const i = src.indexOf(rootSelector);
   if (i < 0) throw new Error(`找不到 ${rootSelector}`);
@@ -123,11 +142,16 @@ function readRootTokens(raw: string, rootSelector: string): Map<string, string> 
   return out;
 }
 
-const ALL = CSS_FILES.flatMap((f) => collectGaps(f, readFileSync(join(PUB, f), "utf8")));
+const ALL = CSS_FILES.flatMap((f) =>
+  collectGaps(f, readFileSync(join(PUB, f), "utf8")),
+);
 
 describe("间距刻度：gap 只走 --space-*，裸值须是亚档且在名单里", () => {
   it("刻度本体是 4/8/12/16/20/24/32，严格递增", () => {
-    const tokens = readRootTokens(readFileSync(join(PUB, "group.css"), "utf8"), ":root");
+    const tokens = readRootTokens(
+      readFileSync(join(PUB, "group.css"), "utf8"),
+      ":root",
+    );
     const got = SCALE.map((_, i) => tokens.get(`--space-${i + 1}`));
     expect(got).toEqual(SCALE.map((px) => `${px}px`));
     const nums = got.map((v) => Number.parseInt(String(v), 10));
@@ -137,7 +161,10 @@ describe("间距刻度：gap 只走 --space-*，裸值须是亚档且在名单�
   });
 
   it("两枚具名别名的值仍指回刻度，不是自己存了一份裸值", () => {
-    const tokens = readRootTokens(readFileSync(join(PUB, "group.css"), "utf8"), ":root");
+    const tokens = readRootTokens(
+      readFileSync(join(PUB, "group.css"), "utf8"),
+      ":root",
+    );
     for (const alias of ["--gap-control", "--gap-tool-cluster"]) {
       const v = tokens.get(alias) ?? "";
       expect(v, `${alias} 的定义`).toMatch(/^var\(--space-\d\)$/u);
@@ -147,22 +174,49 @@ describe("间距刻度：gap 只走 --space-*，裸值须是亚档且在名单�
   it("每一枚 gap 的每一边都是刻度 token（或已在豁免名单里的亚档裸值）", () => {
     const offenders: string[] = [];
     for (const d of ALL) {
-      if (EXEMPT.some((e) => e.file === d.file && e.selector === d.selector && e.value === d.value)) {
+      if (
+        EXEMPT.some(
+          (e) =>
+            e.file === d.file &&
+            e.selector === d.selector &&
+            e.value === d.value,
+        )
+      ) {
         continue;
       }
       const bad = sides(d.value).filter((s) => !isTokenSide(s));
-      if (bad.length > 0) offenders.push(`${d.file} · ${d.selector} · gap:${d.value} ⇒ ${bad.join(" / ")}`);
+      if (bad.length > 0)
+        offenders.push(
+          `${d.file} · ${d.selector} · gap:${d.value} ⇒ ${bad.join(" / ")}`,
+        );
     }
-    expect(offenders, "这些 gap 没走刻度，也不在豁免名单里：\n" + offenders.join("\n")).toEqual([]);
+    expect(
+      offenders,
+      "这些 gap 没走刻度，也不在豁免名单里：\n" + offenders.join("\n"),
+    ).toEqual([]);
   });
 
   it("豁免名单双向：名单里每一条仍然活着，且全部小于最小那一档", () => {
     const dead = EXEMPT.filter(
-      (e) => !ALL.some((d) => d.file === e.file && d.selector === e.selector && d.value === e.value),
+      (e) =>
+        !ALL.some(
+          (d) =>
+            d.file === e.file &&
+            d.selector === e.selector &&
+            d.value === e.value,
+        ),
     );
-    expect(dead.map((d) => `${d.file} ${d.selector} gap:${d.value}`), "豁免名单已过期，删掉这些").toEqual([]);
-    const tooBig = EXEMPT.filter((e) => Number.parseInt(e.value, 10) >= SCALE[0]);
-    expect(tooBig.map((e) => `${e.selector} gap:${e.value}`), "豁免只给亚档（< 4px）；到档了就折进 var(--space-*)").toEqual([]);
+    expect(
+      dead.map((d) => `${d.file} ${d.selector} gap:${d.value}`),
+      "豁免名单已过期，删掉这些",
+    ).toEqual([]);
+    const tooBig = EXEMPT.filter(
+      (e) => Number.parseInt(e.value, 10) >= SCALE[0],
+    );
+    expect(
+      tooBig.map((e) => `${e.selector} gap:${e.value}`),
+      "豁免只给亚档（< 4px）；到档了就折进 var(--space-*)",
+    ).toEqual([]);
   });
 
   it("本仓确实用上了刻度（否则前面几条会因为『压根没有 gap』而假绿）", () => {
@@ -188,7 +242,9 @@ describe("间距刻度：gap 只走 --space-*，裸值须是亚档且在名单�
       ".d|3px",
       ".e|var(--space-1) var(--space-2)",
     ]);
-    const flagged = got.filter((d) => !sides(d.value).every(isTokenSide)).map((d) => d.selector);
+    const flagged = got
+      .filter((d) => !sides(d.value).every(isTokenSide))
+      .map((d) => d.selector);
     expect(flagged).toEqual([".a", ".b", ".c", ".d"]);
     // 嵌套块的选择器要认得出 .d（回溯时越过 @media 的那个 {），否则豁免名单会按选择器对不上号。
     expect(got[3]?.selector).toBe(".d");

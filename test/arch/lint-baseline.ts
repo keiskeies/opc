@@ -100,23 +100,18 @@ export interface BaselineEntry {
 /**
  * 2026-11-17 实测（`node .workbuddy/round274-lint-baseline.mjs`，已排除运行期夹具探针）。
  * 这一份数据是**上限表**不是**期望表**：它不要求今天正好这么多，只要求不许更多。
+ *
+ * ⚠ 2026-11-27：表清空，`pnpm lint` 真 0 error（exit 0）。此前登记的四个类目全部归零：
+ *   · format / organizeImports —— 15bf474 把未提交改动入库后，round285 立的
+ *     「先 commit 再全仓修」前提成立，`biome check --write` 一次收敛（154 份文件，
+ *     纯排版提交，单独一发）；
+ *   · noControlCharactersInRegex ×3（markdown.js）与 noAssignInExpressions ×1（app.js
+ *     SSE 分帧）—— 改【就地 biome-ignore + 理由】。round378 当年选【登记】的唯一理由是
+ *     「别动 markdown.js 的行号」，而全仓 format 收敛必然重排该文件 ⇒ 登记的理由随
+ *     排版一并失效；守卫若因 biome-ignore 归零而报 staleBaselineEntries，那是设计在说话。
+ * 表 emptied 不等于守卫退役：冒出任何新种类 error（含 format 回归）都会红并点名。
  */
-export const LINT_BASELINE: readonly BaselineEntry[] = [
-  { category: "format", atMost: 161 },
-  { category: "assist/source/organizeImports", atMost: 117 },
-  { category: "lint/suspicious/noAssignInExpressions", atMost: 1 },
-  // round378 的 `packages/web/public/markdown.js` 带来 3 条，全部【刻意】：
-  //   :26 的 `[\u0000-\u0020\u007f]` 是 safeHref 剥控制符的那一发 —— 浏览器会忽略
-  //        URL 里的 \t，`java\tscript:` 于是能拆开协议字面量绕过白名单。这条正则
-  //        本身是【防线】，规则警告的「控制符写错了」恰是它要利用的性质；
-  //   :66 的 `\u0000(\d+)\u0000` 是行内码占位哨兵（两侧 U+0000 定界），与 :38 的
-  //        写入端成对 —— 一处改成别的字符就会与正文撞车。
-  // 处置选【登记】不选【就地 biome-ignore】：markdown.js 正是 round378 变异机
-  // P15/P16/P17 的锚点文件，现在往它里面插注释会让已落的证据 log 与台账坐标失效。
-  // ⚠ 这条豁免与那发 sanitizer 同生共死：哪天它降到 0，staleBaselineEntries 会报
-  //   「请把这条删掉」—— 那一次删行动时请先确认剥控制符那一发不是被顺手删掉的。
-  { category: "lint/suspicious/noControlCharactersInRegex", atMost: 3 },
-];
+export const LINT_BASELINE: readonly BaselineEntry[] = [];
 
 /** biome JSON 读数里本守卫要看的那几个字段。 */
 export interface BiomeDiagnostic {

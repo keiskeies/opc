@@ -187,7 +187,7 @@ wouldExceedMaxDepth / 深度判据：parentDepth + heightBelow(child)   // 规�
 ## 8. 这三个函数现在**没有任何生产调用方**
 
 【round322 复核：本节标题与正文的「没有任何生产调用方」已过期。三个 validate* 函数
-现在被 `org/commit.ts:200` 的 `validateReparenting` 调用（`commitOrgGraph` 校验段：
+现在被 `org/commit.ts:205` 的 `validateReparenting` 调用（`commitOrgGraph` 校验段：
 `:200` validateReparenting、`:202` validateNewEdge、`:216` validateOrgChange），而
 `commitOrgGraph` 经 `http/real-deps.ts:1029`（HTTP 组织提交路由，生产）与
 `serve/dev-seed.ts:391`（seed 入口）调用（round357 复算：351 → 391）。原句保留为 0011 写作时的读数。】

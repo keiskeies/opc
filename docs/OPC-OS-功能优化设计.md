@@ -238,12 +238,12 @@ pnpm 把包装在 workspace 包下面，不在根 `node_modules`。
    ⚠ 【round314 复核】这句「它们不同步了」已过期：两处抄本今天同口径 ——
    §O2 动作 4 修正块（验收第 5 条）写「它读起来是『有一份没签的运营岗位书』」，
    与本格的「有一份没签的岗位书，而装配表里没有它的位置」是同一件事的两种写法；
-   钉住【事实】的守卫是 `roles/charter.test.ts:588`（孤儿集合 `== ["ops"]` +
+   钉住【事实】的守卫是 `roles/charter.test.ts:613`（孤儿集合 `== ["ops"]` +
    播种命令目录 glob 读得到它）。同步的凭据在守卫，不在散文。
    ⚠ 「不同步了【多久】」我**说不出**：`seed.ts` 与本文档今天都还是未跟踪文件
    （`git status` 实测两格都是 `??`），没有提交历史可查 ⇒ 只能说「播种落地之后这一格没跟着改」，
    不能说漂了几轮（round286 台账记的「归因不可考」同一个规矩：查不出来的时间量就不写）。
-   唯一相关的钉子是 `roles/charter.test.ts:588` 那一发（孤儿集合 `== ["ops"]`），
+   唯一相关的钉子是 `roles/charter.test.ts:613` 那一发（孤儿集合 `== ["ops"]`），
    它判的是**装配表**维度的孤儿，所以它对这一句过期【全程是绿的】：
    守卫抓不到散文里的过期现状，这件事本轮又多一个实例。
    ⇒ 这条同时说明：**改组织 = 改这个常量 + 改图 + 重编译**。而 `POST /org`
@@ -1733,7 +1733,7 @@ Task 4.7 只剩飞书沙箱手工验证记录=真凭据 CEO 门。决策面仍�
    （O9 动作 1，影子判定只报不批）。`EvidenceStore` 对外零 import **本轮复核仍成立**
    —— src 里只有注释与类型名提到它，没有一处 import `evidence/store.js`。
    ⚡ **round358 翻向**：这句「没有一处 import `evidence/store.js`」**已过期** ——
-   `engine/work.ts:40` 现在 `import { artifactsRoot } from "../evidence/store.js"`，
+   `engine/work.ts:36` 现在 `import { artifactsRoot } from "../evidence/store.js"`，
    链是 `hub:engine` CLI → `engine/hub-work.ts` → `engine/work.ts` → `store.ts`
    （`--evidence-root` 缺省时真调 `artifactsRoot()`），`evidence/store.ts` 从此
    【模块可达】，dead-modules 基线条目 round358 摘除。这正是这段自我警告预言过的
@@ -2613,7 +2613,7 @@ Task 4.7 只剩飞书沙箱手工验证记录=真凭据 CEO 门。决策面仍�
     另一些读者取**值里的** `role_id`（`subordinateRoles`、`rootsOf`）。
     键=`alice`／值=`bob` 时升级判据那句 `上级 === CEO` **两头各拿一半 ⇒ 永不成立 ⇒
     升级永不触发** —— 而本仓自己把「每一轮真烧一次子进程、人类席位永远等不到」
-    列为那里最贵的那类故障（`dispatch.ts:463-468`，round357 复算：382 → 437，六行一字未变）。
+    列为那里最贵的那类故障（`dispatch.ts:572-468`，round357 复算：382 → 437，六行一字未变）。
 
     **落点选 schema 而不是 `validate.ts`**，三个理由：`rejectMalformed` 在三个入口各调一次、
     判的都是**本次变更之前**那张图，而 `add_edge` 那条根本不进 `validateNewNode`

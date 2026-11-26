@@ -17,18 +17,22 @@
  * ③ prevention 那组：把 `prevention` 从「审计里的一格」当成「路由的硬约束输入」用之后，
  *    「要求」与「实际」必须不分叉（0021 §6 预告的就是这一步）。
  */
-import type { HarnessCapabilities, RiskTier, SandboxTier } from "@opc/contracts";
+import type {
+  HarnessCapabilities,
+  RiskTier,
+  SandboxTier,
+} from "@opc/contracts";
 import { SANDBOX_TIERS } from "@opc/contracts";
 import { describe, expect, it } from "vitest";
 import {
   branchIsOnMain,
   branchViolation,
-  readOnlyTools,
-  requestPolicyFor,
   type RouteCandidate,
   type RouteInput,
   type RoutePlan,
   type RouteStage,
+  readOnlyTools,
+  requestPolicyFor,
   routeTask,
   stagesFor,
   stageWriteViolation,
@@ -62,7 +66,11 @@ function input(over: Partial<RouteInput> = {}): RouteInput {
     workspace: "/repo",
     // 岗位书侧给 workspace-write：这是**被比侧**，必须能从外部注入（见那两条 ⭐ 用例）。
     charterCeiling: "workspace-write",
-    charterForbiddenFlags: ["--dangerously-skip-permissions", "--no-sandbox", "--yolo"],
+    charterForbiddenFlags: [
+      "--dangerously-skip-permissions",
+      "--no-sandbox",
+      "--yolo",
+    ],
     allowedTools: ["Read", "Edit", "Write", "Bash(git:*)"],
     candidates: [CODEX, CLAUDE],
     ...over,
@@ -77,7 +85,13 @@ function planned(over: Partial<RouteInput> = {}): RoutePlan {
 
 function stage(plan: RoutePlan, id: string): RouteStage {
   const s = plan.stages.find((x) => x.id === id);
-  if (s === undefined) throw new Error("计划里没有段 [" + id + "]，实到 " + plan.stages.map((x) => x.id).join(","));
+  if (s === undefined)
+    throw new Error(
+      "计划里没有段 [" +
+        id +
+        "]，实到 " +
+        plan.stages.map((x) => x.id).join(","),
+    );
   return s;
 }
 
@@ -119,11 +133,18 @@ describe("【规格】§12.4 双轴：类别轴", () => {
   it("重构那一行要求独立分支；其余类别不要求", () => {
     const r = planned({ category: "refactor" });
     expect(stage(r, "implement").independentBranch).toBe(true);
-    expect(stage(planned({ category: "feature" }), "implement").independentBranch).toBe(false);
+    expect(
+      stage(planned({ category: "feature" }), "implement").independentBranch,
+    ).toBe(false);
   });
 
   it("每一段都带着『为什么这么配』（配置页不能只给一个档位值）", () => {
-    for (const cat of ["feature", "bugfix", "refactor", "experimental"] as const) {
+    for (const cat of [
+      "feature",
+      "bugfix",
+      "refactor",
+      "experimental",
+    ] as const) {
       for (const s of stagesFor(cat)) {
         expect(s.why.length, cat + "/" + s.id + " 缺 why").toBeGreaterThan(10);
       }
@@ -135,7 +156,10 @@ describe("【规格】§12.5 段闸门：只读段出现写操作即失败（计
   const analyze = stage(planned(), "analyze");
 
   it("只读段里一次 Edit 即失败", () => {
-    const v = stageWriteViolation(analyze, { tool: "Edit", args: { path: "/repo/a.ts" } });
+    const v = stageWriteViolation(analyze, {
+      tool: "Edit",
+      args: { path: "/repo/a.ts" },
+    });
     expect(v.ok).toBe(false);
     if (!v.ok) expect(v.code).toBe("write_in_read_only_stage");
   });
@@ -145,18 +169,30 @@ describe("【规格】§12.5 段闸门：只读段出现写操作即失败（计
     // 那么把整条判据改成「只读段一律拒」也全绿，而那样【规格】§12.5 第 1 步
     // 「预检：git status」就做不出来了（0021 §3 记的就是这种「全拒 ⇒ 下次放松」）。
     expect(
-      stageWriteViolation(analyze, { tool: "Bash", args: { command: "rm -rf build" } }).ok,
+      stageWriteViolation(analyze, {
+        tool: "Bash",
+        args: { command: "rm -rf build" },
+      }).ok,
     ).toBe(false);
     expect(
-      stageWriteViolation(analyze, { tool: "Bash", args: { command: "git status" } }).ok,
+      stageWriteViolation(analyze, {
+        tool: "Bash",
+        args: { command: "git status" },
+      }).ok,
     ).toBe(true);
     expect(
-      stageWriteViolation(analyze, { tool: "Bash", args: { command: "git diff HEAD" } }).ok,
+      stageWriteViolation(analyze, {
+        tool: "Bash",
+        args: { command: "git diff HEAD" },
+      }).ok,
     ).toBe(true);
   });
 
   it("⭐ 认不出的工具名在只读段里算违规（宁可打断分析，不要偷偷改文件）", () => {
-    const v = stageWriteViolation(analyze, { tool: "SomeVendorTool", args: { x: 1 } });
+    const v = stageWriteViolation(analyze, {
+      tool: "SomeVendorTool",
+      args: { x: 1 },
+    });
     expect(v.ok).toBe(false);
   });
 
@@ -164,12 +200,20 @@ describe("【规格】§12.5 段闸门：只读段出现写操作即失败（计
     // 「档位那一格对不对」与「这一段有没有被守住」是两件事。
     // 前者交给 harness 执行（本层看不见），后者是外层那一份（【规格】§12.7 表头说的「叠加」）。
     const loosened: RouteStage = { ...analyze, sandbox: "workspace-write" };
-    expect(stageWriteViolation(loosened, { tool: "Edit", args: { path: "/repo/a.ts" } }).ok).toBe(false);
+    expect(
+      stageWriteViolation(loosened, {
+        tool: "Edit",
+        args: { path: "/repo/a.ts" },
+      }).ok,
+    ).toBe(false);
   });
 
   it("非只读段不因这条被判（不是一条『写一律拒』的判据）", () => {
     const impl = stage(planned(), "implement");
-    expect(stageWriteViolation(impl, { tool: "Write", args: { path: "/repo/a.ts" } }).ok).toBe(true);
+    expect(
+      stageWriteViolation(impl, { tool: "Write", args: { path: "/repo/a.ts" } })
+        .ok,
+    ).toBe(true);
   });
 
   it("⚠ 与审批**同一个判据**（不是第二张表）", () => {
@@ -178,9 +222,18 @@ describe("【规格】§12.5 段闸门：只读段出现写操作即失败（计
     // Edit 在审批侧「不用问人」（可逆）而在只读段「违规」—— 那不是不一致，
     // 而是同一档位在两个问题下的两种答案（要不要问人 / 这一段允不允许）。
     // 这一条用例真正防的是「有人在 routing 里再写一张写工具表」。
-    const e = stageWriteViolation(analyze, { tool: "Edit", args: { path: "/repo/a.ts" } });
-    const w = stageWriteViolation(analyze, { tool: "Write", args: { path: "/repo/a.ts" } });
-    const r = stageWriteViolation(analyze, { tool: "Read", args: { path: "/repo/a.ts" } });
+    const e = stageWriteViolation(analyze, {
+      tool: "Edit",
+      args: { path: "/repo/a.ts" },
+    });
+    const w = stageWriteViolation(analyze, {
+      tool: "Write",
+      args: { path: "/repo/a.ts" },
+    });
+    const r = stageWriteViolation(analyze, {
+      tool: "Read",
+      args: { path: "/repo/a.ts" },
+    });
     expect([e.ok, w.ok, r.ok]).toEqual([false, false, true]);
   });
 
@@ -195,7 +248,11 @@ describe("【规格】§12.5 段闸门：只读段出现写操作即失败（计
     if (!v.ok) expect(v.code).toBe("independent_stage_by_author");
     // 反向对照：同一段由独立角色发起 ⇒ 放行。
     expect(
-      stageWriteViolation(verify, { tool: "Bash", args: { command: "pnpm test" }, executor: "independent" }).ok,
+      stageWriteViolation(verify, {
+        tool: "Bash",
+        args: { command: "pnpm test" },
+        executor: "independent",
+      }).ok,
     ).toBe(true);
   });
 });
@@ -210,7 +267,9 @@ describe("主干闸门（【规格】§12.4 重构那一行）", () => {
   });
 
   it("非重构类的段不受这条约束", () => {
-    expect(branchViolation(stage(planned(), "implement"), "main").ok).toBe(true);
+    expect(branchViolation(stage(planned(), "implement"), "main").ok).toBe(
+      true,
+    );
   });
 
   it("只认 main / master —— 这条**已知宽松**被钉住，别被误当 bug 收紧", () => {
@@ -242,9 +301,15 @@ describe("风险轴（第二轴）：只收紧，永远不放松", () => {
     const high = planned({ risk: "irreversible" });
     expect(low.stages.map((s) => s.id)).toEqual(high.stages.map((s) => s.id));
     // 低风险的段档位 == 默认的段档位（没有任何一格因为「风险低」而被放宽）。
-    expect(low.stages.map((s) => s.sandbox)).toEqual(stagesFor("bugfix").map((s) => s.sandbox));
-    expect(low.stages.map((s) => s.readOnly)).toEqual(stagesFor("bugfix").map((s) => s.readOnly));
-    expect(low.stages.map((s) => s.executor)).toEqual(stagesFor("bugfix").map((s) => s.executor));
+    expect(low.stages.map((s) => s.sandbox)).toEqual(
+      stagesFor("bugfix").map((s) => s.sandbox),
+    );
+    expect(low.stages.map((s) => s.readOnly)).toEqual(
+      stagesFor("bugfix").map((s) => s.readOnly),
+    );
+    expect(low.stages.map((s) => s.executor)).toEqual(
+      stagesFor("bugfix").map((s) => s.executor),
+    );
     // 而高风险只会**更严**：逐段比较，不允许任何一段变松。
     // （第一版这一段写的是 `expect(cond ? "same" : "tightened").not.toBe("loosened")` ——
     // 那个表达式两个分支都不等于 "loosened"，对任何代码都真，是 0013/0016 记过两次的
@@ -253,11 +318,17 @@ describe("风险轴（第二轴）：只收紧，永远不放松", () => {
       const a = low.stages[i] as RouteStage;
       const b = high.stages[i] as RouteStage;
       expect(b.sandbox, "段 [" + a.id + "] 的档位不该随风险变").toBe(a.sandbox);
-      expect(b.readOnly, "段 [" + a.id + "] 的只读性不该随风险变").toBe(a.readOnly);
-      expect(b.executor, "段 [" + a.id + "] 的发起方不该随风险变").toBe(a.executor);
+      expect(b.readOnly, "段 [" + a.id + "] 的只读性不该随风险变").toBe(
+        a.readOnly,
+      );
+      expect(b.executor, "段 [" + a.id + "] 的发起方不该随风险变").toBe(
+        a.executor,
+      );
       // 唯一的允许方向：never ⇒ on-request。反过来就是放松。
       if (a.approvalPolicy === "on-request") {
-        expect(b.approvalPolicy, "段 [" + a.id + "] 在高风险下被放松了").toBe("on-request");
+        expect(b.approvalPolicy, "段 [" + a.id + "] 在高风险下被放松了").toBe(
+          "on-request",
+        );
       }
     }
   });
@@ -277,7 +348,10 @@ describe("风险轴（第二轴）：只收紧，永远不放松", () => {
             charterCeiling: "danger",
           }),
         );
-        expect(r.ok, category + " × " + risk + " 应该出计划：" + (r.ok ? "" : r.reason)).toBe(true);
+        expect(
+          r.ok,
+          category + " × " + risk + " 应该出计划：" + (r.ok ? "" : r.reason),
+        ).toBe(true);
       }
     }
   });
@@ -285,7 +359,9 @@ describe("风险轴（第二轴）：只收紧，永远不放松", () => {
 
 describe("prevention 作为路由的硬约束输入（0021 §6 预告的那一步）", () => {
   it("⭐ 风险不可逆 + 一家不会问我们的执行器 ⇒ 拒，而不是挑一个聊胜于无的", () => {
-    const r = routeTask(input({ risk: "irreversible", candidates: [AFK_ONLY] }));
+    const r = routeTask(
+      input({ risk: "irreversible", candidates: [AFK_ONLY] }),
+    );
     expect(r.ok).toBe(false);
     if (!r.ok) {
       expect(r.code).toBe("prevention_gap");
@@ -300,7 +376,9 @@ describe("prevention 作为路由的硬约束输入（0021 §6 预告的那一�
   });
 
   it("有合格候选时跳过不合格的那一家，而不是整体失败", () => {
-    const r = routeTask(input({ risk: "irreversible", candidates: [AFK_ONLY, CODEX] }));
+    const r = routeTask(
+      input({ risk: "irreversible", candidates: [AFK_ONLY, CODEX] }),
+    );
     expect(r.ok).toBe(true);
     if (r.ok) expect(r.plan.harnessId).toBe("codex");
   });
@@ -312,15 +390,26 @@ describe("prevention 作为路由的硬约束输入（0021 §6 预告的那一�
     const plan = planned({ risk: "irreversible" });
     expect(plan.prevention).toBe(preventionFor(APPROVING, "on-request"));
     expect(plan.prevention).toBe("enforced");
-    expect(planned({ risk: "reversible", candidates: [AFK_ONLY] }).prevention).toBe("observed_only");
+    expect(
+      planned({ risk: "reversible", candidates: [AFK_ONLY] }).prevention,
+    ).toBe("observed_only");
   });
 
   it("⭐ 成功计划里『要求的』与『实际拿到的』必然一致", () => {
     // 这条不变量今天**由构造保证**（prevention_gap 那条拒绝在前）。写成用例不是为了
     // 证明现在的代码，是为了钉住**哪一种改法会破坏它**：把候选过滤里那个
     // `!needEnforced ||` 去掉、或把 prevention_gap 改成警告继续跑，这一条立刻红。
-    for (const risk of ["read_only", "reversible", "irreversible"] as RiskTier[]) {
-      for (const cands of [[CODEX], [AFK_ONLY], [AFK_ONLY, CODEX], [CODEX, AFK_ONLY]]) {
+    for (const risk of [
+      "read_only",
+      "reversible",
+      "irreversible",
+    ] as RiskTier[]) {
+      for (const cands of [
+        [CODEX],
+        [AFK_ONLY],
+        [AFK_ONLY, CODEX],
+        [CODEX, AFK_ONLY],
+      ]) {
         const r = routeTask(input({ risk, candidates: cands }));
         if (!r.ok) continue;
         expect(
@@ -354,7 +443,9 @@ describe("授权上限：路由不做静默降档，也不自造被比侧（0021
     // 这一对是 0021 §1 那条纪律在路由层的复述：**只喂一个上限值的用例对这类 bug 判别力为零**。
     // 如果哪天有人把上限改成「从 stage 自己反推」（那就是自比），只有这一对能抓到。
     expect(routeTask(input({ charterCeiling: "read-only" })).ok).toBe(false);
-    expect(routeTask(input({ charterCeiling: "workspace-write" })).ok).toBe(true);
+    expect(routeTask(input({ charterCeiling: "workspace-write" })).ok).toBe(
+      true,
+    );
     expect(routeTask(input({ charterCeiling: "danger" })).ok).toBe(true);
   });
 
@@ -389,13 +480,18 @@ describe("拒绝码必须各说各事", () => {
   it("⭐ experimental ⇒ experimental_not_enabled，且**优先于** no_candidate/prevention_gap", () => {
     // 顺序用例：kimi 今天没有适配器，所以它同时命中「找不到合格候选」。
     // 若先报后者，当事人会去接一家根本没打算接的执行器。
-    const r = routeTask(input({ category: "experimental", candidates: [CODEX] }));
+    const r = routeTask(
+      input({ category: "experimental", candidates: [CODEX] }),
+    );
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.code).toBe("experimental_not_enabled");
   });
 
   it("显式 allowExperimental 才放行（那一句的含义是「我知道它今天跑不起来」）", () => {
-    expect(routeTask(input({ category: "experimental", allowExperimental: true })).ok).toBe(true);
+    expect(
+      routeTask(input({ category: "experimental", allowExperimental: true }))
+        .ok,
+    ).toBe(true);
   });
 });
 
@@ -414,15 +510,21 @@ describe("段 → 请求的策略部分（这份计划得真的能被 gateway �
     expect(p.allowedTools).not.toContain("Edit");
     expect(p.allowedTools).not.toContain("Write");
     // 反向对照：非只读段用完整名单。
-    expect(requestPolicyFor(plan, stage(plan, "implement")).allowedTools).toContain("Edit");
+    expect(
+      requestPolicyFor(plan, stage(plan, "implement")).allowedTools,
+    ).toContain("Edit");
   });
 
   it("Bash(git:*) 在只读段里**保留**（预检那句『git status』要用）", () => {
-    expect(readOnlyTools(["Read", "Edit", "Bash(git:*)"])).toContain("Bash(git:*)");
+    expect(readOnlyTools(["Read", "Edit", "Bash(git:*)"])).toContain(
+      "Bash(git:*)",
+    );
   });
 
   it("失效方向是少留而不是误留：带写动词的形状全被剔", () => {
-    expect(readOnlyTools(["apply_patch", "git-push", "create_branch", "Read"])).toEqual(["Read"]);
+    expect(
+      readOnlyTools(["apply_patch", "git-push", "create_branch", "Read"]),
+    ).toEqual(["Read"]);
   });
 
   it("档位与审批策略逐段透传", () => {

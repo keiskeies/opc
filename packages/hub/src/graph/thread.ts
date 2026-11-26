@@ -21,7 +21,9 @@
  * 迟早被传进一对不匹配的值，于是恢复时读的是甲会话的进度、写的是乙任务的审计，
  * 两边还都「看着合理」—— CLI 显式拒绝 --thread 是同一条纪律（0006 §6.2）。
  */
-export function threadConfig(taskId: string): { configurable: { thread_id: string } } {
+export function threadConfig(taskId: string): {
+  configurable: { thread_id: string };
+} {
   return { configurable: { thread_id: taskId } };
 }
 

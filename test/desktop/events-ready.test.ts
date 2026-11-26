@@ -16,11 +16,16 @@
  *
  * electron 三样仍是手搓替身（同 wire.test.ts 的立场：形状就三个方法）。
  */
-import { type Server, createServer } from "node:http";
+import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterEach, describe, expect, it } from "vitest";
+import {
+  type IpcMainLike,
+  invokeChannels,
+  type SenderLike,
+  wireMain,
+} from "../../packages/desktop/src/main/wire.js";
 import { EVENTS_READY_CHANNEL } from "../../packages/desktop/src/preload/api.js";
-import { type IpcMainLike, type SenderLike, invokeChannels, wireMain } from "../../packages/desktop/src/main/wire.js";
 import { verifyRequest } from "../../packages/hub/src/http/auth.js";
 
 const TOKEN = "events-ready-token-0123456789";
@@ -30,12 +35,16 @@ interface FakeIpc {
   ipcMain: IpcMainLike;
 }
 function fakeIpc(): FakeIpc {
-  const handlers = new Map<string, (e: unknown, a: unknown) => Promise<unknown>>();
+  const handlers = new Map<
+    string,
+    (e: unknown, a: unknown) => Promise<unknown>
+  >();
   return {
     handlers,
     ipcMain: {
       handle: (channel, h) => {
-        if (handlers.has(channel)) throw new Error("通道 " + channel + " 被注册了两次");
+        if (handlers.has(channel))
+          throw new Error("通道 " + channel + " 被注册了两次");
         handlers.set(channel, h);
       },
       removeHandler: (channel) => {
@@ -120,9 +129,11 @@ afterEach(async () => {
 });
 
 const tick = async (turns = 15): Promise<void> => {
-  for (let i = 0; i < turns; i++) await new Promise<void>((r) => setImmediate(r));
+  for (let i = 0; i < turns; i++)
+    await new Promise<void>((r) => setImmediate(r));
 };
-const settle = (ms = 40): Promise<void> => new Promise((r) => setTimeout(r, ms));
+const settle = (ms = 40): Promise<void> =>
+  new Promise((r) => setTimeout(r, ms));
 
 function fakeClock() {
   const pending: { fn: () => void }[] = [];
@@ -159,7 +170,9 @@ describe("hub:eventsReady：开流的时机闸门", () => {
     if (ready === undefined) throw new Error("hub:eventsReady 没注册 handler");
     await ready({}, undefined);
     await tick();
-    expect(srv.connections, "ready 到了而流没开 ⇒ 界面永远停在『连不上』").toBe(1);
+    expect(srv.connections, "ready 到了而流没开 ⇒ 界面永远停在『连不上』").toBe(
+      1,
+    );
     expect(wire.running).toBe(true);
     wire.stop();
     wire.unregister();
@@ -274,7 +287,10 @@ describe("hub:eventsReady：开流的时机闸门", () => {
       setTimeoutImpl: fakeClock().setTimeoutImpl,
     });
     wire.unregister();
-    expect(ipc.handlers.has(EVENTS_READY_CHANNEL), "握手通道没被摘 ⇒ handler 握着已死的 sender").toBe(false);
+    expect(
+      ipc.handlers.has(EVENTS_READY_CHANNEL),
+      "握手通道没被摘 ⇒ handler 握着已死的 sender",
+    ).toBe(false);
     await settle();
     expect(srv.connections).toBe(0);
   });

@@ -28,12 +28,15 @@ import {
   GATE_SEVERITY,
   mergeParallelResults,
   PARALLEL_MIN_BRANCHES,
+  type ParallelBranch,
   severityRank,
   worstOfReducer,
-  type ParallelBranch,
 } from "../../src/graph/branches.js";
 
-const BR = (roleId: string, artifact: string): ParallelBranch => ({ roleId, artifact });
+const BR = (roleId: string, artifact: string): ParallelBranch => ({
+  roleId,
+  artifact,
+});
 
 const PRODUCT = BR("product", "prd");
 const OPS = BR("ops", "content_package");
@@ -49,12 +52,15 @@ const PERMUTATIONS_3: readonly (readonly ParallelBranch[])[] = [
   [TECH, OPS, PRODUCT],
 ];
 
-const allowedAll = (branches: readonly ParallelBranch[]): Record<string, boolean> =>
+const allowedAll = (
+  branches: readonly ParallelBranch[],
+): Record<string, boolean> =>
   Object.fromEntries(branches.map((b) => ["ceo->" + b.roleId, true]));
 
 const edgesFrom = (
   branches: readonly ParallelBranch[],
-): { from: string; to: string }[] => branches.map((b) => ({ from: "ceo", to: b.roleId }));
+): { from: string; to: string }[] =>
+  branches.map((b) => ({ from: "ceo", to: b.roleId }));
 
 describe("① 该不该并行：四条判据各挡一种真实漏法", () => {
   it("两条以上 + 边齐 + 开了 parallel_allowed ⇒ 并行", () => {
@@ -209,16 +215,28 @@ describe("① 该不该并行：四条判据各挡一种真实漏法", () => {
       edges: edgesFrom([PRODUCT, OPS]),
       from: "ceo",
     };
-    const a = decideParallelDecomposition({ ...base, branches: [PRODUCT, OPS] });
-    const b = decideParallelDecomposition({ ...base, branches: [OPS, PRODUCT] });
+    const a = decideParallelDecomposition({
+      ...base,
+      branches: [PRODUCT, OPS],
+    });
+    const b = decideParallelDecomposition({
+      ...base,
+      branches: [OPS, PRODUCT],
+    });
     expect(a.parallel).toBe(true);
     expect(b.parallel).toBe(true);
 
     // 反向对照：把其中一条的边抽掉，两种顺序都必须**同样**报 edge_missing。
     // 少了这一发，上面那条「顺序无关」在「两条都合法」这种平凡情形上是空的。
     const broken = { ...base, edges: [{ from: "ceo", to: "product" }] };
-    const c = decideParallelDecomposition({ ...broken, branches: [PRODUCT, OPS] });
-    const e = decideParallelDecomposition({ ...broken, branches: [OPS, PRODUCT] });
+    const c = decideParallelDecomposition({
+      ...broken,
+      branches: [PRODUCT, OPS],
+    });
+    const e = decideParallelDecomposition({
+      ...broken,
+      branches: [OPS, PRODUCT],
+    });
     expect(c.parallel).toBe(false);
     expect(e.parallel).toBe(false);
     if (!c.parallel && !e.parallel) expect(c.blocked_by).toBe(e.blocked_by);
@@ -241,12 +259,19 @@ describe("② 汇聚的合并语义：交换律（PoC 门禁第 3 项的可验�
       mergeParallelResults(p, contributions),
     );
     // 同一排列两次调用结果一致（纯函数，不藏状态）。
-    expect(mergeParallelResults(PERMUTATIONS_3[0] as readonly ParallelBranch[], contributions)).toEqual(results[0]);
+    expect(
+      mergeParallelResults(
+        PERMUTATIONS_3[0] as readonly ParallelBranch[],
+        contributions,
+      ),
+    ).toEqual(results[0]);
 
     // 集合层面：6 种排列的产物集合与汇聚 gate 全同。
     // （用 .size 而不是 toHaveLength —— 理由见 ① 节末尾那条注释。）
     const asSet = results.map((r) =>
-      [...r.artifacts.map((a) => a.role_id + ":" + a.artifact)].sort().join("|"),
+      [...r.artifacts.map((a) => a.role_id + ":" + a.artifact)]
+        .sort()
+        .join("|"),
     );
     expect(new Set(asSet).size).toBe(1);
     /*
@@ -317,7 +342,8 @@ describe("② 汇聚的合并语义：交换律（PoC 门禁第 3 项的可验�
      * 上面那条 ① 用例比的是 sort 之后的串，它一直是对的。
      * 一条空断言把一个错期望盖了几轮，这条比前几条变异实验都值钱。
      */
-    const sortJoin = (xs: readonly string[]): string => [...xs].sort().join(",");
+    const sortJoin = (xs: readonly string[]): string =>
+      [...xs].sort().join(",");
     const seqs = [
       ["p", "o", "t"],
       ["p", "t", "o"],
@@ -371,32 +397,28 @@ describe("③ 汇聚时的门控取值：取最严，而不是取后到", () => 
   });
 
   it("escalate 压过 reject（严格度序只有一处定义）", () => {
-    const r = mergeParallelResults(
-      [PRODUCT, OPS, TECH],
-      {
-        product: { artifact: "prd", gate: "reject" },
-        ops: { artifact: "cp", gate: "escalate" },
-        tech: { artifact: "tp", gate: "pass" },
-      },
-    );
+    const r = mergeParallelResults([PRODUCT, OPS, TECH], {
+      product: { artifact: "prd", gate: "reject" },
+      ops: { artifact: "cp", gate: "escalate" },
+      tech: { artifact: "tp", gate: "pass" },
+    });
     expect(r.gate).toBe("escalate");
     // 反向对照：换顺序仍然 escalate。若两处严格度序不一致（一处 reject > escalate），
     // 不同顺序会给出不同答案 —— 那正是本模块存在理由里写的那个失效。
-    const flipped = mergeParallelResults(
-      [TECH, OPS, PRODUCT],
-      {
-        product: { artifact: "prd", gate: "reject" },
-        ops: { artifact: "cp", gate: "escalate" },
-        tech: { artifact: "tp", gate: "pass" },
-      },
-    );
+    const flipped = mergeParallelResults([TECH, OPS, PRODUCT], {
+      product: { artifact: "prd", gate: "reject" },
+      ops: { artifact: "cp", gate: "escalate" },
+      tech: { artifact: "tp", gate: "pass" },
+    });
     expect(flipped.gate).toBe("escalate");
   });
 
   it("未知取值排在 pass 之后（判不出的东西不被当成最轻）", () => {
     // 走 worstOfReducer 的公开面：未知值当最严，所以它压过 escalate。
     expect(severityRank("not-a-gate")).toBe(GATE_SEVERITY.length);
-    expect(worstOfReducer("escalate", "not-a-gate" as never)).toBe("not-a-gate");
+    expect(worstOfReducer("escalate", "not-a-gate" as never)).toBe(
+      "not-a-gate",
+    );
     // 反向对照：已知值之间仍是正常序，证明上一条不是「什么都压过 escalate」。
     expect(worstOfReducer("escalate", "pass")).toBe("escalate");
   });
@@ -407,9 +429,11 @@ describe("③ 汇聚时的门控取值：取最严，而不是取后到", () => 
      * 这一格若默认 pass，「两条分支都没交东西」会变成一个放行结论。
      */
     expect(worstOfReducer(undefined, undefined)).toBe("escalate");
-    expect(mergeParallelResults([PRODUCT], { product: { artifact: "p", gate: "pass" } }).gate).toBe(
-      "pass",
-    );
+    expect(
+      mergeParallelResults([PRODUCT], {
+        product: { artifact: "p", gate: "pass" },
+      }).gate,
+    ).toBe("pass");
   });
 });
 

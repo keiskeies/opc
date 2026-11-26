@@ -63,9 +63,9 @@ CEO 收件箱会变吵：凡是标准写成自然语言的岗位书，每一闸�
 
 `HANDOFF_BUNDLE_TYPES` 在 contracts 里躺到本轮为止，**没有任何生产调用方**（实测：只有它自己的单测在调）。
 【round322 复核：本句「没有任何生产调用方」已过期。门控现在读它：
-`graph/gates/evaluate.ts:22` import、`:219` `evaluateGate` 里
+`graph/gates/evaluate.ts:21` import、`:216` `evaluateGate` 里
 `Object.hasOwn(HANDOFF_BUNDLE_TYPES, input.gate)`，而 `evaluateGate` 由
-`harness/verifier.ts:640` 生产调用（0023 §6 认定的那一环已上移）。原句保留。】
+`harness/verifier.ts:699` 生产调用（0023 §6 认定的那一环已上移）。原句保留。】
 表在、函数在、校验在，接线缺失 —— 于是 §8.1 只是【文档上存在】：`dev_to_test` 收任何 `bundle_type` 都照收。
 
 反向绕过也很便宜：交一个 `bundle_type` 写成 `test_report`、内容只有两句话的包，类型这一维就过了。
@@ -197,7 +197,7 @@ round331 因该篇 §5 加了 harness_defaults 那一格而整体下移）——
 ⚠ 顺带一条方法：**改口之前先 grep 那句原话**（`grep -rl "不需要人工催办" docs`）。
 我这次是改完才 grep，于是要回来补这一段 —— 顺序对了，这一段就不用写。
 
-`roles/charter.test.ts:560`（带目录是因为仓库里有
+`roles/charter.test.ts:585`（带目录是因为仓库里有
 【两个】 `charter.test.ts`，另一个在 `engine/` 下；原写 411，round331 顶漂 +149 ——
 加的是它上面的 harness_defaults 那组用例，判据本体没动）那一发断言的是
 「模板的 acceptance_criteria **仍是**固定占位串」—— 断言的是**占位串还在**，

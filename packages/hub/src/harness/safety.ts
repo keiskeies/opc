@@ -47,11 +47,11 @@ import {
   type ApprovalHandler,
   type ApprovalPolicy,
   type RiskTier,
-  type SandboxTier,
   SANDBOX_TIERS,
+  type SandboxTier,
   type ToolApprovalRequest,
 } from "@opc/contracts";
-import { classifyAction, type ActionDraft } from "../policy/engine.js";
+import { type ActionDraft, classifyAction } from "../policy/engine.js";
 
 /** 拒绝码。审计里要按码统计（「今天有多少次是提级尝试」），自由文本做不了。 */
 export const SAFETY_BLOCK_CODES = [
@@ -82,7 +82,9 @@ function block(
   reason: string,
   detail?: Record<string, unknown>,
 ): SafetyVerdict {
-  return detail === undefined ? { ok: false, code, reason } : { ok: false, code, reason, detail };
+  return detail === undefined
+    ? { ok: false, code, reason }
+    : { ok: false, code, reason, detail };
 }
 
 /**
@@ -156,7 +158,9 @@ export function forbiddenFlagBlock(o: {
 }): SafetyVerdict {
   const base = new Set(o.baseline.map(normalizeFlag));
   const eff = new Set(o.effective.map(normalizeFlag));
-  const dropped: string[] = [...base].filter((f: string): boolean => !eff.has(f));
+  const dropped: string[] = [...base].filter(
+    (f: string): boolean => !eff.has(f),
+  );
   if (dropped.length > 0) {
     return block(
       "forbidden_flag",
@@ -207,7 +211,9 @@ export function toolAllowed(
 ): boolean {
   for (const entry of allowlist) {
     if (entry === tool) return true;
-    const m: RegExpMatchArray | null = /^([A-Za-z0-9_-]+)\((.+)\)$/u.exec(entry);
+    const m: RegExpMatchArray | null = /^([A-Za-z0-9_-]+)\((.+)\)$/u.exec(
+      entry,
+    );
     if (m === null) continue;
     if (m[1] !== tool) continue;
     const patterns: string[] = (m[2] as string).split(",").map((s) => s.trim());
@@ -257,7 +263,8 @@ export function argCandidates(args: unknown): string[] {
     for (const k of ARG_TEXT_KEYS) {
       const v: unknown = (args as Record<string, unknown>)[k];
       if (typeof v === "string") out.push(v);
-      else if (Array.isArray(v)) out.push(...v.filter((x): x is string => typeof x === "string"));
+      else if (Array.isArray(v))
+        out.push(...v.filter((x): x is string => typeof x === "string"));
     }
   }
   out.push(argText(args));
@@ -328,7 +335,8 @@ export function sandboxTierBlock(
     if (!(SANDBOX_TIERS as readonly string[]).includes(t)) {
       return block(
         "sandbox_tier_unknown",
-        side + "侧的沙箱档位 [" +
+        side +
+          "侧的沙箱档位 [" +
           String(t) +
           "] 不是已知档位（已知：" +
           SANDBOX_TIERS.join(" < ") +
@@ -593,7 +601,9 @@ export async function approvalBlock(
       "approval_denied",
       "审批被拒：" +
         req.reason +
-        (d.note === undefined || d.note === "" ? "" : "（备注：" + d.note + "）"),
+        (d.note === undefined || d.note === ""
+          ? ""
+          : "（备注：" + d.note + "）"),
       { tool: req.tool, decided_by: d.decidedBy ?? null },
     ),
     decidedBy: d.decidedBy ?? null,
@@ -622,7 +632,9 @@ export function preventionFor(
   caps: { readonly toolApproval: boolean },
   policy: ApprovalPolicy,
 ): "enforced" | "observed_only" {
-  return caps.toolApproval && policy === "on-request" ? "enforced" : "observed_only";
+  return caps.toolApproval && policy === "on-request"
+    ? "enforced"
+    : "observed_only";
 }
 
 /* ═════════════════ 脱敏（§12.7 第四层「脱敏参数」） ═════════════════ */
@@ -644,7 +656,10 @@ export const REDACTED = "[redacted]";
  * 循环引用 ⇒ 该子树整体替换成 "[redacted]"（而不是抛错）：
  * 审计落不下去的代价是「这次调用没有留痕」，比留一条被打码的占位更糟。
  */
-export function redact(v: unknown, seen: WeakSet<object> = new WeakSet()): unknown {
+export function redact(
+  v: unknown,
+  seen: WeakSet<object> = new WeakSet(),
+): unknown {
   if (v === null || typeof v !== "object") return v;
   if (seen.has(v as object)) return REDACTED;
   seen.add(v as object);
@@ -663,7 +678,8 @@ export function redact(v: unknown, seen: WeakSet<object> = new WeakSet()): unkno
  * `--token=sk-xxx` 那种由 redact/normalizeFlag 之外的路径处理：这里也一起处理，
  * 因为命令行是 harness 最常见的入口，漏它等于白做。
  */
-const SECRET_FLAG = /^(--?)(api[-_]?key|token|secret|password|passwd|auth|authorization|credential)$/iu;
+const SECRET_FLAG =
+  /^(--?)(api[-_]?key|token|secret|password|passwd|auth|authorization|credential)$/iu;
 
 export function redactArgs(args: readonly string[]): string[] {
   const out: string[] = [];

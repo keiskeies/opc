@@ -34,9 +34,9 @@ import type {
 } from "@opc/contracts";
 import {
   charterSchema,
+  evidenceBundleSchema,
   SEARCH_MANDATORY_SOURCES_CONDITION,
   SHA256_RE,
-  evidenceBundleSchema,
 } from "@opc/contracts";
 import { describe, expect, it } from "vitest";
 import type { AuditRow } from "../../src/events/recorder.js";
@@ -48,10 +48,10 @@ import {
   SELF_REPORTED_PATTERNS,
   sessionIndependenceBlock,
   stripSelfReported,
-  verifierAuditRow,
-  verifierStage,
   VERIFY_REJECT_CODES,
   type VerifyInput,
+  verifierAuditRow,
+  verifierStage,
   verifyFix,
 } from "../../src/harness/verifier.js";
 
@@ -185,7 +185,11 @@ function charterWith(searchPolicy?: { tier_1_mandatory?: string[] }): Charter {
     version: 1,
     honesty_boundaries: ["不声称未跑过的测试已通过"],
     acceptance_criteria: [
-      { condition: "metric:coverage < 90", action: "reject", message: "覆盖率不足" },
+      {
+        condition: "metric:coverage < 90",
+        action: "reject",
+        message: "覆盖率不足",
+      },
       ...(declared
         ? [
             {
@@ -201,7 +205,11 @@ function charterWith(searchPolicy?: { tier_1_mandatory?: string[] }): Charter {
     model_tier: "execution",
     budget: { daily_usd: 1, per_task_usd: 1 },
     escalation_triggers: [],
-    decision_scope: { autonomous: [], requires_consultation: [], forbidden: [] },
+    decision_scope: {
+      autonomous: [],
+      requires_consultation: [],
+      forbidden: [],
+    },
     judgment_mode: {
       type: "strict_rules",
       strict_rules: [],
@@ -234,7 +242,9 @@ function deps(over: Partial<VerifyInput> = {}): VerifyInput {
     // 审阅方**自己**跑出来的数字：谎报不参与这里任何东西。
     assemble: () => ({
       artifacts: [{ path: "cov.json", sha256: SHA_A, bytes: 10 }],
-      claims: [{ text: "跑完 42 个用例，2 个未通过", evidence_refs: ["cov.json"] }],
+      claims: [
+        { text: "跑完 42 个用例，2 个未通过", evidence_refs: ["cov.json"] },
+      ],
       metrics: { coverage: 61 },
     }),
     criteria: [COVERAGE_CRITERION],
@@ -322,13 +332,15 @@ describe("① 谎报 ⇒ 独立工作区跑出失败 ⇒ 门控 reject", () => {
     if (!r.ok) throw new Error("不应被拒：" + r.code);
     expect(r.bundle.bundle_type).toBe("test_report");
     // reasons 只在 reject 分支存在（pass/escalate 没有）；pass 时判「没被拒」就已够。
-    const passReasons = r.verdict.decision === "reject" ? r.verdict.reasons : [];
+    const passReasons =
+      r.verdict.decision === "reject" ? r.verdict.reasons : [];
     expect(passReasons.join(" ")).not.toContain("证据包类型");
     // 反过来：显式走 dev_to_test 就得**因为类型**被拒（证明这条断言有判别力）。
     const wrong = await verifyFix(deps({ gate: "dev_to_test" }));
     if (!wrong.ok) throw new Error("门控本身仍应给出结论：" + wrong.code);
     expect(wrong.verdict.decision).toBe("reject");
-    if (wrong.verdict.decision !== "reject") throw new Error("包类型不符时必须 reject");
+    if (wrong.verdict.decision !== "reject")
+      throw new Error("包类型不符时必须 reject");
     expect(wrong.verdict.reasons.join(" ")).toContain("证据包类型");
   });
 
@@ -364,7 +376,8 @@ describe("① 谎报 ⇒ 独立工作区跑出失败 ⇒ 门控 reject", () => {
       }),
     );
     if (!r.ok) throw new Error("不应被拒：" + r.code);
-    if (r.verdict.decision !== "reject") throw new Error("完整性失败必须 reject，实到 " + r.verdict.decision);
+    if (r.verdict.decision !== "reject")
+      throw new Error("完整性失败必须 reject，实到 " + r.verdict.decision);
     expect(r.verdict.reasons.join(" ")).toContain("完整性");
   });
 });
@@ -387,7 +400,9 @@ describe("② 四维独立性（目录 / 会话 / 家族 / 否决权）", () => 
   });
 
   it("同会话 ⇒ 拒（换目录不换会话 = 同一个 agent 换个地方重跑）", async () => {
-    const r = await verifyFix(deps({ adapter: adapter({ sessionId: "dev-sess-1" }) }));
+    const r = await verifyFix(
+      deps({ adapter: adapter({ sessionId: "dev-sess-1" }) }),
+    );
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.code).toBe("same_session");
   });
@@ -406,13 +421,17 @@ describe("② 四维独立性（目录 / 会话 / 家族 / 否决权）", () => 
   });
 
   it("同模型家族 ⇒ 拒（判据**复用**门控层那一份，不写第二份）", async () => {
-    const r = await verifyFix(deps({ adapter: adapter({ modelFamily: "claude" }) }));
+    const r = await verifyFix(
+      deps({ adapter: adapter({ modelFamily: "claude" }) }),
+    );
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.code).toBe("same_model_family");
   });
 
   it("家族未声明 ⇒ 拒（『不填』不能成为绕过同源拦截的通路）", async () => {
-    const r = await verifyFix(deps({ author: { roleId: "dev", modelFamily: "", sessionId: "d1" } }));
+    const r = await verifyFix(
+      deps({ author: { roleId: "dev", modelFamily: "", sessionId: "d1" } }),
+    );
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.code).toBe("unknown_model_family");
   });
@@ -442,7 +461,9 @@ describe("② 四维独立性（目录 / 会话 / 家族 / 否决权）", () => 
     // 独立性讲的是「谁在看」，而「看的那一家会不会被我们问到」看起来是另一个话题 ——
     // 它是同一件事：审阅方的结论要能变成一次拦下，靠的是我们有权不让它继续。
     // 跑在 toolApproval=false 上，那次「审阅」只是一次**观察**（0021 §6 的 observed_only）。
-    const r = await verifyFix(deps({ adapter: adapter({ caps: { toolApproval: false } }) }));
+    const r = await verifyFix(
+      deps({ adapter: adapter({ caps: { toolApproval: false } }) }),
+    );
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.code).toBe("verifier_not_enforced");
   });
@@ -564,7 +585,11 @@ describe("不可信输入", () => {
       "本地跑过了",
     ]);
     // matched 交回的是**命中了表里哪一条**（漏检时要能看出是表缺还是匹配逻辑坏）。
-    expect(r.dropped.map((d) => d.matched)).toEqual(["我已覆盖", "tests pass", "本地跑过"]);
+    expect(r.dropped.map((d) => d.matched)).toEqual([
+      "我已覆盖",
+      "tests pass",
+      "本地跑过",
+    ]);
     expect(SELF_REPORTED_PATTERNS.length).toBeGreaterThan(0);
   });
 
@@ -698,16 +723,23 @@ describe("码表必须有返回点", () => {
     await record({ authorWorkspace: "/tmp/opc-verify/task-1" }); // same_workspace
     await record({ verifierRoleId: "dev" }); // same_role
     await record({ adapter: adapter({ sessionId: "dev-sess-1" }) }); // same_session
-    await record({ author: { roleId: "dev", modelFamily: "claude", sessionId: "" } }); // empty_session
+    await record({
+      author: { roleId: "dev", modelFamily: "claude", sessionId: "" },
+    }); // empty_session
     await record({ adapter: adapter({ modelFamily: "claude" }) }); // same_model_family
-    await record({ author: { roleId: "dev", modelFamily: "", sessionId: "d1" } }); // unknown_model_family
+    await record({
+      author: { roleId: "dev", modelFamily: "", sessionId: "d1" },
+    }); // unknown_model_family
     await record({
       adapter: adapter({ modelFamily: "claude" }),
       sameFamilyApproval: { approvedBy: "dev", reason: "x" },
     }); // approval_by_author
     await record({ adapter: adapter({ caps: { toolApproval: false } }) }); // verifier_not_enforced
     await record({
-      assemble: () => ({ artifacts: [{ path: "x", sha256: "z", bytes: 1 }], claims: [] }),
+      assemble: () => ({
+        artifacts: [{ path: "x", sha256: "z", bytes: 1 }],
+        claims: [],
+      }),
     }); // bad_artifact
     await record({
       adapter: {
@@ -727,7 +759,8 @@ describe("码表必须有返回点", () => {
     // 那**永远**是红的（前缀无条件在），是「恒绿断言」的镜像版本 ——
     // 一个从不通的断言与一个从不红的断言一样没用，只是它会把人引去改**代码**
     // 而问题在断言。想要「报错时能看见缺哪些码」，就把消息放在**分支里**：
-    if (missing.length > 0) throw new Error("码表里没有返回点的码：" + missing.join(", "));
+    if (missing.length > 0)
+      throw new Error("码表里没有返回点的码：" + missing.join(", "));
     // 并且反过来钉一句：这一条**确实**收集到了码（否则 missing 为空只是因为
     // 上面 record 全没跑起来，那也是一个从不会红的假绿）。
     expect(seen.size).toBe(VERIFY_REJECT_CODES.length);
@@ -785,7 +818,12 @@ describe("请求装配", () => {
 describe("§搜索 第 1 层经由 criteriaEvaluator 接进这一层的门控", () => {
   const urlClaim = () => ({
     artifacts: [{ path: "cov.json", sha256: SHA_A, bytes: 10 }],
-    claims: [{ text: "该框架 3.2 已废弃这个 API", evidence_refs: ["https://example.com/a"] }],
+    claims: [
+      {
+        text: "该框架 3.2 已废弃这个 API",
+        evidence_refs: ["https://example.com/a"],
+      },
+    ],
     metrics: { coverage: 95 },
   });
   const WEB_SEARCH: HarnessEvent = {
@@ -793,7 +831,11 @@ describe("§搜索 第 1 层经由 criteriaEvaluator 接进这一层的门控", 
     tool: "WebSearch",
     redactedArgs: { query: "framework 3.2 deprecation" },
   };
-  const READ: HarnessEvent = { kind: "tool_call", tool: "Read", redactedArgs: { note: "读一眼" } };
+  const READ: HarnessEvent = {
+    kind: "tool_call",
+    tool: "Read",
+    redactedArgs: { note: "读一眼" },
+  };
   // ⚠ 参数里刻意**不带** `path` / `file_path` / `target` 任何一格：带了就会被
   // `pathArg` 取出来送进越界判据，而那发工具调用会变成一次「越权」并中止整次调用
   // （我第一次就红在这里：报的是 verifier_call_failed，看起来像网关坏了，
@@ -831,7 +873,9 @@ describe("§搜索 第 1 层经由 criteriaEvaluator 接进这一层的门控", 
       deps({
         integrityOk: true,
         allowedTools: GRANTED_SEARCH,
-        verifierCharter: charterWith({ tier_1_mandatory: ["framework_versions"] }),
+        verifierCharter: charterWith({
+          tier_1_mandatory: ["framework_versions"],
+        }),
         criteria: [SEARCH_CRITERION],
         assemble: urlClaim,
         adapter: adapter({ toolCalls: [READ] }),
@@ -848,7 +892,9 @@ describe("§搜索 第 1 层经由 criteriaEvaluator 接进这一层的门控", 
       deps({
         integrityOk: true,
         allowedTools: GRANTED_SEARCH,
-        verifierCharter: charterWith({ tier_1_mandatory: ["framework_versions"] }),
+        verifierCharter: charterWith({
+          tier_1_mandatory: ["framework_versions"],
+        }),
         criteria: [SEARCH_CRITERION],
         assemble: urlClaim,
         adapter: adapter({ toolCalls: [WEB_SEARCH] }),
@@ -892,7 +938,9 @@ describe("§搜索 第 1 层经由 criteriaEvaluator 接进这一层的门控", 
     const r = await verifyFix(
       deps({
         integrityOk: true,
-        verifierCharter: charterWith({ tier_1_mandatory: ["security_advisories"] }),
+        verifierCharter: charterWith({
+          tier_1_mandatory: ["security_advisories"],
+        }),
         criteria: [SEARCH_CRITERION],
         assemble: urlClaim,
       }),
@@ -902,7 +950,9 @@ describe("§搜索 第 1 层经由 criteriaEvaluator 接进这一层的门控", 
     // 本模块自己不写那行审计（写它的是调用方），所以「进了审计」这句话的可证范围是
     // 「它在这行的 payload 里」，不是「库里有一行」。后者要等 verifyFix 有生产调用方。
     const row = verifierAuditRow(r, "task-1");
-    const payload = row.payload as { search_observation: { kind: string; why: string } };
+    const payload = row.payload as {
+      search_observation: { kind: string; why: string };
+    };
     expect(payload.search_observation.kind).toBe("not_granted");
     expect(payload.search_observation.why.length).toBeGreaterThan(20);
   });

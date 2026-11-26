@@ -19,7 +19,15 @@
  * 所以那两条只断言【不抛】与返回类型，不断言具体真值。
  */
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  utimesSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -34,7 +42,9 @@ import {
 } from "../../src/serve/lock.js";
 
 /** 被测源码【文件本体】。文本守卫读实现，不读这份测试。 */
-const LOCK_TS = fileURLToPath(new URL("../../src/serve/lock.ts", import.meta.url));
+const LOCK_TS = fileURLToPath(
+  new URL("../../src/serve/lock.ts", import.meta.url),
+);
 
 const dirs: string[] = [];
 function tmp(): string {
@@ -59,10 +69,18 @@ afterAll(() => {
 });
 
 /** 一份「别的进程」的锁内容，用来手工布置现场。 */
-function plant(dbPath: string, h: { pid: number; startedAtMs: number; who?: string; host?: string }): void {
+function plant(
+  dbPath: string,
+  h: { pid: number; startedAtMs: number; who?: string; host?: string },
+): void {
   writeFileSync(
     lockPathFor(dbPath),
-    JSON.stringify({ pid: h.pid, startedAtMs: h.startedAtMs, host: h.host ?? "testhost", who: h.who ?? "hub-serve" }) + "\n",
+    JSON.stringify({
+      pid: h.pid,
+      startedAtMs: h.startedAtMs,
+      host: h.host ?? "testhost",
+      who: h.who ?? "hub-serve",
+    }) + "\n",
   );
 }
 
@@ -78,7 +96,10 @@ describe("抢到与抢不到", () => {
     if (!r.ok) throw new Error("不该抢不到");
     expect(r.path).toBe(db + ".lock");
     expect(existsSync(r.path)).toBe(true);
-    const raw = JSON.parse(readFileSync(r.path, "utf8")) as Record<string, unknown>;
+    const raw = JSON.parse(readFileSync(r.path, "utf8")) as Record<
+      string,
+      unknown
+    >;
     expect(raw["pid"]).toBe(process.pid);
     expect(raw["who"]).toBe("hub-serve");
   });
@@ -87,7 +108,10 @@ describe("抢到与抢不到", () => {
     const db = dbIn(tmp());
     const r = acquireLock(db, { now: () => T0, isAlive: () => true });
     expect(r.ok).toBe(true); // 先自己拿一次
-    const second = acquireLock(db, { now: () => T0 + 1000, isAlive: () => true });
+    const second = acquireLock(db, {
+      now: () => T0 + 1000,
+      isAlive: () => true,
+    });
     expect(second.ok).toBe(false);
     if (second.ok) throw new Error("第二次必须拒");
     expect(second.reason).toBe("held_by_other_process");
@@ -107,7 +131,10 @@ describe("抢到与抢不到", () => {
     expect(r.tookOverFrom?.pid).toBe(999_999);
     // 反向：没抢别人时这个字段【必须缺席】，否则调用方分不清「我拿到了」与
     // 「我拿到了而且刚才有人」，而后者是要写进日志的一句话。
-    const fresh = acquireLock(dbIn(tmp()), { now: () => T0, isAlive: () => true });
+    const fresh = acquireLock(dbIn(tmp()), {
+      now: () => T0,
+      isAlive: () => true,
+    });
     if (!fresh.ok) throw new Error("空库该抢到");
     expect(fresh.tookOverFrom).toBeUndefined();
   });
@@ -123,7 +150,9 @@ describe("抢到与抢不到", () => {
     // 反向对照：同一份锁内容，时刻推到宽限期之外就该抢下。
     // 少了这一发，上面那条绿可能只是因为「恒不抢陈旧锁」。
     plant(db, { pid: 999_997, startedAtMs: T0 - 60_000 });
-    expect(acquireLock(db, { now: () => T0, isAlive: () => false }).ok).toBe(true);
+    expect(acquireLock(db, { now: () => T0, isAlive: () => false }).ok).toBe(
+      true,
+    );
   });
 
   it("读不懂的锁 ⇒ 拒，不抢（读不懂 = 无从判断有没有人持着）", () => {
@@ -136,15 +165,24 @@ describe("抢到与抢不到", () => {
     expect(describeLockFailure(r)).toContain("--force-unlock");
     // 反向对照：把内容改好就能抢 —— 证明上面那条不是「这个目录永远抢不到」。
     plant(db, { pid: 999_996, startedAtMs: STALE });
-    expect(acquireLock(db, { now: () => T0, isAlive: () => false }).ok).toBe(true);
+    expect(acquireLock(db, { now: () => T0, isAlive: () => false }).ok).toBe(
+      true,
+    );
   });
 
   it("缺 pid 字段的 JSON 也算读不懂（形状对而内容空不算对）", () => {
     const db = dbIn(tmp());
     writeFileSync(lockPathFor(db), JSON.stringify({ who: "hub-serve" }));
-    expect(acquireLock(db, { now: () => T0, isAlive: () => false }).ok).toBe(false);
-    writeFileSync(lockPathFor(db), JSON.stringify({ pid: 0, startedAtMs: T0, host: "h", who: "w" }));
-    expect(acquireLock(db, { now: () => T0, isAlive: () => true }).ok).toBe(false);
+    expect(acquireLock(db, { now: () => T0, isAlive: () => false }).ok).toBe(
+      false,
+    );
+    writeFileSync(
+      lockPathFor(db),
+      JSON.stringify({ pid: 0, startedAtMs: T0, host: "h", who: "w" }),
+    );
+    expect(acquireLock(db, { now: () => T0, isAlive: () => true }).ok).toBe(
+      false,
+    );
   });
 });
 
@@ -153,7 +191,11 @@ describe("--force-unlock 那条显式出口", () => {
     // 人会判断错（以为没在跑而其实在跑），所以那一句报错是他唯一的补救线索。
     const db = dbIn(tmp());
     plant(db, { pid: 4242, startedAtMs: T0 - 1000, who: "hub-serve" });
-    const r = acquireLock(db, { now: () => T0, isAlive: () => true, force: true });
+    const r = acquireLock(db, {
+      now: () => T0,
+      isAlive: () => true,
+      force: true,
+    });
     expect(r.ok).toBe(true);
     if (!r.ok) throw new Error("force 该能抢");
     expect(r.tookOverFrom?.pid).toBe(4242);
@@ -257,7 +299,8 @@ describe("两个进程同时启动（O_EXCL 那一格）", () => {
     }
     const won = outs.filter((x) => x === "WON").length;
     const errs = outs.filter((x) => x.startsWith("ERR"));
-    if (errs.length > 0) throw new Error("子进程报了 EEXIST 以外的错：" + errs.join(", "));
+    if (errs.length > 0)
+      throw new Error("子进程报了 EEXIST 以外的错：" + errs.join(", "));
     expect(outs).toHaveLength(N);
     expect(won).toBe(1);
     // ⚠ 这一发证不了的东西也写下来，别让它被读成「并发已充分验证」：
@@ -280,14 +323,18 @@ describe("两个进程同时启动（O_EXCL 那一格）", () => {
     const src = readFileSync(LOCK_TS, "utf8");
     // 只看两处 createLock 用的写法。剥掉块注释与行注释，否则本文件写的这些字
     // 会在被测源码里命中自己（那就是「判据被自己的注释喂绿」）。
-    const code = src.replace(/\/\*[\s\S]*?\*\//gu, "").replace(/^\s*\/\/.*$/gmu, "");
+    const code = src
+      .replace(/\/\*[\s\S]*?\*\//gu, "")
+      .replace(/^\s*\/\/.*$/gmu, "");
     const hits = code.match(/flag:\s*"wx"/gu) ?? [];
     expect(hits.length).toBeGreaterThanOrEqual(1);
     // 反向 canary：本模块里【不能】出现「先 existsSync 再无条件 writeFileSync」这种
     // 检查-动作分离的写法（窗口 = 双开发生的那个瞬间）。
     // 判据是【存在一处 wx】而不是【不存在 existsSync】：读别人锁的时候确实要 existsSync，
     // 那条读路径是被允许的，把它一起禁掉会让这条守卫变成假的。
-    expect(code).not.toMatch(/if\s*\(\s*existsSync\([^)]*lock[^)]*\)\s*\)\s*\{[^}]*writeFileSync\([^)]*\)\s*;/u);
+    expect(code).not.toMatch(
+      /if\s*\(\s*existsSync\([^)]*lock[^)]*\)\s*\)\s*\{[^}]*writeFileSync\([^)]*\)\s*;/u,
+    );
   });
 
   it("锁文件路径就是 <db>.lock（与库同目录，一眼看得出来归谁）", () => {

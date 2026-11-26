@@ -36,10 +36,10 @@
  *    页面重载会摘掉监听，那一段靠的仍是 §5.8 的快照 + seq 幂等，不是这条通道。
  */
 import { request } from "node:http";
+import { CHANNEL_SPECS } from "../ipc-surface.js";
 import type { HubEventPayload } from "../preload/api.js";
 import { EVENT_CHANNEL, EVENTS_READY_CHANNEL } from "../preload/api.js";
-import { CHANNEL_SPECS } from "../ipc-surface.js";
-import { type IpcError, dispatch } from "./channels.js";
+import { dispatch, type IpcError } from "./channels.js";
 import { type EventStreamHandle, openEventStream } from "./event-stream.js";
 import { type FetchLike, makeSignedFetch } from "./signed-fetch.js";
 
@@ -49,7 +49,10 @@ import { type FetchLike, makeSignedFetch } from "./signed-fetch.js";
  * 而"够不够"由装配那一次赋值去证，不由这里的断言自称（同 signed-fetch 的 fetchImpl）。
  */
 export interface IpcMainLike {
-  handle(channel: string, handler: (event: unknown, args: unknown) => Promise<unknown>): void;
+  handle(
+    channel: string,
+    handler: (event: unknown, args: unknown) => Promise<unknown>,
+  ): void;
   removeHandler(channel: string): void;
 }
 
@@ -146,8 +149,12 @@ export function wireMain(o: WireOptions): WireHandle {
       token: o.token,
       hubAddress: o.hubAddress,
       push,
-      ...(o.initialCursor === undefined ? {} : { initialCursor: o.initialCursor }),
-      ...(o.setTimeoutImpl === undefined ? {} : { setTimeoutImpl: o.setTimeoutImpl }),
+      ...(o.initialCursor === undefined
+        ? {}
+        : { initialCursor: o.initialCursor }),
+      ...(o.setTimeoutImpl === undefined
+        ? {}
+        : { setTimeoutImpl: o.setTimeoutImpl }),
     });
   };
 
@@ -204,7 +211,11 @@ function destroyedError(channel: string): { ok: false; error: IpcError } {
  * 而那正是我在 signed-fetch.ts 文件头列的第 ① 条理由要防的东西。
  */
 function makeDeps(o: WireOptions) {
-  return makeSignedFetch({ token: o.token, hubAddress: o.hubAddress, fetchImpl: nodeHttpFetch });
+  return makeSignedFetch({
+    token: o.token,
+    hubAddress: o.hubAddress,
+    fetchImpl: nodeHttpFetch,
+  });
 }
 
 /**

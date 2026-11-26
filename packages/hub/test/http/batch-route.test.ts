@@ -21,8 +21,8 @@
 import { mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { BATCH_MAX_CARDS } from "@opc/contracts";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { migrate } from "../../src/db/migrate.js";
 import { WriteQueue } from "../../src/db/write-queue.js";
 import { InMemoryEventBus } from "../../src/events/bus.js";
@@ -32,9 +32,9 @@ import {
   handleRequest,
   matchRoute,
 } from "../../src/http/app.js";
-import { applyDecision } from "../../src/http/real-deps.js";
 import { newLocalToken, signedHeaders } from "../../src/http/auth.js";
 import { LOOPBACK_HOST } from "../../src/http/bind.js";
+import { applyDecision } from "../../src/http/real-deps.js";
 import { DRIVER_OFF } from "../fixtures/driver-state.js";
 import { fixtureTmp } from "../fixtures/fixture-dir.js";
 
@@ -93,7 +93,9 @@ interface Harness {
  * 而这里要钉的是【调用顺序与失败处置】，不是 LangGraph 收到 resume 之后做了什么。
  * 那半句在 real-deps.test.ts 文件头同样写着，两处同一口径。
  */
-async function harness(o: { resumeFailsFor?: string[] } = {}): Promise<Harness> {
+async function harness(
+  o: { resumeFailsFor?: string[] } = {},
+): Promise<Harness> {
   const path = join(TMP, "b-" + process.pid + "-" + ++fileSeq + ".db");
   const queue = new WriteQueue(path) as unknown as {
     writeConnection: () => Db;
@@ -107,7 +109,11 @@ async function harness(o: { resumeFailsFor?: string[] } = {}): Promise<Harness> 
   const read = queue.readConnection();
   const token = newLocalToken();
   const calls: Harness["calls"] = { decision: [], resumed: [] };
-  const sign = (method: string, target: string, body = ""): Record<string, string> =>
+  const sign = (
+    method: string,
+    target: string,
+    body = "",
+  ): Record<string, string> =>
     signedHeaders(token, { method, target, body, now: NOW });
   const deps: HubDeps = {
     db: read as unknown as DatabaseSync,
@@ -164,7 +170,13 @@ function task(db: Db, id: string): void {
   ).run(id, "批量夹具任务 " + id, NOW, NOW);
 }
 
-function approval(db: Db, id: string, taskId: string, type = "strategic", status = "pending"): void {
+function approval(
+  db: Db,
+  id: string,
+  taskId: string,
+  type = "strategic",
+  status = "pending",
+): void {
   db.prepare(
     "INSERT INTO approvals (id, task_id, approval_type, summary, parameters, status) " +
       "VALUES (?, ?, ?, '一句话摘要', '{}', ?)",
@@ -173,7 +185,9 @@ function approval(db: Db, id: string, taskId: string, type = "strategic", status
 
 const json = (body: unknown): string => JSON.stringify(body);
 const auditRows = (db: Db): Row[] =>
-  db.prepare("SELECT action, task_id, target, payload FROM events ORDER BY id").all();
+  db
+    .prepare("SELECT action, task_id, target, payload FROM events ORDER BY id")
+    .all();
 
 beforeAll(() => {
   rmSync(TMP, { recursive: true, force: true });
@@ -234,7 +248,12 @@ describe("② 鉴权：批量只有回环 HMAC 一条路，带票打在它上面
     const h = await harness();
     const res = await handleRequest(
       h.deps,
-      h.req({ method: "POST", path: BATCH_PATH, headers: {}, body: json({ approval_ids: ["a"], resume: "approve" }) }),
+      h.req({
+        method: "POST",
+        path: BATCH_PATH,
+        headers: {},
+        body: json({ approval_ids: ["a"], resume: "approve" }),
+      }),
     );
     expect(res.status).toBe(401);
   });
@@ -268,7 +287,11 @@ describe("③ 请求体：空集 / 超限 / 重复 id / 批量不含第三个按
     const h = await harness();
     const res = await handleRequest(
       h.deps,
-      h.req({ method: "POST", path: BATCH_PATH, body: json({ ...ok, approval_ids: [] }) }),
+      h.req({
+        method: "POST",
+        path: BATCH_PATH,
+        body: json({ ...ok, approval_ids: [] }),
+      }),
     );
     expect(res.status).toBe(422);
     expect(h.calls.decision).toHaveLength(0);
@@ -279,7 +302,11 @@ describe("③ 请求体：空集 / 超限 / 重复 id / 批量不含第三个按
     const ids = Array.from({ length: BATCH_MAX_CARDS + 1 }, (_, i) => `a-${i}`);
     const res = await handleRequest(
       h.deps,
-      h.req({ method: "POST", path: BATCH_PATH, body: json({ ...ok, approval_ids: ids }) }),
+      h.req({
+        method: "POST",
+        path: BATCH_PATH,
+        body: json({ ...ok, approval_ids: ids }),
+      }),
     );
     expect(res.status).toBe(422);
     expect(h.calls.decision).toHaveLength(0);
@@ -291,7 +318,11 @@ describe("③ 请求体：空集 / 超限 / 重复 id / 批量不含第三个按
     const h = await harness();
     const res = await handleRequest(
       h.deps,
-      h.req({ method: "POST", path: BATCH_PATH, body: json({ ...ok, approval_ids: ["a-1", "a-1"] }) }),
+      h.req({
+        method: "POST",
+        path: BATCH_PATH,
+        body: json({ ...ok, approval_ids: ["a-1", "a-1"] }),
+      }),
     );
     expect(res.status).toBe(422);
     expect(h.calls.decision).toHaveLength(0);
@@ -342,13 +373,22 @@ describe("④ §9.4 判据在写之前判完：混类型 422、有缺失 404，�
     approval(h.write, "a-2", "task-1", "budget_override");
     const res = await handleRequest(
       h.deps,
-      h.req({ method: "POST", path: BATCH_PATH, body: json({ approval_ids: ["a-1", "a-2"], resume: "approve" }) }),
+      h.req({
+        method: "POST",
+        path: BATCH_PATH,
+        body: json({ approval_ids: ["a-1", "a-2"], resume: "approve" }),
+      }),
     );
     expect(res.status).toBe(422);
     expect(res.body).toMatchObject({ types: ["budget_override", "strategic"] });
     expect(h.calls.decision).toHaveLength(0);
     // 真库读数：卡片仍是 pending，事件表一条没有。422 的「一张都不动」不许只靠计数器。
-    expect(String(h.db.prepare("SELECT status FROM approvals WHERE id='a-1'").get()?.status)).toBe("pending");
+    expect(
+      String(
+        h.db.prepare("SELECT status FROM approvals WHERE id='a-1'").get()
+          ?.status,
+      ),
+    ).toBe("pending");
     expect(auditRows(h.db)).toHaveLength(0);
   });
 
@@ -359,12 +399,21 @@ describe("④ §9.4 判据在写之前判完：混类型 422、有缺失 404，�
     approval(h.write, "a-1", "task-1");
     const res = await handleRequest(
       h.deps,
-      h.req({ method: "POST", path: BATCH_PATH, body: json({ approval_ids: ["a-1", "ghost"], resume: "approve" }) }),
+      h.req({
+        method: "POST",
+        path: BATCH_PATH,
+        body: json({ approval_ids: ["a-1", "ghost"], resume: "approve" }),
+      }),
     );
     expect(res.status).toBe(404);
     expect(res.body).toMatchObject({ missing: ["ghost"] });
     expect(h.calls.decision).toHaveLength(0);
-    expect(String(h.db.prepare("SELECT status FROM approvals WHERE id='a-1'").get()?.status)).toBe("pending");
+    expect(
+      String(
+        h.db.prepare("SELECT status FROM approvals WHERE id='a-1'").get()
+          ?.status,
+      ),
+    ).toBe("pending");
     expect(auditRows(h.db)).toHaveLength(0);
   });
 
@@ -376,7 +425,11 @@ describe("④ §9.4 判据在写之前判完：混类型 422、有缺失 404，�
     approval(h.write, "a-2", "task-1");
     const res = await handleRequest(
       h.deps,
-      h.req({ method: "POST", path: BATCH_PATH, body: json({ approval_ids: ["a-1", "a-2"], resume: "approve" }) }),
+      h.req({
+        method: "POST",
+        path: BATCH_PATH,
+        body: json({ approval_ids: ["a-1", "a-2"], resume: "approve" }),
+      }),
     );
     expect(res.status).toBe(200);
     expect(h.calls.decision.map((d) => d.approvalId)).toEqual(["a-1", "a-2"]);
@@ -393,7 +446,11 @@ describe("⑤ 已决策的那一张计进 replayed，不再调写路径（append
     approval(h.write, "a-2", "task-1", "strategic", "approved");
     const res = await handleRequest(
       h.deps,
-      h.req({ method: "POST", path: BATCH_PATH, body: json({ approval_ids: ["a-1", "a-2"], resume: "approve" }) }),
+      h.req({
+        method: "POST",
+        path: BATCH_PATH,
+        body: json({ approval_ids: ["a-1", "a-2"], resume: "approve" }),
+      }),
     );
     expect(res.status).toBe(200);
     expect(res.body).toMatchObject({ ok: true, applied: 1, replayed: 1 });
@@ -409,7 +466,11 @@ describe("⑤ 已决策的那一张计进 replayed，不再调写路径（append
     approval(h.write, "a-2", "task-1", "strategic", "approved");
     const res = await handleRequest(
       h.deps,
-      h.req({ method: "POST", path: BATCH_PATH, body: json({ approval_ids: ["a-1", "a-2"], resume: "approve" }) }),
+      h.req({
+        method: "POST",
+        path: BATCH_PATH,
+        body: json({ approval_ids: ["a-1", "a-2"], resume: "approve" }),
+      }),
     );
     expect(res.status).toBe(200);
     expect(res.body).toMatchObject({ applied: 0, replayed: 2 });
@@ -440,7 +501,11 @@ describe("⑥ 图恢复：一张失败不丢掉其余，且响应不许诱导重
     );
     expect(h.calls.resumed).toEqual(["task-1", "task-2"]); // 失败没截断循环
     expect(res.status).toBe(500);
-    expect(res.body).toMatchObject({ applied: 2, replayed: 0, resume_failed: 1 });
+    expect(res.body).toMatchObject({
+      applied: 2,
+      replayed: 0,
+      resume_failed: 1,
+    });
     expect(JSON.stringify(res.body)).toContain("不要重发");
     // 决策本身仍落库（不可回滚）：两张各有 1 条事件。
     expect(auditRows(h.db)).toHaveLength(2);
@@ -454,7 +519,11 @@ describe("⑥ 图恢复：一张失败不丢掉其余，且响应不许诱导重
     approval(h.write, "a-2", "task-2");
     const res = await handleRequest(
       h.deps,
-      h.req({ method: "POST", path: BATCH_PATH, body: json({ approval_ids: ["a-1", "a-2"], resume: "approve" }) }),
+      h.req({
+        method: "POST",
+        path: BATCH_PATH,
+        body: json({ approval_ids: ["a-1", "a-2"], resume: "approve" }),
+      }),
     );
     expect(res.status).toBe(200);
     expect(h.calls.resumed).toEqual(["task-1", "task-2"]);
@@ -467,7 +536,11 @@ describe("⑥ 图恢复：一张失败不丢掉其余，且响应不许诱导重
     approval(h.write, "a-2", "task-1", "strategic", "approved");
     await handleRequest(
       h.deps,
-      h.req({ method: "POST", path: BATCH_PATH, body: json({ approval_ids: ["a-1", "a-2"], resume: "approve" }) }),
+      h.req({
+        method: "POST",
+        path: BATCH_PATH,
+        body: json({ approval_ids: ["a-1", "a-2"], resume: "approve" }),
+      }),
     );
     expect(h.calls.resumed).toEqual(["task-1"]);
   });
@@ -486,17 +559,30 @@ describe("⑦ 真写路径：逐卡一条决策事件，批量不新增聚合事
     approval(h.write, "a-3", "task-1");
     const res = await handleRequest(
       h.deps,
-      h.req({ method: "POST", path: BATCH_PATH, body: json({ approval_ids: ["a-1", "a-2", "a-3"], resume: "approve" }) }),
+      h.req({
+        method: "POST",
+        path: BATCH_PATH,
+        body: json({ approval_ids: ["a-1", "a-2", "a-3"], resume: "approve" }),
+      }),
     );
     expect(res.status).toBe(200);
     const rows = auditRows(h.db);
     expect(rows).toHaveLength(3);
-    expect(new Set(rows.map((r) => String(r.action)))).toEqual(new Set(["approval"]));
-    expect(rows.map((r) => String(r.target)).sort()).toEqual(["a-1", "a-2", "a-3"]);
+    expect(new Set(rows.map((r) => String(r.action)))).toEqual(
+      new Set(["approval"]),
+    );
+    expect(rows.map((r) => String(r.target)).sort()).toEqual([
+      "a-1",
+      "a-2",
+      "a-3",
+    ]);
     expect(String(rows[0]?.payload)).toContain('"resume":"approve"');
     // 卡片状态真变了（不是只有事件）。
     expect(
-      h.db.prepare("SELECT status FROM approvals ORDER BY id").all().map((r) => String(r.status)),
+      h.db
+        .prepare("SELECT status FROM approvals ORDER BY id")
+        .all()
+        .map((r) => String(r.status)),
     ).toEqual(["approved", "approved", "approved"]);
   });
 
@@ -510,13 +596,22 @@ describe("⑦ 真写路径：逐卡一条决策事件，批量不新增聚合事
       h.req({
         method: "POST",
         path: BATCH_PATH,
-        body: json({ approval_ids: ["a-1", "a-2"], resume: "reject_with_comment", note: "理由要能拿去执行" }),
+        body: json({
+          approval_ids: ["a-1", "a-2"],
+          resume: "reject_with_comment",
+          note: "理由要能拿去执行",
+        }),
       }),
     );
     expect(res.status).toBe(200);
-    expect(res.body).toMatchObject({ applied: 2, resume: "reject_with_comment" });
+    expect(res.body).toMatchObject({
+      applied: 2,
+      resume: "reject_with_comment",
+    });
     expect(
-      h.db.prepare("SELECT decision_note, status FROM approvals ORDER BY id").all(),
+      h.db
+        .prepare("SELECT decision_note, status FROM approvals ORDER BY id")
+        .all(),
     ).toEqual([
       { decision_note: "理由要能拿去执行", status: "rejected" },
       { decision_note: "理由要能拿去执行", status: "rejected" },

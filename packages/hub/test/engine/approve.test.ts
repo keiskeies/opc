@@ -21,22 +21,21 @@
  */
 import { mkdirSync, rmSync } from "node:fs";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-
-import { fixtureTmp } from "../fixtures/fixture-dir.js";
-import { migrate } from "../../src/db/migrate.js";
-import { INSERT_DELEGATION_GRAPH_SQL } from "../../src/org/commit.js";
-import { InMemoryEventBus } from "../../src/events/bus.js";
 import { insertCard, type NewCardDraft } from "../../src/approvals/cards.js";
+import { migrate } from "../../src/db/migrate.js";
+import type { HubWriter } from "../../src/db/write-queue.js";
 import {
-  CLAIM_CARD_SQL,
-  STATUS_BY_BUTTON,
   approveCard,
+  CLAIM_CARD_SQL,
   humanSeatHint,
   pendingCards,
+  STATUS_BY_BUTTON,
 } from "../../src/engine/approve.js";
-import { STATUS_BY_RESUME } from "../../src/http/real-deps.js";
 import { HUMAN_EDGES } from "../../src/engine/dispatch.js";
-import type { HubWriter } from "../../src/db/write-queue.js";
+import { InMemoryEventBus } from "../../src/events/bus.js";
+import { STATUS_BY_RESUME } from "../../src/http/real-deps.js";
+import { INSERT_DELEGATION_GRAPH_SQL } from "../../src/org/commit.js";
+import { fixtureTmp } from "../fixtures/fixture-dir.js";
 
 const TMP = fixtureTmp("engine-approve", import.meta.url);
 const NOW = 1_700_000_000_000;
@@ -93,7 +92,9 @@ async function world(o: {
   readonly cardTask?: string;
 }): Promise<World> {
   const { WriteQueue } = await import("../../src/db/write-queue.js");
-  const q = new WriteQueue(TMP + "/a-" + process.pid + "-" + ++fileSeq + ".db") as unknown as Queue;
+  const q = new WriteQueue(
+    TMP + "/a-" + process.pid + "-" + ++fileSeq + ".db",
+  ) as unknown as Queue;
   queues.push(q);
   const db = q.writeConnection();
   migrate(db as unknown as Parameters<typeof migrate>[0]);
@@ -111,8 +112,18 @@ async function world(o: {
     1,
     JSON.stringify({
       nodes: {
-        ceo: { role_id: "ceo", can_manage: true, reports_to: null, model_family: "opus" },
-        intake: { role_id: "intake", can_manage: true, reports_to: "ceo", model_family: "sonnet" },
+        ceo: {
+          role_id: "ceo",
+          can_manage: true,
+          reports_to: null,
+          model_family: "opus",
+        },
+        intake: {
+          role_id: "intake",
+          can_manage: true,
+          reports_to: "ceo",
+          model_family: "sonnet",
+        },
       },
       edges: [],
     }),
@@ -165,7 +176,15 @@ function task(w: World): Row {
   return r;
 }
 
-const run = (w: World, o: { taskId?: string; approvalId?: string; button?: "approve" | "reject_with_comment" | "defer_deep_review"; note?: string }) =>
+const run = (
+  w: World,
+  o: {
+    taskId?: string;
+    approvalId?: string;
+    button?: "approve" | "reject_with_comment" | "defer_deep_review";
+    note?: string;
+  },
+) =>
   approveCard(
     w.q,
     {
@@ -190,17 +209,31 @@ describe("一次批准 = 卡片决策 + 状态边，同一事务", () => {
     expect(r.from).toBe("CHARTER_PENDING");
     expect(r.to).toBe("CHARTER_APPROVED");
     expect(String(task(w)["status"])).toBe("CHARTER_APPROVED");
-    const card = w.db.prepare("SELECT status, decided_by, decided_at, decision_note FROM approvals").get();
+    const card = w.db
+      .prepare(
+        "SELECT status, decided_by, decided_at, decision_note FROM approvals",
+      )
+      .get();
     expect(card?.["status"]).toBe("approved");
     // decided_by 存【谁】而不是【决定了什么】（real-deps 同一条口径）
     expect(card?.["decided_by"]).toBe("ceo");
     expect(card?.["decided_at"]).toBe(NOW + 5000);
 
     // 两条审计：一条决策、一条状态变化。少任何一条都是「半套事实」。
-    const evts = w.db.prepare("SELECT action, actor_type, actor_id, target FROM events ORDER BY id").all();
-    expect(evts.map((e) => String(e["action"]))).toEqual(["approval", "state_change"]);
+    const evts = w.db
+      .prepare(
+        "SELECT action, actor_type, actor_id, target FROM events ORDER BY id",
+      )
+      .all();
+    expect(evts.map((e) => String(e["action"]))).toEqual([
+      "approval",
+      "state_change",
+    ]);
     // 人走的边，actor 必须是 human/ceo：写成 agent 的话，回放会答错「这一步是谁推的」
-    expect(evts.map((e) => String(e["actor_type"]))).toEqual(["human", "human"]);
+    expect(evts.map((e) => String(e["actor_type"]))).toEqual([
+      "human",
+      "human",
+    ]);
     expect(evts.map((e) => String(e["actor_id"]))).toEqual(["ceo", "ceo"]);
   });
 
@@ -217,7 +250,11 @@ describe("一次批准 = 卡片决策 + 状态边，同一事务", () => {
   });
 
   it("批准后 assigned_role【不被抹掉】（WRITE_EDGE_SQL 会写那一列，少回填一次就清一次）", async () => {
-    const w = await world({ status: "CHARTER_PENDING", role: "intake", withCard: true });
+    const w = await world({
+      status: "CHARTER_PENDING",
+      role: "intake",
+      withCard: true,
+    });
     await run(w, {});
     // assigned_role 是 NOT NULL，被抹成 NULL 会当场抛；current_node 才是那个静默的。
     expect(String(task(w)["assigned_role"])).toBe("intake");
@@ -237,11 +274,17 @@ describe("一次批准 = 卡片决策 + 状态边，同一事务", () => {
     await run(w, { note: "验收标准第二条判不了，重写" });
     const card = w.db.prepare("SELECT decision_note FROM approvals").get();
     expect(card?.["decision_note"]).toBe("验收标准第二条判不了，重写");
-    const dec = w.db.prepare("SELECT payload, state_snapshot FROM events WHERE action='approval'").get();
+    const dec = w.db
+      .prepare(
+        "SELECT payload, state_snapshot FROM events WHERE action='approval'",
+      )
+      .get();
     const p = JSON.parse(String(dec?.["payload"])) as Record<string, unknown>;
     expect(p["resume"]).toBe("approve");
     expect(p["note"]).toBeUndefined();
-    expect(JSON.parse(String(dec?.["state_snapshot"]))["note"]).toBe("验收标准第二条判不了，重写");
+    expect(JSON.parse(String(dec?.["state_snapshot"]))["note"]).toBe(
+      "验收标准第二条判不了，重写",
+    );
   });
 });
 
@@ -262,19 +305,29 @@ describe("重复点击与错卡片：一条都不写", () => {
   });
 
   it("卡片挂在另一条任务上 ⇒ 不写任何东西，也不推进这条任务", async () => {
-    const w = await world({ status: "CHARTER_PENDING", withCard: true, cardTask: "other" });
+    const w = await world({
+      status: "CHARTER_PENDING",
+      withCard: true,
+      cardTask: "other",
+    });
     const r = await run(w, {});
     expect(r.outcome).toBe("card_belongs_to_other_task");
-    expect(w.db.prepare("SELECT count(*) AS c FROM events").get()?.["c"]).toBe(0);
+    expect(w.db.prepare("SELECT count(*) AS c FROM events").get()?.["c"]).toBe(
+      0,
+    );
     expect(String(task(w)["status"])).toBe("CHARTER_PENDING");
-    expect(w.db.prepare("SELECT status FROM approvals").get()?.["status"]).toBe("pending");
+    expect(w.db.prepare("SELECT status FROM approvals").get()?.["status"]).toBe(
+      "pending",
+    );
   });
 
   it("卡片不存在 ⇒ card_missing，零写入（404 不产生审计：同 applyDecision 那条不变量）", async () => {
     const w = await world({ status: "CHARTER_PENDING", withCard: false });
     const r = await run(w, { approvalId: "没这张卡" });
     expect(r.outcome).toBe("card_missing");
-    expect(w.db.prepare("SELECT count(*) AS c FROM events").get()?.["c"]).toBe(0);
+    expect(w.db.prepare("SELECT count(*) AS c FROM events").get()?.["c"]).toBe(
+      0,
+    );
   });
 
   it("卡片在而任务不在了 ⇒ task_missing，不留下【批掉了却推不动】的批准记录", async () => {
@@ -288,8 +341,12 @@ describe("重复点击与错卡片：一条都不写", () => {
     w.db.prepare("DELETE FROM tasks WHERE id='t1'").run();
     const r = await run(w, {});
     expect(r.outcome).toBe("task_missing");
-    expect(w.db.prepare("SELECT status FROM approvals").get()?.["status"]).toBe("pending");
-    expect(w.db.prepare("SELECT count(*) AS c FROM events").get()?.["c"]).toBe(0);
+    expect(w.db.prepare("SELECT status FROM approvals").get()?.["status"]).toBe(
+      "pending",
+    );
+    expect(w.db.prepare("SELECT count(*) AS c FROM events").get()?.["c"]).toBe(
+      0,
+    );
   });
 });
 
@@ -297,8 +354,14 @@ describe("广播：本轮写下的每条都发，且在提交之后", () => {
   it("决策 + 状态变化两条【都】广播，seq 与落库的 events.id 逐条对齐", async () => {
     const w = await world({ status: "CHARTER_PENDING", withCard: true });
     const r = await run(w, {});
-    expect(w.published.map((p) => p.kind)).toEqual(["ApprovalDecided", "TaskStateChanged"]);
-    const ids = w.db.prepare("SELECT id FROM events ORDER BY id").all().map((x) => Number(x["id"]));
+    expect(w.published.map((p) => p.kind)).toEqual([
+      "ApprovalDecided",
+      "TaskStateChanged",
+    ]);
+    const ids = w.db
+      .prepare("SELECT id FROM events ORDER BY id")
+      .all()
+      .map((x) => Number(x["id"]));
     // 【空洞】是这里要防的东西：ids 里每个都出现在 published 里，一个不漏
     expect(w.published.map((p) => p.seq).sort((a, b) => a - b)).toEqual(ids);
     // 总线真的收到了（不是只收了个数组）：订阅者从 0 开始能读到两条
@@ -320,14 +383,19 @@ describe("没有出边的那两颗按钮：卡片记掉而任务不动，并且�
     const w = await world({ status: "CHARTER_PENDING", withCard: true });
     // 带 --note：reject_with_comment 不带理由在【开事务之前】就被拦下（见下面那一发），
     // 而这一发要测的是「没有出边」那一支，不该被前置检查抢先。
-    const r = await run(w, { button: "reject_with_comment", note: "验收标准第二条判不了真假，重写" });
+    const r = await run(w, {
+      button: "reject_with_comment",
+      note: "验收标准第二条判不了真假，重写",
+    });
     expect(r.edgeExists).toBe(false);
     expect(r.cardStatus).toBe("rejected");
     expect(String(task(w)["status"])).toBe("CHARTER_PENDING");
     expect(r.note).toContain("没有");
     // 只有决策那一条审计（没有状态变化那条）：广播与写入仍然逐条对齐
     expect(w.published.map((p) => p.kind)).toEqual(["ApprovalDecided"]);
-    expect(w.db.prepare("SELECT count(*) AS c FROM events").get()?.["c"]).toBe(1);
+    expect(w.db.prepare("SELECT count(*) AS c FROM events").get()?.["c"]).toBe(
+      1,
+    );
   });
 
   it("打回而【没给理由】⇒ note_required，且【一次写连接都没碰到】", async () => {
@@ -337,16 +405,26 @@ describe("没有出边的那两颗按钮：卡片记掉而任务不动，并且�
     expect(r.published.length).toBe(0);
     expect(w.published.length).toBe(0);
     // 卡片仍然 pending、任务仍然原位、审计零行：请求不成立不该留下任何痕迹
-    expect(w.db.prepare("SELECT status FROM approvals").get()?.["status"]).toBe("pending");
+    expect(w.db.prepare("SELECT status FROM approvals").get()?.["status"]).toBe(
+      "pending",
+    );
     expect(String(task(w)["status"])).toBe("CHARTER_PENDING");
-    expect(w.db.prepare("SELECT count(*) AS c FROM events").get()?.["c"]).toBe(0);
+    expect(w.db.prepare("SELECT count(*) AS c FROM events").get()?.["c"]).toBe(
+      0,
+    );
   });
 
   it("纯空白的理由与【没给理由】算同一件事（不能悄悄存成 NULL）", async () => {
     const w = await world({ status: "CHARTER_PENDING", withCard: true });
     const r = await run(w, { button: "reject_with_comment", note: "   " });
     expect(r.outcome).toBe("note_required");
-    expect(w.db.prepare("SELECT count(*) AS c FROM approvals WHERE status = 'rejected'").get()?.["c"]).toBe(0);
+    expect(
+      w.db
+        .prepare(
+          "SELECT count(*) AS c FROM approvals WHERE status = 'rejected'",
+        )
+        .get()?.["c"],
+    ).toBe(0);
   });
 
   it("approve 带不带 note 都成立（理由不是它的必填项）", async () => {
@@ -367,7 +445,9 @@ describe("没有出边的那两颗按钮：卡片记掉而任务不动，并且�
   });
 
   it("认领卡片那条 SQL 与 http 那份【逐字相同】（两份文本漂移的代价见 approve.ts 注释）", () => {
-    expect(CLAIM_CARD_SQL).toBe("UPDATE approvals SET status = ?, decided_by = ?, decided_at = ?, decision_note = ? WHERE id = ? AND status = ?");
+    expect(CLAIM_CARD_SQL).toBe(
+      "UPDATE approvals SET status = ?, decided_by = ?, decided_at = ?, decision_note = ? WHERE id = ? AND status = ?",
+    );
   });
 });
 

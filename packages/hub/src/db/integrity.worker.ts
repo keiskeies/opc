@@ -26,8 +26,8 @@
  *    （一个永不返回的完整性检查比没有检查更危险，因为它挂在那儿等）。
  */
 
-import { parentPort, workerData } from "node:worker_threads";
 import { DatabaseSync } from "node:sqlite";
+import { parentPort, workerData } from "node:worker_threads";
 import { isPageOk, reportText } from "./page-check.js";
 
 /**

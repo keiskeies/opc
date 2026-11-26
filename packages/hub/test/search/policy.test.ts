@@ -19,14 +19,17 @@
 import type { EvidenceBundle } from "@opc/contracts";
 import { isExternalSourceRef } from "@opc/contracts";
 import { describe, expect, it } from "vitest";
-import { evaluateGate, metricCriteriaEvaluator } from "../../src/graph/gates/evaluate.js";
+import {
+  evaluateGate,
+  metricCriteriaEvaluator,
+} from "../../src/graph/gates/evaluate.js";
 import {
   adrEvidenceBlock,
   deprecationEscalationBlock,
   FAST_CHANGING_DOMAINS,
   isFastChangingDomain,
-  makeSearchCriteriaEvaluator,
   judgmentBlock,
+  makeSearchCriteriaEvaluator,
   mandatorySearchObservedBlock,
   mandatorySourceBlock,
   matchDomains,
@@ -34,12 +37,12 @@ import {
   prohibitedBlock,
   SEARCH_DECISIONS,
   SEARCH_REJECT_CODES,
+  type SearchBudgetThresholds,
+  type SearchJudgment,
   searchBudgetTier,
   searchEvidenceGate,
   searchPolicy,
   searchResultUrlBlock,
-  type SearchBudgetThresholds,
-  type SearchJudgment,
   unobservedSearchBlock,
 } from "../../src/search/policy.js";
 
@@ -60,8 +63,15 @@ function bundle(over: Partial<EvidenceBundle> = {}): EvidenceBundle {
   };
 }
 
-const THRESHOLDS: SearchBudgetThresholds = { techLeadRatio: 0.6, ceoRatio: 0.9 };
-const DECLARED: SearchJudgment = { declared: true, needsSearch: true, reason: "参数化知识停在两个版本前" };
+const THRESHOLDS: SearchBudgetThresholds = {
+  techLeadRatio: 0.6,
+  ceoRatio: 0.9,
+};
+const DECLARED: SearchJudgment = {
+  declared: true,
+  needsSearch: true,
+  reason: "参数化知识停在两个版本前",
+};
 
 function input(over: Partial<Parameters<typeof searchPolicy>[0]> = {}) {
   return {
@@ -79,11 +89,16 @@ function input(over: Partial<Parameters<typeof searchPolicy>[0]> = {}) {
 
 describe("第 1 层：强制搜索领域", () => {
   it("⭐ 计划点名那条：无来源引用 ⇒ **reject**（不是 warning、不是 escalate）", () => {
-    const b = mandatorySourceBlock(["security_advisories"], bundle({ claims: [] }));
+    const b = mandatorySourceBlock(
+      ["security_advisories"],
+      bundle({ claims: [] }),
+    );
     expect(b.ok).toBe(false);
     if (!b.ok) expect(b.code).toBe("no_source_for_mandatory_domain");
     // 一条外部 URL 就放行（口径是【有没有】，不是【够不不够】—— 后者判不了，见下）。
-    expect(mandatorySourceBlock(["security_advisories"], bundle()).ok).toBe(true);
+    expect(mandatorySourceBlock(["security_advisories"], bundle()).ok).toBe(
+      true,
+    );
   });
 
   it("领域名没听过 ⇒ 独立的一个码，**不借用**『缺来源』那个", () => {
@@ -102,21 +117,30 @@ describe("第 1 层：强制搜索领域", () => {
       "security_advisories",
     ]);
     expect(isFastChangingDomain("security_advisories")).toBe(true);
-    expect(isFastChangingDomain("framework_version")) .toBe(false); // 少个 s 就是没听过
+    expect(isFastChangingDomain("framework_version")).toBe(false); // 少个 s 就是没听过
   });
 
   it("⭐⭐ 第 1 层的**两个强度**：字面判据放过的，观测判据拦得住", () => {
     // 这一条是本文件存在的理由。一个编造的 URL 在【规格】字面判据下完全合格，
     // 而「编一个 URL」比「编一个覆盖率数字」更省事（后者至少还有个范围会被对账）。
     const fabricated = bundle({
-      claims: [{ text: "该框架已停止维护", evidence_refs: ["https://never-fetched.invalid/x"] }],
+      claims: [
+        {
+          text: "该框架已停止维护",
+          evidence_refs: ["https://never-fetched.invalid/x"],
+        },
+      ],
     });
-    expect(mandatorySourceBlock(["framework_versions"], fabricated).ok).toBe(true);
+    expect(mandatorySourceBlock(["framework_versions"], fabricated).ok).toBe(
+      true,
+    );
     const obs = mandatorySearchObservedBlock(["framework_versions"], 0);
     expect(obs.ok).toBe(false);
     if (!obs.ok) expect(obs.code).toBe("mandatory_source_not_observed");
     // 真搜过一次就放行（这一条判的是搜过没有，不管包里写了什么）。
-    expect(mandatorySearchObservedBlock(["framework_versions"], 1).ok).toBe(true);
+    expect(mandatorySearchObservedBlock(["framework_versions"], 1).ok).toBe(
+      true,
+    );
   });
 
   it("没有观测通路 ⇒ 拒，且**不允许**用传 0 之外的方式混过去", () => {
@@ -127,9 +151,9 @@ describe("第 1 层：强制搜索领域", () => {
   });
 
   it("领域取的是 任务声明 ∩ 岗位书，匹配不上的名字**报错**而不是丢弃", () => {
-    expect(matchDomains(["framework_versions", "unrelated"], ["framework_versions"])).toEqual([
-      "framework_versions",
-    ]);
+    expect(
+      matchDomains(["framework_versions", "unrelated"], ["framework_versions"]),
+    ).toEqual(["framework_versions"]);
     // 岗位书写了个规格表里没有的名字：不静默丢，丢了就变成「那条声明永不生效」而没人知道。
     const b = mandatorySourceBlock(["team_internal_jargon"], bundle());
     expect(b.ok).toBe(false);
@@ -147,7 +171,11 @@ describe("第 2 层：显式判断（可审计性本身是产物）", () => {
   });
 
   it("表态了而理由为空 ⇒ 拒（空理由与没判断等价，且它看起来满足了一条要求）", () => {
-    const b = judgmentBlock({ declared: true, needsSearch: true, reason: "   " });
+    const b = judgmentBlock({
+      declared: true,
+      needsSearch: true,
+      reason: "   ",
+    });
     expect(b.ok).toBe(false);
     if (!b.ok) expect(b.code).toBe("judgment_without_reason");
   });
@@ -156,7 +184,13 @@ describe("第 2 层：显式判断（可审计性本身是产物）", () => {
     // 反过来说才成立：如果 needsSearch=false 被拒，Agent 学会的就是「随便找个理由去搜」，
     // 而【规格】明确反对默认搜索。这一发钉的是那一侧。
     const v = searchPolicy(
-      input({ judgment: { declared: true, needsSearch: false, reason: "索引原理是稳定知识" } }),
+      input({
+        judgment: {
+          declared: true,
+          needsSearch: false,
+          reason: "索引原理是稳定知识",
+        },
+      }),
     );
     if (!("ok" in v)) expect(v.decision).toBe("skipped_by_judgment");
   });
@@ -170,7 +204,12 @@ describe("第 3 层：预算降级（判不了 ⇒ 要批）", () => {
   });
 
   it("⭐ 成本或上限拿不到 ⇒ unknown ⇒ **要批**，不是按没超处理", () => {
-    for (const [s, l] of [[null, 1000], [10, null], [undefined, 1000], [10, 0]] as const) {
+    for (const [s, l] of [
+      [null, 1000],
+      [10, null],
+      [undefined, 1000],
+      [10, 0],
+    ] as const) {
       const d = searchBudgetTier(s, l, THRESHOLDS);
       expect(d.tier).toBe("unknown");
     }
@@ -220,9 +259,13 @@ describe("② 搜索结果必须带来源 URL", () => {
     const noUrl = bundle({
       claims: [{ text: "这个框架已经不维护了", evidence_refs: ["notes.md"] }],
     });
-    expect(searchResultUrlBlock({ searched: true, bundle: noUrl }).ok).toBe(false);
+    expect(searchResultUrlBlock({ searched: true, bundle: noUrl }).ok).toBe(
+      false,
+    );
     // 反向对照：没搜索时这一条**不该**拦（否则普通任务全被要求带外链）。
-    expect(searchResultUrlBlock({ searched: false, bundle: noUrl }).ok).toBe(true);
+    expect(searchResultUrlBlock({ searched: false, bundle: noUrl }).ok).toBe(
+      true,
+    );
   });
 
   it("包内引用不算来源（notes.md 在 artifacts 里，§8.1 那关它是过的）", () => {
@@ -235,12 +278,16 @@ describe("② 搜索结果必须带来源 URL", () => {
 
 describe("③ 搜索结论不得直接变成架构决策", () => {
   it("⭐ 依据**全是**外部链接的 claim ⇒ 必须指向一份 ADR", () => {
-    const b = bundle({ claims: [{ text: "选 Postgres", evidence_refs: [URL1] }] });
+    const b = bundle({
+      claims: [{ text: "选 Postgres", evidence_refs: [URL1] }],
+    });
     expect(adrEvidenceBlock(b, []).ok).toBe(false);
     // 空名单与「有名单但这条 claim 没引用它」是两种坏法，报错一样而修法不同，都得判住。
     expect(adrEvidenceBlock(b, ["adr-0004.md"]).ok).toBe(false);
     const withAdr = bundle({
-      claims: [{ text: "选 Postgres", evidence_refs: [URL1, "adr-0004.md#备选方案"] }],
+      claims: [
+        { text: "选 Postgres", evidence_refs: [URL1, "adr-0004.md#备选方案"] },
+      ],
     });
     expect(adrEvidenceBlock(withAdr, ["adr-0004.md"]).ok).toBe(true);
   });
@@ -248,13 +295,17 @@ describe("③ 搜索结论不得直接变成架构决策", () => {
   it("⭐ 判据收在【全是】而不是【有】：正常调研不能被全拦住", () => {
     // 拦法太宽的第一后果不是合规，是更精心的规避：人们开始给内部制品编 URL。
     const mixed = bundle({
-      claims: [{ text: "基准测试显示 X 快 3 倍", evidence_refs: [URL1, "bench.json"] }],
+      claims: [
+        { text: "基准测试显示 X 快 3 倍", evidence_refs: [URL1, "bench.json"] },
+      ],
     });
     expect(adrEvidenceBlock(mixed, []).ok).toBe(true);
   });
 
   it("ADR 名单是**注入**的，不按文件名猜（改名即绕过 ⇒ 猜规则等于没规则）", () => {
-    const b = bundle({ claims: [{ text: "选 Postgres", evidence_refs: [URL1] }] });
+    const b = bundle({
+      claims: [{ text: "选 Postgres", evidence_refs: [URL1] }],
+    });
     expect(adrEvidenceBlock(b, ["decisions/db.md"]).ok).toBe(false);
     expect(adrEvidenceBlock(b, ["decisions/db.md", "x"]).ok).toBe(false);
   });
@@ -269,10 +320,14 @@ describe("③ 搜索结论不得直接变成架构决策", () => {
 
 describe("事前 / 事后两遍", () => {
   it("强制领域在**事前**要求观测到搜索，事后要求包里有来源", () => {
-    const pre = searchPolicy(input({ taskDomains: ["security_advisories"], observedSearches: 3 }));
+    const pre = searchPolicy(
+      input({ taskDomains: ["security_advisories"], observedSearches: 3 }),
+    );
     if ("ok" in pre) throw new Error("不应被拒");
     expect(pre.decision).toBe("required");
-    const blocked = searchPolicy(input({ taskDomains: ["security_advisories"], observedSearches: 0 }));
+    const blocked = searchPolicy(
+      input({ taskDomains: ["security_advisories"], observedSearches: 0 }),
+    );
     expect("ok" in blocked).toBe(true);
 
     const post = searchEvidenceGate({
@@ -306,7 +361,9 @@ describe("事前 / 事后两遍", () => {
     // 于是被 ADR 那一批发掉 —— 报错说的是 ADR，我要测的却是观测通路。
     // 「一条判据红在另一条判据上」是最容易误诊的一族红。
     const g = searchEvidenceGate({
-      bundle: bundle({ claims: [{ text: "本地依据", evidence_refs: ["notes.md"] }] }),
+      bundle: bundle({
+        claims: [{ text: "本地依据", evidence_refs: ["notes.md"] }],
+      }),
       mandatoryDomains: [],
       observedSearches: OBSERVATION_UNAVAILABLE,
       adrPaths: [],
@@ -315,7 +372,9 @@ describe("事前 / 事后两遍", () => {
     // 反向对照：同一份包配上【强制领域】就该红（缺来源那一发），
     // 否则上面那条绿只是因为整遍没跑。
     const strict = searchEvidenceGate({
-      bundle: bundle({ claims: [{ text: "本地依据", evidence_refs: ["notes.md"] }] }),
+      bundle: bundle({
+        claims: [{ text: "本地依据", evidence_refs: ["notes.md"] }],
+      }),
       mandatoryDomains: ["security_advisories"],
       observedSearches: OBSERVATION_UNAVAILABLE,
       adrPaths: [],
@@ -345,7 +404,13 @@ describe("接进门控：让『打回』真的是**门控**打回", () => {
       producer: { roleId: "tech_lead", modelFamily: "claude" },
       // bundle_type 得配得上 gate，否则会先撞类型那一发而测不到搜索判据（Task 5.4 刚踩过）。
       bundle: { ...o.bundle, bundle_type: "design" },
-      criteria: [{ condition: CONDITION, action: "reject", message: "强制搜索领域缺来源" }],
+      criteria: [
+        {
+          condition: CONDITION,
+          action: "reject",
+          message: "强制搜索领域缺来源",
+        },
+      ],
       reviewer: { roleId: "architect", modelFamily: "gpt" },
       // 不传的话门控记一条「完整性未对账」的 unresolved ⇒ 顶成 escalate，
       // 那我就测不到搜索判据了（Task 5.4 里刚为同一格写过一整条用例）。
@@ -438,7 +503,9 @@ describe("接进门控：让『打回』真的是**门控**打回", () => {
     const v = gateWith({
       mandatoryDomains: [],
       observedSearches: 0,
-      bundle: bundle({ claims: [{ text: "本地依据", evidence_refs: ["notes.md"] }] }),
+      bundle: bundle({
+        claims: [{ text: "本地依据", evidence_refs: ["notes.md"] }],
+      }),
     });
     expect(v.decision).toBe("pass");
     expect(v.unresolved).toEqual([]);
@@ -451,7 +518,13 @@ describe("接进门控：让『打回』真的是**门控**打回", () => {
       gate: "tech_to_dev",
       producer: { roleId: "tech_lead", modelFamily: "claude" },
       bundle: { ...bundle(), bundle_type: "design" },
-      criteria: [{ condition: "metric:coverage < 90", action: "reject", message: "覆盖率不足" }],
+      criteria: [
+        {
+          condition: "metric:coverage < 90",
+          action: "reject",
+          message: "覆盖率不足",
+        },
+      ],
       reviewer: { roleId: "architect", modelFamily: "gpt" },
       // 不传的话门控记一条「完整性未对账」的 unresolved ⇒ 顶成 escalate，
       // 那我就测不到搜索判据了（Task 5.4 里刚为同一格写过一整条用例）。
@@ -473,7 +546,11 @@ describe("接进门控：让『打回』真的是**门控**打回", () => {
       producer: { roleId: "tech_lead", modelFamily: "claude" },
       bundle: { ...bundle(), bundle_type: "design" },
       criteria: [
-        { condition: "search:mandatory_source", action: "reject", message: "少个 s" },
+        {
+          condition: "search:mandatory_source",
+          action: "reject",
+          message: "少个 s",
+        },
       ],
       reviewer: { roleId: "architect", modelFamily: "gpt" },
       // 不传的话门控记一条「完整性未对账」的 unresolved ⇒ 顶成 escalate，
@@ -503,8 +580,15 @@ describe("码表与取值表", () => {
     hit(judgmentBlock({ declared: false }));
     hit(judgmentBlock({ declared: true, needsSearch: true, reason: "" }));
     hit(prohibitedBlock(true, []));
-    hit(searchResultUrlBlock({ searched: true, bundle: bundle({ claims: [] }) }));
-    hit(adrEvidenceBlock(bundle({ claims: [{ text: "t", evidence_refs: [URL1] }] }), []));
+    hit(
+      searchResultUrlBlock({ searched: true, bundle: bundle({ claims: [] }) }),
+    );
+    hit(
+      adrEvidenceBlock(
+        bundle({ claims: [{ text: "t", evidence_refs: [URL1] }] }),
+        [],
+      ),
+    );
     hit(deprecationEscalationBlock(true));
     // 预算那一维的两个码**不在**这张表里（它产出的是 verdict 而不是拒绝）。
     // 上面那条 SEARCH_DECISIONS 的用例钉的是同一件事的另一面。
@@ -517,7 +601,8 @@ describe("码表与取值表", () => {
     if ("ok" in blocked && !blocked.ok) seen.add(blocked.code);
 
     const missing = SEARCH_REJECT_CODES.filter((c) => !seen.has(c));
-    if (missing.length > 0) throw new Error("没有返回点的码：" + missing.join(", "));
+    if (missing.length > 0)
+      throw new Error("没有返回点的码：" + missing.join(", "));
   });
 
   it("decision 取值表里**没有**永不产出的那一格", () => {

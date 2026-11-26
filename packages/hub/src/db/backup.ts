@@ -47,13 +47,13 @@ import {
   copyFileSync,
   existsSync,
   mkdirSync,
-  readFileSync,
   readdirSync,
+  readFileSync,
   rmSync,
   statSync,
 } from "node:fs";
-import { DatabaseSync } from "node:sqlite";
 import { basename, dirname, join, resolve } from "node:path";
+import type { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
 import { Worker } from "node:worker_threads";
 import { openSnapshotReadonlyDb } from "./pragmas.js";
@@ -88,8 +88,7 @@ export const BACKUP_SUFFIX = ".db";
  *  - **同一毫秒之内唯一**：见 nextBackupPath。
  *  - **只有这一种形状能被删**：见 pruneBackups。多一个字符就不是备份。
  */
-const BACKUP_NAME =
-  /^opc-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z\.db$/u;
+const BACKUP_NAME = /^opc-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z\.db$/u;
 
 /** 时间戳 → 文件名。分隔符全部避开 `:` 与 `.`，它们在文件名里的含义各处不一致。 */
 export function backupName(nowMs: number): string {
@@ -201,7 +200,10 @@ function openSourceForSnapshot(dbPath: string): DatabaseSync {
 }
 
 /** 唯一文件名：同一毫秒内撞上了就往后挪 1ms 再试（最多 1000 次，之后如实报错）。 */
-function nextBackupPath(backupDir: string, nowMs: number): { path: string; atMs: number } {
+function nextBackupPath(
+  backupDir: string,
+  nowMs: number,
+): { path: string; atMs: number } {
   let at = nowMs;
   for (let i = 0; i < 1000; i++) {
     const path = join(backupDir, backupName(at));
@@ -225,7 +227,9 @@ function countEvents(db: DatabaseSync): number {
   // 「备份一个空库」是可以的，「备份一个 schema 不认识的库」也应当留下文件让人看，
   // 而不是在备份这一步就把唯一可用的灾难恢复路径堵死。
   const has = db
-    .prepare("SELECT count(*) AS c FROM sqlite_master WHERE type = 'table' AND name = 'events'")
+    .prepare(
+      "SELECT count(*) AS c FROM sqlite_master WHERE type = 'table' AND name = 'events'",
+    )
     .get() as { c: number | bigint };
   if (Number(has.c) === 0) return 0;
   const row = db.prepare("SELECT count(*) AS c FROM events").get() as {
@@ -258,7 +262,9 @@ export function createBackup(o: BackupRequest): BackupResult {
   }
   if (!Number.isSafeInteger(keep) || keep < 1) {
     throw new TypeError(
-      "keep 必须是 >= 1 的整数（得到 " + String(keep) + "）。keep = 0 意味着每次备份" +
+      "keep 必须是 >= 1 的整数（得到 " +
+        String(keep) +
+        "）。keep = 0 意味着每次备份" +
         "都把自己删掉 —— 那不是「不留备份」，那是「每次备份完都以为留了一份」。",
     );
   }
@@ -371,10 +377,7 @@ export function createBackup(o: BackupRequest): BackupResult {
     // 把它报成 ok:false 会让调用方再去备份一次，于是目录越堆越厚 ——
     // 而那正是保留策略要防的事。所以这是告警，不是失败。
     o.onWarning(
-      "备份成功但清理旧备份失败（目录会超出 " +
-        keep +
-        " 份）—— " +
-        String(e),
+      "备份成功但清理旧备份失败（目录会超出 " + keep + " 份）—— " + String(e),
     );
   }
 
@@ -408,7 +411,9 @@ export type PruneRequest = {
 export function pruneBackups(o: PruneRequest): readonly string[] {
   const keep = o.keep ?? KEEP_BACKUPS;
   if (!Number.isSafeInteger(keep) || keep < 1) {
-    throw new TypeError("keep 必须是 >= 1 的整数（得到 " + String(keep) + "）。");
+    throw new TypeError(
+      "keep 必须是 >= 1 的整数（得到 " + String(keep) + "）。",
+    );
   }
   if (!existsSync(o.backupDir)) return [];
   const names = readdirSync(o.backupDir)
@@ -526,7 +531,10 @@ export function restoreBackup(o: RestoreRequest): RestoreResult {
           reason: "backup_unverified",
           message:
             "恢复失败：备份自身未通过 integrity_check —— " +
-            rows.map((r) => r.integrity_check).join("; ").slice(0, 200),
+            rows
+              .map((r) => r.integrity_check)
+              .join("; ")
+              .slice(0, 200),
         };
       }
       eventsInBackup = countEvents(probe);
@@ -561,7 +569,9 @@ export function restoreBackup(o: RestoreRequest): RestoreResult {
       ok: false,
       reason: "target_not_writable",
       message:
-        "恢复被拒绝：目标路径存在而【不是普通文件】—— " + o.targetPath + "。" +
+        "恢复被拒绝：目标路径存在而【不是普通文件】—— " +
+        o.targetPath +
+        "。" +
         "传 confirmOverwrite 也没用：这里要覆盖的是一个目录，不是一个库。" +
         "把那个路径清掉再恢复（它可能是上一次失败演练留下的目标）。",
     };
@@ -594,7 +604,10 @@ export function restoreBackup(o: RestoreRequest): RestoreResult {
             "恢复后完整性检查未通过（目标 " +
             o.targetPath +
             " → " +
-            rows.map((r) => r.integrity_check).join("; ").slice(0, 200) +
+            rows
+              .map((r) => r.integrity_check)
+              .join("; ")
+              .slice(0, 200) +
             "）。目标可能是半截文件，不要拿它跑任何写操作。",
         };
       }
@@ -713,7 +726,15 @@ export function restoreDrill(o: {
     ...(o.keep === undefined ? {} : { keep: o.keep }),
   });
   if (!backup.ok) {
-    return { backup, restore: { ok: false, reason: "backup_missing", message: "备份这一步就失败了，没有可恢复的文件" }, ok: false };
+    return {
+      backup,
+      restore: {
+        ok: false,
+        reason: "backup_missing",
+        message: "备份这一步就失败了，没有可恢复的文件",
+      },
+      ok: false,
+    };
   }
   // 演练目标必须【每次都干净】：上一次演练留下的 -wal 会让这一次读到上一次的库
   // （文件头实测第 3 条）。restoreBackup 自己会清 sidecar，但主文件覆盖需要确认，
@@ -765,7 +786,10 @@ export function backupNameToMs(name: string): number | null {
   if (!isBackupName(name)) return null;
   const iso = name
     .slice(BACKUP_PREFIX.length, name.length - BACKUP_SUFFIX.length)
-    .replace(/(\d{4})-(\d{2})-(\d{2})T(\d{2})-(\d{2})-(\d{2})-(\d{3})Z$/u, "$1-$2-$3T$4:$5:$6.$7Z");
+    .replace(
+      /(\d{4})-(\d{2})-(\d{2})T(\d{2})-(\d{2})-(\d{2})-(\d{3})Z$/u,
+      "$1-$2-$3T$4:$5:$6.$7Z",
+    );
   const t = Date.parse(iso);
   return Number.isFinite(t) ? t : null;
 }
@@ -924,13 +948,20 @@ export async function createBackupOffLoop(
   rejectsFunctionFields(o);
   const timeoutMs = o.timeoutMs ?? BACKUP_WORKER_TIMEOUT_MS;
   if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 0) {
-    throw new TypeError("timeoutMs 必须是 >= 0 的整数（得到 " + String(timeoutMs) + "）。");
+    throw new TypeError(
+      "timeoutMs 必须是 >= 0 的整数（得到 " + String(timeoutMs) + "）。",
+    );
   }
-  if (o.nowMs !== undefined && (!Number.isSafeInteger(o.nowMs) || o.nowMs < 0)) {
+  if (
+    o.nowMs !== undefined &&
+    (!Number.isSafeInteger(o.nowMs) || o.nowMs < 0)
+  ) {
     // 这里【抛】而不是「当作没传」。当作没传的后果是文件名用墙钟，
     // 而调用方以为注入生效了 —— 那正是 §4 那条「静默失效」的形状，
     // 只是这次的入口是「传了一个不合法的值」而不是「传了个函数」。
-    throw new TypeError("nowMs 必须是 >= 0 的安全整数毫秒（得到 " + String(o.nowMs) + "）。");
+    throw new TypeError(
+      "nowMs 必须是 >= 0 的安全整数毫秒（得到 " + String(o.nowMs) + "）。",
+    );
   }
   const started = Date.now();
   const workerData: BackupWorkerData = {
@@ -1000,13 +1031,18 @@ export async function createBackupOffLoop(
         );
         return;
       }
-      if (msg?.kind !== "result" || msg.via !== "worker" || msg.result === undefined) {
+      if (
+        msg?.kind !== "result" ||
+        msg.via !== "worker" ||
+        msg.result === undefined
+      ) {
         // 消息形状不对 ⇒ 判失败，**不猜**。这一支的存在理由是：worker 入口换了回程形状
         // 而忘了改这里时，「没有 result」最省事的写法是当成 ok:true，
         // 于是每天报一次「备份成功」而目录里一份新文件都没有。
         reject(
           new BackupWorkerThrewError(
-            "备份 worker 回了一句认不出的消息：" + JSON.stringify(msg ?? null).slice(0, 400),
+            "备份 worker 回了一句认不出的消息：" +
+              JSON.stringify(msg ?? null).slice(0, 400),
             [],
           ),
         );

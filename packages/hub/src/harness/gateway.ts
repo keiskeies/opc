@@ -72,23 +72,21 @@ import {
   type HarnessAdapter,
   type HarnessCapabilities,
   type HarnessEvent,
-  type HarnessRequest,
   type HarnessOutcome,
+  type HarnessRequest,
   SANDBOX_TIERS,
   type SandboxTier,
   type ToolApprovalRequest,
 } from "@opc/contracts";
-import {
-  type AuditRow,
-} from "../events/recorder.js";
+import type { AuditRow } from "../events/recorder.js";
 // ⚠ **type-only**，而且这一格必须是 type-only：Gateway 对搜索策略**什么都不判**
 // （它只报告「这次看见过什么」，判不判、怎么判全在 search/ 那一侧）。
 // 一旦这里写成值 import，Gateway 就在运行期依赖了它本该只把数据交给它的那个模块 ——
 // 而那正是 §13.3「Gateway 不为每家 harness 单独实现搜索」这句话的反面。
 import type { ToolSighting } from "../search/observe.js";
 import {
-  approvalBlock,
   type ApprovalVerdict,
+  approvalBlock,
   forbiddenFlagBlock,
   isAbsoluteWorkspacePath,
   needsApproval,
@@ -381,7 +379,10 @@ export async function callHarness(
       action: "unauthorized_attempt",
       // target 指被拦的那个具体对象，而不是 "gateway"：审计里「有人试过」必须
       // 能读出「试的是什么」（同 author-reviewer.ts 那条立场）。
-      target: typeof detail["tool"] === "string" ? (detail["tool"] as string) : adapter.id,
+      target:
+        typeof detail["tool"] === "string"
+          ? (detail["tool"] as string)
+          : adapter.id,
       payload,
     });
   };
@@ -403,7 +404,9 @@ export async function callHarness(
    * 而 blocked 那一路（调用跑起来了、只是某次工具调用被拦）也是同一个 kind 词表 ——
    * 两条路的分层信息在审计里同构，这是刻意的。
    */
-  const blocked = (v: Extract<SafetyVerdict, { ok: false }>): GatewayOutcome => {
+  const blocked = (
+    v: Extract<SafetyVerdict, { ok: false }>,
+  ): GatewayOutcome => {
     attempt(v.code, "pre_call", v.detail ?? {});
     return reject("safety_blocked", v.reason);
   };
@@ -447,9 +450,16 @@ export async function callHarness(
    * stages 要累积成两个（「问过我们」与「它通报了」是两件事），
    * 而计数仍然是 1 —— 累积与计数读的是同一份 Map 的两个不同侧面。
    */
-  const seen = new Map<string, ToolSighting & { stages: ("handler" | "event_stream")[] }>();
+  const seen = new Map<
+    string,
+    ToolSighting & { stages: ("handler" | "event_stream")[] }
+  >();
 
-  function see(tool: string, args: unknown, stage: "handler" | "event_stream"): void {
+  function see(
+    tool: string,
+    args: unknown,
+    stage: "handler" | "event_stream",
+  ): void {
     const key: string = verdictKey(tool, args);
     const hit = seen.get(key);
     if (hit === undefined) seen.set(key, { tool, stages: [stage] });
@@ -458,7 +468,10 @@ export async function callHarness(
 
   /** 交出去的那一份（拷贝，免得调用方改到内部状态 —— 这个 Map 还要被后续出口读）。 */
   function toolSightings(): ToolSighting[] {
-    return [...seen.values()].map((s) => ({ tool: s.tool, stages: [...s.stages] }));
+    return [...seen.values()].map((s) => ({
+      tool: s.tool,
+      stages: [...s.stages],
+    }));
   }
 
   /** 缓存键。参数序列化失败（循环引用）时退化成工具名 + 一个不可能的后缀 ⇒ 不共享缓存（宁可多问一次）。 */
@@ -606,7 +619,10 @@ export async function callHarness(
   const adapterHandler: ApprovalHandler = async (r: ToolApprovalRequest) => {
     const v: ApprovalVerdict = await toolVerdict(r.tool, r.args, "handler");
     return v.ok
-      ? { approved: true, ...(v.decidedBy === null ? {} : { decidedBy: v.decidedBy }) }
+      ? {
+          approved: true,
+          ...(v.decidedBy === null ? {} : { decidedBy: v.decidedBy }),
+        }
       : {
           approved: false,
           decidedBy: v.decidedBy ?? "gateway",
@@ -731,19 +747,31 @@ export async function callHarness(
     // 并覆盖掉已经定下的消耗 —— 那是本仓反复记的那一族：判据在、分支在、用例也能过
     // （写用例的人只知道 finished 那条路），只有覆盖面是空的。
     if (sawFinish) {
-      return finishReject("adapter_error", "event_after_finish",
-        "适配器在 finished 之后又发了一发 [" + ev.kind + "]。刻意【不忽略也不采信】：" +
-        "忽略等于把「结果已定之后还有事」这个适配器 bug 藏起来，" +
-        "而那条 harness_call 已经写完了 —— 继续采只会让审计与真实执行不一致。");
+      return finishReject(
+        "adapter_error",
+        "event_after_finish",
+        "适配器在 finished 之后又发了一发 [" +
+          ev.kind +
+          "]。刻意【不忽略也不采信】：" +
+          "忽略等于把「结果已定之后还有事」这个适配器 bug 藏起来，" +
+          "而那条 harness_call 已经写完了 —— 继续采只会让审计与真实执行不一致。",
+      );
     }
     switch (ev.kind) {
       case "session_started": {
         if (sessionId !== null) {
           // 不覆盖：第二个 session_started 意味着适配器行为异常，
           // 而「以最后一个为准」会让审计里那一格指向一个没人知道的会话。
-          return finishReject("adapter_error", "duplicate_session_event",
-            "适配器发了第二个 session_started（[" + sessionId + "] → [" + ev.sessionId + "]）。" +
-            "刻意不取后者：一次调用只能有一个会话身份，否则恢复时不知道接哪一个。");
+          return finishReject(
+            "adapter_error",
+            "duplicate_session_event",
+            "适配器发了第二个 session_started（[" +
+              sessionId +
+              "] → [" +
+              ev.sessionId +
+              "]）。" +
+              "刻意不取后者：一次调用只能有一个会话身份，否则恢复时不知道接哪一个。",
+          );
         }
         sessionId = ev.sessionId;
         break;
@@ -752,7 +780,11 @@ export async function callHarness(
         // 与 onApproval 那一路【同一个函数、同一份判据】，理由见 toolVerdict。
         // 这一路发生在动作之后，所以判定【不问人】—— 事后追认会留下一条
         // 『有人批准了它』的假记录。
-        const v: ApprovalVerdict = await toolVerdict(ev.tool, ev.redactedArgs, "event_stream");
+        const v: ApprovalVerdict = await toolVerdict(
+          ev.tool,
+          ev.redactedArgs,
+          "event_stream",
+        );
         if (!v.ok) {
           // ⚠ 观测到一次未授权 ⇒ **停止整次调用**（这一句是本文件里唯一一处
           // 「我们其实有否决权」的用法，所以理由写足）。
@@ -810,7 +842,7 @@ export async function callHarness(
       "no_result",
       "适配器没有发 finished 就结束（session=" +
         (sessionId ?? "从未建立") +
-        "）。刻意【不编】一个 exitCode=null + output=\"\" 的结果：" +
+        '）。刻意【不编】一个 exitCode=null + output="" 的结果：' +
         "那是一条看起来合法而真相是「根本没跑完」的审计行。",
     );
   }
@@ -865,7 +897,10 @@ export async function callHarness(
   // 结构化输出那一项要**声明了才允许有值**（§12.3 能力差异不得被静默吞掉）：
   // 适配器声明 structuredOutput=false 而结果里塞了一份 structured，
   // 意思是它绕过了自己的声明 —— 那正是 capabilityGap 要拦的形状，只是发生在返回侧。
-  if (result.structured !== undefined && !adapter.capabilities.structuredOutput) {
+  if (
+    result.structured !== undefined &&
+    !adapter.capabilities.structuredOutput
+  ) {
     return finishReject(
       "adapter_error",
       "capability_gap",

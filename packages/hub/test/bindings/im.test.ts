@@ -37,31 +37,31 @@
  */
 import { mkdirSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
+import type { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
 import { afterAll, describe, expect, it } from "vitest";
-import type { DatabaseSync } from "node:sqlite";
-import { fixtureTmp } from "../fixtures/fixture-dir.js";
-import { openDb } from "../../src/db/driver.js";
-import { migrate } from "../../src/db/migrate.js";
-import { WriteQueue } from "../../src/db/write-queue.js";
 import {
   BINDING_COLUMNS,
   IM_BINDING_PLATFORMS,
-  MARK_VERIFIED_SQL,
-  REBIND_ROLE_SQL,
-  REQUEST_BINDING_SQL,
-  SELECT_BINDING_BY_IDENTITY_SQL,
-  SELECT_BINDINGS_SQL,
-  SELECT_VERIFIED_BINDING_SQL,
   listBindings,
+  MARK_VERIFIED_SQL,
   makeChannelActorResolver,
   markVerified,
   normalizePlatform,
+  REBIND_ROLE_SQL,
+  REQUEST_BINDING_SQL,
+  type ResolveResult,
   rebindRole,
   requestBinding,
   resolveBinding,
-  type ResolveResult,
+  SELECT_BINDING_BY_IDENTITY_SQL,
+  SELECT_BINDINGS_SQL,
+  SELECT_VERIFIED_BINDING_SQL,
 } from "../../src/bindings/im.js";
+import { openDb } from "../../src/db/driver.js";
+import { migrate } from "../../src/db/migrate.js";
+import { WriteQueue } from "../../src/db/write-queue.js";
+import { fixtureTmp } from "../fixtures/fixture-dir.js";
 
 const HUB = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 
@@ -100,9 +100,7 @@ const IM_SRC = join(HUB, "src", "bindings", "im.ts");
  * 下面那条「确实剥掉了东西而代码骨架还在」的自检就是这条正则失效时的兜底。
  */
 function stripComments(text: string): string {
-  return text
-    .replace(/\/\*[\s\S]*?\*\//gu, "")
-    .replace(/^\s*\/\/.*$/gmu, "");
+  return text.replace(/\/\*[\s\S]*?\*\//gu, "").replace(/^\s*\/\/.*$/gmu, "");
 }
 
 /** 一个不像「现在」的时刻：真时钟永远不等于它，所以「偷偷用了真时钟」会被抓到。 */
@@ -110,7 +108,15 @@ const T0 = Date.parse("2026-03-04T05:06:07.000Z");
 /** 第二个时刻，用来验「重复校验不许刷新时间」。 */
 const T1 = T0 + 60_000;
 
-const ROLES = new Set(["ceo", "dev", "tech", "product", "test", "report", "assistant"]);
+const ROLES = new Set([
+  "ceo",
+  "dev",
+  "tech",
+  "product",
+  "test",
+  "report",
+  "assistant",
+]);
 
 const opened: Array<{ close(): void }> = [];
 const queues: Array<{ close(): Promise<void> }> = [];
@@ -174,7 +180,10 @@ function rawRow(db: DatabaseSync, id: string): Raw | undefined {
 }
 
 /** 跑一条裸 SQL，交出「被拦下」与「那句报错」。 */
-function attempt(db: DatabaseSync, sql: string): { blocked: boolean; message: string } {
+function attempt(
+  db: DatabaseSync,
+  sql: string,
+): { blocked: boolean; message: string } {
   try {
     db.prepare(sql).run();
     return { blocked: false, message: "" };
@@ -209,15 +218,22 @@ interface DdlCase {
   /** 可选：把那一行推进到「已校验」，供**只有在那个状态下才成立**的坏法使用。 */
   readonly promote?: string;
   /** 合法写入：必须**放行**，且落库形状 = want。 */
-  readonly legal: (id: string) => { readonly sql: string; readonly want: Partial<Raw> };
+  readonly legal: (id: string) => {
+    readonly sql: string;
+    readonly want: Partial<Raw>;
+  };
   /** 坏写入：必须**拦下**，且报错里带着那句人话。 */
-  readonly illegal: (id: string) => { readonly sql: string; readonly hint: string };
+  readonly illegal: (id: string) => {
+    readonly sql: string;
+    readonly hint: string;
+  };
 }
 
 const DDL_CASES: readonly DdlCase[] = [
   {
     name: "第 1 条：一个平台账号只能有一条绑定",
-    seed: "INSERT INTO im_bindings (id,platform,external_user_id,ceo_role,verified,created_at) " +
+    seed:
+      "INSERT INTO im_bindings (id,platform,external_user_id,ceo_role,verified,created_at) " +
       "VALUES ('s1','feishu','ext-1','dev',0,1)",
     // 合法：同平台**不同账号**指向同一角色（§11.5 三通道并存时最常见的情形）。
     legal: () => ({
@@ -235,7 +251,8 @@ const DDL_CASES: readonly DdlCase[] = [
   },
   {
     name: "第 2 条：平台白名单（0002 那条排除从此不再只由注释拦着）",
-    seed: "INSERT INTO im_bindings (id,platform,external_user_id,ceo_role,verified,created_at) " +
+    seed:
+      "INSERT INTO im_bindings (id,platform,external_user_id,ceo_role,verified,created_at) " +
       "VALUES ('s2','feishu','ext-2','dev',0,1)",
     legal: () => ({
       sql:
@@ -246,14 +263,18 @@ const DDL_CASES: readonly DdlCase[] = [
     illegal: (id) => ({
       // 走 UPDATE 那一发而不是再插一行：那才是「经过一次合法写入」的路径，
       // 只拦 INSERT 的白名单在这一发上是洞。
-      sql: "UPDATE im_bindings SET platform='wechat', verified=0, verified_at=NULL, " +
-        "verified_by=NULL WHERE id='" + id + "'",
+      sql:
+        "UPDATE im_bindings SET platform='wechat', verified=0, verified_at=NULL, " +
+        "verified_by=NULL WHERE id='" +
+        id +
+        "'",
       hint: "只接受 feishu / wecom / qq",
     }),
   },
   {
     name: "第 3 条：一行绑定不许「出生即已验证」（DEFAULT 'ceo' 那个陷阱的门）",
-    seed: "INSERT INTO im_bindings (id,platform,external_user_id,ceo_role,verified,created_at) " +
+    seed:
+      "INSERT INTO im_bindings (id,platform,external_user_id,ceo_role,verified,created_at) " +
       "VALUES ('s3','feishu','ext-3','dev',0,1)",
     legal: () => ({
       sql:
@@ -270,11 +291,15 @@ const DDL_CASES: readonly DdlCase[] = [
   },
   {
     name: "第 4 条：置 1 必须同时交出署名与时刻",
-    seed: "INSERT INTO im_bindings (id,platform,external_user_id,ceo_role,verified,created_at) " +
+    seed:
+      "INSERT INTO im_bindings (id,platform,external_user_id,ceo_role,verified,created_at) " +
       "VALUES ('s4','feishu','ext-4','dev',0,1)",
     legal: (id) => ({
-      sql: "UPDATE im_bindings SET verified=1, verified_at=1700000000000, verified_by='ceo' " +
-        "WHERE id='" + id + "'",
+      sql:
+        "UPDATE im_bindings SET verified=1, verified_at=1700000000000, verified_by='ceo' " +
+        "WHERE id='" +
+        id +
+        "'",
       want: { verified: 1, verified_by: "ceo", verified_at: 1700000000000 },
     }),
     illegal: (id) => ({
@@ -284,15 +309,19 @@ const DDL_CASES: readonly DdlCase[] = [
   },
   {
     name: "第 5 条：已验证的绑定不许就地换身份（探针撞出来的那条）",
-    seed: "INSERT INTO im_bindings (id,platform,external_user_id,ceo_role,verified,created_at) " +
+    seed:
+      "INSERT INTO im_bindings (id,platform,external_user_id,ceo_role,verified,created_at) " +
       "VALUES ('s5','feishu','ext-5','dev',0,1)",
     // ★ 这一发**必须**先校验：判据管的是「已验证」那一格。
     // 未验证的行上 `SET ceo_role='ceo'` 是**合法**的（申请阶段改角色）。
     promote:
       "UPDATE im_bindings SET verified=1, verified_at=1700000000000, verified_by='ceo' WHERE id='s5'",
     legal: (id) => ({
-      sql: "UPDATE im_bindings SET verified=1, verified_at=1700000000000, verified_by='ceo' " +
-        "WHERE id='" + id + "'",
+      sql:
+        "UPDATE im_bindings SET verified=1, verified_at=1700000000000, verified_by='ceo' " +
+        "WHERE id='" +
+        id +
+        "'",
       want: { verified: 1, ceo_role: "dev" },
     }),
     illegal: (id) => ({
@@ -304,23 +333,34 @@ const DDL_CASES: readonly DdlCase[] = [
   },
   {
     name: "第 6 条：verified 只能是 0 或 1（不许第三态）",
-    seed: "INSERT INTO im_bindings (id,platform,external_user_id,ceo_role,verified,created_at) " +
+    seed:
+      "INSERT INTO im_bindings (id,platform,external_user_id,ceo_role,verified,created_at) " +
       "VALUES ('s6','feishu','ext-6','dev',0,1)",
     legal: (id) => ({
-      sql: "UPDATE im_bindings SET verified=1, verified_at=1, verified_by='ceo' WHERE id='" + id + "'",
+      sql:
+        "UPDATE im_bindings SET verified=1, verified_at=1, verified_by='ceo' WHERE id='" +
+        id +
+        "'",
       want: { verified: 1 },
     }),
     illegal: (id) => ({
-      sql: "UPDATE im_bindings SET verified=2, verified_at=1, verified_by='ceo' WHERE id='" + id + "'",
+      sql:
+        "UPDATE im_bindings SET verified=2, verified_at=1, verified_by='ceo' WHERE id='" +
+        id +
+        "'",
       hint: "只能是 0 或 1",
     }),
   },
   {
     name: "第 7 条：未验证的行不许留着校验署名",
-    seed: "INSERT INTO im_bindings (id,platform,external_user_id,ceo_role,verified,created_at) " +
+    seed:
+      "INSERT INTO im_bindings (id,platform,external_user_id,ceo_role,verified,created_at) " +
       "VALUES ('s7','feishu','ext-7','dev',0,1)",
     legal: (id) => ({
-      sql: "UPDATE im_bindings SET verified=1, verified_at=1, verified_by='ceo' WHERE id='" + id + "'",
+      sql:
+        "UPDATE im_bindings SET verified=1, verified_at=1, verified_by='ceo' WHERE id='" +
+        id +
+        "'",
       want: { verified: 1, verified_by: "ceo" },
     }),
     illegal: () => ({
@@ -386,8 +426,10 @@ describe("DDL 判据（裸 SQL，绕开整个模块）", () => {
         "VALUES ('p7','feishu','ext-p7','dev',0,1)",
     );
     expect(
-      attempt(db, "UPDATE im_bindings SET verified=1, verified_at=1, verified_by='ceo' WHERE id='p7'")
-        .blocked,
+      attempt(
+        db,
+        "UPDATE im_bindings SET verified=1, verified_at=1, verified_by='ceo' WHERE id='p7'",
+      ).blocked,
     ).toBe(false);
     const r = attempt(
       db,
@@ -426,10 +468,14 @@ describe("DDL 判据（裸 SQL，绕开整个模块）", () => {
         "VALUES ('aff','qq','ext-aff','dev',0,1)",
     );
     expect(
-      attempt(db, "UPDATE im_bindings SET verified='1', verified_at=1, verified_by='ceo' WHERE id='aff'")
-        .message,
+      attempt(
+        db,
+        "UPDATE im_bindings SET verified='1', verified_at=1, verified_by='ceo' WHERE id='aff'",
+      ).message,
     ).toBe("");
-    const t = db.prepare("SELECT typeof(verified) AS t FROM im_bindings WHERE id='aff'").get() as {
+    const t = db
+      .prepare("SELECT typeof(verified) AS t FROM im_bindings WHERE id='aff'")
+      .get() as {
       t: string;
     };
     expect(t.t).toBe("integer");
@@ -445,14 +491,19 @@ describe("DDL 判据（裸 SQL，绕开整个模块）", () => {
         "VALUES ('tri','feishu','ext-tri','dev',0,1)",
     );
     // 只动 verified_by（不点名 verified）⇒ 第 7 条必须仍然生效。
-    const r = attempt(db, "UPDATE im_bindings SET verified_by='someone' WHERE id='tri'");
+    const r = attempt(
+      db,
+      "UPDATE im_bindings SET verified_by='someone' WHERE id='tri'",
+    );
     expect(r.blocked).toBe(true);
     expect(r.message).toContain("verified=0 的行不许带");
     // 而只动 created_at（与任何判据无关）⇒ 必须放行，否则第 7 条是恒拦。
-    expect(attempt(db, "UPDATE im_bindings SET created_at=99 WHERE id='tri'").message).toBe("");
+    expect(
+      attempt(db, "UPDATE im_bindings SET created_at=99 WHERE id='tri'")
+        .message,
+    ).toBe("");
   });
 });
-
 
 describe("平台白名单与归一化", () => {
   /** 每一发都是 [输入, 期望]，包含【必须放行】的那些 —— 恒拒的实现能全绿。 */
@@ -511,7 +562,10 @@ describe("平台白名单与归一化", () => {
     // unknown_platform 多半是手滑；fake 出现在生产写侧只有一种成因
     // —— 有人把测试通道接到了真绑定上。合并成一个 reason 之后，
     // 第二种读起来像第一种，那条最该被看见的信号就并进噪音里（0019 §5 同族）。
-    expect(normalizePlatform("fake")).toEqual({ ok: false, reason: "test_channel" });
+    expect(normalizePlatform("fake")).toEqual({
+      ok: false,
+      reason: "test_channel",
+    });
     expect(normalizePlatform("feishu2")).toEqual({
       ok: false,
       reason: "unknown_platform",
@@ -566,7 +620,9 @@ describe("判据清单本身", () => {
     // 出现的「第 N 条」，与触发器条数对齐（不是等价判据 —— 一条判据可能有两条触发器，
     // 平台那组就是 INSERT/UPDATE 两条 —— 所以这里只断言【下界】并说明为什么不到界）。
     const caseNames = DDL_CASES.map((c) => c.name).join("\n");
-    const numbered = [...caseNames.matchAll(/第 (\d) 条/gu)].map((m) => Number(m[1]));
+    const numbered = [...caseNames.matchAll(/第 (\d) 条/gu)].map((m) =>
+      Number(m[1]),
+    );
     const distinct = new Set(numbered);
     // 7 条编号判据全部有 case（第 6、7 条是探针撞出来的那两条，最容易漏写用例）。
     expect([...distinct].sort()).toEqual([1, 2, 3, 4, 5, 6, 7]);
@@ -578,13 +634,11 @@ describe("判据清单本身", () => {
     // 一个 `BEGIN END;`（什么都不做）的触发器在 sqlite_master 里存在、在清单里对得上，
     // 而它一条都不拦 —— 这一发让「存在」与「拦得住」之间至少隔一次检查。
     const { db } = fresh();
-    const rows = (
-      db
-        .prepare(
-          "SELECT name, sql FROM sqlite_master WHERE type = 'trigger' AND tbl_name = 'im_bindings'",
-        )
-        .all() as { name: string; sql: string }[]
-    );
+    const rows = db
+      .prepare(
+        "SELECT name, sql FROM sqlite_master WHERE type = 'trigger' AND tbl_name = 'im_bindings'",
+      )
+      .all() as { name: string; sql: string }[];
     expect(rows).toHaveLength(EXPECTED_TRIGGERS.length);
     for (const r of rows) {
       expect(r.sql, r.name + " 没有 RAISE ⇒ 它不拦任何东西").toContain("RAISE");
@@ -698,7 +752,9 @@ describe("模块侧写路径", () => {
       newId: () => "same-id", // ← 撞的是主键
     });
     // 必须抛（不是 already_bound）：把「你给的行号重复了」翻成业务判决是撒谎。
-    await expect(second).rejects.toThrow(/UNIQUE constraint failed: im_bindings\.id/u);
+    await expect(second).rejects.toThrow(
+      /UNIQUE constraint failed: im_bindings\.id/u,
+    );
   });
 
   it("校验：verified 0→1，署名与时刻落下", async () => {
@@ -718,7 +774,11 @@ describe("模块侧写路径", () => {
       nowMs: T0,
     });
     expect(r).toEqual({ kind: "verified", verifiedAtMs: T0 });
-    expect(rawRow(db, "c1")).toMatchObject({ verified: 1, verified_by: "ceo", verified_at: T0 });
+    expect(rawRow(db, "c1")).toMatchObject({
+      verified: 1,
+      verified_by: "ceo",
+      verified_at: T0,
+    });
   });
 
   it("⭐ 重复校验【不刷新时刻】：那次署名的时间必须是当初那一次", async () => {
@@ -731,7 +791,12 @@ describe("模块侧写路径", () => {
       knownRoles: ROLES,
       newId: () => "d1",
     });
-    await markVerified(q, { platform: "feishu", externalUserId: "ext-d", verifiedBy: "ceo", nowMs: T0 });
+    await markVerified(q, {
+      platform: "feishu",
+      externalUserId: "ext-d",
+      verifiedBy: "ceo",
+      nowMs: T0,
+    });
     const again = await markVerified(q, {
       platform: "feishu",
       externalUserId: "ext-d",
@@ -764,7 +829,12 @@ describe("模块侧写路径", () => {
       knownRoles: ROLES,
       newId: () => "e1",
     });
-    await markVerified(q, { platform: "feishu", externalUserId: "ext-e", verifiedBy: "ceo", nowMs: T0 });
+    await markVerified(q, {
+      platform: "feishu",
+      externalUserId: "ext-e",
+      verifiedBy: "ceo",
+      nowMs: T0,
+    });
     const r = await rebindRole(q, {
       platform: "feishu",
       externalUserId: "ext-e",
@@ -779,14 +849,16 @@ describe("模块侧写路径", () => {
       verified_by: null,
     });
     // 改绑之后必须**重新**校验才算数。
-    expect(resolveBinding(db, { platform: "feishu", externalUserId: "ext-e" }).kind).toBe(
-      "pending_verification",
-    );
+    expect(
+      resolveBinding(db, { platform: "feishu", externalUserId: "ext-e" }).kind,
+    ).toBe("pending_verification");
   });
 
   it("REBIND_ROLE_SQL 一条语句做两件事（拆两条会被 DDL 拦，见 im.ts 那段更正）", () => {
     // 这一发钉的是那条 SQL 的**形状**：verified=0 与两个 NULL 必须与 ceo_role 同一条语句。
-    expect(REBIND_ROLE_SQL).toMatch(/SET ceo_role = \?, verified = 0, verified_at = NULL, verified_by = NULL/u);
+    expect(REBIND_ROLE_SQL).toMatch(
+      /SET ceo_role = \?, verified = 0, verified_at = NULL, verified_by = NULL/u,
+    );
     // 反向对照：不许写成 `SET ceo_role = ?`（那条今天会被触发器拦下，
     // 而「靠触发器拦」与「SQL 本来就这么写」在测试里长得一样 —— 所以钉形状）。
     expect(REBIND_ROLE_SQL).not.toMatch(/SET ceo_role = \? ?WHERE/u);
@@ -835,14 +907,27 @@ describe("模块侧写路径", () => {
 
   it("空白输入一律拒：role / externalUserId / verifiedBy 三个各一发", async () => {
     const { db, q } = fresh();
-    const base = { platform: "feishu", nowMs: T0, knownRoles: ROLES, newId: () => "h1" };
-    expect(await requestBinding(q, { ...base, externalUserId: "  ", role: "dev" })).toEqual({
+    const base = {
+      platform: "feishu",
+      nowMs: T0,
+      knownRoles: ROLES,
+      newId: () => "h1",
+    };
+    expect(
+      await requestBinding(q, { ...base, externalUserId: "  ", role: "dev" }),
+    ).toEqual({
       kind: "invalid_input",
       field: "external_user_id",
     });
     // 空白角色那一发是本文件认定最该拦的一发：那一列是 NOT NULL，
     // 空白完全写得进去，于是「已校验而指向一个不存在的角色」会**只有在使用时才炸**。
-    expect(await requestBinding(q, { ...base, externalUserId: "ext-h", role: "   " })).toEqual({
+    expect(
+      await requestBinding(q, {
+        ...base,
+        externalUserId: "ext-h",
+        role: "   ",
+      }),
+    ).toEqual({
       kind: "invalid_input",
       field: "role",
     });
@@ -870,7 +955,11 @@ describe("模块侧写路径", () => {
 
 /** 造一份「已绑好并校验」的库，返回 db。 */
 async function seeded(
-  o: { readonly verified?: boolean; readonly role?: string; readonly platform?: string } = {},
+  o: {
+    readonly verified?: boolean;
+    readonly role?: string;
+    readonly platform?: string;
+  } = {},
 ): Promise<{ db: DatabaseSync; q: WriteQueue }> {
   const { db, q } = fresh();
   const platform = o.platform ?? "feishu";
@@ -883,7 +972,12 @@ async function seeded(
     newId: () => "r1",
   });
   if (o.verified !== false) {
-    await markVerified(q, { platform, externalUserId: "ext-r", verifiedBy: "ceo", nowMs: T0 });
+    await markVerified(q, {
+      platform,
+      externalUserId: "ext-r",
+      verifiedBy: "ceo",
+      nowMs: T0,
+    });
   }
   return { db, q };
 }
@@ -891,7 +985,10 @@ async function seeded(
 describe("读侧", () => {
   it("已校验的绑定 ⇒ resolved，字段齐", async () => {
     const { db } = await seeded();
-    const r = resolveBinding(db, { platform: "feishu", externalUserId: "ext-r" });
+    const r = resolveBinding(db, {
+      platform: "feishu",
+      externalUserId: "ext-r",
+    });
     expect(r.kind).toBe("resolved");
     if (r.kind !== "resolved") return;
     expect(r.binding).toEqual({
@@ -908,7 +1005,9 @@ describe("读侧", () => {
 
   it("⭐ 未校验的申请 ⇒ pending_verification 而【不是】resolved", async () => {
     const { db } = await seeded({ verified: false });
-    expect(resolveBinding(db, { platform: "feishu", externalUserId: "ext-r" })).toEqual({
+    expect(
+      resolveBinding(db, { platform: "feishu", externalUserId: "ext-r" }),
+    ).toEqual({
       kind: "pending_verification",
       role: "dev",
     });
@@ -917,15 +1016,17 @@ describe("读侧", () => {
   it("⭐ 三种「拿不到身份」分开报：unbound / pending / rejected_platform", async () => {
     const { db } = await seeded({ verified: false });
     // ① 压根没这行
-    expect(resolveBinding(db, { platform: "feishu", externalUserId: "nobody" }).kind).toBe(
-      "unbound",
-    );
+    expect(
+      resolveBinding(db, { platform: "feishu", externalUserId: "nobody" }).kind,
+    ).toBe("unbound");
     // ② 有行而未校验
-    expect(resolveBinding(db, { platform: "feishu", externalUserId: "ext-r" }).kind).toBe(
-      "pending_verification",
-    );
+    expect(
+      resolveBinding(db, { platform: "feishu", externalUserId: "ext-r" }).kind,
+    ).toBe("pending_verification");
     // ③ 平台不合法（还没到库里那一步）
-    expect(resolveBinding(db, { platform: "wechat", externalUserId: "ext-r" })).toEqual({
+    expect(
+      resolveBinding(db, { platform: "wechat", externalUserId: "ext-r" }),
+    ).toEqual({
       kind: "rejected_platform",
       reason: "unknown_platform",
     });
@@ -963,7 +1064,9 @@ describe("读侧", () => {
       SELECT_BINDING_BY_IDENTITY_SQL,
       SELECT_BINDINGS_SQL,
     ]) {
-      expect(sql.startsWith("SELECT " + BINDING_COLUMNS + " FROM im_bindings")).toBe(true);
+      expect(
+        sql.startsWith("SELECT " + BINDING_COLUMNS + " FROM im_bindings"),
+      ).toBe(true);
     }
     // 反向：不许有 `SELECT *`（那会让以后加的每个内部列自动变成对外形状）。
     expect(BINDING_COLUMNS).not.toMatch(/\*/u);
@@ -971,9 +1074,10 @@ describe("读侧", () => {
 
   it("大小写归一在**读侧**同样生效：'Feishu' 查得到 feishu 那一行", async () => {
     const { db } = await seeded();
-    expect(resolveBinding(db, { platform: " Feishu ", externalUserId: "ext-r" }).kind).toBe(
-      "resolved",
-    );
+    expect(
+      resolveBinding(db, { platform: " Feishu ", externalUserId: "ext-r" })
+        .kind,
+    ).toBe("resolved");
   });
 
   it("knownRoles 注入后，读侧也判：已校验而角色陌生 ⇒ unknown_role", async () => {
@@ -991,10 +1095,33 @@ describe("读侧", () => {
 
   it("listBindings：已校验排前面，其余按申请先后", async () => {
     const { db, q } = fresh();
-    await requestBinding(q, { platform: "feishu", externalUserId: "a", role: "dev", nowMs: T0, newId: () => "L1" });
-    await requestBinding(q, { platform: "wecom", externalUserId: "b", role: "dev", nowMs: T1, newId: () => "L2" });
-    await requestBinding(q, { platform: "qq", externalUserId: "c", role: "dev", nowMs: T0 + 1, newId: () => "L3" });
-    await markVerified(q, { platform: "wecom", externalUserId: "b", verifiedBy: "ceo", nowMs: T1 });
+    await requestBinding(q, {
+      platform: "feishu",
+      externalUserId: "a",
+      role: "dev",
+      nowMs: T0,
+      newId: () => "L1",
+    });
+    await requestBinding(q, {
+      platform: "wecom",
+      externalUserId: "b",
+      role: "dev",
+      nowMs: T1,
+      newId: () => "L2",
+    });
+    await requestBinding(q, {
+      platform: "qq",
+      externalUserId: "c",
+      role: "dev",
+      nowMs: T0 + 1,
+      newId: () => "L3",
+    });
+    await markVerified(q, {
+      platform: "wecom",
+      externalUserId: "b",
+      verifiedBy: "ceo",
+      nowMs: T1,
+    });
     expect(listBindings(db).map((b) => [b.id, b.verified])).toEqual([
       ["L2", true],
       ["L1", false],
@@ -1064,13 +1191,11 @@ describe("读侧", () => {
     // 每跑一次测试留一个没关的 WAL 句柄（Windows 上 rmSync 会因此失败）。
     const third = openDb(path) as unknown as DatabaseSync;
     opened.push(third);
-    const after = (
-      third
-        .prepare(
-          "SELECT name FROM sqlite_master WHERE type = 'trigger' AND name = 'im_bindings_platform_insert'",
-        )
-        .all() as { name: string }[]
-    );
+    const after = third
+      .prepare(
+        "SELECT name FROM sqlite_master WHERE type = 'trigger' AND name = 'im_bindings_platform_insert'",
+      )
+      .all() as { name: string }[];
     expect(after).toEqual([]);
   });
 });
@@ -1092,7 +1217,9 @@ describe("makeChannelActorResolver（0028 那个 actorFor 注入点）", () => {
 
   it("未校验 ⇒ null（默认拒绝）", async () => {
     const { db } = await seeded({ verified: false });
-    const f = makeChannelActorResolver(db, { platformOfChannel: () => "feishu" });
+    const f = makeChannelActorResolver(db, {
+      platformOfChannel: () => "feishu",
+    });
     expect(f(actor)).toBeNull();
   });
 
@@ -1116,7 +1243,9 @@ describe("makeChannelActorResolver（0028 那个 actorFor 注入点）", () => {
   it("平台映射错位 ⇒ 查不到 ⇒ null（不跨平台认领）", async () => {
     const { db } = await seeded({ platform: "feishu" });
     // 这个通道其实是企微，而绑定记在飞书上 ⇒ 必须认不出。
-    const f = makeChannelActorResolver(db, { platformOfChannel: () => "wecom" });
+    const f = makeChannelActorResolver(db, {
+      platformOfChannel: () => "wecom",
+    });
     expect(f(actor)).toBeNull();
   });
 
@@ -1176,7 +1305,8 @@ describe("源码层", () => {
     for (const f of files) {
       if (f.endsWith(join("bindings", "im.ts"))) continue;
       const code = stripComments(readFileSync(f, "utf8"));
-      if (/\bim_bindings\b/u.test(code)) offenders.push(f.slice(HUB.length + 1));
+      if (/\bim_bindings\b/u.test(code))
+        offenders.push(f.slice(HUB.length + 1));
     }
     expect(offenders.join(", ")).toBe("");
   });
@@ -1190,6 +1320,3 @@ describe("源码层", () => {
     expect(self).toMatch(/\bim_bindings\b/u);
   });
 });
-
-
-

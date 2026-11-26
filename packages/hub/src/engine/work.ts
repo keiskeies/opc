@@ -30,20 +30,20 @@
  * 两个字段的结构类型，复制一份比留一个隐式依赖便宜。
  */
 import { existsSync } from "node:fs";
-import { WriteQueue } from "../db/write-queue.js";
 import { migrate } from "../db/migrate.js";
+import { WriteQueue } from "../db/write-queue.js";
 import { InMemoryEventBus } from "../events/bus.js";
-import { makeDispatch } from "./dispatch.js";
-import { makeRuntime } from "./runtime.js";
-import { advance, describeAdvance, type AdvanceResult } from "./driver.js";
-import { ensureCharterCard } from "./charter.js";
 import { artifactsRoot } from "../evidence/store.js";
 import {
   approveCard,
+  type CardButton,
   pendingCards,
   requiresNote,
-  type CardButton,
 } from "./approve.js";
+import { ensureCharterCard } from "./charter.js";
+import { makeDispatch } from "./dispatch.js";
+import { type AdvanceResult, advance, describeAdvance } from "./driver.js";
+import { makeRuntime } from "./runtime.js";
 
 /** 与 cli.ts 的 CliIo 同构（结构类型，两边可互换传递）。 */
 export interface WorkIo {
@@ -87,7 +87,9 @@ export interface WorkArgs {
  * cmdWork 收到 undefined 然后在 existsSync 上炸，报出来的是一条看不懂的 stack
  * （cli.ts:438 那条「不用 as never 掩盖」同一条理由）。
  */
-export type ParsedArgs<T> = { readonly ok: true; readonly args: T } | { readonly ok: false; readonly error: string };
+export type ParsedArgs<T> =
+  | { readonly ok: true; readonly args: T }
+  | { readonly ok: false; readonly error: string };
 
 /**
  * 解析 work 的参数。不复用 cli.ts 的 parseCli：那个函数返回的 ParsedCli 只有
@@ -117,7 +119,8 @@ export function parseWorkArgs(argv: readonly string[]): ParsedArgs<WorkArgs> {
     // 的措辞），而换来的是一条不会把人指错的报错。
     const val = (): string | undefined => {
       const next = argv[i + 1];
-      if (next === undefined || next === "" || next.startsWith("--")) return undefined;
+      if (next === undefined || next === "" || next.startsWith("--"))
+        return undefined;
       i += 1;
       return next;
     };
@@ -145,21 +148,38 @@ export function parseWorkArgs(argv: readonly string[]): ParsedArgs<WorkArgs> {
   const missing: string[] = [];
   if (db === undefined || db === "") missing.push("--db");
   if (task === undefined || task === "") missing.push("--task");
-  if (budget === undefined) missing.push("--max-budget-usd（每轮美元硬顶，不给默认值）");
-  if (limit === undefined) missing.push("--task-limit-cents（任务级预算上限，不给默认值）");
-  if (missing.length > 0) return { ok: false, error: "缺参数：" + missing.join(" / ") };
+  if (budget === undefined)
+    missing.push("--max-budget-usd（每轮美元硬顶，不给默认值）");
+  if (limit === undefined)
+    missing.push("--task-limit-cents（任务级预算上限，不给默认值）");
+  if (missing.length > 0)
+    return { ok: false, error: "缺参数：" + missing.join(" / ") };
   // 三个数值都要【有限】：NaN（填了单词）与 Infinity（填了 1e999）都得红。
   // --max-turns 与 --task-limit-cents 还要是整数 —— 后者是美分，§6.1 明写禁浮点金额，
   // 而「-task-limit-cents 12.5」被静默变成 12.5 美分存进 INTEGER 列，
   // 是这一族缺陷里最省笔墨也最难查的一种（同 assertCents）。
-  if (maxTurns !== undefined && (!Number.isSafeInteger(maxTurns) || maxTurns < 1)) {
-    return { ok: false, error: "--max-turns 必须是正整数，实到 " + String(maxTurns) };
+  if (
+    maxTurns !== undefined &&
+    (!Number.isSafeInteger(maxTurns) || maxTurns < 1)
+  ) {
+    return {
+      ok: false,
+      error: "--max-turns 必须是正整数，实到 " + String(maxTurns),
+    };
   }
   if (!Number.isFinite(budget) || (budget as number) <= 0) {
-    return { ok: false, error: "--max-budget-usd 必须是正数，实到 " + String(budget) };
+    return {
+      ok: false,
+      error: "--max-budget-usd 必须是正数，实到 " + String(budget),
+    };
   }
   if (!Number.isSafeInteger(limit)) {
-    return { ok: false, error: "--task-limit-cents 必须是整数美分（§6.1 禁浮点金额），实到 " + String(limit) };
+    return {
+      ok: false,
+      error:
+        "--task-limit-cents 必须是整数美分（§6.1 禁浮点金额），实到 " +
+        String(limit),
+    };
   }
   if (evidenceRoot === undefined || evidenceRoot === "") {
     // 缺省目录要在【这里】算而不是在 cmdWork 里：WorkArgs 的 `evidenceRoot` 是必填，
@@ -172,7 +192,9 @@ export function parseWorkArgs(argv: readonly string[]): ParsedArgs<WorkArgs> {
     } catch (error) {
       return {
         ok: false,
-        error: "算不出证据制品根目录的缺省值：" + String(error instanceof Error ? error.message : error) +
+        error:
+          "算不出证据制品根目录的缺省值：" +
+          String(error instanceof Error ? error.message : error) +
           "\n→ 显式给一个 --evidence-root <目录> 就能跑。",
       };
     }
@@ -242,7 +264,11 @@ export interface DecideArgs {
  * 漏改】在编译期就红（数组字面量逐元素受检），而运行时比较用 readonly string[]
  * 那一层（命令行来的是裸 string，没有 __proto__ 保证）。
  */
-const BUTTON_VALUES: readonly CardButton[] = ["approve", "reject_with_comment", "defer_deep_review"];
+const BUTTON_VALUES: readonly CardButton[] = [
+  "approve",
+  "reject_with_comment",
+  "defer_deep_review",
+];
 const KNOWN_BUTTONS: readonly string[] = BUTTON_VALUES;
 
 /**
@@ -254,7 +280,9 @@ const KNOWN_BUTTONS: readonly string[] = BUTTON_VALUES;
  * 落进 STATUS_BY_BUTTON[undefined] = undefined，然后写着 status=undefined 的卡片行
  * 落进 append-only 的库。这一族（人打的字符串直接进状态列）在这里挡住。
  */
-export function parseDecideArgs(argv: readonly string[]): ParsedArgs<DecideArgs> {
+export function parseDecideArgs(
+  argv: readonly string[],
+): ParsedArgs<DecideArgs> {
   let db: string | undefined;
   let task: string | undefined;
   let card: string | undefined;
@@ -276,8 +304,10 @@ export function parseDecideArgs(argv: readonly string[]): ParsedArgs<DecideArgs>
   const missing: string[] = [];
   if (db === undefined || db === "") missing.push("--db");
   if (task === undefined || task === "") missing.push("--task");
-  if (button === undefined) missing.push("--button（" + KNOWN_BUTTONS.join(" / ") + "）");
-  if (missing.length > 0) return { ok: false, error: "缺参数：" + missing.join(" / ") };
+  if (button === undefined)
+    missing.push("--button（" + KNOWN_BUTTONS.join(" / ") + "）");
+  if (missing.length > 0)
+    return { ok: false, error: "缺参数：" + missing.join(" / ") };
   // 先收成【要么是三颗之一、要么是 undefined】，再判 undefined：
   // 直接 if(!includes) return 之后 TS 并不会把 button 从 string 收窄成 CardButton，
   // 于是下游还得 cast 一次，而 cast 掩盖的就是「以后加了第四颗按钮忘了改这里」。
@@ -285,12 +315,22 @@ export function parseDecideArgs(argv: readonly string[]): ParsedArgs<DecideArgs>
     ? (button as CardButton)
     : undefined;
   if (b === undefined) {
-    return { ok: false, error: "--button 只认 " + KNOWN_BUTTONS.join(" / ") + "，实到 " + String(button) };
+    return {
+      ok: false,
+      error:
+        "--button 只认 " +
+        KNOWN_BUTTONS.join(" / ") +
+        "，实到 " +
+        String(button),
+    };
   }
   // 判在解析层而不只在 approveCard 里，是为了这一句能出现在【参数错误】那一支：
   // 退出码 2（改命令就行）比 1（跑炸了，去看原文）更贴合「你少打了一个 --note」。
   if (requiresNote(b) && (note === undefined || note.trim() === "")) {
-    return { ok: false, error: "--button reject_with_comment 必须带 --note <理由>" };
+    return {
+      ok: false,
+      error: "--button reject_with_comment 必须带 --note <理由>",
+    };
   }
   return {
     ok: true,
@@ -312,9 +352,16 @@ export function parseDecideArgs(argv: readonly string[]): ParsedArgs<DecideArgs>
  * 「没有待批卡片」算 2 而不是 1：下一步是去建那张卡（hub work）或换一条任务，
  * 不是排查这个进程。
  */
-export async function cmdDecide(a: DecideArgs, io: WorkIo): Promise<WorkResult> {
+export async function cmdDecide(
+  a: DecideArgs,
+  io: WorkIo,
+): Promise<WorkResult> {
   if (!existsSync(a.db)) {
-    io.error("错误：数据库文件不存在 —— " + a.db + "\n（hub decide 不建库，见 --help）\n");
+    io.error(
+      "错误：数据库文件不存在 —— " +
+        a.db +
+        "\n（hub decide 不建库，见 --help）\n",
+    );
     return { code: 2 };
   }
   const q = new WriteQueue(a.db);
@@ -330,8 +377,12 @@ export async function cmdDecide(a: DecideArgs, io: WorkIo): Promise<WorkResult> 
         .prepare("SELECT status FROM tasks WHERE id = ?")
         .get(a.task) as Record<string, unknown> | undefined;
       io.error(
-        "错误：任务 [" + a.task + "] 上【没有待批的卡片】" +
-          (t === undefined ? "（这条任务也不在库里）" : "（它现在在 " + String(t["status"] ?? "") + "）") +
+        "错误：任务 [" +
+          a.task +
+          "] 上【没有待批的卡片】" +
+          (t === undefined
+            ? "（这条任务也不在库里）"
+            : "（它现在在 " + String(t["status"] ?? "") + "）") +
           "。\nhub decide 只管【收件箱里已有的那一张】；没有卡就去跑 hub work（它会把要人批的东西建成卡），" +
           "或者确认你指的是不是这条任务。\n",
       );
@@ -342,14 +393,27 @@ export async function cmdDecide(a: DecideArgs, io: WorkIo): Promise<WorkResult> 
     if (cardId === undefined) {
       if (cards.length > 1) {
         io.error(
-          "错误：那条任务上有 " + cards.length + " 张待批卡片，不能替你猜要办哪一张。\n" +
+          "错误：那条任务上有 " +
+            cards.length +
+            " 张待批卡片，不能替你猜要办哪一张。\n" +
             "请指定 --card <下面某个 id>：\n" +
             // 打印 cardKey 而不是只打印 approvalType：一张任务上【两张】待批卡从今天起是
             // 正常状态（拦截卡 + 席位补卡），而它们的 approvalType【相同】（都是 escalation），
             // 于是原来那份清单读起来是两条一模一样的"escalation"+ 两串 UUID，
             // 等于把"该办哪张"这个问题原样退还给看清单的人。
             // cardKey 已经在 CardRow 里（PENDING_CARDS_SQL 带着），不用改 SQL。
-            cards.map((c) => "  · " + c.id + "（" + c.approvalType + " / " + (c.cardKey ?? "无键") + "）").join("\n") +
+            cards
+              .map(
+                (c) =>
+                  "  · " +
+                  c.id +
+                  "（" +
+                  c.approvalType +
+                  " / " +
+                  (c.cardKey ?? "无键") +
+                  "）",
+              )
+              .join("\n") +
             "\n",
         );
         return { code: 2 };
@@ -363,9 +427,24 @@ export async function cmdDecide(a: DecideArgs, io: WorkIo): Promise<WorkResult> 
     const hit = cards.find((c) => c.id === cardId);
     if (hit === undefined) {
       io.error(
-        "错误：卡片 [" + cardId + "] 不是任务 [" + a.task + "] 上【待批】的卡片。\n" +
+        "错误：卡片 [" +
+          cardId +
+          "] 不是任务 [" +
+          a.task +
+          "] 上【待批】的卡片。\n" +
           "这条任务此刻待批的是：\n" +
-          cards.map((c) => "  · " + c.id + "（" + c.approvalType + " / " + (c.cardKey ?? "无键") + "）").join("\n") +
+          cards
+            .map(
+              (c) =>
+                "  · " +
+                c.id +
+                "（" +
+                c.approvalType +
+                " / " +
+                (c.cardKey ?? "无键") +
+                "）",
+            )
+            .join("\n") +
           "\n（已经批过的卡片不能再批一次：决策是 append-only 的，重复点一次就是在历史里说「这个人又决定了一次」。）\n",
       );
       return { code: 2 };
@@ -385,7 +464,17 @@ export async function cmdDecide(a: DecideArgs, io: WorkIo): Promise<WorkResult> 
     );
     io.write("  " + r.note + "\n");
     if (r.outcome === "decided" && r.edgeExists) {
-      io.write("  任务 " + a.task + "：" + r.from + " → " + r.to + "（卡片 " + r.cardStatus + "）\n");
+      io.write(
+        "  任务 " +
+          a.task +
+          "：" +
+          r.from +
+          " → " +
+          r.to +
+          "（卡片 " +
+          r.cardStatus +
+          "）\n",
+      );
     }
     // note_required 走 2：approveCard 里那一发是「请求本身不成立」，
     // 而 parseDecideArgs 已经挡过一道，走到这里只剩【直连本函数调用】那条路。
@@ -400,7 +489,6 @@ export async function cmdDecide(a: DecideArgs, io: WorkIo): Promise<WorkResult> 
   }
 }
 
-
 /**
  * 跑一次 work。
  *
@@ -412,7 +500,11 @@ export async function cmdDecide(a: DecideArgs, io: WorkIo): Promise<WorkResult> 
  */
 export async function cmdWork(a: WorkArgs, io: WorkIo): Promise<WorkResult> {
   if (!existsSync(a.db)) {
-    io.error("错误：数据库文件不存在 —— " + a.db + "\n（hub work 不建库，先用 hub run 建任务）\n");
+    io.error(
+      "错误：数据库文件不存在 —— " +
+        a.db +
+        "\n（hub work 不建库，先用 hub run 建任务）\n",
+    );
     return { code: 2 };
   }
   const q = new WriteQueue(a.db);
@@ -434,12 +526,23 @@ export async function cmdWork(a: WorkArgs, io: WorkIo): Promise<WorkResult> {
     });
     const task = rt.deps.loadTask(a.task);
     if (task === null) {
-      io.error("错误：任务不存在 —— task_id = " + a.task + "\n（hub work 不建任务，见 --help）\n");
+      io.error(
+        "错误：任务不存在 —— task_id = " +
+          a.task +
+          "\n（hub work 不建任务，见 --help）\n",
+      );
       return { code: 2 };
     }
     io.write(
-      "推进任务 " + a.task + "：状态 " + task.status + "，负责角色 " + task.role +
-        "，组织图 v" + task.graphVersion + "\n",
+      "推进任务 " +
+        a.task +
+        "：状态 " +
+        task.status +
+        "，负责角色 " +
+        task.role +
+        "，组织图 v" +
+        task.graphVersion +
+        "\n",
     );
 
     // ── CHARTER_PENDING 这一格：先把提案起草出来，再谈推进 ──────────────
@@ -459,10 +562,16 @@ export async function cmdWork(a: WorkArgs, io: WorkIo): Promise<WorkResult> {
           publish: (e, seq) => bus.publishPersisted(e, seq),
         },
       );
-      io.write("  章程：" + c.note + (c.costCents > 0 ? "（" + c.costCents + " 美分）" : "") + "\n");
+      io.write(
+        "  章程：" +
+          c.note +
+          (c.costCents > 0 ? "（" + c.costCents + " 美分）" : "") +
+          "\n",
+      );
       // 没起草出来就【不进 advance】：状态还是 CHARTER_PENDING，advance 会为它
       // 白跑一趟（dispatch 立刻拒绝），而那次白跑在输出里长得像「试过了没用」。
-      if (c.outcome !== "drafted") return { code: c.outcome === "already_pending" ? 0 : 1 };
+      if (c.outcome !== "drafted")
+        return { code: c.outcome === "already_pending" ? 0 : 1 };
       // 把那一张卡的 id 与整条命令打出来。只说「去收件箱点一下」在 CLI 上等于没说：
       // 这一发的用户此刻就在终端前，而收件箱是另一个进程（web / 桌面端）。
       // --button 也带上：省掉它的话这一发敲下去拿到的是「缺参数 --button」，
@@ -472,8 +581,13 @@ export async function cmdWork(a: WorkArgs, io: WorkIo): Promise<WorkResult> {
       // 名字不一致是事件的既有形状，不是这里能改的（改它等于改 DomainEvent），
       // 但打出来的值必须是对的 —— 否则这一行照抄下去拿到的是「卡片不存在」。
       io.write(
-        "  下一步：hub decide --db " + a.db + " --task " + a.task +
-          " --card " + (c.card?.interruptId ?? "?") + " --button approve" +
+        "  下一步：hub decide --db " +
+          a.db +
+          " --task " +
+          a.task +
+          " --card " +
+          (c.card?.interruptId ?? "?") +
+          " --button approve" +
           " —— 那一次点击才是推进这一格的东西。\n",
       );
       return { code: 0 };
@@ -486,8 +600,17 @@ export async function cmdWork(a: WorkArgs, io: WorkIo): Promise<WorkResult> {
       maxTurns: a.maxTurns,
       onTurn: (t) => {
         io.write(
-          "  [" + t.turn + "] " + t.res.role + " → " + t.res.status +
-            "（" + t.res.costCents + " 美分" + (t.recorded ? "" : "，⚠ 执行日志没写进去：" + t.why) + "）\n",
+          "  [" +
+            t.turn +
+            "] " +
+            t.res.role +
+            " → " +
+            t.res.status +
+            "（" +
+            t.res.costCents +
+            " 美分" +
+            (t.recorded ? "" : "，⚠ 执行日志没写进去：" + t.why) +
+            "）\n",
         );
       },
     });

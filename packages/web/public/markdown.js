@@ -16,13 +16,16 @@ const escMd = (value) =>
   String(value ?? "").replace(
     /[&<>"']/g,
     (c) =>
-      ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c],
+      ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[
+        c
+      ],
   );
 
 /** 只放行能安全出现在 href/src 里的形态：http(s)、mailto、站内相对路径与 # 锚点。 */
 const safeHref = (raw) => {
   const url = String(raw ?? "").trim();
   // 控制字符与空白能用来拆开 javascript: 的字面量（java\tscript:），先剥掉再判协议。
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: 剥控制符的正则本身必须字面写出码位段，规则警告的性质正是这条防线的用途
   const flat = url.replace(/[\u0000-\u0020\u007f]/gu, "");
   if (/^(?:https?:|mailto:|#|\/|\.\/|\.\.\/)/iu.test(flat)) return url;
   return "#";
@@ -63,6 +66,7 @@ function inlineMd(escaped) {
   );
   s = s.replace(/~~([^~]+)~~/gu, "<del>$1</del>");
   return s.replace(
+    // biome-ignore lint/suspicious/noControlCharactersInRegex: 行内码占位哨兵的 U+0000 定界必须字面写出，与写入端成对，换别的字符会与正文撞车
     /\u0000(\d+)\u0000/gu,
     (_m, i) => `<code>${codes[Number(i)]}</code>`,
   );
@@ -99,7 +103,10 @@ function tableHtml(header, divider, rows) {
     .map(
       (row) =>
         `<tr>${cellsOf(row)
-          .map((cell, i) => `<td${aligns[i] ? ` align="${aligns[i]}"` : ""}>${inlineMd(cell)}</td>`)
+          .map(
+            (cell, i) =>
+              `<td${aligns[i] ? ` align="${aligns[i]}"` : ""}>${inlineMd(cell)}</td>`,
+          )
           .join("")}</tr>`,
     )
     .join("");
@@ -119,7 +126,9 @@ function listHtml(items, ordered) {
  * @returns {string} 可直接交给 innerHTML 的片段
  */
 export function renderMarkdown(text) {
-  const lines = String(text ?? "").replace(/\r\n?/gu, "\n").split("\n");
+  const lines = String(text ?? "")
+    .replace(/\r\n?/gu, "\n")
+    .split("\n");
   const out = [];
   let i = 0;
   let paragraph = [];
@@ -177,7 +186,11 @@ export function renderMarkdown(text) {
       const divider = escMd(lines[i + 1]);
       i += 2;
       const rows = [];
-      while (i < lines.length && lines[i].includes("|") && lines[i].trim() !== "") {
+      while (
+        i < lines.length &&
+        lines[i].includes("|") &&
+        lines[i].trim() !== ""
+      ) {
         rows.push(escMd(lines[i]));
         i += 1;
       }

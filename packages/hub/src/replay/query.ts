@@ -103,7 +103,9 @@ export type ReplayCheckpoint = {
    * `decoded: false` 时为 null（解码失败或没提供）。
    * 形状见 decodeCheckpoint —— 用官方程 JsonPlusSerializer 还原，不是自己猜格式。
    */
-  readonly summary: readonly { readonly channel: string; readonly valueJson: string }[] | null;
+  readonly summary:
+    | readonly { readonly channel: string; readonly valueJson: string }[]
+    | null;
 };
 
 export type ReplayView = {
@@ -226,7 +228,9 @@ export type BuildReplayInput = {
  */
 export function replayEventsByIdsSql(ids: readonly number[]): string {
   if (ids.length === 0) {
-    throw new Error("ids 为空时不要走这条 SQL（IN () 是语法错误），调用方应提前返回空。");
+    throw new Error(
+      "ids 为空时不要走这条 SQL（IN () 是语法错误），调用方应提前返回空。",
+    );
   }
   /*
    * 这一条是【上界对账】，不是防御性冗余。实测本机 SQLite 接受
@@ -281,7 +285,8 @@ export async function buildReplayView(
   const keyword = o.keyword;
   // 显式收窄而不是靠 `searching` 这个布尔：TS 不会顺着布尔把 keyword 收窄成 string，
   // 而写成 `keyword as string` 会把「空串也算搜不搜」这件事的判断权交回给类型断言。
-  const needle = keyword !== undefined && [...keyword].length > 0 ? keyword : undefined;
+  const needle =
+    keyword !== undefined && [...keyword].length > 0 ? keyword : undefined;
   const searchLimit = Math.min(limit, MAX_SEARCH_LIMIT);
   const effectiveLimit = needle === undefined ? limit : searchLimit;
   let rows: Record<string, unknown>[];
@@ -468,9 +473,12 @@ export async function decodeCheckpoint(
   serializer: JsonPlusSerializer = new JsonPlusSerializer(),
 ): Promise<{
   readonly decoded: boolean;
-  readonly summary: readonly { readonly channel: string; readonly valueJson: string }[] | null;
+  readonly summary:
+    | readonly { readonly channel: string; readonly valueJson: string }[]
+    | null;
 }> {
-  if (type === null || blob.byteLength === 0) return { decoded: false, summary: null };
+  if (type === null || blob.byteLength === 0)
+    return { decoded: false, summary: null };
   let state: unknown;
   try {
     state = await serializer.loadsTyped(type, blob);
@@ -531,8 +539,7 @@ async function readCheckpoints(
       const rawBlob = r["checkpoint"];
       // node:sqlite 的 BLOB 列读回来是 Uint8Array。非 Uint8Array（不该发生）
       // 时按空字节交给 decodeCheckpoint —— 它会走 decoded:false 那一支，不会抛。
-      const blob =
-        rawBlob instanceof Uint8Array ? rawBlob : new Uint8Array(0);
+      const blob = rawBlob instanceof Uint8Array ? rawBlob : new Uint8Array(0);
       const decoded = await decodeCheckpoint(type, blob);
       return {
         checkpoint_id: id,
@@ -594,7 +601,8 @@ function parseColumn(
     return {
       value: null,
       degraded: true,
-      reason: column + " 是空串（recorder 从不写空串，这行是绕过 recorder 直写的）",
+      reason:
+        column + " 是空串（recorder 从不写空串，这行是绕过 recorder 直写的）",
       raw,
     };
   }
@@ -605,7 +613,9 @@ function parseColumn(
       value: null,
       degraded: true,
       reason:
-        column + " 不是合法 JSON：" + (e instanceof Error ? e.message : String(e)),
+        column +
+        " 不是合法 JSON：" +
+        (e instanceof Error ? e.message : String(e)),
       raw,
     };
   }
@@ -618,7 +628,10 @@ function readAll(
 ): Record<string, unknown>[] {
   assertSingleStatement(sql);
   assertParamCount(sql, params);
-  return db.prepare(sql).all(...(params as never[])) as Record<string, unknown>[];
+  return db.prepare(sql).all(...(params as never[])) as Record<
+    string,
+    unknown
+  >[];
 }
 
 function readOne(
@@ -631,7 +644,9 @@ function readOne(
 
 function str(v: unknown, column: string): string {
   if (typeof v === "string") return v;
-  throw new Error(column + " 期望字符串，实到 " + typeof v + "。列名或表结构变了。");
+  throw new Error(
+    column + " 期望字符串，实到 " + typeof v + "。列名或表结构变了。",
+  );
 }
 
 function num(v: unknown, column: string): number {

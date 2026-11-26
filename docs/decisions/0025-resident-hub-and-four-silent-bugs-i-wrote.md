@@ -12,7 +12,7 @@
 ## 0. 这一篇填的是什么洞
 
 四条 grep（当场跑的）：`serveHub(` 与 `buildHubDeps(` 在 `src/` 里**零**非测试调用点；
-`runPatrol(` 只有 `maintenance.ts`（一个要人手工敲的脚本）调；`packages/hub/src/heartbeat/patrol.ts:385` 明写
+`runPatrol(` 只有 `maintenance.ts`（一个要人手工敲的脚本）调；`packages/hub/src/heartbeat/patrol.ts:401` 明写
 「调度（什么时候醒）属于常驻进程」。合起来：HTTP 层、依赖装配、完整性巡检、备份、
 停滞检测**全都写完了，而没有任何东西把它们叫起来**。【规格】§5.1 那句「Hub 是唯一常驻进程」
 在此之前描述的是一堆模块，不是一个进程。

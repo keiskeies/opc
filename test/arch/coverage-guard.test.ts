@@ -40,35 +40,43 @@ it("门控判定内核文件覆盖率 ≥ 下限（反假绿：文件必须在�
 
   const vitest = join(ROOT, "node_modules", "vitest", "vitest.mjs");
   if (!existsSync(vitest)) throw new Error("找不到 vitest.mjs：" + vitest);
-  const r = spawnSync(process.execPath, [
-    vitest,
-    "run",
-    "--coverage",
-    "--coverage.provider=v8",
-    "--coverage.reporter=json-summary",
-    "--coverage.reportsDirectory=" + TMP,
-    "packages/hub/test/gates",
-    "packages/hub/test/routing/escalation.test.ts",
-    "packages/hub/test/acceptance/phase1-gates.test.ts",
-  ], {
-    cwd: ROOT,
-    encoding: "utf8",
-    timeout: 180000,
-    maxBuffer: 32 * 1024 * 1024,
-    shell: false,
-  });
+  const r = spawnSync(
+    process.execPath,
+    [
+      vitest,
+      "run",
+      "--coverage",
+      "--coverage.provider=v8",
+      "--coverage.reporter=json-summary",
+      "--coverage.reportsDirectory=" + TMP,
+      "packages/hub/test/gates",
+      "packages/hub/test/routing/escalation.test.ts",
+      "packages/hub/test/acceptance/phase1-gates.test.ts",
+    ],
+    {
+      cwd: ROOT,
+      encoding: "utf8",
+      timeout: 180000,
+      maxBuffer: 32 * 1024 * 1024,
+      shell: false,
+    },
+  );
   if (r.error) throw new Error("vitest 调用失败：" + r.error.message);
   const out = (r.stdout ?? "") + (r.stderr ?? "");
 
   const sumFile = join(TMP, "coverage-summary.json");
   // 哨兵：summary 必须在场 —— 没产出 = 调用没成功 = 不能当通过。
   if (!existsSync(sumFile))
-    throw new Error("coverage-summary.json 未生成。vitest 输出（尾 300 字）：\n" + out.slice(-300));
+    throw new Error(
+      "coverage-summary.json 未生成。vitest 输出（尾 300 字）：\n" +
+        out.slice(-300),
+    );
   const sum = JSON.parse(readFileSync(sumFile, "utf8"));
 
   // 反假绿 2：两个门控源文件真的被 v8 纳入统计了 —— 空对空跑绿是假通过。
   const found = Object.keys(sum).filter((k) =>
-    GATE_FILES.some((f) => k.replace(/\\/g, "/").endsWith("/" + f)));
+    GATE_FILES.some((f) => k.replace(/\\/g, "/").endsWith("/" + f)),
+  );
   expect(found.length).toBe(GATE_FILES.length);
 
   // 反假绿 3：每条独立的、重算来源的下限断言。
@@ -76,12 +84,20 @@ it("门控判定内核文件覆盖率 ≥ 下限（反假绿：文件必须在�
     const v = sum[k];
     const fname = k.replace(/\\/g, "/").split("/").pop();
     expect(v.lines?.pct, fname + " lines").toBeGreaterThanOrEqual(MIN.lines);
-    expect(v.branches?.pct, fname + " branches").toBeGreaterThanOrEqual(MIN.branches);
-    expect(v.functions?.pct, fname + " functions").toBeGreaterThanOrEqual(MIN.functions);
-    expect(v.statements?.pct, fname + " statements").toBeGreaterThanOrEqual(MIN.statements);
+    expect(v.branches?.pct, fname + " branches").toBeGreaterThanOrEqual(
+      MIN.branches,
+    );
+    expect(v.functions?.pct, fname + " functions").toBeGreaterThanOrEqual(
+      MIN.functions,
+    );
+    expect(v.statements?.pct, fname + " statements").toBeGreaterThanOrEqual(
+      MIN.statements,
+    );
   }
 
   // 兜底：vitest 进程本身应当成功。
   if (r.status !== 0)
-    throw new Error("vitest --coverage 非零退出 " + r.status + "：\n" + out.slice(-500));
+    throw new Error(
+      "vitest --coverage 非零退出 " + r.status + "：\n" + out.slice(-500),
+    );
 });

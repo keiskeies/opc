@@ -24,7 +24,6 @@ import { join } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import type { EvidenceBundle } from "@opc/contracts";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { fixtureTmp } from "../fixtures/fixture-dir.js";
 import { BudgetTracker } from "../../src/budget/tracker.js";
 import { migrate } from "../../src/db/migrate.js";
 import type { DomainEvent } from "../../src/events/bus.js";
@@ -43,6 +42,7 @@ import {
   type EscalationState,
 } from "../../src/graph/routing/escalation.js";
 import type { TaskState } from "../../src/graph/status.js";
+import { fixtureTmp } from "../fixtures/fixture-dir.js";
 
 const TMP = fixtureTmp("acceptance", import.meta.url);
 
@@ -86,7 +86,7 @@ async function scenario(taskId: string): Promise<{
   actions: () => string[];
 }> {
   const { openDb } = await import("../../src/db/driver.js");
-  const db = openDb(join(TMP, "a-" + process.pid + "-" + ++fileSeq + ".db")) ;
+  const db = openDb(join(TMP, "a-" + process.pid + "-" + ++fileSeq + ".db"));
   opened.push(db);
   migrate(db);
   db.prepare(
@@ -113,7 +113,7 @@ async function scenario(taskId: string): Promise<{
       }
       open = false;
     },
-    scope: <T,>(fn: () => Promise<T>): Promise<T> => als.run({ db }, fn),
+    scope: <T>(fn: () => Promise<T>): Promise<T> => als.run({ db }, fn),
     inTx: () => open,
     db: () => {
       const s = als.getStore();
@@ -158,9 +158,9 @@ async function scenario(taskId: string): Promise<{
     store,
     eid,
     actions: () =>
-      (
-        db.prepare("SELECT action FROM events ORDER BY id").all() as Row[]
-      ).map((r) => String(r["action"])),
+      (db.prepare("SELECT action FROM events ORDER BY id").all() as Row[]).map(
+        (r) => String(r["action"]),
+      ),
   };
 }
 
@@ -361,7 +361,9 @@ describe("验收 2：测试说「通过」但覆盖率不足", () => {
       artifacts: [
         { path: "T-1/test_report/r.md", sha256: sha256Text("r"), bytes: 1 },
       ],
-      claims: [{ text: "全部用例通过", evidence_refs: ["T-1/test_report/r.md"] }],
+      claims: [
+        { text: "全部用例通过", evidence_refs: ["T-1/test_report/r.md"] },
+      ],
       honesty_boundaries: [],
       metrics,
     }) as EvidenceBundle;
@@ -396,7 +398,9 @@ describe("验收 2：测试说「通过」但覆盖率不足", () => {
     expect(v.decision).toBe("escalate");
     expect(v.unresolved.join("")).toContain("coverage");
     // 判不出 ⇒ 门控自己承认没判成，并把这件事接给升级路由（两侧同向）
-    const e = decideEscalation(escalationState({ unresolvedCriteriaCount: v.unresolved.length }));
+    const e = decideEscalation(
+      escalationState({ unresolvedCriteriaCount: v.unresolved.length }),
+    );
     expect(e.escalate).toBe(true);
     if (e.escalate) expect(e.reason).toBe("insufficient_evidence");
   });
@@ -457,7 +461,9 @@ describe("验收 2：测试说「通过」但覆盖率不足", () => {
 /* ══════════ 验收标准 3：预算突破 → BudgetPaused + 升级卡片 ══════════ */
 
 describe("验收 3：一次预算突破", () => {
-  const escalationState = (over: Partial<EscalationState> = {}): EscalationState => ({
+  const escalationState = (
+    over: Partial<EscalationState> = {},
+  ): EscalationState => ({
     taskId: "T-1",
     state: "IN_REVIEW",
     ...over,

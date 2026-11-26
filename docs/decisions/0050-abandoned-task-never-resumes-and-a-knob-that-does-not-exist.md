@@ -62,7 +62,7 @@
 我就此以为"这两格在屏幕上没有任何标记"。实际去看渲染那几行：
 
 ```js
-<span class="admin-pill ${statusClass(tk.status)}">${esc(tk.status)}</span>   // app.js:1129
+<span class="admin-pill ${statusClass(tk.status)}">${esc(tk.status)}</span>   // app.js:1134
 ```
 
 - 卡片上那枚 pill 渲的是**状态名原文** —— `BLOCKED` 三个字就在屏幕上。
@@ -131,7 +131,7 @@
 而 `kindOf`（`heartbeat/patrol.ts:139`）取的是 **`payload` 里的 `$.kind`**，
 我手写的行把 `TaskStateChanged` 写进了 **`action` 列**、payload 里**没有 `kind`**
 ⇒ marker 恒 0 ⇒ 那一发测的根本不是 marker。
-回去照 `dispatch.ts:1973`（round357 复算：1393 → 1554）那个真实写入点抄了形状（`action='state_change'`、
+回去照 `dispatch.ts:2281`（round357 复算：1393 → 1554）那个真实写入点抄了形状（`action='state_change'`、
 `target=落点状态`、`payload.kind` 在 payload 里）**同一条探针**：
 
 ```
@@ -200,7 +200,7 @@
 **没有写进措辞**，理由两条而都可复算：
 
 - 屏幕上**已经**有 `hub work` 那句话，而只在「这台 Hub 没开驱动器」那一档
-  （`app.js:959`）。那一档里它是**那条路本身**；到顶这一档里它是**同一堵墙的另一次尝试**。
+  （`app.js:964`）。那一档里它是**那条路本身**；到顶这一档里它是**同一堵墙的另一次尝试**。
 - 驱动器放弃的常见原因就是"跑了一轮而状态没动"，而 `advance` 数的是**单次调用内**
   连续多少轮没动（与驱动器那个跨进程 attempts 是**两个不同的计数器**，
   后者只活在 `events` 里）。所以再跑一次多半得到**同一个结果**，
@@ -298,7 +298,7 @@ note **写死在调用点**（「产出已进入 X 的审阅队列」）。今�
 ```
 
 ⇒ `advance` 那条「不动就停」的判据**在这个循环上恒假**（`!r.moved` 永不成立），
-单轮的封顶退化成 `maxTurns=12`，而 `driver-pump.ts:354` 自己写着
+单轮的封顶退化成 `maxTurns=12`，而 `driver-pump.ts:355` 自己写着
 「这个数字**不是预算**，是最后一道闸」。
 
 **探针 54**（跨轮，`/tmp/probe54.mts`，`maxAttempts=2` 而命令行上限故意放到不可能触发）：
@@ -440,7 +440,7 @@ task.status === "IN_REVIEW" && decision?.action === "handoff" ? deps.rejectionCo
 两侧刻意相反：装配侧忘了接线 = 上限永不生效（"配置写了而没生效"那族），要 TS 响；
 纯函数侧三十来个调用点大多没有"打回"这一维，强制写 0 只会让每一处都得解释那个 0 是什么。
 
-`runtime.ts:132` 那个 `REJECTION_COUNT_SQL`（【round272 坐标 +5：runtime.ts 头部加了一条 import，判据本体没动】【round305 再 +1：又是头部加 import —— 接上 `turn-retry.js`，判据本体仍没动】【round312 再 +9：还是头部 —— runTurn 走 gateway 那几条 import，判据本体照旧没动】）数的是 `json_extract(payload,'$.to') = 'REJECTED_DOWNWARD'`
+`runtime.ts:133` 那个 `REJECTION_COUNT_SQL`（【round272 坐标 +5：runtime.ts 头部加了一条 import，判据本体没动】【round305 再 +1：又是头部加 import —— 接上 `turn-retry.js`，判据本体仍没动】【round312 再 +9：还是头部 —— runTurn 走 gateway 那几条 import，判据本体照旧没动】）数的是 `json_extract(payload,'$.to') = 'REJECTED_DOWNWARD'`
 而**不是 `action`** —— 一次打回写**两条** `state_change` 边（那一跳 + 自动补的 `IN_PROGRESS` 那一跳），
 数 `action` ⇒ 恒翻倍 ⇒ 上限**提前一倍**咬，而屏幕上没有任何一处会说"这次升级是计数算重了"。
 数 tasks.status 也不行：任务早被自动那一跳落到 `IN_PROGRESS` 重做了，那个数**恒 0**。
@@ -467,7 +467,7 @@ task.status === "IN_REVIEW" && decision?.action === "handoff" ? deps.rejectionCo
 > ⇒ **两类坐标必须用两种形态写**：断言今天的位置 ⇒ `文件:行号`（进快照）；
 > 陈述当时写的是什么 ⇒ 汉字「第 N 行」（不进快照，也不该进）。
 > 本仓此前没有把这条区分写下来过，所以每次文件一动，历史引述就会跟着"漂"，
-> 而把它"修绿"的那一步恰好就是在改历史。上面 §6.5 顶部那个 `runtime.ts:132` 是**今天的位置**
+> 而把它"修绿"的那一步恰好就是在改历史。上面 §6.5 顶部那个 `runtime.ts:133` 是**今天的位置**
 > （【round272 又 +5：runtime.ts 头部加了一条 import；原为 108，再往前是 112；round305 再 +1，还是头部加 import】，
 > 因为 `runtime.ts` 头部不断加行而整体下移），它与这句历史不冲突：
 > 一个说今天，一个说当时。
@@ -516,7 +516,7 @@ IN_PROGRESS/dev → IN_REVIEW/director → IN_PROGRESS/dev → … → ESCALATED
 
 - **放弃之后没有任何屏幕内动作能让它继续走**（§3.2/§3.4）。唯一的复活路径是
   【重新来到这一格】，而 `IN_PROGRESS` 在边表里只有**一条入边**
-  （`DECOMPOSING → IN_PROGRESS`，`dispatch.ts:152`，round357 复算：102 → 126），且**没有任何一条边的落点是
+  （`DECOMPOSING → IN_PROGRESS`，`dispatch.ts:168`，round357 复算：102 → 126；round380 再复算：152 → 168，全仓 format 收敛），且**没有任何一条边的落点是
   `CHARTER_PENDING` / `DECOMPOSING`** —— 也就是说停在 `IN_PROGRESS` 而已被放弃的任务，
   **没有合法的边可以走回那条链**。本篇只把措辞改诚实，**没有**造那条边：
   那条边是 `0044 §9.1`（打回无处可去）与 `0041 §7`（跨限没有合法停法）同一族的事，

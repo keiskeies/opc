@@ -292,7 +292,7 @@ M10 一开始报「全绿」时我的第一反应是「这条测试真守不住�
 【round316 复核】③ 表里第二行说的「`auto_approved_by` 无人写 / 那一列根本不存在 /
 策略引擎自动审批是 Task 3.5（未做）」今天**也被覆盖**：`policy/auto-approve.ts`
 现在写 `payload.auto_approved_by`（JSON 键路线，非独立列，见其 454/457 行注释
-「计划 Test 项点名的字段名」），`overview/today.ts:372` 与 `replay/query.ts:62`
+「计划 Test 项点名的字段名」），`overview/today.ts:375` 与 `replay/query.ts:62`
 都读它 ⇒「无人写」不成立；且 0026 的 cards.ts 让 `approvals` 有了**创建方**，
 0013 当时「3.5 之前先得有人创建卡片」那个前置今天存在。`approvals` 的创建
 （INSERT）此后由 cards.ts 负责、claimed 由 CLAIM_APPROVAL_SQL 负责 ——

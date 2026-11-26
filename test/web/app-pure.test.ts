@@ -2944,7 +2944,7 @@ describe("rejectHtml —— 422 的人话（round351 补执行证据）", () => 
 
   it("⭐ 都没有 ⇒ JSON.stringify 兜底且被 esc", () => {
     const html = f(500, { weird: true }) as string;
-    expect(html).toContain('{&quot;weird&quot;:true}');
+    expect(html).toContain("{&quot;weird&quot;:true}");
   });
 });
 
@@ -2973,14 +2973,19 @@ describe("decideRow —— 审批决定行模板（round351 补执行证据）",
 });
 
 describe("enumSel —— 下拉框（round351 补执行证据：岗位书表单同源）", () => {
-  const f = (attr: unknown, values: unknown, def: unknown, title: unknown): unknown =>
+  const f = (
+    attr: unknown,
+    values: unknown,
+    def: unknown,
+    title: unknown,
+  ): unknown =>
     (fns.enumSel as (...a: unknown[]) => unknown)(attr, values, def, title);
 
   it("⭐ data-f 用 attr、selected 给匹配 def 那档", () => {
     const html = f("scope_type", ["a", "b"], "b", "范围") as string;
     expect(html).toContain('data-f="scope_type"');
     expect(html).toContain("<option>a</option>");
-    expect(html).toContain('<option selected>b</option>');
+    expect(html).toContain("<option selected>b</option>");
     expect(html).toContain('title="范围"');
   });
 });
@@ -3038,7 +3043,7 @@ describe("notesHtml —— 口径说明（round351 补执行证据）", () => {
 
   it("⭐ 有 notes ⇒ details + 条数 + esc 每条", () => {
     const html = f(["有 <x>", "two"]) as string;
-    expect(html).toContain('<summary>口径说明 · 2 条</summary>');
+    expect(html).toContain("<summary>口径说明 · 2 条</summary>");
     expect(html).toContain("· 有 &lt;x&gt;");
     expect(html).toContain("· two");
   });
@@ -3085,7 +3090,10 @@ describe("parseAdminHash —— 两个入口共用的唯一 hash 解析（round3
       query: "id=ev-1",
     });
     // 独立页形状也要能拆出 query（原来只有工作台需要，两条分支都得通）。
-    expect(f("#/today?window=30d")).toEqual({ page: "today", query: "window=30d" });
+    expect(f("#/today?window=30d")).toEqual({
+      page: "today",
+      query: "window=30d",
+    });
   });
 
   it("⭐ 前缀只在开头剥一次，页名里再出现 admin/ 不许被吃掉", () => {

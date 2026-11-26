@@ -31,26 +31,26 @@ import { mkdirSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, describe, expect, it } from "vitest";
-import { fixtureTmp } from "../fixtures/fixture-dir.js";
-import { appendAudit, KIND_TO_ACTION } from "../../src/events/recorder.js";
-import { migrate } from "../../src/db/migrate.js";
 import { openDb } from "../../src/db/driver.js";
+import { migrate } from "../../src/db/migrate.js";
+import { appendAudit, KIND_TO_ACTION } from "../../src/events/recorder.js";
 import {
   APPROVAL_TYPE_UNKNOWN,
   CEO_MEMORY_OWNER,
+  type CrossRoleScope,
   classifyMemoryRow,
   MAX_MEMORY_LIMIT,
-  memoryCoverage,
   MEMORY_ROWS_SQL,
-  NON_DECISION_EVENT_KINDS,
   MEMORY_SCAN_WINDOW,
+  type MemoryEntry,
+  memoryCoverage,
+  NON_DECISION_EVENT_KINDS,
   NON_STRATEGIC_APPROVAL_TYPES,
   readMemoryTodayProbe,
   readRoleMemory,
   renderMemoryBlock,
-  type CrossRoleScope,
-  type MemoryEntry,
 } from "../../src/memory/role-memory.js";
+import { fixtureTmp } from "../fixtures/fixture-dir.js";
 
 const HUB = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const ROLE_MEMORY_SRC = join(HUB, "src", "memory", "role-memory.ts");
@@ -172,7 +172,9 @@ describe("① 计划点名的那条 Test：开发角色读不到 CEO 战略记�
     });
     // 记录**被取回了**（否则下面那条「读不到」是空的）—— 这一发先钉住，
     // 是为了让「读不到」这条断言的**唯一**原因是隔离而不是没数据。
-    const candidates = db.prepare(MEMORY_ROWS_SQL).all("dev", "dev", 10) as Row[];
+    const candidates = db
+      .prepare(MEMORY_ROWS_SQL)
+      .all("dev", "dev", 10) as Row[];
     expect(candidates.length).toBe(1);
     expect(asDev.entries).toEqual([]);
     // 被挡的那一条要在 withheld 里**点名到档**，不能只报一个总数：
@@ -318,11 +320,20 @@ describe("① 计划点名的那条 Test：开发角色读不到 CEO 战略记�
      * ② 是本文件里我唯一能给「将来的取值」写的用例，而它之所以有效，
      * 全是因为判据不看具体取值而只看是否在排除表上。
      */
-    for (const future of ["some_type_invented_next_month", "meeting_escalation", "irreversible_action"]) {
+    for (const future of [
+      "some_type_invented_next_month",
+      "meeting_escalation",
+      "irreversible_action",
+    ]) {
       const db = newDb();
       addTask(db, "T-1", "dev");
       addCard(db, { id: "A-1", taskId: "T-1", type: future });
-      ceoDecides(db, { approvalId: "A-1", taskId: "T-1", resume: "approve", note: "理由" });
+      ceoDecides(db, {
+        approvalId: "A-1",
+        taskId: "T-1",
+        resume: "approve",
+        note: "理由",
+      });
       const asDev = readRoleMemory(db as never, {
         owner: "dev",
         requester: "dev",
@@ -335,7 +346,9 @@ describe("① 计划点名的那条 Test：开发角色读不到 CEO 战略记�
     }
 
     const src = readFileSync(ROLE_MEMORY_SRC, "utf8");
-    const code = src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, "");
+    const code = src
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .replace(/\/\/[^\n]*/g, "");
     expect(code).toMatch(
       /!NON_STRATEGIC_APPROVAL_TYPES\.includes\(approvalType\)/u,
     );
@@ -700,7 +713,11 @@ describe("③ coverage：把「这一档是空的」报成数据", () => {
         actorId: "hub",
         action: "approval",
         target: "interrupt-1",
-        payload: { kind: "ApprovalRequired", taskId: "T-1", interruptId: "interrupt-1" },
+        payload: {
+          kind: "ApprovalRequired",
+          taskId: "T-1",
+          interruptId: "interrupt-1",
+        },
         createdAt: NOW,
       },
       () => NOW,
@@ -733,7 +750,11 @@ describe("③ coverage：把「这一档是空的」报成数据", () => {
         actorId: "hub",
         action: "approval",
         target: "interrupt-1",
-        payload: { kind: "ApprovalDecided", interruptId: "interrupt-1", decision: "approved" },
+        payload: {
+          kind: "ApprovalDecided",
+          interruptId: "interrupt-1",
+          decision: "approved",
+        },
         createdAt: NOW,
       },
       () => NOW,
@@ -845,7 +866,11 @@ describe("③ coverage：把「这一档是空的」报成数据", () => {
         actorId: CEO_MEMORY_OWNER,
         action: "approval",
         target: "A-1",
-        payload: { kind: "ApprovalDecided", interruptId: "A-1", resume: "approve" },
+        payload: {
+          kind: "ApprovalDecided",
+          interruptId: "A-1",
+          resume: "approve",
+        },
         createdAt: NOW,
       },
       () => NOW,
@@ -865,7 +890,11 @@ describe("③ coverage：把「这一档是空的」报成数据", () => {
         actorId: "approval-token",
         action: "approval",
         target: "A-1",
-        payload: { kind: "ApprovalTokenRedeemed", taskId: "T-1", interruptId: "A-1" },
+        payload: {
+          kind: "ApprovalTokenRedeemed",
+          taskId: "T-1",
+          interruptId: "A-1",
+        },
         createdAt: NOW + 1,
       },
       () => NOW + 1,
@@ -891,7 +920,11 @@ describe("③ coverage：把「这一档是空的」报成数据", () => {
         actorId: "someone-else-entirely",
         action: "approval",
         target: "A-2",
-        payload: { kind: "ApprovalTokenRedeemed", taskId: "T-1", interruptId: "A-2" },
+        payload: {
+          kind: "ApprovalTokenRedeemed",
+          taskId: "T-1",
+          interruptId: "A-2",
+        },
         createdAt: NOW + 2,
       },
       () => NOW + 2,
@@ -917,7 +950,11 @@ describe("④ 分页与窗口：不能给出翻不完的空白页", () => {
     addTask(db, "T-1", CEO_MEMORY_OWNER);
     for (const [i, t] of ["strategic", "strategic", "strategic"].entries()) {
       addCard(db, { id: "A-" + i, taskId: "T-1", type: t });
-      ceoDecides(db, { approvalId: "A-" + i, taskId: "T-1", resume: "approve" });
+      ceoDecides(db, {
+        approvalId: "A-" + i,
+        taskId: "T-1",
+        resume: "approve",
+      });
     }
     const got = readRoleMemory(db as never, {
       owner: CEO_MEMORY_OWNER,
@@ -975,7 +1012,11 @@ describe("④ 分页与窗口：不能给出翻不完的空白页", () => {
     addTask(db, "T-1", CEO_MEMORY_OWNER);
     for (let i = 0; i < 5; i++) {
       addCard(db, { id: "A-" + i, taskId: "T-1", type: "strategic" });
-      ceoDecides(db, { approvalId: "A-" + i, taskId: "T-1", resume: "approve" });
+      ceoDecides(db, {
+        approvalId: "A-" + i,
+        taskId: "T-1",
+        resume: "approve",
+      });
     }
     const p0 = readRoleMemory(db as never, {
       owner: CEO_MEMORY_OWNER,
@@ -1028,9 +1069,13 @@ describe("⑤ 参数校验：空角色名等于没有主语", () => {
       isTaskOwner: ownerOf(db),
     };
     for (const limit of [0, -1, 1.5]) {
-      expect(() => readRoleMemory(db as never, { ...base, limit })).toThrow(/limit/);
+      expect(() => readRoleMemory(db as never, { ...base, limit })).toThrow(
+        /limit/,
+      );
     }
-    expect(() => readRoleMemory(db as never, { ...base, offset: -1 })).toThrow(/offset/);
+    expect(() => readRoleMemory(db as never, { ...base, offset: -1 })).toThrow(
+      /offset/,
+    );
     const mem = readRoleMemory(db as never, base);
     for (const c of [0, -3, 1.5]) {
       expect(() => renderMemoryBlock(mem, c)).toThrow(/maxChars/);
@@ -1083,7 +1128,9 @@ describe("⑥ few-shot 渲染：标注是数据而不是指令，且不改写内
   });
 
   it("字符上限截断时必须报 omitted 与 truncated（静默截断＝假装给完）", () => {
-    const many = Array.from({ length: 20 }, () => ({ reason: "一段不算短的理由文字用于撑长度" }));
+    const many = Array.from({ length: 20 }, () => ({
+      reason: "一段不算短的理由文字用于撑长度",
+    }));
     const full = renderMemoryBlock(memory(many));
     const tight = renderMemoryBlock(memory(many), 300);
     expect(full.omitted).toBe(0);
@@ -1098,7 +1145,10 @@ describe("⑥ few-shot 渲染：标注是数据而不是指令，且不改写内
      * （`决定=approve` 留下了、`理由=因为预算不够所以拒` 被切掉了）。
      * 宁缺毋半。
      */
-    const got = renderMemoryBlock(memory([{ decision: "approve", reason: "很长" }]), 5);
+    const got = renderMemoryBlock(
+      memory([{ decision: "approve", reason: "很长" }]),
+      5,
+    );
     expect(got.text).toBe("");
     expect(got.rendered).toBe(0);
     expect(got.omitted).toBe(1);
@@ -1107,7 +1157,12 @@ describe("⑥ few-shot 渲染：标注是数据而不是指令，且不改写内
 
   it("空记忆给出空块且 truncated=false（没有东西被省略，就不是截断）", () => {
     const got = renderMemoryBlock(memory([]));
-    expect(got).toEqual({ text: "", rendered: 0, omitted: 0, truncated: false });
+    expect(got).toEqual({
+      text: "",
+      rendered: 0,
+      omitted: 0,
+      truncated: false,
+    });
   });
 
   it("有记录被隔离挡住时 truncated=true（few-shot 不完整必须可见）", () => {
@@ -1146,16 +1201,44 @@ describe("⑦ 同一件库的两面：有界的今日探针 与 精确的 covera
       actorId: string,
       payload: Record<string, unknown>,
     ): void => {
-      appendAudit(db as never, { taskId: "T-1", actorType, actorId, action, target: "g", payload, createdAt: NOW }, () => NOW);
+      appendAudit(
+        db as never,
+        {
+          taskId: "T-1",
+          actorType,
+          actorId,
+          action,
+          target: "g",
+          payload,
+          createdAt: NOW,
+        },
+        () => NOW,
+      );
     };
     // ① 请求：action=approval 而 kind 在 NON_DECISION_EVENT_KINDS 里 ⇒ 是素材、不是决定。
-    w("approval", "system", "hub", { kind: "ApprovalRequired", taskId: "T-1", interruptId: "i-1" });
+    w("approval", "system", "hub", {
+      kind: "ApprovalRequired",
+      taskId: "T-1",
+      interruptId: "i-1",
+    });
     // ② system 署名的【真决定】⇒ coverage 的 unattributed 数得到，探针不看这一半。
-    w("approval", "system", "policy-engine", { kind: "ApprovalDecided", interruptId: "i-1", decision: "approved" });
+    w("approval", "system", "policy-engine", {
+      kind: "ApprovalDecided",
+      interruptId: "i-1",
+      decision: "approved",
+    });
     // ③ 角色署名的审阅判定。
-    w("review_decision", "agent", "dev", { kind: "ReviewDecided", gate: "in_review:dev->test", decision: "pass" });
+    w("review_decision", "agent", "dev", {
+      kind: "ReviewDecided",
+      gate: "in_review:dev->test",
+      decision: "pass",
+    });
     // ④ system 署名的审阅判定（署名丢了，记忆进不了任何角色的提示词）。
-    w("review_decision", "system", "hub", { kind: "ReviewDecided", gate: "in_review:dev->test", decision: "pass" });
+    w("review_decision", "system", "hub", {
+      kind: "ReviewDecided",
+      gate: "in_review:dev->test",
+      decision: "pass",
+    });
 
     const probe = readMemoryTodayProbe(db as never);
     const cov = memoryCoverage(db as never);
@@ -1170,7 +1253,9 @@ describe("⑦ 同一件库的两面：有界的今日探针 与 精确的 covera
     expect(probe.gate_rows).toBe(sum(gates));
     expect(probe.gate_rows).toBe(2);
     // ③ 未署名那一半【在 review_decision 这一档上】两边同数（过了 JSON 与没过 JSON 的同一条判据）。
-    expect(probe.gate_unattributed_rows).toBe(sum(gates.filter((r) => r.actor_type === "system")));
+    expect(probe.gate_unattributed_rows).toBe(
+      sum(gates.filter((r) => r.actor_type === "system")),
+    );
     expect(probe.gate_unattributed_rows).toBe(1);
     // ④ 两边【不一致】的那一半也得明写，否则读代码的人会拿探针去对 O3 验收第 2 条：
     // coverage.unattributed 还含着 approval 那一半（上面第 ② 条那行），探针不看它。
@@ -1201,14 +1286,17 @@ describe("⑦ 同一件库的两面：有界的今日探针 与 精确的 covera
      * 把判据写成「名单里没有任何 kind 映到 review_decision」这种恒真的怪话也能全绿。
      */
     const nonDecision = new Set(NON_DECISION_EVENT_KINDS.map((e) => e.kind));
-    const gateKinds = (Object.keys(KIND_TO_ACTION) as (keyof typeof KIND_TO_ACTION)[]).filter(
-      (k) => KIND_TO_ACTION[k] === "review_decision",
-    );
+    const gateKinds = (
+      Object.keys(KIND_TO_ACTION) as (keyof typeof KIND_TO_ACTION)[]
+    ).filter((k) => KIND_TO_ACTION[k] === "review_decision");
     // 分母本身要先站住：这一档确实有 kind 映进来（否则下面那句"交集为空"是空的真）。
     expect(gateKinds).toEqual(["ReviewDecided"]);
     expect(gateKinds.filter((k) => nonDecision.has(k))).toEqual([]);
     // 反向对照：名单里那两位是真的，只是不映到这一档。
-    expect([...nonDecision].sort()).toEqual(["ApprovalRequired", "ApprovalTokenRedeemed"]);
+    expect([...nonDecision].sort()).toEqual([
+      "ApprovalRequired",
+      "ApprovalTokenRedeemed",
+    ]);
     expect(nonDecision.has("ReviewDecided")).toBe(false);
     // 而它们映到 approval ⇒ coverage 会看到它们、探针那一格不会（上面那发的第 ④ 条同一件事）。
     expect(KIND_TO_ACTION.ApprovalRequired).toBe("approval");
@@ -1248,9 +1336,15 @@ describe("⑦ 同一件库的两面：有界的今日探针 与 精确的 covera
       .map((f) => join(SRC, f).replace(/\\/g, "/"));
     expect(files.length).toBeGreaterThan(50); // 分母：枚举路径写错时这一发先红，别让扫描空转
     const code = (rel: string): string =>
-      readFileSync(rel, "utf8").replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, "");
-    const hardcoded = files.filter((f) => code(f).includes('action: "review_decision"'));
-    const viaMap = files.filter((f) => code(f).includes("action: KIND_TO_ACTION.ReviewDecided"));
+      readFileSync(rel, "utf8")
+        .replace(/\/\*[\s\S]*?\*\//g, "")
+        .replace(/\/\/[^\n]*/g, "");
+    const hardcoded = files.filter((f) =>
+      code(f).includes('action: "review_decision"'),
+    );
+    const viaMap = files.filter((f) =>
+      code(f).includes("action: KIND_TO_ACTION.ReviewDecided"),
+    );
     expect(
       hardcoded.map((f) => f.replace(REPO, "")),
       "review_decision 只能由 KIND_TO_ACTION.ReviewDecided 落库：硬写 action 会让 kind 与 action 各自表述",

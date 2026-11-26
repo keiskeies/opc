@@ -1371,21 +1371,24 @@ describe("⑦ 备份在 worker 里跑（0036）", () => {
      * 为什么按【import 语句】数而不是按 import 图递归解析：
      * 递归解析要把整张图算出来（得依赖打包器或 tsc 的 API），而这里要防的只是
      * 「有人在本文件顶部加了一行 import」。0033 §3 那条「只有 import 形态能表达的约束
-     * 要用 import 表达」在这里的可执行版本就是：数行首的 import。
+     * 要用 import 表达」在这里的可执行版本就是：数 import 语句。
+     *
+     * ⚠ 「一行」是这个判据表达不了的：`biome check --write` 会把花括号超过行宽的
+     * import 折成多行（round380 实测：`import {\n backupDatabase,\n} from "./backup.js"`），
+     * 于是按行首 `import ` 取材会把那条的 from 子句整个丢掉 —— 判据当场从「恰 2 条」
+     * 读成 1 条，而红因是排版、不是模块图。所以取材按【语句】切：一条 import 从行首
+     * 的 import 起，停在它自己那个 from 子句上。判别力一分不减：加一行真 import
+     * 仍然被数到，只是换行不再算数。
      */
     const text = readFileSync(join(HUB, "src", "db", "backup.ts"), "utf8");
-    const imports = text
-      .split("\n")
-      .map((l) => l.trim())
-      .filter((l) => l.startsWith("import "))
-      .join("\n");
+    const imports = importStatements(text).join("\n");
     for (const bad of ["@langchain", "graph/", "http/app", "roles/"]) {
       expect(
         imports,
         "backup.ts import 了 " + bad + " ⇒ worker 入口会变重到加载不了",
       ).not.toContain(bad);
     }
-    // 反向对照：这条扫描必须真的【看得见】import 行，否则「不含 X」可能只是
+    // 反向对照：这条扫描必须真的【看得见】import 语句，否则「不含 X」可能只是
     // 「我把过滤条件写错了，一条都没捞到」。node:sqlite 是 backup.ts 一定有的依赖。
     expect(imports).toContain("node:sqlite");
     // worker 入口自己的运行时 import 也钉住：它【只】能要 worker_threads 与 backup.js。
@@ -1394,13 +1397,30 @@ describe("⑦ 备份在 worker 里跑（0036）", () => {
       join(HUB, "src", "db", "backup.worker.ts"),
       "utf8",
     );
-    const runtimeImports = wtext
-      .split("\n")
-      .map((l) => l.trim())
-      .filter((l) => l.startsWith("import ") && !l.startsWith("import type "))
-      .join("\n");
+    const runtimeImports = importStatements(wtext, true).join("\n");
     expect(runtimeImports).toContain("node:worker_threads");
     expect(runtimeImports).toContain("./backup.js");
     expect(runtimeImports.split("import ").length - 1).toBe(2);
   });
 });
+
+/**
+ * 按【语句】取出现在的 import，返回每条的源码原文。
+ * 一条 = 行首的 `import` 起，到它自己的 `from "…"`（副作用式裸 `import "…"` 也算）为止。
+ * 非贪婪保证连排的多条各自停在自己那条上，不会把下一条吃进来。
+ * @param onlyRuntime 为真时剔掉 `import type`（类型 import 编译后不存在，不进 worker 的加载面）。
+ */
+function importStatements(src: string, onlyRuntime = false): string[] {
+  const out: string[] = [];
+  for (const m of src.matchAll(
+    /^import(?:[\s\S]*?from\s*"[^"]*"|"[^"]*");?[^\S\n]*$/gmu,
+  )) {
+    const stmt = String(m[0]);
+    if (onlyRuntime && /^\s*import\s+type\b/u.test(stmt)) continue;
+    out.push(stmt);
+  }
+  if (out.length === 0) {
+    throw new Error("一条 import 都没扫到 ⇒ 取材正则失效，判据无法成立");
+  }
+  return out;
+}

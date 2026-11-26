@@ -154,7 +154,8 @@ export function quoteFtsPhrase(keyword: string): string {
  * external content 表（content='events'）与 events 共用 rowid，
  * 所以 e.id = f.rowid 这个 join 条件是**语义**上的同一行，不只是能跑。
  */
-const FTS_SCOPE = " AND EXISTS (SELECT 1 FROM events e WHERE e.id = f.rowid AND e.task_id = ?)";
+const FTS_SCOPE =
+  " AND EXISTS (SELECT 1 FROM events e WHERE e.id = f.rowid AND e.task_id = ?)";
 const LIKE_SCOPE = " AND task_id = ?";
 
 /**
@@ -225,7 +226,6 @@ const DEFAULT_SHAPE: SqlShape = { scope: false, order: "recent" };
 export const FTS_SEARCH_SQL: string = ftsSearchSql(DEFAULT_SHAPE);
 export const LIKE_SEARCH_SQL: string = likeSearchSql(DEFAULT_SHAPE);
 
-
 export type SearchEventsInput = {
   readonly keyword: string;
   /** 只看这一个任务的事件。缺省即全库搜（审计页那种跨任务检索走这一档）。 */
@@ -242,7 +242,9 @@ function paging(o: SearchEventsInput): { limit: number; offset: number } {
   const rawOffset = o.offset ?? 0;
   if (!Number.isInteger(rawLimit) || rawLimit < 1) {
     throw new Error(
-      "limit 必须是 ≥1 的整数，实到 " + String(rawLimit) + "。" +
+      "limit 必须是 ≥1 的整数，实到 " +
+        String(rawLimit) +
+        "。" +
         "传 0 或负数不会得到「空页」，SQLite 的 LIMIT 0 是合法的「全不给」而 OFFSET 仍生效，" +
         "于是分页游标会停不住（第 2 页与第 1 页同样空，客户端以为翻到头了）。",
     );
@@ -264,10 +266,7 @@ function paging(o: SearchEventsInput): { limit: number; offset: number } {
  * 无界全表扫的入口（payload 没有长度上限，events 是 append-only ⇒ 行数只增）。
  * 空输入的正确语义是「别查」，界面提示「关键词建议 ≥3 个汉字」（C.3 的 UI 约束）。
  */
-export function searchEvents(
-  db: ReadDb,
-  o: SearchEventsInput,
-): SearchHit[] {
+export function searchEvents(db: ReadDb, o: SearchEventsInput): SearchHit[] {
   const keyword = o.keyword;
   if ([...keyword].length === 0) return [];
   const { limit, offset } = paging(o);
@@ -276,10 +275,14 @@ export function searchEvents(
 
   // 第一档：FTS。只在长度够 trigram 窗口时试（短于 3 必 0 命中，试了就是白付一次查询）。
   if ([...keyword].length >= TRIGRAM_MIN_CHARS) {
-    const ftsSql = ftsSearchSql({ scope: scope !== undefined, order: timeline ? "timeline" : "recent" });
-    const head: unknown[] = scope === undefined
-      ? [quoteFtsPhrase(keyword)]
-      : [quoteFtsPhrase(keyword), scope];
+    const ftsSql = ftsSearchSql({
+      scope: scope !== undefined,
+      order: timeline ? "timeline" : "recent",
+    });
+    const head: unknown[] =
+      scope === undefined
+        ? [quoteFtsPhrase(keyword)]
+        : [quoteFtsPhrase(keyword), scope];
     const hits = runAll(db, ftsSql, [...head, limit, offset]);
     if (hits.length > 0) {
       return hits.map((r): SearchHit => ({ id: idOf(r), via: "fts" }));
@@ -290,16 +293,22 @@ export function searchEvents(
   }
 
   const pattern = "%" + escapeLikePattern(keyword) + "%";
-  const likeHead: unknown[] = scope === undefined
-    ? [pattern]
-    : [pattern, scope];
-  const likeSql = likeSearchSql({ scope: scope !== undefined, order: timeline ? "timeline" : "recent" });
+  const likeHead: unknown[] =
+    scope === undefined ? [pattern] : [pattern, scope];
+  const likeSql = likeSearchSql({
+    scope: scope !== undefined,
+    order: timeline ? "timeline" : "recent",
+  });
   return runAll(db, likeSql, [...likeHead, limit, offset]).map(
     (r): SearchHit => ({ id: idOf(r), via: "like" }),
   );
 }
 
-function runAll(db: ReadDb, sql: string, params: readonly unknown[]): unknown[] {
+function runAll(
+  db: ReadDb,
+  sql: string,
+  params: readonly unknown[],
+): unknown[] {
   assertSingleStatement(sql);
   assertParamCount(sql, params);
   return db.prepare(sql).all(...(params as never[]));
@@ -313,7 +322,9 @@ function idOf(row: unknown): number {
   if (typeof v === "number") return v;
   if (typeof v === "bigint") return Number(v);
   throw new Error(
-    "检索结果的 id 不是数字，实到 " + typeof v + "。" +
+    "检索结果的 id 不是数字，实到 " +
+      typeof v +
+      "。" +
       "SQL 里的列别名（rowid AS id）被改坏了，或者表结构变了。",
   );
 }

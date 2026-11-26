@@ -23,16 +23,22 @@
 import { mkdirSync, rmSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-
-import { fixtureTmp } from "../fixtures/fixture-dir.js";
 import { migrate } from "../../src/db/migrate.js";
-import { INSERT_DELEGATION_GRAPH_SQL } from "../../src/org/commit.js";
-import { KIND_TO_ACTION } from "../../src/events/recorder.js";
 import { runEngineCli } from "../../src/engine/hub-work.js";
-import { DECIDE_USAGE, WORK_USAGE, parseDecideArgs, parseWorkArgs } from "../../src/engine/work.js";
+import {
+  DECIDE_USAGE,
+  parseDecideArgs,
+  parseWorkArgs,
+  WORK_USAGE,
+} from "../../src/engine/work.js";
+import { KIND_TO_ACTION } from "../../src/events/recorder.js";
+import { INSERT_DELEGATION_GRAPH_SQL } from "../../src/org/commit.js";
+import { fixtureTmp } from "../fixtures/fixture-dir.js";
 
 const TMP = fixtureTmp("engine-work", import.meta.url);
-const FAKE_CLI = fileURLToPath(new URL("./fixtures/fake-claude.mjs", import.meta.url));
+const FAKE_CLI = fileURLToPath(
+  new URL("./fixtures/fake-claude.mjs", import.meta.url),
+);
 const NOW = 1_700_000_000_000;
 
 type Row = Record<string, unknown>;
@@ -82,7 +88,9 @@ interface World {
  * graph_version 与 INSERT 放在同一事务里取，§18.4），而本文件要测的是
  * work/decide 那两发，不该顺手把「不建任务」这条边界演成「其实能建」。
  */
-async function world(o: { readonly status?: string; readonly withCard?: boolean } = {}): Promise<World> {
+async function world(
+  o: { readonly status?: string; readonly withCard?: boolean } = {},
+): Promise<World> {
   const { WriteQueue } = await import("../../src/db/write-queue.js");
   const dbPath = TMP + "/w-" + process.pid + "-" + ++fileSeq + ".db";
   const q = new WriteQueue(dbPath) as unknown as Queue;
@@ -98,8 +106,18 @@ async function world(o: { readonly status?: string; readonly withCard?: boolean 
     1,
     JSON.stringify({
       nodes: {
-        ceo: { role_id: "ceo", can_manage: true, reports_to: null, model_family: "opus" },
-        intake: { role_id: "intake", can_manage: true, reports_to: "ceo", model_family: "sonnet" },
+        ceo: {
+          role_id: "ceo",
+          can_manage: true,
+          reports_to: null,
+          model_family: "opus",
+        },
+        intake: {
+          role_id: "intake",
+          can_manage: true,
+          reports_to: "ceo",
+          model_family: "sonnet",
+        },
       },
       edges: [],
     }),
@@ -148,7 +166,20 @@ async function cli(w: World, argv: readonly string[]): Promise<number> {
 
 /** work 那一发的固定参数（两个上限【必填】，所以每次都得带 —— 少一个就是另一发用例）。 */
 function workArgv(w: World, extra: readonly string[] = []): string[] {
-  return ["work", "--db", w.dbPath, "--task", "t1", "--max-budget-usd", "0.5", "--task-limit-cents", "1000", "--bin", FAKE_CLI, ...extra];
+  return [
+    "work",
+    "--db",
+    w.dbPath,
+    "--task",
+    "t1",
+    "--max-budget-usd",
+    "0.5",
+    "--task-limit-cents",
+    "1000",
+    "--bin",
+    FAKE_CLI,
+    ...extra,
+  ];
 }
 function decideArgv(w: World, extra: readonly string[] = []): string[] {
   return ["decide", "--db", w.dbPath, "--task", "t1", ...extra];
@@ -161,14 +192,25 @@ function task(w: World): Row {
 }
 
 describe("parseWorkArgs：两个上限不给默认值", () => {
-  const base = ["--db", "d.db", "--task", "t1", "--max-budget-usd", "0.5", "--task-limit-cents", "500"];
+  const base = [
+    "--db",
+    "d.db",
+    "--task",
+    "t1",
+    "--max-budget-usd",
+    "0.5",
+    "--task-limit-cents",
+    "500",
+  ];
   it("齐了 ⇒ ok，--max-turns 缺省 12", () => {
     const p = parseWorkArgs(base);
     expect(p.ok).toBe(true);
     if (p.ok) expect(p.args.maxTurns).toBe(12);
   });
   it("少一个上限 ⇒ 那条错误点名【缺的是哪一个】，而不是泛泛一句缺参数", () => {
-    const p = parseWorkArgs(base.filter((x) => x !== "--task-limit-cents" && x !== "500"));
+    const p = parseWorkArgs(
+      base.filter((x) => x !== "--task-limit-cents" && x !== "500"),
+    );
     expect(!p.ok && p.error).toContain("--task-limit-cents");
   });
   it("--max-turns 0 红（正整数），而不是静默变成「跑 0 轮」", () => {
@@ -176,12 +218,24 @@ describe("parseWorkArgs：两个上限不给默认值", () => {
     expect(!p.ok && p.error).toContain("--max-turns");
   });
   it("--task-limit-cents 12.5 红（§6.1 禁浮点金额）", () => {
-    const p = parseWorkArgs([...base.slice(0, 6), "--task-limit-cents", "12.5"]);
+    const p = parseWorkArgs([
+      ...base.slice(0, 6),
+      "--task-limit-cents",
+      "12.5",
+    ]);
     expect(p.ok).toBe(false);
   });
   it("写了 --max-budget-usd 但【忘填值】时报的是缺参数，不是「必须是正数，实到 0」", () => {
     // Number("") === 0：那一发会把人指到自己【没写错】的那个数字上去。
-    const p = parseWorkArgs(["--db", "d.db", "--task", "t1", "--max-budget-usd", "--task-limit-cents", "500"]);
+    const p = parseWorkArgs([
+      "--db",
+      "d.db",
+      "--task",
+      "t1",
+      "--max-budget-usd",
+      "--task-limit-cents",
+      "500",
+    ]);
     expect(p.ok).toBe(false);
     if (!p.ok) {
       expect(p.error).toContain("--max-budget-usd");
@@ -210,7 +264,13 @@ describe("parseDecideArgs：三颗按钮的取值与那句必填的理由", () =
     expect(parseDecideArgs([...base, "--button", "approve"]).ok).toBe(true);
   });
   it("--note 空串 ≠ 有理由（Number('')===0 那一族的另一面）", () => {
-    const p = parseDecideArgs([...base, "--button", "reject_with_comment", "--note", ""]);
+    const p = parseDecideArgs([
+      ...base,
+      "--button",
+      "reject_with_comment",
+      "--note",
+      "",
+    ]);
     expect(p.ok).toBe(false);
   });
 });
@@ -279,7 +339,9 @@ describe("hub work 停在章程那一格：起草 + 建卡 + 把下一步打成�
   it("提示句里那条命令【照抄就能跑】：库路径、任务、卡片 id、按钮四样都在", async () => {
     const w = await world({});
     await cli(w, workArgv(w));
-    const id = String(w.db.prepare("SELECT id FROM approvals").get()?.["id"] ?? "");
+    const id = String(
+      w.db.prepare("SELECT id FROM approvals").get()?.["id"] ?? "",
+    );
     expect(id.length).toBeGreaterThan(10);
     // 这不只是「文案里有个 id」：下面真的拿这一行去跑 decide。
     const line = w.out.split("\n").find((l) => l.includes("hub decide")) ?? "";
@@ -291,13 +353,21 @@ describe("hub work 停在章程那一格：起草 + 建卡 + 把下一步打成�
   it("再敲一次 hub work【不重烧一次起草】，而且仍然退出 0", async () => {
     const w = await world({});
     await cli(w, workArgv(w));
-    const calls = Number(w.db.prepare("SELECT count(*) AS c FROM harness_calls").get()?.["c"]);
+    const calls = Number(
+      w.db.prepare("SELECT count(*) AS c FROM harness_calls").get()?.["c"],
+    );
     w.out = "";
     const code = await cli(w, workArgv(w));
     expect(code).toBe(0);
-    expect(Number(w.db.prepare("SELECT count(*) AS c FROM approvals").get()?.["c"])).toBe(1);
+    expect(
+      Number(w.db.prepare("SELECT count(*) AS c FROM approvals").get()?.["c"]),
+    ).toBe(1);
     // 执行日志没有第二条：唯一索引挡得住第二张卡，挡不住第二次烧钱，这一条钉的是后者
-    expect(Number(w.db.prepare("SELECT count(*) AS c FROM harness_calls").get()?.["c"])).toBe(calls);
+    expect(
+      Number(
+        w.db.prepare("SELECT count(*) AS c FROM harness_calls").get()?.["c"],
+      ),
+    ).toBe(calls);
     expect(w.out).toContain("已经有一张待批的章程卡");
   });
 
@@ -306,7 +376,9 @@ describe("hub work 停在章程那一格：起草 + 建卡 + 把下一步打成�
     const code = await cli(w, workArgv(w, ["--task", "ghost"]));
     expect(code).toBe(2);
     expect(w.err).toContain("任务不存在");
-    expect(w.db.prepare("SELECT count(*) AS c FROM tasks").get()?.["c"]).toBe(1);
+    expect(w.db.prepare("SELECT count(*) AS c FROM tasks").get()?.["c"]).toBe(
+      1,
+    );
   });
 });
 
@@ -318,7 +390,9 @@ describe("hub decide：收件箱里那一次点击真的把任务推走", () => 
     const code = await cli(w, decideArgv(w, ["--button", "approve"]));
     expect(code).toBe(0);
     expect(String(task(w)["status"])).toBe("CHARTER_APPROVED");
-    expect(w.db.prepare("SELECT status FROM approvals").get()?.["status"]).toBe("approved");
+    expect(w.db.prepare("SELECT status FROM approvals").get()?.["status"]).toBe(
+      "approved",
+    );
     expect(w.out).toContain("CHARTER_PENDING → CHARTER_APPROVED");
   });
 
@@ -337,7 +411,9 @@ describe("hub decide：收件箱里那一次点击真的把任务推走", () => 
     await cli(w, workArgv(w));
     await cli(w, decideArgv(w, ["--button", "approve"]));
     const rows = w.db
-      .prepare("SELECT action, actor_type, actor_id, target, payload FROM events ORDER BY id")
+      .prepare(
+        "SELECT action, actor_type, actor_id, target, payload FROM events ORDER BY id",
+      )
       .all();
     /**
      * 按【署名 + target】筛，【不是】按 payload.kind —— 而我一开始写的是后者，
@@ -352,19 +428,28 @@ describe("hub decide：收件箱里那一次点击真的把任务推走", () => 
      * 而那个缺失本身登记在 0041（读侧「按 payload.kind 分辨」的写法会静默数到 0）。
      */
     const decided = rows.filter(
-      (r) => String(r["action"]) === "approval" && String(r["actor_type"]) === "human",
+      (r) =>
+        String(r["action"]) === "approval" &&
+        String(r["actor_type"]) === "human",
     );
     expect(decided.length).toBe(1);
     expect(String(decided[0]?.["actor_id"])).toBe("ceo");
     // 卡片那条【还在】，而且 target 指向同一张卡：一次点击挂在正确的卡片上
     const asked = rows.filter(
-      (r) => String(r["action"]) === "approval" && String(r["actor_type"]) === "system",
+      (r) =>
+        String(r["action"]) === "approval" &&
+        String(r["actor_type"]) === "system",
     );
     expect(asked.length).toBe(1);
-    expect(String(asked[0]?.["target"])).toBe(String(w.db.prepare("SELECT id FROM approvals").get()?.["id"]));
+    expect(String(asked[0]?.["target"])).toBe(
+      String(w.db.prepare("SELECT id FROM approvals").get()?.["id"]),
+    );
     expect(String(decided[0]?.["target"])).toBe(String(asked[0]?.["target"]));
     // 决策那句理由落在 state_snapshot 而不是 payload（applyDecision 同一条边界）
-    const snap = JSON.parse(String(decided[0]?.["payload"])) as Record<string, unknown>;
+    const snap = JSON.parse(String(decided[0]?.["payload"])) as Record<
+      string,
+      unknown
+    >;
     expect(snap["resume"]).toBe("approve");
 
     const moved = rows.filter((r) => String(r["action"]) === "state_change");
@@ -385,20 +470,31 @@ describe("hub decide：收件箱里那一次点击真的把任务推走", () => 
   it("两张待批卡 ⇒ 【不替 CEO 猜】办哪一张，把 id 列出来让她指", async () => {
     const w = await world({ withCard: true });
     await cli(w, workArgv(w));
-    expect(w.db.prepare("SELECT count(*) AS c FROM approvals WHERE status = 'pending'").get()?.["c"]).toBe(2);
+    expect(
+      w.db
+        .prepare("SELECT count(*) AS c FROM approvals WHERE status = 'pending'")
+        .get()?.["c"],
+    ).toBe(2);
     w.err = "";
     const code = await cli(w, decideArgv(w, ["--button", "approve"]));
     expect(code).toBe(2);
     expect(w.err).toContain("不能替你猜");
     // 一张都没被办掉：猜错的代价是一次【不可逆的】批准
-    expect(w.db.prepare("SELECT count(*) AS c FROM approvals WHERE status = 'pending'").get()?.["c"]).toBe(2);
+    expect(
+      w.db
+        .prepare("SELECT count(*) AS c FROM approvals WHERE status = 'pending'")
+        .get()?.["c"],
+    ).toBe(2);
   });
 
   it("--card 指着一条不相干的 id ⇒ 红，并把【此刻该打的那几个 id】打出来", async () => {
     const w = await world({});
     await cli(w, workArgv(w));
     w.err = "";
-    const code = await cli(w, decideArgv(w, ["--card", "not-a-card", "--button", "approve"]));
+    const code = await cli(
+      w,
+      decideArgv(w, ["--card", "not-a-card", "--button", "approve"]),
+    );
     expect(code).toBe(2);
     expect(w.err).toContain("not-a-card");
     const real = String(w.db.prepare("SELECT id FROM approvals").get()?.["id"]);
@@ -410,13 +506,17 @@ describe("hub decide：收件箱里那一次点击真的把任务推走", () => 
     const w = await world({});
     await cli(w, workArgv(w));
     await cli(w, decideArgv(w, ["--button", "approve"]));
-    const before = Number(w.db.prepare("SELECT count(*) AS c FROM events").get()?.["c"]);
+    const before = Number(
+      w.db.prepare("SELECT count(*) AS c FROM events").get()?.["c"],
+    );
     w.out = "";
     const code = await cli(w, decideArgv(w, ["--button", "approve"]));
     expect(code).toBe(2);
     // 卡片此刻已经不是 pending，所以红在 CLI 那一层（列不出待批卡），
     // 而不是进到 approveCard 里去撞 already_decided —— 两支都不写，这一条断的是【不写】。
-    expect(Number(w.db.prepare("SELECT count(*) AS c FROM events").get()?.["c"])).toBe(before);
+    expect(
+      Number(w.db.prepare("SELECT count(*) AS c FROM events").get()?.["c"]),
+    ).toBe(before);
     expect(String(task(w)["status"])).toBe("CHARTER_APPROVED");
   });
 
@@ -426,7 +526,9 @@ describe("hub decide：收件箱里那一次点击真的把任务推走", () => 
     w.out = "";
     const code = await cli(w, decideArgv(w, ["--button", "defer_deep_review"]));
     expect(code).toBe(0);
-    expect(w.db.prepare("SELECT status FROM approvals").get()?.["status"]).toBe("deferred");
+    expect(w.db.prepare("SELECT status FROM approvals").get()?.["status"]).toBe(
+      "deferred",
+    );
     expect(String(task(w)["status"])).toBe("CHARTER_PENDING");
     expect(w.out).toContain("没有");
     // 「卡片记掉了而任务没动」是一次【成立】的点击，不是失败：重跑只会撞已决策
@@ -455,7 +557,10 @@ describe("整条链：下发想法 → 起草 → 签署 → 任务动起来", (
     expect(cards[0]?.["status"]).toBe("approved");
     expect(cards[0]?.["approval_type"]).toBe("charter");
 
-    const actions = w.db.prepare("SELECT action FROM events ORDER BY id").all().map((x) => String(x["action"]));
+    const actions = w.db
+      .prepare("SELECT action FROM events ORDER BY id")
+      .all()
+      .map((x) => String(x["action"]));
     // 数组里 'approval' 出现【两次】不是笔误：卡片那条（ApprovalRequired）与点击那条
     // （ApprovalDecided）共用同一个 action 值（§22.1 的枚举不开第 11 个值），
     // 所以这条断言能钉住的是【顺序 + 条数 + 没有多余的状态变化】，
@@ -473,8 +578,16 @@ describe("整条链：下发想法 → 起草 → 签署 → 任务动起来", (
     expect(actions.filter((x) => x === "approval").length).toBe(2);
     // 账：起草那一轮 4 美分，批准 0；budgets / budget_events / tasks 三处同一个数
     expect(Number(task(w)["consumed_cents"])).toBe(4);
-    expect(Number(w.db.prepare("SELECT consumed_cents FROM budgets").get()?.["consumed_cents"])).toBe(4);
-    expect(w.db.prepare("SELECT count(*) AS c FROM budget_events").get()?.["c"]).toBe(1);
+    expect(
+      Number(
+        w.db.prepare("SELECT consumed_cents FROM budgets").get()?.[
+          "consumed_cents"
+        ],
+      ),
+    ).toBe(4);
+    expect(
+      w.db.prepare("SELECT count(*) AS c FROM budget_events").get()?.["c"],
+    ).toBe(1);
   });
 });
 

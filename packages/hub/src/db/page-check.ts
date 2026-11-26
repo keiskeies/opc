@@ -32,5 +32,7 @@ export function reportText(rows: readonly Record<string, string>[]): string {
  * 由损坏内容自己决定 —— 用「包含」判过，等于给一个损坏库发通行证。
  */
 export function isPageOk(rows: readonly Record<string, string>[]): boolean {
-  return rows.length === 1 && String(Object.values(rows[0] ?? {})[0] ?? "") === "ok";
+  return (
+    rows.length === 1 && String(Object.values(rows[0] ?? {})[0] ?? "") === "ok"
+  );
 }

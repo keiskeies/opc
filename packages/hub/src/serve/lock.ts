@@ -33,7 +33,13 @@
  * 误判的方向是【拒绝启动】，而拒绝启动带着一句「如果你确认没有，加 --force-unlock」
  * —— 保守方向的那一侧永远留一个显式出口，不然锁就变成砖。
  */
-import { existsSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { hostname } from "node:os";
 
 /** 锁文件相对库文件的名字。<db> 与 <db>.lock 同目录，一眼看得出来归谁。 */
@@ -52,10 +58,22 @@ export type LockHolder = {
 };
 
 export type LockAcquire =
-  | { readonly ok: true; readonly path: string; readonly tookOverFrom?: LockHolder | undefined }
-  | { readonly ok: false; readonly path: string; readonly holder: LockHolder | null; readonly reason: LockNotAcquiredReason };
+  | {
+      readonly ok: true;
+      readonly path: string;
+      readonly tookOverFrom?: LockHolder | undefined;
+    }
+  | {
+      readonly ok: false;
+      readonly path: string;
+      readonly holder: LockHolder | null;
+      readonly reason: LockNotAcquiredReason;
+    };
 
-export type LockNotAcquiredReason = "held_by_other_process" | "unparsable_lock" | "forced_but_absent";
+export type LockNotAcquiredReason =
+  | "held_by_other_process"
+  | "unparsable_lock"
+  | "forced_but_absent";
 
 export interface AcquireLockOptions {
   /** 持锁者自述。默认 hub-serve。 */
@@ -220,7 +238,8 @@ export function releaseLock(
 ): { readonly removed: boolean; readonly note: string } {
   void o;
   const path = lockPathFor(dbPath);
-  if (!existsSync(path)) return { removed: false, note: "锁文件本来就不在（可能已被清理）" };
+  if (!existsSync(path))
+    return { removed: false, note: "锁文件本来就不在（可能已被清理）" };
   const raw = readExisting(path);
   const prev = raw === null ? null : decode(raw);
   if (prev !== null && prev.pid !== process.pid) {
@@ -251,8 +270,11 @@ function removeOwn(path: string): void {
  * 一句人话的拒绝理由。放在这里而不是调用方，是因为 serve 与维护入口都要说这句话，
  * 两处的字不一样就会有一处的信息更少（而信息更少的那一处恰好是出事时有人读的那处）。
  */
-export function describeLockFailure(x: Extract<LockAcquire, { ok: false }>): string {
-  const at = (ms: number): string => new Date(ms).toISOString().replace("T", " ").slice(0, 19);
+export function describeLockFailure(
+  x: Extract<LockAcquire, { ok: false }>,
+): string {
+  const at = (ms: number): string =>
+    new Date(ms).toISOString().replace("T", " ").slice(0, 19);
   if (x.holder === null) {
     return (
       "锁文件读不出内容：" +

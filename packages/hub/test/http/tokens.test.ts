@@ -24,24 +24,24 @@
  */
 import { mkdirSync, readFileSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
 import type { DatabaseSync } from "node:sqlite";
+import { fileURLToPath } from "node:url";
 import { afterAll, describe, expect, it } from "vitest";
+import { openDb } from "../../src/db/driver.js";
+import { migrate } from "../../src/db/migrate.js";
 import {
-  DEFAULT_TOKEN_TTL_MS,
   BURN_TOKEN_SQL,
+  DEFAULT_TOKEN_TTL_MS,
   hashToken,
   INSERT_TOKEN_SQL,
+  isIrreversibleApproval,
   issueToken,
   newApprovalToken,
   redeemToken,
   TOKEN_UNUSED,
   tokenRemainingMs,
-  isIrreversibleApproval,
 } from "../../src/http/tokens.js";
 import { fixtureTmp } from "../fixtures/fixture-dir.js";
-import { openDb } from "../../src/db/driver.js";
-import { migrate } from "../../src/db/migrate.js";
 
 const HUB = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const TMP = fixtureTmp("tokens", import.meta.url);
@@ -54,19 +54,19 @@ const opened: Array<{ close(): void }> = [];
 let seq = 0;
 
 function fresh(): DatabaseSync {
-  const db = openDb(join(TMP, "tk-" + ++seq + ".db")) as unknown as DatabaseSync;
+  const db = openDb(
+    join(TMP, "tk-" + ++seq + ".db"),
+  ) as unknown as DatabaseSync;
   opened.push(db);
   migrate(db);
   return db;
 }
 
 function addTask(db: DatabaseSync, id: string): void {
-  db
-    .prepare(
-      "INSERT INTO tasks (id, title, status, assigned_role, current_node, created_at, updated_at) " +
-        "VALUES (?, ?, 'IN_PROGRESS', 'dev', 'implement', ?, ?)",
-    )
-    .run(id, "token 夹具 " + id, T0, T0);
+  db.prepare(
+    "INSERT INTO tasks (id, title, status, assigned_role, current_node, created_at, updated_at) " +
+      "VALUES (?, ?, 'IN_PROGRESS', 'dev', 'implement', ?, ?)",
+  ).run(id, "token 夹具 " + id, T0, T0);
 }
 
 /**
@@ -94,7 +94,11 @@ function addApproval(
   return id;
 }
 
-function issue(db: DatabaseSync, approvalId: string, over: { nowMs?: number; ttlMs?: number } = {}) {
+function issue(
+  db: DatabaseSync,
+  approvalId: string,
+  over: { nowMs?: number; ttlMs?: number } = {},
+) {
   const raw = newApprovalToken();
   issueToken(db, {
     rawToken: raw,
@@ -217,7 +221,10 @@ describe("① 一次：一张票只换一次兑换", () => {
     // 行为断言在上面那一发，而它只覆盖了「跑到的那条路径」。
     // 这一发扫全部源码：将来有人加一条 UPDATE approvals 就红，
     // 哪怕那条路今天没有任何用例经过（0026 §7.1 那一族的正面解法）。
-    const code = TOKENS_SRC.replace(/\/\*[\s\S]*?\*\//gu, "").replace(/^\s*\/\/.*$/gmu, "");
+    const code = TOKENS_SRC.replace(/\/\*[\s\S]*?\*\//gu, "").replace(
+      /^\s*\/\/.*$/gmu,
+      "",
+    );
     expect(code).not.toMatch(/UPDATE\s+approvals/iu);
     expect(code).not.toMatch(/INSERT\s+INTO\s+approvals/iu);
     // 反向对照：剥注释【确实剥到了东西】，否则这条扫描可能只是在比原文。
@@ -240,7 +247,11 @@ describe("② 一张：票与卡绑定", () => {
     addApproval(db, "a-1");
     addApproval(db, "a-2");
     const raw = issue(db, "a-1");
-    const r = redeemToken(db, { rawToken: raw, nowMs: T0, expectedApprovalId: "a-2" });
+    const r = redeemToken(db, {
+      rawToken: raw,
+      nowMs: T0,
+      expectedApprovalId: "a-2",
+    });
     expect(r.ok).toBe(false);
     expect(r.ok === false && r.reason).toBe("approval_mismatch");
     // 反向对照：同一张票批【它自己那张】仍然成功。
@@ -258,7 +269,9 @@ describe("② 一张：票与卡绑定", () => {
     const db = fresh();
     addTask(db, "t-1");
     const raw = issue(db, addApproval(db, "a-1"));
-    db.prepare("UPDATE approvals SET status = 'approved' WHERE id = 'a-1'").run();
+    db.prepare(
+      "UPDATE approvals SET status = 'approved' WHERE id = 'a-1'",
+    ).run();
     const r = redeemToken(db, { rawToken: raw, nowMs: T0 });
     expect(r.ok).toBe(false);
     expect(r.ok === false && r.reason).toBe("approval_not_pending");
@@ -275,7 +288,10 @@ describe("③ 时间", () => {
     const db = fresh();
     addTask(db, "t-1");
     const raw = issue(db, addApproval(db, "a-1"));
-    const r = redeemToken(db, { rawToken: raw, nowMs: T0 + DEFAULT_TOKEN_TTL_MS });
+    const r = redeemToken(db, {
+      rawToken: raw,
+      nowMs: T0 + DEFAULT_TOKEN_TTL_MS,
+    });
     expect(r.ok).toBe(false);
     expect(r.ok === false && r.reason).toBe("expired");
   });
@@ -317,8 +333,14 @@ describe("③ 时间", () => {
     addTask(db, "t-1");
     addApproval(db, "a-1");
     for (const bad of [Number.NaN, 0, -1, Number.POSITIVE_INFINITY]) {
-      expect(() =>
-        issueToken(db, { rawToken: newApprovalToken(), approvalId: "a-1", nowMs: T0, ttlMs: bad }),
+      expect(
+        () =>
+          issueToken(db, {
+            rawToken: newApprovalToken(),
+            approvalId: "a-1",
+            nowMs: T0,
+            ttlMs: bad,
+          }),
         String(bad),
       ).toThrow(/正有限数/u);
     }
@@ -329,7 +351,10 @@ describe("④ §11.4 不可逆不许在远程完成", () => {
   it("type 是 irreversible_action ⇒ 拒", () => {
     const db = fresh();
     addTask(db, "t-1");
-    const raw = issue(db, addApproval(db, "a-1", { type: "irreversible_action" }));
+    const raw = issue(
+      db,
+      addApproval(db, "a-1", { type: "irreversible_action" }),
+    );
     const r = redeemToken(db, { rawToken: raw, nowMs: T0 });
     expect(r.ok === false && r.reason).toBe("irreversible_denied");
   });
@@ -343,7 +368,10 @@ describe("④ §11.4 不可逆不许在远程完成", () => {
      */
     const db = fresh();
     addTask(db, "t-1");
-    const raw = issue(db, addApproval(db, "a-1", { parameters: '{"irreversible": true}' }));
+    const raw = issue(
+      db,
+      addApproval(db, "a-1", { parameters: '{"irreversible": true}' }),
+    );
     const r = redeemToken(db, { rawToken: raw, nowMs: T0 });
     expect(r.ok === false && r.reason).toBe("irreversible_denied");
   });
@@ -365,28 +393,43 @@ describe("④ §11.4 不可逆不许在远程完成", () => {
 
   it("四种判不出的形状全部算不可逆：脏串 / null / 空串 / 数组", () => {
     for (const p of ["{坏", null, "", "[1,2]", '"一个字符串"']) {
-      expect(isIrreversibleApproval("budget_override", p), JSON.stringify(p)).toBe(true);
+      expect(
+        isIrreversibleApproval("budget_override", p),
+        JSON.stringify(p),
+      ).toBe(true);
     }
     // 反向对照：一个明确的 false 必须放行。否则上面那五条只是「恒返回 true」。
-    expect(isIrreversibleApproval("budget_override", '{"irreversible": false}')).toBe(false);
-    expect(isIrreversibleApproval("escalation", '{"impact_scope":"x"}')).toBe(false);
+    expect(
+      isIrreversibleApproval("budget_override", '{"irreversible": false}'),
+    ).toBe(false);
+    expect(isIrreversibleApproval("escalation", '{"impact_scope":"x"}')).toBe(
+      false,
+    );
   });
 
-  it("⭐ 只认【真】true：字符串 \"true\" 与 1 不算（否则偏严会被取值解释抵消）", () => {
+  it('⭐ 只认【真】true：字符串 "true" 与 1 不算（否则偏严会被取值解释抵消）', () => {
     // 这一发看着像在挑刺，它钉的是【判据的方向不能反】：
     // 上面几条把「判不出」一律算不可逆（偏严），而如果这里把 "true"/1 也算 true（偏松），
     // 两件事叠起来会得到一个【谁也说不清】的真值表。取值解释跟契约走：
     // 建卡方过的是 zod 的严格布尔（cards.ts），写不出非布尔的 irreversible。
-    expect(isIrreversibleApproval("budget_override", '{"irreversible": "true"}')).toBe(false);
-    expect(isIrreversibleApproval("budget_override", '{"irreversible": 1}')).toBe(false);
-    expect(isIrreversibleApproval("budget_override", '{"irreversible": true}')).toBe(true);
+    expect(
+      isIrreversibleApproval("budget_override", '{"irreversible": "true"}'),
+    ).toBe(false);
+    expect(
+      isIrreversibleApproval("budget_override", '{"irreversible": 1}'),
+    ).toBe(false);
+    expect(
+      isIrreversibleApproval("budget_override", '{"irreversible": true}'),
+    ).toBe(true);
   });
 
   it("timeout_behavior【不是】可逆性的判据（那是超时策略，不是可撤销性）", () => {
     // 【规格】§11.4 原文是「IM 只处理可逆的、有超时默认行为的审批」——
     // 那是【两个必要条件】，不是把后者当前者的定义。
     // 一张 auto_reject 的不可逆卡照样不可逆。这一发把这条误读钉死。
-    expect(isIrreversibleApproval("irreversible_action", '{"irreversible": false}')).toBe(true);
+    expect(
+      isIrreversibleApproval("irreversible_action", '{"irreversible": false}'),
+    ).toBe(true);
   });
 });
 
@@ -401,7 +444,9 @@ describe("⑤ 库里存的是哈希", () => {
     const db = fresh();
     addTask(db, "t-1");
     const raw = issue(db, addApproval(db, "a-1"));
-    const byRaw = db.prepare("SELECT 1 AS x FROM im_tokens WHERE token = ?").get(raw);
+    const byRaw = db
+      .prepare("SELECT 1 AS x FROM im_tokens WHERE token = ?")
+      .get(raw);
     const byHash = db
       .prepare("SELECT 1 AS x FROM im_tokens WHERE token = ?")
       .get(hashToken(raw));
@@ -449,12 +494,18 @@ describe("⑤ 库里存的是哈希", () => {
     // 逼读的人去重新决定那次预检留不留 —— 而不是让两处判据悄悄并存。
     expect(() =>
       db
-        .prepare("INSERT INTO im_tokens (token, approval_id, expires_at, used) VALUES (?,?,?,?)")
+        .prepare(
+          "INSERT INTO im_tokens (token, approval_id, expires_at, used) VALUES (?,?,?,?)",
+        )
         .run("h-x", "no-such-approval", T0 + 1000, TOKEN_UNUSED),
     ).not.toThrow();
     // 于是【没有 FK 挡着】是事实，那么这一发必须靠代码挡住：
     expect(() =>
-      issueToken(db, { rawToken: newApprovalToken(), approvalId: "ghost", nowMs: T0 }),
+      issueToken(db, {
+        rawToken: newApprovalToken(),
+        approvalId: "ghost",
+        nowMs: T0,
+      }),
     ).toThrow(/不存在/u);
   });
 
@@ -468,7 +519,9 @@ describe("⑤ 库里存的是哈希", () => {
     // 所以这一发不是「双保险里的第二道」，它是【这一条性质在本机唯一的守卫】——
     // 而它防的是【两个进程同时写这个库】（§5.4 单写者队列之外唯一剩下的窗口），
     // 那个场景在单进程测试里【造不出来】，只能靠钉形状。
-    expect(BURN_TOKEN_SQL).toMatch(/WHERE token = \? AND used = \? AND expires_at > \?/u);
+    expect(BURN_TOKEN_SQL).toMatch(
+      /WHERE token = \? AND used = \? AND expires_at > \?/u,
+    );
     expect(INSERT_TOKEN_SQL).toMatch(
       /INSERT INTO im_tokens \(token, approval_id, expires_at, used\) VALUES \(\?, \?, \?, \?\)/u,
     );

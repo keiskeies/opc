@@ -68,7 +68,11 @@ export const PARALLEL_MIN_BRANCHES = 2;
 /** 判定的返回值：允许就给出分支清单，不允许就给出**具体**理由。 */
 export type ParallelDecision =
   | { readonly parallel: true; readonly branches: readonly ParallelBranch[] }
-  | { readonly parallel: false; readonly reason: string; readonly blocked_by: BlockedBy };
+  | {
+      readonly parallel: false;
+      readonly reason: string;
+      readonly blocked_by: BlockedBy;
+    };
 
 export const BLOCKED_BY = [
   "fewer_than_two_branches",
@@ -215,7 +219,9 @@ export function worstOfReducer(
 ): GateSeverity {
   if (accumulated === undefined) return update ?? "escalate";
   if (update === undefined) return accumulated;
-  return severityRank(update) > severityRank(accumulated) ? update : accumulated;
+  return severityRank(update) > severityRank(accumulated)
+    ? update
+    : accumulated;
 }
 
 /**
@@ -241,7 +247,8 @@ export function assertAllBranchesReported(
     // 有 key 但值是 undefined：**也算缺**。`{dev: undefined}` 与 `{}` 在
     // Object.hasOwn 上不同，但在「分支到底交没交东西」这个问题上是同一件事。
     // 判不出交没交的时候必须算没交（收紧方向，同 decideParallelDecomposition 缺键判法）。
-    else if (contributions[b.roleId] === undefined) missing.push(b.roleId + "(值为 undefined)");
+    else if (contributions[b.roleId] === undefined)
+      missing.push(b.roleId + "(值为 undefined)");
   }
   if (missing.length > 0) {
     throw new Error(
@@ -261,7 +268,10 @@ export function assertAllBranchesReported(
  */
 export interface ParallelMergeResult {
   /** 全部产物，**顺序不敏感**：任何分支到达顺序都得到同一个多重集合（有用例钉）。 */
-  readonly artifacts: readonly { readonly role_id: string; readonly artifact: string }[];
+  readonly artifacts: readonly {
+    readonly role_id: string;
+    readonly artifact: string;
+  }[];
   readonly gate: GateSeverity;
 }
 
@@ -291,7 +301,9 @@ export function mergeParallelResults(
       artifact: string;
       gate: GateSeverity;
     };
-    artifacts = appendReducer(artifacts, [{ role_id: b.roleId, artifact: c.artifact }]);
+    artifacts = appendReducer(artifacts, [
+      { role_id: b.roleId, artifact: c.artifact },
+    ]);
     gate = worstOfReducer(gate, c.gate);
   }
   return { artifacts, gate: gate ?? "escalate" };

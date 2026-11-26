@@ -35,9 +35,9 @@
 
 import type { DatabaseSync } from "node:sqlite";
 import { requireScopeDb } from "../checkpoint/tx-scope.js";
-import { appendAudit } from "../events/recorder.js";
-import type { EventBus, DomainEvent } from "../events/bus.js";
 import type { Writer } from "../db/write-queue.js";
+import type { DomainEvent, EventBus } from "../events/bus.js";
+import { appendAudit } from "../events/recorder.js";
 import { TASK_STATES, type TaskState } from "../graph/status.js";
 
 /**
@@ -175,16 +175,26 @@ export const PATROL_SQL =
   "SELECT t.id AS id, t.status AS status, t.current_node AS current_node, " +
   "  t.created_at AS created_at, " +
   "  (SELECT max(e.created_at) FROM events e WHERE e.task_id = t.id " +
-  "     AND " + kindOf("e") + " IS NOT NULL " +
-  "     AND " + kindOf("e") + " <> 'HeartbeatStalled') AS last_real_event_at, " +
+  "     AND " +
+  kindOf("e") +
+  " IS NOT NULL " +
+  "     AND " +
+  kindOf("e") +
+  " <> 'HeartbeatStalled') AS last_real_event_at, " +
   "  (SELECT max(e.created_at) FROM events e WHERE e.task_id = t.id " +
-  "     AND " + kindOf("e") + " = 'HeartbeatStalled') AS last_stall_at, " +
+  "     AND " +
+  kindOf("e") +
+  " = 'HeartbeatStalled') AS last_stall_at, " +
   "  EXISTS (" +
   "    SELECT 1 FROM events r WHERE r.task_id = t.id " +
-  "      AND " + kindOf("r") + " = 'ApprovalRequired' " +
+  "      AND " +
+  kindOf("r") +
+  " = 'ApprovalRequired' " +
   "      AND NOT EXISTS (SELECT 1 FROM events d WHERE d.task_id = r.task_id " +
   "        AND d.target = r.target " +
-  "        AND " + kindOf("d") + " = 'ApprovalDecided')" +
+  "        AND " +
+  kindOf("d") +
+  " = 'ApprovalDecided')" +
   "  ) AS awaiting_approval " +
   "FROM tasks t ORDER BY t.created_at";
 
@@ -244,7 +254,8 @@ export function judgeTask(
   // 一条事件都没有过：拿 created_at 起算。把 null 当 0 会让【每一个新建任务】
   // 在第一次巡检时被报成停滞（1970 年起的沉默），而新建任务正是最不该吵的那类。
   if (s.lastRealEventAtMs === null) {
-    if (silentForMs <= thresholdMs) return { ...base, verdict: "never_started" };
+    if (silentForMs <= thresholdMs)
+      return { ...base, verdict: "never_started" };
   } else if (silentForMs <= thresholdMs) {
     return { ...base, verdict: "recent" };
   }
@@ -276,8 +287,10 @@ export function patrolTasks(
         status: String(r["status"] ?? ""),
         currentNode: String(r["current_node"] ?? ""),
         createdAtMs: num(r["created_at"]),
-        lastRealEventAtMs: r["last_real_event_at"] == null ? null : num(r["last_real_event_at"]),
-        lastStallAtMs: r["last_stall_at"] == null ? null : num(r["last_stall_at"]),
+        lastRealEventAtMs:
+          r["last_real_event_at"] == null ? null : num(r["last_real_event_at"]),
+        lastStallAtMs:
+          r["last_stall_at"] == null ? null : num(r["last_stall_at"]),
         awaitingApproval: num(r["awaiting_approval"]) === 1,
       },
       now(),
@@ -298,7 +311,10 @@ export function stalledTasks(
 }
 
 /** 事件载荷里写清的三件事：停滞多久、球在哪个节点、这是第几轮巡检报的。 */
-export const STALL_ACTOR = { actorType: "system", actorId: "heartbeat" } as const;
+export const STALL_ACTOR = {
+  actorType: "system",
+  actorId: "heartbeat",
+} as const;
 
 export function stallEvent(j: TaskJudgement): DomainEvent {
   return {

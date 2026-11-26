@@ -67,12 +67,20 @@ export interface AdvanceResult {
  */
 async function oneTurn(
   rt: EngineRuntime,
-  dispatch: (o: { taskId: string; nowMs: number; maxBudgetUsd: number }) => Promise<DispatchResult>,
+  dispatch: (o: {
+    taskId: string;
+    nowMs: number;
+    maxBudgetUsd: number;
+  }) => Promise<DispatchResult>,
   o: AdvanceOptions,
   turn: number,
 ): Promise<AdvanceTurnLog> {
   const now = (o.nowMs ?? Date.now)();
-  const res = await dispatch({ taskId: o.taskId, nowMs: now, maxBudgetUsd: o.maxBudgetUsd });
+  const res = await dispatch({
+    taskId: o.taskId,
+    nowMs: now,
+    maxBudgetUsd: o.maxBudgetUsd,
+  });
   const rec = await rt.recordTurn({
     taskId: res.taskId,
     role: res.role,
@@ -81,7 +89,12 @@ async function oneTurn(
     ok: res.seat === "agent",
     nowMs: now,
   });
-  const log: AdvanceTurnLog = { turn, res, recorded: rec.recorded, why: rec.why };
+  const log: AdvanceTurnLog = {
+    turn,
+    res,
+    recorded: rec.recorded,
+    why: rec.why,
+  };
   o.onTurn?.(log);
   return log;
 }
@@ -94,7 +107,11 @@ async function oneTurn(
  */
 export async function advance(
   rt: EngineRuntime,
-  dispatch: (o: { taskId: string; nowMs: number; maxBudgetUsd: number }) => Promise<DispatchResult>,
+  dispatch: (o: {
+    taskId: string;
+    nowMs: number;
+    maxBudgetUsd: number;
+  }) => Promise<DispatchResult>,
   o: AdvanceOptions,
 ): Promise<AdvanceResult> {
   const maxTurns = o.maxTurns ?? 12;
@@ -103,15 +120,23 @@ export async function advance(
   // 结果是一句听起来成功的谎话（同 assertCents / assertParamCount 那条立场）。
   if (!Number.isSafeInteger(maxTurns) || maxTurns < 1) {
     throw new Error(
-      "advance: maxTurns 必须是正整数（实到 " + String(o.maxTurns) + "）。" +
-      "0 会让循环一次都不跑而返回一个【看起来跑完了】的结果。",
+      "advance: maxTurns 必须是正整数（实到 " +
+        String(o.maxTurns) +
+        "）。" +
+        "0 会让循环一次都不跑而返回一个【看起来跑完了】的结果。",
     );
   }
   const turns: AdvanceTurnLog[] = [];
   // 任务不在了就不进循环：dispatch 会为一条不存在的任务抛错，而那句抛错
   // 到了 CLI 会变成「执行失败」，比「任务不存在」难懂一档。
   if (rt.deps.loadTask(o.taskId) === null) {
-    return { taskId: o.taskId, turns, stopped: "gone", totalCostCents: 0, status: "" };
+    return {
+      taskId: o.taskId,
+      turns,
+      stopped: "gone",
+      totalCostCents: 0,
+      status: "",
+    };
   }
   let stopped: AdvanceResult["stopped"] = "limit";
 
@@ -141,9 +166,20 @@ export async function advance(
 }
 
 /** 一句人话的收尾。CLI 与桌面端都读这一句，所以措辞只有一份。 */
-export function describeAdvance(r: AdvanceResult, task: DispatchTask | null): string {
+export function describeAdvance(
+  r: AdvanceResult,
+  task: DispatchTask | null,
+): string {
   const head =
-    "任务 " + r.taskId + " 停在 " + r.status + "（跑了 " + r.turns.length + " 轮，花 " + r.totalCostCents + " 美分）";
+    "任务 " +
+    r.taskId +
+    " 停在 " +
+    r.status +
+    "（跑了 " +
+    r.turns.length +
+    " 轮，花 " +
+    r.totalCostCents +
+    " 美分）";
   const last = r.turns[r.turns.length - 1];
   const why = last === undefined ? "（一轮都没跑起来）" : "：" + last.res.note;
   const tail =
@@ -154,5 +190,7 @@ export function describeAdvance(r: AdvanceResult, task: DispatchTask | null): st
         : r.stopped === "limit"
           ? "\n撞上轮数上限。通常是「不动就停」那条判据没生效 —— 检查一下最后几轮的 moved。"
           : "\n任务在库里找不到了。";
-  return head + why + tail + (task === null ? "" : "（负责角色：" + task.role + "）");
+  return (
+    head + why + tail + (task === null ? "" : "（负责角色：" + task.role + "）")
+  );
 }

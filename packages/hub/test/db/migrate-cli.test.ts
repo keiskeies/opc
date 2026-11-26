@@ -4,8 +4,8 @@ import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, expect, it } from "vitest";
-import { fixtureTmp } from "../fixtures/fixture-dir.js";
 import { parseArgs } from "../../src/db/migrate-cli.js";
+import { fixtureTmp } from "../fixtures/fixture-dir.js";
 
 /**
  * Task 0.5　pnpm migrate 的入口行为。

@@ -27,8 +27,8 @@ Task 3.x 那一阵写完的东西：
 `HUMAN_EDGES` 那张表把三条人类出边算好了、`humanEdge()` 能查出来，而 `grep` 出来的命中只有
 表本身、那句人席提示、和一条「落点合法」的表扫描 —— **没有人调它**。
 【round321 复核：「没有人调它」已过期 —— 0044/0046/0048 接人席卡后，`humanEdge()`
-与 `HUMAN_EDGES` 都有生产读者：`dispatch.ts:307` 定义且被 approve 的人席推进读、
-`seat-card.ts:71` 的 `needsSeatCard`（判「要不要给人席建卡」）、`src/cli.ts:442` 判据。
+与 `HUMAN_EDGES` 都有生产读者：`dispatch.ts:389` 定义且被 approve 的人席推进读、
+`seat-card.ts:72` 的 `needsSeatCard`（判「要不要给人席建卡」）、`src/cli.ts:442` 判据。
 写作时点的 grep 读数保留，接线事实以当前 src 为准。】
 `approval_type='charter'` 这个取值在枚举里、在 role-memory 的分类表里、在 LangGraph 那条直通桩节点里，
 **没有任何代码建这种卡**。
@@ -112,7 +112,7 @@ CEO 的原话是「别用 langchain，每个 agent 都是灵活的，不是写�
 变成一个**不可见的少记账**。
 
 同一族的另一发：卡片审计那行的 payload 形状。`createCard`（http / 巡检建卡走的那条）落
-`evt.payload`（`{kind, approval_type, summary, evidence_refs}` 在**顶层**，被 `cards.test.ts:510` 钉住），
+`evt.payload`（`{kind, approval_type, summary, evidence_refs}` 在**顶层**，被 `cards.test.ts:605` 钉住），
 而 `dispatch.ts` 从前写 `{...evt}`（字段嵌一层）。**共用的 `kind` 掩盖了不共用的部分** ——
 role-memory 那个 `payload.kind` 判别式一直看起来是对的，而按 `approval_type` 数待批事项的读法
 会漏掉引擎建的那一类。两处一起纠正，并由 `charter.test.ts` 那条**跨生产者**用例钉住

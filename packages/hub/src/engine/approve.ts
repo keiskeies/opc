@@ -31,16 +31,17 @@
  * 哪个状态【规格没定】，已登记在 real-deps.ts §4.1 的等待区。在那里拍板之前，
  * 这里宁可对那一颗按钮报「这条出边不存在」，也不猜一条边写进 append-only 的审计库。
  */
-import type { HubWriter } from "../db/write-queue.js";
-import { assertParamCount, assertSingleStatement } from "../db/write-queue.js";
+
 import type { DatabaseSync } from "node:sqlite";
-import { requireScopeDb } from "../checkpoint/tx-scope.js";
-import { appendAudit, KIND_TO_ACTION } from "../events/recorder.js";
-import type { DomainEvent } from "../events/bus.js";
 import {
   APPROVAL_STATUS_PENDING,
   SAME_FAMILY_REVIEW_KEY_PREFIX,
 } from "../approvals/cards.js";
+import { requireScopeDb } from "../checkpoint/tx-scope.js";
+import type { HubWriter } from "../db/write-queue.js";
+import { assertParamCount, assertSingleStatement } from "../db/write-queue.js";
+import type { DomainEvent } from "../events/bus.js";
+import { appendAudit, KIND_TO_ACTION } from "../events/recorder.js";
 import type { TaskState } from "../graph/status.js";
 import { humanEdge, seatOf, WRITE_EDGE_SQL } from "./dispatch.js";
 import {
@@ -70,7 +71,11 @@ export const CLAIM_CARD_SQL =
   "WHERE id = ? AND status = ?";
 
 /** 卡片被点掉之后的三种结局。 */
-export const CARD_DECIDED_STATUS = ["approved", "rejected", "deferred"] as const;
+export const CARD_DECIDED_STATUS = [
+  "approved",
+  "rejected",
+  "deferred",
+] as const;
 export type CardDecidedStatus = (typeof CARD_DECIDED_STATUS)[number];
 
 /**
@@ -80,7 +85,10 @@ export type CardDecidedStatus = (typeof CARD_DECIDED_STATUS)[number];
  * approveCard 的调用方（CLI / 桌面 IPC）拿到的字符串本来就该由 contracts 校验过，
  * 这一层要的是【不再依赖 http 那一族】，不是自立一套词表。同值由测试钉住。
  */
-export type CardButton = "approve" | "reject_with_comment" | "defer_deep_review";
+export type CardButton =
+  | "approve"
+  | "reject_with_comment"
+  | "defer_deep_review";
 
 /**
  * 三颗按钮 → 卡片状态。
@@ -94,11 +102,12 @@ export type CardButton = "approve" | "reject_with_comment" | "defer_deep_review"
  * 另外两条落进 rejected / deferred 之后任务原地不动，这是规格缺口不是这里的取舍，
  * 返回值里的 edgeExists 就是为了让调用方能把这件事说出来而不是含糊过去。
  */
-export const STATUS_BY_BUTTON: Readonly<Record<CardButton, CardDecidedStatus>> = {
-  approve: "approved",
-  reject_with_comment: "rejected",
-  defer_deep_review: "deferred",
-};
+export const STATUS_BY_BUTTON: Readonly<Record<CardButton, CardDecidedStatus>> =
+  {
+    approve: "approved",
+    reject_with_comment: "rejected",
+    defer_deep_review: "deferred",
+  };
 
 /**
  * 打回必须带理由。判据与 contracts 的 approvalDecisionRequestSchema 那条 superRefine
@@ -145,13 +154,17 @@ const LOAD_TASK_STATE_SQL =
  * 漂移的结局是：一处把已批掉的算进来，收件箱计数从此恒大于真值（0026 §9 那一族）。
  */
 function pendingCardKeys(db: DatabaseSync, taskId: string): PendingCardLite[] {
-  const rows = db.prepare(PENDING_CARDS_SQL).all(taskId, APPROVAL_STATUS_PENDING) as Record<string, unknown>[];
+  const rows = db
+    .prepare(PENDING_CARDS_SQL)
+    .all(taskId, APPROVAL_STATUS_PENDING) as Record<string, unknown>[];
   return rows.map((r) => ({
     id: String(r["id"] ?? ""),
-    cardKey: r["card_key"] === null || r["card_key"] === undefined ? null : String(r["card_key"]),
+    cardKey:
+      r["card_key"] === null || r["card_key"] === undefined
+        ? null
+        : String(r["card_key"]),
   }));
 }
-
 
 export interface ApproveOptions {
   readonly taskId: string;
@@ -175,8 +188,7 @@ export interface ApproveOptions {
 }
 
 export interface ApproveResult {
-  readonly outcome:
-    /** 全部落库：卡片已决策 + 任务状态边（有合法出边时）+ 事件已广播。 */
+  readonly outcome: /** 全部落库：卡片已决策 + 任务状态边（有合法出边时）+ 事件已广播。 */
     | "decided"
     /** 卡片不在库里。【不写任何东西】—— 与 applyDecision 同一条不变量。 */
     | "card_missing"
@@ -228,7 +240,10 @@ export interface ApproveResult {
    */
   readonly orgVersionUnchecked: true;
   /** 本轮消费掉的每一条 (事件, seq)（提交后已广播）。空 = 什么都没写。 */
-  readonly published: readonly { readonly event: DomainEvent; readonly seq: number }[];
+  readonly published: readonly {
+    readonly event: DomainEvent;
+    readonly seq: number;
+  }[];
   /**
    * 一句人话：这一步走到了哪 / 为什么没走到。与 DispatchResult.note 同位同义。
    * 别与入参那个 note（CEO 写的理由）混起来 —— 那是【决策的附件】，这里是【给终端
@@ -300,7 +315,12 @@ export async function approveCard(
 
     const cardTaskId = String(card["task_id"] ?? "");
     if (cardTaskId !== o.taskId) {
-      return { kind: "card_belongs_to_other_task" as const, status, from: "" as const, to: "" as const };
+      return {
+        kind: "card_belongs_to_other_task" as const,
+        status,
+        from: "" as const,
+        to: "" as const,
+      };
     }
     // 只认 pending。已经决策过的卡片【一条审计都不写】：写一条就等于在 append-only
     // 的历史里说「这个人又决定了一次」，而没发生（同 applyDecision 第 ① 条不变量）。
@@ -322,7 +342,11 @@ export async function approveCard(
      * 这里不让它在读侧空判，而是让空理由【到不了 approval 这一行】。
      */
     const cardKey = String(card["card_key"] ?? "");
-    if (o.button === "approve" && cardKey.startsWith(SAME_FAMILY_REVIEW_KEY_PREFIX) && trimmed === "") {
+    if (
+      o.button === "approve" &&
+      cardKey.startsWith(SAME_FAMILY_REVIEW_KEY_PREFIX) &&
+      trimmed === ""
+    ) {
       return { kind: "waiver_note_required" as const, status };
     }
 
@@ -373,7 +397,6 @@ export async function approveCard(
       };
     }
 
-
     // 先认领，再动任务。顺序反过来的话，「卡片已被别人抢先批掉」这一支会留下一条
     // 【没有批准记录的状态变化】，而它是回放里最难查的那种缺口。
     const claimParams: unknown[] = [
@@ -387,7 +410,9 @@ export async function approveCard(
     ];
     assertSingleStatement(CLAIM_CARD_SQL);
     assertParamCount(CLAIM_CARD_SQL, claimParams);
-    const claimed = db.prepare(CLAIM_CARD_SQL).run(...(claimParams as never[])) as {
+    const claimed = db
+      .prepare(CLAIM_CARD_SQL)
+      .run(...(claimParams as never[])) as {
       changes: number | bigint;
     };
     if (Number(claimed.changes) === 0) {
@@ -396,7 +421,11 @@ export async function approveCard(
     }
 
     const published: { event: DomainEvent; seq: number }[] = [];
-    const decidedPayload = { approvalId: o.approvalId, resume: o.button, by: "engine" };
+    const decidedPayload = {
+      approvalId: o.approvalId,
+      resume: o.button,
+      by: "engine",
+    };
     const decidedSeq = appendAudit(
       db,
       {
@@ -434,11 +463,20 @@ export async function approveCard(
         edgeExists: false,
         published,
         publishedNote:
-          "卡片已记为 " + status + "，但 " + from + " 上【没有】这一颗按钮对应的出边（HUMAN_EDGES 只有 approve）。",
+          "卡片已记为 " +
+          status +
+          "，但 " +
+          from +
+          " 上【没有】这一颗按钮对应的出边（HUMAN_EDGES 只有 approve）。",
       };
     }
 
-    const edgeEvent: DomainEvent = { kind: "TaskStateChanged", taskId: o.taskId, from, to: edge.to };
+    const edgeEvent: DomainEvent = {
+      kind: "TaskStateChanged",
+      taskId: o.taskId,
+      from,
+      to: edge.to,
+    };
     const stateSeq = appendAudit(
       db,
       {
@@ -482,8 +520,17 @@ export async function approveCard(
     };
     if (Number(info.changes) !== 1) {
       throw new Error(
-        "approveCard: 状态边被守卫拦下 —— 任务 [" + o.taskId + "] 在写 " + from + " → " + edge.to +
-          " 时状态已不是 " + from + "（实到 changes=" + Number(info.changes) + "）。整笔回滚，" +
+        "approveCard: 状态边被守卫拦下 —— 任务 [" +
+          o.taskId +
+          "] 在写 " +
+          from +
+          " → " +
+          edge.to +
+          " 时状态已不是 " +
+          from +
+          "（实到 changes=" +
+          Number(info.changes) +
+          "）。整笔回滚，" +
           "卡片退回待批：不能让 CEO 看见「已批准」而任务原地不动。",
       );
     }
@@ -547,7 +594,9 @@ export async function approveCard(
       orgVersionUnchecked: true,
       published: [],
       note:
-        "卡片挂在 [" + o.taskId + "] 上而那条任务不在库里 —— 一致性坏了，什么都没写。" +
+        "卡片挂在 [" +
+        o.taskId +
+        "] 上而那条任务不在库里 —— 一致性坏了，什么都没写。" +
         "这一发不能只批卡片：那会留下一条【批掉了却推不动任何东西】的批准记录。",
     };
   }
@@ -601,9 +650,16 @@ export async function approveCard(
       orgVersionUnchecked: true,
       published: [],
       note:
-        "那张卡片问的不是 [" + wrote.from + "] 这一格，而这一格已经有它自己的卡在等着（" +
-        String(wrote.ownKey) + "，共 " + String(wrote.ownCount) + " 张）。点它不会推进任务——" +
-        "任务此刻在 [" + wrote.from + "]，要批的是那张卡，不是这张过期的。什么都没写。",
+        "那张卡片问的不是 [" +
+        wrote.from +
+        "] 这一格，而这一格已经有它自己的卡在等着（" +
+        String(wrote.ownKey) +
+        "，共 " +
+        String(wrote.ownCount) +
+        " 张）。点它不会推进任务——" +
+        "任务此刻在 [" +
+        wrote.from +
+        "]，要批的是那张卡，不是这张过期的。什么都没写。",
     };
   }
   // 提交成功之后才广播（回滚的话那些行根本没存在过 —— §5.8）。
@@ -642,7 +698,10 @@ export function pendingCards(w: HubWriter, taskId: string): CardRow[] {
     taskId: String(r["task_id"] ?? ""),
     status: String(r["status"] ?? ""),
     approvalType: String(r["approval_type"] ?? ""),
-    cardKey: r["card_key"] === null || r["card_key"] === undefined ? null : String(r["card_key"]),
+    cardKey:
+      r["card_key"] === null || r["card_key"] === undefined
+        ? null
+        : String(r["card_key"]),
   }));
 }
 
@@ -652,6 +711,7 @@ export function humanSeatHint(status: TaskState): string {
   if (seat === "agent") return "这一格由 agent 推进，不需要人来点。";
   const e = humanEdge(status, "approve");
   return e === null
-    ? status + " 是人坐的格子，而 §7.1 没给它出边（现状：MEETING_REQUIRED / BLOCKED 就是这种死路）。"
+    ? status +
+        " 是人坐的格子，而 §7.1 没给它出边（现状：MEETING_REQUIRED / BLOCKED 就是这种死路）。"
     : status + " 等你批准，批准后进入 " + e.to + "：" + e.why;
 }

@@ -33,11 +33,12 @@
  */
 import { mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { afterAll, describe, expect, it } from "vitest";
 import type { DatabaseSync } from "node:sqlite";
+import { APPROVAL_STATUS_PENDING } from "@opc/contracts";
+import { afterAll, describe, expect, it } from "vitest";
 import {
-  approvalRequiredEvent,
   APPROVAL_TYPES,
+  approvalRequiredEvent,
   createCard,
   DEFAULT_TIMEOUT_HOURS,
   draftFromEscalation,
@@ -48,18 +49,20 @@ import {
   SQLITE_CONSTRAINT_UNIQUE,
   timeoutAtMs,
 } from "../../src/approvals/cards.js";
-import { fixtureTmp } from "../fixtures/fixture-dir.js";
-import { decideEscalation, type EscalationState } from "../../src/graph/routing/escalation.js";
+import { evidenceRefsOf } from "../../src/approvals/query.js";
 import { openDb } from "../../src/db/driver.js";
 import { migrate } from "../../src/db/migrate.js";
 import { WriteQueue } from "../../src/db/write-queue.js";
 import {
+  decideEscalation,
+  type EscalationState,
+} from "../../src/graph/routing/escalation.js";
+import { CEO_ACTOR, CLAIM_APPROVAL_SQL } from "../../src/http/real-deps.js";
+import {
   CLAIM_APPROVAL_FOR_AUTO_SQL,
   countSimilarApprovals,
 } from "../../src/policy/auto-approve.js";
-import { CLAIM_APPROVAL_SQL, CEO_ACTOR } from "../../src/http/real-deps.js";
-import { evidenceRefsOf } from "../../src/approvals/query.js";
-import { APPROVAL_STATUS_PENDING } from "@opc/contracts";
+import { fixtureTmp } from "../fixtures/fixture-dir.js";
 
 const TMP = fixtureTmp("approvals", import.meta.url);
 
@@ -163,14 +166,16 @@ describe("① 建得出：卡片与审计同事务，字段各归各位", () => 
     addTask(db, "t-1");
     const r = await createCard(q, draft(), { nowMs: T0 });
     const card = db
-      .prepare("SELECT status, decided_by, decided_at, decision_note FROM approvals WHERE id = ?")
+      .prepare(
+        "SELECT status, decided_by, decided_at, decision_note FROM approvals WHERE id = ?",
+      )
       .get(r.result.approvalId) as Record<string, unknown>;
-    expect([card["status"], card["decided_by"], card["decided_at"], card["decision_note"]]).toEqual([
-      "pending",
-      null,
-      null,
-      null,
-    ]);
+    expect([
+      card["status"],
+      card["decided_by"],
+      card["decided_at"],
+      card["decision_note"],
+    ]).toEqual(["pending", null, null, null]);
     // 反向对照：建出来的这张卡必须【能被现有的两条认领 SQL 抢到】。
     // 「初值是 NULL」这句话本身不推进任何东西，能配上才是性质。
     //
@@ -185,7 +190,14 @@ describe("① 建得出：卡片与审计同事务，字段各归各位", () => 
     ] as const) {
       const info = db
         .prepare(sql)
-        .run("approved", actor, T0 + HOUR, "上线", r.result.approvalId, APPROVAL_STATUS_PENDING) as {
+        .run(
+          "approved",
+          actor,
+          T0 + HOUR,
+          "上线",
+          r.result.approvalId,
+          APPROVAL_STATUS_PENDING,
+        ) as {
         changes: number | bigint;
       };
       expect(Number(info.changes), name).toBe(1);
@@ -193,7 +205,14 @@ describe("① 建得出：卡片与审计同事务，字段各归各位", () => 
       // （初值只要不是绑参那个常量，第一次就会是 0，两发都红）。
       const again = db
         .prepare(sql)
-        .run("approved", actor, T0 + 2 * HOUR, null, r.result.approvalId, APPROVAL_STATUS_PENDING) as {
+        .run(
+          "approved",
+          actor,
+          T0 + 2 * HOUR,
+          null,
+          r.result.approvalId,
+          APPROVAL_STATUS_PENDING,
+        ) as {
         changes: number | bigint;
       };
       expect(Number(again.changes), name + " 第二次").toBe(0);
@@ -215,9 +234,11 @@ describe("① 建得出：卡片与审计同事务，字段各归各位", () => 
     const { db, q } = fresh();
     addTask(db, "t-1");
     const r = await createCard(q, draft(), { nowMs: T0 });
-    const at = (db
-      .prepare("SELECT created_at FROM approvals WHERE id = ?")
-      .get(r.result.approvalId) as Row)["created_at"];
+    const at = (
+      db
+        .prepare("SELECT created_at FROM approvals WHERE id = ?")
+        .get(r.result.approvalId) as Row
+    )["created_at"];
     expect(Number(at)).toBe(T0);
   });
 
@@ -230,9 +251,11 @@ describe("① 建得出：卡片与审计同事务，字段各归各位", () => 
       recommendationSource: "tech_director",
     });
     const get = (id: string): unknown =>
-      ((db
-        .prepare("SELECT recommendation_source FROM approvals WHERE id = ?")
-        .get(id) as Row)["recommendation_source"]);
+      (
+        db
+          .prepare("SELECT recommendation_source FROM approvals WHERE id = ?")
+          .get(id) as Row
+      )["recommendation_source"];
     expect(get(noSource.result.approvalId)).toBeNull();
     expect(get(withSource.result.approvalId)).toBe("tech_director");
   });
@@ -246,21 +269,37 @@ describe("① 建得出：卡片与审计同事务，字段各归各位", () => 
     await expect(
       createCard(q, draft({ taskId: "nope" }), { nowMs: T0 }),
     ).rejects.toThrow(/FOREIGN KEY|FOREIGN KEY constraint/iu);
-    expect(Number((db.prepare("SELECT COUNT(*) AS n FROM approvals").get() as Row)["n"])).toBe(0);
-    expect(Number((db.prepare("SELECT COUNT(*) AS n FROM events").get() as Row)["n"])).toBe(0);
+    expect(
+      Number(
+        (db.prepare("SELECT COUNT(*) AS n FROM approvals").get() as Row)["n"],
+      ),
+    ).toBe(0);
+    expect(
+      Number(
+        (db.prepare("SELECT COUNT(*) AS n FROM events").get() as Row)["n"],
+      ),
+    ).toBe(0);
   });
 
   it("撞去重键 ⇒ 事件也不写（否则审计里多一次【没发生过的】「需要批准」）", async () => {
     const { db, q } = fresh();
     addTask(db, "t-1");
-    const first = await createCard(q, draft({ cardKey: "gate-1" }), { nowMs: T0 });
-    const second = await createCard(q, draft({ cardKey: "gate-1" }), { nowMs: T0 + HOUR });
+    const first = await createCard(q, draft({ cardKey: "gate-1" }), {
+      nowMs: T0,
+    });
+    const second = await createCard(q, draft({ cardKey: "gate-1" }), {
+      nowMs: T0 + HOUR,
+    });
     expect(first.result.created).toBe(true);
     expect(second.result.created).toBe(false);
     expect(second.result.skipped).toBe("duplicate");
     expect(second.event).toBeNull();
     expect(second.seq).toBeNull();
-    expect(Number((db.prepare("SELECT COUNT(*) AS n FROM events").get() as Row)["n"])).toBe(1);
+    expect(
+      Number(
+        (db.prepare("SELECT COUNT(*) AS n FROM events").get() as Row)["n"],
+      ),
+    ).toBe(1);
   });
 });
 
@@ -269,9 +308,15 @@ describe("② 去重：同一个决定一张卡，而不同决定不能被合成
     const { db, q } = fresh();
     addTask(db, "t-1");
     for (let i = 0; i < 3; i++) {
-      await createCard(q, draft({ cardKey: "gate-1" }), { nowMs: T0 + i * HOUR });
+      await createCard(q, draft({ cardKey: "gate-1" }), {
+        nowMs: T0 + i * HOUR,
+      });
     }
-    expect(Number((db.prepare("SELECT COUNT(*) AS n FROM approvals").get() as Row)["n"])).toBe(1);
+    expect(
+      Number(
+        (db.prepare("SELECT COUNT(*) AS n FROM approvals").get() as Row)["n"],
+      ),
+    ).toBe(1);
   });
 
   it("⭐ 反向对照：同任务、【不同 key】必须各建一张 —— 合并比重复贵", async () => {
@@ -283,9 +328,17 @@ describe("② 去重：同一个决定一张卡，而不同决定不能被合成
      */
     const { db, q } = fresh();
     addTask(db, "t-1");
-    await createCard(q, draft({ cardKey: "gate-a", summary: "第一次" }), { nowMs: T0 });
-    await createCard(q, draft({ cardKey: "gate-b", summary: "第一次" }), { nowMs: T0 });
-    expect(Number((db.prepare("SELECT COUNT(*) AS n FROM approvals").get() as Row)["n"])).toBe(2);
+    await createCard(q, draft({ cardKey: "gate-a", summary: "第一次" }), {
+      nowMs: T0,
+    });
+    await createCard(q, draft({ cardKey: "gate-b", summary: "第一次" }), {
+      nowMs: T0,
+    });
+    expect(
+      Number(
+        (db.prepare("SELECT COUNT(*) AS n FROM approvals").get() as Row)["n"],
+      ),
+    ).toBe(2);
   });
 
   it("不传 cardKey ⇒ 不去重（显式选择），但它不去重的是【别的】卡", async () => {
@@ -293,7 +346,11 @@ describe("② 去重：同一个决定一张卡，而不同决定不能被合成
     addTask(db, "t-1");
     await createCard(q, draft(), { nowMs: T0 });
     await createCard(q, draft(), { nowMs: T0 });
-    expect(Number((db.prepare("SELECT COUNT(*) AS n FROM approvals").get() as Row)["n"])).toBe(2);
+    expect(
+      Number(
+        (db.prepare("SELECT COUNT(*) AS n FROM approvals").get() as Row)["n"],
+      ),
+    ).toBe(2);
     // 反向：NULL 不去重 ≠ 唯一性整体失效。带 key 的那条路仍然被挡。
     await createCard(q, draft({ cardKey: "k" }), { nowMs: T0 });
     const dup = await createCard(q, draft({ cardKey: "k" }), { nowMs: T0 });
@@ -305,7 +362,11 @@ describe("② 去重：同一个决定一张卡，而不同决定不能被合成
     addTask(db, "t-1");
     addTask(db, "t-2");
     const a = await createCard(q, draft({ cardKey: "round-3" }), { nowMs: T0 });
-    const b = await createCard(q, draft({ taskId: "t-2", cardKey: "round-3" }), { nowMs: T0 });
+    const b = await createCard(
+      q,
+      draft({ taskId: "t-2", cardKey: "round-3" }),
+      { nowMs: T0 },
+    );
     expect([a.result.created, b.result.created]).toEqual([true, true]);
   });
 
@@ -334,10 +395,12 @@ describe("② 去重：同一个决定一张卡，而不同决定不能被合成
       "same-key",
       T0,
     ];
-    expect(() => db.prepare(INSERT_CARD_SQL).run(...(params("c1") as never[]))).not.toThrow();
-    expect(() => db.prepare(INSERT_CARD_SQL).run(...(params("c2") as never[]))).toThrow(
-      /UNIQUE constraint failed/u,
-    );
+    expect(() =>
+      db.prepare(INSERT_CARD_SQL).run(...(params("c1") as never[])),
+    ).not.toThrow();
+    expect(() =>
+      db.prepare(INSERT_CARD_SQL).run(...(params("c2") as never[])),
+    ).toThrow(/UNIQUE constraint failed/u);
   });
 
   it("⭐ 同一个键上【已决策的卡】不挡新的待批卡（0006 收窄的那一维）", async () => {
@@ -350,14 +413,22 @@ describe("② 去重：同一个决定一张卡，而不同决定不能被合成
      */
     const { db, q } = fresh();
     addTask(db, "t-1");
-    const first = await createCard(q, draft({ cardKey: "gate-once" }), { nowMs: T0 });
+    const first = await createCard(q, draft({ cardKey: "gate-once" }), {
+      nowMs: T0,
+    });
     expect(first.result.created).toBe(true);
     db.prepare("UPDATE approvals SET status = 'rejected' WHERE id = ?").run(
       first.result.approvalId,
     );
-    const again = await createCard(q, draft({ cardKey: "gate-once" }), { nowMs: T0 + HOUR });
+    const again = await createCard(q, draft({ cardKey: "gate-once" }), {
+      nowMs: T0 + HOUR,
+    });
     expect(again.result.created, "退回之后同一个决定必须能再问一次").toBe(true);
-    expect(Number((db.prepare("SELECT COUNT(*) AS n FROM approvals").get() as Row)["n"])).toBe(2);
+    expect(
+      Number(
+        (db.prepare("SELECT COUNT(*) AS n FROM approvals").get() as Row)["n"],
+      ),
+    ).toBe(2);
   });
 
   it("⭐ 但收窄只收窄【已决策】那一半：两张 pending 仍然挡得住", () => {
@@ -384,10 +455,12 @@ describe("② 去重：同一个决定一张卡，而不同决定不能被合成
       "one-gate",
       T0,
     ];
-    expect(() => db.prepare(INSERT_CARD_SQL).run(...(params("p1", "pending") as never[]))).not.toThrow();
-    expect(() => db.prepare(INSERT_CARD_SQL).run(...(params("p2", "pending") as never[]))).toThrow(
-      /UNIQUE constraint failed/u,
-    );
+    expect(() =>
+      db.prepare(INSERT_CARD_SQL).run(...(params("p1", "pending") as never[])),
+    ).not.toThrow();
+    expect(() =>
+      db.prepare(INSERT_CARD_SQL).run(...(params("p2", "pending") as never[])),
+    ).toThrow(/UNIQUE constraint failed/u);
     // 已批掉的那一张不占用这个键：与上一发同一件事，只是从裸 SQL 那一侧看。
     expect(() =>
       db.prepare(INSERT_CARD_SQL).run(...(params("d1", "approved") as never[])),
@@ -402,7 +475,11 @@ describe("③ 契约拦得住：§9.2 那三条硬约束不是注释", () => {
     await expect(
       createCard(q, draft({ evidence_refs: [] }), { nowMs: T0 }),
     ).rejects.toThrow(/evidence_refs/u);
-    expect(Number((db.prepare("SELECT COUNT(*) AS n FROM approvals").get() as Row)["n"])).toBe(0);
+    expect(
+      Number(
+        (db.prepare("SELECT COUNT(*) AS n FROM approvals").get() as Row)["n"],
+      ),
+    ).toBe(0);
   });
 
   it("⭐ 第四个按钮 ⇒ 抛（§8.2 第 4 条「不可绕过」由 schema 的 .length(3) 落地）", async () => {
@@ -411,7 +488,14 @@ describe("③ 契约拦得住：§9.2 那三条硬约束不是注释", () => {
     await expect(
       createCard(
         q,
-        draft({ buttons: ["approve", "reject_with_comment", "defer_deep_review", "approve_all"] }),
+        draft({
+          buttons: [
+            "approve",
+            "reject_with_comment",
+            "defer_deep_review",
+            "approve_all",
+          ],
+        }),
         { nowMs: T0 },
       ),
     ).rejects.toThrow(/buttons/u);
@@ -424,9 +508,7 @@ describe("③ 契约拦得住：§9.2 那三条硬约束不是注释", () => {
     bad.parameters["recommendation_is_not_decision"] = false;
     await expect(
       createCard(q, bad as Parameters<typeof createCard>[1], { nowMs: T0 }),
-    ).rejects.toThrow(
-      /recommendation_is_not_decision/u,
-    );
+    ).rejects.toThrow(/recommendation_is_not_decision/u);
   });
 
   it("⭐ 不在 APPROVAL_TYPES 里的类型 ⇒ 抛，而不是静静落一个错值", async () => {
@@ -440,10 +522,18 @@ describe("③ 契约拦得住：§9.2 那三条硬约束不是注释", () => {
     await expect(
       createCard(q, draft({ approvalType: "strategc" }), { nowMs: T0 }),
     ).rejects.toThrow(/approval_type 取值非法/u);
-    expect(Number((db.prepare("SELECT COUNT(*) AS n FROM approvals").get() as Row)["n"])).toBe(0);
+    expect(
+      Number(
+        (db.prepare("SELECT COUNT(*) AS n FROM approvals").get() as Row)["n"],
+      ),
+    ).toBe(0);
     // 反向：六个合法取值全部建得出来（少一格会在上面那发的反向对照里红）。
     for (const t of APPROVAL_TYPES) {
-      const r = await createCard(q, draft({ approvalType: t, cardKey: "k-" + t }), { nowMs: T0 });
+      const r = await createCard(
+        q,
+        draft({ approvalType: t, cardKey: "k-" + t }),
+        { nowMs: T0 },
+      );
       expect(r.result.created, "类型 " + t + " 建不出来").toBe(true);
     }
   });
@@ -473,9 +563,9 @@ describe("④ 下游立刻能用：两处此前恒空/恒 UNKNOWN 的读法拿�
       approvals: 0,
       nonApprovals: 0,
     });
-    db.prepare(
-      "UPDATE approvals SET status = 'approved' WHERE id = ?",
-    ).run(a.result.approvalId);
+    db.prepare("UPDATE approvals SET status = 'approved' WHERE id = ?").run(
+      a.result.approvalId,
+    );
     db.prepare("UPDATE approvals SET status = 'rejected' WHERE id = ?").run(
       b.result.approvalId,
     );
@@ -503,7 +593,12 @@ describe("④ 下游立刻能用：两处此前恒空/恒 UNKNOWN 的读法拿�
       .prepare("SELECT payload FROM events LIMIT 0")
       .all() as unknown[];
     expect(r).toEqual([]);
-    const e = approvalRequiredEvent("t-1", "card-1", draft() as never, "escalation");
+    const e = approvalRequiredEvent(
+      "t-1",
+      "card-1",
+      draft() as never,
+      "escalation",
+    );
     expect(e.kind).toBe("ApprovalRequired");
     const payload = e.payload as Record<string, unknown>;
     expect(payload["kind"]).toBe("ApprovalRequired");
@@ -524,16 +619,18 @@ describe("④ 下游立刻能用：两处此前恒空/恒 UNKNOWN 的读法拿�
     const r = decideEscalation(s);
     expect(r.escalate).toBe(true);
     if (r.escalate !== true) throw new Error("夹具应当命中升级");
-    const created = await createCard(
-      q,
-      draftFromEscalation(s, r, "step-7"),
-      { nowMs: T0, recommendationSource: "tech_director" },
-    );
+    const created = await createCard(q, draftFromEscalation(s, r, "step-7"), {
+      nowMs: T0,
+      recommendationSource: "tech_director",
+    });
     const row = db
       .prepare("SELECT * FROM approvals WHERE id = ?")
       .get(created.result.approvalId) as Record<string, unknown>;
     const p = JSON.parse(String(row["parameters"])) as Record<string, unknown>;
-    expect(p["escalation"]).toEqual({ reason: "irreversible_action", also: ["low_confidence"] });
+    expect(p["escalation"]).toEqual({
+      reason: "irreversible_action",
+      also: ["low_confidence"],
+    });
     // summary 里【只有】人话，没有枚举名 —— 否则「按原因统计」变成中文匹配。
     expect(String(row["summary"])).not.toContain("irreversible_action");
     expect(row["recommendation"]).toBe(
@@ -543,7 +640,10 @@ describe("④ 下游立刻能用：两处此前恒空/恒 UNKNOWN 的读法拿�
 
   it("parametersFor 不污染契约那四个键，也不给不带 reason 的卡加空壳", () => {
     const d = draft() as never;
-    const withReason = parametersFor(d, { reason: "budget_threshold", also: [] });
+    const withReason = parametersFor(d, {
+      reason: "budget_threshold",
+      also: [],
+    });
     expect(withReason["escalation"]).toEqual({ reason: "budget_threshold" });
     expect(parametersFor(d)["escalation"]).toBeUndefined();
     // 契约那几个键原样在（并一层不能把它们盖掉）。
@@ -557,7 +657,9 @@ describe("⑤ 超时行为：timeout_at 落库，而巡检【不】替他做超�
     addTask(db, "t-1");
     const r = await createCard(q, draft(), { nowMs: T0 });
     const at = db
-      .prepare("SELECT timeout_at, timeout_behavior FROM approvals WHERE id = ?")
+      .prepare(
+        "SELECT timeout_at, timeout_behavior FROM approvals WHERE id = ?",
+      )
       .get(r.result.approvalId) as Record<string, unknown>;
     expect(Number(at["timeout_at"])).toBe(T0 + DEFAULT_TIMEOUT_HOURS * HOUR);
     expect(at["timeout_behavior"]).toBe("auto_reject");
@@ -597,11 +699,21 @@ describe("⑤ 超时行为：timeout_at 落库，而巡检【不】替他做超�
 
   it("约束识别只认 UNIQUE：外键冲突必须仍然抛", () => {
     expect(
-      isUniqueCardKeyViolation(new Error("UNIQUE constraint failed: approvals.task_id, approvals.card_key")),
+      isUniqueCardKeyViolation(
+        new Error(
+          "UNIQUE constraint failed: approvals.task_id, approvals.card_key",
+        ),
+      ),
     ).toBe(true);
-    expect(isUniqueCardKeyViolation(new Error("FOREIGN KEY constraint failed"))).toBe(false);
-    expect(isUniqueCardKeyViolation({ errcode: SQLITE_CONSTRAINT_UNIQUE })).toBe(true);
-    expect(isUniqueCardKeyViolation(new Error("no such table: approvals"))).toBe(false);
+    expect(
+      isUniqueCardKeyViolation(new Error("FOREIGN KEY constraint failed")),
+    ).toBe(false);
+    expect(
+      isUniqueCardKeyViolation({ errcode: SQLITE_CONSTRAINT_UNIQUE }),
+    ).toBe(true);
+    expect(
+      isUniqueCardKeyViolation(new Error("no such table: approvals")),
+    ).toBe(false);
   });
 });
 
@@ -610,7 +722,9 @@ describe("⑥ evidence_refs：卡片背面的证据包可见（O5 动作 4，迁
     const { db, q } = fresh();
     addTask(db, "t-1");
     const refs = ["task:t-1/evidence/prd.md", "task:t-1/evidence/tech-plan.md"];
-    const r = await createCard(q, draft({ evidence_refs: refs }), { nowMs: T0 });
+    const r = await createCard(q, draft({ evidence_refs: refs }), {
+      nowMs: T0,
+    });
     const row = db
       .prepare("SELECT evidence_refs FROM approvals WHERE id = ?")
       .get(r.result.approvalId) as Record<string, unknown>;
@@ -628,9 +742,9 @@ describe("⑥ evidence_refs：卡片背面的证据包可见（O5 动作 4，迁
     const { db, q } = fresh();
     addTask(db, "t-1");
     const val = undefined as never;
-    await expect(createCard(q, draft({ evidence_refs: val }), { nowMs: T0 })).rejects.toThrow(
-      /evidence_refs/u,
-    );
+    await expect(
+      createCard(q, draft({ evidence_refs: val }), { nowMs: T0 }),
+    ).rejects.toThrow(/evidence_refs/u);
   });
 
   it("读侧 evidence_refsOf：坏 JSON / 非数组 ⇒ null（不 500），空数组保留", () => {
@@ -642,6 +756,6 @@ describe("⑥ evidence_refs：卡片背面的证据包可见（O5 动作 4，迁
     expect(evidenceRefsOf("not json")).toBeNull();
     expect(evidenceRefsOf('"str"')).toBeNull();
     expect(evidenceRefsOf('{"a":1}')).toBeNull();
-    expect(evidenceRefsOf('[1,2]')).toBeNull();
+    expect(evidenceRefsOf("[1,2]")).toBeNull();
   });
 });

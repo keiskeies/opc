@@ -36,30 +36,29 @@
  */
 import { mkdirSync, rmSync } from "node:fs";
 import type { DatabaseSync } from "node:sqlite";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
-
 import type { OrgGraph } from "@opc/contracts";
-import { fixtureTmp } from "../fixtures/fixture-dir.js";
-import { gateDepsFrom } from "../fixtures/gate-deps.js";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { insertCard, type NewCardDraft } from "../../src/approvals/cards.js";
 import { migrate } from "../../src/db/migrate.js";
 import { WriteQueue } from "../../src/db/write-queue.js";
-import { INSERT_DELEGATION_GRAPH_SQL } from "../../src/org/commit.js";
-import { InMemoryEventBus } from "../../src/events/bus.js";
-import { insertCard, type NewCardDraft } from "../../src/approvals/cards.js";
 import { approveCard, pendingCards } from "../../src/engine/approve.js";
 import {
+  type DispatchResult,
   HUMAN_EDGES,
   makeDispatch,
-  type DispatchResult,
   type TurnOutcome,
 } from "../../src/engine/dispatch.js";
 import {
-  SEAT_CARD_KEY_PREFIX,
   mintSeatCard,
   needsSeatCard,
+  SEAT_CARD_KEY_PREFIX,
   seatCardKey,
 } from "../../src/engine/seat-card.js";
+import { InMemoryEventBus } from "../../src/events/bus.js";
 import type { TaskState } from "../../src/graph/status.js";
+import { INSERT_DELEGATION_GRAPH_SQL } from "../../src/org/commit.js";
+import { fixtureTmp } from "../fixtures/fixture-dir.js";
+import { gateDepsFrom } from "../fixtures/gate-deps.js";
 
 const TMP = fixtureTmp("engine-seat-card", import.meta.url);
 const NOW = 1_700_000_000_000;
@@ -87,9 +86,24 @@ type Row = Record<string, unknown>;
  */
 const GRAPH: OrgGraph = {
   nodes: {
-    ceo: { role_id: CEO, can_manage: true, reports_to: null, model_family: "opus" },
-    director: { role_id: "director", can_manage: true, reports_to: CEO, model_family: "sonnet" },
-    dev: { role_id: "dev", can_manage: false, reports_to: "director", model_family: "claude" },
+    ceo: {
+      role_id: CEO,
+      can_manage: true,
+      reports_to: null,
+      model_family: "opus",
+    },
+    director: {
+      role_id: "director",
+      can_manage: true,
+      reports_to: CEO,
+      model_family: "sonnet",
+    },
+    dev: {
+      role_id: "dev",
+      can_manage: false,
+      reports_to: "director",
+      model_family: "claude",
+    },
   },
   edges: [{ from: "dev", to: "director", review_gate: true }],
 };
@@ -124,7 +138,14 @@ function openWorld(status: string, role = CEO): World {
     "INSERT INTO tasks (id, title, status, assigned_role, current_node, created_at, updated_at, graph_version) " +
       "VALUES ('t1', '做个 AI 笔记应用', ?, ?, ?, ?, ?, 1)",
   ).run(status, role, role, NOW, NOW);
-  db.prepare(INSERT_DELEGATION_GRAPH_SQL).run("g1", 1, JSON.stringify(GRAPH), NOW, CEO, "测试用组织图");
+  db.prepare(INSERT_DELEGATION_GRAPH_SQL).run(
+    "g1",
+    1,
+    JSON.stringify(GRAPH),
+    NOW,
+    CEO,
+    "测试用组织图",
+  );
   return { q, db };
 }
 
@@ -146,21 +167,28 @@ function cardsIn(db: DatabaseSync): Row[] {
 
 /** events 表里【真实存在】的 seq 集合。与广播集合比对就是「有没有洞」。 */
 function seqsIn(db: DatabaseSync): number[] {
-  return (db.prepare("SELECT id FROM events ORDER BY id").all() as Row[]).map((r) => Number(r["id"]));
+  return (db.prepare("SELECT id FROM events ORDER BY id").all() as Row[]).map(
+    (r) => Number(r["id"]),
+  );
 }
 
 function statusOf(db: DatabaseSync): string {
-  return String(db.prepare("SELECT status FROM tasks WHERE id='t1'").get()?.["status"]);
+  return String(
+    db.prepare("SELECT status FROM tasks WHERE id='t1'").get()?.["status"],
+  );
 }
 
 /* ═══════════════════ needsSeatCard：哪些格子要卡 ═══════════════════ */
 
 describe("needsSeatCard —— 从 HUMAN_EDGES 派生，不手抄名单", () => {
   it("HUMAN_EDGES 里除 CHARTER_PENDING 之外【每一格】都要卡（表扫描，防只测我顺手写的那两条）", () => {
-    const seats = Object.keys(HUMAN_EDGES).filter((s) => s !== "CHARTER_PENDING");
+    const seats = Object.keys(HUMAN_EDGES).filter(
+      (s) => s !== "CHARTER_PENDING",
+    );
     // 分母。这条断言存在的全部理由：名单要是哪天变空，下面那条循环【恒真】。
     expect(seats).toEqual(["ESCALATED_TO_CEO", "FINAL_REVIEW"]);
-    for (const s of seats) expect(needsSeatCard(s as TaskState), s + " 是人席，应当要卡").toBe(true);
+    for (const s of seats)
+      expect(needsSeatCard(s as TaskState), s + " 是人席，应当要卡").toBe(true);
   });
 
   it("CHARTER_PENDING【排除】：那张卡的生产者是 charter.ts / 章程泵，再建一张就是同一件事两张卡", () => {
@@ -168,13 +196,25 @@ describe("needsSeatCard —— 从 HUMAN_EDGES 派生，不手抄名单", () => 
   });
 
   it("agent 席位不建卡（人不该被叫起来，token 也不该在那儿等）", () => {
-    for (const s of ["CHARTER_APPROVED", "DECOMPOSING", "IN_PROGRESS", "IN_REVIEW", "BUDGET_PAUSED"] as const) {
+    for (const s of [
+      "CHARTER_APPROVED",
+      "DECOMPOSING",
+      "IN_PROGRESS",
+      "IN_REVIEW",
+      "BUDGET_PAUSED",
+    ] as const) {
       expect(needsSeatCard(s), s + " 由 agent 推进").toBe(false);
     }
   });
 
   it("两张表都没有出边的【死路】不建卡：给它一张 approve 卡等于假装它有出路", () => {
-    for (const s of ["MEETING_REQUIRED", "BLOCKED", "APPROVED_UPWARD", "DELIVERED", "ARCHIVED"] as const) {
+    for (const s of [
+      "MEETING_REQUIRED",
+      "BLOCKED",
+      "APPROVED_UPWARD",
+      "DELIVERED",
+      "ARCHIVED",
+    ] as const) {
       expect(needsSeatCard(s), s + " 没有人类出边，不该假装能批").toBe(false);
     }
   });
@@ -186,7 +226,9 @@ describe("seatCardKey —— 一次到达一个身份", () => {
     expect(seatCardKey("FINAL_REVIEW", 42)).toBe("seat:FINAL_REVIEW:42");
   });
   it("同一格两次到达 ⇒ 两个键（键里【只有状态名】的那版实现第二次会撞键不建卡）", () => {
-    expect(seatCardKey("ESCALATED_TO_CEO", 7)).not.toBe(seatCardKey("ESCALATED_TO_CEO", 8));
+    expect(seatCardKey("ESCALATED_TO_CEO", 7)).not.toBe(
+      seatCardKey("ESCALATED_TO_CEO", 8),
+    );
   });
 });
 
@@ -202,7 +244,8 @@ function mint(
       taskId: "t1",
       status: o.status,
       arrivalSeq: o.arrivalSeq,
-      why: o.why ?? "审阅通过且已到组织顶层，升到 CEO：覆盖率 92%，3 个 P2 缺陷",
+      why:
+        o.why ?? "审阅通过且已到组织顶层，升到 CEO：覆盖率 92%，3 个 P2 缺陷",
       nowMs: NOW,
     }),
   );
@@ -224,12 +267,21 @@ describe("mintSeatCard —— 一张卡 + 一条审计 + 一个可广播的 seq"
     // 摘要带着【那一句为什么】：CEO 在收件箱里要在几秒内决定，光说"等你批"不可决策
     expect(String(cards[0]?.["summary"])).toContain("覆盖率 92%");
     // 推荐必须自证是推荐（§9.2 那个字面量字段），且【不】伪装成有出处
-    const params = JSON.parse(String(cards[0]?.["parameters"])) as Record<string, unknown>;
+    const params = JSON.parse(String(cards[0]?.["parameters"])) as Record<
+      string,
+      unknown
+    >;
     expect(params["recommendation_is_not_decision"]).toBe(true);
     // ⚠ 升级原因由【状态机 + 组织树】定（顶层审阅通过），不由 agent 给自己定性
-    expect(JSON.stringify(params["escalation"])).toContain("outside_decision_scope");
+    expect(JSON.stringify(params["escalation"])).toContain(
+      "outside_decision_scope",
+    );
 
-    const evts = w.db.prepare("SELECT action, actor_type, actor_id, target, payload FROM events").all() as Row[];
+    const evts = w.db
+      .prepare(
+        "SELECT action, actor_type, actor_id, target, payload FROM events",
+      )
+      .all() as Row[];
     expect(evts.length).toBe(1);
     expect(evts[0]?.["action"]).toBe("approval");
     // 署名 system/hub：卡片是【系统提出的一次请求】，署人名会污染 role-memory 的分桶依据
@@ -238,7 +290,10 @@ describe("mintSeatCard —— 一张卡 + 一条审计 + 一个可广播的 seq"
     // target = 卡片 id：「这张卡被要求批准」与「这张卡被批掉」要在 target 上 join 得起来
     expect(evts[0]?.["target"]).toBe(cards[0]?.["id"]);
     // payload 是【内层那份】（approval_type / summary / evidence_refs 在顶层），不是 {...evt}
-    const p = JSON.parse(String(evts[0]?.["payload"])) as Record<string, unknown>;
+    const p = JSON.parse(String(evts[0]?.["payload"])) as Record<
+      string,
+      unknown
+    >;
     expect(p["kind"]).toBe("ApprovalRequired");
     expect(p["approval_type"]).toBe("escalation");
     expect(Array.isArray(p["evidence_refs"])).toBe(true);
@@ -258,9 +313,17 @@ describe("mintSeatCard —— 一张卡 + 一条审计 + 一个可广播的 seq"
 
   it("撞去重键 ⇒ created:false，且【不写第二条审计】（写了就是审计里多一次没发生的批准请求）", async () => {
     const w = openWorld("ESCALATED_TO_CEO");
-    const first = await mint(w, { status: "ESCALATED_TO_CEO", arrivalSeq: 5, why: "第一次到达" });
+    const first = await mint(w, {
+      status: "ESCALATED_TO_CEO",
+      arrivalSeq: 5,
+      why: "第一次到达",
+    });
     const before = seqsIn(w.db).length;
-    const second = await mint(w, { status: "ESCALATED_TO_CEO", arrivalSeq: 5, why: "同一个到达重放" });
+    const second = await mint(w, {
+      status: "ESCALATED_TO_CEO",
+      arrivalSeq: 5,
+      why: "同一个到达重放",
+    });
     expect(first.created).toBe(true);
     expect(second.created).toBe(false);
     expect(second.event).toBeNull();
@@ -274,8 +337,16 @@ describe("mintSeatCard —— 一张卡 + 一条审计 + 一个可广播的 seq"
 
   it("同一格【第二次真到达】（另一个 seq）⇒ 新键新卡：§8.3 允许同一任务多次升级", async () => {
     const w = openWorld("ESCALATED_TO_CEO");
-    await mint(w, { status: "ESCALATED_TO_CEO", arrivalSeq: 1, why: "第一次升级" });
-    await mint(w, { status: "ESCALATED_TO_CEO", arrivalSeq: 2, why: "第二次升级（另一轮，另一个问题）" });
+    await mint(w, {
+      status: "ESCALATED_TO_CEO",
+      arrivalSeq: 1,
+      why: "第一次升级",
+    });
+    await mint(w, {
+      status: "ESCALATED_TO_CEO",
+      arrivalSeq: 2,
+      why: "第二次升级（另一轮，另一个问题）",
+    });
     const cards = cardsIn(w.db);
     expect(cards.length).toBe(2);
     expect(cards.map((c) => String(c["card_key"]))).toEqual([
@@ -312,7 +383,9 @@ describe("mintSeatCard 的事务作用域守卫", () => {
 
   it("事务内但传的是【另一条连接】⇒ 抛（那条连接不在这笔事务里，写下去会立刻 autocommit）", async () => {
     const w = openWorld("FINAL_REVIEW");
-    const other = new WriteQueue(TMP + "/foreign-" + process.pid + "-" + ++fileSeq + ".db");
+    const other = new WriteQueue(
+      TMP + "/foreign-" + process.pid + "-" + ++fileSeq + ".db",
+    );
     queues.push(other);
     // 那条库上要有同名任务，否则这一发会先撞 FK，测到的就不是作用域守卫了。
     const odb = other.writeConnection();
@@ -323,7 +396,9 @@ describe("mintSeatCard 的事务作用域守卫", () => {
           "VALUES ('t1', '另一本库上的同名任务', 'FINAL_REVIEW', 'ceo', 'ceo', ?, ?, 1)",
       )
       .run(NOW, NOW);
-    await expect(mint(w, { status: "FINAL_REVIEW", arrivalSeq: 1, db: odb })).rejects.toThrow(/事务/u);
+    await expect(
+      mint(w, { status: "FINAL_REVIEW", arrivalSeq: 1, db: odb }),
+    ).rejects.toThrow(/事务/u);
     // 两本库【都】干干净净：外键那条路也不该留下一张卡
     expect(cardsIn(w.db).length).toBe(0);
     expect(cardsIn(odb).length).toBe(0);
@@ -340,7 +415,8 @@ const turn = (text: string, over: Partial<TurnOutcome> = {}): TurnOutcome => ({
   error: null,
   ...over,
 });
-const said = (o: Record<string, unknown>) => "干完了。\n\n<<<OPC_DECISION>>>\n" + JSON.stringify(o);
+const said = (o: Record<string, unknown>) =>
+  "干完了。\n\n<<<OPC_DECISION>>>\n" + JSON.stringify(o);
 
 interface RunWorld extends World {
   readonly res: DispatchResult;
@@ -362,7 +438,9 @@ async function runDispatch(o: {
     writer: w.q,
     ...gateDepsFrom(w.db, TMP + "/artifacts"),
     loadTask: (id) => {
-      const r = w.db.prepare("SELECT * FROM tasks WHERE id = ?").get(id) as Row | undefined;
+      const r = w.db.prepare("SELECT * FROM tasks WHERE id = ?").get(id) as
+        | Row
+        | undefined;
       if (r === undefined) return null;
       return {
         id: String(r["id"]),
@@ -372,7 +450,8 @@ async function runDispatch(o: {
         graphVersion: Number(r["graph_version"]),
       };
     },
-    modelFamily: (roleId) => String(GRAPH.nodes[roleId]?.["model_family"] ?? ""),
+    modelFamily: (roleId) =>
+      String(GRAPH.nodes[roleId]?.["model_family"] ?? ""),
     rolePrompt: (roleId) => "你是 " + roleId + "。",
     roleSession: () => null,
     runTurn: async () => o.turn,
@@ -394,7 +473,9 @@ const topPass = {
   status: "IN_REVIEW",
   role: "director",
   lastProducer: "dev",
-  turn: turn(said({ action: "pass", summary: "覆盖率 92%，3 个 P2 缺陷待后续迭代" })),
+  turn: turn(
+    said({ action: "pass", summary: "覆盖率 92%，3 个 P2 缺陷待后续迭代" }),
+  ),
 } as const;
 
 describe("dispatch 把人席当终点时 —— 门 4 全量拦下，补卡机制改由 approveCard 侧承担", () => {
@@ -417,11 +498,15 @@ describe("dispatch 把人席当终点时 —— 门 4 全量拦下，补卡机�
     expect(cards.length).toBe(1);
     expect(String(cards[0]?.["card_key"])).toContain("gate-blocked:");
     // 摘要要点名：谁（产出方）、为什么（没通过门控）、证据包 sha（可指认）
-    expect(String(cards[0]?.["summary"])).toContain("[dev] 的产出没有通过 §8.2 门控");
+    expect(String(cards[0]?.["summary"])).toContain(
+      "[dev] 的产出没有通过 §8.2 门控",
+    );
     expect(res.card).not.toBeNull();
     expect(res.card?.kind).toBe("ApprovalRequired");
     // 门控的账两行 + 一条审计，evidence 引用在 —— §22.4「每个门控决定都有证据包引用」从此可校验
-    const rg = db.prepare("SELECT gate_type, decision, round_no FROM review_gates").all() as Row[];
+    const rg = db
+      .prepare("SELECT gate_type, decision, round_no FROM review_gates")
+      .all() as Row[];
     expect(rg.length).toBe(1);
     expect(String(rg[0]?.["gate_type"])).toBe("engine_review");
     expect(String(rg[0]?.["decision"])).toBe("rejected");
@@ -429,14 +514,22 @@ describe("dispatch 把人席当终点时 —— 门 4 全量拦下，补卡机�
   });
 
   it("gate-blocked 卡【点得动】但【不推进】：批准只是把它记下来（这一族卡的按钮不是跃迁钮）", async () => {
-    const { q, db } = await runDispatch({ ...topPass, turn: turn(said({ action: "pass", summary: "全绿" })) });
+    const { q, db } = await runDispatch({
+      ...topPass,
+      turn: turn(said({ action: "pass", summary: "全绿" })),
+    });
     const pending = pendingCards(q, "t1");
     expect(pending.length).toBe(1);
     expect(String(pending[0]?.cardKey)).toContain("gate-blocked:");
     const cardsBefore = cardsIn(db).length;
     const r = await approveCard(
       q,
-      { taskId: "t1", approvalId: (pending[0] as { id: string }).id, button: "approve", nowMs: NOW + 1000 },
+      {
+        taskId: "t1",
+        approvalId: (pending[0] as { id: string }).id,
+        button: "approve",
+        nowMs: NOW + 1000,
+      },
       () => {},
     );
     // outcome=decided（按钮有效、审计记下这次批准），但任务【不】推进 ——
@@ -449,7 +542,10 @@ describe("dispatch 把人席当终点时 —— 门 4 全量拦下，补卡机�
   });
 
   it("本轮【每一个消费掉的 seq】都被广播（被拦那轮：gate 审计一条 + 卡一条，无状态边）", async () => {
-    const { db, published } = await runDispatch({ ...topPass, turn: turn(said({ action: "pass", summary: "全绿" })) });
+    const { db, published } = await runDispatch({
+      ...topPass,
+      turn: turn(said({ action: "pass", summary: "全绿" })),
+    });
     const inDb = seqsIn(db);
     expect(published.length).toBe(inDb.length);
     expect(published.map((p) => p.seq)).toEqual(inDb);
@@ -458,10 +554,12 @@ describe("dispatch 把人席当终点时 —— 门 4 全量拦下，补卡机�
     expect(published.some((p) => p.kind === "TaskStateChanged")).toBe(false);
     // 门控审计行确实广播了（RoleTurnReported 带 gate_decision）
     expect(published.some((p) => p.kind === "RoleTurnReported")).toBe(true);
-    const approvalSeq = (db.prepare("SELECT id FROM events WHERE action='approval'").all() as Row[]).map((r) =>
-      Number(r["id"]),
+    const approvalSeq = (
+      db.prepare("SELECT id FROM events WHERE action='approval'").all() as Row[]
+    ).map((r) => Number(r["id"]));
+    expect(published.find((p) => p.kind === "ApprovalRequired")?.seq).toEqual(
+      approvalSeq[0],
     );
-    expect(published.find((p) => p.kind === "ApprovalRequired")?.seq).toEqual(approvalSeq[0]);
     expect(new Set(published.map((p) => p.seq)).size).toBe(published.length);
   });
 
@@ -472,7 +570,9 @@ describe("dispatch 把人席当终点时 —— 门 4 全量拦下，补卡机�
       writer: w.q,
       ...gateDepsFrom(w.db, TMP + "/artifacts"),
       loadTask: (id) => {
-        const r = w.db.prepare("SELECT * FROM tasks WHERE id = ?").get(id) as Row | undefined;
+        const r = w.db.prepare("SELECT * FROM tasks WHERE id = ?").get(id) as
+          | Row
+          | undefined;
         if (r === undefined) return null;
         return {
           id: String(r["id"]),
@@ -482,7 +582,8 @@ describe("dispatch 把人席当终点时 —— 门 4 全量拦下，补卡机�
           graphVersion: Number(r["graph_version"]),
         };
       },
-      modelFamily: (roleId) => String(GRAPH.nodes[roleId]?.["model_family"] ?? ""),
+      modelFamily: (roleId) =>
+        String(GRAPH.nodes[roleId]?.["model_family"] ?? ""),
       rolePrompt: (r) => "你是 " + r + "。",
       roleSession: () => null,
       runTurn: async () => turn(said({ action: "pass", summary: "全绿" })),
@@ -498,9 +599,11 @@ describe("dispatch 把人席当终点时 —— 门 4 全量拦下，补卡机�
     //（探针实测 = 2：tool_call 执行 + tool_call 门控审计 + approval 卡）。onCost 的 seq 就是它。
     expect(res.status).toBe("IN_REVIEW");
     expect(cost.length).toBe(1);
-    const gateEvents = (w.db.prepare("SELECT id FROM events WHERE action='tool_call' ORDER BY id").all() as Row[]).map((r) =>
-      Number(r["id"]),
-    );
+    const gateEvents = (
+      w.db
+        .prepare("SELECT id FROM events WHERE action='tool_call' ORDER BY id")
+        .all() as Row[]
+    ).map((r) => Number(r["id"]));
     expect(gateEvents.length).toBeGreaterThan(0);
     expect(res.stateEventSeq).toBe(gateEvents[gateEvents.length - 1]);
     expect((cost[0] as { seq: number }).seq).toBe(res.stateEventSeq);
@@ -530,7 +633,9 @@ describe("dispatch 把人席当终点时 —— 门 4 全量拦下，补卡机�
     const { db, res } = await runDispatch({
       status: "IN_PROGRESS",
       role: "dev",
-      turn: turn(said({ action: "handoff", to_role: "ceo", summary: "直接甩给 CEO" })),
+      turn: turn(
+        said({ action: "handoff", to_role: "ceo", summary: "直接甩给 CEO" }),
+      ),
     });
     expect(res.moved).toBe(false);
     const cards = cardsIn(db);
@@ -560,7 +665,13 @@ describe("dispatch 把人席当终点时 —— 门 4 全量拦下，补卡机�
     const dispatch = makeDispatch({
       writer: w.q,
       ...gateDepsFrom(w.db, TMP + "/artifacts"),
-      loadTask: () => ({ id: "t1", title: "x", status: "IN_REVIEW", role: "director", graphVersion: 1 }),
+      loadTask: () => ({
+        id: "t1",
+        title: "x",
+        status: "IN_REVIEW",
+        role: "director",
+        graphVersion: 1,
+      }),
       modelFamily: (r) => String(GRAPH.nodes[r]?.["model_family"] ?? ""),
       rolePrompt: () => "",
       roleSession: () => null,
@@ -611,19 +722,32 @@ describe("点【过期那张】不能推进当前这一格", () => {
     const w = await runDispatch({
       status: "IN_PROGRESS",
       role: "dev",
-      turn: turn(said({ action: "handoff", to_role: "dev", summary: "自己交自己" })),
+      turn: turn(
+        said({ action: "handoff", to_role: "dev", summary: "自己交自己" }),
+      ),
     });
     expect(cardsIn(w.db).length).toBe(1);
     // 构造任务真的升到 CEO 那一格：状态 + 一条状态边事件（seat 卡的键要带它的 seq）
     w.db
-      .prepare("UPDATE tasks SET status='ESCALATED_TO_CEO', assigned_role='ceo', current_node='ceo' WHERE id='t1'")
+      .prepare(
+        "UPDATE tasks SET status='ESCALATED_TO_CEO', assigned_role='ceo', current_node='ceo' WHERE id='t1'",
+      )
       .run();
     const stSeq = await w.q.node(() => {
       const info = w.db
         .prepare(
           "INSERT INTO events (task_id, actor_type, actor_id, action, target, payload, created_at) VALUES (?, 'system', 'hub', 'state_change', 'ESCALATED_TO_CEO', ?, ?)",
         )
-        .run("t1", JSON.stringify({ kind: "TaskStateChanged", taskId: "t1", from: "IN_REVIEW", to: "ESCALATED_TO_CEO" }), NOW + 1);
+        .run(
+          "t1",
+          JSON.stringify({
+            kind: "TaskStateChanged",
+            taskId: "t1",
+            from: "IN_REVIEW",
+            to: "ESCALATED_TO_CEO",
+          }),
+          NOW + 1,
+        );
       return Number(info.lastInsertRowid);
     });
     await w.q.node(() => {
@@ -649,10 +773,28 @@ describe("点【过期那张】不能推进当前这一格", () => {
       return null;
     });
     // 语义自检：这个形状必须是「一张拦截卡 + 一张 seat 卡、任务在 CEO 席」。
-    const keys = pendingCards(w.q, "t1").map((p) => String(p.cardKey)).sort();
+    const keys = pendingCards(w.q, "t1")
+      .map((p) => String(p.cardKey))
+      .sort();
     expect(keys).toContain("handoff-block:dev->dev");
-    expect(keys.filter((k) => k.startsWith("seat:ESCALATED_TO_CEO:")).length).toBe(1);
-    return { ...w, res: { taskId: "t1", status: "ESCALATED_TO_CEO", moved: false, seat: "human", note: "", costCents: 0, sessionId: "", stateEventSeq: stSeq, card: null } as never, published: w.published };
+    expect(
+      keys.filter((k) => k.startsWith("seat:ESCALATED_TO_CEO:")).length,
+    ).toBe(1);
+    return {
+      ...w,
+      res: {
+        taskId: "t1",
+        status: "ESCALATED_TO_CEO",
+        moved: false,
+        seat: "human",
+        note: "",
+        costCents: 0,
+        sessionId: "",
+        stateEventSeq: stSeq,
+        card: null,
+      } as never,
+      published: w.published,
+    };
   }
 
   it("分母：任务升到 CEO 之后【确实】同时有两张 pending（没有这个形状，下面两条都是空判）", async () => {
@@ -661,21 +803,30 @@ describe("点【过期那张】不能推进当前这一格", () => {
     expect(pend.length).toBe(2);
     const keys = pend.map((p) => String(p.cardKey)).sort();
     expect(keys).toContain("handoff-block:dev->dev");
-    expect(keys.filter((k) => k.startsWith("seat:ESCALATED_TO_CEO:")).length).toBe(1);
+    expect(
+      keys.filter((k) => k.startsWith("seat:ESCALATED_TO_CEO:")).length,
+    ).toBe(1);
     expect(statusOf(db)).toBe("ESCALATED_TO_CEO");
   });
 
   it("点【旧的那张】拦截卡 ⇒ stale_card、状态不动、一条都不写、真正在等的那张还在", async () => {
     const { q, db } = await twoPendingCards();
     const pend = pendingCards(q, "t1");
-    const stale = pend.find((p) => String(p.cardKey).startsWith("handoff-block:"));
+    const stale = pend.find((p) =>
+      String(p.cardKey).startsWith("handoff-block:"),
+    );
     expect(stale).toBeDefined();
     const cardsBefore = cardsIn(db).length;
     const seqsBefore = seqsIn(db).length;
 
     const r = await approveCard(
       q,
-      { taskId: "t1", approvalId: String(stale?.id), button: "approve", nowMs: NOW + 10 },
+      {
+        taskId: "t1",
+        approvalId: String(stale?.id),
+        button: "approve",
+        nowMs: NOW + 10,
+      },
       () => {},
     );
     expect(r.outcome).toBe("stale_card");
@@ -687,7 +838,9 @@ describe("点【过期那张】不能推进当前这一格", () => {
     expect(seqsIn(db).length).toBe(seqsBefore);
     expect(String(stale?.id)).not.toBe("");
     // 旧卡【仍然 pending】：它没有被顺手关掉（关掉 = 替 CEO 做了一个她没做的决定）
-    expect(pendingCards(q, "t1").map((p) => String(p.cardKey))).toContain(String(stale?.cardKey));
+    expect(pendingCards(q, "t1").map((p) => String(p.cardKey))).toContain(
+      String(stale?.cardKey),
+    );
     // 那句人话要点名【该点哪张】，否则 CEO 只知道"不行"而下一步还是点同一张
     expect(r.note).toContain("seat:ESCALATED_TO_CEO:");
   });
@@ -695,9 +848,20 @@ describe("点【过期那张】不能推进当前这一格", () => {
   it("点【当前格那张】⇒ 照常推进（判据不是【收件箱只许一张卡】）", async () => {
     const { q, db } = await twoPendingCards();
     const pend = pendingCards(q, "t1");
-    const own = pend.find((p) => String(p.cardKey).startsWith("seat:ESCALATED_TO_CEO:"));
+    const own = pend.find((p) =>
+      String(p.cardKey).startsWith("seat:ESCALATED_TO_CEO:"),
+    );
     expect(own).toBeDefined();
-    const r = await approveCard(q, { taskId: "t1", approvalId: String(own?.id), button: "approve", nowMs: NOW + 10 }, () => {});
+    const r = await approveCard(
+      q,
+      {
+        taskId: "t1",
+        approvalId: String(own?.id),
+        button: "approve",
+        nowMs: NOW + 10,
+      },
+      () => {},
+    );
     expect(r.outcome).toBe("decided");
     expect(r.to).toBe("FINAL_REVIEW");
     expect(statusOf(db)).toBe("FINAL_REVIEW");
@@ -706,7 +870,9 @@ describe("点【过期那张】不能推进当前这一格", () => {
   it("过期那张仍然可以【打回 / 暂缓】：挡掉 approve 而不挡 reject，否则它永远挂在待批数里", async () => {
     const { q, db } = await twoPendingCards();
     const pend = pendingCards(q, "t1");
-    const stale = pend.find((p) => String(p.cardKey).startsWith("handoff-block:"));
+    const stale = pend.find((p) =>
+      String(p.cardKey).startsWith("handoff-block:"),
+    );
     const r = await approveCard(
       q,
       {
@@ -732,12 +898,25 @@ describe("点【过期那张】不能推进当前这一格", () => {
     const { q, db } = await runDispatch({
       status: "IN_PROGRESS",
       role: "dev",
-      turn: turn(said({ action: "handoff", to_role: "dev", summary: "自己交自己" })),
+      turn: turn(
+        said({ action: "handoff", to_role: "dev", summary: "自己交自己" }),
+      ),
     });
-    db.prepare("UPDATE tasks SET status='ESCALATED_TO_CEO' WHERE id='t1'").run();
+    db.prepare(
+      "UPDATE tasks SET status='ESCALATED_TO_CEO' WHERE id='t1'",
+    ).run();
     const pend = pendingCards(q, "t1");
     expect(pend.length).toBe(1);
-    const r = await approveCard(q, { taskId: "t1", approvalId: (pend[0] as { id: string }).id, button: "approve", nowMs: NOW + 10 }, () => {});
+    const r = await approveCard(
+      q,
+      {
+        taskId: "t1",
+        approvalId: (pend[0] as { id: string }).id,
+        button: "approve",
+        nowMs: NOW + 10,
+      },
+      () => {},
+    );
     // 沿用旧行为：能推进。白名单写法在这一发上会变成 stale_card ⇒ 那张卡既推不动也批不掉，
     // 而"CEO 看着一张待批卡而一个按钮都点不动"正是本篇在修的那个症状的镜像。
     expect(r.outcome).toBe("decided");
@@ -747,11 +926,21 @@ describe("点【过期那张】不能推进当前这一格", () => {
   it("CHARTER_PENDING 那一格认的是 charter.ts 的键（本模块不生产它，判据得跟着它定义）", async () => {
     const w = await worldWithCard("CHARTER_PENDING");
     const pend = pendingCards(w.q, "t1");
-    const r = await approveCard(w.q, { taskId: "t1", approvalId: (pend[0] as { id: string }).id, button: "approve", nowMs: NOW + 10 }, () => {});
-    expect(r.outcome, "charter:proposal 就是那一格自己的入口卡").toBe("decided");
+    const r = await approveCard(
+      w.q,
+      {
+        taskId: "t1",
+        approvalId: (pend[0] as { id: string }).id,
+        button: "approve",
+        nowMs: NOW + 10,
+      },
+      () => {},
+    );
+    expect(r.outcome, "charter:proposal 就是那一格自己的入口卡").toBe(
+      "decided",
+    );
   });
 });
-
 
 /** 一张挂在任务上的【待批卡】（收件箱里那张的替身：真 insertCard，不是手写 INSERT）。 */
 /* ═══════════════════ approveCard 落人席 ⇒ 同事务补下一张 ═══════════════════ */
@@ -786,27 +975,53 @@ describe("approveCard 落到人席时补下一张（否则「批过一步就再�
     const before = pendingCards(w.q, "t1");
     const r = await approveCard(
       w.q,
-      { taskId: "t1", approvalId: (before[0] as { id: string }).id, button: "approve", nowMs: NOW + 1000 },
+      {
+        taskId: "t1",
+        approvalId: (before[0] as { id: string }).id,
+        button: "approve",
+        nowMs: NOW + 1000,
+      },
       () => {},
     );
     expect(r.to).toBe("FINAL_REVIEW");
     const after = pendingCards(w.q, "t1");
     // 「已批掉的那张」不算欠的决定：这张表要能答「还欠几个」（0026 §9 那一族）
     expect(after.length).toBe(1);
-    expect((after[0] as { id: string }).id).not.toBe((before[0] as { id: string }).id);
-    const row = w.db.prepare("SELECT card_key, summary FROM approvals WHERE id = ?").get((after[0] as { id: string }).id) as Row;
+    expect((after[0] as { id: string }).id).not.toBe(
+      (before[0] as { id: string }).id,
+    );
+    const row = w.db
+      .prepare("SELECT card_key, summary FROM approvals WHERE id = ?")
+      .get((after[0] as { id: string }).id) as Row;
     expect(String(row["card_key"])).toContain("seat:FINAL_REVIEW:");
     // 键的身份 = 【刚才那条状态边】的 seq，不是决策那条
     const stateSeq = Number(
-      ((w.db.prepare("SELECT id FROM events WHERE action='state_change'").all() as Row[])[0] as Row)["id"],
+      (
+        (
+          w.db
+            .prepare("SELECT id FROM events WHERE action='state_change'")
+            .all() as Row[]
+        )[0] as Row
+      )["id"],
     );
-    expect(String(row["card_key"])).toBe("seat:FINAL_REVIEW:" + String(stateSeq));
+    expect(String(row["card_key"])).toBe(
+      "seat:FINAL_REVIEW:" + String(stateSeq),
+    );
   });
 
   it("CHARTER_PENDING 上点批准 ⇒ 落 CHARTER_APPROVED（agent 席）⇒ 【不】补卡", async () => {
     const w = await worldWithCard("CHARTER_PENDING");
     const before = pendingCards(w.q, "t1");
-    await approveCard(w.q, { taskId: "t1", approvalId: (before[0] as { id: string }).id, button: "approve", nowMs: NOW + 1000 }, () => {});
+    await approveCard(
+      w.q,
+      {
+        taskId: "t1",
+        approvalId: (before[0] as { id: string }).id,
+        button: "approve",
+        nowMs: NOW + 1000,
+      },
+      () => {},
+    );
     expect(statusOf(w.db)).toBe("CHARTER_APPROVED");
     // 只有被批掉的那一张，没有第二张
     expect(cardsIn(w.db).length).toBe(1);
@@ -823,7 +1038,16 @@ describe("approveCard 落到人席时补下一张（否则「批过一步就再�
         .prepare(
           "INSERT INTO events (task_id, actor_type, actor_id, action, target, payload, created_at) VALUES (?, 'system', 'hub', 'state_change', 'ESCALATED_TO_CEO', ?, ?)",
         )
-        .run("t1", JSON.stringify({ kind: "TaskStateChanged", taskId: "t1", from: "IN_REVIEW", to: "ESCALATED_TO_CEO" }), NOW);
+        .run(
+          "t1",
+          JSON.stringify({
+            kind: "TaskStateChanged",
+            taskId: "t1",
+            from: "IN_REVIEW",
+            to: "ESCALATED_TO_CEO",
+          }),
+          NOW,
+        );
       return Number(info.lastInsertRowid);
     });
     await w.q.node(() => {
@@ -857,7 +1081,12 @@ describe("approveCard 落到人席时补下一张（否则「批过一步就再�
       expect(pending.length, "每一格只欠一个决定").toBe(1);
       const r = await approveCard(
         q,
-        { taskId: "t1", approvalId: (pending[0] as { id: string }).id, button: "approve", nowMs: NOW + 1000 * (i + 1) },
+        {
+          taskId: "t1",
+          approvalId: (pending[0] as { id: string }).id,
+          button: "approve",
+          nowMs: NOW + 1000 * (i + 1),
+        },
         () => {},
       );
       expect(r.outcome).toBe("decided");
@@ -865,7 +1094,10 @@ describe("approveCard 落到人席时补下一张（否则「批过一步就再�
       expect(r.edgeExists, "卡片指着一条没有出边的格子").toBe(true);
       clicks.push(r.from + "→" + r.to);
     }
-    expect(clicks).toEqual(["ESCALATED_TO_CEO→FINAL_REVIEW", "FINAL_REVIEW→DELIVERED"]);
+    expect(clicks).toEqual([
+      "ESCALATED_TO_CEO→FINAL_REVIEW",
+      "FINAL_REVIEW→DELIVERED",
+    ]);
     expect(statusOf(db)).toBe("DELIVERED");
     // DELIVERED 是终点：收件箱为空 = 真的没有欠的决定
     expect(pendingCards(q, "t1").length).toBe(0);

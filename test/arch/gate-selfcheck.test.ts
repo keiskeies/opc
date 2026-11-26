@@ -247,7 +247,9 @@ it("门禁的【结论】必须在已知红名单里（记账对 ≠ 有人看�
   ).toBe("");
   // 反向对照：名单判据本身必须有分辨力。少了这一发，
   // 「KNOWN_RED 被写成恒真判断」「filter 写反」都会让上面那条恒绿。
-  expect(["某项本只该报数的检查"].filter((x) => !KNOWN_RED.includes(x))).toHaveLength(1);
+  expect(
+    ["某项本只该报数的检查"].filter((x) => !KNOWN_RED.includes(x)),
+  ).toHaveLength(1);
   expect(KNOWN_RED).toEqual([]);
 });
 

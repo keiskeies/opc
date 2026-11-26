@@ -65,7 +65,12 @@ export const LINK_EVENT = "desktop:link";
 
 export type LinkStatus =
   | { readonly state: "live" }
-  | { readonly state: "retrying"; readonly attempt: number; readonly delayMs: number; readonly reason: string }
+  | {
+      readonly state: "retrying";
+      readonly attempt: number;
+      readonly delayMs: number;
+      readonly reason: string;
+    }
   | { readonly state: "down"; readonly reason: string };
 
 export interface EventStreamOptions {
@@ -117,17 +122,26 @@ function retryableStatus(status: number): boolean {
 
 export function openEventStream(o: EventStreamOptions): EventStreamHandle {
   const [host, port] = o.hubAddress.split(":");
-  if (host === undefined || host.trim() === "" || port === undefined || !/^\d+$/.test(port)) {
+  if (
+    host === undefined ||
+    host.trim() === "" ||
+    port === undefined ||
+    !/^\d+$/.test(port)
+  ) {
     // 与 makeSignedFetch 的空 token 同一条纪律：配置缺失要在这里说，
     // 不要拼出一个必然连不上的地址、让它以「Hub 没起来」的形状出现。
-    throw new Error("hubAddress 必须是 host:port，实到 " + JSON.stringify(o.hubAddress));
+    throw new Error(
+      "hubAddress 必须是 host:port，实到 " + JSON.stringify(o.hubAddress),
+    );
   }
-  const setTimeoutImpl = o.setTimeoutImpl ?? ((fn: () => void, ms: number) => {
-    const t = setTimeout(fn, ms);
-    return () => {
-      clearTimeout(t);
-    };
-  });
+  const setTimeoutImpl =
+    o.setTimeoutImpl ??
+    ((fn: () => void, ms: number) => {
+      const t = setTimeout(fn, ms);
+      return () => {
+        clearTimeout(t);
+      };
+    });
 
   let cursor = o.initialCursor ?? 0;
   let attempt = 0;
@@ -173,7 +187,9 @@ export function openEventStream(o: EventStreamOptions): EventStreamHandle {
       // 停在这里而不重连（推给谁？），但游标留着是对的值：
       // 下一次壳起来时会从【真正送达的位置】续，而不是跳过这一条。
       process.stderr.write(
-        "桌面壳推送失败，事件流已停：" + (e instanceof Error ? e.message : String(e)).slice(0, 200) + "\n",
+        "桌面壳推送失败，事件流已停：" +
+          (e instanceof Error ? e.message : String(e)).slice(0, 200) +
+          "\n",
       );
       return false;
     }
@@ -190,7 +206,10 @@ export function openEventStream(o: EventStreamOptions): EventStreamHandle {
     if (shouldGiveUp(attempt)) {
       // 到这里说明连续失败已经 >= GIVE_UP_AFTER_ATTEMPTS 次。
       // 放弃之后【不重连】，但界面必须说得出为什么：这是 down 而不是 live 的唯一依据。
-      status({ state: "down", reason: "连续 " + attempt + " 次连不上，已停止重连：" + reason });
+      status({
+        state: "down",
+        reason: "连续 " + attempt + " 次连不上，已停止重连：" + reason,
+      });
       return;
     }
     const delayMs = reconnectDelayMs(attempt);
@@ -233,7 +252,10 @@ export function openEventStream(o: EventStreamOptions): EventStreamHandle {
       // 要么被下游当成有效位置而丢事件。两种都比停下来说一句更坏。
       closed = true;
       req?.destroy();
-      status({ state: "down", reason: "事件流给出了不是非负整数的 id：" + JSON.stringify(frame.id) });
+      status({
+        state: "down",
+        reason: "事件流给出了不是非负整数的 id：" + JSON.stringify(frame.id),
+      });
       return;
     }
     // 游标【只在真的送达之后】才前进。顺序在这里有内容：
@@ -267,7 +289,13 @@ export function openEventStream(o: EventStreamOptions): EventStreamHandle {
       }),
     };
     if (req !== null) req.destroy(); // 上一轮流还没散干净（正常路径下已经是 null）
-    const r = request({ host, port: Number(port), path: target, method: "GET", headers });
+    const r = request({
+      host,
+      port: Number(port),
+      path: target,
+      method: "GET",
+      headers,
+    });
     req = r;
     r.on("response", (res) => {
       const st = res.statusCode ?? 0;
@@ -280,9 +308,16 @@ export function openEventStream(o: EventStreamOptions): EventStreamHandle {
         res.on("end", () => {
           req = null;
           res.destroy();
-          const why = "HTTP " + st + (body.trim() === "" ? "" : " " + body.trim().slice(0, 200));
+          const why =
+            "HTTP " +
+            st +
+            (body.trim() === "" ? "" : " " + body.trim().slice(0, 200));
           if (retryableStatus(st)) scheduleReconnect(why);
-          else status({ state: "down", reason: why + "（这一类重试不会成功，检查部署 token 与地址）" });
+          else
+            status({
+              state: "down",
+              reason: why + "（这一类重试不会成功，检查部署 token 与地址）",
+            });
         });
         return;
       }

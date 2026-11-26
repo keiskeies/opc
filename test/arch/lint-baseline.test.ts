@@ -10,6 +10,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
+  type BaselineEntry,
   type BiomeDiagnostic,
   countErrorCategories,
   diffLintBaseline,
@@ -89,14 +90,24 @@ describe("lint 基线：棘轮判据", () => {
     expect(msg).toBe("");
   });
 
-  it("变异：某类目多一条 ⇒ 红，且红话点名是哪一类、从几到几", () => {
-    const mutated = [...atBaseline(), diag("format")];
-    const msg = diffLintBaseline(countErrorCategories(mutated));
-    // 上限从 LINT_BASELINE 取，不手抄。手抄那一次它跟着 round285 的下调当场过期，
-    // 和红因无关地红了一发 —— 同「期望里那份手抄名单」一族（台账 ⑩）。
-    const cap = LINT_BASELINE.find((b) => b.category === "format")?.atMost;
-    expect(msg).toContain(`format ${cap}→${cap! + 1}`);
+  it("变异：某类目多于基线配额 ⇒ 红，且红话点名是哪一类、从几到几", () => {
+    // 判据形态用显式合成基线测，不再从 LINT_BASELINE 借「format 那条恰好在表里」的形态 ——
+    // 2026-11-27 全仓修绿后真表清空，表里不再有任何类目可供借形。
+    // 上限仍不手抄进断言文案：cap 从合成的基线对象取（同「手抄会漂」那一族）。
+    const synth: BaselineEntry[] = [{ category: "format", atMost: 3 }];
+    const counts = new Map<string, number>([["format", 4]]);
+    const msg = diffLintBaseline(counts, synth);
+    const cap = synth.find((b) => b.category === "format")?.atMost;
+    expect(msg).toContain(`format ${cap}→${cap === undefined ? 0 : cap + 1}`);
     expect(msg).toContain("只许减不许增");
+  });
+
+  it("变异：表清空后冒出任何 error ⇒ 红并点名（0 error 是常态，新账必须新点名）", () => {
+    // 真表今天为空（全仓 0 error）。空表下判据换了一副红话：不是「超配额」而是
+    // 「基线外类目」。这一发钉的是【清空之后】的日常形态 —— format 回归 1 条也必须红。
+    const msg = diffLintBaseline(countErrorCategories([diag("format")]));
+    expect(msg).toContain("基线外的 error 类目");
+    expect(msg).toContain("format=1");
   });
 
   it("变异：冒出基线外的新 error 类目 ⇒ 红并点名（防『反正 lint 本来就红』混过去）", () => {

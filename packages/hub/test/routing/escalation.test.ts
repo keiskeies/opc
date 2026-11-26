@@ -6,10 +6,7 @@
  * （节点作者不知道有这条触发条件），不该升的狂升（每个节点都怕背锅而上交）。
  * 集中判定 + 固定卡片形状，才谈得上统计「这周升了多少、各因为什么」。
  */
-import {
-  approvalCardDraftSchema,
-  ESCALATION_REASONS,
-} from "@opc/contracts";
+import { approvalCardDraftSchema, ESCALATION_REASONS } from "@opc/contracts";
 import { describe, expect, it } from "vitest";
 import {
   canEscalateFrom,
@@ -210,7 +207,8 @@ describe("审批卡片形状（§9.2 三行 + 三按钮）", () => {
     if (!r.escalate) throw new Error("应当升级");
     expect(r.card.evidence_refs.length).toBeGreaterThan(0);
     expect(
-      approvalCardDraftSchema.safeParse({ ...r.card, evidence_refs: [] }).success,
+      approvalCardDraftSchema.safeParse({ ...r.card, evidence_refs: [] })
+        .success,
     ).toBe(false);
   });
 
@@ -226,10 +224,9 @@ describe("审批卡片形状（§9.2 三行 + 三按钮）", () => {
     ]) {
       const r = decideEscalation(s);
       if (!r.escalate) throw new Error("应当升级");
-      expect(
-        r.card.parameters.timeout_behavior,
-        JSON.stringify(s),
-      ).toBe(timeoutFor(r.card.parameters.irreversible));
+      expect(r.card.parameters.timeout_behavior, JSON.stringify(s)).toBe(
+        timeoutFor(r.card.parameters.irreversible),
+      );
     }
   });
 
@@ -273,6 +270,8 @@ describe("升级在状态机上是否走得通", () => {
   });
 
   it("未知状态名 → 抛错而不是返回 false（伪装的合法拒绝最危险）", () => {
-    expect(() => canEscalateFrom("NOT_A_STATE" as never)).toThrow(/未知的任务状态/u);
+    expect(() => canEscalateFrom("NOT_A_STATE" as never)).toThrow(
+      /未知的任务状态/u,
+    );
   });
 });

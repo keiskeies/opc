@@ -71,7 +71,11 @@ export function findNullBytes(buf: Buffer): number[] {
 }
 
 /** 把「字节偏移 + 原始 Buffer」翻成一条能读的命中。 */
-export function describeNullHit(path: string, buf: Buffer, byteOffset: number): NullHit {
+export function describeNullHit(
+  path: string,
+  buf: Buffer,
+  byteOffset: number,
+): NullHit {
   // 行号 = 偏移之前的换行数 + 1（NUL 自己不是换行，latin1 下字节数=字符数）。
   const head = buf.subarray(0, byteOffset).toString("latin1");
   const line = (head.match(/\n/gu)?.length ?? 0) + 1;
@@ -90,7 +94,8 @@ export function describeNullHit(path: string, buf: Buffer, byteOffset: number): 
 export function nullByteHits(files: ReadonlyMap<string, Buffer>): NullHit[] {
   const hits: NullHit[] = [];
   for (const [path, buf] of files) {
-    for (const off of findNullBytes(buf)) hits.push(describeNullHit(path, buf, off));
+    for (const off of findNullBytes(buf))
+      hits.push(describeNullHit(path, buf, off));
   }
   return hits;
 }

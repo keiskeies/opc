@@ -212,7 +212,10 @@ export async function runRole(i: RoleRunInput): Promise<RoleRunResult> {
     spawnErrno: string;
   }>((resolveP) => {
     const argv = /\.[cm]?js$/.test(bin) ? [bin, ...args] : args;
-    const p = spawn(/\.[cm]?js$/.test(bin) ? process.execPath : bin, argv, { cwd: i.cwd, env: process.env });
+    const p = spawn(/\.[cm]?js$/.test(bin) ? process.execPath : bin, argv, {
+      cwd: i.cwd,
+      env: process.env,
+    });
     // prompt 走 stdin 而不是 argv：想法文本由 CEO 输入，放进 argv 会出现在
     // `ps` 里，也会被下一个写适配器的人顺手拼进 shell 字符串。
     p.stdin.write(i.prompt);
@@ -241,14 +244,22 @@ export async function runRole(i: RoleRunInput): Promise<RoleRunResult> {
         timedOut: false,
         spawned: false,
         // errno 名【只在这一支取得到】，出了这里就没了（下面的返回点全靠 Promise 带出来）。
-        spawnErrno: typeof (e as { code?: unknown })["code"] === "string"
-          ? String((e as { code?: unknown })["code"])
-          : "",
+        spawnErrno:
+          typeof (e as { code?: unknown })["code"] === "string"
+            ? String((e as { code?: unknown })["code"])
+            : "",
       });
     });
     p.on("close", (code) => {
       clearTimeout(t);
-      resolveP({ code, stdout, stderr, timedOut, spawned: true, spawnErrno: "" });
+      resolveP({
+        code,
+        stdout,
+        stderr,
+        timedOut,
+        spawned: true,
+        spawnErrno: "",
+      });
     });
   });
 
@@ -281,7 +292,9 @@ export async function runRole(i: RoleRunInput): Promise<RoleRunResult> {
       sessionId: i.resumeSessionId ?? null,
       costUsd: 0,
       error:
-        "CLI 输出不是预期的 JSON（exit=" + String(raw.code) + "）：" +
+        "CLI 输出不是预期的 JSON（exit=" +
+        String(raw.code) +
+        "）：" +
         (raw.stderr || raw.stdout).replace(/\s+/g, " ").slice(0, 300),
       // spawned=false 那一支（ENOENT 等）落在这里：stdout 是空串，JSON.parse 必然抛。
       // 这就是「找不到二进制」今天的形状，而它以前与「CLI 真的起来而输出坏了」同形。
@@ -297,7 +310,10 @@ export async function runRole(i: RoleRunInput): Promise<RoleRunResult> {
       text: typeof j.result === "string" ? j.result : "",
       sessionId,
       costUsd: cost,
-      error: (typeof j.result === "string" ? j.result : "角色执行失败").slice(0, 400),
+      error: (typeof j.result === "string" ? j.result : "角色执行失败").slice(
+        0,
+        400,
+      ),
       started: raw.spawned,
       spawnErrno: raw.spawnErrno,
     };
@@ -370,13 +386,16 @@ export function parseDecision(text: string): RoleDecision | null {
   const o = parsed as Record<string, unknown>;
   const action: string = typeof o["action"] === "string" ? o["action"] : "";
   if (!(ROLE_ACTIONS as readonly string[]).includes(action)) return null;
-  if (typeof o["summary"] !== "string" || o["summary"].trim() === "") return null;
+  if (typeof o["summary"] !== "string" || o["summary"].trim() === "")
+    return null;
   const a = action as RoleAction;
   return {
     action: a,
     // 只有 handoff 带收件人。pass 的下一跳由【汇报树】决定，agent 点名也没用 ——
     // 所以这里刻意不把它塞进 to_role：留着就等于邀请调用方去读一个契约外的通道。
-    ...(a === "handoff" ? { to_role: typeof o["to_role"] === "string" ? o["to_role"] : "" } : {}),
+    ...(a === "handoff"
+      ? { to_role: typeof o["to_role"] === "string" ? o["to_role"] : "" }
+      : {}),
     summary: o["summary"].trim(),
     ...(typeof o["note"] === "string" ? { note: o["note"].trim() } : {}),
   };

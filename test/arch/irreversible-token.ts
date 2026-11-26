@@ -121,7 +121,9 @@ export function checkIrreversibleToken(srcs: SrcCorpus): string {
   for (const [name, text] of srcs) {
     if (APPROVE_WRITE_RE.test(text) && !registered.has(name)) {
       problems.push(
-        "[" + name + "] 直接 UPDATE approvals SET status —— O11：任何写「卡片被决定」的路径" +
+        "[" +
+          name +
+          "] 直接 UPDATE approvals SET status —— O11：任何写「卡片被决定」的路径" +
           "必须先在 APPROVE_PATHS 登记，并写明这一路的不可逆防线（票/R3/拒建/物理在场），" +
           "不接受空口条目。",
       );
@@ -130,12 +132,17 @@ export function checkIrreversibleToken(srcs: SrcCorpus): string {
   // 判据①反向：登记条目的特征串还在。
   for (const e of APPROVE_PATHS) {
     if (e.why.trim() === "") {
-      problems.push("APPROVE_PATHS 条目 [" + e.file + "] 的 why 为空 —— 名单不是豁免表。");
+      problems.push(
+        "APPROVE_PATHS 条目 [" + e.file + "] 的 why 为空 —— 名单不是豁免表。",
+      );
     }
     const text = srcs.get(e.file);
     if (text === undefined || !text.includes(e.marker)) {
       problems.push(
-        "APPROVE_PATHS 条目 [" + e.file + "] 过期：特征串「" + e.marker +
+        "APPROVE_PATHS 条目 [" +
+          e.file +
+          "] 过期：特征串「" +
+          e.marker +
           "」不在该文件里 —— 防线可能已被删掉，去更新登记或把防线补回来。",
       );
     }
@@ -146,7 +153,9 @@ export function checkIrreversibleToken(srcs: SrcCorpus): string {
   for (const [name, text] of srcs) {
     if (APPROVE_CARD_CALL_RE.test(text) && !callers.has(name)) {
       problems.push(
-        "[" + name + "] 调用 approveCard —— §O11 验收句：绕过凭据校验直接调 approveCard" +
+        "[" +
+          name +
+          "] 调用 approveCard —— §O11 验收句：绕过凭据校验直接调 approveCard" +
           " 必须红。新调用方要先在 APPROVE_CARD_CALLERS 登记这一路的凭据（票/HMAC/物理在场）。",
       );
     }
@@ -158,7 +167,10 @@ export function checkIrreversibleToken(srcs: SrcCorpus): string {
     const text = srcs.get(e.file);
     if (text === undefined || !text.includes(e.marker)) {
       problems.push(
-        "APPROVE_CARD_CALLERS 条目 [" + e.file + "] 过期：特征串「" + e.marker +
+        "APPROVE_CARD_CALLERS 条目 [" +
+          e.file +
+          "] 过期：特征串「" +
+          e.marker +
           "」不在该文件里 —— 它已不再调用 approveCard。",
       );
     }
@@ -168,7 +180,8 @@ export function checkIrreversibleToken(srcs: SrcCorpus): string {
   const cards = srcs.get("approvals/cards.ts");
   if (cards === undefined || !cards.includes(REJECT_BUILD_MARKER)) {
     problems.push(
-      "approvals/cards.ts 里的建卡拒建判据（特征串「" + REJECT_BUILD_MARKER +
+      "approvals/cards.ts 里的建卡拒建判据（特征串「" +
+        REJECT_BUILD_MARKER +
         "」）不见了 —— auto_approve ∧ irreversible 的卡又能建出来了，" +
         "timeout.ts 的 auto_approve 支随之失去兜底。",
     );

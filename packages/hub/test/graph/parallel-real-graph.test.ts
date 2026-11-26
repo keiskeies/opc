@@ -33,11 +33,12 @@
  * 才在测试断言里露馅。graph 组装复刻 company.ts 的纯链式（StateGraph 的节点名
  * 只沿链式返回值累积，中断成语句调用会让 addEdge 的字面量过不了类型检查）。
  */
-import { describe, expect, it } from "vitest";
+
 import { Annotation, END, START, StateGraph } from "@langchain/langgraph";
+import { describe, expect, it } from "vitest";
 import {
-  mergeParallelResults,
   type GateSeverity,
+  mergeParallelResults,
   type ParallelBranch,
   type ParallelMergeResult,
 } from "../../src/graph/branches.js";
@@ -169,7 +170,9 @@ describe("真 StateGraph：扇出扇入的 Reducer 合并语义（0016 §7 框�
       .addEdge("ops", "fanIn")
       .addEdge("fanIn", END)
       .compile();
-    const out = (await graph.invoke({})) as { fanInResult: ParallelMergeResult };
+    const out = (await graph.invoke({})) as {
+      fanInResult: ParallelMergeResult;
+    };
     expect(out.fanInResult.artifacts.map((a) => a.role_id)).toEqual([
       "product",
       "ops",

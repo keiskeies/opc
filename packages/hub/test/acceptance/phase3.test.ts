@@ -53,24 +53,24 @@ import {
   gateCriteriaForRoleAtVersion,
   saveCharterVersion,
 } from "../../src/charter/store.js";
-import { fixtureTmp } from "../fixtures/fixture-dir.js";
-import { toPosix } from "../fixtures/paths.js";
-import { WriteQueue } from "../../src/db/write-queue.js";
 import { migrate } from "../../src/db/migrate.js";
+import { WriteQueue } from "../../src/db/write-queue.js";
+import { EvidenceStore } from "../../src/evidence/store.js";
 import { evaluateGate } from "../../src/graph/gates/evaluate.js";
 import {
   canEscalateFrom,
   decideEscalation,
 } from "../../src/graph/routing/escalation.js";
-import { EvidenceStore } from "../../src/evidence/store.js";
 import {
   AUTO_APPROVED_BY,
-  autoApprove,
-  recordAutoApproval,
-  readAutoApprovalReport,
   type AutoApproveInput,
+  autoApprove,
+  readAutoApprovalReport,
+  recordAutoApproval,
 } from "../../src/policy/auto-approve.js";
 import { searchEvents } from "../../src/replay/search.js";
+import { fixtureTmp } from "../fixtures/fixture-dir.js";
+import { toPosix } from "../fixtures/paths.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const HUB = join(HERE, "..", "..");
@@ -152,14 +152,23 @@ const draft = (over: Partial<CharterInput> = {}): CharterInput => ({
   // 0015 §7 记着在这格上错过的那次：`metric:coverage >= 80` + reject 表达的是
   // 「覆盖率好就拒」，全绿而门控从不拦任何东西。这里写 < 80。
   acceptance_criteria: [
-    { condition: "metric:coverage < 80", action: "reject", message: "覆盖率不足 80" },
+    {
+      condition: "metric:coverage < 80",
+      action: "reject",
+      message: "覆盖率不足 80",
+    },
   ],
   forbidden_actions: [],
   tool_permissions: ["read"],
   model_tier: "execution",
   budget: { daily_usd: 15, per_task_usd: 5 },
   decision_scope: { autonomous: [], requires_consultation: [], forbidden: [] },
-  judgment_mode: { type: "strict_rules", strict_rules: [], bounded_judgment: [], full_discretion: [] },
+  judgment_mode: {
+    type: "strict_rules",
+    strict_rules: [],
+    bounded_judgment: [],
+    full_discretion: [],
+  },
   escalation_triggers: [],
   ...over,
 });
@@ -169,8 +178,15 @@ let bundleSeq = 0;
 const nextBundleId = (): string => {
   const h = (++bundleSeq).toString(16).padStart(32, "0");
   return (
-    h.slice(0, 8) + "-" + h.slice(8, 12) + "-4" + h.slice(13, 16) +
-    "-8" + h.slice(17, 20) + "-" + h.slice(20, 32)
+    h.slice(0, 8) +
+    "-" +
+    h.slice(8, 12) +
+    "-4" +
+    h.slice(13, 16) +
+    "-8" +
+    h.slice(17, 20) +
+    "-" +
+    h.slice(20, 32)
   );
 };
 
@@ -226,11 +242,17 @@ const gateFor = (
     criteria,
   });
 
-async function newCharterRun(): Promise<{ q: WriteQueue; db: AnyDb; store: EvidenceStore }> {
+async function newCharterRun(): Promise<{
+  q: WriteQueue;
+  db: AnyDb;
+  store: EvidenceStore;
+}> {
   const path = join(TMP, "ch-" + process.pid + "-" + ++fileSeq + ".db");
   const q = new WriteQueue(path) as WriteQueue;
   queues.push(q);
-  const db = (q as unknown as { writeConnection: () => AnyDb }).writeConnection();
+  const db = (
+    q as unknown as { writeConnection: () => AnyDb }
+  ).writeConnection();
   migrate(db as never);
   db.prepare(
     "INSERT INTO tasks (id, title, status, assigned_role, current_node, created_at, updated_at) " +
@@ -265,7 +287,11 @@ describe("① 改岗位书验收标准 ⇒ 门控结论变化（规格 §23.1 Ph
     // 从未被验证。传的是 run.integrity（一个算出来的值）而不是 true，这一发才有内容。
     expect(run.integrity).toBe(true);
 
-    const before = gateFor(run.bundle, run.integrity, gateCriteriaForRole(db as never, "dev"));
+    const before = gateFor(
+      run.bundle,
+      run.integrity,
+      gateCriteriaForRole(db as never, "dev"),
+    );
     expect(before.decision).toBe("pass");
     // pass 那一支的 unresolved 必须是空数组：非空的 pass 在本仓的口径里不存在
     // （evaluateGate 末尾「有标准没判成 ⇒ escalate」那一段）。少了这一发，
@@ -277,7 +303,11 @@ describe("① 改岗位书验收标准 ⇒ 门控结论变化（规格 §23.1 Ph
       roleId: "dev",
       config: draft({
         acceptance_criteria: [
-          { condition: "metric:coverage < 95", action: "reject", message: "覆盖率不足 95" },
+          {
+            condition: "metric:coverage < 95",
+            action: "reject",
+            message: "覆盖率不足 95",
+          },
         ],
       }),
       nowMs: NOW + 1,
@@ -285,7 +315,11 @@ describe("① 改岗位书验收标准 ⇒ 门控结论变化（规格 §23.1 Ph
     });
     expect(v2.ok).toBe(true);
 
-    const after = gateFor(run.bundle, run.integrity, gateCriteriaForRole(db as never, "dev"));
+    const after = gateFor(
+      run.bundle,
+      run.integrity,
+      gateCriteriaForRole(db as never, "dev"),
+    );
     expect(after.decision).toBe("reject");
     if (after.decision === "reject") {
       // 拒的理由必须是**那条新标准**，不是别的。
@@ -346,20 +380,40 @@ describe("① 改岗位书验收标准 ⇒ 门控结论变化（规格 §23.1 Ph
       roleId: "dev",
       config: draft({
         acceptance_criteria: [
-          { condition: "metric:coverage < 95", action: "reject", message: "不足 95" },
+          {
+            condition: "metric:coverage < 95",
+            action: "reject",
+            message: "不足 95",
+          },
         ],
       }),
       nowMs: NOW,
       changeSummary: "只有 95 这一版",
     });
     const criteria = gateCriteriaForRole(db as never, "dev");
-    expect(gateFor((await realBundle(store, { coverage: 90 })).bundle, true, criteria).decision).toBe("reject");
-    expect(gateFor((await realBundle(store, { coverage: 99 })).bundle, true, criteria).decision).toBe("pass");
+    expect(
+      gateFor(
+        (await realBundle(store, { coverage: 90 })).bundle,
+        true,
+        criteria,
+      ).decision,
+    ).toBe("reject");
+    expect(
+      gateFor(
+        (await realBundle(store, { coverage: 99 })).bundle,
+        true,
+        criteria,
+      ).decision,
+    ).toBe("pass");
     // 第三种形状：证据包里**根本没有这个指标** ⇒ escalate 而不是 pass（evaluateGate 文件末段
     // 那句「最省事的假绿方式不是伪造覆盖率数字，而是【不提覆盖率】」）。
     // 这一发放在 ① 段里的理由：它是「改标准 ⇒ 结论变化」这条命题的**边界**，
     // 少了它，「标准判不判得成都 pass」的实现能让整段 ① 绿。
-    const noMetric = gateFor((await realBundle(store, {})).bundle, true, criteria);
+    const noMetric = gateFor(
+      (await realBundle(store, {})).bundle,
+      true,
+      criteria,
+    );
     expect(noMetric.decision).toBe("escalate");
     if (noMetric.decision === "escalate") {
       // 而且 escalate 的理由必须点名【是哪条标准判不出】，不能只说「证据不足」。
@@ -402,7 +456,9 @@ describe("① 改岗位书验收标准 ⇒ 门控结论变化（规格 §23.1 Ph
     const criteria = gateCriteriaForRole(db as never, "dev");
     // 先按原样过 —— 证明下面的 reject 是【篡改】造成的，不是夹具本来就不合格。
     expect(store.verify(bundle).ok).toBe(true);
-    expect(gateFor(bundle, store.verify(bundle).ok, criteria).decision).toBe("pass");
+    expect(gateFor(bundle, store.verify(bundle).ok, criteria).decision).toBe(
+      "pass",
+    );
 
     writeFileSync(join(store.root, w.declared), "coverage 99\n", "utf8"); // 内容变了，声明没变
     expect(store.verify(bundle).ok).toBe(false);
@@ -421,7 +477,9 @@ describe("① 改岗位书验收标准 ⇒ 门控结论变化（规格 §23.1 Ph
 
 async function newPolicyRun(): Promise<{ db: AnyDb }> {
   const { openDb } = await import("../../src/db/driver.js");
-  const db = openDb(join(TMP, "pol-" + process.pid + "-" + ++fileSeq + ".db")) as unknown as AnyDb;
+  const db = openDb(
+    join(TMP, "pol-" + process.pid + "-" + ++fileSeq + ".db"),
+  ) as unknown as AnyDb;
   plain.push(db);
   migrate(db as never);
   db.prepare(
@@ -491,7 +549,9 @@ describe("② 自动通过的决策：日报数得到 + 回放搜得出（§23.1
     // 反向对照：一个**不该**命中的关键词必须搜不到这一行。
     // 少了这一发，「searchEvents 永远返回全部行」的实现也能让上面两条绿
     // （0013 §8 那条纪律：反向对照必须经过被测代码）。
-    const miss = searchEvents(db as never, { keyword: "从未出现过的中文关键词串" });
+    const miss = searchEvents(db as never, {
+      keyword: "从未出现过的中文关键词串",
+    });
     expect(miss.map((h) => h.id)).not.toContain(rec.seq);
   });
 
@@ -538,7 +598,9 @@ describe("② 自动通过的决策：日报数得到 + 回放搜得出（§23.1
       approvalId: "ap-1",
       nowMs: NOW,
     });
-    const rows = db.prepare("SELECT actor_type, actor_id, action FROM events").all();
+    const rows = db
+      .prepare("SELECT actor_type, actor_id, action FROM events")
+      .all();
     expect(rows).toHaveLength(1);
     // actor_type = system 而不是 human/agent：没有人做过这个动作，是规则做的。
     expect(rows[0]?.["actor_type"]).toBe("system");
@@ -549,13 +611,17 @@ describe("② 自动通过的决策：日报数得到 + 回放搜得出（§23.1
     // 「自动批准写对了」，这一份测的是「跨到日报口径之后仍然对得上」——
     // 而「可追溯」最怕的正是**两处各对一半**：payload 署了引擎而列上署了 ceo，
     // 于是日报数得到、审批页却显示成 CEO 批的。
-    const card = db.prepare("SELECT status, decided_by FROM approvals WHERE id = 'ap-1'").get();
+    const card = db
+      .prepare("SELECT status, decided_by FROM approvals WHERE id = 'ap-1'")
+      .get();
     expect(card?.["status"]).toBe("approved");
     expect(card?.["decided_by"]).toBe(AUTO_APPROVED_BY);
     // 「可追溯」的下界不是「现在查得到」，是「事后谁也抹不掉」。
     // schema-0001.test.ts 在 DDL 层测过那两个触发器本身（拿合成行测），
     // 这一发测的是【这一条具体的自动批准记录】在真写入之后仍然抹不掉。
-    expect(() => db.prepare("DELETE FROM events WHERE id = ?").run(rec.seq)).toThrow();
+    expect(() =>
+      db.prepare("DELETE FROM events WHERE id = ?").run(rec.seq),
+    ).toThrow();
     expect(db.prepare("SELECT COUNT(*) AS n FROM events").get()?.["n"]).toBe(1);
     /*
      * 反向对照：同一个连接上删一张**不是** append-only 的表必须成功。
@@ -563,8 +629,12 @@ describe("② 自动通过的决策：日报数得到 + 回放搜得出（§23.1
      * 那测的就不是 append-only 而是「库是只读的」，两者是完全不同的性质
      * （后者会让整个 Hub 跑不起来，而且是响的、不会被当成通过）。
      */
-    expect(() => db.prepare("DELETE FROM approvals WHERE id = 'ap-1'").run()).not.toThrow();
-    expect(db.prepare("SELECT COUNT(*) AS n FROM approvals").get()?.["n"]).toBe(0);
+    expect(() =>
+      db.prepare("DELETE FROM approvals WHERE id = 'ap-1'").run(),
+    ).not.toThrow();
+    expect(db.prepare("SELECT COUNT(*) AS n FROM approvals").get()?.["n"]).toBe(
+      0,
+    );
   });
 });
 
@@ -618,7 +688,11 @@ describe("③ 岗位书里的 escalate 标准到不了升级路由（本轮实�
     expect(saved.ok).toBe(true);
 
     const run = await realBundle(store, { coverage: 50 });
-    const v = gateFor(run.bundle, run.integrity, gateCriteriaForRole(db as never, "dev"));
+    const v = gateFor(
+      run.bundle,
+      run.integrity,
+      gateCriteriaForRole(db as never, "dev"),
+    );
     // 门控这一侧：判成 escalate，理由带着 CEO 写的那句话与升级目标。
     expect(v.decision).toBe("escalate");
     if (v.decision !== "escalate") return;
@@ -644,7 +718,11 @@ describe("③ 岗位书里的 escalate 标准到不了升级路由（本轮实�
      *     少了这一发，整段 ③ 可能只是在证「这个状态本来就不能升级」——
      *     那是一条完全不同的结论，而且它会让人去改状态机而不是改接缝。
      */
-    const e2 = decideEscalation({ taskId: "T-1", state: "IN_REVIEW", unresolvedCriteriaCount: 1 });
+    const e2 = decideEscalation({
+      taskId: "T-1",
+      state: "IN_REVIEW",
+      unresolvedCriteriaCount: 1,
+    });
     expect(e2.escalate).toBe(true);
     if (e2.escalate) {
       expect(e2.reason).toBe("insufficient_evidence");
@@ -781,13 +859,12 @@ function srcFilesMatching(re: RegExp): string[] {
   return tsFiles(SRC).filter((f) => {
     const text = readIfPresent(f);
     if (text === null) return false;
-    return text
-      .split("\n")
-      .some((l) => {
-        const t = l.trim();
-        if (t.startsWith("//") || t.startsWith("*") || t.startsWith("/*")) return false;
-        return re.test(l);
-      });
+    return text.split("\n").some((l) => {
+      const t = l.trim();
+      if (t.startsWith("//") || t.startsWith("*") || t.startsWith("/*"))
+        return false;
+      return re.test(l);
+    });
   });
 }
 
@@ -849,7 +926,9 @@ describe("④ 两条验收各自【不可测的那一半】（登记，不写成
   });
 
   it("② 的『在日报可见』只有数据面：readAutoApprovalReport 也零调用方", () => {
-    expect(callersOf("readAutoApprovalReport", "policy/auto-approve.ts")).toEqual([]);
+    expect(
+      callersOf("readAutoApprovalReport", "policy/auto-approve.ts"),
+    ).toEqual([]);
     /*
      * 「有没有日报端点」这一维的判据要选对，否则会自欺：
      *  【不能】grep「日报」这个词在 src 里出现没有 —— 它出现了，全在注释里
@@ -859,7 +938,10 @@ describe("④ 两条验收各自【不可测的那一半】（登记，不写成
      *    与恒绿的判据等价。所以这里配一发**同一个文件里的真端点**做正向对照：
      *    「扫这个文件能捞到端点」与「捞不到日报端点」两条一起，才是一次有内容的排除法。
      */
-    const api = readFileSync(join(HUB, "..", "..", "packages", "contracts", "src", "api.ts"), "utf8");
+    const api = readFileSync(
+      join(HUB, "..", "..", "packages", "contracts", "src", "api.ts"),
+      "utf8",
+    );
     expect(api).toContain("GET /replay/:taskId");
     expect(api).not.toMatch(/daily[-_]?report|auto[-_]?approval/iu);
     // 第三发：这条「只有数据面」的结论在**岗位书读侧**那一维上也成立 —— 同一个扫描器，
@@ -937,7 +1019,9 @@ describe("④ 两条验收各自【不可测的那一半】（登记，不写成
       SRC + "/harness/verifier.ts",
     ]);
     expect(callersOf("verifyFix", "harness/verifier.ts")).toHaveLength(0);
-    expect(callersOf("readAutoApprovalReport", "policy/auto-approve.ts")).toHaveLength(0);
+    expect(
+      callersOf("readAutoApprovalReport", "policy/auto-approve.ts"),
+    ).toHaveLength(0);
     /*
      * 第 6 条 blocker 原来只是作者自述（「卡片仍零 INSERT」）。自述会过期而**过期时不响**，
      * 所以这里把它也变成判据。0026 落地时它**真的红了一次**（红的就是下面第一发），
@@ -1143,7 +1227,10 @@ describe("⑤ tsFiles 对「遍历途中消失」的容错，与它不容错的�
     writeFileSync(join(scan, "sub", "deep.ts"), "export const b = 2;\n");
     // 窗口本身：一个 readdirSync 列得出、statSync 必抛 ENOENT 的名字。
     try {
-      symlinkSync(join(scan, "target-does-not-exist.ts"), join(scan, "gone.ts"));
+      symlinkSync(
+        join(scan, "target-does-not-exist.ts"),
+        join(scan, "gone.ts"),
+      );
     } catch (e) {
       // 建不出来就【明确红】，不静默跳过 —— 静默跳过的守卫等于没有守卫，
       // 0053 记的正是「8 发故意红在 Windows 上从来没生效过」那一族。

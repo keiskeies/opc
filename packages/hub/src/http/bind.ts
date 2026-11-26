@@ -77,7 +77,8 @@ export type BindRejectReason =
  * 就会漂，而漂了的症状是「配置错了本该拒绝启动，结果退回了回环」——
  * 一个静默的方向错误。所以只有这一处定义。
  */
-export const FATAL_BIND_REASON: BindRejectReason = "lan_without_approvals_channel";
+export const FATAL_BIND_REASON: BindRejectReason =
+  "lan_without_approvals_channel";
 
 export type BindRejection = {
   readonly ok: false;
@@ -86,7 +87,9 @@ export type BindRejection = {
   readonly message: string;
 };
 
-export type BindOutcome = { readonly ok: true; readonly decision: BindDecision } | BindRejection;
+export type BindOutcome =
+  | { readonly ok: true; readonly decision: BindDecision }
+  | BindRejection;
 
 /**
  * 一次监听决定。构造点是私有的 —— 见文件头那条「造不出来的凭据」。
@@ -142,7 +145,9 @@ export class BindDecision {
     // 没填 ⇒ 回环。这一支【不查】remoteApprovalsWired：默认路径不该因为
     // 「远程通道没接」就起不来，那会把一个 Phase 4 的可选能力变成 Phase 2 的启动依赖。
     if (requested === undefined || requested === "") {
-      return ok(new BindDecision(LOOPBACK_HOST, "loopback", null, CONSTRUCTION_KEY));
+      return ok(
+        new BindDecision(LOOPBACK_HOST, "loopback", null, CONSTRUCTION_KEY),
+      );
     }
 
     // 回环字面量 ⇒ 直接放行，与 remoteApprovalsWired 无关。
@@ -150,9 +155,18 @@ export class BindDecision {
       // ::1 单独提示一句，因为它是【另一个】栈：绑了 ::1 就连不上 127.0.0.1，
       // 而 desktop 侧现在连的是 v4 —— 这不是安全问题，是一个会让人以为服务没起来的坑。
       if (requested === LOOPBACK_HOST_V6) {
-        return ok(new BindDecision(requested, "loopback", LOOPBACK_V6_NOTE, CONSTRUCTION_KEY));
+        return ok(
+          new BindDecision(
+            requested,
+            "loopback",
+            LOOPBACK_V6_NOTE,
+            CONSTRUCTION_KEY,
+          ),
+        );
       }
-      return ok(new BindDecision(requested, "loopback", null, CONSTRUCTION_KEY));
+      return ok(
+        new BindDecision(requested, "loopback", null, CONSTRUCTION_KEY),
+      );
     }
 
     // 到这里 requested 一定是【非回环】。先分「它到底是不是个 IP」。
@@ -194,7 +208,14 @@ export class BindDecision {
           "。",
       };
     }
-    return ok(new BindDecision(requested, "lan", lanWarning(requested), CONSTRUCTION_KEY));
+    return ok(
+      new BindDecision(
+        requested,
+        "lan",
+        lanWarning(requested),
+        CONSTRUCTION_KEY,
+      ),
+    );
   }
 }
 

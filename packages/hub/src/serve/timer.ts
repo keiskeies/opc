@@ -77,7 +77,13 @@ export interface FakeScheduler extends Scheduler {
 export function createFakeScheduler(startMs = 0): FakeScheduler {
   let clock = startMs;
   let seq = 0;
-  type Item = { readonly at: number; readonly order: number; fn: () => void; done: boolean; handle: TimerHandle };
+  type Item = {
+    readonly at: number;
+    readonly order: number;
+    fn: () => void;
+    done: boolean;
+    handle: TimerHandle;
+  };
   let items: Item[] = [];
 
   const remove = (it: Item): void => {
@@ -103,9 +109,17 @@ export function createFakeScheduler(startMs = 0): FakeScheduler {
   return {
     after(ms, fn) {
       if (!Number.isFinite(ms) || ms < 0) {
-        throw new Error("Scheduler.after 的 ms 必须是非负有限数，收到 " + String(ms));
+        throw new Error(
+          "Scheduler.after 的 ms 必须是非负有限数，收到 " + String(ms),
+        );
       }
-      const it: Item = { at: clock + ms, order: seq++, fn, done: false, handle: undefined as unknown as TimerHandle };
+      const it: Item = {
+        at: clock + ms,
+        order: seq++,
+        fn,
+        done: false,
+        handle: undefined as unknown as TimerHandle,
+      };
       it.handle = { clear: () => remove(it) };
       items.push(it);
       return it.handle;
@@ -278,12 +292,10 @@ export function createInFlightWatch<T = unknown>(): InFlightWatch<T> {
       const p = Promise.resolve()
         .then(task)
         .catch((): undefined => undefined)
-        .then(
-          (v): T => {
-            current = null;
-            return v as T;
-          },
-        );
+        .then((v): T => {
+          current = null;
+          return v as T;
+        });
       current = p;
       return { started: true };
     },
@@ -291,7 +303,9 @@ export function createInFlightWatch<T = unknown>(): InFlightWatch<T> {
       // current 可能为 null（没有在飞的东西）—— 那时这就是「不用等」，不是「等一个不存在的东西」。
       // 与 0025 §3 第 ③ 条那条「await 一个永远为 null 的变量」的区别是：
       // 这里 null 是【真的没有】而不是【读错了地方】，因为读的是闭包里的 current。
-      return current === null ? Promise.resolve() : current.then((): void => undefined);
+      return current === null
+        ? Promise.resolve()
+        : current.then((): void => undefined);
     },
   };
   return watch;

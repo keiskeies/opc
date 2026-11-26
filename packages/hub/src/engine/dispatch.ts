@@ -43,28 +43,35 @@
  * 门 4 上被拦成一张卡。那是 CEO 拍的「全量拦」（0 标准不放行），不是这一格漏了。
  */
 import type { OrgGraph } from "@opc/contracts";
-import { ENGINE_REVIEW_GATE, HANDOFF_BUNDLE_TYPES } from "@opc/contracts";
-import type { Writer } from "../db/write-queue.js";
-import { requireScopeDb } from "../checkpoint/tx-scope.js";
-import { appendAudit, KIND_TO_ACTION } from "../events/recorder.js";
-import type { DomainEvent } from "../events/bus.js";
 import {
+  ENGINE_REVIEW_GATE,
+  getDescendants,
+  HANDOFF_BUNDLE_TYPES,
+} from "@opc/contracts";
+import {
+  type ApprovalRequiredEvent,
   approvalRequiredEvent,
-  insertCard,
   GATE_BLOCK_KEY_PREFIX,
+  insertCard,
+  type NewCardDraft,
   REVIEW_BLOCK_KEY_PREFIX,
   SAME_FAMILY_REVIEW_KEY_PREFIX,
-  type ApprovalRequiredEvent,
-  type NewCardDraft,
 } from "../approvals/cards.js";
-import { getDescendants } from "@opc/contracts";
-import { readGraphByVersion } from "../org/commit.js";
-import { assertTaskTransition, legalTransitionsFrom, type TaskState } from "../graph/status.js";
-import { DECISION_MARK, parseDecision, type RoleAction, type RoleDecision } from "./claude.js";
-import { mintSeatCard, needsSeatCard } from "./seat-card.js";
+import { requireScopeDb } from "../checkpoint/tx-scope.js";
+import type { Writer } from "../db/write-queue.js";
+import type { DomainEvent } from "../events/bus.js";
+import { appendAudit, KIND_TO_ACTION } from "../events/recorder.js";
 import {
-  selfReviewEdgeBlock,
+  integrityCondition,
+  produceTurnArtifact,
+  registerTurnEvidence,
+  shortHash,
+  type TurnEvidence,
+  writeGateDecision,
+} from "../evidence/turn-bundle.js";
+import {
   type DelegationEdge as ReviewEdge,
+  selfReviewEdgeBlock,
 } from "../graph/gates/author-reviewer.js";
 import {
   evaluateGate,
@@ -72,13 +79,18 @@ import {
   type GateVerdict,
 } from "../graph/gates/evaluate.js";
 import {
-  integrityCondition,
-  produceTurnArtifact,
-  registerTurnEvidence,
-  shortHash,
-  writeGateDecision,
-  type TurnEvidence,
-} from "../evidence/turn-bundle.js";
+  assertTaskTransition,
+  legalTransitionsFrom,
+  type TaskState,
+} from "../graph/status.js";
+import { readGraphByVersion } from "../org/commit.js";
+import {
+  DECISION_MARK,
+  parseDecision,
+  type RoleAction,
+  type RoleDecision,
+} from "./claude.js";
+import { mintSeatCard, needsSeatCard } from "./seat-card.js";
 
 /**
  * 委派边 → 「谁审谁」判据要的那一份边。
@@ -145,22 +157,52 @@ export interface AgentEdge {
  * 表【之外】的组合一律不动状态，并在 note 里说明为什么不动。这个「不默认往下走」
  * 的立场与 claude.ts 的 parseDecision 同源：格式跑偏不该变成一次静默推进。
  */
-export const AGENT_EDGES: Readonly<Partial<Record<TaskState, Partial<Record<RoleAction, AgentEdge>>>>> = {
+export const AGENT_EDGES: Readonly<
+  Partial<Record<TaskState, Partial<Record<RoleAction, AgentEdge>>>>
+> = {
   // §7.1 767→768：章程已批（那一格是 CEO 的席位，见 HUMAN_EDGES），开始拆解
-  CHARTER_APPROVED: { pass: { to: "DECOMPOSING", next: "same", why: "章程已批，开始拆解这件事" } },
+  CHARTER_APPROVED: {
+    pass: { to: "DECOMPOSING", next: "same", why: "章程已批，开始拆解这件事" },
+  },
   // §7.1 768→769：拆解 = 决定谁来做 ⇒ 这一跳是 handoff，活儿落到被点名的角色身上
-  DECOMPOSING: { handoff: { to: "IN_PROGRESS", next: "target", why: "拆解完成，活儿交给被点名的角色" } },
+  DECOMPOSING: {
+    handoff: {
+      to: "IN_PROGRESS",
+      next: "target",
+      why: "拆解完成，活儿交给被点名的角色",
+    },
+  },
   // §7.1 769→770：我这一轮做完了，交直接上级审阅。⚠ 这里【还没有】证据包（文件头那条缺口）
-  IN_PROGRESS: { pass: { to: "EVIDENCE_SUBMITTED", next: "upstream", why: "本轮产出提交上级审阅" } },
+  IN_PROGRESS: {
+    pass: {
+      to: "EVIDENCE_SUBMITTED",
+      next: "upstream",
+      why: "本轮产出提交上级审阅",
+    },
+  },
   IN_REVIEW: {
     // §7.1 772：通过。next=topmost —— 还有上级就进下一层，到顶就升 CEO（§7.2 步骤 7→8）
     pass: { to: "APPROVED_UPWARD", next: "topmost", why: "审阅通过" },
     // §7.1 773：打回。沿汇报树【向下】，所以复用 handoff（同一个方向、同一条边）
-    handoff: { to: "REJECTED_DOWNWARD", next: "target", why: "审阅打回 / 派回下游" },
-    blocked: { to: "ESCALATED_TO_CEO", next: "same", why: "审阅者要求 CEO 裁决（§8.3）" },
+    handoff: {
+      to: "REJECTED_DOWNWARD",
+      next: "target",
+      why: "审阅打回 / 派回下游",
+    },
+    blocked: {
+      to: "ESCALATED_TO_CEO",
+      next: "same",
+      why: "审阅者要求 CEO 裁决（§8.3）",
+    },
   },
   // §8.3 第二条 + §7.4：预算暂停必须升到 CEO，否则卡片起草了却送不到（status.ts 那段补边理由）
-  BUDGET_PAUSED: { blocked: { to: "ESCALATED_TO_CEO", next: "same", why: "预算暂停需 CEO 决定追加/终止" } },
+  BUDGET_PAUSED: {
+    blocked: {
+      to: "ESCALATED_TO_CEO",
+      next: "same",
+      why: "预算暂停需 CEO 决定追加/终止",
+    },
+  },
 };
 
 /**
@@ -208,18 +250,34 @@ export const AGENT_EDGES: Readonly<Partial<Record<TaskState, Partial<Record<Role
  * （`planEdge` 的 `next: "target"` 那一支），所以自动那一格落的是 `IN_PROGRESS/下游`。
  */
 export const AUTO_AFTER_EDGE: Readonly<
-  Partial<Record<TaskState, { readonly to: TaskState; readonly note: (role: string, from: TaskState) => string }>>
+  Partial<
+    Record<
+      TaskState,
+      {
+        readonly to: TaskState;
+        readonly note: (role: string, from: TaskState) => string;
+      }
+    >
+  >
 > = {
   EVIDENCE_SUBMITTED: {
     to: "IN_REVIEW",
     note: (role, from) =>
-      "产出已进入 " + role + " 的审阅队列（§7.1 从 " + from + " 只有一个出口，不需要判断）",
+      "产出已进入 " +
+      role +
+      " 的审阅队列（§7.1 从 " +
+      from +
+      " 只有一个出口，不需要判断）",
   },
   REJECTED_DOWNWARD: {
     to: "IN_PROGRESS",
     note: (role, from) =>
-      "打回已落到 " + role + " 手上，任务回到执行那一格（§7.2 打回路径：沿边回退到上游重新处理；" +
-      "这一格不需要任何人再表态，所以由 hub 直接落到底 —— 停在 " + from + " 会既没有 agent 会动、也没有人类入口）",
+      "打回已落到 " +
+      role +
+      " 手上，任务回到执行那一格（§7.2 打回路径：沿边回退到上游重新处理；" +
+      "这一格不需要任何人再表态，所以由 hub 直接落到底 —— 停在 " +
+      from +
+      " 会既没有 agent 会动、也没有人类入口）",
   },
 };
 
@@ -267,10 +325,20 @@ export const DEFAULT_MAX_REJECTIONS = 3;
  * 而 §4.2.1 那个额度、§20.4 的回放、以及任何"这条想法被打回几次"的读法读的就是那串行。
  * 措辞因此只能说「已打回 N 次」—— N 是那条 SQL 数出来的真数，一句话不外加。
  */
-export function rejectionCapNote(rejections: number, role: string, summary: string): string {
+export function rejectionCapNote(
+  rejections: number,
+  role: string,
+  summary: string,
+): string {
   return (
-    "这条想法已被打回 " + rejections + " 次，达到 " + DEFAULT_MAX_REJECTIONS + " 次上限 —— " + role +
-    " 与下游没有收敛，本轮【不再派回下游】，按 §4.2.1「超限自动升级到 CEO」升给人裁决。审阅原文：" + summary
+    "这条想法已被打回 " +
+    rejections +
+    " 次，达到 " +
+    DEFAULT_MAX_REJECTIONS +
+    " 次上限 —— " +
+    role +
+    " 与下游没有收敛，本轮【不再派回下游】，按 §4.2.1「超限自动升级到 CEO」升给人裁决。审阅原文：" +
+    summary
   );
 }
 
@@ -285,10 +353,21 @@ export interface HumanEdge {
  * 「这个状态有没有 agent 出边」有【另一半】可对：一张状态若在两张表里都没有出边，
  * 它就是死路，而那是 §7.1 的现状（MEETING_REQUIRED / BLOCKED），不是本模块的漏洞。
  */
-export const HUMAN_EDGES: Readonly<Partial<Record<TaskState, Partial<Record<"approve", HumanEdge>>>>> = {
-  CHARTER_PENDING: { approve: { to: "CHARTER_APPROVED", why: "CEO 签署岗位书/章程（§7.1 766→767）" } },
-  ESCALATED_TO_CEO: { approve: { to: "FINAL_REVIEW", why: "CEO 批准上线（§7.2 步骤 8→9）" } },
-  FINAL_REVIEW: { approve: { to: "DELIVERED", why: "终审通过，交付（§7.1 778→779）" } },
+export const HUMAN_EDGES: Readonly<
+  Partial<Record<TaskState, Partial<Record<"approve", HumanEdge>>>>
+> = {
+  CHARTER_PENDING: {
+    approve: {
+      to: "CHARTER_APPROVED",
+      why: "CEO 签署岗位书/章程（§7.1 766→767）",
+    },
+  },
+  ESCALATED_TO_CEO: {
+    approve: { to: "FINAL_REVIEW", why: "CEO 批准上线（§7.2 步骤 8→9）" },
+  },
+  FINAL_REVIEW: {
+    approve: { to: "DELIVERED", why: "终审通过，交付（§7.1 778→779）" },
+  },
 };
 
 /**
@@ -303,7 +382,10 @@ export function seatOf(status: TaskState): "agent" | "human" {
 }
 
 /** 人坐的那一格，一次「批准」能走到哪。 */
-export function humanEdge(status: TaskState, decision: "approve"): { to: TaskState; why: string } | null {
+export function humanEdge(
+  status: TaskState,
+  decision: "approve",
+): { to: TaskState; why: string } | null {
   return HUMAN_EDGES[status]?.[decision] ?? null;
 }
 
@@ -334,18 +416,26 @@ export function handoffGate(o: {
     return {
       ok: false,
       code: "self_handoff",
-      reason: "handoff 没点名收件人。hub 不猜下游 —— 猜错一次的代价是任务跑到一个没人负责的角色手里。",
+      reason:
+        "handoff 没点名收件人。hub 不猜下游 —— 猜错一次的代价是任务跑到一个没人负责的角色手里。",
     };
   }
   if (to === from) {
-    return { ok: false, code: "self_handoff", reason: "handoff 的收件人是它自己 [" + from + "]。自己交给自己不是一次交接。" };
+    return {
+      ok: false,
+      code: "self_handoff",
+      reason:
+        "handoff 的收件人是它自己 [" + from + "]。自己交给自己不是一次交接。",
+    };
   }
   if (graph.nodes[to] === undefined) {
     return {
       ok: false,
       code: "unknown_role",
       reason:
-        "角色 [" + to + "] 不在这张组织图上。agent 不能凭空造一个收件人 —— 要加角色，" +
+        "角色 [" +
+        to +
+        "] 不在这张组织图上。agent 不能凭空造一个收件人 —— 要加角色，" +
         "先在组织配置里加（POST /org，那条路径上有 L1/L2/L3 三关校验）。",
     };
   }
@@ -357,8 +447,15 @@ export function handoffGate(o: {
       ok: false,
       code: "not_downstream",
       reason:
-        "[" + to + "] 不在 [" + from + "] 的汇报子树里。" + from + " 能直接交下去的角色：" +
-        (subs.length > 0 ? subs.join(" / ") : "（无 —— 它是叶子角色）") + "。",
+        "[" +
+        to +
+        "] 不在 [" +
+        from +
+        "] 的汇报子树里。" +
+        from +
+        " 能直接交下去的角色：" +
+        (subs.length > 0 ? subs.join(" / ") : "（无 —— 它是叶子角色）") +
+        "。",
     };
   }
   return { ok: true };
@@ -391,7 +488,11 @@ export type ReviewBlockCode =
 
 export type ReviewGate =
   | { readonly ok: true }
-  | { readonly ok: false; readonly code: ReviewBlockCode; readonly reason: string };
+  | {
+      readonly ok: false;
+      readonly code: ReviewBlockCode;
+      readonly reason: string;
+    };
 
 export function reviewGate(o: {
   readonly producerRole: string | null;
@@ -412,7 +513,10 @@ export function reviewGate(o: {
     return {
       ok: false,
       code: "self_review",
-      reason: "审阅者 [" + o.reviewerRole + "] 与产出者是同一角色 —— §8.2 第 1 条，图结构上的硬约束，不接受运行时豁免。",
+      reason:
+        "审阅者 [" +
+        o.reviewerRole +
+        "] 与产出者是同一角色 —— §8.2 第 1 条，图结构上的硬约束，不接受运行时豁免。",
     };
   }
   if (o.producerFamily.trim() === "" || o.reviewerFamily.trim() === "") {
@@ -428,8 +532,13 @@ export function reviewGate(o: {
       ok: false,
       code: "same_model_family",
       reason:
-        "产出方 [" + o.producerRole + "] 与审阅者 [" + o.reviewerRole + "] 同属模型家族 [" +
-        o.producerFamily + "]（§24 风险 1）：同家族判断高度相关，「两个不同 agent」只是表象。" +
+        "产出方 [" +
+        o.producerRole +
+        "] 与审阅者 [" +
+        o.reviewerRole +
+        "] 同属模型家族 [" +
+        o.producerFamily +
+        "]（§24 风险 1）：同家族判断高度相关，「两个不同 agent」只是表象。" +
         "需要 CEO 显式批准（§5.9）。",
     };
   }
@@ -518,7 +627,9 @@ export function resolveCeoRoleId(
         "图里的汇报根是：" +
         (rootsOf(graph).length === 0
           ? "（一个都没有 —— 汇报关系成环）"
-          : rootsOf(graph).map((r) => "[" + r + "]").join(" / ")) +
+          : rootsOf(graph)
+              .map((r) => "[" + r + "]")
+              .join(" / ")) +
         "。要么改那个指定值，要么把指定的角色加进组织图。",
     };
   }
@@ -532,7 +643,10 @@ export function resolveCeoRoleId(
           "成环的图【提交不进来】，但它可能已经在历史版本里：dispatch 读的是任务创建时那一版" +
           "（§18.4），而校验只管提交那一侧。顶层判定需要一个根，这里不猜 —— " +
           "猜一个顶层 = 让一条不存在的汇报关系决定谁能宣布交付。"
-        : "这张组织图有 " + roots.length + " 个汇报根（" + roots.join(" / ") +
+        : "这张组织图有 " +
+          roots.length +
+          " 个汇报根（" +
+          roots.join(" / ") +
           "），而「谁是 CEO」只能有一个答案：多个根意味着这是一片森林而不是一棵树。" +
           "要么装配里指定 --ceo，要么把图改成单根。",
   };
@@ -549,7 +663,12 @@ function rootsOf(graph: OrgGraph): string[] {
 /* ───────────────────────── 判定（纯函数）───────────────────────── */
 
 export type EdgePlan =
-  | { readonly move: true; readonly to: TaskState; readonly role: string; readonly note: string; readonly producerRole?: string;
+  | {
+      readonly move: true;
+      readonly to: TaskState;
+      readonly role: string;
+      readonly note: string;
+      readonly producerRole?: string;
       /**
        * 「这一轮【做成了一次审阅判定】」⇒ 该写那条 `ReviewDecided`（§5.8 六个 kind 之一）。
        * 不在场就是"这一轮没有审阅决定"：一轮 wait、一轮执行失败、一轮被机器拦下、
@@ -570,8 +689,14 @@ export type EdgePlan =
        * 产出确实进了审阅队列，只是审阅者是个真人。审计里要留下这一段，
        * 否则回放看到"从 IN_PROGRESS 直接升到 CEO"，中间那一步在历史上是缺的。
        */
-      readonly thenEscalateToCeo?: true }
-  | { readonly move: false; readonly to: TaskState; readonly role: string; readonly note: string };
+      readonly thenEscalateToCeo?: true;
+    }
+  | {
+      readonly move: false;
+      readonly to: TaskState;
+      readonly role: string;
+      readonly note: string;
+    };
 
 /**
  * 一次审阅判定的【内容】。不含「哪一次审阅」那个身份 —— 那个要 `lastProducer`，
@@ -610,7 +735,9 @@ export type ReviewVerdict = {
  * （为什么不只写手抄的 `d.action === "pass"`：那正是本文件在 `rejectionCount` 那条上
  * 反复消灭的形状 —— 分子与判据分处两处，各自收窄一次就永久失真。）
  */
-const VERDICT_BY_LANDING: Readonly<Partial<Record<TaskState, "pass" | "reject">>> = {
+const VERDICT_BY_LANDING: Readonly<
+  Partial<Record<TaskState, "pass" | "reject">>
+> = {
   APPROVED_UPWARD: "pass",
   REJECTED_DOWNWARD: "reject",
 };
@@ -626,10 +753,12 @@ const VERDICT_BY_LANDING: Readonly<Partial<Record<TaskState, "pass" | "reject">>
  * 宁可让它出现在审计里，也不为它编一个名字 —— 一条指不到产出方的审阅决定仍然比
  * 没有那条决定有用，而一个编出来的产出方会在 append-only 库里指认一个没做过事的人。
  */
-export function reviewGateId(producer: string | null, reviewer: string): string {
+export function reviewGateId(
+  producer: string | null,
+  reviewer: string,
+): string {
   return "in_review:" + (producer ?? "?") + "->" + reviewer;
 }
-
 
 /**
  * 「这一轮该不该改状态」——本文件唯一可穷尽测试的那一块。
@@ -675,13 +804,26 @@ export function planEdge(o: {
 }): EdgePlan {
   const d = o.decision;
   const failure = o.failure ?? null;
-  const stay = (note: string): EdgePlan => ({ move: false, to: o.status, role: o.role, note });
+  const stay = (note: string): EdgePlan => ({
+    move: false,
+    to: o.status,
+    role: o.role,
+    note,
+  });
 
   if (failure !== null) {
-    return stay(failure + "（状态不变；账单照记，那一行账与这条 note 在同一次事务里）");
+    return stay(
+      failure + "（状态不变；账单照记，那一行账与这条 note 在同一次事务里）",
+    );
   }
   if (d === null) {
-    return stay("这一轮没有给出可判定的决策段（缺 " + DECISION_MARK + " 或格式不合），任务留在 " + o.status + "。");
+    return stay(
+      "这一轮没有给出可判定的决策段（缺 " +
+        DECISION_MARK +
+        " 或格式不合），任务留在 " +
+        o.status +
+        "。",
+    );
   }
   if (d.action === "wait") return stay(d.summary);
   if (d.action === "handoff" && o.blockedHandoff !== null) {
@@ -695,8 +837,18 @@ export function planEdge(o: {
   if (edge === undefined) {
     const outs = legalTransitionsFrom(o.status);
     return stay(
-      "角色报告 [" + d.action + "]：" + d.summary + " —— 但 " + o.status + " 状态下这个动作不对应任何合法的" +
-        "状态跃迁（§7.1 从 " + o.status + " 出发：" + (outs.length === 0 ? "无出路，死路" : outs.join(" / ")) + "）。" +
+      "角色报告 [" +
+        d.action +
+        "]：" +
+        d.summary +
+        " —— 但 " +
+        o.status +
+        " 状态下这个动作不对应任何合法的" +
+        "状态跃迁（§7.1 从 " +
+        o.status +
+        " 出发：" +
+        (outs.length === 0 ? "无出路，死路" : outs.join(" / ")) +
+        "）。" +
         "状态不变。要改的是状态机（需 CEO 拍板），不是让它走过去。",
     );
   }
@@ -717,7 +869,9 @@ export function planEdge(o: {
   const verdict = VERDICT_BY_LANDING[edge.to];
   /** 下面每一个 `move: true` 的返回值都摊上这一份 —— 逐个手写会漏，而漏的那支正是新加的那支。 */
   const reviewField =
-    verdict === undefined ? {} : { review: { decision: verdict, note: d.summary } };
+    verdict === undefined
+      ? {}
+      : { review: { decision: verdict, note: d.summary } };
 
   // ⭐ 打回超限 ⇒ 不派回下游，改升给 CEO（§4.2.1 `max_rejections` + `escalation_on_exceed`）。
   //
@@ -739,7 +893,11 @@ export function planEdge(o: {
   // 规格没那条边时这条上限就没有合法的落点可用，此时最诚实的行为是照旧打回，
   // 而抛会把一整轮已花掉的钱变成一次崩溃。
   const cap = AGENT_EDGES.IN_REVIEW?.["blocked"];
-  if (edge.to === "REJECTED_DOWNWARD" && (o.rejections ?? 0) >= DEFAULT_MAX_REJECTIONS && cap !== undefined) {
+  if (
+    edge.to === "REJECTED_DOWNWARD" &&
+    (o.rejections ?? 0) >= DEFAULT_MAX_REJECTIONS &&
+    cap !== undefined
+  ) {
     return {
       move: true,
       to: assertTaskTransition(o.status, cap.to),
@@ -754,11 +912,15 @@ export function planEdge(o: {
   let nextRole = o.role;
   let to = edge.to;
   if (edge.next === "target") {
-    if (o.handoffTo === null) return stay("交接没点名收件人，状态不变。" + d.summary);
+    if (o.handoffTo === null)
+      return stay("交接没点名收件人，状态不变。" + d.summary);
     nextRole = o.handoffTo;
   } else if (edge.next === "upstream") {
     const up = upstreamOf(o.graph, o.role);
-    if (up === null) return stay(o.role + " 在组织图上没有上级，产出无处可交（状态不变）。" + d.summary);
+    if (up === null)
+      return stay(
+        o.role + " 在组织图上没有上级，产出无处可交（状态不变）。" + d.summary,
+      );
     /**
      * ⭐ 上级就是【CEO 本人】⇒ 这一轮【不该交给他去"审"】，而是直接升到他手上等人裁决。
      *
@@ -817,8 +979,11 @@ export function planEdge(o: {
         thenEscalateToCeo: true,
         producerRole: o.role,
         note:
-          "本轮产出交上去，而它的上级 [" + up + "] 是【CEO 本人】—— 直接升给 CEO 等人裁决，" +
-          "不起子进程去扮演他：" + d.summary,
+          "本轮产出交上去，而它的上级 [" +
+          up +
+          "] 是【CEO 本人】—— 直接升给 CEO 等人裁决，" +
+          "不起子进程去扮演他：" +
+          d.summary,
       };
     }
     nextRole = up;
@@ -848,7 +1013,14 @@ export function planEdge(o: {
   // 产出方那一格要留在审计里：IN_REVIEW 上判独立性时要知道【审的是谁的产出】。
   // 存 payload 而不是新增列 —— 这一列没有别的读方，而加一列要过一次迁移。
   return edge.to === "EVIDENCE_SUBMITTED"
-    ? { move: true, to, role: nextRole, note, producerRole: o.role, ...reviewField }
+    ? {
+        move: true,
+        to,
+        role: nextRole,
+        note,
+        producerRole: o.role,
+        ...reviewField,
+      }
     : { move: true, to, role: nextRole, note, ...reviewField };
 }
 
@@ -868,11 +1040,17 @@ export function buildTurnPrompt(o: {
   readonly summaries: readonly string[];
   readonly ceoRoleId: string;
 }): string {
-  const lines = ["任务：" + o.title, "当前状态：" + o.status + "；负责角色：" + o.role];
-  if (o.upstream !== null) lines.push("你的直接上级：" + o.upstream + "（你的 pass 会交到它手上）");
+  const lines = [
+    "任务：" + o.title,
+    "当前状态：" + o.status + "；负责角色：" + o.role,
+  ];
+  if (o.upstream !== null)
+    lines.push("你的直接上级：" + o.upstream + "（你的 pass 会交到它手上）");
   lines.push(
     "你可以直接交下去的角色：" +
-      (o.subordinates.length > 0 ? o.subordinates.join(" / ") : "（无 —— 你是叶子角色，只能 wait 或 blocked）"),
+      (o.subordinates.length > 0
+        ? o.subordinates.join(" / ")
+        : "（无 —— 你是叶子角色，只能 wait 或 blocked）"),
   );
   if (o.summaries.length > 0) {
     lines.push("", "这条任务上最近的汇报（新 → 旧）：");
@@ -898,11 +1076,11 @@ export function buildTurnPrompt(o: {
 
 /* ───────────────────────── 卡片 ───────────────────────── */
 
-const CARD_BUTTONS: readonly ["approve", "reject_with_comment", "defer_deep_review"] = [
+const CARD_BUTTONS: readonly [
   "approve",
   "reject_with_comment",
   "defer_deep_review",
-];
+] = ["approve", "reject_with_comment", "defer_deep_review"];
 
 /**
  * 建卡。cardKey 是「同一件事只出一张」的键，由调用方给（cards.ts 文件头那条判据：
@@ -946,7 +1124,10 @@ function card(o: {
  * 映射住在 dispatch 而不是 turn-bundle.ts：那一层只负责"写一行什么形状的行"，
  * 「门控的三种结论怎么对上审计词表」是执行路径的判断。
  */
-const GATE_DECISION_WORD: Record<GateVerdict["decision"], "approved" | "rejected" | "escalated"> = {
+const GATE_DECISION_WORD: Record<
+  GateVerdict["decision"],
+  "approved" | "rejected" | "escalated"
+> = {
   pass: "approved",
   reject: "rejected",
   escalate: "escalated",
@@ -962,11 +1143,15 @@ const GATE_DECISION_WORD: Record<GateVerdict["decision"], "approved" | "rejected
  */
 export function gateReasonText(v: GateVerdict): string {
   if (v.decision === "escalate") return v.reason;
-  if (v.decision === "pass") return "门控放行：验收标准逐条判过，没有不合格项。";
+  if (v.decision === "pass")
+    return "门控放行：验收标准逐条判过，没有不合格项。";
   const first = v.reasons[0];
   return v.reasons.length === 0
     ? "门控判为不放行，但没有给出理由（内核的三条 reject 分支都写理由 —— 见到这行说明内核改坏了）"
-    : first + (v.reasons.length > 1 ? "（另有 " + String(v.reasons.length - 1) + " 条，见 conditions）" : "");
+    : first +
+        (v.reasons.length > 1
+          ? "（另有 " + String(v.reasons.length - 1) + " 条，见 conditions）"
+          : "");
 }
 
 /**
@@ -976,10 +1161,20 @@ export function gateReasonText(v: GateVerdict): string {
  * note 长这样 ——「审阅通过但无法推进：…（已建卡）」（planEdge 里那条 stay 分支）。
  * 两族的修法完全相反（一个去写岗位书，一个去改组织图），所以两族的话必须一眼分得开。
  */
-export function gateBlockedNote(v: GateVerdict, producer: string, roundNo: number): string {
+export function gateBlockedNote(
+  v: GateVerdict,
+  producer: string,
+  roundNo: number,
+): string {
   const round = "第 " + String(roundNo + 1) + " 轮";
   if (v.decision === "escalate") {
-    return "审阅被门控内核拦下（" + round + "，需你裁决）：" + v.reason + "（已建卡）";
+    return (
+      "审阅被门控内核拦下（" +
+      round +
+      "，需你裁决）：" +
+      v.reason +
+      "（已建卡）"
+    );
   }
   if (v.decision === "pass") {
     // 门 4 只在 verdict !== "pass" 时调本函数（dispatch 里那发 if 就是这条不变量的家）。
@@ -993,8 +1188,15 @@ export function gateBlockedNote(v: GateVerdict, producer: string, roundNo: numbe
   }
   const fix = v.required_fixes[0];
   return (
-    "审阅被门控内核拦下（" + round + "）：[" + producer + "] 的产出没有通过 §8.2 门控 —— " +
-    gateReasonText(v) + "。修法：" + (fix ?? "为该角色补上至少一条可机械判定的 acceptance_criteria（Task 0.9）") +
+    "审阅被门控内核拦下（" +
+    round +
+    "）：[" +
+    producer +
+    "] 的产出没有通过 §8.2 门控 —— " +
+    gateReasonText(v) +
+    "。修法：" +
+    (fix ??
+      "为该角色补上至少一条可机械判定的 acceptance_criteria（Task 0.9）") +
     "（已建卡）"
   );
 }
@@ -1007,7 +1209,11 @@ export function gateBlockedNote(v: GateVerdict, producer: string, roundNo: numbe
  * 本来只装【门控判据】的地方混进【引擎自己的体检结果】—— 读 conditions 的巡检
  * 就得分清哪几条是给人看的（0065 那本账的形状：一列两种语义，第三种用法必然误读）。
  */
-function gateConditions(te: TurnEvidence, v: GateVerdict, criteriaNo: number): string[] {
+function gateConditions(
+  te: TurnEvidence,
+  v: GateVerdict,
+  criteriaNo: number,
+): string[] {
   const out: string[] = [
     integrityCondition(te.integrityOk),
     // 门控【实际收到】几条标准。0 与 3 在这一列上必须看得出区别：0 标准时内核
@@ -1016,11 +1222,13 @@ function gateConditions(te: TurnEvidence, v: GateVerdict, criteriaNo: number): s
     "criteria:" + String(criteriaNo),
   ];
   for (const r of te.integrityReasons) out.push("integrity-note:" + r);
-  if (te.skippedExternal > 0) out.push("external-skipped:" + String(te.skippedExternal));
+  if (te.skippedExternal > 0)
+    out.push("external-skipped:" + String(te.skippedExternal));
   const sha = te.bundle.artifacts[0]?.sha256;
   if (sha !== undefined) out.push("sha256:" + sha);
   for (const u of v.unresolved) out.push("unresolved:" + u);
-  if (v.decision === "reject") for (const f of v.required_fixes) out.push("fix:" + f);
+  if (v.decision === "reject")
+    for (const f of v.required_fixes) out.push("fix:" + f);
   return out;
 }
 
@@ -1082,22 +1290,20 @@ export interface RunTurnInput {
  *     （超步事务的责任方是 recorder.run），而 engine/ 这条路线上没有超步。
  *     装配方直接落那两条 SQL，幂等键仍旧是这里的 seq。
  */
-export interface CostHook {
-  (o: {
-    readonly db: Parameters<typeof appendAudit>[0];
-    readonly taskId: string;
-    readonly role: string;
-    readonly seq: number;
-    readonly costCents: number;
-    /**
-     * 本轮的时刻，与本轮写下的 events / tasks 行【同一个钟】。
-     * 不给这一格的话，装配方只能自己 Date.now()，于是同一轮的 budget_events.created_at
-     * 与 events.created_at 会差几毫秒 —— 平时无害，但「按时刻串一轮」的读法
-     * （回放里那一轮花了多少）就会把同一轮的两行排到两个时刻上。
-     */
-    readonly nowMs: number;
-  }): void;
-}
+export type CostHook = (o: {
+  readonly db: Parameters<typeof appendAudit>[0];
+  readonly taskId: string;
+  readonly role: string;
+  readonly seq: number;
+  readonly costCents: number;
+  /**
+   * 本轮的时刻，与本轮写下的 events / tasks 行【同一个钟】。
+   * 不给这一格的话，装配方只能自己 Date.now()，于是同一轮的 budget_events.created_at
+   * 与 events.created_at 会差几毫秒 —— 平时无害，但「按时刻串一轮」的读法
+   * （回放里那一轮花了多少）就会把同一轮的两行排到两个时刻上。
+   */
+  readonly nowMs: number;
+}) => void;
 
 export interface DispatchOptions {
   readonly taskId: string;
@@ -1217,13 +1423,23 @@ export function orgGateAtVersion(
   }
 }
 
-export function makeDispatch(deps: DispatchDeps): (o: DispatchOptions) => Promise<DispatchResult> {
+export function makeDispatch(
+  deps: DispatchDeps,
+): (o: DispatchOptions) => Promise<DispatchResult> {
   return async (o: DispatchOptions): Promise<DispatchResult> => {
     const task = deps.loadTask(o.taskId);
     if (task === null) {
-      throw new Error("dispatch: 任务 [" + o.taskId + "] 不存在。不能为一条不存在的任务烧 token。");
+      throw new Error(
+        "dispatch: 任务 [" +
+          o.taskId +
+          "] 不存在。不能为一条不存在的任务烧 token。",
+      );
     }
-    const stop = (note: string, costCents = 0, sessionId: string | null = null): DispatchResult => ({
+    const stop = (
+      note: string,
+      costCents = 0,
+      sessionId: string | null = null,
+    ): DispatchResult => ({
       taskId: task.id,
       status: task.status,
       role: task.role,
@@ -1239,18 +1455,25 @@ export function makeDispatch(deps: DispatchDeps): (o: DispatchOptions) => Promis
     // ── 席位：人坐着的格子不放 agent 进场（token 都不烧）──────────────
     if (seatOf(task.status) === "human") {
       return stop(
-        task.status + " 等人不等 agent：这一格的出路只有【人类决策】（HUMAN_EDGES）。" +
+        task.status +
+          " 等人不等 agent：这一格的出路只有【人类决策】（HUMAN_EDGES）。" +
           "推进它的是审批收件箱里的一次点击，不是又一轮执行。",
       );
     }
 
     // ── 门 0：组织图（用一次 node() 读一行【不可变的历史版本】）────────
-    const org = await deps.writer.node(() => orgGateAtVersion(requireScopeDb("dispatch.orgGate"), task.graphVersion));
+    const org = await deps.writer.node(() =>
+      orgGateAtVersion(requireScopeDb("dispatch.orgGate"), task.graphVersion),
+    );
     if (!org.ok) return stop(org.reason);
     const graph = org.graph;
     if (graph.nodes[task.role] === undefined) {
       return stop(
-        "任务负责角色 [" + task.role + "] 不在组织图 v" + task.graphVersion + " 上。" +
+        "任务负责角色 [" +
+          task.role +
+          "] 不在组织图 v" +
+          task.graphVersion +
+          " 上。" +
           "任务用的是创建时那一版组织图（§18.4），这里不能拿最新图顶上 —— 要么这一版确实没有它，" +
           "要么任务行与图版本对不上，两种都需要人看。",
       );
@@ -1302,7 +1525,9 @@ export function makeDispatch(deps: DispatchDeps): (o: DispatchOptions) => Promis
      */
     if (task.role === ceo) {
       return stop(
-        "任务挂在 CEO 角色 [" + ceo + "] 手上，而那是【人类席位】—— hub 不会起子进程去" +
+        "任务挂在 CEO 角色 [" +
+          ceo +
+          "] 手上，而那是【人类席位】—— hub 不会起子进程去" +
           "【扮演你】把这件事做完（那样审计里会留下一行「CEO 以 agent 身份跑了一轮」的" +
           "假记录，删不掉）。\n" +
           "→ 正常路径不会走到这里：产出方 pass 的时候 hub 就已经把任务升到 CEO 席位了" +
@@ -1335,10 +1560,14 @@ export function makeDispatch(deps: DispatchDeps): (o: DispatchOptions) => Promis
     // 失败轮【不 return】：它要走下面那条「不跃迁」的写路径，把账单与「为什么没动」
     // 一起落库。直接 return 的话，症状是「任务停着、钱没记、审计里查不到这一轮」，
     // 而这一轮真的花了钱（claude.ts 里那条「失败的执行也花了钱」同源）。
-    const decision: RoleDecision | null = outcome.ok ? parseDecision(outcome.text) : null;
+    const decision: RoleDecision | null = outcome.ok
+      ? parseDecision(outcome.text)
+      : null;
 
     // ── 门 2：组织边界（只有真点了名才判）─────────────────────────────
-    const failure = outcome.ok ? null : "角色执行失败：" + String(outcome.error);
+    const failure = outcome.ok
+      ? null
+      : "角色执行失败：" + String(outcome.error);
     let handoffTo: string | null = null;
     let blockedHandoff: string | null = null;
     let handoffTarget = "";
@@ -1405,8 +1634,16 @@ export function makeDispatch(deps: DispatchDeps): (o: DispatchOptions) => Promis
       readonly code: ReviewBlockCode;
       readonly reason: string;
     } | null = null;
-    if (failure === null && decision?.action === "pass" && task.status === "IN_REVIEW") {
-      const key = SAME_FAMILY_REVIEW_KEY_PREFIX + (reviewSubject ?? "?") + "->" + task.role;
+    if (
+      failure === null &&
+      decision?.action === "pass" &&
+      task.status === "IN_REVIEW"
+    ) {
+      const key =
+        SAME_FAMILY_REVIEW_KEY_PREFIX +
+        (reviewSubject ?? "?") +
+        "->" +
+        task.role;
       sameFamilyKey = key;
       review = reviewGate({
         producerRole: reviewSubject,
@@ -1429,7 +1666,10 @@ export function makeDispatch(deps: DispatchDeps): (o: DispatchOptions) => Promis
        *   错的地方带（去给一个不存在的角色加边）。
        */
       if (reviewSubject !== null) {
-        const edgeBlock = selfReviewEdgeBlock(reviewSubject, reviewerEdges(graph));
+        const edgeBlock = selfReviewEdgeBlock(
+          reviewSubject,
+          reviewerEdges(graph),
+        );
         if (!edgeBlock.ok) {
           reviewerBlocker = {
             producer: reviewSubject,
@@ -1446,7 +1686,12 @@ export function makeDispatch(deps: DispatchDeps): (o: DispatchOptions) => Promis
           // 同源那一维过了而这一维没过 ⇒ `review` 必须变成拒绝。遗漏这一行的后果
           // 不是「少一张卡」，是【卡建了而任务照样跃迁】—— 那是本仓定义的「接了
           // 但没接上」（判据算出来了，没人据它做决定），比完全没接更贵。
-          if (review.ok) review = { ok: false, code: edgeBlock.code, reason: edgeBlock.reason };
+          if (review.ok)
+            review = {
+              ok: false,
+              code: edgeBlock.code,
+              reason: edgeBlock.reason,
+            };
         }
       }
     }
@@ -1580,7 +1825,9 @@ export function makeDispatch(deps: DispatchDeps): (o: DispatchOptions) => Promis
       // 判据来自【契约那张表本身】，不在这里抄一份方向名清单。
       if (!Object.hasOwn(HANDOFF_BUNDLE_TYPES, ENGINE_REVIEW_GATE)) {
         throw new Error(
-          "门 4 装配自检失败：方向 [" + ENGINE_REVIEW_GATE + "] 没有登记进 contracts 的 " +
+          "门 4 装配自检失败：方向 [" +
+            ENGINE_REVIEW_GATE +
+            "] 没有登记进 contracts 的 " +
             "HANDOFF_BUNDLE_TYPES（§8.1）。内核第 2 步对未登记方向只记 unresolved，而今天" +
             "空标准会让第 1 步先 return ⇒ 这一维【永远无人核对】。要么登记方向，" +
             "要么把这条引擎审阅接进 §8.1 词表，不能留着让文档上存在而库里无从校验。",
@@ -1591,8 +1838,11 @@ export function makeDispatch(deps: DispatchDeps): (o: DispatchOptions) => Promis
       // 而症状是「拦得比配置的少」—— 静默少拦，本仓最贵的那一族）。
       if (input.criteria.length !== criteria.length) {
         throw new Error(
-          "门 4 装配自检失败：交给 evaluateGate 的标准条数是 " + String(input.criteria.length) +
-            "，而 gateCriteria 给的是 " + String(criteria.length) + " —— 中间有人改了这份数组。",
+          "门 4 装配自检失败：交给 evaluateGate 的标准条数是 " +
+            String(input.criteria.length) +
+            "，而 gateCriteria 给的是 " +
+            String(criteria.length) +
+            " —— 中间有人改了这份数组。",
         );
       }
       gateVerdict = evaluateGate(input);
@@ -1641,7 +1891,11 @@ export function makeDispatch(deps: DispatchDeps): (o: DispatchOptions) => Promis
        * unauthorized_attempt 那一行。判据是「这个动作在状态机里合法吗」，
        * 不是「有没有人被拦住」—— 后者会把系统自身的配置记成某人的违规。
        */
-      readonly attempt: { readonly from: string; readonly attempted: string; readonly verdict: string } | null;
+      readonly attempt: {
+        readonly from: string;
+        readonly attempted: string;
+        readonly verdict: string;
+      } | null;
     }
     const pending: PendingCard[] = [];
     if (blockedHandoff !== null) {
@@ -1649,12 +1903,24 @@ export function makeDispatch(deps: DispatchDeps): (o: DispatchOptions) => Promis
         draft: card({
           taskId: task.id,
           cardKey: "handoff-block:" + task.role + "->" + handoffTarget,
-          summary: task.role + " 想把活儿交给 " + (handoffTarget === "" ? "（没点名）" : handoffTarget) + "，这一跳机器不认",
+          summary:
+            task.role +
+            " 想把活儿交给 " +
+            (handoffTarget === "" ? "（没点名）" : handoffTarget) +
+            "，这一跳机器不认",
           impact: "组织：谁可以把活儿交给谁（§3.3 委派规则图）",
-          recommendation: "先看证据里那句原因。多数情况是让 " + task.role + " 改为 wait，而不是给组织加这条汇报关系。",
-          evidence: "dispatch:" + task.id + ":" + task.role + "->" + handoffTarget,
+          recommendation:
+            "先看证据里那句原因。多数情况是让 " +
+            task.role +
+            " 改为 wait，而不是给组织加这条汇报关系。",
+          evidence:
+            "dispatch:" + task.id + ":" + task.role + "->" + handoffTarget,
         }),
-        attempt: { from: task.role, attempted: "handoff->" + handoffTarget, verdict: blockedHandoff },
+        attempt: {
+          from: task.role,
+          attempted: "handoff->" + handoffTarget,
+          verdict: blockedHandoff,
+        },
       });
     }
     if (familyVerdict !== null && !familyVerdict.ok && sameFamilyKey !== null) {
@@ -1664,7 +1930,8 @@ export function makeDispatch(deps: DispatchDeps): (o: DispatchOptions) => Promis
           cardKey: sameFamilyKey,
           summary: "一次审阅卡在「审的人和生产的人同源」上，需要你批准是否接受",
           impact: "审阅独立性：§8.2 第 1 条 / §24 风险 1",
-          recommendation: "如果这台机器上目前只有这一个模型家族，批准等于接受「同源审阅」这个已知弱点；不批准则要接第二个家族。",
+          recommendation:
+            "如果这台机器上目前只有这一个模型家族，批准等于接受「同源审阅」这个已知弱点；不批准则要接第二个家族。",
           evidence: "dispatch:" + task.id + ":" + sameFamilyKey,
         }),
         // 【不】记 unauthorized_attempt：这一条不是「有人试图走一条不该走的边」。
@@ -1697,17 +1964,20 @@ export function makeDispatch(deps: DispatchDeps): (o: DispatchOptions) => Promis
           taskId: task.id,
           cardKey: reviewerBlocker.cardKey,
           summary:
-            "审阅推不动：产出方 [" + reviewerBlocker.producer + "] 在组织图上没有独立审阅者，缺的是一条边、不是一次批准",
+            "审阅推不动：产出方 [" +
+            reviewerBlocker.producer +
+            "] 在组织图上没有独立审阅者，缺的是一条边、不是一次批准",
           impact: "审阅独立性：§8.2 第 1 条 + 第 4 条（门控绑在边上）",
           recommendation:
-            "给 [" + reviewerBlocker.producer + "] 加一条 review_gate=true、指向别的角色的委派边（POST /org）。" +
+            "给 [" +
+            reviewerBlocker.producer +
+            "] 加一条 review_gate=true、指向别的角色的委派边（POST /org）。" +
             "批准这张卡不会推进任务 —— 这一族卡片的按钮只是把它记下来。",
           evidence: "dispatch:" + task.id + ":" + reviewerBlocker.cardKey,
         }),
         attempt: null,
       });
     }
-
 
     /**
      * 门 4 拦下来的那张卡（第三个前缀 `gate-blocked:`）。
@@ -1724,19 +1994,33 @@ export function makeDispatch(deps: DispatchDeps): (o: DispatchOptions) => Promis
      * 摘要里【必须】出现产出方角色名（要去写岗位书的那个角色）与 sha 前 12 位
      * （能指认是哪一份包，而磁盘上那份是人可以点开的）。
      */
-    if (gateCardKey !== null && gateVerdict !== null && turnEvidence !== null && reviewSubject !== null) {
+    if (
+      gateCardKey !== null &&
+      gateVerdict !== null &&
+      turnEvidence !== null &&
+      reviewSubject !== null
+    ) {
       const sha = shortHash(turnEvidence.bundle.artifacts[0]?.sha256 ?? "");
       pending.push({
         draft: card({
           taskId: task.id,
           cardKey: gateCardKey,
           summary:
-            "第 " + String(gateRoundNo + 1) + " 轮审阅被门控内核拦下：[" + reviewSubject +
-            "] 的产出没有通过 §8.2 门控（证据包 sha " + sha + "）",
-          impact: "验收标准：§8.2 第 2 条 / Task 0.9（岗位书 acceptance_criteria）",
+            "第 " +
+            String(gateRoundNo + 1) +
+            " 轮审阅被门控内核拦下：[" +
+            reviewSubject +
+            "] 的产出没有通过 §8.2 门控（证据包 sha " +
+            sha +
+            "）",
+          impact:
+            "验收标准：§8.2 第 2 条 / Task 0.9（岗位书 acceptance_criteria）",
           recommendation:
-            "给 [" + reviewSubject + "] 写岗位书并保存（hub charter save）——" +
-            gateReasonText(gateVerdict) + "。批准这张卡不会推进任务：这一族卡片的按钮只是把它记下来。",
+            "给 [" +
+            reviewSubject +
+            "] 写岗位书并保存（hub charter save）——" +
+            gateReasonText(gateVerdict) +
+            "。批准这张卡不会推进任务：这一族卡片的按钮只是把它记下来。",
           evidence: "dispatch:" + task.id + ":" + gateCardKey,
         }),
         // 与上面两族同条立场：拦的是【资格/内容】，不是一次越权尝试，不该污染
@@ -1786,7 +2070,11 @@ export function makeDispatch(deps: DispatchDeps): (o: DispatchOptions) => Promis
        *   症状是「界面上这一轮判过了、库里查不到这个决定」，而 events 已经有那一条
        *   `RoleTurnReported` —— 两本账对不上而全绿。
        */
-      if (turnEvidence !== null && gateVerdict !== null && reviewSubject !== null) {
+      if (
+        turnEvidence !== null &&
+        gateVerdict !== null &&
+        reviewSubject !== null
+      ) {
         registerTurnEvidence(db, turnEvidence.bundle, o.nowMs);
         const changes = writeGateDecision(
           db,
@@ -1798,15 +2086,26 @@ export function makeDispatch(deps: DispatchDeps): (o: DispatchOptions) => Promis
             reviewerModelFamily: deps.modelFamily(task.role),
             decision: GATE_DECISION_WORD[gateVerdict.decision],
             reason: gateReasonText(gateVerdict),
-            conditions: gateConditions(turnEvidence, gateVerdict, gateCriteriaCount),
+            conditions: gateConditions(
+              turnEvidence,
+              gateVerdict,
+              gateCriteriaCount,
+            ),
             roundNo: gateRoundNo,
           },
           o.nowMs,
         );
         if (changes !== 1) {
           throw new Error(
-            "门 4 的门控决定没落库（review_gates 实到 changes=" + String(changes) + "，期望 1）：" +
-              "任务 [" + task.id + "] 方向 [" + ENGINE_REVIEW_GATE + "] 第 " + String(gateRoundNo) +
+            "门 4 的门控决定没落库（review_gates 实到 changes=" +
+              String(changes) +
+              "，期望 1）：" +
+              "任务 [" +
+              task.id +
+              "] 方向 [" +
+              ENGINE_REVIEW_GATE +
+              "] 第 " +
+              String(gateRoundNo) +
               " 轮。整笔回滚 —— 一轮判过了而库里没有这一行，比不判更贵。",
           );
         }
@@ -1904,7 +2203,6 @@ export function makeDispatch(deps: DispatchDeps): (o: DispatchOptions) => Promis
         outgoing.push({ event: evt, seq });
       }
 
-
       if (plan.move) {
         // 落点之后可能还要自动走一格（AUTO_AFTER_EDGE）。先算出来，两条边一起判：
         // 只写第一格会让任务停在 EVIDENCE_SUBMITTED —— 那一格【没有 agent 出边】
@@ -1917,7 +2215,12 @@ export function makeDispatch(deps: DispatchDeps): (o: DispatchOptions) => Promis
           { to: plan.to, note: plan.note },
           ...(auto === undefined
             ? []
-            : [{ to: assertTaskTransition(plan.to, auto.to), note: auto.note(plan.role, plan.to) }]),
+            : [
+                {
+                  to: assertTaskTransition(plan.to, auto.to),
+                  note: auto.note(plan.role, plan.to),
+                },
+              ]),
         ];
         /**
          * 第三格：该审阅的那一格坐着的是【人类】⇒ 升给 CEO（planEdge 的 upstream 分支）。
@@ -1963,7 +2266,12 @@ export function makeDispatch(deps: DispatchDeps): (o: DispatchOptions) => Promis
           // 落库的 payload 是它的【超集】（多一条 summary）。这两者刻意不等价：
           // 线上那个形状被 web 投影与 SSE 契约吃死了，加一个键等于改契约；
           // 而回放（读 events.payload）要的恰好是那句人话理由。
-          const evt: DomainEvent = { kind: "TaskStateChanged", taskId: task.id, from, to: leg.to };
+          const evt: DomainEvent = {
+            kind: "TaskStateChanged",
+            taskId: task.id,
+            from,
+            to: leg.to,
+          };
           stateEventSeq = appendAudit(
             db,
             {
@@ -1976,7 +2284,8 @@ export function makeDispatch(deps: DispatchDeps): (o: DispatchOptions) => Promis
                 ...evt,
                 summary: leg.note,
                 // 产出方那一格：IN_REVIEW 判独立性要审的是【谁的】产出（见 planEdge）
-                ...(leg.to !== "EVIDENCE_SUBMITTED" || plan.producerRole === undefined
+                ...(leg.to !== "EVIDENCE_SUBMITTED" ||
+                plan.producerRole === undefined
                   ? {}
                   : { producerRole: plan.producerRole }),
               },
@@ -1996,12 +2305,23 @@ export function makeDispatch(deps: DispatchDeps): (o: DispatchOptions) => Promis
             task.id,
             from,
           ];
-          const info = db.prepare(WRITE_EDGE_SQL).run(...(params as never[])) as { changes: number | bigint };
+          const info = db
+            .prepare(WRITE_EDGE_SQL)
+            .run(...(params as never[])) as { changes: number | bigint };
           if (Number(info.changes) !== 1) {
             // 抛 = 整笔回滚（含前面那条 events）。这里的静默分支是「界面显示动了而库里没动」。
             throw new Error(
-              "状态边写入被守卫拦下：任务 [" + task.id + "] 的状态在写 " + from + " → " + leg.to +
-                " 时已不是 " + from + "（UPDATE 带 AND status=? 守卫，实到 changes=" + Number(info.changes) + "）。" +
+              "状态边写入被守卫拦下：任务 [" +
+                task.id +
+                "] 的状态在写 " +
+                from +
+                " → " +
+                leg.to +
+                " 时已不是 " +
+                from +
+                "（UPDATE 带 AND status=? 守卫，实到 changes=" +
+                Number(info.changes) +
+                "）。" +
                 "本轮基于过期认知，整笔回滚；账单同样不记，否则下一次重试像为同一轮又付一遍。",
             );
           }
@@ -2039,14 +2359,20 @@ export function makeDispatch(deps: DispatchDeps): (o: DispatchOptions) => Promis
           () => o.nowMs,
         );
         outgoing.push({ event: evt, seq: stateEventSeq });
-        db.prepare(LEDGER_SQL).run(...([outcome.costCents, o.nowMs, task.id] as never[]));
+        db.prepare(LEDGER_SQL).run(
+          ...([outcome.costCents, o.nowMs, task.id] as never[]),
+        );
       }
 
       // 记账钩子每轮【至多一次】，seq 取本轮最后写下的那条 events.id —— 它是本轮事务
       // 里真实存在的行，正好当 BudgetTracker 的幂等键（重复调用被 source_event 挡下）。
       // 不跃迁那一支同样要调，所以这一发留在 if/else 之外 —— 放进两支里各写一次，
       // 漏的那一支恰好是「失败轮」或「wait 轮」，正是最该看到账的那两支。
-      if (deps.onCost !== undefined && outcome.costCents > 0 && stateEventSeq !== null) {
+      if (
+        deps.onCost !== undefined &&
+        outcome.costCents > 0 &&
+        stateEventSeq !== null
+      ) {
         deps.onCost({
           db,
           taskId: task.id,
@@ -2075,7 +2401,11 @@ export function makeDispatch(deps: DispatchDeps): (o: DispatchOptions) => Promis
        * 已存在的卡」），而把【上一次】那张卡的 id 填进来会让审计指认一次没发生过的批准请求。
        */
       const writeAttempt = (
-        a: { readonly from: string; readonly attempted: string; readonly verdict: string },
+        a: {
+          readonly from: string;
+          readonly attempted: string;
+          readonly verdict: string;
+        },
         cardId: string | null,
       ): void => {
         const evt: DomainEvent = {
@@ -2124,7 +2454,12 @@ export function makeDispatch(deps: DispatchDeps): (o: DispatchOptions) => Promis
         // 事件与 payload 都走 cards.ts 的 approvalRequiredEvent / createCard 同一条构造路径，
         // 不在这里手搓一份：手搓的那份在 bus.ts 给 ApprovalRequired 加键时会【编译照过、
         // 事件少一键】（cards.ts:391 那段就是为这件事写的）。
-        const evt = approvalRequiredEvent(task.id, res.approvalId, p.draft, p.draft.approvalType);
+        const evt = approvalRequiredEvent(
+          task.id,
+          res.approvalId,
+          p.draft,
+          p.draft.approvalType,
+        );
         cardEvent = evt;
         const cardSeq = appendAudit(
           db,

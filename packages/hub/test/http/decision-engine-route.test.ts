@@ -40,19 +40,27 @@
 import { mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { ResumeValue } from "@opc/contracts";
-import { fixtureTmp } from "../fixtures/fixture-dir.js";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { insertCard } from "../../src/approvals/cards.js";
 import { migrate } from "../../src/db/migrate.js";
 import type { WriteQueue } from "../../src/db/write-queue.js";
-import { InMemoryEventBus, type DomainEvent } from "../../src/events/bus.js";
-import { insertCard } from "../../src/approvals/cards.js";
-import { INSERT_DELEGATION_GRAPH_SQL } from "../../src/org/commit.js";
-import { newLocalToken, signedHeaders, NonceGuard } from "../../src/http/auth.js";
+import { type DomainEvent, InMemoryEventBus } from "../../src/events/bus.js";
+import {
+  type HubDeps,
+  type HubRequest,
+  handleRequest,
+} from "../../src/http/app.js";
+import {
+  NonceGuard,
+  newLocalToken,
+  signedHeaders,
+} from "../../src/http/auth.js";
 import { LOOPBACK_HOST } from "../../src/http/bind.js";
-import { handleRequest, type HubDeps, type HubRequest } from "../../src/http/app.js";
-import { DRIVER_OFF } from "../fixtures/driver-state.js";
 import { buildHubDeps, insertTask } from "../../src/http/real-deps.js";
+import { INSERT_DELEGATION_GRAPH_SQL } from "../../src/org/commit.js";
+import { DRIVER_OFF } from "../fixtures/driver-state.js";
+import { fixtureTmp } from "../fixtures/fixture-dir.js";
 
 const TMP = fixtureTmp("decision-engine-route", import.meta.url);
 const NOW = 1_700_000_000_000;
@@ -144,8 +152,18 @@ async function hub(opts: {
         1,
         JSON.stringify({
           nodes: {
-            ceo: { role_id: "ceo", reports_to: null, can_manage: true, model_family: "opus" },
-            intake: { role_id: "intake", reports_to: "ceo", can_manage: false, model_family: "opus" },
+            ceo: {
+              role_id: "ceo",
+              reports_to: null,
+              can_manage: true,
+              model_family: "opus",
+            },
+            intake: {
+              role_id: "intake",
+              reports_to: "ceo",
+              can_manage: false,
+              model_family: "opus",
+            },
           },
         }),
         NOW,
@@ -155,7 +173,12 @@ async function hub(opts: {
   });
 
   const taskId = "task-" + fileSeq;
-  await insertTask(q, { id: taskId, title: "做一个登录模块", assignedRole: "intake", nowMs: NOW });
+  await insertTask(q, {
+    id: taskId,
+    title: "做一个登录模块",
+    assignedRole: "intake",
+    nowMs: NOW,
+  });
   // readonly 属性的收窄在闭包里会被丢掉（closure-narrowing loss），先提成常量再判。
   const status = opts.status;
   if (status !== undefined && status !== "CHARTER_PENDING") {
@@ -168,26 +191,27 @@ async function hub(opts: {
 
   // 卡片走【真的 insertCard】而不是手搓 INSERT：手搓会绕过契约校验，
   // 于是「这张卡长得像收件箱会显示的那张」这件事没人证明（cards.ts 文件头第 ② 条）。
-  const cardId = await q.node(() =>
-    insertCard(
-      q.writeConnection(),
-      {
-        taskId,
-        approvalType: "charter",
-        cardKey: "charter:proposal",
-        summary: "章程提案待你签署：做一个登录模块",
-        parameters: {
-          impact_scope: "签了就生效",
-          irreversible: true,
-          recommendation: "读完再签",
-          recommendation_is_not_decision: true,
-          timeout_behavior: "escalate",
+  const cardId = await q.node(
+    () =>
+      insertCard(
+        q.writeConnection(),
+        {
+          taskId,
+          approvalType: "charter",
+          cardKey: "charter:proposal",
+          summary: "章程提案待你签署：做一个登录模块",
+          parameters: {
+            impact_scope: "签了就生效",
+            irreversible: true,
+            recommendation: "读完再签",
+            recommendation_is_not_decision: true,
+            timeout_behavior: "escalate",
+          },
+          evidence_refs: ["events:1"],
+          buttons: ["approve", "reject_with_comment", "defer_deep_review"],
         },
-        evidence_refs: ["events:1"],
-        buttons: ["approve", "reject_with_comment", "defer_deep_review"],
-      },
-      { nowMs: NOW },
-    ).approvalId,
+        { nowMs: NOW },
+      ).approvalId,
   );
 
   const bus = new InMemoryEventBus();
@@ -195,14 +219,20 @@ async function hub(opts: {
     queue: q,
     bus,
     token: TOKEN,
-    ...(opts.graphFor === undefined ? {} : { graphFor: opts.graphFor as never }),
+    ...(opts.graphFor === undefined
+      ? {}
+      : { graphFor: opts.graphFor as never }),
     now: () => NOW,
     // 这一文件测的是【决策写路径】选哪条路线，不跑心跳 ⇒ 这台夹具【没在推】。
     driverState: () => DRIVER_OFF,
     nonces: new NonceGuard(),
   });
 
-  const req = (o: { method: string; path: string; body?: string }): HubRequest => {
+  const req = (o: {
+    method: string;
+    path: string;
+    body?: string;
+  }): HubRequest => {
     const body = o.body ?? "";
     return {
       method: o.method,
@@ -211,15 +241,21 @@ async function hub(opts: {
       query: {},
       peer: LOOPBACK_HOST,
       body,
-      headers: signedHeaders(TOKEN, { method: o.method, target: o.path, body, now: NOW }),
+      headers: signedHeaders(TOKEN, {
+        method: o.method,
+        target: o.path,
+        body,
+        now: NOW,
+      }),
     };
   };
   return { deps, queue: q, bus, db: q.readConnection(), taskId, cardId, req };
-};
+}
 
 const statusOf = async (h: Harness): Promise<string> => {
   const r = await h.queue.node(() =>
-    h.queue.readConnection()
+    h.queue
+      .readConnection()
       .prepare("SELECT status FROM tasks WHERE id = ?")
       .get(h.taskId),
   );
@@ -227,15 +263,23 @@ const statusOf = async (h: Harness): Promise<string> => {
 };
 const cardState = async (h: Harness): Promise<string> => {
   const r = await h.queue.node(() =>
-    h.queue.readConnection()
+    h.queue
+      .readConnection()
       .prepare("SELECT status FROM approvals WHERE id = ?")
       .get(h.cardId),
   );
   return String((r as Row | undefined)?.["status"]);
 };
-const oneRow = async <T,>(h: Harness, sql: string, ...p: unknown[]): Promise<T> =>
+const oneRow = async <T>(
+  h: Harness,
+  sql: string,
+  ...p: unknown[]
+): Promise<T> =>
   (await h.queue.node(() =>
-    h.queue.readConnection().prepare(sql).get(...(p as never[])),
+    h.queue
+      .readConnection()
+      .prepare(sql)
+      .get(...(p as never[])),
   )) as T;
 
 const decideBody = (resume: ResumeValue, note?: string): string =>
@@ -264,7 +308,11 @@ describe("默认装配下 CEO 点批准：任务真的走了一条边（0043）"
     const h = await hub({});
     const res = await handleRequest(
       h.deps,
-      h.req({ method: "POST", path: "/approvals/" + h.cardId, body: decideBody("defer_deep_review") }),
+      h.req({
+        method: "POST",
+        path: "/approvals/" + h.cardId,
+        body: decideBody("defer_deep_review"),
+      }),
     );
     expect(res.status).toBe(200);
     expect(await cardState(h)).toBe("deferred");
@@ -277,7 +325,10 @@ describe("默认装配下 CEO 点批准：任务真的走了一条边（0043）"
     // 所以断言必须同时看 HTTP 与库 —— 只看任何一边都会假绿。
     const h = await hub({});
     const body = decideBody("approve");
-    await handleRequest(h.deps, h.req({ method: "POST", path: "/approvals/" + h.cardId, body }));
+    await handleRequest(
+      h.deps,
+      h.req({ method: "POST", path: "/approvals/" + h.cardId, body }),
+    );
     const second = await handleRequest(
       h.deps,
       h.req({ method: "POST", path: "/approvals/" + h.cardId, body }),
@@ -298,7 +349,11 @@ describe("默认装配下 CEO 点批准：任务真的走了一条边（0043）"
     const h = await hub({});
     await handleRequest(
       h.deps,
-      h.req({ method: "POST", path: "/approvals/" + h.cardId, body: decideBody("approve") }),
+      h.req({
+        method: "POST",
+        path: "/approvals/" + h.cardId,
+        body: decideBody("approve"),
+      }),
     );
     const got = await feed(h.bus);
     const kinds = got.map((e) => e.kind);
@@ -307,9 +362,13 @@ describe("默认装配下 CEO 点批准：任务真的走了一条边（0043）"
     // 任务没动所以没有 TaskStateChanged —— 而"没发"当时看起来完全正常。
     expect(kinds).toContain("TaskStateChanged");
     // seq 必须【严格递增】：投影层把空洞读成「链路降级」。
-    const seqs = got.map((e) => (e as { seq?: number }).seq).filter((s) => s !== undefined);
+    const seqs = got
+      .map((e) => (e as { seq?: number }).seq)
+      .filter((s) => s !== undefined);
     for (let i = 1; i < seqs.length; i++) {
-      expect(seqs[i]! > seqs[i - 1]!, "seq 乱序：" + JSON.stringify(seqs)).toBe(true);
+      expect(seqs[i]! > seqs[i - 1]!, "seq 乱序：" + JSON.stringify(seqs)).toBe(
+        true,
+      );
     }
   });
 
@@ -317,7 +376,11 @@ describe("默认装配下 CEO 点批准：任务真的走了一条边（0043）"
     const h = await hub({});
     await handleRequest(
       h.deps,
-      h.req({ method: "POST", path: "/approvals/" + h.cardId, body: decideBody("approve") }),
+      h.req({
+        method: "POST",
+        path: "/approvals/" + h.cardId,
+        body: decideBody("approve"),
+      }),
     );
     const row = await oneRow<Row>(
       h,
@@ -342,7 +405,11 @@ describe("默认装配下 CEO 点批准：任务真的走了一条边（0043）"
     expect(await cardState(h)).toBe("rejected");
     expect(await statusOf(h)).toBe("CHARTER_PENDING");
     // 理由必须落库：append-only 的事后补不进去，那是 requiresNote 那条必填判据的全部理由。
-    const note = await oneRow<Row>(h, "SELECT decision_note FROM approvals WHERE id = ?", h.cardId);
+    const note = await oneRow<Row>(
+      h,
+      "SELECT decision_note FROM approvals WHERE id = ?",
+      h.cardId,
+    );
     expect(String(note["decision_note"])).toContain("验收口径");
   });
 
@@ -350,7 +417,11 @@ describe("默认装配下 CEO 点批准：任务真的走了一条边（0043）"
     const h = await hub({});
     const res = await handleRequest(
       h.deps,
-      h.req({ method: "POST", path: "/approvals/" + h.cardId, body: decideBody("reject_with_comment") }),
+      h.req({
+        method: "POST",
+        path: "/approvals/" + h.cardId,
+        body: decideBody("reject_with_comment"),
+      }),
     );
     // 状态码本身是断言的一半：422 = 【这次请求不成立】，不是 500（我坏了），
     // 也不是 200 + replayed（把"你没给理由"说成"已经有人决定过了"，
@@ -359,7 +430,11 @@ describe("默认装配下 CEO 点批准：任务真的走了一条边（0043）"
     expect(JSON.stringify(res.body)).toContain("note");
     expect(await cardState(h)).toBe("pending");
     expect(await statusOf(h)).toBe("CHARTER_PENDING");
-    const n = await oneRow<Row>(h, "SELECT COUNT(*) AS n FROM events WHERE target = ?", h.cardId);
+    const n = await oneRow<Row>(
+      h,
+      "SELECT COUNT(*) AS n FROM events WHERE target = ?",
+      h.cardId,
+    );
     expect(Number(n["n"])).toBe(0);
   });
 
@@ -376,7 +451,11 @@ describe("默认装配下 CEO 点批准：任务真的走了一条边（0043）"
     // 接线就没人守了。
     const h = await hub({});
     const err = await h.deps
-      .recordDecision({ approvalId: h.cardId, taskId: h.taskId, resume: "reject_with_comment" })
+      .recordDecision({
+        approvalId: h.cardId,
+        taskId: h.taskId,
+        resume: "reject_with_comment",
+      })
       .then(
         () => null,
         (e: unknown) => e,
@@ -387,7 +466,11 @@ describe("默认装配下 CEO 点批准：任务真的走了一条边（0043）"
     expect((err as { statusHint?: unknown }).statusHint).toBe(422);
     expect(await cardState(h)).toBe("pending");
     expect(await statusOf(h)).toBe("CHARTER_PENDING");
-    const n = await oneRow<Row>(h, "SELECT COUNT(*) AS n FROM events WHERE target = ?", h.cardId);
+    const n = await oneRow<Row>(
+      h,
+      "SELECT COUNT(*) AS n FROM events WHERE target = ?",
+      h.cardId,
+    );
     expect(Number(n["n"])).toBe(0);
   });
 
@@ -406,42 +489,48 @@ describe("默认装配下 CEO 点批准：任务真的走了一条边（0043）"
       timeout_behavior: "escalate",
     } as const;
     // 当前格自己的卡（任务停在 FINAL_REVIEW，ownCardsOf 会把它算成 own）。
-    const ownId = await h.queue.node(() =>
-      insertCard(
-        h.queue.writeConnection(),
-        {
-          taskId: h.taskId,
-          approvalType: "escalation",
-          cardKey: "seat:FINAL_REVIEW:7",
-          summary: "升级裁决待批（当前格）",
-          parameters: { ...cardParams },
-          evidence_refs: ["events:1"],
-          buttons: ["approve", "reject_with_comment", "defer_deep_review"],
-        },
-        { nowMs: NOW },
-      ).approvalId,
+    const ownId = await h.queue.node(
+      () =>
+        insertCard(
+          h.queue.writeConnection(),
+          {
+            taskId: h.taskId,
+            approvalType: "escalation",
+            cardKey: "seat:FINAL_REVIEW:7",
+            summary: "升级裁决待批（当前格）",
+            parameters: { ...cardParams },
+            evidence_refs: ["events:1"],
+            buttons: ["approve", "reject_with_comment", "defer_deep_review"],
+          },
+          { nowMs: NOW },
+        ).approvalId,
     );
     // 过期卡：上一格留的，任务早不在 ESCALATED_TO_CEO 了。
-    const staleId = await h.queue.node(() =>
-      insertCard(
-        h.queue.writeConnection(),
-        {
-          taskId: h.taskId,
-          approvalType: "escalation",
-          cardKey: "seat:ESCALATED_TO_CEO:4",
-          summary: "升级裁决待批（已过期）",
-          parameters: { ...cardParams },
-          evidence_refs: ["events:1"],
-          buttons: ["approve", "reject_with_comment", "defer_deep_review"],
-        },
-        { nowMs: NOW },
-      ).approvalId,
+    const staleId = await h.queue.node(
+      () =>
+        insertCard(
+          h.queue.writeConnection(),
+          {
+            taskId: h.taskId,
+            approvalType: "escalation",
+            cardKey: "seat:ESCALATED_TO_CEO:4",
+            summary: "升级裁决待批（已过期）",
+            parameters: { ...cardParams },
+            evidence_refs: ["events:1"],
+            buttons: ["approve", "reject_with_comment", "defer_deep_review"],
+          },
+          { nowMs: NOW },
+        ).approvalId,
     );
     expect(ownId !== staleId).toBe(true);
 
     const res = await handleRequest(
       h.deps,
-      h.req({ method: "POST", path: "/approvals/" + staleId, body: decideBody("approve") }),
+      h.req({
+        method: "POST",
+        path: "/approvals/" + staleId,
+        body: decideBody("approve"),
+      }),
     );
     // 409 = 你点晚了 / 这张不是当前格该批的那张，不是"我坏了"（500）。
     expect(res.status).toBe(409);
@@ -450,13 +539,25 @@ describe("默认装配下 CEO 点批准：任务真的走了一条边（0043）"
     // own 卡判对了，不是"全被挡了"的假绿。
     const own = await handleRequest(
       h.deps,
-      h.req({ method: "POST", path: "/approvals/" + ownId, body: decideBody("approve") }),
+      h.req({
+        method: "POST",
+        path: "/approvals/" + ownId,
+        body: decideBody("approve"),
+      }),
     );
     expect(own.status).toBe(200);
     // 过期卡保持 pending（什么都没写），库干净。
-    const st = await oneRow<Row>(h, "SELECT status FROM approvals WHERE id = ?", staleId);
+    const st = await oneRow<Row>(
+      h,
+      "SELECT status FROM approvals WHERE id = ?",
+      staleId,
+    );
     expect(String(st["status"])).toBe("pending");
-    const n = await oneRow<Row>(h, "SELECT COUNT(*) AS n FROM events WHERE target = ?", staleId);
+    const n = await oneRow<Row>(
+      h,
+      "SELECT COUNT(*) AS n FROM events WHERE target = ?",
+      staleId,
+    );
     expect(Number(n["n"])).toBe(0);
   });
 
@@ -491,7 +592,11 @@ describe("默认装配下 CEO 点批准：任务真的走了一条边（0043）"
     });
     const res = await handleRequest(
       depsWithGraph,
-      h.req({ method: "POST", path: "/approvals/" + h.cardId, body: decideBody("approve") }),
+      h.req({
+        method: "POST",
+        path: "/approvals/" + h.cardId,
+        body: decideBody("approve"),
+      }),
     );
     expect(res.status).toBe(200);
     expect(await cardState(h)).toBe("approved");

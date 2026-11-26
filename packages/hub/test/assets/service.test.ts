@@ -79,7 +79,9 @@ describe("content-addressed assets", () => {
       asset: { asset_id: "asset-1" },
     });
     const stored = getAsset(db, "asset-1");
-    expect(Buffer.from(stored?.data ?? []).equals(Buffer.from(bytes))).toBe(true);
+    expect(Buffer.from(stored?.data ?? []).equals(Buffer.from(bytes))).toBe(
+      true,
+    );
     expect(db.prepare("SELECT COUNT(*) AS count FROM assets").get()).toEqual({
       count: 1,
     });

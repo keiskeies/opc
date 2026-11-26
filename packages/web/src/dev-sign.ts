@@ -38,7 +38,11 @@ export function devSign(
   method: string,
   target: string,
   body: string,
-  o: { readonly now?: number; readonly nonce?: string; readonly token?: string } = {},
+  o: {
+    readonly now?: number;
+    readonly nonce?: string;
+    readonly token?: string;
+  } = {},
 ): Record<string, string> {
   const now = o.now ?? Date.now();
   const nonce = o.nonce ?? randomUUID();
@@ -49,10 +53,14 @@ export function devSign(
   //  【分隔符】\n（不是空格：body 摘要与方法名里都不可能出现 \n，拼接不会歧义）
   //  【method 大写】
   //  【target 含原样 query】不做排序、不解码、不剥 query —— 两侧各有一套规范化规则必然漂移
-  const canon = [method.toUpperCase(), target, digest, String(now), nonce].join("\n");
+  const canon = [method.toUpperCase(), target, digest, String(now), nonce].join(
+    "\n",
+  );
   return {
     "content-type": "application/json",
-    "x-opc-signature": createHmac("sha256", token).update(canon, "utf8").digest("hex"),
+    "x-opc-signature": createHmac("sha256", token)
+      .update(canon, "utf8")
+      .digest("hex"),
     "x-opc-timestamp": String(now),
     "x-opc-nonce": nonce,
   };

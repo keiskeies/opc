@@ -93,12 +93,14 @@ const CALLER_EXT: RegExp = /\.(ts|js|mts|mjs)$/u;
 export function selfWorkerUrl(callerUrl: string): URL {
   if (!callerUrl.startsWith("file://")) {
     throw new TypeError(
-      "selfWorkerUrl 要的是 import.meta.url（一个 file:// URL），实得 " + callerUrl,
+      "selfWorkerUrl 要的是 import.meta.url（一个 file:// URL），实得 " +
+        callerUrl,
     );
   }
   if (!CALLER_EXT.test(callerUrl)) {
     throw new TypeError(
-      "selfWorkerUrl 认不出这个扩展名，无法推出 .worker<同扩展名>：" + callerUrl,
+      "selfWorkerUrl 认不出这个扩展名，无法推出 .worker<同扩展名>：" +
+        callerUrl,
     );
   }
   return new URL(callerUrl.replace(CALLER_EXT, ".worker.$1"));
@@ -205,4 +207,3 @@ await import(${JSON.stringify(entryUrl.href)});
 `;
   return new URL("data:text/javascript," + encodeURIComponent(source));
 }
-

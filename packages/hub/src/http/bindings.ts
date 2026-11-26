@@ -41,27 +41,27 @@
  * 「还没装配」才是事实，而它的修法（重启时带上那个参数）只有 501 讲得出来。
  */
 import {
+  type BindingRequest,
+  type BindingVerifyRequest,
+  bindingRequestSchema,
+  bindingVerifyRequestSchema,
   HTTP_CONFLICT,
   HTTP_NOT_FOUND,
   HTTP_NOT_IMPLEMENTED,
   HTTP_UNAUTHORIZED,
   HTTP_UNPROCESSABLE,
-  bindingRequestSchema,
-  bindingVerifyRequestSchema,
-  imBindingViewSchema,
-  type BindingRequest,
-  type BindingVerifyRequest,
   type ImBindingView,
+  imBindingViewSchema,
 } from "@opc/contracts";
 import {
+  type ImBinding,
   listBindings,
   markVerified,
   rebindRole,
   requestBinding,
-  type ImBinding,
 } from "../bindings/im.js";
-import { isLoopbackAddress } from "./bind.js";
 import type { HubDeps, HubRequest, HubResponse } from "./app.js";
+import { isLoopbackAddress } from "./bind.js";
 
 function res(status: number, body: unknown): HubResponse {
   return { status, body };
@@ -77,7 +77,10 @@ function parseJson(text: string): unknown {
   }
 }
 
-function issueBody(error: string, issues: { path: string; message: string }[]): HubResponse {
+function issueBody(
+  error: string,
+  issues: { path: string; message: string }[],
+): HubResponse {
   return res(HTTP_UNPROCESSABLE, { error, issues });
 }
 
@@ -88,7 +91,9 @@ function issueBody(error: string, issues: { path: string; message: string }[]): 
  * 理由与 remoteTokenAuth 复用 matchRoute 同一条：同一判据写四遍，
  * 改的人只会改到他正在看的那一遍。
  */
-export function assertLoopbackBindingRoute(req: HubRequest): HubResponse | null {
+export function assertLoopbackBindingRoute(
+  req: HubRequest,
+): HubResponse | null {
   if (isLoopbackAddress(req.peer)) return null;
   // 与未授权那一条【同一个形状】（只有 "unauthorized"，不带 reason）：
   // 让「远程扫这条路径」得到的答复与「凭据不对」逐字相同，
@@ -114,7 +119,9 @@ function toBindingView(b: ImBinding): ImBindingView {
       "绑定行不符合对外契约（id=" +
         b.id +
         "）：" +
-        r.error.issues.map((x) => x.path.join(".") + " " + x.message).join("; ") +
+        r.error.issues
+          .map((x) => x.path.join(".") + " " + x.message)
+          .join("; ") +
         "。im.ts 的行解析与 contracts 的视图 schema 出现分歧时必须当场响，" +
         "静默丢行会让「列表里少了一个绑定的账号」变成无从排查的报障。",
     );
@@ -186,7 +193,8 @@ export async function requestBindingRoute(
       });
     case "rejected_platform":
       return res(HTTP_UNPROCESSABLE, {
-        error: "平台不接受（只认 feishu / wecom / qq；fake 是测试通道，不得绑定真角色）",
+        error:
+          "平台不接受（只认 feishu / wecom / qq；fake 是测试通道，不得绑定真角色）",
         reason: r.reason,
       });
     case "unknown_role":
@@ -194,7 +202,10 @@ export async function requestBindingRoute(
       // 本路由没有注入（见 requestBindingRoute 的调用参数），所以这一支今天
       // 结构上不可达；分支写着是因为 im.ts 的判决形状里有它 ——
       // 漏一个 kind 时这里的 default 分支会抛，而不是静默把它当成功。
-      return res(HTTP_UNPROCESSABLE, { error: "角色不在已登记的集合里", role: r.role });
+      return res(HTTP_UNPROCESSABLE, {
+        error: "角色不在已登记的集合里",
+        role: r.role,
+      });
     case "invalid_input":
       return res(HTTP_UNPROCESSABLE, { error: "字段形状非法", field: r.field });
     default: {
@@ -252,14 +263,19 @@ export async function verifyBindingRoute(
   });
   switch (r.kind) {
     case "verified":
-      return res(200, { ok: true, verified: true, verified_at: r.verifiedAtMs });
+      return res(200, {
+        ok: true,
+        verified: true,
+        verified_at: r.verifiedAtMs,
+      });
     case "not_found":
       return res(HTTP_NOT_FOUND, {
         error: "该平台账号没有任何绑定记录（先 POST /bindings 登记申请）",
       });
     case "already_verified":
       return res(HTTP_CONFLICT, {
-        error: "这一行已经是已校验状态，本次调用没有改动任何东西（包括校验时刻与署名）",
+        error:
+          "这一行已经是已校验状态，本次调用没有改动任何东西（包括校验时刻与署名）",
       });
     case "rejected_platform":
       return res(HTTP_UNPROCESSABLE, { error: "平台不接受", reason: r.reason });
@@ -268,7 +284,8 @@ export async function verifyBindingRoute(
     default: {
       const impossible: never = r;
       throw new Error(
-        "markVerified 返回了一个本 handler 没有分支的判决：" + JSON.stringify(impossible),
+        "markVerified 返回了一个本 handler 没有分支的判决：" +
+          JSON.stringify(impossible),
       );
     }
   }
@@ -305,7 +322,10 @@ export async function rebindBindingRoute(
     case "not_found":
       return res(HTTP_NOT_FOUND, { error: "该平台账号没有任何绑定记录" });
     case "unknown_role":
-      return res(HTTP_UNPROCESSABLE, { error: "角色不在已登记的集合里", role: r.role });
+      return res(HTTP_UNPROCESSABLE, {
+        error: "角色不在已登记的集合里",
+        role: r.role,
+      });
     case "invalid_input":
       return res(HTTP_UNPROCESSABLE, { error: "字段形状非法", field: r.field });
     case "rejected_platform":
@@ -313,7 +333,8 @@ export async function rebindBindingRoute(
     default: {
       const impossible: never = r;
       throw new Error(
-        "rebindRole 返回了一个本 handler 没有分支的判决：" + JSON.stringify(impossible),
+        "rebindRole 返回了一个本 handler 没有分支的判决：" +
+          JSON.stringify(impossible),
       );
     }
   }

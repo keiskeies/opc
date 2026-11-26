@@ -16,8 +16,8 @@
 
 import {
   type ApprovalCardDraft,
-  type EscalationReason,
   ESCALATION_REASONS,
+  type EscalationReason,
   type RiskTier,
 } from "@opc/contracts";
 import { legalTransitionsFrom, type TaskState } from "../status.js";
@@ -92,7 +92,10 @@ const SUMMARY: Readonly<Record<EscalationReason, string>> = {
 
 function reasons(s: EscalationState): EscalationReason[] {
   const hit: EscalationReason[] = [];
-  if (s.reviewRoundNo !== undefined && s.reviewRoundNo >= REVIEW_CONFLICT_LIMIT) {
+  if (
+    s.reviewRoundNo !== undefined &&
+    s.reviewRoundNo >= REVIEW_CONFLICT_LIMIT
+  ) {
     hit.push("review_conflict_rounds_exceeded");
   }
   if (s.riskTier === "irreversible") hit.push("irreversible_action");
@@ -104,13 +107,17 @@ function reasons(s: EscalationState): EscalationReason[] {
     hit.push("budget_threshold");
   }
   if (s.outsideDecisionScope === true) hit.push("outside_decision_scope");
-  if (s.unresolvedCriteriaCount !== undefined && s.unresolvedCriteriaCount > 0) {
+  if (
+    s.unresolvedCriteriaCount !== undefined &&
+    s.unresolvedCriteriaCount > 0
+  ) {
     hit.push("insufficient_evidence");
   }
   const floor = s.confidenceFloor ?? 0.4;
   // 置信度【缺省不算低】，但也不能当高：缺省不触发本条，交由证据维（上面那条）去拦。
   // 触发条件是【自报了且低于下限】。
-  if (s.confidence !== undefined && s.confidence < floor) hit.push("low_confidence");
+  if (s.confidence !== undefined && s.confidence < floor)
+    hit.push("low_confidence");
   // 顺序即优先级：不可逆 > 预算 > 范围 > 证据 > 轮次 > 置信度。
   const order: EscalationReason[] = [
     "irreversible_action",
@@ -139,17 +146,24 @@ export function decideEscalation(s: EscalationState): EscalationResult {
 
   const parts: string[] = [SUMMARY[primary]];
   for (const extra of all.slice(1)) parts.push(SUMMARY[extra]);
-  if (primary === "budget_threshold" && s.spentCents !== undefined && s.limitCents !== undefined) {
-    parts[0] += "（已用 " + s.spentCents + " / 上限 " + s.limitCents + " 美分）";
+  if (
+    primary === "budget_threshold" &&
+    s.spentCents !== undefined &&
+    s.limitCents !== undefined
+  ) {
+    parts[0] +=
+      "（已用 " + s.spentCents + " / 上限 " + s.limitCents + " 美分）";
   }
   if (
     primary === "review_conflict_rounds_exceeded" &&
     s.reviewRoundNo !== undefined
   ) {
-    parts[0] += "（已 " + s.reviewRoundNo + " 轮，上限 " + REVIEW_CONFLICT_LIMIT + "）";
+    parts[0] +=
+      "（已 " + s.reviewRoundNo + " 轮，上限 " + REVIEW_CONFLICT_LIMIT + "）";
   }
   if (primary === "low_confidence" && s.confidence !== undefined) {
-    parts[0] += "（自报 " + s.confidence + "，下限 " + (s.confidenceFloor ?? 0.4) + "）";
+    parts[0] +=
+      "（自报 " + s.confidence + "，下限 " + (s.confidenceFloor ?? 0.4) + "）";
   }
   if (
     primary === "insufficient_evidence" &&

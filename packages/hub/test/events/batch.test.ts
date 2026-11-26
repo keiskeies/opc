@@ -23,16 +23,17 @@
  * 比值与机器快慢基本无关（同一台机器上两边同涨同跌），
  * 而「分片大小 = 1」这个最真实的回归会当场红。绝对值只记录，不断言。
  */
-import { join } from "node:path";
+
 import { mkdirSync, rmSync } from "node:fs";
+import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { fixtureTmp } from "../fixtures/fixture-dir.js";
 import { BATCH_ROWS, openDb } from "../../src/db/driver.js";
 import { migrate } from "../../src/db/migrate.js";
 import { WriteQueue, type Writer } from "../../src/db/write-queue.js";
-
-import { appendAudit, type AuditRow } from "../../src/events/recorder.js";
 import { appendAuditBatch, shard } from "../../src/events/batch.js";
+
+import { type AuditRow, appendAudit } from "../../src/events/recorder.js";
+import { fixtureTmp } from "../fixtures/fixture-dir.js";
 
 const TMP = fixtureTmp("batch", import.meta.url);
 // 先清再建：只 rmSync 的话目录不存在，openDb 报的是 "unable to open database file"，
@@ -103,18 +104,30 @@ function counting(writer: Writer): { writer: Writer; calls: () => number } {
 }
 
 function rows(n: number, taskId: string | null = "T-batch"): AuditRow[] {
-  return Array.from({ length: n }, (_, i): AuditRow => ({
-    taskId,
-    actorType: "system",
-    actorId: "hub",
-    action: "state_change",
-    target: null,
-    payload: { kind: "TaskStateChanged", taskId, n: i, note: "批量写入的第 " + i + " 条正文" },
-  }));
+  return Array.from(
+    { length: n },
+    (_, i): AuditRow => ({
+      taskId,
+      actorType: "system",
+      actorId: "hub",
+      action: "state_change",
+      target: null,
+      payload: {
+        kind: "TaskStateChanged",
+        taskId,
+        n: i,
+        note: "批量写入的第 " + i + " 条正文",
+      },
+    }),
+  );
 }
 
-function countEvents(db: { prepare(s: string): { get(...p: never[]): unknown } }): number {
-  const r = db.prepare("SELECT count(*) AS c FROM events").get() as { c: number | bigint };
+function countEvents(db: {
+  prepare(s: string): { get(...p: never[]): unknown };
+}): number {
+  const r = db.prepare("SELECT count(*) AS c FROM events").get() as {
+    c: number | bigint;
+  };
   return Number(r.c);
 }
 
@@ -128,7 +141,10 @@ describe("① shard：分片边界（纯函数）", () => {
 
   it("正好整除时【不】多一个空尾片", () => {
     const s = shard([1, 2, 3, 4], 2);
-    expect(s).toEqual([[1, 2], [3, 4]]);
+    expect(s).toEqual([
+      [1, 2],
+      [3, 4],
+    ]);
     // 逐格点名：只比长度的话，「第二片其实是第一片的副本」看不出来
     expect(s.map((g) => g.length)).toEqual([2, 2]);
   });
@@ -225,7 +241,9 @@ describe("③ 校验在入队之前对整批做完", () => {
     // 只改第 4 条：非法 action 由 eventParams 抛出（recorder.ts 那份枚举校验）。
     // 校验若在循环里做，前三行会先落库，然后才抛 —— 那正是本模块要防的半批。
     (bad[3] as { action: string }).action = "not_an_action";
-    await expect(appendAuditBatch(c.writer, bad, () => 1)).rejects.toThrow(/非法的审计 action/u);
+    await expect(appendAuditBatch(c.writer, bad, () => 1)).rejects.toThrow(
+      /非法的审计 action/u,
+    );
     expect(c.calls()).toBe(0);
     expect(countEvents(f.db)).toBe(0);
     // 反向对照：同一批把那条改回去就必须写得出来。
@@ -241,7 +259,9 @@ describe("③ 校验在入队之前对整批做完", () => {
     const c = counting(f.q);
     const bad = rows(6);
     (bad[5] as { actorId: string }).actorId = "   ";
-    await expect(appendAuditBatch(c.writer, bad, () => 1)).rejects.toThrow(/actor_id/u);
+    await expect(appendAuditBatch(c.writer, bad, () => 1)).rejects.toThrow(
+      /actor_id/u,
+    );
     expect(c.calls()).toBe(0);
     expect(countEvents(f.db)).toBe(0);
   });
@@ -260,8 +280,10 @@ describe("③ 校验在入队之前对整批做完", () => {
     const single = appendAudit(f.db, row, () => 9999);
     await appendAuditBatch(f.q, [row], () => 9999);
     const got = f.db
-      .prepare("SELECT task_id, actor_type, actor_id, action, target, payload, state_snapshot, created_at " +
-        "FROM events ORDER BY id")
+      .prepare(
+        "SELECT task_id, actor_type, actor_id, action, target, payload, state_snapshot, created_at " +
+          "FROM events ORDER BY id",
+      )
       .all() as Array<Record<string, unknown>>;
     expect(got).toHaveLength(2);
     const a = got[0] ?? {};
@@ -271,7 +293,10 @@ describe("③ 校验在入队之前对整批做完", () => {
     for (const k of Object.keys(a)) {
       const x = a[k];
       const y = b[k];
-      expect([k, x === null ? null : String(x)]).toEqual([k, y === null ? null : String(y)]);
+      expect([k, x === null ? null : String(x)]).toEqual([
+        k,
+        y === null ? null : String(y),
+      ]);
     }
     expect(Number(single)).toBeGreaterThan(0);
   });
@@ -283,11 +308,10 @@ describe("④ 分片之间不是原子的（文件头那条承诺的可观察形
     // 让第二片失败而第一片成功：分片大小 2，第三行引用不存在的 task ⇒ 外键挡下。
     // 用外键而不是别的错法，是因为它撞在【行级】而不在 prepare 阶段：
     // 拿一条注定失败的 SQL 会让整批在 prepare 时就炸，那测的是另一件事。
-    const batch = [
-      ...rows(2, "T-batch"),
-      ...rows(2, "task-不存在"),
-    ];
-    await expect(appendAuditBatch(f.q, batch, () => 1, 2)).rejects.toThrow(/FOREIGN KEY|外键/u);
+    const batch = [...rows(2, "T-batch"), ...rows(2, "task-不存在")];
+    await expect(appendAuditBatch(f.q, batch, () => 1, 2)).rejects.toThrow(
+      /FOREIGN KEY|外键/u,
+    );
     // 这一发就是「不原子」的定义。它不是 bug，是文件头写了的取舍：
     // 为了原子把分片上限抬到未穷尽的参数边界，换的是更坏的东西。
     expect(countEvents(f.db)).toBe(2);
@@ -338,8 +362,14 @@ describe("⑤ 基准：批量必须显著快于逐条事务", () => {
       "INSERT INTO events (task_id, actor_type, actor_id, action, target, payload, state_snapshot, created_at) " +
       "VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
     const perRowPayloads = data.map((r) => [
-      r.taskId, r.actorType, r.actorId, r.action, r.target,
-      JSON.stringify(r.payload), "{}", 1,
+      r.taskId,
+      r.actorType,
+      r.actorId,
+      r.action,
+      r.target,
+      JSON.stringify(r.payload),
+      "{}",
+      1,
     ]);
     for (const p of perRowPayloads) {
       await f.q.tx([[one, p]]);
@@ -366,8 +396,13 @@ describe("⑤ 基准：批量必须显著快于逐条事务", () => {
     // 绝对值只打印不断言（本机比值随库大小在 4~5× 之间漂；
     // 计划那 50 ms 未达标，归因见 scripts/bench-recompute.mjs 与 0019 §3）。
     process.stdout.write(
-      "\n[bench] 逐条 " + perRowMs.toFixed(0) + "ms / 批量(取 3 趟最小) " +
-        batchMs.toFixed(0) + "ms / 比值 " + (perRowMs / batchMs).toFixed(1) + "×\n",
+      "\n[bench] 逐条 " +
+        perRowMs.toFixed(0) +
+        "ms / 批量(取 3 趟最小) " +
+        batchMs.toFixed(0) +
+        "ms / 比值 " +
+        (perRowMs / batchMs).toFixed(1) +
+        "×\n",
     );
   });
 });

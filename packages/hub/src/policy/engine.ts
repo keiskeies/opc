@@ -217,7 +217,10 @@ export function classifyAction(a: ActionDraft): RiskTier {
  * 不这么做的后果很具体：kind 写 write_repo（可逆）而 detail 写「改完直接发布」，
  * 后判的 kind 会盖掉文本里的不可逆信号。取 max 让自报的温和分类盖不住危险描述。
  */
-function tierAtLeast(declared: RiskTier | undefined, floor: RiskTier): RiskTier {
+function tierAtLeast(
+  declared: RiskTier | undefined,
+  floor: RiskTier,
+): RiskTier {
   if (declared === undefined) return floor;
   return RISK_TIERS.indexOf(declared) > RISK_TIERS.indexOf(floor)
     ? declared
@@ -291,7 +294,9 @@ export function matchForbidden(
   for (const f of forbidden) {
     const needle = f.trim().toLowerCase();
     if (needle === "") continue;
-    const hit = candidates.some((c) => c.includes(needle) || needle.includes(c));
+    const hit = candidates.some(
+      (c) => c.includes(needle) || needle.includes(c),
+    );
     if (hit) return f;
   }
   return undefined;

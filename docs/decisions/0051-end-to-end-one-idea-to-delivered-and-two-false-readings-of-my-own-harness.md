@@ -69,7 +69,7 @@ CEO 那几步走 `approveCard`，每一轮之后按 `driver.ts` 那个形状调 
 > 断言今天的位置 ⇒ `文件:行号`（该进快照）；陈述当时是什么 ⇒ 汉字「第 N 行」（不该进）。
 > 混用的后果不是报错而是**每次那个文件一动，这段历史就"漂"**，而把它改绿的那一步恰好是在改历史
 > （0050 §6.5 末尾把这条写成了正式口径，那里是首次记下来的地方）。
-> 今天 `REJECTION_COUNT_SQL` 在 `engine/runtime.ts:132`，而 `ENSERT_TASK_BUDGET_SQL` 这个符号
+> 今天 `REJECTION_COUNT_SQL` 在 `engine/runtime.ts:133`，而 `ENSERT_TASK_BUDGET_SQL` 这个符号
 > **已经不存在了** —— ffae248 把它并给了 `budget/tracker.ts:76` 那条共用的 `ENSERT_BUDGET_SQL`
 > （那一份的注释自己写着「两份 SQL 从此在字节上就是同一条，没有第二份可漂」）。
 > 与上面那两个数是两件事，别对着读。

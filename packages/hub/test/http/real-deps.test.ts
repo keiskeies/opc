@@ -21,6 +21,11 @@ import { mkdirSync, readFileSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+  EXECUTOR_KINDS,
+  type ExecutionTarget,
+  type ResumeValue,
+} from "@opc/contracts";
+import {
   afterAll,
   afterEach,
   beforeAll,
@@ -29,34 +34,33 @@ import {
   it,
   vi,
 } from "vitest";
-import {
-  EXECUTOR_KINDS,
-  type ExecutionTarget,
-  type ResumeValue,
-} from "@opc/contracts";
-import { fixtureTmp } from "../fixtures/fixture-dir.js";
+import { migrate } from "../../src/db/migrate.js";
 import type { DomainEvent } from "../../src/events/bus.js";
 import { InMemoryEventBus } from "../../src/events/bus.js";
-import { migrate } from "../../src/db/migrate.js";
 import { createExecutorRegistry } from "../../src/executors/production.js";
-import { chooseResumeInput, hasPendingInterrupt, threadConfig } from "../../src/graph/thread.js";
+import {
+  chooseResumeInput,
+  hasPendingInterrupt,
+  threadConfig,
+} from "../../src/graph/thread.js";
+import { newLocalToken } from "../../src/http/auth.js";
 import {
   applyDecision,
   buildHubDeps,
   CEO_ACTOR,
+  type HubWriter,
   insertTask,
   makeResumeGraph,
   mintApprovalTokenVia,
+  type ResumableGraph,
   redeemApprovalTokenVia,
   STATUS_BY_RESUME,
-  type HubWriter,
-  type ResumableGraph,
   type TaskGraph,
   type Writer,
 } from "../../src/http/real-deps.js";
-import { DRIVER_OFF } from "../fixtures/driver-state.js";
-import { newLocalToken } from "../../src/http/auth.js";
 import { issueToken, newApprovalToken } from "../../src/http/tokens.js";
+import { DRIVER_OFF } from "../fixtures/driver-state.js";
+import { fixtureTmp } from "../fixtures/fixture-dir.js";
 
 const TMP = fixtureTmp("real-deps", import.meta.url);
 
@@ -130,7 +134,12 @@ afterAll(async () => {
 });
 
 /** 建一张 pending 卡片。status 不传 ⇒ 走 schema 的 DEFAULT 'pending'。 */
-function approval(db: Db, id: string, taskId = "task-1", status?: string): void {
+function approval(
+  db: Db,
+  id: string,
+  taskId = "task-1",
+  status?: string,
+): void {
   if (status === undefined) {
     db.prepare(
       "INSERT INTO approvals (id, task_id, approval_type, summary, parameters) " +
@@ -159,9 +168,9 @@ const auditRows = (db: Db, id?: string): Row[] =>
  * —— 整整 120 秒被 harness 挪到后台。一条在真实回归下挂住而不报错的测试，
  * 比一条漏测更坏：CI 上看到的是超时，不是「ApprovalDecided 没广播」。
  */
-async function nextBounded(
-  sub: { [Symbol.asyncIterator](): AsyncIterator<unknown> },
-): Promise<unknown> {
+async function nextBounded(sub: {
+  [Symbol.asyncIterator](): AsyncIterator<unknown>;
+}): Promise<unknown> {
   const it = sub[Symbol.asyncIterator]();
   // 取的是 .value：race 赢回来的是 IteratorResult（{value, done}），
   // 直接把它当事件断言的话，断言会去比 {value:…, done:false} 这一层，
@@ -169,18 +178,21 @@ async function nextBounded(
   let timer: ReturnType<typeof setTimeout> | undefined;
   const guard = new Promise<never>((_, reject) => {
     timer = setTimeout(
-      () => reject(new Error("订阅在 2000ms 内没有收到任何事件（= 根本没广播）")),
+      () =>
+        reject(new Error("订阅在 2000ms 内没有收到任何事件（= 根本没广播）")),
       2000,
     );
   });
   try {
-    const r = (await Promise.race([it.next(), guard])) as IteratorResult<unknown>;
+    const r = (await Promise.race([
+      it.next(),
+      guard,
+    ])) as IteratorResult<unknown>;
     return r.value;
   } finally {
     if (timer !== undefined) clearTimeout(timer);
   }
 }
-
 
 /**
  * 广播出口的两种替身。`publish` 现在是【必填】参数（签名处的注释给了理由：
@@ -211,12 +223,16 @@ describe("applyDecision 写库", () => {
   it("approve ⇒ approved + 一条 human/ceo 的 approval 审计，target 是卡片 id", async () => {
     const { db, w } = await newDb();
     approval(db, "a-1");
-    const applied = await applyDecision(w, {
-      approvalId: "a-1",
-      taskId: "task-1",
-      resume: "approve",
-      nowMs: NOW,
-    }, NO_PUBLISH);
+    const applied = await applyDecision(
+      w,
+      {
+        approvalId: "a-1",
+        taskId: "task-1",
+        resume: "approve",
+        nowMs: NOW,
+      },
+      NO_PUBLISH,
+    );
     expect(applied).toBe(true);
 
     const r = row(db, "a-1");
@@ -235,7 +251,10 @@ describe("applyDecision 写库", () => {
     // target 必须是【卡片 id】而不是 status 值：写成 approved 的话，
     // 同一个人对同一张卡片的多次操作（defer 之后再批）在 target 上就分不开了。
     expect(e["target"]).toBe("a-1");
-    expect(JSON.parse(String(e["payload"]))).toEqual({ approvalId: "a-1", resume: "approve" });
+    expect(JSON.parse(String(e["payload"]))).toEqual({
+      approvalId: "a-1",
+      resume: "approve",
+    });
     // created_at 用注入的 now，而不是 Date.now()：审计时间戳不可测 = 回放顺序不可复现。
     expect(e["created_at"]).toBe(NOW);
     // 没有备注就【不带快照】，而不是写一个 { note: null }：
@@ -246,20 +265,26 @@ describe("applyDecision 写库", () => {
   it("reject_with_comment ⇒ rejected，note 进 decided_by 那一行的 decision_note 与快照", async () => {
     const { db, w } = await newDb();
     approval(db, "a-2");
-    await applyDecision(w, {
-      approvalId: "a-2",
-      taskId: "task-1",
-      resume: "reject_with_comment",
-      note: "缺压测数据",
-      nowMs: NOW,
-    }, NO_PUBLISH);
+    await applyDecision(
+      w,
+      {
+        approvalId: "a-2",
+        taskId: "task-1",
+        resume: "reject_with_comment",
+        note: "缺压测数据",
+        nowMs: NOW,
+      },
+      NO_PUBLISH,
+    );
     // 计划 Task 2.6：「打回必须填理由且理由进入审计」。两半都要钉住：
     // decision_note 是【人看的地方】，state_snapshot 是【回放读的地方】。
     // 只写前者会让回放视图少掉理由，只写后者会让收件箱点开看不到理由。
     expect(row(db, "a-2")?.["status"]).toBe("rejected");
     expect(row(db, "a-2")?.["decision_note"]).toBe("缺压测数据");
     const e = auditRows(db, "a-2")[0] as Row;
-    expect(JSON.parse(String(e["state_snapshot"]))).toEqual({ note: "缺压测数据" });
+    expect(JSON.parse(String(e["state_snapshot"]))).toEqual({
+      note: "缺压测数据",
+    });
     // 理由【不在】payload 里：payload 存决策本身（回放按它重建卡片状态），
     // note 是决策的附件。混一起之后，payload 加字段时得先区分哪些属于当时的决策。
     expect(JSON.parse(String(e["payload"]))).toEqual({
@@ -278,12 +303,16 @@ describe("applyDecision 写库", () => {
     for (const [resume, want] of Object.entries(expect_status)) {
       const id = "d-" + resume;
       approval(db, id);
-      await applyDecision(w, {
-        approvalId: id,
-        taskId: "task-1",
-        resume: resume as ResumeValue,
-        nowMs: NOW,
-      }, NO_PUBLISH);
+      await applyDecision(
+        w,
+        {
+          approvalId: id,
+          taskId: "task-1",
+          resume: resume as ResumeValue,
+          nowMs: NOW,
+        },
+        NO_PUBLISH,
+      );
       // 这条断言的意义在于【三个都跑】：STATUS_BY_RESUME 是一张表，
       // 抽查一条的话，另两格写错（approve→approved、reject→approved）照样绿。
       expect(row(db, id)?.["status"]).toBe(want);
@@ -300,19 +329,27 @@ describe("applyDecision 写库", () => {
     const { db, w } = await newDb();
     approval(db, "a-3");
     const spy = publishSpy();
-    const first = await applyDecision(w, {
-      approvalId: "a-3",
-      taskId: "task-1",
-      resume: "reject_with_comment",
-      note: "缺数据",
-      nowMs: NOW,
-    }, spy.fn);
-    const second = await applyDecision(w, {
-      approvalId: "a-3",
-      taskId: "task-1",
-      resume: "approve",
-      nowMs: NOW + 1000,
-    }, spy.fn);
+    const first = await applyDecision(
+      w,
+      {
+        approvalId: "a-3",
+        taskId: "task-1",
+        resume: "reject_with_comment",
+        note: "缺数据",
+        nowMs: NOW,
+      },
+      spy.fn,
+    );
+    const second = await applyDecision(
+      w,
+      {
+        approvalId: "a-3",
+        taskId: "task-1",
+        resume: "approve",
+        nowMs: NOW + 1000,
+      },
+      spy.fn,
+    );
     expect(first).toBe(true);
     expect(second).toBe(false);
     expect(row(db, "a-3")?.["status"]).toBe("rejected");
@@ -331,12 +368,16 @@ describe("applyDecision 写库", () => {
     // 顺序（先 UPDATE 后 appendAudit）就是这条在守的东西。
     const { db, w } = await newDb();
     const spy = publishSpy();
-    const applied = await applyDecision(w, {
-      approvalId: "ghost",
-      taskId: "task-1",
-      resume: "approve",
-      nowMs: NOW,
-    }, spy.fn);
+    const applied = await applyDecision(
+      w,
+      {
+        approvalId: "ghost",
+        taskId: "task-1",
+        resume: "approve",
+        nowMs: NOW,
+      },
+      spy.fn,
+    );
     expect(applied).toBe(false);
     expect(auditRows(db).length).toBe(0);
     // 同上：一条不存在的卡片的决策，既不留审计也不发事件。
@@ -350,12 +391,16 @@ describe("applyDecision 写库", () => {
     const { db, w } = await newDb();
     const spy = publishSpy();
     approval(db, "a-4", "task-1", "deferred");
-    const applied = await applyDecision(w, {
-      approvalId: "a-4",
-      taskId: "task-1",
-      resume: "approve",
-      nowMs: NOW,
-    }, spy.fn);
+    const applied = await applyDecision(
+      w,
+      {
+        approvalId: "a-4",
+        taskId: "task-1",
+        resume: "approve",
+        nowMs: NOW,
+      },
+      spy.fn,
+    );
     expect(applied).toBe(false);
     expect(row(db, "a-4")?.["status"]).toBe("deferred");
     expect(auditRows(db).length).toBe(0);
@@ -375,8 +420,16 @@ describe("applyDecision 写库", () => {
     approval(db, "c-1");
     approval(db, "c-2");
     const both = await Promise.all([
-      applyDecision(w, { approvalId: "c-1", taskId: "task-1", resume: "approve", nowMs: NOW }, NO_PUBLISH),
-      applyDecision(w, { approvalId: "c-2", taskId: "task-1", resume: "approve", nowMs: NOW }, NO_PUBLISH),
+      applyDecision(
+        w,
+        { approvalId: "c-1", taskId: "task-1", resume: "approve", nowMs: NOW },
+        NO_PUBLISH,
+      ),
+      applyDecision(
+        w,
+        { approvalId: "c-2", taskId: "task-1", resume: "approve", nowMs: NOW },
+        NO_PUBLISH,
+      ),
     ]);
     expect(both).toEqual([true, true]);
     expect(row(db, "c-1")?.["status"]).toBe("approved");
@@ -408,7 +461,9 @@ describe("applyDecision 写库", () => {
       decision: "approved",
     });
     // seq 必须【就是】审计行的 id：游标体系只能有一套，否则断线重连必漏事件。
-    const auditId = (db.prepare("SELECT id FROM events ORDER BY id").all() as Row[])[0]?.["id"];
+    const auditId = (
+      db.prepare("SELECT id FROM events ORDER BY id").all() as Row[]
+    )[0]?.["id"];
     expect((first as { seq: number }).seq).toBe(Number(auditId));
     sub.close();
   });
@@ -458,14 +513,27 @@ describe("applyDecision 写库", () => {
     const spy = publishSpy();
     approval(db, "race-1");
     const both = await Promise.all([
-      applyDecision(w, { approvalId: "race-1", taskId: "task-1", resume: "approve", nowMs: NOW }, spy.fn),
-      applyDecision(w, {
-        approvalId: "race-1",
-        taskId: "task-1",
-        resume: "reject_with_comment",
-        note: "另一只手点了打回",
-        nowMs: NOW + 1,
-      }, spy.fn),
+      applyDecision(
+        w,
+        {
+          approvalId: "race-1",
+          taskId: "task-1",
+          resume: "approve",
+          nowMs: NOW,
+        },
+        spy.fn,
+      ),
+      applyDecision(
+        w,
+        {
+          approvalId: "race-1",
+          taskId: "task-1",
+          resume: "reject_with_comment",
+          note: "另一只手点了打回",
+          nowMs: NOW + 1,
+        },
+        spy.fn,
+      ),
     ]);
     // 一支赢一支输，且【不是两支都成功】也不是【两支都失败】。
     expect(both.filter((x) => x === true).length).toBe(1);
@@ -516,7 +584,9 @@ describe("insertTask", () => {
       assignedRole: "intake",
       nowMs: NOW,
     });
-    const r = db.prepare("SELECT * FROM tasks WHERE id = ?").get("t-new") as Row;
+    const r = db
+      .prepare("SELECT * FROM tasks WHERE id = ?")
+      .get("t-new") as Row;
     expect(r["status"]).toBe("CHARTER_PENDING");
     expect(r["current_node"]).toBe("intake");
     expect(r["assigned_role"]).toBe("intake");
@@ -539,7 +609,9 @@ describe("insertTask", () => {
         nowMs: NOW,
       }),
     ).rejects.toThrow(/FOREIGN KEY|foreign key/u);
-    expect(db.prepare("SELECT COUNT(*) AS c FROM tasks WHERE id = ?").get("orphan")).toEqual({
+    expect(
+      db.prepare("SELECT COUNT(*) AS c FROM tasks WHERE id = ?").get("orphan"),
+    ).toEqual({
       c: 0,
     });
   });
@@ -554,7 +626,11 @@ describe("insertTask", () => {
       nowMs: NOW,
     });
     expect(
-      (db.prepare("SELECT parent_id FROM tasks WHERE id = ?").get("child") as Row)["parent_id"],
+      (
+        db
+          .prepare("SELECT parent_id FROM tasks WHERE id = ?")
+          .get("child") as Row
+      )["parent_id"],
     ).toBe("task-1");
   });
 
@@ -572,7 +648,9 @@ describe("insertTask", () => {
       assignedRole: "intake",
       nowMs: NOW,
     });
-    const r = db.prepare("SELECT title FROM tasks WHERE id = ?").get("t-long") as Row;
+    const r = db
+      .prepare("SELECT title FROM tasks WHERE id = ?")
+      .get("t-long") as Row;
     expect(String(r["title"])).toBe("首行标题");
     const hits = db
       .prepare("SELECT COUNT(*) AS c FROM events WHERE payload LIKE ?")
@@ -606,7 +684,9 @@ describe("threadConfig / 恢复判定", () => {
     // 这一条与 audit-middleware.ts 的 detectInterrupts 同一条立场。
     expect(() => hasPendingInterrupt(null)).toThrow(/不是对象/u);
     expect(() => hasPendingInterrupt("[]")).toThrow(/不是对象/u);
-    expect(() => hasPendingInterrupt({ interrupts: { 0: { id: "i" } } })).toThrow(/不是数组/u);
+    expect(() =>
+      hasPendingInterrupt({ interrupts: { 0: { id: "i" } } }),
+    ).toThrow(/不是数组/u);
   });
 });
 
@@ -770,7 +850,14 @@ describe("一次性审批 token 的装配层（mint / redeem）", () => {
     // （这一族我本轮踩了【两次】：另一次是同一份文件里用 bash 注入一段中文注释，
     //   读写按 latin1 往返把那几行压成了不可解码字节 —— 教训是
     //   【带中文的改动一律走 Edit，不走 shell】。）
-    const SELF = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "src", "http", "real-deps.ts");
+    const SELF = join(
+      dirname(fileURLToPath(import.meta.url)),
+      "..",
+      "..",
+      "src",
+      "http",
+      "real-deps.ts",
+    );
     const code = readFileSync(SELF, "utf8")
       .replace(/\/\*[\s\S]*?\*\//gu, "")
       .replace(/^\s*\/\/.*$/gmu, "");
@@ -779,9 +866,7 @@ describe("一次性审批 token 的装配层（mint / redeem）", () => {
     //  ① 剥注释【确实剥到了东西】。否则「剥完再比」可能只是「拿原文比」的别名，
     //     而本仓的注释里恰恰写着「不在这里重算 nowMs + TTL」这种含该常量的句子 ——
     //     不剥注释的话这一发【会假红】，剥不干净的话它会【假绿】。
-    expect(code.length).toBeLessThan(
-      readFileSync(SELF, "utf8").length - 500,
-    );
+    expect(code.length).toBeLessThan(readFileSync(SELF, "utf8").length - 500);
     //  ② 判据【不是恒真】：issueToken 确实被 import 且被调用，
     //     所以这份源码不是「根本没碰 token 那套东西」。
     expect(code).toMatch(/issueToken\(/u);
@@ -793,14 +878,18 @@ describe("一次性审批 token 的装配层（mint / redeem）", () => {
     expect(r.ok).toBe(true);
     if (r.ok !== true) throw new Error("前置失败");
     const stored = Number(
-      (db.prepare("SELECT expires_at FROM im_tokens WHERE approval_id = ?").get("m-1") as Row)[
-        "expires_at"
-      ],
+      (
+        db
+          .prepare("SELECT expires_at FROM im_tokens WHERE approval_id = ?")
+          .get("m-1") as Row
+      )["expires_at"],
     );
     expect(r.expiresAt).toBe(stored);
     // 原文【只在这一次返回】：库里那一行按原文查不到（备份里不含可用凭据）。
     expect(
-      db.prepare("SELECT COUNT(*) AS c FROM im_tokens WHERE token = ?").get(r.token),
+      db
+        .prepare("SELECT COUNT(*) AS c FROM im_tokens WHERE token = ?")
+        .get(r.token),
     ).toEqual({ c: 0 });
     // taskId 顺带钉一次：交回的 taskId 来自 precheck 那一行，不是自己再查的。
     expect(r.taskId).toBe("task-1");
@@ -826,12 +915,18 @@ describe("一次性审批 token 的装配层（mint / redeem）", () => {
       const r = await mintApprovalTokenVia(w, { approvalId: id, nowMs: NOW });
       expect(r.ok, id).toBe(false);
     }
-    expect(db.prepare("SELECT COUNT(*) AS c FROM im_tokens").get()).toEqual({ c: 0 });
+    expect(db.prepare("SELECT COUNT(*) AS c FROM im_tokens").get()).toEqual({
+      c: 0,
+    });
     // 反向对照：同一次调用里加一张干净的卡，就该签得出来 ——
     // 否则上面三个 false 只是「mint 恒失败」的三种写法。
     approval(db, "m-ok");
-    expect((await mintApprovalTokenVia(w, { approvalId: "m-ok", nowMs: NOW })).ok).toBe(true);
-    expect(db.prepare("SELECT COUNT(*) AS c FROM im_tokens").get()).toEqual({ c: 1 });
+    expect(
+      (await mintApprovalTokenVia(w, { approvalId: "m-ok", nowMs: NOW })).ok,
+    ).toBe(true);
+    expect(db.prepare("SELECT COUNT(*) AS c FROM im_tokens").get()).toEqual({
+      c: 1,
+    });
   });
 
   it("⭐ redeem 在【提交之后】广播烧票那行，seq = 那条审计的 events.id", async () => {
@@ -855,12 +950,18 @@ describe("一次性审批 token 的装配层（mint / redeem）", () => {
     expect(r).toEqual({ ok: true, taskId: "task-1" });
 
     const sub = bus.subscribe(0);
-    const first = (await nextBounded(sub)) as { kind: string; seq: number; interruptId: string };
+    const first = (await nextBounded(sub)) as {
+      kind: string;
+      seq: number;
+      interruptId: string;
+    };
     expect(first.kind).toBe("ApprovalTokenRedeemed");
     // target 就是这条事件的 interruptId（recorder 的 targetOf），回放靠它 join 决策。
     expect(first.interruptId).toBe("t-1");
     const auditId = (
-      db.prepare("SELECT id FROM events WHERE target = ? ORDER BY id").all("t-1") as Row[]
+      db
+        .prepare("SELECT id FROM events WHERE target = ? ORDER BY id")
+        .all("t-1") as Row[]
     )[0]?.["id"];
     expect(first.seq).toBe(Number(auditId));
     sub.close();
@@ -878,15 +979,19 @@ describe("一次性审批 token 的装配层（mint / redeem）", () => {
       issueToken(db as never, { rawToken: raw, approvalId: "t-2", nowMs: NOW }),
     );
     const seen: number[] = [];
-    await redeemApprovalTokenVia(w, { token: raw, approvalId: "t-2", nowMs: NOW }, () => {
-      // 只读连接。拿写连接读会【恒过】：同连接看得见自己未提交的行，
-      // 那就退化成「我读我刚写的」，看着像断言而什么都没证明。
-      const r = w
-        .readConnection()
-        .prepare("SELECT used FROM im_tokens WHERE approval_id = ?")
-        .get("t-2") as unknown as Row;
-      seen.push(Number(r["used"]));
-    });
+    await redeemApprovalTokenVia(
+      w,
+      { token: raw, approvalId: "t-2", nowMs: NOW },
+      () => {
+        // 只读连接。拿写连接读会【恒过】：同连接看得见自己未提交的行，
+        // 那就退化成「我读我刚写的」，看着像断言而什么都没证明。
+        const r = w
+          .readConnection()
+          .prepare("SELECT used FROM im_tokens WHERE approval_id = ?")
+          .get("t-2") as unknown as Row;
+        seen.push(Number(r["used"]));
+      },
+    );
     expect(seen).toEqual([1]);
   });
 
@@ -915,12 +1020,24 @@ describe("一次性审批 token 的装配层（mint / redeem）", () => {
     approval(db, "t-race");
     const raw = newApprovalToken();
     await w.node(() =>
-      issueToken(db as never, { rawToken: raw, approvalId: "t-race", nowMs: NOW }),
+      issueToken(db as never, {
+        rawToken: raw,
+        approvalId: "t-race",
+        nowMs: NOW,
+      }),
     );
     const spy = publishSpy();
     const both = await Promise.all([
-      redeemApprovalTokenVia(w, { token: raw, approvalId: "t-race", nowMs: NOW }, spy.fn),
-      redeemApprovalTokenVia(w, { token: raw, approvalId: "t-race", nowMs: NOW }, spy.fn),
+      redeemApprovalTokenVia(
+        w,
+        { token: raw, approvalId: "t-race", nowMs: NOW },
+        spy.fn,
+      ),
+      redeemApprovalTokenVia(
+        w,
+        { token: raw, approvalId: "t-race", nowMs: NOW },
+        spy.fn,
+      ),
     ]);
     expect(both.filter((x) => x.ok === true)).toHaveLength(1);
     expect(both.filter((x) => x.ok === false)).toHaveLength(1);
@@ -938,7 +1055,10 @@ describe("一次性审批 token 的装配层（mint / redeem）", () => {
       queue: w,
       bus: new InMemoryEventBus(),
       token: newLocalToken(),
-      graphFor: () => ({ graph: fakeGraph({}).graph, invoke: async (fn) => await fn() }),
+      graphFor: () => ({
+        graph: fakeGraph({}).graph,
+        invoke: async (fn) => await fn(),
+      }),
       now: () => NOW,
       // 这台夹具不跑心跳 ⇒ 驱动器【没在推】（HubDeps.driverState 必填的理由在那边）。
       driverState: () => DRIVER_OFF,
@@ -948,7 +1068,8 @@ describe("一次性审批 token 的装配层（mint / redeem）", () => {
     // bindForAssembly 的判据是【两个都在】。这一发把那条 AND 与装配对上：
     // 只断言两个 typeof 而不对上 AND 的话，改了 bindForAssembly 的判式这里不会红。
     expect(
-      deps.redeemApprovalToken !== undefined && deps.issueApprovalToken !== undefined,
+      deps.redeemApprovalToken !== undefined &&
+        deps.issueApprovalToken !== undefined,
     ).toBe(true);
   });
 });
@@ -965,7 +1086,10 @@ describe("buildHubDeps", () => {
       queue: w,
       bus: new InMemoryEventBus(),
       token: newLocalToken(),
-      graphFor: (): TaskGraph => ({ graph: g.graph, invoke: async (fn) => await fn() }),
+      graphFor: (): TaskGraph => ({
+        graph: g.graph,
+        invoke: async (fn) => await fn(),
+      }),
       now: () => NOW,
       makeCommand: () => ({ __command: true }),
       // 这台夹具不跑心跳 ⇒ 驱动器【没在推】（HubDeps.driverState 必填的理由在那边）。
@@ -973,20 +1097,32 @@ describe("buildHubDeps", () => {
     });
 
     expect(
-      await deps.recordDecision({ approvalId: "w-1", taskId: "task-1", resume: "approve" }),
+      await deps.recordDecision({
+        approvalId: "w-1",
+        taskId: "task-1",
+        resume: "approve",
+      }),
     ).toBe(true);
     expect(row(db, "w-1")?.["status"]).toBe("approved");
     expect(auditRows(db, "w-1").length).toBe(1);
 
-    await deps.createTask({ id: "w-task", title: "从装配入口建的", nowMs: NOW });
+    await deps.createTask({
+      id: "w-task",
+      title: "从装配入口建的",
+      nowMs: NOW,
+    });
     expect(
-      (db.prepare("SELECT status FROM tasks WHERE id = ?").get("w-task") as Row)["status"],
+      (
+        db.prepare("SELECT status FROM tasks WHERE id = ?").get("w-task") as Row
+      )["status"],
     ).toBe("CHARTER_PENDING");
     // intakeRole 的默认值与图里 intake 节点同一口径；传了就听传的。
     expect(
-      (db.prepare("SELECT assigned_role FROM tasks WHERE id = ?").get("w-task") as Row)[
-        "assigned_role"
-      ],
+      (
+        db
+          .prepare("SELECT assigned_role FROM tasks WHERE id = ?")
+          .get("w-task") as Row
+      )["assigned_role"],
     ).toBe("intake");
 
     await deps.resumeGraph("task-1");
@@ -1004,12 +1140,19 @@ describe("buildHubDeps", () => {
       queue: w,
       bus: new InMemoryEventBus(),
       token: newLocalToken(),
-      graphFor: () => ({ graph: fakeGraph({}).graph, invoke: async (fn) => await fn() }),
+      graphFor: () => ({
+        graph: fakeGraph({}).graph,
+        invoke: async (fn) => await fn(),
+      }),
       now: () => ++tick,
       // 这台夹具不跑心跳 ⇒ 驱动器【没在推】（HubDeps.driverState 必填的理由在那边）。
       driverState: () => DRIVER_OFF,
     });
-    await deps.recordDecision({ approvalId: "w-2", taskId: "task-1", resume: "approve" });
+    await deps.recordDecision({
+      approvalId: "w-2",
+      taskId: "task-1",
+      resume: "approve",
+    });
     const decided = row(db, "w-2")?.["decided_at"];
     const created = auditRows(db, "w-2")[0]?.["created_at"];
     expect(decided).toBe(created);
@@ -1019,7 +1162,8 @@ describe("buildHubDeps", () => {
     const { db, w } = await newDb();
     const registry = createExecutorRegistry({ writer: w });
     expect(registry.list()).toEqual(EXECUTOR_KINDS);
-    for (const kind of EXECUTOR_KINDS) expect(registry.get(kind)).not.toBeNull();
+    for (const kind of EXECUTOR_KINDS)
+      expect(registry.get(kind)).not.toBeNull();
 
     db.prepare(
       "INSERT INTO members (member_id, name, role_id, persona_json, model_tier, status, hired_at, updated_at)" +
@@ -1027,7 +1171,11 @@ describe("buildHubDeps", () => {
     ).run(
       "model-member",
       "Model Member",
-      JSON.stringify({ style: "direct", values: ["evidence"], honesty: "no fabrication" }),
+      JSON.stringify({
+        style: "direct",
+        values: ["evidence"],
+        honesty: "no fabrication",
+      }),
       NOW,
       NOW,
     );

@@ -38,7 +38,9 @@ describe("必填项：缺了就退，不猜", () => {
   it("OPC_DB 是纯空白 ⇒ 算【没设】，不算『设成了一个空白路径』", () => {
     // 这一格是从 cli.ts 的冒烟测试里同一条缺陷搬来的（M8）：
     // 空白当设置 ⇒ openDb("") ⇒ 一个看不懂的 SQLite 报错，而真相是环境变量里有个空格。
-    expect(parseServeArgs(["--port", "8787"], { OPC_DB: "   " }).error).toContain("OPC_DB");
+    expect(
+      parseServeArgs(["--port", "8787"], { OPC_DB: "   " }).error,
+    ).toContain("OPC_DB");
   });
 
   it("既没 --port 也没 --port-file ⇒ 拒，且报错把两条出路都写出来", () => {
@@ -61,9 +63,15 @@ describe("必填项：缺了就退，不猜", () => {
   });
 
   it("端口下界排掉特权段（1023 拒、1024 收）", () => {
-    expect(parseServeArgs(["--db", "/tmp/h.db", "--port", "1023"], CLEAN).error).toBeDefined();
-    expect(parseServeArgs(["--db", "/tmp/h.db", "--port", "1024"], CLEAN).error).toBeUndefined();
-    expect(parseServeArgs(["--db", "/tmp/h.db", "--port", "65536"], CLEAN).error).toBeDefined();
+    expect(
+      parseServeArgs(["--db", "/tmp/h.db", "--port", "1023"], CLEAN).error,
+    ).toBeDefined();
+    expect(
+      parseServeArgs(["--db", "/tmp/h.db", "--port", "1024"], CLEAN).error,
+    ).toBeUndefined();
+    expect(
+      parseServeArgs(["--db", "/tmp/h.db", "--port", "65536"], CLEAN).error,
+    ).toBeDefined();
   });
 });
 
@@ -95,8 +103,13 @@ describe("env 只做缺省来源，不覆盖显式参数", () => {
   });
 
   it("非数字 / 超大整数各一个码，都不落成 NaN", () => {
-    expect(parseServeArgs(["--db", "/tmp/h.db", "--port", "1e999"], CLEAN).error).toContain("整数");
-    const r = parseServeArgs(["--db", "/tmp/h.db", "--heartbeat", "1e999"], CLEAN);
+    expect(
+      parseServeArgs(["--db", "/tmp/h.db", "--port", "1e999"], CLEAN).error,
+    ).toContain("整数");
+    const r = parseServeArgs(
+      ["--db", "/tmp/h.db", "--heartbeat", "1e999"],
+      CLEAN,
+    );
     expect(r.error).toBeDefined();
     if (r.heartbeatMs !== undefined) throw new Error("非法值不该有取值");
   });
@@ -104,27 +117,38 @@ describe("env 只做缺省来源，不覆盖显式参数", () => {
 
 describe("心跳下界", () => {
   it("小于下界 ⇒ 拒，且理由说的是【写队列】不是『太频繁』", () => {
-    const r = parseServeArgs([...BASE, "--heartbeat", String(HEARTBEAT_FLOOR_MS - 1)], CLEAN);
+    const r = parseServeArgs(
+      [...BASE, "--heartbeat", String(HEARTBEAT_FLOOR_MS - 1)],
+      CLEAN,
+    );
     expect(r.error).toContain(String(HEARTBEAT_FLOOR_MS));
     expect(r.error).toContain("写队列");
   });
 
   it("恰好等于下界 ⇒ 收（边界值不能两边都拒）", () => {
     expect(
-      parseServeArgs([...BASE, "--heartbeat", String(HEARTBEAT_FLOOR_MS)], CLEAN).error,
+      parseServeArgs(
+        [...BASE, "--heartbeat", String(HEARTBEAT_FLOOR_MS)],
+        CLEAN,
+      ).error,
     ).toBeUndefined();
   });
 
   it("⭐ 下界存在的意义：没有它，`--heartbeat 1` 就是一次自我 DoS", () => {
     // 反向对照把「这一发确实是被下界拦的」钉住：把常量拿掉，参数就该通过。
-    expect(parseServeArgs([...BASE, "--heartbeat", "1"], CLEAN).error).toBeDefined();
+    expect(
+      parseServeArgs([...BASE, "--heartbeat", "1"], CLEAN).error,
+    ).toBeDefined();
     expect(HEARTBEAT_FLOOR_MS).toBeGreaterThan(1);
   });
 });
 
 describe("备份的两种『不给』必须分得开", () => {
   it("--no-backup 与 --backup-dir 同时给 ⇒ 矛盾，拒", () => {
-    const r = parseServeArgs([...BASE, "--no-backup", "--backup-dir", "/tmp/bk"], CLEAN);
+    const r = parseServeArgs(
+      [...BASE, "--no-backup", "--backup-dir", "/tmp/bk"],
+      CLEAN,
+    );
     expect(r.error).toContain("矛盾");
   });
 
@@ -160,12 +184,18 @@ describe("用法与解析的其它格", () => {
     // 「--db --port 8787」如果按顺序吃，会把 "--port" 当库路径，
     // 于是报错变成「库打不开：--port」，一次打字错误伪装成一个文件系统问题。
     expect(parseServeArgs(["--db"], CLEAN).error).toContain("后面要跟");
-    expect(parseServeArgs(["--db", "--port", "8787"], CLEAN).error).toContain("后面要跟");
+    expect(parseServeArgs(["--db", "--port", "8787"], CLEAN).error).toContain(
+      "后面要跟",
+    );
     expect(parseServeArgs(["--port"], CLEAN).error).toContain("后面要跟");
     // 三个开关的补齐文案各指自己的名字，不能共用一句「参数缺值」——
     // 人对着 --help 找的是「我哪一个少写了值」。
-    expect(parseServeArgs(["--backup-dir"], CLEAN).error).toContain("--backup-dir");
-    expect(parseServeArgs(["--port-file"], CLEAN).error).toContain("--port-file");
+    expect(parseServeArgs(["--backup-dir"], CLEAN).error).toContain(
+      "--backup-dir",
+    );
+    expect(parseServeArgs(["--port-file"], CLEAN).error).toContain(
+      "--port-file",
+    );
   });
 
   it("用法文本是一个字符串而不是数组（数组会被某个入口打印成逗号连接的一整行）", () => {
@@ -184,7 +214,7 @@ describe("--bind：解析层只管形状，安全判据在 http/bind.ts", () => 
     // 而下游 assemble.ts 用的是 `args.bind === undefined ? {} : {requested: args.bind}`，
     // 那个三元判的是【有没有填】。空串在这里必须已经变成错误（下面那一发），
     // 所以到 assemble 手上的只可能是「没有」或「一个非空串」。
-    expect(Object.prototype.hasOwnProperty.call(r, "bind")).toBe(false);
+    expect(Object.hasOwn(r, "bind")).toBe(false);
   });
 
   it("⭐ OPC_BIND 不存在：把 --bind 换成一个 env 缺省源会被这一发抓到", () => {
@@ -201,7 +231,9 @@ describe("--bind：解析层只管形状，安全判据在 http/bind.ts", () => 
     expect((r as { bind?: string }).bind).toBeUndefined();
     // 反向对照：同一份参数走命令行时【确实】能被读到 —— 证明上面那个 undefined
     // 不是「整个 --bind 没接上」造成的。
-    expect(parseServeArgs([...BASE, "--bind", "0.0.0.0"], CLEAN).bind).toBe("0.0.0.0");
+    expect(parseServeArgs([...BASE, "--bind", "0.0.0.0"], CLEAN).bind).toBe(
+      "0.0.0.0",
+    );
   });
 
   it("IP 字面量原样透传：这一层【不】判它安不安全", () => {
@@ -212,7 +244,9 @@ describe("--bind：解析层只管形状，安全判据在 http/bind.ts", () => 
     expect(r.error).toBeUndefined();
     expect(r.bind).toBe("0.0.0.0");
     // 主机名同样原样交下去（bind.ts 会拒它，并给出那句「不接受 localhost」的解释）。
-    expect(parseServeArgs([...BASE, "--bind", "localhost"], CLEAN).bind).toBe("localhost");
+    expect(parseServeArgs([...BASE, "--bind", "localhost"], CLEAN).bind).toBe(
+      "localhost",
+    );
   });
 
   it("⭐ --bind 后面是空串 ⇒ 拒，且不当成「没填」", () => {
@@ -222,13 +256,19 @@ describe("--bind：解析层只管形状，安全判据在 http/bind.ts", () => 
     expect(r.error).toContain("--bind");
     expect((r as { bind?: string }).bind).toBeUndefined();
     // 纯空白同理（与上面 OPC_DB 那一条同一条判据）。
-    expect(parseServeArgs([...BASE, "--bind", "   "], CLEAN).error).toContain("--bind");
+    expect(parseServeArgs([...BASE, "--bind", "   "], CLEAN).error).toContain(
+      "--bind",
+    );
   });
 
   it("--bind 吃掉后一个 token ⇒ 报『后面要跟』，而不是把 --port 当值", () => {
     // 与 --db/--port 同一条缺陷：吃掉下一个开关会让报错指向完全无关的方向。
-    expect(parseServeArgs([...BASE, "--bind"], CLEAN).error).toContain("后面要跟");
-    expect(parseServeArgs([...BASE, "--bind", "--no-backup"], CLEAN).error).toContain("后面要跟");
+    expect(parseServeArgs([...BASE, "--bind"], CLEAN).error).toContain(
+      "后面要跟",
+    );
+    expect(
+      parseServeArgs([...BASE, "--bind", "--no-backup"], CLEAN).error,
+    ).toContain("后面要跟");
   });
 
   it("用法文本里看得到 --bind（安全相关的可选项在 --help 里不可见 = 没人知道有）", () => {
@@ -285,7 +325,12 @@ describe("备份相位：日历日，不是 24 小时计时器", () => {
   it("未来时刻（时钟回拨后）⇒ 不炸、也不无脑重备", () => {
     // 时钟回拨是笔记本合盖一夜后的常态。这一发的价值只在「不抛」，
     // 结论方向（备或不备）都不是安全关键的，所以不断言结论，只断言不抛。
-    expect(() => shouldBackUp(Date.parse("2026-03-11T00:00:00Z"), Date.parse("2026-03-09T00:00:00Z"))).not.toThrow();
+    expect(() =>
+      shouldBackUp(
+        Date.parse("2026-03-11T00:00:00Z"),
+        Date.parse("2026-03-09T00:00:00Z"),
+      ),
+    ).not.toThrow();
   });
 });
 
@@ -295,7 +340,15 @@ describe("备份相位：日历日，不是 24 小时计时器", () => {
  * 必须是这一次命令里一个看得见的参数，而且它的【上限】要一起被看见。
  * 差别只在代价：--bind 打开的是对外暴露，这一组打开的是持续产生 token 账单。
  */
-const PUMP = ["--charter-pump", "--max-budget-usd", "0.5", "--task-limit-cents", "500", "--agent-cwd", "/tmp/work"];
+const PUMP = [
+  "--charter-pump",
+  "--max-budget-usd",
+  "0.5",
+  "--task-limit-cents",
+  "500",
+  "--agent-cwd",
+  "/tmp/work",
+];
 
 describe("--charter-pump：默认不开，开了就要三件同伴", () => {
   it("默认【不开】：结果里根本没有 charterPump 这个键", () => {
@@ -303,7 +356,7 @@ describe("--charter-pump：默认不开，开了就要三件同伴", () => {
     expect(r.error).toBeUndefined();
     // 断「键不存在」而不是「值为 undefined」，理由与 --bind 那一发同一条：
     // 下游 assemble 判的是【有没有填】。
-    expect(Object.prototype.hasOwnProperty.call(r, "charterPump")).toBe(false);
+    expect(Object.hasOwn(r, "charterPump")).toBe(false);
   });
 
   it("四个一起给 ⇒ 解析出来", () => {
@@ -319,7 +372,11 @@ describe("--charter-pump：默认不开，开了就要三件同伴", () => {
     // 为什么不能等到 makeRuntime 才炸：那时 Hub 已在监听、心跳已在跑、库已开着，
     // 一个人会以为「Hub 起来了而泵没起来」，实际可能是【泵在跑而没有上限】。
     // 参数层这一发是【一分钱都没花】的那一次红。
-    for (const drop of ["--max-budget-usd", "--task-limit-cents", "--agent-cwd"]) {
+    for (const drop of [
+      "--max-budget-usd",
+      "--task-limit-cents",
+      "--agent-cwd",
+    ]) {
       const i = PUMP.indexOf(drop);
       const argv = [...BASE, ...PUMP.slice(0, i), ...PUMP.slice(i + 2)];
       const r = parseServeArgs(argv, CLEAN);
@@ -361,7 +418,16 @@ describe("--charter-pump：默认不开，开了就要三件同伴", () => {
     expect(parseServeArgs([...BASE, ...PUMP], CLEAN).maxBudgetUsd).toBe(0.5);
     // 整数也收（写成 2 而不是 2.0 的人占多数）
     const r = parseServeArgs(
-      [...BASE, "--charter-pump", "--max-budget-usd", "2", "--task-limit-cents", "500", "--agent-cwd", "/tmp/w"],
+      [
+        ...BASE,
+        "--charter-pump",
+        "--max-budget-usd",
+        "2",
+        "--task-limit-cents",
+        "500",
+        "--agent-cwd",
+        "/tmp/w",
+      ],
       CLEAN,
     );
     expect(r.error).toBeUndefined();
@@ -389,7 +455,16 @@ describe("--charter-pump：默认不开，开了就要三件同伴", () => {
 
   it("--agent-cwd 空串 ⇒ 拒，并说明这一格决定的是【角色能读到哪些文件】", () => {
     const r = parseServeArgs(
-      [...BASE, "--charter-pump", "--max-budget-usd", "0.5", "--task-limit-cents", "500", "--agent-cwd", ""],
+      [
+        ...BASE,
+        "--charter-pump",
+        "--max-budget-usd",
+        "0.5",
+        "--task-limit-cents",
+        "500",
+        "--agent-cwd",
+        "",
+      ],
       CLEAN,
     );
     expect(r.error).toContain("--agent-cwd");
@@ -412,7 +487,15 @@ describe("--charter-pump：默认不开，开了就要三件同伴", () => {
  * 只写 --driver-pump 的人就会被一条【他自己没写过的】报错挡住，
  * 或者反过来：写了三个上限而两个开关都没给，Hub 照常起来而他以为自己开了。
  */
-const DPUMP = ["--driver-pump", "--max-budget-usd", "0.5", "--task-limit-cents", "500", "--agent-cwd", "/tmp/work"];
+const DPUMP = [
+  "--driver-pump",
+  "--max-budget-usd",
+  "0.5",
+  "--task-limit-cents",
+  "500",
+  "--agent-cwd",
+  "/tmp/work",
+];
 
 describe("--driver-pump：默认不开，开了就要同样那三件同伴", () => {
   it("默认【不开】：结果里根本没有 driverPump 这个键", () => {
@@ -420,7 +503,7 @@ describe("--driver-pump：默认不开，开了就要同样那三件同伴", () 
     expect(r.error).toBeUndefined();
     // 断「键不存在」而不是「值为 undefined」：下游 assemble 判的是【有没有填】
     // （driverPump 那一格是 `?: boolean`，而 driverOn 读的是 args.driverPump === true）。
-    expect(Object.prototype.hasOwnProperty.call(r, "driverPump")).toBe(false);
+    expect(Object.hasOwn(r, "driverPump")).toBe(false);
   });
 
   it("四个一起给 ⇒ 解析出来，而 charterPump 【不】被连带打开", async () => {
@@ -433,11 +516,15 @@ describe("--driver-pump：默认不开，开了就要同样那三件同伴", () 
     // ⭐ 两个开关【各开各的】。连带打开的话，只开驱动器的人会同时得到一条
     // 他没要过的、真起子进程去起草章程的路径 —— 那是两条独立的花钱决定被
     // 一个参数打开，而 --charter-pump 那条"必须显式"的立场就没了。
-    expect(Object.prototype.hasOwnProperty.call(r, "charterPump")).toBe(false);
+    expect(Object.hasOwn(r, "charterPump")).toBe(false);
   });
 
   it("⭐ 只给 --driver-pump 而少任一件同伴 ⇒ USAGE，且报错点名【缺的那一件】与【是哪个开关】", () => {
-    for (const drop of ["--max-budget-usd", "--task-limit-cents", "--agent-cwd"]) {
+    for (const drop of [
+      "--max-budget-usd",
+      "--task-limit-cents",
+      "--agent-cwd",
+    ]) {
       const i = DPUMP.indexOf(drop);
       const argv = [...BASE, ...DPUMP.slice(0, i), ...DPUMP.slice(i + 2)];
       const r = parseServeArgs(argv, CLEAN);
@@ -453,7 +540,15 @@ describe("--driver-pump：默认不开，开了就要同样那三件同伴", () 
     // 只点一个的坏法：一个人按两个都开去理解那句报错，去补了一个"没要求他补"的开关，
     // 而真正缺的那一格还在缺。两个都写出来，他才知道这条命令行上有两条要求。
     const r = parseServeArgs(
-      [...BASE, "--charter-pump", "--driver-pump", "--max-budget-usd", "0.5", "--agent-cwd", "/tmp/w"],
+      [
+        ...BASE,
+        "--charter-pump",
+        "--driver-pump",
+        "--max-budget-usd",
+        "0.5",
+        "--agent-cwd",
+        "/tmp/w",
+      ],
       CLEAN,
     );
     expect(r.error).toContain("--charter-pump");
@@ -466,7 +561,10 @@ describe("--driver-pump：默认不开，开了就要同样那三件同伴", () 
     // 只开 --driver-pump 的人当场拒掉，而那一行命令行【完全正确】。
     // 这一发就是钉那一步：先证明"只开驱动"这一行是能过的。
     expect(parseServeArgs([...BASE, ...DPUMP], CLEAN).error).toBeUndefined();
-    const r = parseServeArgs([...BASE, "--max-budget-usd", "0.5", "--agent-cwd", "/tmp/w"], CLEAN);
+    const r = parseServeArgs(
+      [...BASE, "--max-budget-usd", "0.5", "--agent-cwd", "/tmp/w"],
+      CLEAN,
+    );
     expect(r.error).toContain("--driver-pump");
     expect(r.error).toContain("--charter-pump");
     expect(r.error).toContain("不生效");
@@ -478,7 +576,10 @@ describe("--driver-pump：默认不开，开了就要同样那三件同伴", () 
     // 去补 --charter-pump —— 一句要求他打开【另一件花钱的事】的报错。
     const r = parseServeArgs([...BASE, ...DPUMP], CLEAN);
     expect(r.error).toBeUndefined();
-    const c = parseServeArgs([...BASE, "--charter-pump", ...DPUMP.slice(1)], CLEAN);
+    const c = parseServeArgs(
+      [...BASE, "--charter-pump", ...DPUMP.slice(1)],
+      CLEAN,
+    );
     expect(c.error).toBeUndefined();
   });
 
@@ -487,7 +588,11 @@ describe("--driver-pump：默认不开，开了就要同样那三件同伴", () 
     // 这一格比 --bind 更该钉：账单是事后才知道的，到那时"我当时看见过这个参数"
     // 那条防线已经不在了。而驱动器比章程泵更贵（一趟推若干格而不是一轮起草）。
     expect(DEFAULT_SERVE_USAGE).not.toContain("OPC_DRIVER");
-    const r = parseServeArgs(BASE, { OPC_DRIVER_PUMP: "1", OPC_MAX_BUDGET_USD: "99", OPC_TASK_LIMIT_CENTS: "1" });
+    const r = parseServeArgs(BASE, {
+      OPC_DRIVER_PUMP: "1",
+      OPC_MAX_BUDGET_USD: "99",
+      OPC_TASK_LIMIT_CENTS: "1",
+    });
     expect(r.error).toBeUndefined();
     expect(r.driverPump).toBeUndefined();
     // 反向对照：同一组值走命令行时【确实】能被读到 ——
@@ -503,7 +608,10 @@ describe("--driver-pump：默认不开，开了就要同样那三件同伴", () 
     // 这一发钉的是【那句自我承诺】：文案说"不抄"，所以它自己必须真的没抄。
     expect(DEFAULT_SERVE_USAGE).toContain("不抄那个次数");
     const driverBlock = DEFAULT_SERVE_USAGE.split("\n")
-      .filter((l) => l.includes("驱动") || l.includes("driver") || l.includes("同一格"))
+      .filter(
+        (l) =>
+          l.includes("驱动") || l.includes("driver") || l.includes("同一格"),
+      )
       .join("\n");
     expect(driverBlock).not.toMatch(/试\s*[0-9]+\s*次/);
     // 而它得指一个【真的存在】的地方，而不是指回一条不含那个数的横幅
@@ -513,4 +621,3 @@ describe("--driver-pump：默认不开，开了就要同样那三件同伴", () 
     expect(DEFAULT_SERVE_USAGE).toContain("max_attempts");
   });
 });
-

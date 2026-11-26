@@ -95,16 +95,18 @@ describe("判定的取舍细节", () => {
   });
 
   it("kind 映射表在 detail 无命中时生效", () => {
-    expect(classifyAction(act({ kind: "run_tests", detail: "执行用例集 B" }))).toBe(
-      "read_only",
-    );
+    expect(
+      classifyAction(act({ kind: "run_tests", detail: "执行用例集 B" })),
+    ).toBe("read_only");
     expect(
       classifyAction(act({ kind: "production_deploy", detail: "按计划执行" })),
     ).toBe("irreversible");
   });
 
   it("大小写不影响命中（描述可能是英文大写命令）", () => {
-    expect(classifyAction(act({ detail: "RM -RF /tmp/x" }))).toBe("irreversible");
+    expect(classifyAction(act({ detail: "RM -RF /tmp/x" }))).toBe(
+      "irreversible",
+    );
     expect(classifyAction(act({ detail: "GIT PUSH ORIGIN MAIN" }))).toBe(
       "irreversible",
     );
@@ -135,9 +137,9 @@ describe("policyDecide：三档决定", () => {
     expect(policyDecide(act({ detail: "编辑 src/a.ts" }), {}).action).toBe(
       "require_approval",
     );
-    expect(policyDecide(act({ detail: "git push origin main" }), {}).action).toBe(
-      "require_approval",
-    );
+    expect(
+      policyDecide(act({ detail: "git push origin main" }), {}).action,
+    ).toBe("require_approval");
     // reason 必须说清【为什么】，否则审批界面上是一句废话
     const d = policyDecide(act({ detail: "git push origin main" }), {});
     if (d.action === "require_approval") {
@@ -188,10 +190,14 @@ describe("黑名单匹配（双向包含，全等永远匹配不上中文条目�
   });
 
   it("空条目被跳过（否则 needle.includes(low) 会命中一切，拦光所有动作）", () => {
-    expect(matchForbidden(act({ detail: "read a" }), ["", "   "])).toBeUndefined();
+    expect(
+      matchForbidden(act({ detail: "read a" }), ["", "   "]),
+    ).toBeUndefined();
   });
 
   it("一切皆空 → 不命中（无信息时不做肯定判断）", () => {
-    expect(matchForbidden(act({ kind: "", detail: "" }), ["禁止 anything"])).toBeUndefined();
+    expect(
+      matchForbidden(act({ kind: "", detail: "" }), ["禁止 anything"]),
+    ).toBeUndefined();
   });
 });

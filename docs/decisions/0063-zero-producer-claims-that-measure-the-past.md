@@ -23,16 +23,16 @@ HEAD 里有没有写入方】分堆，现在是时而且为假的 **7 句、归�
 | # | 句子位置 | 主张 | 实际 | 何时变假 |
 | --- | --- | --- | --- | --- |
 | 1 | `db/integrity.ts` 文件头 ④ `review_gates / harness_calls 的 INSERT 是【零】`；同文件 §④ 规则段 `review_gates / harness_calls 在 src 里零 INSERT`；`harnessCallCheck` 文案 `harness_calls 是空的（src 里零 INSERT，0018 §9 复算）` | harness_calls 零 INSERT | `engine/runtime.ts` 的 `INSERT_HARNESS_CALL_SQL`（广告 commit 42c8eea = 0041 引擎路线那一批；生产路径经 `engine/driver.ts` / `serve/charter-pump.ts` 调） | 0041 把 harness_calls 复用为会话存储（`engine/runtime.ts` 文件头「为什么会话落在 harness_calls」自己写着这件事） |
-| 2 | `policy/auto-approve.ts` ① 分支 `src 里没有任何 INSERT INTO approvals`（0049 §11 点名的现在时假话） | approvals 没有 INSERT | `approvals/cards.ts:291` 就是那句 INSERT，经 `insertCard` 被三个生产调用方用着（本行原写「第 237 行」，round357 复算 252 → 273，见下方 ⚠⚡） | 0007 建卡模块补上为止（0049 §11 已记过） |
+| 2 | `policy/auto-approve.ts` ① 分支 `src 里没有任何 INSERT INTO approvals`（0049 §11 点名的现在时假话） | approvals 没有 INSERT | `approvals/cards.ts:293` 就是那句 INSERT，经 `insertCard` 被三个生产调用方用着（本行原写「第 237 行」，round357 复算 252 → 273，见下方 ⚠⚡） | 0007 建卡模块补上为止（0049 §11 已记过） |
 | 3 | `charter/budget-sync.ts` `budgets.consumed_cents 除 ADD_CONSUMED_SQL 之外零写入方` | 那一列只有一个自增作者 | `engine/runtime.ts` 的 `ADD_TASK_BUDGET_SQL` 也写同一列（两处、都是 `+ ?`） | 引擎路线接上（0062 之后） |
-| 4 | `channels/abstraction.ts` `读写方 **0 处** —— 全仓没有任何一条 SQL 碰过它` | im_bindings 无写入方 | `bindings/im.ts:164` 就是那句 INSERT（实测：1 INSERT + 2 UPDATE + 3 SELECT），HTTP 侧 `http/bindings.ts` 三条路由已接 | 0028 起（0028 自己就是来接那层的） |
+| 4 | `channels/abstraction.ts` `读写方 **0 处** —— 全仓没有任何一条 SQL 碰过它` | im_bindings 无写入方 | `bindings/im.ts:168` 就是那句 INSERT（实测：1 INSERT + 2 UPDATE + 3 SELECT），HTTP 侧 `http/bindings.ts` 三条路由已接 | 0028 起（0028 自己就是来接那层的） |
 | 5 | `channels/abstraction.ts` `同 0027 §0 那张 im_tokens 零写入方`（类比用的第二句） | im_tokens 无写入方 | `http/tokens.ts:208` 插 im_tokens | 0028 起 |
 
 ⚠⚡ **round332 复算第 2 行那个行号：本篇自报量的是 61467b5，那里确实是 237；而把本篇提交进库的
 那一发（ffae248）自己把那句 INSERT 顶到了 252** ⇒ 这一格在它落库的那一刻就已经是假的，
 不是后来漂坏的。同一发还让第 2 行括号里那句「三个生产调用方」少了对账：61467b5 上
 `insertCard` 的调用方是 charter / dispatch / seat-card 三处（那个数当时成立），
-ffae248 起多了 `approvals/timeout.ts:275` ⇒ 今天是四处。本表这三格（第 2、4、5 行的行号）
+ffae248 起多了 `approvals/timeout.ts:298` ⇒ 今天是四处。本表这三格（第 2、4、5 行的行号）
 按 0050 §6.5 那条口径改成冒号形态 —— 进 `doc-refs` 快照、从此受漂移判据看着，旧数**逐字留在
 本段**不洗。第 4 行那句「1 INSERT + 2 UPDATE + 3 SELECT」round332 复算【照旧成立】
 （我第一遍 grep 数出 3 个 UPDATE，多的一条是 `im.ts:47` 注释里那条探针反例，不是语句 ——

@@ -17,29 +17,29 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { mkdirSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
 import type { DatabaseSync } from "node:sqlite";
+import { fileURLToPath } from "node:url";
+import { type CharterInput, charterSchema } from "@opc/contracts";
 import { afterAll, describe, expect, it } from "vitest";
-import { fixtureTmp } from "../fixtures/fixture-dir.js";
-import { relPosix, toPosix } from "../fixtures/paths.js";
-import { WriteQueue } from "../../src/db/write-queue.js";
-import { migrate } from "../../src/db/migrate.js";
-import { openDb } from "../../src/db/driver.js";
-import { AuditRecorder, type StepTx } from "../../src/events/recorder.js";
-import { InMemoryEventBus } from "../../src/events/bus.js";
 import { BudgetTracker } from "../../src/budget/tracker.js";
 import {
+  BUDGET_SYNC_AUDIT_KIND,
   budgetRowId,
   budgetRowsFromCharter,
   budgetTierSummary,
-  BUDGET_SYNC_AUDIT_KIND,
   readBudgetTiers,
   silentOverBudgets,
   syncCharterBudgets,
   upsertLimit,
   usdToCents,
 } from "../../src/charter/budget-sync.js";
-import { charterSchema, type CharterInput } from "@opc/contracts";
+import { openDb } from "../../src/db/driver.js";
+import { migrate } from "../../src/db/migrate.js";
+import { WriteQueue } from "../../src/db/write-queue.js";
+import { InMemoryEventBus } from "../../src/events/bus.js";
+import { AuditRecorder, type StepTx } from "../../src/events/recorder.js";
+import { fixtureTmp } from "../fixtures/fixture-dir.js";
+import { relPosix, toPosix } from "../fixtures/paths.js";
 
 const HUB = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const TMP = fixtureTmp("budget-sync", import.meta.url);
@@ -50,7 +50,10 @@ type AnyDb = {
   prepare: (sql: string) => {
     all: (...a: unknown[]) => Row[];
     get: (...a: unknown[]) => Row | undefined;
-    run: (...a: unknown[]) => { changes: number; lastInsertRowid: number | bigint };
+    run: (...a: unknown[]) => {
+      changes: number;
+      lastInsertRowid: number | bigint;
+    };
   };
   exec: (sql: string) => void;
   close: () => void;
@@ -61,12 +64,15 @@ const queues: WriteQueue[] = [];
 const conns: AnyDb[] = [];
 let fileSeq = 0;
 
-const path = (): string => join(TMP, "bs-" + process.pid + "-" + ++fileSeq + ".db");
+const path = (): string =>
+  join(TMP, "bs-" + process.pid + "-" + ++fileSeq + ".db");
 
 async function newQ(): Promise<{ q: WriteQueue; db: AnyDb }> {
   const q = new WriteQueue(path()) as WriteQueue;
   queues.push(q);
-  const db = (q as unknown as { writeConnection: () => AnyDb }).writeConnection();
+  const db = (
+    q as unknown as { writeConnection: () => AnyDb }
+  ).writeConnection();
   migrate(db as never);
   return { q, db };
 }
@@ -104,8 +110,8 @@ async function newTracker(): Promise<{
       }
       open = false;
     },
-    scope: <T,>(fn: () => Promise<T>): Promise<T> =>
-      (als.run({ db }, fn) as Promise<T>),
+    scope: <T>(fn: () => Promise<T>): Promise<T> =>
+      als.run({ db }, fn) as Promise<T>,
     inTx: () => open,
     db: () => {
       const s = als.getStore();
@@ -133,13 +139,20 @@ async function newTracker(): Promise<{
     db,
     tracker,
     recorder,
-    run: <T,>(fn: () => Promise<T>): Promise<T> => recorder.run(fn),
+    run: <T>(fn: () => Promise<T>): Promise<T> => recorder.run(fn),
   };
 }
 
-const limitOf = (db: AnyDb, scope: string, scopeId: string, period: string): number | undefined => {
+const limitOf = (
+  db: AnyDb,
+  scope: string,
+  scopeId: string,
+  period: string,
+): number | undefined => {
   const r = db
-    .prepare("SELECT limit_cents FROM budgets WHERE scope_type=? AND scope_id=? AND period=?")
+    .prepare(
+      "SELECT limit_cents FROM budgets WHERE scope_type=? AND scope_id=? AND period=?",
+    )
     .get(scope, scopeId, period);
   return r === undefined ? undefined : Number(r["limit_cents"]);
 };
@@ -147,8 +160,18 @@ const limitOf = (db: AnyDb, scope: string, scopeId: string, period: string): num
 describe("① declareLimit 在「保存新预算」这个场景里会静默失效（实测钉住）", () => {
   it("tracker.declareLimit 第二次声明【不生效】：症状是保存成功、数字没变、零报错", async () => {
     const { tracker } = await newTracker();
-    tracker.declareLimit({ scope: "role", scopeId: "dev", period: "daily", limitCents: 1000 });
-    tracker.declareLimit({ scope: "role", scopeId: "dev", period: "daily", limitCents: 2000 });
+    tracker.declareLimit({
+      scope: "role",
+      scopeId: "dev",
+      period: "daily",
+      limitCents: 1000,
+    });
+    tracker.declareLimit({
+      scope: "role",
+      scopeId: "dev",
+      period: "daily",
+      limitCents: 2000,
+    });
     // 这条断言是【关于别人的行为】的，它红了说明 tracker.ts 的 ON CONFLICT 语义变了。
     // 那时本模块的 upsertLimit 仍然正确，但文件头 ① 那段理由要重写 —— 所以让它红。
     expect(tracker.limitCents("role", "dev", "daily")).toBe(1000);
@@ -156,7 +179,12 @@ describe("① declareLimit 在「保存新预算」这个场景里会静默失�
 
   it("upsertLimit 真的改到了；而 declareLimit 改不到的那一格，改完 tracker 立刻读到新值", async () => {
     const { db, tracker, run } = await newTracker();
-    tracker.declareLimit({ scope: "role", scopeId: "dev", period: "daily", limitCents: 1000 });
+    tracker.declareLimit({
+      scope: "role",
+      scopeId: "dev",
+      period: "daily",
+      limitCents: 1000,
+    });
     await run(async () => {
       const r = upsertLimit(db as unknown as DatabaseSync, {
         scope: "role",
@@ -164,7 +192,11 @@ describe("① declareLimit 在「保存新预算」这个场景里会静默失�
         period: "daily",
         limitCents: 2000,
       });
-      expect(r).toMatchObject({ changed: true, previousLimitCents: 1000, nowOver: false });
+      expect(r).toMatchObject({
+        changed: true,
+        previousLimitCents: 1000,
+        nowOver: false,
+      });
     });
     // 判据来自【执行侧】而不是本模块自己的读：tracker 是真正拿这个数判超限的人。
     expect(tracker.limitCents("role", "dev", "daily")).toBe(2000);
@@ -210,15 +242,28 @@ describe("① declareLimit 在「保存新预算」这个场景里会静默失�
 describe("② 调低上限会永久关闭突破警报（本文件最重要的一节）", () => {
   it("实测三段式：跨过 ⇒ 1 条 BudgetPaused；调低到已消费量之下 ⇒ 不加新事件；再消费 ⇒ breached 仍 false", async () => {
     const { db, tracker, run } = await newTracker();
-    const o = { scope: "role" as const, scopeId: "dev", period: "daily" as const };
+    const o = {
+      scope: "role" as const,
+      scopeId: "dev",
+      period: "daily" as const,
+    };
     const paused = (): number =>
       Number(
-        db.prepare("SELECT COUNT(*) c FROM events WHERE action = 'budget_consume'").get()?.["c"] ?? 0,
+        db
+          .prepare(
+            "SELECT COUNT(*) c FROM events WHERE action = 'budget_consume'",
+          )
+          .get()?.["c"] ?? 0,
       );
 
     tracker.declareLimit({ ...o, limitCents: 1000 });
     const r1 = await run(() =>
-      tracker.consume({ sourceEvent: 100001, ...o, amountCents: 1200, taskId: "T-1" }),
+      tracker.consume({
+        sourceEvent: 100001,
+        ...o,
+        amountCents: 1200,
+        taskId: "T-1",
+      }),
     );
     expect({ breached: r1.breached, over: r1.over, paused: paused() }).toEqual({
       breached: true,
@@ -227,16 +272,29 @@ describe("② 调低上限会永久关闭突破警报（本文件最重要的一
     });
 
     await run(async () => {
-      const low = upsertLimit(db as unknown as DatabaseSync, { ...o, limitCents: 500 });
+      const low = upsertLimit(db as unknown as DatabaseSync, {
+        ...o,
+        limitCents: 500,
+      });
       // 这一格现在超限，而**没有任何东西会再为它发声**。
       expect(low.nowOver).toBe(true);
     });
     expect(paused()).toBe(1);
 
     const r2 = await run(() =>
-      tracker.consume({ sourceEvent: 100002, ...o, amountCents: 100, taskId: "T-1" }),
+      tracker.consume({
+        sourceEvent: 100002,
+        ...o,
+        amountCents: 100,
+        taskId: "T-1",
+      }),
     );
-    expect({ applied: r2.applied, breached: r2.breached, over: r2.over, paused: paused() }).toEqual({
+    expect({
+      applied: r2.applied,
+      breached: r2.breached,
+      over: r2.over,
+      paused: paused(),
+    }).toEqual({
       applied: true,
       breached: false,
       over: true,
@@ -254,7 +312,9 @@ describe("② 调低上限会永久关闭突破警报（本文件最重要的一
       ],
     ]);
     const r = await syncCharterBudgets(q, {
-      rows: [{ scope: "role", scopeId: "dev", period: "daily", limitCents: 500 }],
+      rows: [
+        { scope: "role", scopeId: "dev", period: "daily", limitCents: 500 },
+      ],
       nowMs: NOW,
       changeSummary: "把开发日预算从 $15 收到 $5",
     });
@@ -266,14 +326,20 @@ describe("② 调低上限会永久关闭突破警报（本文件最重要的一
       alarmSilenced: true,
     });
     const payload = JSON.parse(
-      String(db.prepare("SELECT payload FROM events WHERE id = ?").get(r.auditSeq)?.["payload"]),
+      String(
+        db.prepare("SELECT payload FROM events WHERE id = ?").get(r.auditSeq)?.[
+          "payload"
+        ],
+      ),
     ) as Record<string, unknown>;
     expect(payload["alarm_silenced"]).toEqual(["role|dev|daily"]);
 
     // 反向对照（少了它，「凡是写入都报 alarmSilenced」的实现也能绿）：
     // 同一格处在【未超限】状态时必须是 false。
     const ok = await syncCharterBudgets(q, {
-      rows: [{ scope: "role", scopeId: "test", period: "daily", limitCents: 500 }],
+      rows: [
+        { scope: "role", scopeId: "test", period: "daily", limitCents: 500 },
+      ],
       nowMs: NOW + 1,
       changeSummary: "测试角色首次配预算",
     });
@@ -284,7 +350,9 @@ describe("② 调低上限会永久关闭突破警报（本文件最重要的一
   it("第一版预算（原先没有这一格）不算 alarmSilenced：从没响过的警报谈不上被关掉", async () => {
     const { q } = await newQ();
     const r = await syncCharterBudgets(q, {
-      rows: [{ scope: "role", scopeId: "dev", period: "daily", limitCents: 100 }],
+      rows: [
+        { scope: "role", scopeId: "dev", period: "daily", limitCents: 100 },
+      ],
       nowMs: NOW,
       changeSummary: "第一版",
     });
@@ -328,7 +396,9 @@ describe("③ USD → 美分（实测 271/2001 个两位小数直接乘不是整
     expect(() => usdToCents(0.005, "日预算")).toThrow(/半分钱|美分为最小单位/u);
     expect(() => usdToCents(-1, "日预算")).toThrow(/不得为负/u);
     expect(() => usdToCents(Number.NaN, "日预算")).toThrow(/有限数值/u);
-    expect(() => usdToCents(Number.POSITIVE_INFINITY, "日预算")).toThrow(/有限数值/u);
+    expect(() => usdToCents(Number.POSITIVE_INFINITY, "日预算")).toThrow(
+      /有限数值/u,
+    );
   });
 
   it("2001 个两位小数全部可换算，且【没有一个】被静默改动", () => {
@@ -363,14 +433,18 @@ describe("③ USD → 美分（实测 271/2001 个两位小数直接乘不是整
     // 所以拦得住它的只能是本模块 —— 这正是这条用例的意义。
     expect(parsed.success).toBe(true);
     if (!parsed.success) return;
-    expect(() => budgetRowsFromCharter(parsed.data)).toThrow(/半分钱|美分为最小单位/u);
+    expect(() => budgetRowsFromCharter(parsed.data)).toThrow(
+      /半分钱|美分为最小单位/u,
+    );
   });
 });
 
 describe("④ 审计：一次保存一条，署名是人", () => {
   it("一批两行 ⇒ events 只多【一条】，action=state_change，payload.kind 点名这件事", async () => {
     const { q, db } = await newQ();
-    const before = Number(db.prepare("SELECT COUNT(*) c FROM events").get()?.["c"] ?? 0);
+    const before = Number(
+      db.prepare("SELECT COUNT(*) c FROM events").get()?.["c"] ?? 0,
+    );
     const r = await syncCharterBudgets(q, {
       rows: [
         { scope: "role", scopeId: "dev", period: "daily", limitCents: 1500 },
@@ -379,13 +453,18 @@ describe("④ 审计：一次保存一条，署名是人", () => {
       nowMs: NOW,
       changeSummary: "按新岗位书同步开发预算",
     });
-    expect(Number(db.prepare("SELECT COUNT(*) c FROM events").get()?.["c"] ?? 0)).toBe(before + 1);
+    expect(
+      Number(db.prepare("SELECT COUNT(*) c FROM events").get()?.["c"] ?? 0),
+    ).toBe(before + 1);
     const ev = db.prepare("SELECT * FROM events WHERE id = ?").get(r.auditSeq);
     expect(ev?.["actor_type"]).toBe("human");
     expect(ev?.["actor_id"]).toBe("ceo");
     expect(ev?.["action"]).toBe("state_change");
     expect(ev?.["task_id"]).toBeNull();
-    const payload = JSON.parse(String(ev?.["payload"])) as Record<string, unknown>;
+    const payload = JSON.parse(String(ev?.["payload"])) as Record<
+      string,
+      unknown
+    >;
     expect(payload["kind"]).toBe(BUDGET_SYNC_AUDIT_KIND);
     expect(payload["row_count"]).toBe(2);
     expect(ev?.["target"]).toBe("budgets@2");
@@ -399,10 +478,12 @@ describe("④ 审计：一次保存一条，署名是人", () => {
 
   it("空 rows / 重复 rows / 空摘要 ⇒ 一律拒，且不留下任何事件", async () => {
     const { q, db } = await newQ();
-    const before = Number(db.prepare("SELECT COUNT(*) c FROM events").get()?.["c"] ?? 0);
-    await expect(syncCharterBudgets(q, { rows: [], nowMs: NOW, changeSummary: "空" })).rejects.toThrow(
-      /什么都没改/u,
+    const before = Number(
+      db.prepare("SELECT COUNT(*) c FROM events").get()?.["c"] ?? 0,
     );
+    await expect(
+      syncCharterBudgets(q, { rows: [], nowMs: NOW, changeSummary: "空" }),
+    ).rejects.toThrow(/什么都没改/u);
     await expect(
       syncCharterBudgets(q, {
         rows: [
@@ -415,13 +496,19 @@ describe("④ 审计：一次保存一条，署名是人", () => {
     ).rejects.toThrow(/同一个作用域出现了两次/u);
     await expect(
       syncCharterBudgets(q, {
-        rows: [{ scope: "role", scopeId: "dev", period: "daily", limitCents: 100 }],
+        rows: [
+          { scope: "role", scopeId: "dev", period: "daily", limitCents: 100 },
+        ],
         nowMs: NOW,
         changeSummary: "   ",
       }),
     ).rejects.toThrow(/changeSummary/u);
-    expect(Number(db.prepare("SELECT COUNT(*) c FROM events").get()?.["c"] ?? 0)).toBe(before);
-    expect(Number(db.prepare("SELECT COUNT(*) c FROM budgets").get()?.["c"] ?? 0)).toBe(0);
+    expect(
+      Number(db.prepare("SELECT COUNT(*) c FROM events").get()?.["c"] ?? 0),
+    ).toBe(before);
+    expect(
+      Number(db.prepare("SELECT COUNT(*) c FROM budgets").get()?.["c"] ?? 0),
+    ).toBe(0);
   });
 
   it("同一作用域出现两次这件事【本来会】怎么错：第二行的 previous 会读到第一行刚写的值", async () => {
@@ -431,8 +518,18 @@ describe("④ 审计：一次保存一条，署名是人", () => {
     const { db, run } = await newTracker();
     await run(async () => {
       const d = db as unknown as DatabaseSync;
-      const a = upsertLimit(d, { scope: "role", scopeId: "dev", period: "daily", limitCents: 100 });
-      const b = upsertLimit(d, { scope: "role", scopeId: "dev", period: "daily", limitCents: 200 });
+      const a = upsertLimit(d, {
+        scope: "role",
+        scopeId: "dev",
+        period: "daily",
+        limitCents: 100,
+      });
+      const b = upsertLimit(d, {
+        scope: "role",
+        scopeId: "dev",
+        period: "daily",
+        limitCents: 200,
+      });
       expect(a.previousLimitCents).toBeNull();
       // 若一批里允许重复，审计的 before 会记成 100 而真实保存前是【无此行】。
       expect(b.previousLimitCents).toBe(100);
@@ -475,7 +572,11 @@ describe("⑤ 读侧：「显示与编辑一致」要求「没声明」与「0�
     const t = readBudgetTiers(db as unknown as DatabaseSync, [
       { scope: "task", scopeId: "T-1", period: "per_task" },
     ]);
-    expect(t[0]).toMatchObject({ declared: true, limitCents: 900, consumedCents: 0 });
+    expect(t[0]).toMatchObject({
+      declared: true,
+      limitCents: 900,
+      consumedCents: 0,
+    });
   });
 
   it("budgetTierSummary 报告【声明情况】而不是推断默认值：公司级没声明就报 false", async () => {
@@ -485,29 +586,59 @@ describe("⑤ 读侧：「显示与编辑一致」要求「没声明」与「0�
         "VALUES ('T-9','t','IN_PROGRESS','dev','implement',?,?)",
     ).run(NOW, NOW);
     const s0 = budgetTierSummary(db as unknown as DatabaseSync);
-    expect(s0).toEqual({ companyDeclared: false, roleDeclared: 0, taskDeclared: 0, undeclaredRoles: 1 });
+    expect(s0).toEqual({
+      companyDeclared: false,
+      roleDeclared: 0,
+      taskDeclared: 0,
+      undeclaredRoles: 1,
+    });
     await syncCharterBudgets(q, {
       rows: [
         { scope: "role", scopeId: "dev", period: "daily", limitCents: 1500 },
-        { scope: "company", scopeId: "company", period: "monthly", limitCents: 100000 },
+        {
+          scope: "company",
+          scopeId: "company",
+          period: "monthly",
+          limitCents: 100000,
+        },
       ],
       nowMs: NOW,
       changeSummary: "公司级由 CEO 显式给",
     });
     const s1 = budgetTierSummary(db as unknown as DatabaseSync);
-    expect(s1).toEqual({ companyDeclared: true, roleDeclared: 1, taskDeclared: 0, undeclaredRoles: 0 });
+    expect(s1).toEqual({
+      companyDeclared: true,
+      roleDeclared: 1,
+      taskDeclared: 0,
+      undeclaredRoles: 0,
+    });
   });
 });
 
 describe("⑥ 与执行侧的连通：同步完，BudgetTracker 判超限用的就是这个新值", () => {
   it("同步 → 新上限【立刻】参与判定（这条才叫「编辑与生效一致」）", async () => {
     const { db, tracker, run } = await newTracker();
-    tracker.declareLimit({ scope: "role", scopeId: "dev", period: "daily", limitCents: 10000 });
+    tracker.declareLimit({
+      scope: "role",
+      scopeId: "dev",
+      period: "daily",
+      limitCents: 10000,
+    });
     // 先按宽上限花 3000（不超限）
     const a = await run(() =>
-      tracker.consume({ sourceEvent: 200001, scope: "role", scopeId: "dev", period: "daily", amountCents: 3000, taskId: "T-1" }),
+      tracker.consume({
+        sourceEvent: 200001,
+        scope: "role",
+        scopeId: "dev",
+        period: "daily",
+        amountCents: 3000,
+        taskId: "T-1",
+      }),
     );
-    expect({ breached: a.breached, over: a.over }).toEqual({ breached: false, over: false });
+    expect({ breached: a.breached, over: a.over }).toEqual({
+      breached: false,
+      over: false,
+    });
 
     // CEO 收到 $20（2000 分）—— 走本模块的写入口
     await run(async () => {
@@ -517,7 +648,10 @@ describe("⑥ 与执行侧的连通：同步完，BudgetTracker 判超限用的�
         period: "daily",
         limitCents: 2000,
       });
-      expect({ nowOver: r.nowOver, changed: r.changed }).toEqual({ nowOver: true, changed: true });
+      expect({ nowOver: r.nowOver, changed: r.changed }).toEqual({
+        nowOver: true,
+        changed: true,
+      });
     });
 
     // 执行侧读到的就是这个新数
@@ -526,11 +660,23 @@ describe("⑥ 与执行侧的连通：同步完，BudgetTracker 判超限用的�
     // 但注意它【不会】发 BudgetPaused —— 那就是 ② 那节的事，在这里再验一次是因为
     // 「编辑与生效一致」的完整答案包含两半：判定生效了，警报没响。
     const b = await run(() =>
-      tracker.consume({ sourceEvent: 200002, scope: "role", scopeId: "dev", period: "daily", amountCents: 1, taskId: "T-1" }),
+      tracker.consume({
+        sourceEvent: 200002,
+        scope: "role",
+        scopeId: "dev",
+        period: "daily",
+        amountCents: 1,
+        taskId: "T-1",
+      }),
     );
-    expect({ over: b.over, breached: b.breached }).toEqual({ over: true, breached: false });
+    expect({ over: b.over, breached: b.breached }).toEqual({
+      over: true,
+      breached: false,
+    });
     // 反向对照：没同步过的另一个角色仍然【没有行】，limitCents 应当抛而不是默认放行
-    expect(() => tracker.limitCents("role", "ops", "daily")).toThrow(/没有声明预算上限/u);
+    expect(() => tracker.limitCents("role", "ops", "daily")).toThrow(
+      /没有声明预算上限/u,
+    );
   });
 });
 
@@ -579,13 +725,28 @@ function presetCharter(): CharterInput {
     display_name: "开发",
     version: 1,
     honesty_boundaries: ["不谎报测试结果"],
-    acceptance_criteria: [{ condition: "metric:p0_defect_count != 0", action: "reject", message: "有 P0" }],
+    acceptance_criteria: [
+      {
+        condition: "metric:p0_defect_count != 0",
+        action: "reject",
+        message: "有 P0",
+      },
+    ],
     forbidden_actions: [],
     tool_permissions: ["read"],
     model_tier: "execution",
     budget: { daily_usd: 15, per_task_usd: 5 },
-    decision_scope: { autonomous: [], requires_consultation: [], forbidden: [] },
-    judgment_mode: { type: "strict_rules", strict_rules: [], bounded_judgment: [], full_discretion: [] },
+    decision_scope: {
+      autonomous: [],
+      requires_consultation: [],
+      forbidden: [],
+    },
+    judgment_mode: {
+      type: "strict_rules",
+      strict_rules: [],
+      bounded_judgment: [],
+      full_discretion: [],
+    },
     escalation_triggers: [],
   };
 }

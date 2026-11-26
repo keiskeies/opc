@@ -78,7 +78,8 @@ async function createDoc(kind: string, title: string, bodyText: string) {
     }),
   });
   const text = await res.text();
-  if (!res.ok) throw new Error(`/documents -> ${res.status} ${text.slice(0, 200)}`);
+  if (!res.ok)
+    throw new Error(`/documents -> ${res.status} ${text.slice(0, 200)}`);
   const body = JSON.parse(text) as { document?: { doc_id?: string } };
   const id = body.document?.doc_id ?? "";
   expect(id, `建文档没拿到 doc_id：${text.slice(0, 200)}`).toBeTruthy();
@@ -245,13 +246,19 @@ async function paneGeometry(page: Page) {
 test.describe("markdown 三态视图", () => {
   test.use({ viewport: { width: 1440, height: 900 } });
 
-  test("打开停在源码态：编辑面在场，预览面已画好且不参与布局", async ({ page }) => {
+  test("打开停在源码态：编辑面在场，预览面已画好且不参与布局", async ({
+    page,
+  }) => {
     await openFreshDoc(page, "分栏验收·默认态");
     const m = await paneGeometry(page);
-    expect(m.mode, `默认形态是 "${m.mode}" ⇒ 「打开即编辑」这条没了`).toBe("source");
+    expect(m.mode, `默认形态是 "${m.mode}" ⇒ 「打开即编辑」这条没了`).toBe(
+      "source",
+    );
     expect(m.srcTag, "源码面不是 textarea ⇒ 编辑入口换了东西").toBe("textarea");
     await expect(editorOf(page)).toBeVisible();
-    expect(m.prevDisplay, `预览面在源码态的 display 是 ${m.prevDisplay}`).toBe("none");
+    expect(m.prevDisplay, `预览面在源码态的 display 是 ${m.prevDisplay}`).toBe(
+      "none",
+    );
     // 但节点首屏就画好了（不等用户点开预览才画，否则切过去会闪一下空框）。
     expect(
       m.previewNodes,
@@ -259,13 +266,25 @@ test.describe("markdown 三态视图", () => {
     ).toBeGreaterThan(3);
     // 页签条是一行、且只有一枚处于选中态（三枚全 active = setMode 只加了没减）。
     expect(m.barOneRow, "找不到 .doc-mode-bar ⇒ 形态页签没渲染").not.toBeNull();
-    const bar = m.barOneRow as { extra: number; activeTabs: number; pressed: number };
-    expect(bar.extra, `页签条比「一行内容 + 内距」高 ${bar.extra}px ⇒ 它回绕成了两行`).toBeLessThanOrEqual(2);
+    const bar = m.barOneRow as {
+      extra: number;
+      activeTabs: number;
+      pressed: number;
+    };
+    expect(
+      bar.extra,
+      `页签条比「一行内容 + 内距」高 ${bar.extra}px ⇒ 它回绕成了两行`,
+    ).toBeLessThanOrEqual(2);
     expect(bar.activeTabs, `页签条里 ${bar.activeTabs} 枚 active`).toBe(1);
-    expect(bar.pressed, `aria-pressed=true 的页签有 ${bar.pressed} 枚 ⇒ 三态没一起翻`).toBe(1);
+    expect(
+      bar.pressed,
+      `aria-pressed=true 的页签有 ${bar.pressed} 枚 ⇒ 三态没一起翻`,
+    ).toBe(1);
   });
 
-  test("预览态渲染出真节点，源码面退场；aria-pressed 跟着走", async ({ page }) => {
+  test("预览态渲染出真节点，源码面退场；aria-pressed 跟着走", async ({
+    page,
+  }) => {
     await openFreshDoc(page, "分栏验收·预览态");
     await modeTab(page, "预览").click();
     await expect(paneHost(page)).toHaveAttribute("data-mode", "preview");
@@ -282,7 +301,10 @@ test.describe("markdown 三态视图", () => {
     // 反向那一半：正文文本不许只是「源码原样」——预览必须真的换了壳。
     await expect(prev).not.toContainText("**转化率**");
     await expect(modeTab(page, "预览")).toHaveAttribute("aria-pressed", "true");
-    await expect(modeTab(page, "源码")).toHaveAttribute("aria-pressed", "false");
+    await expect(modeTab(page, "源码")).toHaveAttribute(
+      "aria-pressed",
+      "false",
+    );
   });
 
   test("分栏时两栏等宽、等高，宽度合起来就是正文宽", async ({ page }) => {
@@ -293,7 +315,10 @@ test.describe("markdown 三态视图", () => {
     // 窗口自证：两栏各自要有实际宽高，否则「等宽」量的是 0 == 0。
     expect(m.src.w, "源码面宽 0 ⇒ 分栏没排出版面").toBeGreaterThan(0);
     expect(m.prev.w, "预览面宽 0 ⇒ 分栏没排出版面").toBeGreaterThan(0);
-    expect(Math.abs(m.src.w - m.prev.w), `两栏不等宽：${m.src.w} vs ${m.prev.w}`).toBeLessThanOrEqual(1);
+    expect(
+      Math.abs(m.src.w - m.prev.w),
+      `两栏不等宽：${m.src.w} vs ${m.prev.w}`,
+    ).toBeLessThanOrEqual(1);
     // 两栏是【分】正文的宽，不是各自 100%（flex-basis 没归 0 时长的内容会把某一栏撑走）。
     expect(
       m.src.w + m.prev.w,
@@ -301,10 +326,15 @@ test.describe("markdown 三态视图", () => {
     ).toBeGreaterThanOrEqual(m.hostW - 2);
     expect(m.src.w + m.prev.w).toBeLessThanOrEqual(m.hostW + 2);
     // 左在右左：分栏的定义就是「左边编辑右边预览」。
-    expect(m.prev.x, "预览面不在源码面右侧 ⇒ 两栏顺序倒了").toBeGreaterThan(m.src.x);
+    expect(m.prev.x, "预览面不在源码面右侧 ⇒ 两栏顺序倒了").toBeGreaterThan(
+      m.src.x,
+    );
     // 纵向都吃满容器（长文时预览自己滚，而不是把容器撑高一截）。
     expect(m.src.h, `源码面只有 ${m.src.h} 高`).toBeGreaterThan(300);
-    expect(Math.abs(m.src.h - m.prev.h), "两栏高度不一致 ⇒ 交叉轴被某栏内容拉长").toBeLessThanOrEqual(1);
+    expect(
+      Math.abs(m.src.h - m.prev.h),
+      "两栏高度不一致 ⇒ 交叉轴被某栏内容拉长",
+    ).toBeLessThanOrEqual(1);
   });
 
   test("边打字边重渲染，且保存链路照旧 PATCH", async ({ page }) => {
@@ -318,16 +348,17 @@ test.describe("markdown 三态视图", () => {
     const marker = "本轮新增的小节";
     await editorOf(page).click();
     await page.keyboard.press("Control+A");
-    await page.keyboard.type(`## ${marker}${NL}${NL}这一段是打字打进去的。`, { delay: 5 });
+    await page.keyboard.type(`## ${marker}${NL}${NL}这一段是打字打进去的。`, {
+      delay: 5,
+    });
     // 预览读的是【当前】textarea：标题这一族最能见真伪。
     await expect(previewOf(page).locator("h2")).toHaveText(marker);
     // 自动保存那一跳（900ms 定时器）仍发得出去：分栏容器套进正文宿主之后，
     // readContent() 找 textarea 的那条路没断才算这格过。
     await expect
-      .poll(
-        () => patches.filter((p) => p.includes(marker)).length,
-        { message: "打字后没发出带新正文的 PATCH ⇒ 分栏把保存链路剪断了" },
-      )
+      .poll(() => patches.filter((p) => p.includes(marker)).length, {
+        message: "打字后没发出带新正文的 PATCH ⇒ 分栏把保存链路剪断了",
+      })
       .toBeGreaterThan(0);
     expect(docId).toBeTruthy();
   });
@@ -346,20 +377,30 @@ test.describe("markdown 三态视图", () => {
     });
     // 同上：先确认渲染的是第一篇（标题回来），再读它的形态。
     await expect(page.getByLabel("文档标题")).toHaveValue("分栏验收·偏好A");
-    await expect(paneHost(page), "切回来形态丢了").toHaveAttribute("data-mode", "split");
+    await expect(paneHost(page), "切回来形态丢了").toHaveAttribute(
+      "data-mode",
+      "split",
+    );
   });
 
-  test("新增的两条 chrome 只按内容高，正文仍拿编辑卡的八成以上", async ({ page }) => {
+  test("新增的两条 chrome 只按内容高，正文仍拿编辑卡的八成以上", async ({
+    page,
+  }) => {
     await openFreshDoc(page, "分栏验收·高度账");
     const m = await paneGeometry(page);
-    expect(m.cardH, "编辑卡高度读 0 ⇒ 页面没排版，占比判据无效").toBeGreaterThan(300);
+    expect(
+      m.cardH,
+      "编辑卡高度读 0 ⇒ 页面没排版，占比判据无效",
+    ).toBeGreaterThan(300);
     expect(
       m.src.h,
       `源码面只占编辑卡 ${m.src.h}/${m.cardH} ⇒ 页签条/状态条又开始吃正文高度了`,
     ).toBeGreaterThan(Math.round(m.cardH * 0.8));
     // 反向那一半：页签条不许为了「好看」把自己拉成一条横幅（内容高 + 内距之内才算合格）。
     const bar = m.barOneRow as { extra: number };
-    expect(bar.extra, `页签条比内容高多占 ${bar.extra}px`).toBeLessThanOrEqual(2);
+    expect(bar.extra, `页签条比内容高多占 ${bar.extra}px`).toBeLessThanOrEqual(
+      2,
+    );
   });
 });
 
@@ -386,7 +427,14 @@ test.describe("草稿与分栏要合得上", () => {
       ([id, payload]) => {
         localStorage.setItem(`opc:doc-draft:${id}`, payload);
       },
-      [docId, JSON.stringify({ title: draft.title ?? title, body_text: draft.body, saved_at: 1 })] as [string, string],
+      [
+        docId,
+        JSON.stringify({
+          title: draft.title ?? title,
+          body_text: draft.body,
+          saved_at: 1,
+        }),
+      ] as [string, string],
     );
     await page.goto(`http://127.0.0.1:${webPort}/#/documents/${docId}`, {
       waitUntil: "load",
@@ -396,7 +444,9 @@ test.describe("草稿与分栏要合得上", () => {
     return docId;
   }
 
-  test("草稿提示是一条带：按钮可见、只有一行高、能关掉且关掉不带走编辑区", async ({ page }) => {
+  test("草稿提示是一条带：按钮可见、只有一行高、能关掉且关掉不带走编辑区", async ({
+    page,
+  }) => {
     await openWithDraft(page, "分栏验收·草稿条", { body: "# 草稿里的标题" });
     const bar = page.locator("#docDraftBar");
     await expect(bar).toBeVisible();
@@ -425,7 +475,10 @@ test.describe("草稿与分栏要合得上", () => {
       actionsRight: number;
       barRight: number;
     };
-    expect(g.actionsH, "草稿条里的按钮组高度为 0 ⇒ 恢复/丢弃看不见").toBeGreaterThan(0);
+    expect(
+      g.actionsH,
+      "草稿条里的按钮组高度为 0 ⇒ 恢复/丢弃看不见",
+    ).toBeGreaterThan(0);
     expect(
       g.barRight - g.actionsRight,
       "按钮组没贴到条的右沿 ⇒ 它不在同一行（旧的两行形状）",
@@ -463,10 +516,15 @@ test.describe("草稿与分栏要合得上", () => {
     // 现在只剩 repaintPanes 一条，所以它必须自己撑起这一格：剪掉 paint 回调，这一发红。
     const cloudOutline = ["云端根", "  云端旧支"].join(NL);
     const draftOutline = ["草稿根", "  草稿支", "    草稿孙"].join(NL);
-    await openWithDraft(page, "分栏验收·思维导图草稿", { body: draftOutline }, {
-      kind: "mindmap",
-      cloud: cloudOutline,
-    });
+    await openWithDraft(
+      page,
+      "分栏验收·思维导图草稿",
+      { body: draftOutline },
+      {
+        kind: "mindmap",
+        cloud: cloudOutline,
+      },
+    );
     // 停在【预览】：断的是用户此刻看得见的那一棵树，而不是隐藏栏里恰好也有的那份。
     await modeTab(page, "预览").click();
     const labels = () =>
@@ -523,8 +581,17 @@ test.describe("草稿与分栏要合得上", () => {
         });
       })()`,
     );
-    const s = JSON.parse(shape as string) as { nested: boolean; draftAnchor: boolean };
-    expect(s.nested, "分栏容器不在 .editor-surface 里面 ⇒ 它顶替了正文宿主").toBe(true);
-    expect(s.draftAnchor, ".editor-surface 上没有 data-draftBody ⇒ 草稿锚点没了").toBe(true);
+    const s = JSON.parse(shape as string) as {
+      nested: boolean;
+      draftAnchor: boolean;
+    };
+    expect(
+      s.nested,
+      "分栏容器不在 .editor-surface 里面 ⇒ 它顶替了正文宿主",
+    ).toBe(true);
+    expect(
+      s.draftAnchor,
+      ".editor-surface 上没有 data-draftBody ⇒ 草稿锚点没了",
+    ).toBe(true);
   });
 });

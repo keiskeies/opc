@@ -36,8 +36,8 @@ import {
   mkdirSync,
   mkdtempSync,
   openSync,
-  readFileSync,
   readdirSync,
+  readFileSync,
   rmSync,
   statSync,
   utimesSync,
@@ -46,33 +46,48 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import type { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
 import { afterAll, describe, expect, it } from "vitest";
-import type { DatabaseSync } from "node:sqlite";
-import type { HubDeps } from "../../src/http/app.js";
-import type { HubServer } from "../../src/http/server.js";
-import type { WriteQueue } from "../../src/db/write-queue.js";
 import { BackupWorkerThrewError, backupName } from "../../src/db/backup.js";
-import { acquireLock, lockPathFor, type LockAcquire } from "../../src/serve/lock.js";
-import { bindFailureIsFatal, LOOPBACK_HOST, type BindDecision } from "../../src/http/bind.js";
-import {
-  bindForAssembly,
-  boot,
-  graphNotWiredMessage,
-  GRAPH_NOT_WIRED,
-  lastBackupAtMs,
-  runServeCli,
-  serveBannerOf,
-  unavailableGraphFor,
-  type BootResult,
-  type ServeIo,
-} from "../../src/serve/assemble.js";
-import type { ServeArgs } from "../../src/serve/config.js";
-import { createFakeScheduler, type FakeScheduler } from "../../src/serve/timer.js";
-import { EXIT_OK, EXIT_PROBLEM, EXIT_USAGE } from "../../src/heartbeat/maintenance.js";
 import { openDb } from "../../src/db/driver.js";
 import { migrate } from "../../src/db/migrate.js";
+import type { WriteQueue } from "../../src/db/write-queue.js";
 import { WriteQueue as RealWriteQueue } from "../../src/db/write-queue.js";
+import {
+  EXIT_OK,
+  EXIT_PROBLEM,
+  EXIT_USAGE,
+} from "../../src/heartbeat/maintenance.js";
+import type { HubDeps } from "../../src/http/app.js";
+import {
+  type BindDecision,
+  bindFailureIsFatal,
+  LOOPBACK_HOST,
+} from "../../src/http/bind.js";
+import type { HubServer } from "../../src/http/server.js";
+import {
+  type BootResult,
+  bindForAssembly,
+  boot,
+  GRAPH_NOT_WIRED,
+  graphNotWiredMessage,
+  lastBackupAtMs,
+  runServeCli,
+  type ServeIo,
+  serveBannerOf,
+  unavailableGraphFor,
+} from "../../src/serve/assemble.js";
+import type { ServeArgs } from "../../src/serve/config.js";
+import {
+  acquireLock,
+  type LockAcquire,
+  lockPathFor,
+} from "../../src/serve/lock.js";
+import {
+  createFakeScheduler,
+  type FakeScheduler,
+} from "../../src/serve/timer.js";
 
 const dirs: string[] = [];
 function tmp(prefix = "opc-serve-"): string {
@@ -249,8 +264,9 @@ function breakableQueue(path: string): { q: WriteQueue; break(): void } {
       return real.readConnection();
     },
     writeConnection: () => real.writeConnection(),
-    node: <T,>(fn: () => T): Promise<T> => Promise.resolve(fn()),
-    tx: (fn: () => Promise<void> | void): Promise<void> => Promise.resolve().then(fn),
+    node: <T>(fn: () => T): Promise<T> => Promise.resolve(fn()),
+    tx: (fn: () => Promise<void> | void): Promise<void> =>
+      Promise.resolve().then(fn),
     close: async (): Promise<void> => {
       await real.close();
     },
@@ -290,7 +306,7 @@ function gatedQueue(path: string): {
   const shell = {
     readConnection: () => real.readConnection(),
     writeConnection: () => real.writeConnection(),
-    node: <T,>(fn: () => T | Promise<T>): Promise<T> => {
+    node: <T>(fn: () => T | Promise<T>): Promise<T> => {
       const done = real.node(fn);
       if (!armed) return done;
       return done.then((v: T) => {
@@ -302,7 +318,8 @@ function gatedQueue(path: string): {
         return gate;
       });
     },
-    tx: (fn: () => Promise<void> | void): Promise<void> => Promise.resolve().then(fn),
+    tx: (fn: () => Promise<void> | void): Promise<void> =>
+      Promise.resolve().then(fn),
     close: async (): Promise<void> => {
       await real.close();
     },
@@ -328,13 +345,18 @@ function plantStalledTask(path: string, id = "T-STALL"): void {
         "INSERT INTO tasks (id, title, status, assigned_role, current_node, created_at, updated_at) " +
           "VALUES (?, '停滞夹具', 'IN_PROGRESS', 'dev', 'implement', ?, ?)",
       )
-      .run(id, Date.parse("2020-01-01T00:00:00Z"), Date.parse("2020-01-01T00:00:00Z"));
+      .run(
+        id,
+        Date.parse("2020-01-01T00:00:00Z"),
+        Date.parse("2020-01-01T00:00:00Z"),
+      );
   } finally {
     dbh.close();
   }
 }
 
-const args = (o: Partial<ServeArgs>): ServeArgs => ({ dbPath: "/virtual/hub.db", ...o }) as ServeArgs;
+const args = (o: Partial<ServeArgs>): ServeArgs =>
+  ({ dbPath: "/virtual/hub.db", ...o }) as ServeArgs;
 
 /**
  * 等一个条件成立（真定时器轮询），等不到就返回 false 让断言去红。
@@ -355,13 +377,16 @@ async function happens(cond: () => boolean, ms = 4000): Promise<boolean> {
   }
 }
 
-const names = (d: string): string[] => (existsSync(d) ? readdirSync(d).map(String) : []);
+const names = (d: string): string[] =>
+  existsSync(d) ? readdirSync(d).map(String) : [];
 
 function countEvents(path: string, kind: string): number {
   const dbh = openDb(path);
   try {
     const row = dbh
-      .prepare("SELECT COUNT(*) AS n FROM events WHERE json_extract(payload, '$.kind') = ?")
+      .prepare(
+        "SELECT COUNT(*) AS n FROM events WHERE json_extract(payload, '$.kind') = ?",
+      )
       .get(kind) as { n: number | bigint };
     return Number(row.n);
   } finally {
@@ -405,10 +430,14 @@ describe("boot 是公开 API：参数层的判据它自己也要有", () => {
     // 换上一向成功的假锁，下面那句 existsSync 就成了恒真断言 ——
     // 那种断言比不写更糟，它让人以为清理已经测过。
     const r = needErr(
-      await boot(args({ dbPath: path, port: 8787, heartbeatMs: 1, noBackup: true }), io, {
-        serve: srv.serve,
-        scheduler: createFakeScheduler(0),
-      }),
+      await boot(
+        args({ dbPath: path, port: 8787, heartbeatMs: 1, noBackup: true }),
+        io,
+        {
+          serve: srv.serve,
+          scheduler: createFakeScheduler(0),
+        },
+      ),
     );
     expect(r.code).toBe(EXIT_USAGE);
     // 心跳校验排在 serve 之后（装配顺序如此）⇒ 这一发必须走清理那条路。
@@ -419,10 +448,14 @@ describe("boot 是公开 API：参数层的判据它自己也要有", () => {
     // 少这一发，上面那句「不在」可能只是因为锁从来没被建过。
     const { io: io2 } = ioOf();
     const ok = needOk(
-      await boot(args({ dbPath: path, port: 8787, heartbeatMs: 60_000, noBackup: true }), io2, {
-        serve: srv.serve,
-        scheduler: createFakeScheduler(0),
-      }),
+      await boot(
+        args({ dbPath: path, port: 8787, heartbeatMs: 60_000, noBackup: true }),
+        io2,
+        {
+          serve: srv.serve,
+          scheduler: createFakeScheduler(0),
+        },
+      ),
     );
     expect(existsSync(lockPathFor(path))).toBe(true);
     await ok.shutdown();
@@ -432,10 +465,19 @@ describe("boot 是公开 API：参数层的判据它自己也要有", () => {
     const path = db();
     const { io, warn } = ioOf();
     const r = needOk(
-      await boot(args({ dbPath: path, port: 8787, heartbeatMs: 3 * 86_400_000, noBackup: true }), io, {
-        serve: fakeServer().serve,
-        scheduler: createFakeScheduler(0),
-      }),
+      await boot(
+        args({
+          dbPath: path,
+          port: 8787,
+          heartbeatMs: 3 * 86_400_000,
+          noBackup: true,
+        }),
+        io,
+        {
+          serve: fakeServer().serve,
+          scheduler: createFakeScheduler(0),
+        },
+      ),
     );
     expect(warn.join(" ")).toContain("粒度变粗");
     await r.shutdown();
@@ -447,7 +489,9 @@ describe("库不存在 / 锁拿不到：不创建、不留下垃圾", () => {
     const dir = tmp();
     const missing = join(dir, "typo.db");
     const { io, warn } = ioOf();
-    const r = needErr(await boot(args({ dbPath: missing, port: 8787 }), io, {}));
+    const r = needErr(
+      await boot(args({ dbPath: missing, port: 8787 }), io, {}),
+    );
     expect(r.code).toBe(EXIT_USAGE);
     // 修法的出口在 hint 里（runServeCli 把它单独打成一行 `→ …`）。
     // 断在 message 上会让这条用例绿在「文案挪了位置」这种无关变化上。
@@ -488,7 +532,12 @@ describe("库不存在 / 锁拿不到：不创建、不留下垃圾", () => {
           ok: false,
           path,
           reason: "held_by_other_process",
-          holder: { pid: 4321, startedAtMs: Date.parse("2026-03-04T05:06:07Z"), host: "h", who: "hub-serve" },
+          holder: {
+            pid: 4321,
+            startedAtMs: Date.parse("2026-03-04T05:06:07Z"),
+            host: "h",
+            who: "hub-serve",
+          },
         }),
         openQueue: (): WriteQueue => {
           opened++;
@@ -510,7 +559,12 @@ describe("库不存在 / 锁拿不到：不创建、不留下垃圾", () => {
         acquire: (): LockAcquire => ({
           ok: true,
           path: lockPathFor(path),
-          tookOverFrom: { pid: 999, startedAtMs: 1, host: "h", who: "hub-serve" },
+          tookOverFrom: {
+            pid: 999,
+            startedAtMs: 1,
+            host: "h",
+            who: "hub-serve",
+          },
         }),
         serve: fakeServer().serve,
         scheduler: createFakeScheduler(0),
@@ -682,14 +736,20 @@ describe("备份：没配目录必须说出来；配了就必须真的备一次"
   it("⭐ 首轮心跳就落一份【真的】备份；同一天再推两轮 ⇒ 仍然只有一份", async () => {
     const path = db();
     const dir = join(tmp(), "bk");
-    const s: FakeScheduler = createFakeScheduler(Date.parse("2026-03-10T08:00:00Z"));
+    const s: FakeScheduler = createFakeScheduler(
+      Date.parse("2026-03-10T08:00:00Z"),
+    );
     const { io, log } = ioOf();
     const r = needOk(
-      await boot(args({ dbPath: path, port: 8787, backupDir: dir, heartbeatMs: 60_000 }), io, {
-        serve: fakeServer().serve,
-        scheduler: s,
-        now: () => s.now(),
-      }),
+      await boot(
+        args({ dbPath: path, port: 8787, backupDir: dir, heartbeatMs: 60_000 }),
+        io,
+        {
+          serve: fakeServer().serve,
+          scheduler: s,
+          now: () => s.now(),
+        },
+      ),
     );
     expect(await happens(() => log.join(" ").includes("备份完成"))).toBe(true);
     expect(names(dir)).toHaveLength(1);
@@ -710,11 +770,15 @@ describe("备份：没配目录必须说出来；配了就必须真的备一次"
     const s = createFakeScheduler(Date.parse("2026-03-10T08:00:00Z"));
     const { io, log } = ioOf();
     const r = needOk(
-      await boot(args({ dbPath: path, port: 8787, backupDir: dir, heartbeatMs: 60_000 }), io, {
-        serve: fakeServer().serve,
-        scheduler: s,
-        now: () => s.now(),
-      }),
+      await boot(
+        args({ dbPath: path, port: 8787, backupDir: dir, heartbeatMs: 60_000 }),
+        io,
+        {
+          serve: fakeServer().serve,
+          scheduler: s,
+          now: () => s.now(),
+        },
+      ),
     );
     /**
      * ⭐ 等的是【日志】而不是【文件】，而这一改是 0036 逼出来的、不是风格。
@@ -747,11 +811,15 @@ describe("备份：没配目录必须说出来；配了就必须真的备一次"
     const s = createFakeScheduler(Date.parse("2026-03-10T08:00:00Z"));
     const { io, log, warn } = ioOf();
     const r = needOk(
-      await boot(args({ dbPath: path, port: 8787, backupDir: dir, heartbeatMs: 60_000 }), io, {
-        serve: fakeServer().serve,
-        scheduler: s,
-        now: () => s.now(),
-      }),
+      await boot(
+        args({ dbPath: path, port: 8787, backupDir: dir, heartbeatMs: 60_000 }),
+        io,
+        {
+          serve: fakeServer().serve,
+          scheduler: s,
+          now: () => s.now(),
+        },
+      ),
     );
     expect(await happens(() => existsSync(dir))).toBe(true);
     expect(await happens(() => log.join(" ").includes("备份完成"))).toBe(true);
@@ -774,11 +842,15 @@ describe("备份：没配目录必须说出来；配了就必须真的备一次"
     const s = createFakeScheduler(Date.parse("2026-03-10T08:00:00Z"));
     const { io, log } = ioOf();
     const r = needOk(
-      await boot(args({ dbPath: path, port: 8787, backupDir: dir, heartbeatMs: 60_000 }), io, {
-        serve: fakeServer().serve,
-        scheduler: s,
-        now: () => s.now(),
-      }),
+      await boot(
+        args({ dbPath: path, port: 8787, backupDir: dir, heartbeatMs: 60_000 }),
+        io,
+        {
+          serve: fakeServer().serve,
+          scheduler: s,
+          now: () => s.now(),
+        },
+      ),
     );
     // 先等首轮真的备完（这一发要测的是【之后】的关机）。
     expect(await happens(() => names(dir).length === 1)).toBe(true);
@@ -816,7 +888,14 @@ describe("备份：没配目录必须说出来；配了就必须真的备一次"
    */
   it("⭐⭐ 【判定 → 派发】之间零 await（源码形状守卫；射程随 0036 收窄过一次）", () => {
     const raw = readFileSync(
-      join(dirname(fileURLToPath(import.meta.url)), "..", "..", "src", "serve", "assemble.ts"),
+      join(
+        dirname(fileURLToPath(import.meta.url)),
+        "..",
+        "..",
+        "src",
+        "serve",
+        "assemble.ts",
+      ),
       "utf8",
     );
     /**
@@ -843,26 +922,45 @@ describe("备份：没配目录必须说出来；配了就必须真的备一次"
     const END = "backupWatch.start(";
     const a = src.indexOf(START);
     const b = src.indexOf(END);
-    expect(a, "区间起点找不到：备份那一段被改写过了，这一发要跟着改").toBeGreaterThan(-1);
-    expect(b, "区间终点找不到：派发那一句不在了 —— 那意味着备份【又开始同步跑】了").toBeGreaterThan(a);
+    expect(
+      a,
+      "区间起点找不到：备份那一段被改写过了，这一发要跟着改",
+    ).toBeGreaterThan(-1);
+    expect(
+      b,
+      "区间终点找不到：派发那一句不在了 —— 那意味着备份【又开始同步跑】了",
+    ).toBeGreaterThan(a);
     // 两端都【只能找到一处】。多处意味着有人在别处也写了这句话，
     // 而 indexOf 会悄悄选中前面那一处，扫的就不是被测的那一段（本仓 0006 §7 那一族：
     // 装配自检要能区分「扫不到」与「扫错了地方」）。
-    expect(src.split(START).length - 1, "区间起点这句话在源码里不止一处").toBe(1);
+    expect(src.split(START).length - 1, "区间起点这句话在源码里不止一处").toBe(
+      1,
+    );
     const region = src.slice(a, b + END.length);
     // await / async / .then / await import 四种写法一起挡：
     // 只挡 `await` 关键字的话，`void something.then(...)` 照样能开出一条缝，症状一模一样。
-    for (const bad of [/\bawait\b/, /\basync\b/, /\.then\s*\(/, /\bimport\s*\(/]) {
+    for (const bad of [
+      /\bawait\b/,
+      /\basync\b/,
+      /\.then\s*\(/,
+      /\bimport\s*\(/,
+    ]) {
       const hit = region.match(bad);
       expect(
         hit === null,
-        "判定与派发之间出现了 " + String(bad) + "（命中 " + String(hit?.[0]) + "）：" +
+        "判定与派发之间出现了 " +
+          String(bad) +
+          "（命中 " +
+          String(hit?.[0]) +
+          "）：" +
           "0025 §3 第 ④ 条那一族 —— 中间跨一个 await，『关机时不等备份』就变成有时生效的保护",
       ).toBe(true);
     }
     // 反向对照：同一条扫描必须能【捞到】别处的 await，否则「区间里没有」
     // 可能只是「我把整段切错了 / 过滤条件把代码也滤掉了」。
-    expect(/\bawait\b/.test(src.slice(src.indexOf("const r = await runPatrol"), a))).toBe(true);
+    expect(
+      /\bawait\b/.test(src.slice(src.indexOf("const r = await runPatrol"), a)),
+    ).toBe(true);
     /**
      * ⭐ 下面这一组是【新加的】，而且它比上面四个正则更接近这一发的本体：
      * 四个正则全过只证明「区间里没有 await」—— 有人把整段备份逻辑删掉时它们
@@ -870,8 +968,15 @@ describe("备份：没配目录必须说出来；配了就必须真的备一次"
      * 所以必须钉住「判定之后【真的派了活】」：比较、取名、派发，一步都不能被抽走。
      * ⇒ 「不许有 X」型的判据【永远】要配一条「必须有 Y」，否则把被保护区间清空就是最优解。
      */
-    for (const must of ["lastBackupAtMs(", "shouldBackUp(", "backupWatch.start("]) {
-      expect(region, "区间里少了 " + must + "：判定与派发之间被抽走了一步").toContain(must);
+    for (const must of [
+      "lastBackupAtMs(",
+      "shouldBackUp(",
+      "backupWatch.start(",
+    ]) {
+      expect(
+        region,
+        "区间里少了 " + must + "：判定与派发之间被抽走了一步",
+      ).toContain(must);
     }
     // 时刻与相位判据【必须同源】（0036 §4）。分两截断言，因为它们【不在同一截源码里】：
     // ① 区间里必须出现「atMs 取自注入的 now，退回 scheduler.now」—— 与上面
@@ -916,44 +1021,52 @@ describe("备份：没配目录必须说出来；配了就必须真的备一次"
     let releaseBackup = (): void => {};
     const g = gatedQueue(path);
     const origClose = g.q.close.bind(g.q);
-    (g.q as unknown as { close(): Promise<void> }).close = async (): Promise<void> => {
-      order.push("queue.close");
-      await origClose();
-    };
+    (g.q as unknown as { close(): Promise<void> }).close =
+      async (): Promise<void> => {
+        order.push("queue.close");
+        await origClose();
+      };
 
     const r = needOk(
-      await boot(args({ dbPath: path, port: 8787, backupDir: dir, heartbeatMs: 60_000 }), io, {
-        serve: fakeServer().serve,
-        scheduler: s,
-        openQueue: () => g.q,
-        now: () => s.now(),
-        backupVia: async (req) => {
-          order.push("backup.start");
-          await new Promise<void>((res) => {
-            releaseBackup = res;
-          });
-          order.push("backup.done");
-          // 手工写一个文件，让「备份落地」在磁盘上也可观察（这里注入的是执行点，
-          // 落盘本身不是这一发要测的东西，但留个文件能让失败现场更好读）。
-          writeFileSync(join(req.backupDir, backupName(req.nowMs ?? s.now())), "演练留下的一份");
-          return {
-            ran: true,
-            result: {
-              ok: true,
-              path: join(req.backupDir, "x.db"),
-              bytes: 1,
-              sha256: "0",
-              eventsInBackup: 0,
-              eventsInSourceNow: 0,
-              pruned: [],
-              createdAtMs: req.nowMs ?? 0,
-            },
-            warnings: [],
-            workerMs: 1,
-            totalMs: 1,
-          };
+      await boot(
+        args({ dbPath: path, port: 8787, backupDir: dir, heartbeatMs: 60_000 }),
+        io,
+        {
+          serve: fakeServer().serve,
+          scheduler: s,
+          openQueue: () => g.q,
+          now: () => s.now(),
+          backupVia: async (req) => {
+            order.push("backup.start");
+            await new Promise<void>((res) => {
+              releaseBackup = res;
+            });
+            order.push("backup.done");
+            // 手工写一个文件，让「备份落地」在磁盘上也可观察（这里注入的是执行点，
+            // 落盘本身不是这一发要测的东西，但留个文件能让失败现场更好读）。
+            writeFileSync(
+              join(req.backupDir, backupName(req.nowMs ?? s.now())),
+              "演练留下的一份",
+            );
+            return {
+              ran: true,
+              result: {
+                ok: true,
+                path: join(req.backupDir, "x.db"),
+                bytes: 1,
+                sha256: "0",
+                eventsInBackup: 0,
+                eventsInSourceNow: 0,
+                pruned: [],
+                createdAtMs: req.nowMs ?? 0,
+              },
+              warnings: [],
+              workerMs: 1,
+              totalMs: 1,
+            };
+          },
         },
-      }),
+      ),
     );
     expect(await happens(() => order.includes("backup.start"))).toBe(true);
     // 备份【还挂着】。此刻关机。
@@ -989,35 +1102,39 @@ describe("备份：没配目录必须说出来；配了就必须真的备一次"
     let releaseFirst = (): void => {};
     let calls = 0;
     const r = needOk(
-      await boot(args({ dbPath: path, port: 8787, backupDir: dir, heartbeatMs: 60_000 }), io, {
-        serve: fakeServer().serve,
-        scheduler: s,
-        now: () => s.now(),
-        backupVia: async (req) => {
-          calls++;
-          if (calls === 1) {
-            await new Promise<void>((res) => {
-              releaseFirst = res;
-            });
-          }
-          return {
-            ran: true,
-            result: {
-              ok: true,
-              path: "x",
-              bytes: 1,
-              sha256: "0",
-              eventsInBackup: 0,
-              eventsInSourceNow: 0,
-              pruned: [],
-              createdAtMs: req.nowMs ?? 0,
-            },
-            warnings: [],
-            workerMs: 1,
-            totalMs: 1,
-          };
+      await boot(
+        args({ dbPath: path, port: 8787, backupDir: dir, heartbeatMs: 60_000 }),
+        io,
+        {
+          serve: fakeServer().serve,
+          scheduler: s,
+          now: () => s.now(),
+          backupVia: async (req) => {
+            calls++;
+            if (calls === 1) {
+              await new Promise<void>((res) => {
+                releaseFirst = res;
+              });
+            }
+            return {
+              ran: true,
+              result: {
+                ok: true,
+                path: "x",
+                bytes: 1,
+                sha256: "0",
+                eventsInBackup: 0,
+                eventsInSourceNow: 0,
+                pruned: [],
+                createdAtMs: req.nowMs ?? 0,
+              },
+              warnings: [],
+              workerMs: 1,
+              totalMs: 1,
+            };
+          },
         },
-      }),
+      ),
     );
     expect(await happens(() => calls === 1)).toBe(true);
     // 跨日 ⇒ shouldBackUp 变真 ⇒ 第二轮【本该】去备，但上一份还挂着。
@@ -1050,18 +1167,25 @@ describe("备份：没配目录必须说出来；配了就必须真的备一次"
     const s = createFakeScheduler(Date.parse("2026-03-10T08:00:00Z"));
     const { io, warn } = ioOf();
     const r = needOk(
-      await boot(args({ dbPath: path, port: 8787, backupDir: dir, heartbeatMs: 60_000 }), io, {
-        serve: fakeServer().serve,
-        scheduler: s,
-        now: () => s.now(),
-        backupVia: async () => {
-          throw new BackupWorkerThrewError("worker 内部抛错：keep 必须是 >= 1 的整数", [
-            "已经攒着的一条告警",
-          ]);
+      await boot(
+        args({ dbPath: path, port: 8787, backupDir: dir, heartbeatMs: 60_000 }),
+        io,
+        {
+          serve: fakeServer().serve,
+          scheduler: s,
+          now: () => s.now(),
+          backupVia: async () => {
+            throw new BackupWorkerThrewError(
+              "worker 内部抛错：keep 必须是 >= 1 的整数",
+              ["已经攒着的一条告警"],
+            );
+          },
         },
-      }),
+      ),
     );
-    expect(await happens(() => warn.join(" ").includes("没有得出结论"))).toBe(true);
+    expect(await happens(() => warn.join(" ").includes("没有得出结论"))).toBe(
+      true,
+    );
     // 抛错之前攒的告警也要带出来（backup.worker 里那一栏存在的理由）。
     expect(warn.join(" ")).toContain("已经攒着的一条告警");
     // 清理不被它打断：锁必须还掉。
@@ -1083,19 +1207,25 @@ describe("备份：没配目录必须说出来；配了就必须真的备一次"
     const s = createFakeScheduler(Date.parse("2026-03-10T08:00:00Z"));
     const { io, warn } = ioOf();
     const r = needOk(
-      await boot(args({ dbPath: path, port: 8787, backupDir: dir, heartbeatMs: 60_000 }), io, {
-        serve: fakeServer().serve,
-        scheduler: s,
-        now: () => s.now(),
-        backupVia: async () => ({
-          ran: false,
-          failure: "worker_unavailable",
-          message: "worker 起不来：模拟",
-          warnings: [],
-        }),
-      }),
+      await boot(
+        args({ dbPath: path, port: 8787, backupDir: dir, heartbeatMs: 60_000 }),
+        io,
+        {
+          serve: fakeServer().serve,
+          scheduler: s,
+          now: () => s.now(),
+          backupVia: async () => ({
+            ran: false,
+            failure: "worker_unavailable",
+            message: "worker 起不来：模拟",
+            warnings: [],
+          }),
+        },
+      ),
     );
-    expect(await happens(() => warn.join(" ").includes("worker_unavailable"))).toBe(true);
+    expect(
+      await happens(() => warn.join(" ").includes("worker_unavailable")),
+    ).toBe(true);
     expect(warn.join(" ")).toContain("没有得出结论");
     // ⭐ 反向对照：不许出现「备份失败（worker_unavailable）」这种把两个维度混起来的说法。
     expect(warn.join(" ")).not.toContain("备份失败（");
@@ -1134,12 +1264,16 @@ describe("备份：没配目录必须说出来；配了就必须真的备一次"
     const srv = pausableServer();
     const { io } = ioOf();
     const r = needOk(
-      await boot(args({ dbPath: path, port: 8787, backupDir: dir, heartbeatMs: 60_000 }), io, {
-        serve: srv.serve,
-        scheduler: s,
-        openQueue: () => g.q,
-        now: () => s.now(),
-      }),
+      await boot(
+        args({ dbPath: path, port: 8787, backupDir: dir, heartbeatMs: 60_000 }),
+        io,
+        {
+          serve: srv.serve,
+          scheduler: s,
+          openQueue: () => g.q,
+          now: () => s.now(),
+        },
+      ),
     );
     // 让【启动那一轮】先跑干净（它既报停滞、也备第一份）。
     // 闸门在那之后才武装，否则 boot 自己的完整性检查会被挂住（见 gatedQueue ①）。
@@ -1191,11 +1325,15 @@ describe("备份：没配目录必须说出来；配了就必须真的备一次"
     const s = createFakeScheduler(Date.parse("2026-03-10T08:00:00Z"));
     const { io } = ioOf();
     const r = needOk(
-      await boot(args({ dbPath: path, port: 8787, backupDir: dir, heartbeatMs: 60_000 }), io, {
-        serve: fakeServer().serve,
-        scheduler: s,
-        now: () => s.now(),
-      }),
+      await boot(
+        args({ dbPath: path, port: 8787, backupDir: dir, heartbeatMs: 60_000 }),
+        io,
+        {
+          serve: fakeServer().serve,
+          scheduler: s,
+          now: () => s.now(),
+        },
+      ),
     );
     await r.shutdown();
     const got = names(dir);
@@ -1274,7 +1412,9 @@ describe("清理：每一条出口都还锁、都关队列、都关服务", () =
       await boot(args({ dbPath: path, port: 8787, noBackup: true }), io, {
         openQueue: () => q.q,
         serve: (): Promise<HubServer> => {
-          const e = new Error("listen EADDRINUSE: address already in use :::8787");
+          const e = new Error(
+            "listen EADDRINUSE: address already in use :::8787",
+          );
           (e as { code?: string }).code = "EADDRINUSE";
           throw e;
         },
@@ -1329,11 +1469,15 @@ describe("心跳：首轮立刻跑；坏到底要出声并交出退出权", () =
     const s = createFakeScheduler(Date.parse("2026-03-10T08:00:00Z"));
     const { io } = ioOf();
     const r = needOk(
-      await boot(args({ dbPath: path, port: 8787, heartbeatMs: 60_000, noBackup: true }), io, {
-        serve: fakeServer().serve,
-        scheduler: s,
-        now: () => s.now(),
-      }),
+      await boot(
+        args({ dbPath: path, port: 8787, heartbeatMs: 60_000, noBackup: true }),
+        io,
+        {
+          serve: fakeServer().serve,
+          scheduler: s,
+          now: () => s.now(),
+        },
+      ),
     );
     // 判据不是「有没有写停滞事件」（库里没有停滞任务，那是 patrol.test.ts 的事），
     // 而是【跑完过一轮】：假时钟一次没推进，而下一轮已被排上 ⇒ 只有真跑完一轮才会这样。
@@ -1353,15 +1497,19 @@ describe("心跳：首轮立刻跑；坏到底要出声并交出退出权", () =
     let fatal = 0;
     const { io, warn } = ioOf();
     const r = needOk(
-      await boot(args({ dbPath: path, port: 8787, heartbeatMs: 60_000, noBackup: true }), io, {
-        openQueue: () => brk.q,
-        serve: srv.serve,
-        scheduler: s,
-        now: () => s.now(),
-        onHeartbeatFatal: () => {
-          fatal++;
+      await boot(
+        args({ dbPath: path, port: 8787, heartbeatMs: 60_000, noBackup: true }),
+        io,
+        {
+          openQueue: () => brk.q,
+          serve: srv.serve,
+          scheduler: s,
+          now: () => s.now(),
+          onHeartbeatFatal: () => {
+            fatal++;
+          },
         },
-      }),
+      ),
     );
     // 首轮【成功】之后才把库扳坏 —— 让第一轮去证「默认是好的」，
     // 否则这一发从头红到尾，分不清是夹具坏了还是行为坏了。
@@ -1374,7 +1522,9 @@ describe("心跳：首轮立刻跑；坏到底要出声并交出退出权", () =
     // 但它红得有意义：它会把「阈值到底是几」这件事逼到台面上。
     for (let i = 1; i <= 2; i++) {
       s.advance(60_000);
-      expect(await happens(() => r.heartbeat.consecutiveFailures === i)).toBe(true);
+      expect(await happens(() => r.heartbeat.consecutiveFailures === i)).toBe(
+        true,
+      );
       expect(fatal).toBe(0); // 还没到阈值
     }
     s.advance(60_000);
@@ -1400,15 +1550,23 @@ describe("心跳：首轮立刻跑；坏到底要出声并交出退出权", () =
     const s = createFakeScheduler(Date.parse("2026-03-10T08:00:00Z"));
     const { io } = ioOf();
     const r = needOk(
-      await boot(args({ dbPath: path, port: 8787, heartbeatMs: 90_000, noBackup: true }), io, {
-        serve: fakeServer().serve,
-        scheduler: s,
-        heartbeatMs: 60_000, // 覆盖 args 里的 90_000
-      }),
+      await boot(
+        args({ dbPath: path, port: 8787, heartbeatMs: 90_000, noBackup: true }),
+        io,
+        {
+          serve: fakeServer().serve,
+          scheduler: s,
+          heartbeatMs: 60_000, // 覆盖 args 里的 90_000
+        },
+      ),
     );
     expect(await happens(() => !r.heartbeat.running)).toBe(true);
     s.advance(60_000); // 按 overrides 的 60_000 该叫一轮；按 args 的 90_000 不该
-    expect(await happens(() => r.heartbeat.consecutiveFailures === 0 && !r.heartbeat.running)).toBe(true);
+    expect(
+      await happens(
+        () => r.heartbeat.consecutiveFailures === 0 && !r.heartbeat.running,
+      ),
+    ).toBe(true);
     // 判据：推进到 60_000 之后，那一轮到点了（下一轮被重新排上 ⇒ pending 回到 1）。
     expect(s.pending()).toBe(1);
     s.advance(29_999); // 90_000 还没到，也不该有第二发
@@ -1480,7 +1638,10 @@ describe("O10 动作 1：心跳那一跳真的执行到期审批（接线行为�
       const row = check
         .prepare("SELECT status, decided_by FROM approvals WHERE id = 'A-TO'")
         .get() as Record<string, unknown>;
-      expect(["rejected", "timeout-executor"]).toEqual([row["status"], row["decided_by"]]);
+      expect(["rejected", "timeout-executor"]).toEqual([
+        row["status"],
+        row["decided_by"],
+      ]);
       const ev = check
         .prepare(
           "SELECT actor_type, action FROM events WHERE target = 'A-TO' AND action = 'approval'",
@@ -1586,7 +1747,9 @@ describe("决策写路径是哪一条，启动时就要说出来（两条路线�
     const graphFor = unavailableGraphFor();
     const g = graphFor("task-42"); // 装配时抛的话，看板也打不开，而真相只是「恢复要人喊一声」
     expect(typeof g.invoke).toBe("function");
-    await expect(g.invoke({} as never)).rejects.toThrow(/hub resume --db <库路径> --task task-42/u);
+    await expect(g.invoke({} as never)).rejects.toThrow(
+      /hub resume --db <库路径> --task task-42/u,
+    );
   });
 
   it("⭐ 工厂拿到库路径时，报错里印的是【能直接跑】的那条命令", async () => {
@@ -1599,20 +1762,23 @@ describe("决策写路径是哪一条，启动时就要说出来（两条路线�
     );
     // 空串按【没给】处理：印 `--db ` 后面跟一个空格，是一条【看着完整、必然挂】的命令，
     // 比印占位符更坏 —— 所以这一格不是格式偏好。
-    await expect(unavailableGraphFor("")("t1").invoke({} as never)).rejects.toThrow(
-      /--db <库路径> --task t1/u,
-    );
+    await expect(
+      unavailableGraphFor("")("t1").invoke({} as never),
+    ).rejects.toThrow(/--db <库路径> --task t1/u);
   });
 
   it("getState 也必须抛：返回一个「看起来是空状态」的对象会造成【假的成功】", async () => {
     // makeResumeGraph 用 getState 判「有没有 pending interrupt」。假空状态会让它选
     // invoke(null)，而那在已完成 thread 上【不重放节点】(0006 §1)
     // ⇒ HTTP 200、日志一个字没有、卡片停在批准 —— 最难诊断的那类失效。
-    await expect(unavailableGraphFor()("t9").graph.getState("t9" as never)).rejects.toThrow(
-      /task_id = t9/u,
-    );
-    await expect(unavailableGraphFor()("t9").graph.invoke({} as never, { configurable: { thread_id: "t9" } }))
-      .rejects.toThrow(GRAPH_NOT_WIRED);
+    await expect(
+      unavailableGraphFor()("t9").graph.getState("t9" as never),
+    ).rejects.toThrow(/task_id = t9/u);
+    await expect(
+      unavailableGraphFor()("t9").graph.invoke({} as never, {
+        configurable: { thread_id: "t9" },
+      }),
+    ).rejects.toThrow(GRAPH_NOT_WIRED);
   });
 
   it("报错文案三件事都要有：为什么没接、归属哪条决策、现在能做什么", () => {
@@ -1679,31 +1845,53 @@ describe("监听地址（Task 4.1）：绑定策略跟随【实际装配结果�
     // 而且它读起来更精确 —— 精确到足以让下一个人顺手改对。
     // 这里选偏严（两个都在才算接通），理由与取向写在 bindForAssembly 文件头。
     // 这一发的作用是：那次「顺手改精确」必须红，而不是安静地放宽一条安全边界。
-    const onlyRedeem = { redeemApprovalToken: async () => ({ ok: false as const, reason: "expired" as const }) };
-    expect(bindForAssembly({ requested: "0.0.0.0", deps: onlyRedeem }).remoteApprovalsWired).toBe(
-      false,
-    );
-    const onlyMint = { issueApprovalToken: async () => ({ ok: false as const, reason: "approval_missing" as const }) };
-    expect(bindForAssembly({ requested: "0.0.0.0", deps: onlyMint }).remoteApprovalsWired).toBe(
-      false,
-    );
+    const onlyRedeem = {
+      redeemApprovalToken: async () => ({
+        ok: false as const,
+        reason: "expired" as const,
+      }),
+    };
+    expect(
+      bindForAssembly({ requested: "0.0.0.0", deps: onlyRedeem })
+        .remoteApprovalsWired,
+    ).toBe(false);
+    const onlyMint = {
+      issueApprovalToken: async () => ({
+        ok: false as const,
+        reason: "approval_missing" as const,
+      }),
+    };
+    expect(
+      bindForAssembly({ requested: "0.0.0.0", deps: onlyMint })
+        .remoteApprovalsWired,
+    ).toBe(false);
     // 反向对照：两个都在才算通 —— 证明上面那两个 false 不是「恒 false」。
     expect(
-      bindForAssembly({ requested: "0.0.0.0", deps: { ...onlyRedeem, ...onlyMint } })
-        .remoteApprovalsWired,
+      bindForAssembly({
+        requested: "0.0.0.0",
+        deps: { ...onlyRedeem, ...onlyMint },
+      }).remoteApprovalsWired,
     ).toBe(true);
   });
 
   it("回环【永远】放行，与通道在不在无关（Phase 4 的能力不该是 Phase 2 的启动依赖）", () => {
-    for (const deps of [{}, { redeemApprovalToken: async () => ({ ok: true, taskId: "t" }) }]) {
-      const r = bindForAssembly({ requested: LOOPBACK_HOST, deps: deps as never });
+    for (const deps of [
+      {},
+      { redeemApprovalToken: async () => ({ ok: true, taskId: "t" }) },
+    ]) {
+      const r = bindForAssembly({
+        requested: LOOPBACK_HOST,
+        deps: deps as never,
+      });
       expect(r.outcome.ok).toBe(true);
       if (r.outcome.ok !== true) throw new Error("前置失败");
       expect(r.outcome.decision.exposure).toBe("loopback");
     }
     // 没填 requested 也一样。这一发挡的是「有人把默认那一支也去查 remoteApprovalsWired」——
     // 那一改动让桌面端在通道没接时【起不来】，而它看起来只是多加了一条一致的检查。
-    expect(bindForAssembly({ requested: undefined, deps: {} }).outcome.ok).toBe(true);
+    expect(bindForAssembly({ requested: undefined, deps: {} }).outcome.ok).toBe(
+      true,
+    );
   });
 
   it("boot 把 decision 真的交到了 serve 手上，而 BootResult 报的是【那个】地址", async () => {
@@ -1720,7 +1908,11 @@ describe("监听地址（Task 4.1）：绑定策略跟随【实际装配结果�
     // 这三行必须【互相对得上】：假 server 收到的、BootResult 报的、实际默认值。
     // 只断言 BootResult 的话，「装配算出一个地址、传给 serve 另一个、往上报第三个」
     // 这种三处不一致能全绿 —— 而 CLI 那行「Hub 已在 X:port」读的正是 BootResult。
-    expect(srv.seen()).toEqual({ port: 8787, host: LOOPBACK_HOST, exposure: "loopback" });
+    expect(srv.seen()).toEqual({
+      port: 8787,
+      host: LOOPBACK_HOST,
+      exposure: "loopback",
+    });
     expect(r.bindHost).toBe(LOOPBACK_HOST);
     expect(r.exposure).toBe("loopback");
     await r.shutdown();
@@ -1732,7 +1924,13 @@ describe("监听地址（Task 4.1）：绑定策略跟随【实际装配结果�
     const srv = bindRecordingServer();
     const r = needOk(
       await boot(
-        args({ dbPath: path, port: 8787, bind: "localhost", heartbeatMs: 60_000, noBackup: true }),
+        args({
+          dbPath: path,
+          port: 8787,
+          bind: "localhost",
+          heartbeatMs: 60_000,
+          noBackup: true,
+        }),
         io,
         { serve: srv.serve, scheduler: createFakeScheduler(0) },
       ),
@@ -1741,9 +1939,11 @@ describe("监听地址（Task 4.1）：绑定策略跟随【实际装配结果�
     expect(r.bindHost).toBe(LOOPBACK_HOST);
     // 「响一声」的判据是【内容】不是条数：装配自己会打「决策写路径 = ...」那一句，
     // 断 warn.length 会绿在错的那一句上。
-    expect(warn.some((w) => w.includes("忽略 --bind") && w.includes("not_an_ip_literal"))).toBe(
-      true,
-    );
+    expect(
+      warn.some(
+        (w) => w.includes("忽略 --bind") && w.includes("not_an_ip_literal"),
+      ),
+    ).toBe(true);
     await r.shutdown();
   });
 
@@ -1753,7 +1953,13 @@ describe("监听地址（Task 4.1）：绑定策略跟随【实际装配结果�
     const srv = bindRecordingServer();
     const r = needOk(
       await boot(
-        args({ dbPath: path, port: 8787, bind: "::1", heartbeatMs: 60_000, noBackup: true }),
+        args({
+          dbPath: path,
+          port: 8787,
+          bind: "::1",
+          heartbeatMs: 60_000,
+          noBackup: true,
+        }),
         io,
         { serve: srv.serve, scheduler: createFakeScheduler(0) },
       ),
@@ -1771,10 +1977,14 @@ describe("监听地址（Task 4.1）：绑定策略跟随【实际装配结果�
     const path = db();
     const { io, warn } = ioOf();
     const r = needOk(
-      await boot(args({ dbPath: path, port: 8787, heartbeatMs: 60_000, noBackup: true }), io, {
-        serve: bindRecordingServer().serve,
-        scheduler: createFakeScheduler(0),
-      }),
+      await boot(
+        args({ dbPath: path, port: 8787, heartbeatMs: 60_000, noBackup: true }),
+        io,
+        {
+          serve: bindRecordingServer().serve,
+          scheduler: createFakeScheduler(0),
+        },
+      ),
     );
     expect(warn.some((w) => /--bind|监听|暴露|exposure/iu.test(w))).toBe(false);
     await r.shutdown();
@@ -1788,11 +1998,19 @@ describe("监听地址（Task 4.1）：绑定策略跟随【实际装配结果�
     // waitForShutdown 等一个真信号才返回，而给自己发 SIGINT 会被同进程其他用例
     // 留下的信号监听一起收到（它注册了不注销），所以那一行【在本机一次也没被执行过】。
     // 「只绑回环」这四个字今天没有任何测试见过。
-    const loopback = serveBannerOf({ bindHost: LOOPBACK_HOST, port: 8787, exposure: "loopback" });
+    const loopback = serveBannerOf({
+      bindHost: LOOPBACK_HOST,
+      port: 8787,
+      exposure: "loopback",
+    });
     expect(loopback).toContain("127.0.0.1:8787");
     expect(loopback).toContain("只绑回环");
 
-    const lan = serveBannerOf({ bindHost: "10.1.2.3", port: 9000, exposure: "lan" });
+    const lan = serveBannerOf({
+      bindHost: "10.1.2.3",
+      port: 9000,
+      exposure: "lan",
+    });
     expect(lan).toContain("10.1.2.3:9000");
     // ⚠ 承重的是【这一句不含「只绑回环】，而不是「含 exposure=lan」。
     // 只断后者的话，实现写成「只绑回环（⚠ exposure=lan）」照样全绿 ——
@@ -1801,9 +2019,13 @@ describe("监听地址（Task 4.1）：绑定策略跟随【实际装配结果�
     // 反向对照（地址维）：写死 127.0.0.1 的实现会让上面那句 lan 断言红。
     // 这里再钉一次【端口也是取的入参】：只写对 host 而把 port 写死，
     // 是这类「修了一半」最常见的形状。
-    expect(serveBannerOf({ bindHost: "127.0.0.1", port: 1234, exposure: "loopback" })).toContain(
-      ":1234",
-    );
+    expect(
+      serveBannerOf({
+        bindHost: "127.0.0.1",
+        port: 1234,
+        exposure: "loopback",
+      }),
+    ).toContain(":1234");
   });
 });
 
@@ -1817,16 +2039,24 @@ describe("入口契约与「真起一个 Hub」", () => {
 
   it("参数错 ⇒ EXIT_USAGE，且【同时】给出错误原文与用法（对着报错能自己修）", async () => {
     const { io, warn } = ioOf();
-    expect((await runServeCli(["--db", "/tmp/nope-x.db", "--port", "70000"], io)).code).toBe(EXIT_USAGE);
+    expect(
+      (await runServeCli(["--db", "/tmp/nope-x.db", "--port", "70000"], io))
+        .code,
+    ).toBe(EXIT_USAGE);
     expect(warn.length).toBeGreaterThanOrEqual(2);
     expect(warn[0]).toContain("65535");
   });
 
   it("库不存在 ⇒ 非 0 退出码，hint 单独一行带箭头", async () => {
     const { io, warn } = ioOf();
-    expect((await runServeCli(["--db", join(tmp(), "absent.db"), "--port", "8787"], io)).code).toBe(
-      EXIT_USAGE,
-    );
+    expect(
+      (
+        await runServeCli(
+          ["--db", join(tmp(), "absent.db"), "--port", "8787"],
+          io,
+        )
+      ).code,
+    ).toBe(EXIT_USAGE);
     expect(warn.some((w) => w.startsWith("→ "))).toBe(true);
   });
 
@@ -1836,11 +2066,16 @@ describe("入口契约与「真起一个 Hub」", () => {
     const portFile = join(dir, "hub.port");
     const { io, log, warn } = ioOf();
     const r = needOk(
-      await boot(args({ dbPath: path, portFile, heartbeatMs: 60_000, noBackup: true }), io, {
-        acquire: (p): LockAcquire => acquireLock(p, { who: "hub-serve-test" }),
-        scheduler: createFakeScheduler(Date.parse("2026-03-10T08:00:00Z")),
-        token: "tok-fixed-for-assert",
-      }),
+      await boot(
+        args({ dbPath: path, portFile, heartbeatMs: 60_000, noBackup: true }),
+        io,
+        {
+          acquire: (p): LockAcquire =>
+            acquireLock(p, { who: "hub-serve-test" }),
+          scheduler: createFakeScheduler(Date.parse("2026-03-10T08:00:00Z")),
+          token: "tok-fixed-for-assert",
+        },
+      ),
     );
     expect(r.port).toBeGreaterThan(0);
     expect(readFileSync(portFile, "utf8").trim()).toBe(String(r.port));

@@ -571,7 +571,9 @@ describe("死模块哨兵", () => {
     // 会重新活下来，而这条红不会自己响 —— 任何控制都自证不了自己还在）。
     // 所以别把它当冗余简化掉：上面那条在两个输入下都绿，只有这一条能分辨它们。
     expect(
-      readout(new Map([...BASELINE].filter(([k]) => k !== "harness/routing.ts"))),
+      readout(
+        new Map([...BASELINE].filter(([k]) => k !== "harness/routing.ts")),
+      ),
     ).not.toBe(NOW);
   });
 

@@ -19,7 +19,6 @@ import {
   unresolvableClaimIndexes,
 } from "@opc/contracts";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { fixtureTmp } from "../fixtures/fixture-dir.js";
 import { migrate } from "../../src/db/migrate.js";
 import {
   artifactPath,
@@ -28,6 +27,7 @@ import {
   relativize,
   sha256Text,
 } from "../../src/evidence/store.js";
+import { fixtureTmp } from "../fixtures/fixture-dir.js";
 
 const TMP = fixtureTmp("evidence", import.meta.url);
 
@@ -38,9 +38,7 @@ let seq = 0;
 
 async function migrated(): Promise<Db> {
   const { openDb } = await import("../../src/db/driver.js");
-  const db = openDb(
-    join(TMP, "ev-" + process.pid + "-" + ++seq + ".db"),
-  ) ;
+  const db = openDb(join(TMP, "ev-" + process.pid + "-" + ++seq + ".db"));
   opened.push(db);
   migrate(db);
   return db;
@@ -107,9 +105,9 @@ describe("schema： claims 必须有依据", () => {
     // 没有任何可判定的东西而拦它（unresolvableClaimIndexes 空 + criteria 判定）。
     // 若在 schema 里 min(1)，就等于把「语义充分性」焊死成结构要求，
     // 以后想允许「纯制品交接」（只有文件没有主张）会撞上契约层。
-    expect(
-      evidenceBundleSchema.safeParse(bundle({ claims: [] })).success,
-    ).toBe(true);
+    expect(evidenceBundleSchema.safeParse(bundle({ claims: [] })).success).toBe(
+      true,
+    );
   });
 
   it("refs 里含空串 → 拒绝（空串是「非空数组」最常见的蒙混方式）", () => {
@@ -124,9 +122,8 @@ describe("schema： claims 必须有依据", () => {
       { path: "a.ts", sha256: sha, bytes: 3 },
     ];
     expect(
-      evidenceBundleSchema.safeParse(
-        bundle({ artifacts: art("x".repeat(64)) }),
-      ).success,
+      evidenceBundleSchema.safeParse(bundle({ artifacts: art("x".repeat(64)) }))
+        .success,
     ).toBe(false);
     expect(
       evidenceBundleSchema.safeParse(
@@ -149,7 +146,9 @@ describe("schema： claims 必须有依据", () => {
     for (const b of [-1, 1.5]) {
       expect(
         evidenceBundleSchema.safeParse(
-          bundle({ artifacts: [{ path: "a", sha256: sha256Text("x"), bytes: b }] }),
+          bundle({
+            artifacts: [{ path: "a", sha256: sha256Text("x"), bytes: b }],
+          }),
         ).success,
       ).toBe(false);
     }
@@ -176,7 +175,8 @@ describe("schema： claims 必须有依据", () => {
 
   it("多带未知字段 → 拒绝（strict）。放行的话，字段改名会伪装成『老字段还在』", () => {
     expect(
-      evidenceBundleSchema.safeParse(bundle({ model_family: "claude" })).success,
+      evidenceBundleSchema.safeParse(bundle({ model_family: "claude" }))
+        .success,
     ).toBe(false);
   });
 
@@ -197,8 +197,19 @@ describe("schema： claims 必须有依据", () => {
 describe("引用可解性：refs 非空 ≠ 引用成立", () => {
   it("ref 指向包内制品路径 → 可解", () => {
     const b = valid({
-      artifacts: [{ path: "artifacts/T-1/code_diff/x.diff", sha256: sha256Text("d"), bytes: 1 }],
-      claims: [{ text: "看这个 diff", evidence_refs: ["artifacts/T-1/code_diff/x.diff"] }],
+      artifacts: [
+        {
+          path: "artifacts/T-1/code_diff/x.diff",
+          sha256: sha256Text("d"),
+          bytes: 1,
+        },
+      ],
+      claims: [
+        {
+          text: "看这个 diff",
+          evidence_refs: ["artifacts/T-1/code_diff/x.diff"],
+        },
+      ],
     });
     expect(unresolvableClaimIndexes(b)).toEqual([]);
   });
@@ -213,7 +224,9 @@ describe("引用可解性：refs 非空 ≠ 引用成立", () => {
 
   it("ref 是 http(s) 外链 → 算可解（§8.1 允许外部链接类依据）", () => {
     const b = valid({
-      claims: [{ text: "线上看板", evidence_refs: ["https://example.com/dash"] }],
+      claims: [
+        { text: "线上看板", evidence_refs: ["https://example.com/dash"] },
+      ],
     });
     expect(unresolvableClaimIndexes(b)).toEqual([]);
   });
@@ -267,7 +280,16 @@ describe("制品落盘与路径安全（§5.10）", () => {
     for (const v of bad) {
       for (const key of ["task_id", "bundle_type", "bundle_id"] as const) {
         expect(() =>
-          artifactPath("/r", { task_id: "T-1", bundle_type: "code_diff", bundle_id: ID_A, [key]: v }, "diff"),
+          artifactPath(
+            "/r",
+            {
+              task_id: "T-1",
+              bundle_type: "code_diff",
+              bundle_id: ID_A,
+              [key]: v,
+            },
+            "diff",
+          ),
         ).toThrow();
       }
     }
@@ -294,7 +316,9 @@ describe("制品落盘与路径安全（§5.10）", () => {
   });
 
   it("artifactsRoot 的默认形状是 ~/.opc-os/artifacts", () => {
-    expect(artifactsRoot("/home/u")).toBe(join("/home/u", ".opc-os", "artifacts"));
+    expect(artifactsRoot("/home/u")).toBe(
+      join("/home/u", ".opc-os", "artifacts"),
+    );
   });
 
   it("relativize 把绝对路径折回 root 相对，且越界路径抛错", () => {
@@ -316,7 +340,17 @@ describe("store.verify：完整性对账", () => {
   let artifactSeq = 0;
   const nextId = (): string => {
     const h = (++artifactSeq).toString(16).padStart(32, "0");
-    return h.slice(0, 8) + "-" + h.slice(8, 12) + "-4" + h.slice(13, 16) + "-8" + h.slice(17, 20) + "-" + h.slice(20, 32);
+    return (
+      h.slice(0, 8) +
+      "-" +
+      h.slice(8, 12) +
+      "-4" +
+      h.slice(13, 16) +
+      "-8" +
+      h.slice(17, 20) +
+      "-" +
+      h.slice(20, 32)
+    );
   };
 
   async function withArtifact(
@@ -390,7 +424,11 @@ describe("store.verify：完整性对账", () => {
     const { store } = await withArtifact();
     const b = valid({
       artifacts: [
-        { path: "https://example.com/board", sha256: sha256Text("x"), bytes: 1 },
+        {
+          path: "https://example.com/board",
+          sha256: sha256Text("x"),
+          bytes: 1,
+        },
       ],
     });
     const r = store.verify(b);
@@ -519,7 +557,10 @@ describe("store.register：写 evidence_bundles 那一行", () => {
       },
       now: () => 1700000000123,
     });
-    const b = valid({ task_id: "T-R", metrics: { coverage: 81.5, p0_defects: 0 } });
+    const b = valid({
+      task_id: "T-R",
+      metrics: { coverage: 81.5, p0_defects: 0 },
+    });
     store.register(b, { passed: true, note: "自检，非独立验证" });
 
     expect(captured.length).toBe(1);
@@ -548,7 +589,7 @@ describe("store.register：写 evidence_bundles 那一行", () => {
     });
   });
 
-  it("metrics 的三态落库：缺省 → NULL；空 record → \"{}\"；两者不折叠", async () => {
+  it('metrics 的三态落库：缺省 → NULL；空 record → "{}"；两者不折叠', async () => {
     const db = await migrated();
     db.exec(
       "INSERT INTO tasks (id, title, status, assigned_role, current_node, " +
@@ -564,7 +605,9 @@ describe("store.register：写 evidence_bundles 那一行", () => {
     });
     const metricsCol = (id: string): unknown =>
       (
-        db.prepare("SELECT metrics FROM evidence_bundles WHERE id = ?").get(id) as {
+        db
+          .prepare("SELECT metrics FROM evidence_bundles WHERE id = ?")
+          .get(id) as {
           metrics: unknown;
         }
       ).metrics;
@@ -573,14 +616,17 @@ describe("store.register：写 evidence_bundles 那一行", () => {
     // 包二（空 record）：「带了但没声明具体指标」要存成 "{}"，不能也折成 NULL
     store.register(valid({ bundle_id: ID_B, task_id: "T-3", metrics: {} }));
     const a = metricsCol(ID_A);
-    expect(a, "缺省必须是 NULL —— 不是字符串 \"undefined\"，也不是 \"{}\"").toBeNull();
+    expect(
+      a,
+      '缺省必须是 NULL —— 不是字符串 "undefined"，也不是 "{}"',
+    ).toBeNull();
     expect(JSON.parse(metricsCol(ID_B) as string)).toEqual({});
     // 按 id 读而不是按 created_at 读：两包的 now() 同为 1，按时间读回是【不确定的】——
     // 第一版就是这么写的，写完自己看到才改（时间戳相同 ⇒ 排序退化为主键序，属实现细节）。
     expect(a, "NULL 与 {} 是两种说法，落库后仍要分得开").not.toEqual({});
   });
 
-  it("不传 selfCheck → 存 NULL，而不是字符串 \"undefined\"", async () => {
+  it('不传 selfCheck → 存 NULL，而不是字符串 "undefined"', async () => {
     const db = await migrated();
     let stored: unknown = "未调用";
     const store = new EvidenceStore({

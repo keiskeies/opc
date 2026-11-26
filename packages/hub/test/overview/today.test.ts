@@ -19,15 +19,25 @@ import { mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { fixtureTmp } from "../fixtures/fixture-dir.js";
-import { DRIVER_ON } from "../fixtures/driver-state.js";
-import { WriteQueue } from "../../src/db/write-queue.js";
 import { migrate } from "../../src/db/migrate.js";
-import { handleRequest, matchRoute, type HubDeps, type HubRequest } from "../../src/http/app.js";
-import { readToday, BLOCKED_STATUSES, CEO_DECISION_STATUSES, DEFAULT_WINDOW_MS } from "../../src/overview/today.js";
+import { WriteQueue } from "../../src/db/write-queue.js";
 import { InMemoryEventBus } from "../../src/events/bus.js";
+import {
+  type HubDeps,
+  type HubRequest,
+  handleRequest,
+  matchRoute,
+} from "../../src/http/app.js";
 import { newLocalToken, signedHeaders } from "../../src/http/auth.js";
 import { LOOPBACK_HOST } from "../../src/http/bind.js";
+import {
+  BLOCKED_STATUSES,
+  CEO_DECISION_STATUSES,
+  DEFAULT_WINDOW_MS,
+  readToday,
+} from "../../src/overview/today.js";
+import { DRIVER_ON } from "../fixtures/driver-state.js";
+import { fixtureTmp } from "../fixtures/fixture-dir.js";
 
 const TMP = fixtureTmp("overview-today", import.meta.url);
 const queues: WriteQueue[] = [];
@@ -43,7 +53,9 @@ type Db = DatabaseSync;
 interface World {
   readonly db: Db;
   readonly deps: HubDeps;
-  readonly req: (o: Partial<HubRequest> & { method: string; path: string }) => HubRequest;
+  readonly req: (
+    o: Partial<HubRequest> & { method: string; path: string },
+  ) => HubRequest;
   readonly sign: (m: string, t: string, b?: string) => Record<string, string>;
 }
 
@@ -70,7 +82,8 @@ async function world(): Promise<World> {
    * 而 401 的文案刻意不区分原因（auth.ts 那段「不给免费预言机」），症状是「莫名其妙全红」。
    * 同一个坑 contract.test.ts 文件头记过一次（签名与头不同源那一族）。
    */
-  const sign = (m: string, t: string, b = "") => signedHeaders(token, { method: m, target: t, body: b, now: T0 });
+  const sign = (m: string, t: string, b = "") =>
+    signedHeaders(token, { method: m, target: t, body: b, now: T0 });
   const deps: HubDeps = {
     db: read,
     bus: new InMemoryEventBus(),
@@ -133,7 +146,14 @@ function audit(
   );
 }
 
-const stateChange = (to: string): string => JSON.stringify({ kind: "TaskStateChanged", from: "X", to });const card = (): string => JSON.stringify({ kind: "ApprovalRequired", approval_type: "strategic", summary: "s" });
+const stateChange = (to: string): string =>
+  JSON.stringify({ kind: "TaskStateChanged", from: "X", to });
+const card = (): string =>
+  JSON.stringify({
+    kind: "ApprovalRequired",
+    approval_type: "strategic",
+    summary: "s",
+  });
 
 beforeAll(() => {
   rmSync(TMP, { recursive: true, force: true });
@@ -157,7 +177,12 @@ describe("① delivered_in_window：完成这件事只能由【那次跃迁的�
   it("窗口内一次 →DELIVERED ⇒ 1", async () => {
     const w = await world();
     task(w.db, "t1", "DELIVERED");
-    audit(w.db, { action: "state_change", payload: stateChange("DELIVERED"), taskId: "t1", at: T0 - HOUR });
+    audit(w.db, {
+      action: "state_change",
+      payload: stateChange("DELIVERED"),
+      taskId: "t1",
+      at: T0 - HOUR,
+    });
     expect(readToday(w.db, { nowMs: T0 }).delivered_in_window).toBe(1);
   });
 
@@ -166,16 +191,36 @@ describe("① delivered_in_window：完成这件事只能由【那次跃迁的�
     // 五十天前交付、昨天被人动了一下别的东西（比如预算列被加了一下）。
     // 按 updated_at 数会得到「今天完成 1 个」—— 这一格存在的全部理由就是这个反例。
     task(w.db, "t1", "DELIVERED", T0 - 50 * 24 * HOUR);
-    audit(w.db, { action: "state_change", payload: stateChange("DELIVERED"), taskId: "t1", at: T0 - 50 * 24 * HOUR });
+    audit(w.db, {
+      action: "state_change",
+      payload: stateChange("DELIVERED"),
+      taskId: "t1",
+      at: T0 - 50 * 24 * HOUR,
+    });
     expect(readToday(w.db, { nowMs: T0 }).delivered_in_window).toBe(0);
   });
 
   it("同一条任务被退回又交付 ⇒ 【两次跃迁都在窗口内 ⇒ 2】而不是按任务去重成 1？不 —— 按任务去重", async () => {
     const w = await world();
     task(w.db, "t1", "DELIVERED");
-    audit(w.db, { action: "state_change", payload: stateChange("DELIVERED"), taskId: "t1", at: T0 - 3 * HOUR });
-    audit(w.db, { action: "state_change", payload: stateChange("REJECTED_DOWNWARD"), taskId: "t1", at: T0 - 2 * HOUR });
-    audit(w.db, { action: "state_change", payload: stateChange("DELIVERED"), taskId: "t1", at: T0 - 1 * HOUR });
+    audit(w.db, {
+      action: "state_change",
+      payload: stateChange("DELIVERED"),
+      taskId: "t1",
+      at: T0 - 3 * HOUR,
+    });
+    audit(w.db, {
+      action: "state_change",
+      payload: stateChange("REJECTED_DOWNWARD"),
+      taskId: "t1",
+      at: T0 - 2 * HOUR,
+    });
+    audit(w.db, {
+      action: "state_change",
+      payload: stateChange("DELIVERED"),
+      taskId: "t1",
+      at: T0 - 1 * HOUR,
+    });
     // 这一格问的是「今天【交付了几件事】」，不是「今天发生了几次交付动作」。
     // COUNT(DISTINCT task_id) 因此是判据本身；写成 COUNT(*) 时这一发红。
     // 反过来一个「只交付过一次」的正常任务在上面两条用例里都看不出区别。
@@ -187,8 +232,18 @@ describe("① delivered_in_window：完成这件事只能由【那次跃迁的�
     // events.task_id 有外键（实跑撞出来的：先插事件后插任务 ⇒ FOREIGN KEY constraint failed）。
     task(w.db, "t0", "IN_PROGRESS");
     task(w.db, "t1", "DELIVERED");
-    audit(w.db, { action: "state_change", payload: JSON.stringify({ kind: "TaskStateChanged" }), taskId: "t0", at: T0 - HOUR });
-    audit(w.db, { action: "state_change", payload: stateChange("DELIVERED"), taskId: "t1", at: T0 - HOUR });
+    audit(w.db, {
+      action: "state_change",
+      payload: JSON.stringify({ kind: "TaskStateChanged" }),
+      taskId: "t0",
+      at: T0 - HOUR,
+    });
+    audit(w.db, {
+      action: "state_change",
+      payload: stateChange("DELIVERED"),
+      taskId: "t1",
+      at: T0 - HOUR,
+    });
     expect(readToday(w.db, { nowMs: T0 }).delivered_in_window).toBe(1);
   });
 
@@ -205,7 +260,11 @@ describe("① delivered_in_window：完成这件事只能由【那次跃迁的�
     task(w.db, "t-org", "IN_PROGRESS");
     audit(w.db, {
       action: "state_change",
-      payload: JSON.stringify({ kind: "org_graph_changed", to: "DELIVERED", graph_version: 7 }),
+      payload: JSON.stringify({
+        kind: "org_graph_changed",
+        to: "DELIVERED",
+        graph_version: 7,
+      }),
       taskId: "t-org",
       at: T0 - HOUR,
     });
@@ -223,7 +282,12 @@ describe("②′ active_tasks 是【排除式】定义的，而 blocked_statuses
   it("只有两个终点不算活跃（排除式定义：新增中间态会自动被算进来，这里数得到四个进行中）", async () => {
     const w = await world();
     for (const s of ["DELIVERED", "ARCHIVED"]) task(w.db, "done-" + s, s);
-    for (const s of ["CHARTER_PENDING", "IN_PROGRESS", "IN_REVIEW", "ESCALATED_TO_CEO"]) {
+    for (const s of [
+      "CHARTER_PENDING",
+      "IN_PROGRESS",
+      "IN_REVIEW",
+      "ESCALATED_TO_CEO",
+    ]) {
       task(w.db, "live-" + s, s);
     }
     expect(readToday(w.db, { nowMs: T0 }).active_tasks).toBe(4);
@@ -252,7 +316,9 @@ describe("②′ active_tasks 是【排除式】定义的，而 blocked_statuses
     // 把它从响应里"优化"掉，界面就只能自己写一份字面量清单，
     // 而那份抄件与 hub 侧的漂移【没有任何测试看得见】（变异跑在 hub，看不见 web）。
     // 同 pendingTotal / effective_limit 那条「分母由服务端给」（0013 §5）。
-    const body = (await handleRequest(w.deps, w.req({ method: "GET", path: "/today" }))).body as Record<string, unknown>;
+    const body = (
+      await handleRequest(w.deps, w.req({ method: "GET", path: "/today" }))
+    ).body as Record<string, unknown>;
     expect(body["blocked_statuses"]).toEqual([...BLOCKED_STATUSES]);
   });
 
@@ -260,7 +326,8 @@ describe("②′ active_tasks 是【排除式】定义的，而 blocked_statuses
     const w = await world();
     const v = readToday(w.db, { nowMs: T0 });
     // 子集关系是判据本身：漏掉阻塞态 ⇒ 看板说"不需要你注意"而首页说"它阻塞着"。
-    for (const s of v.blocked_statuses) expect(v.attention_statuses, s).toContain(s);
+    for (const s of v.blocked_statuses)
+      expect(v.attention_statuses, s).toContain(s);
     expect(v.attention_statuses).toContain("ESCALATED_TO_CEO");
     // 反向对照：一个【既不是阻塞也不是升级】的进行中状态不许混进来，
     // 否则「需要我注意」这一列会退化成"所有任务"，那个过滤器就白做了。
@@ -282,10 +349,9 @@ describe("②′ active_tasks 是【排除式】定义的，而 blocked_statuses
     expect(v.attention_statuses).toContain("BUDGET_PAUSED");
     expect(v.ceo_decision_statuses).not.toContain("BUDGET_PAUSED");
     // 差集恰好是那两个阻塞态（不是"差一堆"，也不是"差零个"）：
-    expect(v.attention_statuses.filter((s) => !v.ceo_decision_statuses.includes(s))).toEqual([
-      "BUDGET_PAUSED",
-      "BLOCKED",
-    ]);
+    expect(
+      v.attention_statuses.filter((s) => !v.ceo_decision_statuses.includes(s)),
+    ).toEqual(["BUDGET_PAUSED", "BLOCKED"]);
     // 交集非空：升级到 CEO 两边都在（少这一发，"两个完全不相干的清单"也能全绿）。
     expect(v.ceo_decision_statuses).toContain("ESCALATED_TO_CEO");
     // 琥珀那一侧今天【只有一档】。这条断言是给人看的护栏：往里加状态就是
@@ -301,21 +367,31 @@ describe("②′ active_tasks 是【排除式】定义的，而 blocked_statuses
     const { legalTransitionsFrom } = await import("../../src/graph/status.js");
     expect(legalTransitionsFrom("BUDGET_PAUSED")).toEqual(["ESCALATED_TO_CEO"]);
     // 过 HTTP 这一层也不能丢字段（同 blocked_statuses 那一条的理由）。
-    const body = (await handleRequest(w.deps, w.req({ method: "GET", path: "/today" }))).body as Record<string, unknown>;
+    const body = (
+      await handleRequest(w.deps, w.req({ method: "GET", path: "/today" }))
+    ).body as Record<string, unknown>;
     expect(body["ceo_decision_statuses"]).toEqual([...CEO_DECISION_STATUSES]);
   });
 
   it("⭐ 「运营事件」那一档与 role-memory 那个「非战略」表【不是同一条轴】", async () => {
     const w = await world();
-    const { OPERATIONAL_APPROVAL_TYPES } = await import("../../src/approvals/cards.js");
-    const { NON_STRATEGIC_APPROVAL_TYPES } = await import("../../src/memory/role-memory.js");
+    const { OPERATIONAL_APPROVAL_TYPES } = await import(
+      "../../src/approvals/cards.js"
+    );
+    const { NON_STRATEGIC_APPROVAL_TYPES } = await import(
+      "../../src/memory/role-memory.js"
+    );
     const v = readToday(w.db, { nowMs: T0 });
-    expect(v.operational_approval_types).toEqual([...OPERATIONAL_APPROVAL_TYPES]);
+    expect(v.operational_approval_types).toEqual([
+      ...OPERATIONAL_APPROVAL_TYPES,
+    ]);
     // 两张表都叫"非战略"，轴却不同：那边问「能不能进 dev 的角色记忆桶」（可见性），
     // 这边问「这张卡现在要不要惊动 CEO」（§19.2 的琥珀）。
     // 数字对不上不是疏漏，而是这条断言存在的意义 —— 复用会静默串色：
     // 哪天有人往 role-memory 那张表里加一格（让 dev 少一段提示词），收件箱颜色跟着变。
-    expect(OPERATIONAL_APPROVAL_TYPES.length).not.toBe(NON_STRATEGIC_APPROVAL_TYPES.length);
+    expect(OPERATIONAL_APPROVAL_TYPES.length).not.toBe(
+      NON_STRATEGIC_APPROVAL_TYPES.length,
+    );
     // 具体那个反例：charter 在【那边】是"非战略"，而 §7.2 步骤 1 里 CEO 就是要
     // 展开章程卡片点「批准章程」⇒ 在【这边】它必须是决策卡（琥珀）。
     expect(NON_STRATEGIC_APPROVAL_TYPES).toContain("charter");
@@ -352,20 +428,31 @@ describe("② blocked_tasks：用【当前状态】而不是窗口内发生", ()
     // MEETING_REQUIRED 的出边也是空数组（status.ts 明写「规格未给出路」），
     // 把它并进来等于替【规格】§10.1 决定「辩论会卡住算不算阻塞」—— 那不在射程内。
     // 这一发是 BLOCKED_STATUSES 的【反向对照】：抄宽了在这里红。
-    for (const s of ["IN_REVIEW", "MEETING_REQUIRED", "ESCALATED_TO_CEO", "FINAL_REVIEW", "DELIVERED"]) {
+    for (const s of [
+      "IN_REVIEW",
+      "MEETING_REQUIRED",
+      "ESCALATED_TO_CEO",
+      "FINAL_REVIEW",
+      "DELIVERED",
+    ]) {
       task(w.db, "n-" + s, s);
     }
     expect(readToday(w.db, { nowMs: T0 }).blocked_tasks).toBe(0);
   });
 
   it("界面那份「阻塞」清单与边表里的死路【不冲突也不越界】", async () => {
-    const { legalTransitionsFrom, TASK_STATES } = await import("../../src/graph/status.js");
-    const deadEnds = TASK_STATES.filter((s) => legalTransitionsFrom(s).length === 0);
+    const { legalTransitionsFrom, TASK_STATES } = await import(
+      "../../src/graph/status.js"
+    );
+    const deadEnds = TASK_STATES.filter(
+      (s) => legalTransitionsFrom(s).length === 0,
+    );
     // BLOCKED_STATUSES 里每个状态都必须真实存在（拼错一个枚举值不会编译期响，
     // 只会让那一格永远数到 0 —— 界面于是显示「没有阻塞的事」）。
     for (const s of BLOCKED_STATUSES) expect(TASK_STATES, s).toContain(s);
     // 反向：每一个「agent 走不动而等人」的阻塞态都在清单里。
-    for (const s of ["BUDGET_PAUSED", "BLOCKED"]) expect(BLOCKED_STATUSES, s).toContain(s);
+    for (const s of ["BUDGET_PAUSED", "BLOCKED"])
+      expect(BLOCKED_STATUSES, s).toContain(s);
     // MEETING_REQUIRED 是【刻意】不在里面的那条（上面那个反例讲的就是它）。
     expect(deadEnds).toContain("MEETING_REQUIRED");
     expect(BLOCKED_STATUSES).not.toContain("MEETING_REQUIRED");
@@ -379,11 +466,19 @@ describe("③ 决策三格：判据各自挑过，其中一格【不能】靠 pa
     const w = await world();
     audit(w.db, {
       action: "approval",
-      payload: JSON.stringify({ auto_approved_by: "policy-engine", rule: "read_only" }),
+      payload: JSON.stringify({
+        auto_approved_by: "policy-engine",
+        rule: "read_only",
+      }),
       at: T0 - HOUR,
     });
     audit(w.db, { action: "approval", payload: card(), at: T0 - HOUR });
-    audit(w.db, { action: "approval", payload: JSON.stringify({ approvalId: "a1", resume: "approve" }), actorType: "human", at: T0 - HOUR });
+    audit(w.db, {
+      action: "approval",
+      payload: JSON.stringify({ approvalId: "a1", resume: "approve" }),
+      actorType: "human",
+      at: T0 - HOUR,
+    });
     const d = readToday(w.db, { nowMs: T0 }).decisions;
     expect(d.auto_approved_in_window).toBe(1);
     expect(d.to_human_in_window).toBe(1);
@@ -393,22 +488,37 @@ describe("③ 决策三格：判据各自挑过，其中一格【不能】靠 pa
   it("⭐ 决策那条的 payload【没有 kind】—— 按 kind 数会静默得到 0（0041 §10 那一坑）", async () => {
     const w = await world();
     // 真形状：applyDecision 落的是 {approvalId, resume}。这里【故意】不带 kind。
-    audit(w.db, { action: "approval", payload: JSON.stringify({ approvalId: "a1", resume: "approve" }), actorType: "human" });
+    audit(w.db, {
+      action: "approval",
+      payload: JSON.stringify({ approvalId: "a1", resume: "approve" }),
+      actorType: "human",
+    });
     const raw = w.db.prepare("SELECT payload FROM events").get();
     expect(JSON.parse(String(raw?.["payload"]))["kind"]).toBeUndefined();
     // 判据是 actor_type，所以它数得到 1。写成 json_extract(payload,'$.kind') 的话这里 0。
-    expect(readToday(w.db, { nowMs: T0 }).decisions.human_decided_in_window).toBe(1);
+    expect(
+      readToday(w.db, { nowMs: T0 }).decisions.human_decided_in_window,
+    ).toBe(1);
   });
 
   it("「提到了 auto_approved_by 这几个字」的行【不算】自动通过（LIKE 那一族的反例）", async () => {
     const w = await world();
-    audit(w.db, { action: "approval", payload: JSON.stringify({ error: "auto_approved_by 这一列不可用" }) });
-    expect(readToday(w.db, { nowMs: T0 }).decisions.auto_approved_in_window).toBe(0);
+    audit(w.db, {
+      action: "approval",
+      payload: JSON.stringify({ error: "auto_approved_by 这一列不可用" }),
+    });
+    expect(
+      readToday(w.db, { nowMs: T0 }).decisions.auto_approved_in_window,
+    ).toBe(0);
   });
 
   it("非 approval 的 action 一律不进这三格（人工的一次 review_decision 不算批了张卡）", async () => {
     const w = await world();
-    audit(w.db, { action: "review_decision", payload: JSON.stringify({ approvalId: "a1" }), actorType: "human" });
+    audit(w.db, {
+      action: "review_decision",
+      payload: JSON.stringify({ approvalId: "a1" }),
+      actorType: "human",
+    });
     const d = readToday(w.db, { nowMs: T0 }).decisions;
     expect(d.human_decided_in_window).toBe(0);
     expect(d.to_human_in_window).toBe(0);
@@ -423,12 +533,22 @@ describe("③ 决策三格：判据各自挑过，其中一格【不能】靠 pa
     // 第一版只造了前者，于是我把 DECISIONS_SQL 的 json_valid 拆掉之后【全绿】
     // —— 那一道门当时没被任何输入摸到。SQLite 的 CASE 不保证短路，
     // "坏行不会走到那一支"这个直觉在 SQL 里不成立（实测抛 malformed JSON）。
-    audit(w.db, { action: "state_change", payload: "{not json", at: T0 - HOUR });
-    audit(w.db, { action: "approval", payload: "not json either", at: T0 - HOUR });
+    audit(w.db, {
+      action: "state_change",
+      payload: "{not json",
+      at: T0 - HOUR,
+    });
+    audit(w.db, {
+      action: "approval",
+      payload: "not json either",
+      at: T0 - HOUR,
+    });
     audit(w.db, { action: "approval", payload: card(), at: T0 - HOUR });
     const v = readToday(w.db, { nowMs: T0 });
     expect(v.decisions.to_human_in_window).toBe(1);
-    expect(v.notes.join("\n")).toContain("2 条 events 的 payload 不是合法 JSON");
+    expect(v.notes.join("\n")).toContain(
+      "2 条 events 的 payload 不是合法 JSON",
+    );
   });
 });
 
@@ -470,7 +590,13 @@ describe("④ 预算：窗口内消耗是准数，而【按天的上限】这个
   });
 });
 
-function db_budget(db: Db, id: string, scopeId: string, limitCents: number, consumed: number): void {
+function db_budget(
+  db: Db,
+  id: string,
+  scopeId: string,
+  limitCents: number,
+  consumed: number,
+): void {
   db.prepare(
     "INSERT INTO budgets (id, scope_type, scope_id, period, limit_cents, consumed_cents, hard_stop) " +
       "VALUES (?, 'task', ?, 'per_task', ?, ?, 1)",
@@ -487,12 +613,20 @@ function db_budget(db: Db, id: string, scopeId: string, limitCents: number, cons
  * 那个症状在真库里对应的是「只有人手工插过 budget_events 而没走 tracker」，
  * 而 tracker 是唯一写侧 —— 所以这里补的是【夹具失真】，不是判据。
  */
-function spend(db: Db, sourceEvent: number, taskId: string, cents: number, at: number): void {
+function spend(
+  db: Db,
+  sourceEvent: number,
+  taskId: string,
+  cents: number,
+  at: number,
+): void {
   db.prepare(
     "INSERT INTO budget_events (source_event, scope_type, scope_id, period, amount_cents, task_id, created_at) " +
       "VALUES (?, 'task', ?, 'per_task', ?, ?, ?)",
   ).run(sourceEvent, taskId, cents, taskId, at);
-  db.prepare("UPDATE budgets SET consumed_cents = consumed_cents + ? WHERE id = ?").run(cents, "task|" + taskId + "|per_task");
+  db.prepare(
+    "UPDATE budgets SET consumed_cents = consumed_cents + ? WHERE id = ?",
+  ).run(cents, "task|" + taskId + "|per_task");
 }
 
 /* ═══════════════ ⑤ 窗口与端点 ═══════════════ */
@@ -501,9 +635,9 @@ describe("⑤ 窗口与 GET /today 这个入口", () => {
   it("window_ms 被【报回来】而不是静默用掉：越界的值钳到上限并如实写出", async () => {
     const w = await world();
     expect(readToday(w.db, { nowMs: T0, windowMs: 1000 }).window_ms).toBe(1000);
-    expect(readToday(w.db, { nowMs: T0, windowMs: 999_999_999_999 }).window_ms).toBeLessThanOrEqual(
-      90 * DEFAULT_WINDOW_MS,
-    );
+    expect(
+      readToday(w.db, { nowMs: T0, windowMs: 999_999_999_999 }).window_ms,
+    ).toBeLessThanOrEqual(90 * DEFAULT_WINDOW_MS);
     // 0 / 负数 / 小数都不能把窗口变成「看不见任何东西」—— 那比报一个错更坏。
     expect(readToday(w.db, { nowMs: T0, windowMs: 0 }).window_ms).toBe(1);
     expect(readToday(w.db, { nowMs: T0, windowMs: -5 }).window_ms).toBe(1);
@@ -523,7 +657,10 @@ describe("⑤ 窗口与 GET /today 这个入口", () => {
   it("真请求走一遍：200、形状齐、notes 一路带到调用方", async () => {
     const w = await world();
     task(w.db, "t1", "BLOCKED");
-    const r = await handleRequest(w.deps, w.req({ method: "GET", path: "/today" }));
+    const r = await handleRequest(
+      w.deps,
+      w.req({ method: "GET", path: "/today" }),
+    );
     expect(r.status).toBe(200);
     const body = r.body as Record<string, unknown>;
     expect(body["blocked_tasks"]).toBe(1);
@@ -576,7 +713,9 @@ describe("⑤ 窗口与 GET /today 这个入口", () => {
     expect(drv["task_limit_cents"]).toBe(500);
     expect(drv["taskLimitCents"]).toBeUndefined();
     expect(Array.isArray(drv["stopped"])).toBe(true);
-    expect(Object.keys(body["budget"] as Record<string, unknown>).sort()).toEqual(
+    expect(
+      Object.keys(body["budget"] as Record<string, unknown>).sort(),
+    ).toEqual(
       [
         "consumed_in_window_cents",
         "consumed_total_cents",
@@ -585,22 +724,33 @@ describe("⑤ 窗口与 GET /today 这个入口", () => {
         "silent_over_scopes",
       ].sort(),
     );
-    expect(Object.keys(body["decisions"] as Record<string, unknown>).sort()).toEqual(
-      ["auto_approved_in_window", "to_human_in_window", "human_decided_in_window"].sort(),
+    expect(
+      Object.keys(body["decisions"] as Record<string, unknown>).sort(),
+    ).toEqual(
+      [
+        "auto_approved_in_window",
+        "to_human_in_window",
+        "human_decided_in_window",
+      ].sort(),
     );
     // memory 那一格同样钉【键名集合】。理由与上面两格相同，而这一格多一条：
     // 它的三个字段名字里带的口径不一样（两个是"行数"、一个是"未署名的行数"），
     // 改名或改名而不改 notes 里那句话，都会让界面把「素材行数」念成「决定数」。
-    expect(Object.keys(body["memory"] as Record<string, unknown>).sort()).toEqual(
-      ["scope_rows", "gate_rows", "gate_unattributed_rows"].sort(),
-    );
+    expect(
+      Object.keys(body["memory"] as Record<string, unknown>).sort(),
+    ).toEqual(["scope_rows", "gate_rows", "gate_unattributed_rows"].sort());
   });
 
   it("?window_ms=abc ⇒ 422 而【不是】悄悄按默认窗口出数", async () => {
     const w = await world();
-    const r = await handleRequest(w.deps, w.req({ method: "GET", path: "/today", query: { window_ms: "abc" } }));
+    const r = await handleRequest(
+      w.deps,
+      w.req({ method: "GET", path: "/today", query: { window_ms: "abc" } }),
+    );
     expect(r.status).toBe(422);
-    expect(String((r.body as Record<string, unknown>)["error"])).toContain("window_ms");
+    expect(String((r.body as Record<string, unknown>)["error"])).toContain(
+      "window_ms",
+    );
   });
 
   it("⭐ 新端点【没有】被顺手加进远程 token 白名单：带票打 /today ⇒ 拒，不带票的同一份签名 ⇒ 200", async () => {
@@ -624,7 +774,10 @@ describe("⑤ 窗口与 GET /today 这个入口", () => {
         method: "GET",
         path: "/today",
         peer: LAN_PEER,
-        headers: { ...w.sign("GET", "/today"), "x-opc-approval-token": "anything" },
+        headers: {
+          ...w.sign("GET", "/today"),
+          "x-opc-approval-token": "anything",
+        },
       }),
     );
     expect(withTicket.status).toBe(UNAUTHORIZED);
@@ -632,14 +785,22 @@ describe("⑤ 窗口与 GET /today 这个入口", () => {
     // 少了这一发，上面那个 401 可能只是「远程签名验不过」，那条判据就变成恒绿装饰。
     const noTicket = await handleRequest(
       w.deps,
-      w.req({ method: "GET", path: "/today", peer: LAN_PEER, headers: w.sign("GET", "/today") }),
+      w.req({
+        method: "GET",
+        path: "/today",
+        peer: LAN_PEER,
+        headers: w.sign("GET", "/today"),
+      }),
     );
     expect(noTicket.status).toBe(200);
   });
 
   it("拼错路径得到的是 404 而【不是】today（路径段字面必须逐字对）", async () => {
     const w = await world();
-    const r = await handleRequest(w.deps, w.req({ method: "GET", path: "/todya" }));
+    const r = await handleRequest(
+      w.deps,
+      w.req({ method: "GET", path: "/todya" }),
+    );
     expect(r.status).toBe(404);
   });
 });
@@ -657,7 +818,11 @@ describe("⑥ 记忆那一格：「这一档是空的」要【说出来】，而
      */
     const w = await world();
     const v = readToday(w.db, { nowMs: T0 });
-    expect(v.memory).toEqual({ scope_rows: 0, gate_rows: 0, gate_unattributed_rows: 0 });
+    expect(v.memory).toEqual({
+      scope_rows: 0,
+      gate_rows: 0,
+      gate_unattributed_rows: 0,
+    });
     expect(JSON.stringify(v.memory)).not.toContain("null");
     const n = v.notes.join("\n");
     expect(n).toContain("角色记忆那一格是【无数据】");
@@ -680,10 +845,18 @@ describe("⑥ 记忆那一格：「这一档是空的」要【说出来】，而
     const w = await world();
     audit(w.db, { action: "approval", payload: card() });
     audit(w.db, { action: "approval", payload: card(), actorType: "human" });
-    audit(w.db, { action: "approval", payload: card(), at: T0 - 30 * 24 * HOUR });
+    audit(w.db, {
+      action: "approval",
+      payload: card(),
+      at: T0 - 30 * 24 * HOUR,
+    });
 
     const before = readToday(w.db, { nowMs: T0 });
-    expect(before.memory).toEqual({ scope_rows: 3, gate_rows: 0, gate_unattributed_rows: 0 });
+    expect(before.memory).toEqual({
+      scope_rows: 3,
+      gate_rows: 0,
+      gate_unattributed_rows: 0,
+    });
     const n = before.notes.join("\n");
     expect(n).toContain("在等它的生产者");
     expect(n).toContain("另有 3 条");
@@ -691,7 +864,11 @@ describe("⑥ 记忆那一格：「这一档是空的」要【说出来】，而
 
     audit(w.db, {
       action: "review_decision",
-      payload: JSON.stringify({ kind: "ReviewDecided", gate: "in_review:dev->test", decision: "pass" }),
+      payload: JSON.stringify({
+        kind: "ReviewDecided",
+        gate: "in_review:dev->test",
+        decision: "pass",
+      }),
       actorType: "agent",
       actorId: "dev",
     });
@@ -715,10 +892,18 @@ describe("⑥ 记忆那一格：「这一档是空的」要【说出来】，而
     const w = await world();
     audit(w.db, {
       action: "review_decision",
-      payload: JSON.stringify({ kind: "ReviewDecided", gate: "in_review:dev->test", decision: "pass" }),
+      payload: JSON.stringify({
+        kind: "ReviewDecided",
+        gate: "in_review:dev->test",
+        decision: "pass",
+      }),
     });
     const sys = readToday(w.db, { nowMs: T0 });
-    expect(sys.memory).toEqual({ scope_rows: 1, gate_rows: 1, gate_unattributed_rows: 1 });
+    expect(sys.memory).toEqual({
+      scope_rows: 1,
+      gate_rows: 1,
+      gate_unattributed_rows: 1,
+    });
     expect(sys.notes.join("\n")).toContain("署名是【系统】而不是某个角色");
     // 「在等生产者」此时【不能】出现：这一档有数据，缺的是署名不是生产者。
     expect(sys.notes.join("\n")).not.toContain("在等它的生产者");
@@ -726,12 +911,20 @@ describe("⑥ 记忆那一格：「这一档是空的」要【说出来】，而
     const w2 = await world();
     audit(w2.db, {
       action: "review_decision",
-      payload: JSON.stringify({ kind: "ReviewDecided", gate: "in_review:dev->test", decision: "pass" }),
+      payload: JSON.stringify({
+        kind: "ReviewDecided",
+        gate: "in_review:dev->test",
+        decision: "pass",
+      }),
       actorType: "agent",
       actorId: "dev",
     });
     const agent = readToday(w2.db, { nowMs: T0 });
-    expect(agent.memory).toEqual({ scope_rows: 1, gate_rows: 1, gate_unattributed_rows: 0 });
+    expect(agent.memory).toEqual({
+      scope_rows: 1,
+      gate_rows: 1,
+      gate_unattributed_rows: 0,
+    });
     expect(agent.notes.join("\n")).not.toContain("署名是【系统】");
   });
 
@@ -776,10 +969,17 @@ describe("⑥ 记忆那一格：「这一档是空的」要【说出来】，而
       payload: JSON.stringify({ kind: "ReviewDecided", decision: "pass" }),
     });
     audit(w.db, { action: "approval", payload: card(), actorType: "human" });
-    const r = await handleRequest(w.deps, w.req({ method: "GET", path: "/today" }));
+    const r = await handleRequest(
+      w.deps,
+      w.req({ method: "GET", path: "/today" }),
+    );
     expect(r.status).toBe(200);
     const body = r.body as Record<string, unknown>;
-    expect(body["memory"]).toEqual({ scope_rows: 2, gate_rows: 1, gate_unattributed_rows: 1 });
+    expect(body["memory"]).toEqual({
+      scope_rows: 2,
+      gate_rows: 1,
+      gate_unattributed_rows: 1,
+    });
     expect(body["memory"]).toEqual(readToday(w.db, { nowMs: T0 }).memory);
   });
 });

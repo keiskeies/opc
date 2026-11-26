@@ -31,12 +31,12 @@ import {
   BudgetTracker,
   type ConsumeInput,
 } from "../../src/budget/tracker.js";
-import { fixtureTmp } from "../fixtures/fixture-dir.js";
+import { migrate } from "../../src/db/migrate.js";
+import type { DomainEvent } from "../../src/events/bus.js";
+import { InMemoryEventBus } from "../../src/events/bus.js";
 import type { StepTx } from "../../src/events/recorder.js";
 import { AuditRecorder } from "../../src/events/recorder.js";
-import { InMemoryEventBus } from "../../src/events/bus.js";
-import type { DomainEvent } from "../../src/events/bus.js";
-import { migrate } from "../../src/db/migrate.js";
+import { fixtureTmp } from "../fixtures/fixture-dir.js";
 
 const TMP = fixtureTmp("budget", import.meta.url);
 
@@ -63,7 +63,9 @@ const num = (row: Row | undefined, key: string): number => {
  */
 function makeEid(db: Db): () => number {
   let local = Number(
-    Object.values(db.prepare("SELECT COALESCE(MAX(id), 0) AS m FROM events").get() ?? {})[0],
+    Object.values(
+      db.prepare("SELECT COALESCE(MAX(id), 0) AS m FROM events").get() ?? {},
+    )[0],
   );
   return () => {
     const head = Number(
@@ -102,7 +104,7 @@ async function make(): Promise<{
 }> {
   const { openDb } = await import("../../src/db/driver.js");
   const file = join(TMP, "b-" + process.pid + "-" + ++seq + ".db");
-  const db = openDb(file) ;
+  const db = openDb(file);
   opened.push(db);
   migrate(db);
 
@@ -125,7 +127,7 @@ async function make(): Promise<{
       }
       open = false;
     },
-    scope: <T,>(fn: () => Promise<T>): Promise<T> => als.run({ db }, fn),
+    scope: <T>(fn: () => Promise<T>): Promise<T> => als.run({ db }, fn),
     inTx: () => open,
     db: () => {
       const s = als.getStore();
@@ -153,7 +155,18 @@ async function make(): Promise<{
     now: () => 1_700_000_000_000,
   });
   // 本文件所有 consume 默认挂在 T-1 上，其余任务 id 由用例自己点名
-  for (const t of ["T-1", "T-K", "T-F", "T-BULK", "T-D", "T-R", "T-E", "T-X", "T-P", "T-L"])
+  for (const t of [
+    "T-1",
+    "T-K",
+    "T-F",
+    "T-BULK",
+    "T-D",
+    "T-R",
+    "T-E",
+    "T-X",
+    "T-P",
+    "T-L",
+  ])
     seedTask(db, t);
 
   return {
@@ -162,9 +175,10 @@ async function make(): Promise<{
     recorder,
     bus,
     eid: makeEid(db),
-    actions: () => (db.prepare("SELECT action FROM events ORDER BY id").all() as Row[]).map(
-      (r) => String(r["action"]),
-    ),
+    actions: () =>
+      (db.prepare("SELECT action FROM events ORDER BY id").all() as Row[]).map(
+        (r) => String(r["action"]),
+      ),
   };
 }
 
@@ -204,18 +218,23 @@ const consumedOf = (db: Db, scopeId: string, period: string): number =>
   );
 
 const budgetRows = (db: Db, scopeId: string): Row[] =>
-  db.prepare("SELECT id, scope_type, period, limit_cents FROM budgets WHERE scope_id = ?").all(
-    scopeId,
-  );
+  db
+    .prepare(
+      "SELECT id, scope_type, period, limit_cents FROM budgets WHERE scope_id = ?",
+    )
+    .all(scopeId);
 
 const budgetEventRows = (db: Db, sourceEvent: number): Row[] =>
-  db.prepare("SELECT source_event, amount_cents FROM budget_events WHERE source_event = ?").all(
-    sourceEvent,
-  );
+  db
+    .prepare(
+      "SELECT source_event, amount_cents FROM budget_events WHERE source_event = ?",
+    )
+    .all(sourceEvent);
 
 /** consume 的默认入参：只补默认值，不改任何语义。 */
 const give = (
-  over: Partial<ConsumeInput> & Pick<ConsumeInput, "scope" | "scopeId" | "sourceEvent">,
+  over: Partial<ConsumeInput> &
+    Pick<ConsumeInput, "scope" | "scopeId" | "sourceEvent">,
 ): ConsumeInput => ({
   period: "per_task",
   amountCents: 100,
@@ -269,43 +288,61 @@ describe("三级作用域各自突破", () => {
   ];
 
   for (const t of three) {
-    it(t.scope + "/" + t.period + " 突破 → 发 BudgetPaused 且【只发一次】", async () => {
-      const { db, tracker, recorder, bus, eid } = await make();
-      await recorder.run(async () => {
-        limit(tracker, t.scope, t.scopeId, t.period, 1000);
-        expect(
-          (
-            await tracker.consume(
-              give({ ...t, scopeId: t.scopeId, sourceEvent: eid(), amountCents: 600 }),
-            )
-          ).breached,
-        ).toBe(false);
+    it(
+      t.scope + "/" + t.period + " 突破 → 发 BudgetPaused 且【只发一次】",
+      async () => {
+        const { db, tracker, recorder, bus, eid } = await make();
+        await recorder.run(async () => {
+          limit(tracker, t.scope, t.scopeId, t.period, 1000);
+          expect(
+            (
+              await tracker.consume(
+                give({
+                  ...t,
+                  scopeId: t.scopeId,
+                  sourceEvent: eid(),
+                  amountCents: 600,
+                }),
+              )
+            ).breached,
+          ).toBe(false);
 
-        const second = await tracker.consume(
-          give({ ...t, scopeId: t.scopeId, sourceEvent: eid(), amountCents: 500 }),
-        );
-        expect(second.breached).toBe(true);
-        expect(second.over).toBe(true);
-        expect(second.consumedCents).toBe(1100);
+          const second = await tracker.consume(
+            give({
+              ...t,
+              scopeId: t.scopeId,
+              sourceEvent: eid(),
+              amountCents: 500,
+            }),
+          );
+          expect(second.breached).toBe(true);
+          expect(second.over).toBe(true);
+          expect(second.consumedCents).toBe(1100);
 
-        // 第三笔：【已经】超着 ⇒ 不再重复发事件。否则 CEO 收件箱被同一条超限刷满。
-        const third = await tracker.consume(
-          give({ ...t, scopeId: t.scopeId, sourceEvent: eid(), amountCents: 100 }),
-        );
-        expect(third.breached).toBe(false);
-        expect(third.over).toBe(true);
-      });
+          // 第三笔：【已经】超着 ⇒ 不再重复发事件。否则 CEO 收件箱被同一条超限刷满。
+          const third = await tracker.consume(
+            give({
+              ...t,
+              scopeId: t.scopeId,
+              sourceEvent: eid(),
+              amountCents: 100,
+            }),
+          );
+          expect(third.breached).toBe(false);
+          expect(third.over).toBe(true);
+        });
 
-      const paused = pausedOnly(await feed(bus));
-      expect(paused.length).toBe(1);
-      const p = paused[0];
-      if (p?.kind !== "BudgetPaused") throw new Error("应有 BudgetPaused");
-      // 事件必须能指回任务：CEO 收到卡片要回得去（BudgetPaused.taskId 是必填的）
-      expect(p.taskId).toBe("T-1");
-      expect(p.spentUsdCents).toBe(1100);
-      expect(tracker.limitCents(t.scope, t.scopeId, t.period)).toBe(1000);
-      expect(consumedOf(db, t.scopeId, t.period)).toBe(1200);
-    });
+        const paused = pausedOnly(await feed(bus));
+        expect(paused.length).toBe(1);
+        const p = paused[0];
+        if (p?.kind !== "BudgetPaused") throw new Error("应有 BudgetPaused");
+        // 事件必须能指回任务：CEO 收到卡片要回得去（BudgetPaused.taskId 是必填的）
+        expect(p.taskId).toBe("T-1");
+        expect(p.spentUsdCents).toBe(1100);
+        expect(tracker.limitCents(t.scope, t.scopeId, t.period)).toBe(1000);
+        expect(consumedOf(db, t.scopeId, t.period)).toBe(1200);
+      },
+    );
   }
 
   it("审计里出现的是 budget_consume，没有任何【任务终止】语义的动作（§7.4 暂停而非杀）", async () => {
@@ -359,7 +396,12 @@ describe("整数美分（§6.1 禁浮点）", () => {
       limit(tracker, "task", "T-F", "per_task", 1000);
       await expect(
         tracker.consume(
-          give({ scope: "task", scopeId: "T-F", sourceEvent: eid(), amountCents: 0.5 }),
+          give({
+            scope: "task",
+            scopeId: "T-F",
+            sourceEvent: eid(),
+            amountCents: 0.5,
+          }),
         ),
       ).rejects.toThrow(/整数美分/u);
     });
@@ -393,13 +435,23 @@ describe("幂等：同一预算事件重复上报不重复扣减", () => {
       limit(tracker, "task", "T-D", "per_task", 1000);
       const id = eid();
       const first = await tracker.consume(
-        give({ scope: "task", scopeId: "T-D", sourceEvent: id, amountCents: 300 }),
+        give({
+          scope: "task",
+          scopeId: "T-D",
+          sourceEvent: id,
+          amountCents: 300,
+        }),
       );
       expect(first.applied).toBe(true);
       expect(first.consumedCents).toBe(300);
 
       const again = await tracker.consume(
-        give({ scope: "task", scopeId: "T-D", sourceEvent: id, amountCents: 300 }),
+        give({
+          scope: "task",
+          scopeId: "T-D",
+          sourceEvent: id,
+          amountCents: 300,
+        }),
       );
       expect(again.applied).toBe(false);
       expect(again.consumedCents).toBe(300); // 没有变成 600
@@ -450,10 +502,20 @@ describe("幂等：同一预算事件重复上报不重复扣减", () => {
       limit(tracker, "task", "T-E", "per_task", 100);
       id = eid();
       await tracker.consume(
-        give({ scope: "task", scopeId: "T-E", sourceEvent: id, amountCents: 200 }),
+        give({
+          scope: "task",
+          scopeId: "T-E",
+          sourceEvent: id,
+          amountCents: 200,
+        }),
       );
       const dup = await tracker.consume(
-        give({ scope: "task", scopeId: "T-E", sourceEvent: id, amountCents: 200 }),
+        give({
+          scope: "task",
+          scopeId: "T-E",
+          sourceEvent: id,
+          amountCents: 200,
+        }),
       );
       expect(dup.applied).toBe(false);
       expect(dup.breached).toBe(false); // 重复上报不得再触发一次暂停
@@ -473,7 +535,12 @@ describe("幂等：同一预算事件重复上报不重复扣减", () => {
     await expect(
       recorder.run(async () => {
         await tracker.consume(
-          give({ scope: "task", scopeId: "T-X", sourceEvent: id, amountCents: 200 }),
+          give({
+            scope: "task",
+            scopeId: "T-X",
+            sourceEvent: id,
+            amountCents: 200,
+          }),
         );
         throw new Error("BOOM-中途失败");
       }),
@@ -484,7 +551,12 @@ describe("幂等：同一预算事件重复上报不重复扣减", () => {
 
     await recorder.run(async () => {
       const r = await tracker.consume(
-        give({ scope: "task", scopeId: "T-X", sourceEvent: id, amountCents: 200 }),
+        give({
+          scope: "task",
+          scopeId: "T-X",
+          sourceEvent: id,
+          amountCents: 200,
+        }),
       );
       expect(r.applied).toBe(true);
       expect(r.consumedCents).toBe(200);
@@ -499,7 +571,9 @@ describe("幂等：同一预算事件重复上报不重复扣减", () => {
     await recorder.run(async () => {
       const id = eid();
       await expect(
-        tracker.consume(give({ scope: "role", scopeId: "ghost", sourceEvent: id })),
+        tracker.consume(
+          give({ scope: "role", scopeId: "ghost", sourceEvent: id }),
+        ),
       ).rejects.toThrow(/declareLimit/u);
       // 键没被占：插入未发生
       expect(budgetEventRows(db, id).length).toBe(0);
@@ -523,7 +597,9 @@ describe("幂等：同一预算事件重复上报不重复扣减", () => {
       ];
       for (const v of bad) {
         await expect(
-          tracker.consume(give({ scope: "task", scopeId: "T-P", sourceEvent: v })),
+          tracker.consume(
+            give({ scope: "task", scopeId: "T-P", sourceEvent: v }),
+          ),
         ).rejects.toThrow(/events\.id/u);
       }
       // 非法值【不留行】：校验排在插入之前，所以一条 budget_events 都不该有
@@ -534,7 +610,12 @@ describe("幂等：同一预算事件重复上报不重复扣减", () => {
       expect(
         (
           await tracker.consume(
-            give({ scope: "task", scopeId: "T-P", sourceEvent: eid(), amountCents: 5 }),
+            give({
+              scope: "task",
+              scopeId: "T-P",
+              sourceEvent: eid(),
+              amountCents: 5,
+            }),
           )
         ).applied,
       ).toBe(true);
@@ -557,7 +638,9 @@ describe("必须在超步事务内（文件头那条不变量的可执行版本�
 
   it("事务外 declareLimit 不在禁止之列（启动期声明限额，本就不属于任何超步）", async () => {
     const { db, tracker } = await make();
-    expect(() => limit(tracker, "task", "T-BOOT", "per_task", 50)).not.toThrow();
+    expect(() =>
+      limit(tracker, "task", "T-BOOT", "per_task", 50),
+    ).not.toThrow();
     expect(budgetRows(db, "T-BOOT").length).toBe(1);
   });
 });
@@ -578,7 +661,12 @@ describe("缺上限时的立场", () => {
     await recorder.run(async () => {
       limit(tracker, "task", "T-L", "per_task", 1000);
       await tracker.consume(
-        give({ scope: "task", scopeId: "T-L", sourceEvent: eid(), amountCents: 400 }),
+        give({
+          scope: "task",
+          scopeId: "T-L",
+          sourceEvent: eid(),
+          amountCents: 400,
+        }),
       );
       tracker.declareLimit({
         scope: "task",

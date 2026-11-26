@@ -288,7 +288,9 @@ describe("§13.3 搜索策略那一格（0033 新加的可选字段）", () => {
     expect(c.searchPolicy?.mandatoryDomains).toEqual([]);
     // 两态各归其位：缺格是 undefined、声明了而空是 []。若两者都是 []，
     // 「这个角色的领域还没定」与「定过了、答案是零个」就分不开了。
-    expect(loadCharterText(yamlWith({}), "x.yaml").searchPolicy).toBeUndefined();
+    expect(
+      loadCharterText(yamlWith({}), "x.yaml").searchPolicy,
+    ).toBeUndefined();
   });
 
   it("⭐ 只认 tier_1_mandatory：B.3 那两键进来必须被 strict 拒掉", () => {
@@ -318,7 +320,9 @@ describe("§13.3 搜索策略那一格（0033 新加的可选字段）", () => {
       }),
       "x.yaml",
     );
-    expect(c.searchPolicy?.mandatoryDomains).toEqual(["framework_version_compat"]);
+    expect(c.searchPolicy?.mandatoryDomains).toEqual([
+      "framework_version_compat",
+    ]);
   });
 });
 
@@ -329,7 +333,9 @@ describe("⭐ 第 1 层那两半必须成对（0034 §1 新加的判据）", () 
     // 实测当时：加载通过、领域读得到、展开出的标准里没有一条走搜索判据 ⇒ 全绿而不判。
     const e = grab(() =>
       loadCharterText(
-        yamlWith({ search_policy: { tier_1_mandatory: ["security_advisories"] } }),
+        yamlWith({
+          search_policy: { tier_1_mandatory: ["security_advisories"] },
+        }),
         "x.yaml",
       ),
     );
@@ -353,7 +359,10 @@ describe("⭐ 第 1 层那两半必须成对（0034 §1 新加的判据）", () 
 
   it("空数组不触发成对判据（声明过而没有领域 ⇒ 本来就没东西要判）", () => {
     expect(() =>
-      loadCharterText(yamlWith({ search_policy: { tier_1_mandatory: [] } }), "x.yaml"),
+      loadCharterText(
+        yamlWith({ search_policy: { tier_1_mandatory: [] } }),
+        "x.yaml",
+      ),
     ).not.toThrow();
   });
 
@@ -373,7 +382,12 @@ describe("⭐ 第 1 层那两半必须成对（0034 §1 新加的判据）", () 
       yamlWith({
         search_policy: { tier_1_mandatory: ["framework_versions"] },
         acceptance_criteria: withSearchCriterion().map((a, i) =>
-          i === 1 ? { ...a, condition: "  " + SEARCH_MANDATORY_SOURCES_CONDITION + " " } : a,
+          i === 1
+            ? {
+                ...a,
+                condition: "  " + SEARCH_MANDATORY_SOURCES_CONDITION + " ",
+              }
+            : a,
         ),
       }),
       "x.yaml",
@@ -426,14 +440,20 @@ describe("⭐ harness_defaults 的键必须有人读（round331：拼错的键 =
     // 把 forbidden_flags 落到 []。前者只是变严，后者是【失败方向为开】——
     // 岗位书明明写了这条禁令，gateway 照放、审计照写、没人报错。
     const e = grab(() =>
-      loadCharterText(yamlWith({ harness_defaults: cell("claudecode") }), "x.yaml"),
+      loadCharterText(
+        yamlWith({ harness_defaults: cell("claudecode") }),
+        "x.yaml",
+      ),
     );
     expect(charterFieldPaths(e)).toContain("harness_defaults");
   });
 
   it("⭐ 报错必须点名那个错键名（只说「配错了」他没法改）", () => {
     const e = grab(() =>
-      loadCharterText(yamlWith({ harness_defaults: cell("claude_cod") }), "x.yaml"),
+      loadCharterText(
+        yamlWith({ harness_defaults: cell("claude_cod") }),
+        "x.yaml",
+      ),
     );
     expect(String(e)).toContain("claude_cod");
     // 还要给出合法键集：别名表有四个名字，靠人记住必然再错一次。
@@ -526,7 +546,10 @@ describe("⭐ harness_defaults 的键必须有人读（round331：拼错的键 =
     // 而这条判据从此对任何继承名失效 —— 恰好是它要抓的形状。
     for (const inherited of ["toString", "constructor", "valueOf"]) {
       const e = grab(() =>
-        loadCharterText(yamlWith({ harness_defaults: cell(inherited) }), "x.yaml"),
+        loadCharterText(
+          yamlWith({ harness_defaults: cell(inherited) }),
+          "x.yaml",
+        ),
       );
       expect(charterFieldPaths(e), inherited).toContain("harness_defaults");
     }
@@ -539,7 +562,9 @@ describe("⭐ harness_defaults 的键必须有人读（round331：拼错的键 =
     // 「加载期放行」—— 它必须在读取期才炸，那才是唯一那份 schema 在说话。
     expect(() =>
       loadCharterText(
-        yamlWith({ harness_defaults: { claude_code: { sandbox: "workspace" } } }),
+        yamlWith({
+          harness_defaults: { claude_code: { sandbox: "workspace" } },
+        }),
         "x.yaml",
       ),
     ).not.toThrow();
@@ -597,7 +622,9 @@ describe("7 个预设模板（Task 0.7 交付物）", () => {
     // 有一条真的入口（签字之后），preset 没有 —— 两种「装载」不是一回事。
     expect(files).toHaveLength(SEVEN.length);
     for (const name of orphans) {
-      expect(() => loadCharterFile(join(TEMPLATES, name + ".yaml"))).not.toThrow();
+      expect(() =>
+        loadCharterFile(join(TEMPLATES, name + ".yaml")),
+      ).not.toThrow();
     }
   });
 });

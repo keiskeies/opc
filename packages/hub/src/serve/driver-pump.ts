@@ -93,16 +93,17 @@
  *    「谁该被叫起来改」是 dispatch 的 handoff 语义决定的，本篇不加边。
  *  · 并行分支（同一想法下多条任务）各推各的，本篇不引入任何跨任务的顺序或依赖。
  */
+
+import { requireScopeDb } from "../checkpoint/tx-scope.js";
 import type { HubWriter } from "../db/write-queue.js";
+import { AGENT_EDGES, makeDispatch, seatOf } from "../engine/dispatch.js";
+import { type AdvanceResult, advance } from "../engine/driver.js";
+import { type EngineRuntime, makeRuntime } from "../engine/runtime.js";
 import type { EventBus } from "../events/bus.js";
 import { appendAudit, KIND_TO_ACTION } from "../events/recorder.js";
-import { requireScopeDb } from "../checkpoint/tx-scope.js";
-import { AGENT_EDGES, makeDispatch, seatOf } from "../engine/dispatch.js";
-import { advance, type AdvanceResult } from "../engine/driver.js";
-import { makeRuntime, type EngineRuntime } from "../engine/runtime.js";
-import { underTaskBudgetSql } from "./charter-pump.js";
-import { kindOf } from "../heartbeat/patrol.js";
 import type { TaskState } from "../graph/status.js";
+import { kindOf } from "../heartbeat/patrol.js";
+import { underTaskBudgetSql } from "./charter-pump.js";
 
 /**
  * 驱动器会考虑的那些状态。
@@ -114,7 +115,9 @@ import type { TaskState } from "../graph/status.js";
  * 今天算出来是 CHARTER_APPROVED / DECOMPOSING / IN_PROGRESS / IN_REVIEW / BUDGET_PAUSED。
  * 前四个是【活的那条链】，第五个今天没有写入方（见文件头）。
  */
-export const DRIVER_ELIGIBLE_STATES: readonly TaskState[] = Object.keys(AGENT_EDGES).filter(
+export const DRIVER_ELIGIBLE_STATES: readonly TaskState[] = Object.keys(
+  AGENT_EDGES,
+).filter(
   (s): s is TaskState => seatOf(s as TaskState) === "agent",
 ) as readonly TaskState[];
 
@@ -152,7 +155,10 @@ export const DRIVER_GAVE_UP_KIND = "DriverTurnAbandoned";
  * 那正是 0047 花整篇消灭的那行 `actor_type='agent', actor_id='ceo'` 的复刻。
  * 驱动器是【决定叫谁干活的那个人】，不是【干活的那个人】。
  */
-export const DRIVER_ACTOR = { actorType: "system", actorId: "driver_pump" } as const;
+export const DRIVER_ACTOR = {
+  actorType: "system",
+  actorId: "driver_pump",
+} as const;
 
 /**
  * SQL 那一侧的【那一格】：`t.status || ':' || t.assigned_role`（`t` 换成 tasks 的别名）。
@@ -171,14 +177,7 @@ export const DRIVER_ACTOR = { actorType: "system", actorId: "driver_pump" } as c
  * 分隔符用 DRIVER_CELL_SEP 常量拼进去，所以换分隔符会【同时】改到写侧与读侧。
  */
 export function driverCellTargetSql(t: string): string {
-  return (
-    t +
-    ".status || '" +
-    DRIVER_CELL_SEP +
-    "' || " +
-    t +
-    ".assigned_role"
-  );
+  return t + ".status || '" + DRIVER_CELL_SEP + "' || " + t + ".assigned_role";
 }
 
 /**
@@ -309,7 +308,9 @@ export function placeholdersFor(n: number): string {
   if (!Number.isInteger(n) || n < 1) {
     // 空集合会拼出 `IN ()`（SQLite 语法错误）。空集合在这里是【配置坏了】而不是"什么都不筛"，
     // 所以抛而不是返回一个恒空候选 —— 后者看起来像"今天没有可驱动的任务"。
-    throw new Error("驱动器候选 SQL 的状态集合至少要有 1 格，实到 " + String(n));
+    throw new Error(
+      "驱动器候选 SQL 的状态集合至少要有 1 格，实到 " + String(n),
+    );
   }
   const parts: string[] = [];
   for (let i = 0; i < n; i++) parts.push("?");
@@ -381,7 +382,10 @@ export const CLAUDE_TURN_CAP_MS = 180_000;
  * 而那正是那句话本来要防的动作。所以它做成【从两个配置算出来】的函数，
  * 而不是又一处写死的字符串。
  */
-export function worstDriveWaitMs(o: { readonly taskLimit: number; readonly maxTurns: number }): string {
+export function worstDriveWaitMs(o: {
+  readonly taskLimit: number;
+  readonly maxTurns: number;
+}): string {
   const ms = o.taskLimit * o.maxTurns * CLAUDE_TURN_CAP_MS;
   const min = Math.ceil(ms / 60_000);
   if (min < 60) return min + " 分钟";
@@ -391,7 +395,11 @@ export function worstDriveWaitMs(o: { readonly taskLimit: number; readonly maxTu
 }
 
 /** 推一条任务的那一步。测试注入假的那一发；默认走真 runtime + 真 dispatch。 */
-export type DriveTaskFn = (taskId: string, maxBudgetUsd: number, maxTurns: number) => Promise<AdvanceResult>;
+export type DriveTaskFn = (
+  taskId: string,
+  maxBudgetUsd: number,
+  maxTurns: number,
+) => Promise<AdvanceResult>;
 
 export interface DriveOptions {
   readonly nowMs: number;
@@ -445,10 +453,19 @@ export interface DriveRoundResult {
   }[];
   readonly costCents: number;
   readonly abandoned: readonly string[];
-  readonly blocked: readonly { readonly taskId: string; readonly title: string; readonly consumedCents: number }[];
+  readonly blocked: readonly {
+    readonly taskId: string;
+    readonly title: string;
+    readonly consumedCents: number;
+  }[];
 }
 
-const nothing: DriveRoundResult = { driven: [], costCents: 0, abandoned: [], blocked: [] };
+const nothing: DriveRoundResult = {
+  driven: [],
+  costCents: 0,
+  abandoned: [],
+  blocked: [],
+};
 
 /**
  * 一趟驱动。心跳每轮叫一次；测试也直接叫这一发。
@@ -458,7 +475,11 @@ const nothing: DriveRoundResult = { driven: [], costCents: 0, abandoned: [], blo
  * 连番之后停掉的是【整条心跳】（含巡检与备份）。一条任务推不动，
  * 不该让停滞检测从此不再运行。
  */
-export async function driveTasks(w: HubWriter, bus: EventBus, o: DriveOptions): Promise<DriveRoundResult> {
+export async function driveTasks(
+  w: HubWriter,
+  bus: EventBus,
+  o: DriveOptions,
+): Promise<DriveRoundResult> {
   const maxAttempts = o.maxAttempts ?? DEFAULT_DRIVER_MAX_ATTEMPTS;
   const perRound = o.taskLimit ?? DEFAULT_DRIVER_TASK_LIMIT;
   const maxTurns = o.maxTurns ?? DEFAULT_DRIVER_MAX_TURNS;
@@ -468,13 +489,21 @@ export async function driveTasks(w: HubWriter, bus: EventBus, o: DriveOptions): 
   // 实到的值，而那一圈下标是【运行时才成立】的（TS 只能靠 as 糊过去）。
   // 三行重复换来的是每一行的报错里那个数字是【编译器已经证明存在的那个】。
   if (!Number.isInteger(maxAttempts) || maxAttempts < 1) {
-    throw new Error("驱动器的 maxAttempts 必须是 >= 1 的整数，实到 " + String(o.maxAttempts));
+    throw new Error(
+      "驱动器的 maxAttempts 必须是 >= 1 的整数，实到 " + String(o.maxAttempts),
+    );
   }
   if (!Number.isInteger(perRound) || perRound < 1) {
-    throw new Error("驱动器一轮最多推几条（taskLimit）必须是 >= 1 的整数，实到 " + String(o.taskLimit));
+    throw new Error(
+      "驱动器一轮最多推几条（taskLimit）必须是 >= 1 的整数，实到 " +
+        String(o.taskLimit),
+    );
   }
   if (!Number.isInteger(maxTurns) || maxTurns < 1) {
-    throw new Error("驱动器单条任务最多推几格（maxTurns）必须是 >= 1 的整数，实到 " + String(o.maxTurns));
+    throw new Error(
+      "驱动器单条任务最多推几格（maxTurns）必须是 >= 1 的整数，实到 " +
+        String(o.maxTurns),
+    );
   }
 
   const states = DRIVER_ELIGIBLE_STATES;
@@ -503,7 +532,11 @@ export async function driveTasks(w: HubWriter, bus: EventBus, o: DriveOptions): 
       title: string;
       consumed: number;
     }[]
-  ).map((b) => ({ taskId: b.id, title: b.title, consumedCents: Number(b.consumed) }));
+  ).map((b) => ({
+    taskId: b.id,
+    title: b.title,
+    consumedCents: Number(b.consumed),
+  }));
 
   if (candidates.length === 0 && blocked.length === 0) return nothing;
   if (candidates.length === 0) return { ...nothing, blocked };
@@ -539,12 +572,23 @@ export async function driveTasks(w: HubWriter, bus: EventBus, o: DriveOptions): 
         stopped: null,
         turns: 0,
         costCents: 0,
-        note: "候选 SQL 交出了 " + c.status + "，而 seatOf 判它不是 agent 席位 —— 派生与筛子已经不一致。",
+        note:
+          "候选 SQL 交出了 " +
+          c.status +
+          "，而 seatOf 判它不是 agent 席位 —— 派生与筛子已经不一致。",
       });
       continue;
     }
     // 先认领，再花钱（顺序是判据，见文件头那段：崩溃循环正是上限要挡的那种）。
-    await writeClaim(w, c.id, c.status, c.role, Number(c.attempts) + 1, maxAttempts, o.nowMs);
+    await writeClaim(
+      w,
+      c.id,
+      c.status,
+      c.role,
+      Number(c.attempts) + 1,
+      maxAttempts,
+      o.nowMs,
+    );
     try {
       const r = await drive(c.id, o.maxBudgetUsd, maxTurns);
       costCents += r.totalCostCents;
@@ -572,7 +616,8 @@ export async function driveTasks(w: HubWriter, bus: EventBus, o: DriveOptions): 
         stopped: null,
         turns: 0,
         costCents: 0,
-        note: "驱动器推这一发直接抛了（原文如下）。它【可能已经花掉钱】—— 那个数在这里拿不到，" +
+        note:
+          "驱动器推这一发直接抛了（原文如下）。它【可能已经花掉钱】—— 那个数在这里拿不到，" +
           "要查这一条任务的 harness_calls：\n" +
           (e instanceof Error ? e.message : String(e)),
       });
@@ -593,15 +638,20 @@ export async function driveTasks(w: HubWriter, bus: EventBus, o: DriveOptions): 
     // driverAttemptsSql 数的是【新格】的次数（新格 marker 变了、认领为零），
     // 于是"次数不到上限"这一条会替它说话而掩盖真正的理由 ——
     // 真正的理由是【这一格已经被离开了，"试到上限"这件事不再成立】。
-    const still = w.readConnection().prepare("SELECT status FROM tasks WHERE id = ?").get(c.id) as
-      | { status: string }
-      | undefined;
+    const still = w
+      .readConnection()
+      .prepare("SELECT status FROM tasks WHERE id = ?")
+      .get(c.id) as { status: string } | undefined;
     if (still === undefined || still.status !== c.status) continue;
     const after = Number(
       (
         w
           .readConnection()
-          .prepare("SELECT " + driverAttemptsSql("t") + " AS n FROM tasks t WHERE t.id = ?")
+          .prepare(
+            "SELECT " +
+              driverAttemptsSql("t") +
+              " AS n FROM tasks t WHERE t.id = ?",
+          )
           .get(c.id) as { n: number } | undefined
       )?.n ?? 0,
     );
@@ -617,8 +667,18 @@ export async function driveTasks(w: HubWriter, bus: EventBus, o: DriveOptions): 
       turns: 0,
       costCents: 0,
       note:
-        "在 " + c.status + "/" + c.role + " 这一格试到第 " + after + " 次（上限 " + maxAttempts + "）而没推进，" +
-        "驱动器不再推（那条 " + DRIVER_GAVE_UP_KIND + " 审计里有细节）。",
+        "在 " +
+        c.status +
+        "/" +
+        c.role +
+        " 这一格试到第 " +
+        after +
+        " 次（上限 " +
+        maxAttempts +
+        "）而没推进，" +
+        "驱动器不再推（那条 " +
+        DRIVER_GAVE_UP_KIND +
+        " 审计里有细节）。",
     });
     await writeGaveUp(w, c.id, c.status, c.role, after, maxAttempts, o.nowMs);
   }
@@ -642,9 +702,24 @@ function stopNote(r: AdvanceResult): string {
   if (r.turns.length === 0) return "一轮都没跑起来";
   const last = r.turns[r.turns.length - 1];
   const note = last === undefined ? "" : "：" + last.res.note;
-  if (r.stopped === "human_seat") return "停在 " + r.status + "，那一格是【人类席位】—— 下一次点击在你手上" + note;
-  if (r.stopped === "stalled") return "停在 " + r.status + "，角色这一轮没推进（它说了等，或它的动作对不上任何一条合法边）" + note;
-  if (r.stopped === "limit") return "撞上单轮格数上限（" + r.turns.length + " 格）而没停 —— 通常是 advance 的「不动就停」那条判据没生效" + note;
+  if (r.stopped === "human_seat")
+    return (
+      "停在 " + r.status + "，那一格是【人类席位】—— 下一次点击在你手上" + note
+    );
+  if (r.stopped === "stalled")
+    return (
+      "停在 " +
+      r.status +
+      "，角色这一轮没推进（它说了等，或它的动作对不上任何一条合法边）" +
+      note
+    );
+  if (r.stopped === "limit")
+    return (
+      "撞上单轮格数上限（" +
+      r.turns.length +
+      " 格）而没停 —— 通常是 advance 的「不动就停」那条判据没生效" +
+      note
+    );
   return "任务在库里找不到了";
 }
 
@@ -690,7 +765,16 @@ async function writeClaim(
           role,
           attempt,
           max_attempts: maxAttempts,
-          note: "驱动器准备在 " + state + "/" + role + " 这一格推一轮（第 " + attempt + "/" + maxAttempts + " 次）。",
+          note:
+            "驱动器准备在 " +
+            state +
+            "/" +
+            role +
+            " 这一格推一轮（第 " +
+            attempt +
+            "/" +
+            maxAttempts +
+            " 次）。",
         },
         createdAt: nowMs,
       },
@@ -756,7 +840,11 @@ async function writeGaveUp(
  * 是被【故意分开】的，分开装配等于允许"执行走 A 套而执行日志记 B 套"。
  * 惰性：候选为空那一轮一次都不建（早退在上面）。
  */
-function defaultDriver(o: DriveOptions, w: HubWriter, bus: EventBus): DriveTaskFn {
+function defaultDriver(
+  o: DriveOptions,
+  w: HubWriter,
+  bus: EventBus,
+): DriveTaskFn {
   let rt: EngineRuntime | null = null;
   const runtime = (): EngineRuntime => {
     if (rt === null) {
@@ -777,6 +865,11 @@ function defaultDriver(o: DriveOptions, w: HubWriter, bus: EventBus): DriveTaskF
   return async (taskId, maxBudgetUsd, maxTurns) => {
     const r = runtime();
     const dispatch = makeDispatch(r.deps);
-    return advance(r, (x) => dispatch(x), { taskId, maxBudgetUsd, maxTurns, nowMs: () => o.nowMs });
+    return advance(r, (x) => dispatch(x), {
+      taskId,
+      maxBudgetUsd,
+      maxTurns,
+      nowMs: () => o.nowMs,
+    });
   };
 }

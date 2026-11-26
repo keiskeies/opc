@@ -69,10 +69,18 @@
 
 import type { DatabaseSync } from "node:sqlite";
 import type { Charter } from "@opc/contracts";
-import { assertParamCount, assertSingleStatement, type Writer } from "../db/write-queue.js";
+import {
+  assertCents,
+  type BudgetPeriod,
+  type BudgetScope,
+} from "../budget/tracker.js";
 import { requireScopeDb } from "../checkpoint/tx-scope.js";
+import {
+  assertParamCount,
+  assertSingleStatement,
+  type Writer,
+} from "../db/write-queue.js";
 import { appendAudit } from "../events/recorder.js";
-import { assertCents, type BudgetPeriod, type BudgetScope } from "../budget/tracker.js";
 
 /** 与 charter/store.ts 同一个署名：改预算的是人，不是 agent（规格 §4.4.3 `role_budget: "ceo"`）。 */
 export const BUDGET_ACTOR = { actorType: "human", actorId: "ceo" } as const;
@@ -89,8 +97,12 @@ export function usdToCents(usd: number, what = "金额"): number {
     throw new Error(what + " 必须是有限数值（实到 " + String(usd) + "）。");
   }
   if (usd < 0) {
-    throw new
-      Error(what + " 不得为负（实到 " + usd + "）。负预算等于凭空增加额度（与 assertCents 同一立场）。");
+    throw new Error(
+      what +
+        " 不得为负（实到 " +
+        usd +
+        "）。负预算等于凭空增加额度（与 assertCents 同一立场）。",
+    );
   }
   const raw = usd * 100;
   const near = Math.round(raw);
@@ -99,7 +111,8 @@ export function usdToCents(usd: number, what = "金额"): number {
   // 而「真的有半分钱」的差距是 5e-1。1e-9 把两者分开且两边都有几个数量级余量。
   if (Math.abs(raw - near) > 1e-9) {
     throw new Error(
-      what + " [" +
+      what +
+        " [" +
         usd +
         "] 换算成美分是 " +
         raw +
@@ -116,7 +129,11 @@ export function usdToCents(usd: number, what = "金额"): number {
 }
 
 /** 作用域在 `budgets` 里的主键形状。**逐字照抄 tracker.ts:121** 的拼法。 */
-export function budgetRowId(scope: BudgetScope, scopeId: string, period: BudgetPeriod): string {
+export function budgetRowId(
+  scope: BudgetScope,
+  scopeId: string,
+  period: BudgetPeriod,
+): string {
   return scope + "|" + scopeId + "|" + period;
 }
 
@@ -131,26 +148,36 @@ export const ROLE_DAILY_SCOPE: { scope: BudgetScope; period: BudgetPeriod } = {
   scope: "role",
   period: "daily",
 };
-export const ROLE_PER_TASK_SCOPE: { scope: BudgetScope; period: BudgetPeriod } = {
-  scope: "role",
-  period: "per_task",
-};
+export const ROLE_PER_TASK_SCOPE: { scope: BudgetScope; period: BudgetPeriod } =
+  {
+    scope: "role",
+    period: "per_task",
+  };
 
-export function budgetRowsFromCharter(
-  charter: Charter,
-): { scope: BudgetScope; scopeId: string; period: BudgetPeriod; limitCents: number }[] {
+export function budgetRowsFromCharter(charter: Charter): {
+  scope: BudgetScope;
+  scopeId: string;
+  period: BudgetPeriod;
+  limitCents: number;
+}[] {
   return [
     {
       scope: ROLE_DAILY_SCOPE.scope,
       scopeId: charter.roleId,
       period: ROLE_DAILY_SCOPE.period,
-      limitCents: usdToCents(charter.budget.dailyUsd, charter.roleId + " 的 dailyUsd"),
+      limitCents: usdToCents(
+        charter.budget.dailyUsd,
+        charter.roleId + " 的 dailyUsd",
+      ),
     },
     {
       scope: ROLE_PER_TASK_SCOPE.scope,
       scopeId: charter.roleId,
       period: ROLE_PER_TASK_SCOPE.period,
-      limitCents: usdToCents(charter.budget.perTaskUsd, charter.roleId + " 的 perTaskUsd"),
+      limitCents: usdToCents(
+        charter.budget.perTaskUsd,
+        charter.roleId + " 的 perTaskUsd",
+      ),
     },
   ];
 }
@@ -166,8 +193,18 @@ export function budgetRowsFromCharter(
  */
 export function upsertLimit(
   db: DatabaseSync,
-  o: { scope: BudgetScope; scopeId: string; period: BudgetPeriod; limitCents: number },
-): { changed: boolean; previousLimitCents: number | null; consumedCents: number; nowOver: boolean } {
+  o: {
+    scope: BudgetScope;
+    scopeId: string;
+    period: BudgetPeriod;
+    limitCents: number;
+  },
+): {
+  changed: boolean;
+  previousLimitCents: number | null;
+  consumedCents: number;
+  nowOver: boolean;
+} {
   assertCents(o.limitCents, "limit_cents");
   const selSql =
     "SELECT limit_cents, consumed_cents FROM budgets " +
@@ -199,7 +236,8 @@ export function upsertLimit(
   db.prepare(upSql).run(...(upParams as never[]));
 
   const prev = before === undefined ? null : Number(before.limit_cents);
-  const consumed = before === undefined ? 0 : Number(before.consumed_cents ?? 0);
+  const consumed =
+    before === undefined ? 0 : Number(before.consumed_cents ?? 0);
   return {
     changed: prev !== o.limitCents,
     previousLimitCents: prev,
@@ -267,7 +305,12 @@ export interface SyncBudgetResult {
  */
 export function applyBudgetRowsInTx(
   db: DatabaseSync,
-  rows: readonly { scope: BudgetScope; scopeId: string; period: BudgetPeriod; limitCents: number }[],
+  rows: readonly {
+    scope: BudgetScope;
+    scopeId: string;
+    period: BudgetPeriod;
+    limitCents: number;
+  }[],
 ): SyncRowResult[] {
   return rows.map((r) => {
     const res = upsertLimit(db, r);
@@ -350,9 +393,12 @@ export async function syncCharterBudgets(
       });
     }
     const after: Record<string, number> = {};
-    for (const r of o.rows) after[budgetRowId(r.scope, r.scopeId, r.period)] = r.limitCents;
+    for (const r of o.rows)
+      after[budgetRowId(r.scope, r.scopeId, r.period)] = r.limitCents;
 
-    const silenced = results.filter((r) => r.alarmSilenced).map((r) => budgetRowId(r.scope, r.scopeId, r.period));
+    const silenced = results
+      .filter((r) => r.alarmSilenced)
+      .map((r) => budgetRowId(r.scope, r.scopeId, r.period));
     const seq = appendAudit(
       db,
       {
@@ -379,7 +425,9 @@ export async function syncCharterBudgets(
   });
 
   if (wrote === undefined || wrote === null) {
-    throw new Error("事务没有返回结果（WriteQueue 那一层给出空）—— 未写入，未审计。");
+    throw new Error(
+      "事务没有返回结果（WriteQueue 那一层给出空）—— 未写入，未审计。",
+    );
   }
   return { auditSeq: wrote.seq, rows: wrote.results };
 }
@@ -410,7 +458,11 @@ export interface BudgetTierRow {
  */
 export function readBudgetTiers(
   db: DatabaseSync,
-  expected: readonly { scope: BudgetScope; scopeId: string; period: BudgetPeriod }[],
+  expected: readonly {
+    scope: BudgetScope;
+    scopeId: string;
+    period: BudgetPeriod;
+  }[],
 ): BudgetTierRow[] {
   const sql =
     "SELECT scope_type, scope_id, period, limit_cents, consumed_cents FROM budgets " +
@@ -426,7 +478,12 @@ export function readBudgetTiers(
     out.push({
       ...e,
       declared: row !== undefined,
-      limitCents: row === undefined ? null : row.limit_cents === null ? null : Number(row.limit_cents),
+      limitCents:
+        row === undefined
+          ? null
+          : row.limit_cents === null
+            ? null
+            : Number(row.limit_cents),
       consumedCents: Number(row?.["consumed_cents"] ?? 0),
     });
   }
@@ -484,18 +541,24 @@ export function budgetTierSummary(db: DatabaseSync): {
     assertSingleStatement(sql);
     const params = [scope];
     assertParamCount(sql, params);
-    return Number((db.prepare(sql).get(...(params as never[])) as { c: number }).c);
+    return Number(
+      (db.prepare(sql).get(...(params as never[])) as { c: number }).c,
+    );
   };
-  const rolesSql = "SELECT DISTINCT scope_id FROM budgets WHERE scope_type = 'role'";
+  const rolesSql =
+    "SELECT DISTINCT scope_id FROM budgets WHERE scope_type = 'role'";
   assertSingleStatement(rolesSql);
   const withRole = new Set(
-    (db.prepare(rolesSql).all() as unknown as { scope_id: string }[]).map((r) => r.scope_id),
+    (db.prepare(rolesSql).all() as unknown as { scope_id: string }[]).map(
+      (r) => r.scope_id,
+    ),
   );
-  const allRolesSql = "SELECT DISTINCT assigned_role FROM tasks WHERE assigned_role IS NOT NULL";
+  const allRolesSql =
+    "SELECT DISTINCT assigned_role FROM tasks WHERE assigned_role IS NOT NULL";
   assertSingleStatement(allRolesSql);
-  const allRoles = (db.prepare(allRolesSql).all() as unknown as { assigned_role: string }[]).map(
-    (r) => r.assigned_role,
-  );
+  const allRoles = (
+    db.prepare(allRolesSql).all() as unknown as { assigned_role: string }[]
+  ).map((r) => r.assigned_role);
   return {
     companyDeclared: one("company") > 0,
     roleDeclared: one("role"),

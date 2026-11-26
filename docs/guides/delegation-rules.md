@@ -158,7 +158,7 @@
    不再成立；仍成立的是**直接写库会绕过这三层校验的全部** —— 这一条仍是本节最实用的一条，
    只是病灶从「没有入口」换成了「入口旁边还留着没有入口时代的写库捷径」。
 2. **门控【读岗位书】那半零生产调用方**（~~`evaluateGate` 与~~ `gateCriteriaForRole` 只有自己的单测在调；
-   【2026-11-19 改口】`evaluateGate` 在 src 有 `harness/verifier.ts:640` 一处调用，但 verifier 的入口
+   【2026-11-19 改口】`evaluateGate` 在 src 有 `harness/verifier.ts:699` 一处调用，但 verifier 的入口
    `verifyFix` 自己零生产调用方，且它的 criteria 由调用方传入、不来自岗位书库 —— 准确边界以设计文档
    O2 第 4 条为准），委派边上的 `review_gate: true` 今天**不会拦下任何一次交接**。它是配置面的事实，不是运行时的事实。
    详见 `how-to-write-a-charter.md` §6 第 1 条。

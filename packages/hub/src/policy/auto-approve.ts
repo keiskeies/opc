@@ -72,8 +72,8 @@
 import { createHash } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 import { APPROVAL_STATUS_PENDING } from "@opc/contracts";
-import { appendAudit } from "../events/recorder.js";
 import { assertParamCount, assertSingleStatement } from "../db/write-queue.js";
+import { appendAudit } from "../events/recorder.js";
 import { type ActionDraft, matchForbidden, policyDecide } from "./engine.js";
 
 /**
@@ -209,7 +209,9 @@ const gat = (g?: AutoApproveGate): { passed?: boolean; gate?: string } => ({
   ...(g?.passed === undefined ? {} : { passed: g.passed }),
   ...(g?.gate === undefined ? {} : { gate: g.gate }),
 });
-const his = (h?: SimilarHistory): { approvals?: number; nonApprovals?: number } => ({
+const his = (
+  h?: SimilarHistory,
+): { approvals?: number; nonApprovals?: number } => ({
   ...(h?.approvals === undefined ? {} : { approvals: h.approvals }),
   ...(h?.nonApprovals === undefined ? {} : { nonApprovals: h.nonApprovals }),
 });
@@ -294,9 +296,11 @@ export function autoApprove(o: AutoApproveInput): AutoApproveOutcome {
   const approvals = o.history?.approvals;
   const nonApprovals = o.history?.nonApprovals;
   const missing: MissingReason[] = [];
-  if (approvals === undefined || nonApprovals === undefined) missing.push("history_missing");
+  if (approvals === undefined || nonApprovals === undefined)
+    missing.push("history_missing");
   else if (nonApprovals > 0) missing.push("history_not_unanimous");
-  else if (approvals < PATTERN_MIN_APPROVALS) missing.push("history_below_threshold");
+  else if (approvals < PATTERN_MIN_APPROVALS)
+    missing.push("history_below_threshold");
   if (missing.length === 0) {
     return {
       decision: "auto_approved",
@@ -412,7 +416,11 @@ export function recordAutoApproval(
   let cardClaimed = false;
   if (o.approvalId !== undefined) {
     const note =
-      "基于模式的自动批准（规则 " + out.rule + "，署名 " + AUTO_APPROVED_BY + "）";
+      "基于模式的自动批准（规则 " +
+      out.rule +
+      "，署名 " +
+      AUTO_APPROVED_BY +
+      "）";
     const sql = CLAIM_APPROVAL_FOR_AUTO_SQL;
     const params: unknown[] = [
       // ⚠ 这一格【故意】还是字面量，与最后一个参数不对称，理由是实的：
@@ -581,7 +589,11 @@ const MALFORMED_PAYLOAD_PROBE_SQL =
  */
 export function readAutoApprovalReport(
   db: DatabaseSync,
-  o: { readonly day: string; readonly limit?: number; readonly offset?: number },
+  o: {
+    readonly day: string;
+    readonly limit?: number;
+    readonly offset?: number;
+  },
 ): AutoApprovalReport {
   const limit = Math.min(o.limit ?? MAX_REPORT_ITEMS, MAX_REPORT_ITEMS);
   const offset = o.offset ?? 0;
@@ -594,7 +606,9 @@ export function readAutoApprovalReport(
     Record<string, unknown>
   >;
   if (bad.length > 0) {
-    const listed = bad.map((r) => "id=" + String(r["id"]) + "(" + String(r["action"]) + ")").join(", ");
+    const listed = bad
+      .map((r) => "id=" + String(r["id"]) + "(" + String(r["action"]) + ")")
+      .join(", ");
     throw new Error(
       "自动批准日报拒绝出数：' " +
         o.day +
@@ -628,7 +642,11 @@ export function readAutoApprovalReport(
     // JSON 而【不是对象】（比如裸字符串或数字）。json_extract 对它返回 NULL，
     // 于是那一行根本不会进结果集 —— 走到这里说明 SQL 与这段代码对形状的假设分叉了，
     // 是一次真事故，抛错并点名。
-    if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+    if (
+      parsed === null ||
+      typeof parsed !== "object" ||
+      Array.isArray(parsed)
+    ) {
       throw new Error(
         "自动批准日报：events.id=" +
           String(r["id"]) +

@@ -44,40 +44,48 @@
  * 于是本模块只填**它自己知道**的那几格（产出者身份、包类型、任务号），
  * 内容性的一律由调用方从真实产物算出来。
  */
+
+import { randomUUID } from "node:crypto";
 import type {
-  ExecutionResult,
+  Charter,
   EvidenceArtifact,
   EvidenceBundle,
-  Charter,
+  ExecutionResult,
   HarnessAdapter,
   HarnessCapabilities,
   HarnessRequest,
 } from "@opc/contracts";
 import { harnessRequestSchema, SHA256_RE } from "@opc/contracts";
-import { randomUUID } from "node:crypto";
 import type { AuditRow } from "../events/recorder.js";
-import {
-  evaluateGate,
-  metricCriteriaEvaluator,
-  type CriteriaEvaluator,
-  type GateCriterion,
-  type GateVerdict,
-} from "../graph/gates/evaluate.js";
 import {
   type Party,
   sameFamilyReviewBlock,
 } from "../graph/gates/author-reviewer.js";
+import {
+  type CriteriaEvaluator,
+  evaluateGate,
+  type GateCriterion,
+  type GateVerdict,
+  metricCriteriaEvaluator,
+} from "../graph/gates/evaluate.js";
 // 【规格】§13.3 第 1 层的那一侧。方向是 harness → search（search 只回依赖 graph 的类型），
 // 所以这一格不会成环；`search/policy.ts` 也不 import harness 里的任何东西。
-import { observeSearchCalls, toObservedSearches, type SearchObservation } from "../search/observe.js";
-import { charterMandatoryDomains, makeSearchCriteriaEvaluator } from "../search/policy.js";
+import {
+  observeSearchCalls,
+  type SearchObservation,
+  toObservedSearches,
+} from "../search/observe.js";
+import {
+  charterMandatoryDomains,
+  makeSearchCriteriaEvaluator,
+} from "../search/policy.js";
 import {
   callHarness,
   type GatewayDeps,
   type GatewayOutcome,
 } from "./gateway.js";
-import { preventionFor } from "./safety.js";
 import type { RouteStage } from "./routing.js";
+import { preventionFor } from "./safety.js";
 
 /** 审阅方的身份（比 `Party` 多一个会话身份 —— 那一维是这一层独有的）。 */
 export interface VerifierParty extends Party {
@@ -185,7 +193,10 @@ export function independenceBlock(o: {
   readonly verifierCaps: HarnessCapabilities;
   readonly verifierApprovalPolicy: "never" | "on-request";
   /** 同家族审阅所需的 CEO 批准（与门控层同一份凭据形状）。 */
-  readonly sameFamilyApproval?: { readonly approvedBy: string; readonly reason: string };
+  readonly sameFamilyApproval?: {
+    readonly approvedBy: string;
+    readonly reason: string;
+  };
   readonly stage: "pre_call" | "post_call";
 }): IndependenceVerdict {
   const a = o.authorWorkspace.replace(/\/+$/u, "");
@@ -195,7 +206,9 @@ export function independenceBlock(o: {
       ok: false,
       code: "same_workspace",
       reason:
-        "审阅方与产出方用同一个工作区 [" + v + "]，拒绝发起。" +
+        "审阅方与产出方用同一个工作区 [" +
+        v +
+        "]，拒绝发起。" +
         "【规格】§12.6 第 2 条要的是『在隔离工作区调用独立 harness 实例』：" +
         "同一个目录里审阅方看到的是作者**已经改过**的东西，" +
         "它跑出来的『通过』审的是作者的状态而不是产物本身。",
@@ -209,7 +222,11 @@ export function independenceBlock(o: {
       ok: false,
       code: "nested_workspace",
       reason:
-        "审阅工作区 [" + v + "] 与作者工作区 [" + a + "] 互为嵌套，拒绝发起。" +
+        "审阅工作区 [" +
+        v +
+        "] 与作者工作区 [" +
+        a +
+        "] 互为嵌套，拒绝发起。" +
         "『不同路径』不等于『隔离』：内含的那一侧能被另一侧读到底，" +
         "而 §12.6 要的是读不到作者状态。修法是把审阅目录放到 /tmp/… 或仓库外。",
     };
@@ -219,7 +236,9 @@ export function independenceBlock(o: {
       ok: false,
       code: "same_role",
       reason:
-        "审阅者与产出者是同一角色 [" + o.author.roleId + "]（【规格】§8.2 第 1 条）。" +
+        "审阅者与产出者是同一角色 [" +
+        o.author.roleId +
+        "]（【规格】§8.2 第 1 条）。" +
         "这一条在门控层也判一次，那不是重复：门控拦的是**结论算不算**，" +
         "这里拦的是**这次审阅该不该发起** —— 走到门控时预算已经花掉、事件流已经写下。",
     };
@@ -237,7 +256,9 @@ export function independenceBlock(o: {
         ok: false,
         code: "verifier_not_enforced",
         reason:
-          "审阅调用被配置在 prevention=" + p + " 的执行器上，拒绝发起。" +
+          "审阅调用被配置在 prevention=" +
+          p +
+          " 的执行器上，拒绝发起。" +
           "『独立验证』与『独立观察』的区别就在这一格：审阅方发现 P0 时我们得有能力" +
           "不让这件事继续往下走，而 toolApproval=false 的适配器整场不会问我们一次。" +
           "修法：审阅这一侧换一家有审批回调的执行器，或把 approval_policy 设成 on-request。",
@@ -256,9 +277,12 @@ export function independenceBlock(o: {
   if (!fam.ok) {
     return {
       ok: false,
-      code: fam.code === "unknown_model_family" ? "unknown_model_family"
-        : fam.code === "approval_by_author" ? "approval_by_author"
-        : "same_model_family",
+      code:
+        fam.code === "unknown_model_family"
+          ? "unknown_model_family"
+          : fam.code === "approval_by_author"
+            ? "approval_by_author"
+            : "same_model_family",
       reason:
         fam.reason +
         "（【规格】§5.9 第 1 条 / §24 风险 1；判据**复用**门控层那一份，" +
@@ -304,7 +328,9 @@ export function sessionIndependenceBlock(
       ok: false,
       code: "same_session",
       reason:
-        "审阅与产出用的是同一个会话 [" + a + "]，拒绝采信审阅结论。" +
+        "审阅与产出用的是同一个会话 [" +
+        a +
+        "]，拒绝采信审阅结论。" +
         "同一个会话意味着审阅方拿到的是作者**自己的上下文**（含它自己那份『已经测过了』），" +
         "§12.6 那句『不复用开发 Agent 的会话与结论』讲的就是这一维 —— " +
         "换目录不换会话，得到的是同一个 agent 换个地方重跑一遍。",
@@ -341,7 +367,10 @@ export const SELF_REPORTED_PATTERNS: readonly string[] = [
 
 export interface StripResult {
   readonly kept: readonly string[];
-  readonly dropped: readonly { readonly text: string; readonly matched: string }[];
+  readonly dropped: readonly {
+    readonly text: string;
+    readonly matched: string;
+  }[];
 }
 
 export function stripSelfReported(texts: readonly string[]): StripResult {
@@ -353,7 +382,8 @@ export function stripSelfReported(texts: readonly string[]): StripResult {
     // 「dev 说：自测通过」这种【包着】的写法，只判 includes(pattern) 能命中；
     // 而条目被写成一句长话时（"self_reported_completion 不可信"）要反过来判。
     const hit: string | undefined = SELF_REPORTED_PATTERNS.find(
-      (p: string): boolean => low.includes(p.toLowerCase()) || p.toLowerCase().includes(low),
+      (p: string): boolean =>
+        low.includes(p.toLowerCase()) || p.toLowerCase().includes(low),
     );
     if (hit === undefined) kept.push(t);
     else dropped.push({ text: t, matched: hit });
@@ -365,7 +395,11 @@ export function stripSelfReported(texts: readonly string[]): StripResult {
 
 export interface VerifyInput {
   readonly taskId: string;
-  readonly author: { readonly roleId: string; readonly modelFamily: string; readonly sessionId: string };
+  readonly author: {
+    readonly roleId: string;
+    readonly modelFamily: string;
+    readonly sessionId: string;
+  };
   /**
    * 作者的工作区。**只用来比对**，不用来派生审阅目录。
    *
@@ -388,7 +422,10 @@ export interface VerifyInput {
   /** 期望的模型家族（真正的判定读结果里那一格，不读这一格）。 */
   readonly modelFamily?: string;
   /** 同家族时的 CEO 批准凭据（与门控层同一形状）。 */
-  readonly sameFamilyApproval?: { readonly approvedBy: string; readonly reason: string };
+  readonly sameFamilyApproval?: {
+    readonly approvedBy: string;
+    readonly reason: string;
+  };
   /** 审阅产物 → 证据包内容。**由调用方从真实文件算出**，见文件头那条。 */
   readonly assemble: (r: {
     readonly output: string;
@@ -396,7 +433,10 @@ export interface VerifyInput {
     readonly exitCode: number | null | undefined;
   }) => {
     readonly artifacts: readonly EvidenceArtifact[];
-    readonly claims: readonly { readonly text: string; readonly evidence_refs: readonly string[] }[];
+    readonly claims: readonly {
+      readonly text: string;
+      readonly evidence_refs: readonly string[];
+    }[];
     readonly metrics?: Readonly<Record<string, number>>;
     readonly honestyBoundaries?: readonly string[];
   };
@@ -497,8 +537,15 @@ export type VerifyOutcome =
  * 花掉预算换一次不算数的审阅是损失，而**采信**一次不独立的审阅是 §8.2 被绕过。
  */
 export async function verifyFix(input: VerifyInput): Promise<VerifyOutcome> {
-  const fail = (code: VerifyRejectCode, reason: string): VerifyOutcome => ({ ok: false, code, reason });
-  const verifierWorkspace = independentWorkspace(input.taskId, input.verifyRoot);
+  const fail = (code: VerifyRejectCode, reason: string): VerifyOutcome => ({
+    ok: false,
+    code,
+    reason,
+  });
+  const verifierWorkspace = independentWorkspace(
+    input.taskId,
+    input.verifyRoot,
+  );
 
   const authorView: Party & { sessionId: string } = {
     roleId: input.author.roleId,
@@ -508,7 +555,10 @@ export async function verifyFix(input: VerifyInput): Promise<VerifyOutcome> {
   // 事后那两维在这里还没有值，先用**占位**跑事前那一遍（pre_call 分支不读它们）。
   const pre = independenceBlock({
     author: authorView,
-    verifier: { roleId: input.verifierRoleId, modelFamily: input.modelFamily ?? "" },
+    verifier: {
+      roleId: input.verifierRoleId,
+      modelFamily: input.modelFamily ?? "",
+    },
     authorWorkspace: input.authorWorkspace,
     verifierWorkspace,
     verifierCaps: input.adapter.capabilities,
@@ -536,7 +586,9 @@ export async function verifyFix(input: VerifyInput): Promise<VerifyOutcome> {
     forbidden_flags: [...input.forbiddenFlags],
     requested_args: ["--sandbox", input.stage.sandbox],
     max_budget_usd: input.maxBudgetUsd,
-    ...(input.modelFamily === undefined ? {} : { model_family: input.modelFamily }),
+    ...(input.modelFamily === undefined
+      ? {}
+      : { model_family: input.modelFamily }),
   });
   const out: GatewayOutcome = await callHarness(
     input.adapter,
@@ -549,7 +601,10 @@ export async function verifyFix(input: VerifyInput): Promise<VerifyOutcome> {
       ok: false,
       code: "verifier_call_failed",
       reason:
-        "审阅调用本身没跑成（gateway 报 [" + out.code + "]）：" + out.reason +
+        "审阅调用本身没跑成（gateway 报 [" +
+        out.code +
+        "]）：" +
+        out.reason +
         "\n刻意**不**把它换算成 reject：审阅没跑成与『审阅判定不合格』是两件事，" +
         "前者该重试或找人，后者该打回开发者。把前者写成后者会让一次网关故障" +
         "看起来像一次开发质量事故，而修的东西完全不同。",
@@ -585,7 +640,11 @@ export async function verifyFix(input: VerifyInput): Promise<VerifyOutcome> {
     if (!SHA256_RE.test(a.sha256)) {
       return fail(
         "bad_artifact",
-        "assemble 交回的制品 [" + a.path + "] 的 sha256 不是 64 位十六进制 [" + a.sha256 + "]。",
+        "assemble 交回的制品 [" +
+          a.path +
+          "] 的 sha256 不是 64 位十六进制 [" +
+          a.sha256 +
+          "]。",
       );
     }
   }
@@ -597,9 +656,9 @@ export async function verifyFix(input: VerifyInput): Promise<VerifyOutcome> {
   // 命中可能是【坏写法】（把 dev 那句话拼进来了），也可能是【正当提到】
   // （「不要采信『自测通过』」这一句本身就命中，而它是**对的**提示词）。
   // 拒掉会误伤后者，而误伤的代价是调用方绕开这一层自己拼请求 —— 那比漏记严重。
-  const instructionFlags: readonly string[] = stripSelfReported([input.instruction]).dropped.map(
-    (d) => d.matched,
-  );
+  const instructionFlags: readonly string[] = stripSelfReported([
+    input.instruction,
+  ]).dropped.map((d) => d.matched);
   const claims = made.claims
     .filter((c): boolean => !strip.dropped.some((d) => d.text === c.text))
     // 拷成可变形状：EvidenceBundle 的类型来自 zod 推断（不是 readonly），
@@ -651,12 +710,17 @@ export async function verifyFix(input: VerifyInput): Promise<VerifyOutcome> {
     // evaluateGate 的类型核对**每一次**都判「包类型不符」而 reject ——
     // 一个恒拒的门控与一个恒放行的门控一样没用，而且它拒的理由是假的。
     gate: input.gate ?? "test_upward",
-    producer: { roleId: input.author.roleId, modelFamily: input.author.modelFamily },
+    producer: {
+      roleId: input.author.roleId,
+      modelFamily: input.author.modelFamily,
+    },
     bundle,
     criteria: [...input.criteria],
     reviewer: { roleId: verifier.roleId, modelFamily: verifier.modelFamily },
     // 只有调用方**明确给了**才传：把 undefined 变成 true 就是我替调用方对账。
-    ...(input.integrityOk === undefined ? {} : { integrityOk: input.integrityOk }),
+    ...(input.integrityOk === undefined
+      ? {}
+      : { integrityOk: input.integrityOk }),
     criteriaEvaluator: searchEvaluator,
   });
   return {

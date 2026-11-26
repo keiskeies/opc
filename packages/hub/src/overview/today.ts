@@ -34,12 +34,12 @@
  */
 
 import type { DatabaseSync } from "node:sqlite";
-import { assertParamCount, assertSingleStatement } from "../db/write-queue.js";
-import { silentOverBudgets } from "../charter/budget-sync.js";
 // 只读一张**常量表**（不是写通道，也不是查询函数）。为什么今日视图要带一张审批侧的
 // 名单：收件箱那张卡的颜色看的是 approval_type，而那份判据不能落在渲染进程里
 // —— 同 `blocked_statuses` 那条「判据随响应发出」的立场。
 import { OPERATIONAL_APPROVAL_TYPES } from "../approvals/cards.js";
+import { silentOverBudgets } from "../charter/budget-sync.js";
+import { assertParamCount, assertSingleStatement } from "../db/write-queue.js";
 // 记忆那一格（O3 动作 3）。只 import 这一对：判据面 `memoryCoverage` 刻意【不】进来 ——
 // 它要逐行解析 payload，是这一页付不起的那一发（成本实测见 role-memory 的探针注释）。
 import { readMemoryTodayProbe } from "../memory/role-memory.js";
@@ -108,7 +108,10 @@ export const INACTIVE_STATUSES: readonly string[] = ["DELIVERED", "ARCHIVED"];
  * 后者是另一份清单（`CEO_DECISION_STATUSES`），两者不能合并成一个字段 ——
  * 理由见下面那个常量旁边的说明（0042 §3，那一格我第一版就是合并着做的）。
  */
-export const ATTENTION_STATUSES: readonly string[] = ["ESCALATED_TO_CEO", ...BLOCKED_STATUSES];
+export const ATTENTION_STATUSES: readonly string[] = [
+  "ESCALATED_TO_CEO",
+  ...BLOCKED_STATUSES,
+];
 
 /**
  * 「需要 CEO 决策」= 琥珀色的【唯一】合法触发状态，随响应发出。
@@ -381,12 +384,16 @@ function row(
 ): Record<string, unknown> {
   assertSingleStatement(sql);
   assertParamCount(sql, params);
-  const r = db.prepare(sql).get(...(params as never[])) as Record<string, unknown> | undefined;
+  const r = db.prepare(sql).get(...(params as never[])) as
+    | Record<string, unknown>
+    | undefined;
   if (r === undefined) {
     // 聚合查询不返回行是【事实源出了问题】（表被改名、连接不对），而不是「这个数是 0」。
     // 把缺行读成 0 会让首页显示「今天什么都没发生」—— 那正是这一页最坏的一种说谎。
     throw new Error(
-      "今日视图的聚合查询没有返回行：[" + sql.slice(0, 70) + "…]。" +
+      "今日视图的聚合查询没有返回行：[" +
+        sql.slice(0, 70) +
+        "…]。" +
         "COUNT/SUM 恒返回一行，拿不到行说明这条查询根本没跑到那张表。",
     );
   }
@@ -415,16 +422,23 @@ export const MAX_WINDOW_MS = 90 * DEFAULT_WINDOW_MS;
  */
 export function readToday(
   db: DatabaseSync,
-  o: { readonly nowMs: number; readonly windowMs?: number } = { nowMs: Date.now() },
+  o: { readonly nowMs: number; readonly windowMs?: number } = {
+    nowMs: Date.now(),
+  },
 ): TodayView {
-  const windowMs = Math.min(Math.max(Math.trunc(o.windowMs ?? DEFAULT_WINDOW_MS), 1), MAX_WINDOW_MS);
+  const windowMs = Math.min(
+    Math.max(Math.trunc(o.windowMs ?? DEFAULT_WINDOW_MS), 1),
+    MAX_WINDOW_MS,
+  );
   const from = o.nowMs - windowMs;
   const notes: string[] = [];
 
   const bad = count(db, MALFORMED_PROBE_SQL, [from, o.nowMs], "n");
   if (bad > 0) {
     notes.push(
-      "这个窗口里有 " + bad + " 条 events 的 payload 不是合法 JSON，它们已被跳过（不算进下面任何一个数）。" +
+      "这个窗口里有 " +
+        bad +
+        " 条 events 的 payload 不是合法 JSON，它们已被跳过（不算进下面任何一个数）。" +
         "appendAudit 只会写合法 JSON，所以这些行是【库被外部改过】的痕迹。",
     );
   }
@@ -434,7 +448,9 @@ export function readToday(
   const unattributed = Number(deliveredRow["unattributed"] ?? 0);
   if (unattributed > 0) {
     notes.push(
-      "有 " + unattributed + " 行 state_change 记的是【不属于任何任务】的交付（task_id 为空），" +
+      "有 " +
+        unattributed +
+        " 行 state_change 记的是【不属于任何任务】的交付（task_id 为空），" +
         "它们【没有】算进「今天完成几件事」—— 那一格问的是任务。这一行说的是【别的东西】也交付了。",
     );
   }
@@ -445,7 +461,12 @@ export function readToday(
   const scopes = Number(budget["scopes"] ?? 0);
   const consumedTotal = Number(budget["consumed"] ?? 0);
   const declared = Number(budget["declared"] ?? 0);
-  const consumedWindow = count(db, BUDGET_WINDOW_SQL, [from, o.nowMs], "consumed");
+  const consumedWindow = count(
+    db,
+    BUDGET_WINDOW_SQL,
+    [from, o.nowMs],
+    "consumed",
+  );
   const silentOver = silentOverBudgets(db).length;
 
   const raw = row(db, DECISIONS_SQL, [from, o.nowMs]);
@@ -504,7 +525,9 @@ export function readToday(
   }
   if (silentOver > 0) {
     notes.push(
-      "有 " + silentOver + " 格预算已超限而【突破警报已经哑】（把上限调到已消费量之下会永久关闭警报，" +
+      "有 " +
+        silentOver +
+        " 格预算已超限而【突破警报已经哑】（把上限调到已消费量之下会永久关闭警报，" +
         "0015 文件头 ②）。数还在，警报没了 —— 这一格只能在这里看见。",
     );
   }
@@ -517,14 +540,17 @@ export function readToday(
     notes.push(
       memory.scope_rows === 0
         ? "角色记忆那一格是【无数据】：库里连一条记忆口径的审计都没有（不是读取失败）。" +
-          "所以各角色提示词里那句「你还没有可读的历史决定」是真的没有，不是没接上。"
-        : "角色记忆里的【审阅判定】那一档是空的（库里另有 " + memory.scope_rows +
-          " 条其它记忆口径的审计，它们不是审阅判定）。规格 §24 风险 2 要的是「历史审阅决定与理由」" +
-          "⇒ 这一档在等它的生产者，不是「角色还没做过决定」。",
+            "所以各角色提示词里那句「你还没有可读的历史决定」是真的没有，不是没接上。"
+        : "角色记忆里的【审阅判定】那一档是空的（库里另有 " +
+            memory.scope_rows +
+            " 条其它记忆口径的审计，它们不是审阅判定）。规格 §24 风险 2 要的是「历史审阅决定与理由」" +
+            "⇒ 这一档在等它的生产者，不是「角色还没做过决定」。",
     );
   } else if (memory.gate_unattributed_rows > 0) {
     notes.push(
-      "有 " + memory.gate_unattributed_rows + " 条审阅判定的署名是【系统】而不是某个角色" +
+      "有 " +
+        memory.gate_unattributed_rows +
+        " 条审阅判定的署名是【系统】而不是某个角色" +
         " —— 记忆按 actor_id 分桶，所以这些判定【不会】进任何角色的提示词。" +
         "这不是「没人做过判定」，是做过而没署上名。",
     );

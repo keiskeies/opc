@@ -193,7 +193,9 @@ describe("runViaGateway —— 出口表", () => {
       // 换算刀打不红这一发 —— 两条账各钉一条，换算段才真被覆盖。
       const calls = rows
         .filter((x: AuditRow): boolean => x.action === "harness_call")
-        .map((x: AuditRow): HarnessCallPayload => x.payload as HarnessCallPayload);
+        .map(
+          (x: AuditRow): HarnessCallPayload => x.payload as HarnessCallPayload,
+        );
       expect(calls).toHaveLength(1);
       expect(calls[0]?.spent_cents).toBe(4);
       expect(retryableWithoutCost(r), "起过进程就不可自动重试").toBe(false);
@@ -258,7 +260,10 @@ describe("buildGatewayDeps —— 装配期纪律", () => {
       buildGatewayDeps({
         audit,
         charterHarnessDefaults: {
-          claudecode: { sandbox: "workspace-write", forbidden_flags: ["--yolo"] },
+          claudecode: {
+            sandbox: "workspace-write",
+            forbidden_flags: ["--yolo"],
+          },
         },
       }),
     ).toThrow(/读不出【该用哪一格】/u);

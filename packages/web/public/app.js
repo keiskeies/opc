@@ -61,6 +61,7 @@ import {
   reconnectDelayMs,
   shouldGiveUp,
 } from "/vendor/contracts/index.js";
+
 // 日 / 夜主题切换由宿主负责（group.js 调 mountThemeToggle），独立控制室页已删，
 // 本模块不再自己接按钮。
 
@@ -376,7 +377,7 @@ function memoryBandHtml(m) {
     body +=
       '<div class="admin-meta" style="margin-top:6px">· 审阅判定那一档是【空的】（库里另有 ' +
       `${esc(scope)} 条其它记忆口径的审计，它们不是审阅判定）。` +
-      '规格 §24 风险 2 要的是「历史审阅决定与理由」⇒ 这一档在等它的生产者，不是「角色还没做过决定」。</div>';
+      "规格 §24 风险 2 要的是「历史审阅决定与理由」⇒ 这一档在等它的生产者，不是「角色还没做过决定」。</div>";
   } else {
     body +=
       '<div class="admin-meta" style="margin-top:6px">· 审阅判定 ' +
@@ -471,7 +472,9 @@ async function renderToday() {
               (w) =>
                 `<a data-win-ms="${w.ms ?? ""}" href="${routeToHash(
                   "today",
-                  w.ms === undefined ? "" : "window=" + Math.round(w.ms / DAY_MS) + "d",
+                  w.ms === undefined
+                    ? ""
+                    : "window=" + Math.round(w.ms / DAY_MS) + "d",
                 )}" class="admin-chip${w.ms === winMs ? " admin-chip-active" : ""}" style="margin-left:6px">${esc(w.label)}</a>`,
             )
             .join("")}
@@ -569,7 +572,8 @@ const notesHtml = (notes) =>
     ? `<details class="admin-lowcontrast" style="margin-top:10px"><summary>口径说明 · ${esc(notes.length)} 条</summary>` +
       notes
         .map(
-          (n) => `<div class="admin-meta" style="margin-top:6px">· ${esc(n)}</div>`,
+          (n) =>
+            `<div class="admin-meta" style="margin-top:6px">· ${esc(n)}</div>`,
         )
         .join("") +
       `</details>`
@@ -666,7 +670,8 @@ const strategyLine = (t) =>
   `当前待处理 ${navPending} 项。`;
 
 /** Ctrl+Enter 快捷提交的判定（纯函数，测在 app-pure）。恒返回布尔：只认主键 + 不带 shift，null 事件一律 false。 */
-const isCtrlEnter = (e) => !!(e && (e.ctrlKey || e.metaKey) && e.key === "Enter" && !e.shiftKey);
+const isCtrlEnter = (e) =>
+  !!(e && (e.ctrlKey || e.metaKey) && e.key === "Enter" && !e.shiftKey);
 
 /**
  * 想法输入框（§16.1 第一个入口）。
@@ -1788,8 +1793,8 @@ async function loadSnapshot(id) {
   if (!slot) return;
   if (snapshotCache.has(id)) {
     const st = snapshotCache.get(id);
-      slot.innerHTML =
-        paramSnapshotHtml(st?.parameters ?? null) + decidedMetaHtml(st);
+    slot.innerHTML =
+      paramSnapshotHtml(st?.parameters ?? null) + decidedMetaHtml(st);
     return;
   }
   const { status, data } = await api(
@@ -2167,7 +2172,9 @@ function bindOrgDrag(nodes, edges) {
 
   // 命中测试：ghost 是 pointer-events:none，elementFromPoint 直接穿过去落在卡片上。
   const hit = (x, y, child) => {
-    const el = document.elementFromPoint(x, y)?.closest(".admin-orgdrag .admin-node");
+    const el = document
+      .elementFromPoint(x, y)
+      ?.closest(".admin-orgdrag .admin-node");
     if (!el || el.dataset.role === child) return { el: null };
     const parent = el.dataset.role;
     if (wouldCycle(child, parent))
@@ -2203,7 +2210,8 @@ function bindOrgDrag(nodes, edges) {
         ghost.style.transform = `translate(${ev.clientX - x0}px, ${ev.clientY - y0}px)`;
         clearMarks();
         const t = hit(ev.clientX, ev.clientY, child);
-        if (t.el) t.el.classList.add(t.parent ? "admin-dropok" : "admin-dropbad");
+        if (t.el)
+          t.el.classList.add(t.parent ? "admin-dropok" : "admin-dropbad");
       };
       const up = (ev) => {
         card.removeEventListener("pointermove", move);
@@ -2262,7 +2270,9 @@ function bindOrgDrag(nodes, edges) {
   }
   function unpick() {
     dragPicked = null;
-    for (const c of $view.querySelectorAll(".admin-orgdrag .admin-node.admin-pick"))
+    for (const c of $view.querySelectorAll(
+      ".admin-orgdrag .admin-node.admin-pick",
+    ))
       c.classList.remove("admin-pick");
   }
 
@@ -3003,12 +3013,10 @@ async function renderReplay() {
     replayOffset = 0; // 换过滤：同一段可能已翻页，游标归零
     void loadReplay();
   });
-  $view
-    .querySelector("[data-go]")
-    .addEventListener("click", () => {
-      replayOffset = 0; // 关键词变了：游标归零（round340）
-      void loadReplay();
-    });
+  $view.querySelector("[data-go]").addEventListener("click", () => {
+    replayOffset = 0; // 关键词变了：游标归零（round340）
+    void loadReplay();
+  });
   void loadReplay();
 }
 
@@ -3070,11 +3078,30 @@ async function loadReplay() {
   const more = body.querySelector("[data-more]");
   // 换条件 = 重拉。翻页那格【不进 querySelector 那套绑定】：点「加载更多」
   // 是游标前进 + 重新请求，不能换任务/关键词/过滤（那会与游标打架）。
-  if (pick) pick.onchange = () => { replayOffset = 0; void loadReplay(); };
-  if (kwInput) kwInput.oninput = () => { replayOffset = 0; };
-  if (flt) flt.onchange = () => { replayOffset = 0; void loadReplay(); };
-  if (go) go.onclick = () => { replayOffset = 0; void loadReplay(); };
-  if (more) more.onclick = () => { replayOffset = replayNextOffset(rawEntries.length, replayOffset); void loadReplay(); };
+  if (pick)
+    pick.onchange = () => {
+      replayOffset = 0;
+      void loadReplay();
+    };
+  if (kwInput)
+    kwInput.oninput = () => {
+      replayOffset = 0;
+    };
+  if (flt)
+    flt.onchange = () => {
+      replayOffset = 0;
+      void loadReplay();
+    };
+  if (go)
+    go.onclick = () => {
+      replayOffset = 0;
+      void loadReplay();
+    };
+  if (more)
+    more.onclick = () => {
+      replayOffset = replayNextOffset(rawEntries.length, replayOffset);
+      void loadReplay();
+    };
 }
 
 /**
@@ -3098,7 +3125,9 @@ function eventTargetText(target) {
 function checkpointDegradedNote(unavailable, count) {
   if (!unavailable) return "";
   const n =
-    typeof count === "number" && Number.isFinite(count) && count > 0 ? count : 0;
+    typeof count === "number" && Number.isFinite(count) && count > 0
+      ? count
+      : 0;
   return (
     `<div class="admin-banner admin-warn" style="margin:0 0 10px"><b>断点解码失败，仅显示数量</b>` +
     `（${esc(String(unavailable))}${n > 0 ? ` · 实际断点 ${esc(n)} 个` : ""}）</div>`
@@ -3202,9 +3231,7 @@ function eventNoteText(e) {
       : undefined;
   const fromSnapshot = typeof snap === "string" ? snap.trim() : "";
   const payloadNote =
-    e.payload && typeof e.payload === "object"
-      ? e.payload.note
-      : undefined;
+    e.payload && typeof e.payload === "object" ? e.payload.note : undefined;
   const fromPayload = typeof payloadNote === "string" ? payloadNote.trim() : "";
   if (e.action === "review_decision") {
     return fromPayload;
@@ -3349,6 +3376,7 @@ async function connectFeed() {
       if (done) break;
       buf += td.decode(value, { stream: true });
       let i;
+      // biome-ignore lint/suspicious/noAssignInExpressions: SSE 分帧的标准惯用法，indexOf 与终止条件写在一处
       while ((i = buf.indexOf("\n\n")) >= 0) {
         const raw = buf.slice(0, i);
         buf = buf.slice(i + 2);
@@ -3455,12 +3483,12 @@ const safe = (s) => {
 const linkText = (p) =>
   !p
     ? undefined
-    : ({
+    : {
         live: "实时",
         stale: `补洞中（连续出洞 ${p.resnapshotCount} 次）`,
         down: `已断开（第 ${p.attempt} 次重连）`,
         connecting: "连接中",
-      })[p.link];
+      }[p.link];
 
 /* ───────────────── 视图切换 ───────────────── */
 const viewCleanups = [];
@@ -3546,7 +3574,8 @@ function unmountAdmin() {
   stopFeed();
   // 拖影挂在 document.body 上，不在 $view 里面 —— 只清 $view 会留下一枚飘在
   // 屏幕上的幽灵卡（pointerup 再也不会来了，因为监听挂在被抹掉的卡上）。
-  for (const g of document.body.querySelectorAll(".admin-org-ghost")) g.remove();
+  for (const g of document.body.querySelectorAll(".admin-org-ghost"))
+    g.remove();
 }
 
 /* ───────────────── 暴露给工作台宿主的挂载 API ─────────────────

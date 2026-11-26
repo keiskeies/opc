@@ -44,18 +44,22 @@ import type { DatabaseSync } from "node:sqlite";
 import {
   CEO_ROLE_ID,
   everyNodeDeclaresModelFamily,
-  validateNewEdge,
-  validateNewNode,
-  validateOrgChange,
-  validateReparenting,
   type OrgActor,
   type OrgChange,
   type OrgGraph,
   type RunningTasksInput,
   type Verdict,
+  validateNewEdge,
+  validateNewNode,
+  validateOrgChange,
+  validateReparenting,
 } from "@opc/contracts";
 import { requireScopeDb } from "../checkpoint/tx-scope.js";
-import { assertParamCount, assertSingleStatement, type Writer } from "../db/write-queue.js";
+import {
+  assertParamCount,
+  assertSingleStatement,
+  type Writer,
+} from "../db/write-queue.js";
 import { appendAudit } from "../events/recorder.js";
 
 /**
@@ -148,7 +152,9 @@ type DbLike = Pick<DatabaseSync, "prepare">;
 
 export function currentGraphVersion(db: DbLike): number {
   assertSingleStatement(MAX_GRAPH_VERSION_SQL);
-  const row = db.prepare(MAX_GRAPH_VERSION_SQL).get() as { v: number | bigint } | undefined;
+  const row = db.prepare(MAX_GRAPH_VERSION_SQL).get() as
+    | { v: number | bigint }
+    | undefined;
   if (row === undefined) {
     // COALESCE + 聚合恒返回一行。走到这里说明 SQL 被人改过（加了 WHERE / LIMIT），
     // 此时【不能】当 0 处理：那会让所有新任务静默盖成 0，
@@ -160,7 +166,7 @@ export function currentGraphVersion(db: DbLike): number {
   return Number(row.v);
 }
 
-/** 运行中的任务（§18.3 第三个函数那个 `getRunningTasks()`，按纯函数原则由调用方查）。 */export const RUNNING_TASKS_SQL =
+/** 运行中的任务（§18.3 第三个函数那个 `getRunningTasks()`，按纯函数原则由调用方查）。 */ export const RUNNING_TASKS_SQL =
   "SELECT id FROM tasks WHERE status NOT IN ('DELIVERED', 'ARCHIVED') ORDER BY id";
 
 /** 读出一张已提交的图。 */
@@ -174,7 +180,6 @@ export const SELECT_GRAPH_WITH_META_BY_VERSION_SQL =
 /** 读 MAX(version) 那一行：图 + 元数据 + 当前版本号，一次查询拿全。 */
 export const SELECT_LATEST_GRAPH_SQL =
   "SELECT id, version, graph_json, effective_from, change_summary FROM delegation_graphs ORDER BY version DESC LIMIT 1";
-
 
 /**
  * 提交前必须过的三关。返回第一条不通过的理由。
@@ -228,7 +233,8 @@ function noUntouchedKind(change: never): never {
   throw new Error(
     "revalidate：出现了一种没有分派的组织变更 kind ⇒ 那种变更【不校验】就能进库。" +
       "OrgChange 加了新 kind 而这里没跟上 —— 补判据，不要补 else 分支的默认放行。" +
-      "实到 = " + JSON.stringify(change),
+      "实到 = " +
+      JSON.stringify(change),
   );
 }
 
@@ -304,7 +310,8 @@ export async function commitOrgGraph(
 ): Promise<CommitResult> {
   const check = revalidate(o.change, o.graph, o.actor, o.runningTasks);
   if (!check.ok) return { ok: false, reason: check.reason, code: check.code };
-  const needsConfirmation = "needsConfirmation" in check ? check.needsConfirmation : undefined;
+  const needsConfirmation =
+    "needsConfirmation" in check ? check.needsConfirmation : undefined;
 
   const after = applyChangeToGraph(o.graph, o.change);
 
@@ -324,7 +331,8 @@ export async function commitOrgGraph(
   // 到 round294 已经过期，add_node 会加节点。仍然判整张图的理由是那条函数头里
   // 改写后的那半句：缺家族是绕过同家族拦截的通路，与「是不是这次新增的」无关。
   const families = everyNodeDeclaresModelFamily(after);
-  if (!families.ok) return { ok: false, reason: families.reason, code: families.code };
+  if (!families.ok)
+    return { ok: false, reason: families.reason, code: families.code };
 
   const graphJson = JSON.stringify(after);
   const beforeJson = JSON.stringify(o.graph);
@@ -333,7 +341,9 @@ export async function commitOrgGraph(
     const db = requireScopeDb("commitOrgGraph");
 
     assertSingleStatement(MAX_GRAPH_VERSION_SQL);
-    const cur = db.prepare(MAX_GRAPH_VERSION_SQL).get() as { v: number | bigint };
+    const cur = db.prepare(MAX_GRAPH_VERSION_SQL).get() as {
+      v: number | bigint;
+    };
     const next = Number(cur.v) + 1;
 
     // 哪些角色的汇报关系真的变了 —— 只有这些配得上一个新的岗位书版本。
@@ -417,7 +427,12 @@ export async function commitOrgGraph(
       },
       () => o.nowMs,
     );
-    return { graphVersion: next, graphId: id, charterBumpedRoles: bumped, auditSeq: seq };
+    return {
+      graphVersion: next,
+      graphId: id,
+      charterBumpedRoles: bumped,
+      auditSeq: seq,
+    };
   });
 
   return needsConfirmation === undefined

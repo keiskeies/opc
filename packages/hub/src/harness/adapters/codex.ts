@@ -189,7 +189,10 @@ export function codexToolCallsFor(
       return [
         {
           tool:
-            "mcp__" + (item.server ?? "unknown") + "__" + (item.tool ?? "unknown"),
+            "mcp__" +
+            (item.server ?? "unknown") +
+            "__" +
+            (item.tool ?? "unknown"),
           args: item.arguments ?? null,
         },
       ];
@@ -296,7 +299,7 @@ export class CodexCliAdapter implements HarnessAdapter {
     let sessionId: string | null = null;
     let sessionEmitted = false;
     let text = "";
-    let errors: string[] = [];
+    const errors: string[] = [];
     let cost: CostReport | null = null;
     const emitted = new Set<string>();
 
@@ -351,8 +354,10 @@ export class CodexCliAdapter implements HarnessAdapter {
               }
             }
             if (e.type === "item.completed") {
-              if (item.type === "agent_message") text += (item.text ?? "") + "\n";
-              if (item.type === "error") errors.push(item.message ?? "error item");
+              if (item.type === "agent_message")
+                text += (item.text ?? "") + "\n";
+              if (item.type === "error")
+                errors.push(item.message ?? "error item");
             }
           }
         } else if (e.type === "turn.completed") {
@@ -395,13 +400,9 @@ export class CodexCliAdapter implements HarnessAdapter {
       // 那一次调用真起过线程（钱可能真花了），takeRun 交出 started:true 而不是 null，
       // gateway-runner 的三态映射才不会把「跑到一半被我们掐死」读成「从未开始」。
       if (this.#lastRun === null) {
-        this.#lastRun = this.#failed(
-          text,
-          sessionId,
-          seenAny,
-          "",
-          ["codex 事件流结束而没有 turn.completed/turn.failed"],
-        );
+        this.#lastRun = this.#failed(text, sessionId, seenAny, "", [
+          "codex 事件流结束而没有 turn.completed/turn.failed",
+        ]);
       }
     }
 

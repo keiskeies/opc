@@ -40,12 +40,13 @@
  *          ⚠ 它刻意【不传 execArgv】—— 传了测的就不是「没修」而是【另一发缺陷】
  *            （那道校验会让它【永远坏】，于是它谁也证不了）。
  */
-import { register } from "node:module";
+
 import { mkdtempSync } from "node:fs";
+import { register } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
 import { DatabaseSync } from "node:sqlite";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { Worker } from "node:worker_threads";
 
 /* 这份钩子只在【本线程】注册。register() 不跨线程 —— 实测（0037 §1），
@@ -74,7 +75,14 @@ export async function resolve(specifier, context, next) {
 register("data:text/javascript," + encodeURIComponent(MAIN_THREAD_HOOK));
 
 /** src/db 的绝对目录：由本文件位置算，不写死（写死挪个目录就悄悄失效）。 */
-const DB_SRC = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "src", "db");
+const DB_SRC = resolve(
+  dirname(fileURLToPath(import.meta.url)),
+  "..",
+  "..",
+  "..",
+  "src",
+  "db",
+);
 
 /* 五行读数里的头两行。两个都要打：
    · EXECARGV —— 本进程的 execArgv。测试断它含 --experimental-transform-types 而【不含 --import】。
@@ -96,7 +104,9 @@ db.exec("CREATE TABLE events (id INTEGER PRIMARY KEY, payload TEXT)");
 db.prepare("INSERT INTO events (payload) VALUES (?)").run("hook-fixture");
 
 const backupMod = await import(pathToFileURL(join(DB_SRC, "backup.ts")).href);
-const integrityMod = await import(pathToFileURL(join(DB_SRC, "integrity.ts")).href);
+const integrityMod = await import(
+  pathToFileURL(join(DB_SRC, "integrity.ts")).href
+);
 
 /* ── 走生产入口：线程的解析能力只能由生产代码递进来 ── */
 const b = await backupMod.createBackupOffLoop({
@@ -104,7 +114,9 @@ const b = await backupMod.createBackupOffLoop({
   backupDir: join(dir, "b"),
   nowMs: 1_700_000_000_000,
 });
-console.log("BACKUP " + (b.ran ? "ran=true ok=" + b.result.ok : "ran=false " + b.failure));
+console.log(
+  "BACKUP " + (b.ran ? "ran=true ok=" + b.result.ok : "ran=false " + b.failure),
+);
 
 const r = await integrityMod.runIntegrityScan({ dbPath, db });
 db.close();

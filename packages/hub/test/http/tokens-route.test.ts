@@ -35,20 +35,18 @@
 import { mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { HTTP_CONFLICT } from "@opc/contracts";
-import { fixtureTmp } from "../fixtures/fixture-dir.js";
-import { DRIVER_OFF } from "../fixtures/driver-state.js";
-import { InMemoryEventBus } from "../../src/events/bus.js";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { migrate } from "../../src/db/migrate.js";
+import { InMemoryEventBus } from "../../src/events/bus.js";
 import {
+  type HubDeps,
+  type HubRequest,
   handleRequest,
   matchRoute,
   mintToken,
   tokenHttpStatus,
   tokenIssueStatus,
-  type HubDeps,
-  type HubRequest,
 } from "../../src/http/app.js";
 import { newLocalToken, signedHeaders } from "../../src/http/auth.js";
 import { LOOPBACK_HOST } from "../../src/http/bind.js";
@@ -60,6 +58,8 @@ import {
   redeemToken,
   TOKEN_AUDIT_ACTOR,
 } from "../../src/http/tokens.js";
+import { DRIVER_OFF } from "../fixtures/driver-state.js";
+import { fixtureTmp } from "../fixtures/fixture-dir.js";
 
 const TMP = fixtureTmp("http-tokens-route", import.meta.url);
 
@@ -80,7 +80,7 @@ let fileSeq = 0;
 
 async function newDb(): Promise<Db> {
   const { openDb } = await import("../../src/db/driver.js");
-  const db = openDb(join(TMP, "tr-" + process.pid + "-" + ++fileSeq + ".db")) ;
+  const db = openDb(join(TMP, "tr-" + process.pid + "-" + ++fileSeq + ".db"));
   opened.push(db);
   migrate(db);
   db.prepare(
@@ -111,11 +111,21 @@ afterAll(() => {
  * （类型标记 / parameters.irreversible / parameters 解析不出来），
  * 而这三条在 HTTP 层应当给出【同一个】403 —— 少测一条，实现里少一条判据不会红。
  */
-function card(db: Db, id: string, o: { type?: string; params?: string; status?: string } = {}): void {
+function card(
+  db: Db,
+  id: string,
+  o: { type?: string; params?: string; status?: string } = {},
+): void {
   db.prepare(
     "INSERT INTO approvals (id, task_id, approval_type, summary, parameters, status) " +
       "VALUES (?, ?, ?, '一句话摘要', ?, ?)",
-  ).run(id, "task-1", o.type ?? "budget_override", o.params ?? "{}", o.status ?? "pending");
+  ).run(
+    id,
+    "task-1",
+    o.type ?? "budget_override",
+    o.params ?? "{}",
+    o.status ?? "pending",
+  );
 }
 
 /** 签一张票（走签发函数本身，不走 HTTP），返回原文。 */
@@ -127,13 +137,19 @@ function mint(db: Db, approvalId: string): string {
 
 function tokenRow(db: Db, raw: string): Row | undefined {
   return db
-    .prepare("SELECT approval_id, used, expires_at FROM im_tokens WHERE token = ?")
+    .prepare(
+      "SELECT approval_id, used, expires_at FROM im_tokens WHERE token = ?",
+    )
     .get(hashToken(raw)) as Row | undefined;
 }
 
 function countTokens(db: Db): number {
   return Number(
-    (db.prepare("SELECT COUNT(*) AS c FROM im_tokens").get() as { c: number | bigint }).c,
+    (
+      db.prepare("SELECT COUNT(*) AS c FROM im_tokens").get() as {
+        c: number | bigint;
+      }
+    ).c,
   );
 }
 
@@ -147,8 +163,14 @@ function countTokens(db: Db): number {
 async function harness(nowMs = NOW): Promise<{
   deps: HubDeps;
   db: Db;
-  req: (o: Partial<HubRequest> & { method: string; path: string }) => HubRequest;
-  sign: (method: string, target: string, body?: string) => Record<string, string>;
+  req: (
+    o: Partial<HubRequest> & { method: string; path: string },
+  ) => HubRequest;
+  sign: (
+    method: string,
+    target: string,
+    body?: string,
+  ) => Record<string, string>;
 }> {
   const db = await newDb();
   const deps: HubDeps = {
@@ -167,7 +189,9 @@ async function harness(nowMs = NOW): Promise<{
         nowMs,
         expectedApprovalId: approvalId,
       });
-      return r.ok === true ? { ok: true, taskId: r.taskId } : { ok: false, reason: r.reason };
+      return r.ok === true
+        ? { ok: true, taskId: r.taskId }
+        : { ok: false, reason: r.reason };
     },
     issueApprovalToken: async ({ approvalId, nowMs: issuedAt }) => {
       const pre = precheckIssue(db, approvalId);
@@ -175,11 +199,19 @@ async function harness(nowMs = NOW): Promise<{
       // 与 real-deps.ts 那个包装同形：先 precheck、后 issue，且在【一次同步块】里
       // （真实现里是同一个 w.node 事务；这里没有写队列，窗口这一维由 real-deps 测）。
       const rawToken = newApprovalToken();
-      const { expiresAt } = issueToken(db, { rawToken, approvalId, nowMs: issuedAt });
+      const { expiresAt } = issueToken(db, {
+        rawToken,
+        approvalId,
+        nowMs: issuedAt,
+      });
       return { ok: true, token: rawToken, expiresAt };
     },
   };
-  const sign = (method: string, target: string, body = ""): Record<string, string> =>
+  const sign = (
+    method: string,
+    target: string,
+    body = "",
+  ): Record<string, string> =>
     signedHeaders(TOKEN, { method, target, body, now: nowMs });
   return {
     deps,
@@ -203,7 +235,15 @@ async function harness(nowMs = NOW): Promise<{
 
 /** 直接调内层 handler 时的最小请求：那道门只读 peer，不读签名。 */
 function rawReq(peer: string): HubRequest {
-  return { method: "POST", path: "", target: "", query: {}, body: "", headers: {}, peer };
+  return {
+    method: "POST",
+    path: "",
+    target: "",
+    query: {},
+    body: "",
+    headers: {},
+    peer,
+  };
 }
 
 /* ───────────────────────── 签票：路由与可达性 ───────────────────────── */
@@ -223,7 +263,10 @@ describe("POST /approvals/:id/token 的路由与【远程不可达】", () => {
   it("⭐ 本机 + HMAC ⇒ 201 拿到票，而库里那一行存的是【哈希】不是这个原文", async () => {
     const h = await harness();
     card(h.db, "A-1");
-    const res = await handleRequest(h.deps, h.req({ method: "POST", path: "/approvals/A-1/token" }));
+    const res = await handleRequest(
+      h.deps,
+      h.req({ method: "POST", path: "/approvals/A-1/token" }),
+    );
     expect(res.status).toBe(201);
     const body = res.body as { token: string; expires_at: number };
     expect(body.token.length).toBeGreaterThan(40);
@@ -237,7 +280,9 @@ describe("POST /approvals/:id/token 的路由与【远程不可达】", () => {
       expires_at: NOW + 10 * 60_000,
     });
     expect(
-      h.db.prepare("SELECT COUNT(*) AS c FROM im_tokens WHERE token = ?").get(body.token),
+      h.db
+        .prepare("SELECT COUNT(*) AS c FROM im_tokens WHERE token = ?")
+        .get(body.token),
     ).toEqual({ c: 0 });
   });
 
@@ -280,7 +325,9 @@ describe("POST /approvals/:id/token 的路由与【远程不可达】", () => {
     expect(countTokens(h.db)).toBe(0);
     // 反向对照：同一份 deps、同一张卡，只换 peer ⇒ 签得出来。
     // 少了这一发，上面那个 401 可能只是「这个 handler 恒回 401」。
-    expect((await mintToken(h.deps, "A-2", rawReq(LOOPBACK_HOST))).status).toBe(201);
+    expect((await mintToken(h.deps, "A-2", rawReq(LOOPBACK_HOST))).status).toBe(
+      201,
+    );
     expect(countTokens(h.db)).toBe(1);
   });
 
@@ -293,10 +340,16 @@ describe("POST /approvals/:id/token 的路由与【远程不可达】", () => {
     const h = await harness();
     card(h.db, "A-3");
     for (const peer of ["127.0.0.2", "::ffff:127.0.0.1", "::1"]) {
-      expect((await mintToken(h.deps, "A-3", rawReq(peer))).status, peer).toBe(201);
+      expect((await mintToken(h.deps, "A-3", rawReq(peer))).status, peer).toBe(
+        201,
+      );
     }
-    expect((await mintToken(h.deps, "A-3", rawReq("127.evil.com"))).status).toBe(UNAUTHORIZED);
-    expect((await mintToken(h.deps, "A-3", rawReq("10.0.0.5"))).status).toBe(UNAUTHORIZED);
+    expect(
+      (await mintToken(h.deps, "A-3", rawReq("127.evil.com"))).status,
+    ).toBe(UNAUTHORIZED);
+    expect((await mintToken(h.deps, "A-3", rawReq("10.0.0.5"))).status).toBe(
+      UNAUTHORIZED,
+    );
   });
 
   it("装配没接签发实现 ⇒ 501 而【不是】404：卡片在，缺的是服务端", async () => {
@@ -317,7 +370,9 @@ describe("POST /approvals/:id/token 的路由与【远程不可达】", () => {
     card(h.db, "A-decided", { status: "approved" });
     card(h.db, "A-irrev", { type: "irreversible_action" });
 
-    expect((await mintToken(h.deps, "A-nope", rawReq(LOOPBACK_HOST))).status).toBe(404);
+    expect(
+      (await mintToken(h.deps, "A-nope", rawReq(LOOPBACK_HOST))).status,
+    ).toBe(404);
 
     const stale = await mintToken(h.deps, "A-decided", rawReq(LOOPBACK_HOST));
     expect(stale.status).toBe(HTTP_CONFLICT);
@@ -332,7 +387,9 @@ describe("POST /approvals/:id/token 的路由与【远程不可达】", () => {
     expect(countTokens(h.db)).toBe(0);
     // 反向对照：同一次调用里那张干净的卡签得出来 ——
     // 否则上面三个状态码可能只是「mintToken 恒失败」的三种写法。
-    expect((await mintToken(h.deps, "A-pending", rawReq(LOOPBACK_HOST))).status).toBe(201);
+    expect(
+      (await mintToken(h.deps, "A-pending", rawReq(LOOPBACK_HOST))).status,
+    ).toBe(201);
   });
 
   it("parameters 解析不出来的卡也算不可逆 ⇒ 403（判据复用兑换那一侧那一发）", async () => {
@@ -347,7 +404,9 @@ describe("POST /approvals/:id/token 的路由与【远程不可达】", () => {
     // 反向：一张显式声明可逆的同类卡照常签得出 —— 证明那个 403 来自解析失败，
     // 不是来自「parameters 字段存在就拒」这种更懒的实现。
     card(h.db, "A-clean", { params: '{"irreversible":false}' });
-    expect((await mintToken(h.deps, "A-clean", rawReq(LOOPBACK_HOST))).status).toBe(201);
+    expect(
+      (await mintToken(h.deps, "A-clean", rawReq(LOOPBACK_HOST))).status,
+    ).toBe(201);
   });
 });
 
@@ -378,7 +437,11 @@ describe("远程靠一次性票批准：一条通路、一条写路径、一种�
     // 这个 harness 的 recordDecision 是替身（不写库），所以这里钉的是
     // 【这条路径没有绕过它去改卡片】。
     expect(
-      (h.db.prepare("SELECT status FROM approvals WHERE id = ?").get("B-1") as Row)["status"],
+      (
+        h.db
+          .prepare("SELECT status FROM approvals WHERE id = ?")
+          .get("B-1") as Row
+      )["status"],
     ).toBe("pending");
     expect(tokenRow(h.db, raw)?.["used"]).toBe(1);
   });
@@ -389,7 +452,12 @@ describe("远程靠一次性票批准：一条通路、一条写路径、一种�
     const raw = mint(h.db, "B-3");
     const res = await handleRequest(
       h.deps,
-      h.req({ method: "GET", path: "/tasks", peer: LAN_PEER, headers: { [TOKEN_HEADER]: raw } }),
+      h.req({
+        method: "GET",
+        path: "/tasks",
+        peer: LAN_PEER,
+        headers: { [TOKEN_HEADER]: raw },
+      }),
     );
     expect(res.status).toBe(UNAUTHORIZED);
     // 这一发真正守的是【不烧票】与【不泄库】：拿票去读看板既不该消耗那张卡的
@@ -434,7 +502,12 @@ describe("远程靠一次性票批准：一条通路、一条写路径、一种�
     // 这一发是整条判据的分母 —— 少了它，上面那个 401 可能只是「远程签名验不过」。
     const noTicket = await handleRequest(
       h.deps,
-      h.req({ method: "GET", path: "/tasks", peer: LAN_PEER, headers: h.sign("GET", "/tasks") }),
+      h.req({
+        method: "GET",
+        path: "/tasks",
+        peer: LAN_PEER,
+        headers: h.sign("GET", "/tasks"),
+      }),
     );
     expect(noTicket.status).toBe(200);
     // ⚠ 上面这两句合起来读出的产品含义要说清：**一个远程对端只要持有本机 HMAC 密钥，
@@ -460,7 +533,10 @@ describe("远程靠一次性票批准：一条通路、一条写路径、一种�
         // 带一个【真签名】。用真签名是这一发的要点：它让「退回 HMAC」那条歧路
         // 【真的能走通】，于是下面的 401 只能来自「没接 token 存储就拒」这条判据，
         // 而不是来自「远程签不出名」。少了这个签名，这一发是恒绿的装饰。
-        headers: { ...h.sign("POST", "/approvals/B-4", DECIDE_BODY), [TOKEN_HEADER]: "x" },
+        headers: {
+          ...h.sign("POST", "/approvals/B-4", DECIDE_BODY),
+          [TOKEN_HEADER]: "x",
+        },
       }),
     );
     expect(res.status).toBe(UNAUTHORIZED);

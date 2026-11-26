@@ -22,38 +22,43 @@
  */
 import { mkdirSync, rmSync } from "node:fs";
 import type { DatabaseSync } from "node:sqlite";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
-
 import type { OrgGraph } from "@opc/contracts";
-import { fixtureTmp } from "../fixtures/fixture-dir.js";
-import { gateDepsFrom } from "../fixtures/gate-deps.js";
-import { REVIEW_BLOCK_KEY_PREFIX, SAME_FAMILY_REVIEW_KEY_PREFIX } from "../../src/approvals/cards.js";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import {
+  REVIEW_BLOCK_KEY_PREFIX,
+  SAME_FAMILY_REVIEW_KEY_PREFIX,
+} from "../../src/approvals/cards.js";
 import { migrate } from "../../src/db/migrate.js";
 import { approveCard } from "../../src/engine/approve.js";
-import { CEO_APPROVED_SQL, REJECTION_COUNT_SQL } from "../../src/engine/runtime.js";
-import { INSERT_DELEGATION_GRAPH_SQL } from "../../src/org/commit.js";
-import type { EventBus, EventSubscription } from "../../src/events/bus.js";
+import type { RoleAction } from "../../src/engine/claude.js";
 import {
   AGENT_EDGES,
-  HUMAN_EDGES,
   buildTurnPrompt,
+  type DispatchDeps,
+  type DispatchResult,
+  HUMAN_EDGES,
   handoffGate,
   humanEdge,
   makeDispatch,
   planEdge,
+  type ReviewGate,
   resolveCeoRoleId,
   reviewGate,
   seatOf,
   subordinateRoles,
+  type TurnOutcome,
   upstreamOf,
   usdToCents,
-  type DispatchDeps,
-  type DispatchResult,
-  type ReviewGate,
-  type TurnOutcome,
 } from "../../src/engine/dispatch.js";
+import {
+  CEO_APPROVED_SQL,
+  REJECTION_COUNT_SQL,
+} from "../../src/engine/runtime.js";
+import type { EventBus, EventSubscription } from "../../src/events/bus.js";
 import type { TaskState } from "../../src/graph/status.js";
-import type { RoleAction } from "../../src/engine/claude.js";
+import { INSERT_DELEGATION_GRAPH_SQL } from "../../src/org/commit.js";
+import { fixtureTmp } from "../fixtures/fixture-dir.js";
+import { gateDepsFrom } from "../fixtures/gate-deps.js";
 
 const TMP = fixtureTmp("engine-dispatch", import.meta.url);
 const NOW = 1_700_000_000_000;
@@ -107,17 +112,32 @@ describe("usdToCents —— 账单换算", () => {
 
 describe("seatOf —— 谁坐在那一格", () => {
   it("CEO 的三个席位没有 agent 出边 ⇒ 人不来，agent 不开口（token 都不烧）", () => {
-    for (const s of ["CHARTER_PENDING", "ESCALATED_TO_CEO", "FINAL_REVIEW"] as const) {
+    for (const s of [
+      "CHARTER_PENDING",
+      "ESCALATED_TO_CEO",
+      "FINAL_REVIEW",
+    ] as const) {
       expect(seatOf(s)).toBe("human");
     }
   });
   it("干活的格子是 agent 席位", () => {
-    for (const s of ["CHARTER_APPROVED", "DECOMPOSING", "IN_PROGRESS", "IN_REVIEW", "BUDGET_PAUSED"] as const) {
+    for (const s of [
+      "CHARTER_APPROVED",
+      "DECOMPOSING",
+      "IN_PROGRESS",
+      "IN_REVIEW",
+      "BUDGET_PAUSED",
+    ] as const) {
       expect(seatOf(s)).toBe("agent");
     }
   });
   it("两张表都没有出边的状态 ⇒ human（fail-closed）：§7.1 的死路不该由 agent 猜出路", () => {
-    for (const s of ["BLOCKED", "MEETING_REQUIRED", "DELIVERED", "ARCHIVED"] as const) {
+    for (const s of [
+      "BLOCKED",
+      "MEETING_REQUIRED",
+      "DELIVERED",
+      "ARCHIVED",
+    ] as const) {
       expect(seatOf(s)).toBe("human");
     }
   });
@@ -187,7 +207,8 @@ describe("AGENT_EDGES —— 表本身就是权限清单", () => {
 });
 
 describe("handoffGate —— agent 点的收件人，hub 认不认", () => {
-  const g = (from: string, to: string) => handoffGate({ graph: GRAPH, from, to });
+  const g = (from: string, to: string) =>
+    handoffGate({ graph: GRAPH, from, to });
 
   it("交给自己链子里的人 ⇒ 认", () => {
     expect(g("director", "dev").ok).toBe(true);
@@ -270,7 +291,12 @@ describe("planEdge —— 一句话能不能变成一条状态边", () => {
   });
 
   it("IN_PROGRESS + pass ⇒ 提交上级审阅，下一轮由上级开口", () => {
-    const p = planEdge({ ...base, status: "IN_PROGRESS", role: "dev", decision: d("pass") });
+    const p = planEdge({
+      ...base,
+      status: "IN_PROGRESS",
+      role: "dev",
+      decision: d("pass"),
+    });
     expect(p.move).toBe(true);
     expect(p.to).toBe("EVIDENCE_SUBMITTED");
     expect(p.role).toBe("director");
@@ -282,7 +308,13 @@ describe("planEdge —— 一句话能不能变成一条状态边", () => {
       nodes: { lone: { role_id: "lone", can_manage: false, reports_to: null } },
       edges: [],
     };
-    const p = planEdge({ ...base, graph: orphan, status: "IN_PROGRESS", role: "lone", decision: d("pass") });
+    const p = planEdge({
+      ...base,
+      graph: orphan,
+      status: "IN_PROGRESS",
+      role: "lone",
+      decision: d("pass"),
+    });
     expect(p.move).toBe(false);
     expect(p.note).toContain("没有上级");
   });
@@ -299,20 +331,31 @@ describe("planEdge —— 一句话能不能变成一条状态边", () => {
     expect(p.role).toBe("dev");
   });
   it("IN_REVIEW + pass ⇒ 还有上级就进下一层（APPROVED_UPWARD 这一格的下一跳是上级）", () => {
-    const p = planEdge({ ...base, status: "IN_REVIEW", role: "dev", decision: d("pass") });
+    const p = planEdge({
+      ...base,
+      status: "IN_REVIEW",
+      role: "dev",
+      decision: d("pass"),
+    });
     expect(p.move).toBe(true);
     expect(p.to).toBe("IN_PROGRESS");
     expect(p.role).toBe("director");
   });
   it("IN_REVIEW + pass 且【到顶】⇒ 升 CEO，而不是自己宣布交付", () => {
-    const p = planEdge({ ...base, status: "IN_REVIEW", role: CEO, decision: d("pass") });
+    const p = planEdge({
+      ...base,
+      status: "IN_REVIEW",
+      role: CEO,
+      decision: d("pass"),
+    });
     expect(p.move).toBe(true);
     expect(p.to).toBe("ESCALATED_TO_CEO");
     expect(p.note).toContain("升到 CEO");
   });
   it("审阅者只能交付到 CEO 那一步【之前】—— DELIVERED 不在任何 agent 出边里", () => {
     for (const byAction of Object.values(AGENT_EDGES)) {
-      for (const e of Object.values(byAction ?? {})) expect(e.to).not.toBe("DELIVERED");
+      for (const e of Object.values(byAction ?? {}))
+        expect(e.to).not.toBe("DELIVERED");
     }
   });
   it("IN_REVIEW + handoff ⇒ 打回下游（REJECTED_DOWNWARD），方向与 pass 相反", () => {
@@ -327,20 +370,35 @@ describe("planEdge —— 一句话能不能变成一条状态边", () => {
     expect(p.role).toBe("dev");
   });
   it("决策段缺失 ⇒ 不动状态，note 里点名那个缺失的标记", () => {
-    const p = planEdge({ ...base, status: "IN_PROGRESS", role: "dev", decision: null });
+    const p = planEdge({
+      ...base,
+      status: "IN_PROGRESS",
+      role: "dev",
+      decision: null,
+    });
     expect(p.move).toBe(false);
     expect(p.to).toBe("IN_PROGRESS");
     expect(p.note).toContain("<<<OPC_DECISION>>>");
   });
   it("wait ⇒ 不动状态、不换角色，但 note 是员工那句话（回放要能看到它说了什么）", () => {
-    const p = planEdge({ ...base, status: "IN_PROGRESS", role: "dev", decision: d("wait") });
+    const p = planEdge({
+      ...base,
+      status: "IN_PROGRESS",
+      role: "dev",
+      decision: d("wait"),
+    });
     expect(p.move).toBe(false);
     expect(p.role).toBe("dev");
     expect(p.note).toBe("干了活");
   });
   it("状态与动作对不上 ⇒ 不动，并且 note 里带上【该状态能走哪些边】", () => {
     // DECOMPOSING 上 pass：拆解阶段没法「做完」，只能决定交给谁。
-    const p = planEdge({ ...base, status: "DECOMPOSING", role: "director", decision: d("pass") });
+    const p = planEdge({
+      ...base,
+      status: "DECOMPOSING",
+      role: "director",
+      decision: d("pass"),
+    });
     expect(p.move).toBe(false);
     expect(p.note).toContain("IN_PROGRESS");
     expect(p.note).toContain("需 CEO 拍板");
@@ -374,7 +432,11 @@ describe("planEdge —— 一句话能不能变成一条状态边", () => {
       status: "IN_REVIEW",
       role: "qa",
       decision: d("pass"),
-      review: { ok: false, code: "same_model_family", reason: "同属模型家族 [claude]" },
+      review: {
+        ok: false,
+        code: "same_model_family",
+        reason: "同属模型家族 [claude]",
+      },
     });
     expect(p.move).toBe(false);
     expect(p.note).toContain("模型家族");
@@ -422,17 +484,27 @@ describe("planEdge —— 一句话能不能变成一条状态边", () => {
               ...base,
               status,
               role: "dev",
-              decision: d(action, action === "handoff" ? { to_role: "qa" } : {}),
+              decision: d(
+                action,
+                action === "handoff" ? { to_role: "qa" } : {},
+              ),
               handoffTo: "qa",
               blockedHandoff,
               review,
             });
             cells += 1;
-            const sig = action + "/拦门=" + String(blockedHandoff !== null) + "/审阅=" +
-              (review === null ? "null" : review.ok ? "放行" : "拦") + "@" + status;
-            expect(p.note.includes("已建卡"), "签名 " + sig + " 上 note 的声称与建卡表不一致").toBe(
-              shouldClaimCard({ action, blockedHandoff, review }),
-            );
+            const sig =
+              action +
+              "/拦门=" +
+              String(blockedHandoff !== null) +
+              "/审阅=" +
+              (review === null ? "null" : review.ok ? "放行" : "拦") +
+              "@" +
+              status;
+            expect(
+              p.note.includes("已建卡"),
+              "签名 " + sig + " 上 note 的声称与建卡表不一致",
+            ).toBe(shouldClaimCard({ action, blockedHandoff, review }));
           }
         }
       }
@@ -445,7 +517,11 @@ describe("planEdge —— 一句话能不能变成一条状态边", () => {
 
 describe("组织原语", () => {
   it("subordinateRoles 只给直接下属、不给孙子，且排序稳定", () => {
-    expect(subordinateRoles(GRAPH, "director")).toEqual(["auditor", "dev", "qa"]);
+    expect(subordinateRoles(GRAPH, "director")).toEqual([
+      "auditor",
+      "dev",
+      "qa",
+    ]);
     expect(subordinateRoles(GRAPH, CEO)).toEqual(["director"]);
     expect(subordinateRoles(GRAPH, "dev")).toEqual([]);
   });
@@ -491,7 +567,8 @@ const DEEP_GRAPH: OrgGraph = {
 };
 
 describe("resolveCeoRoleId —— 顶层从图里读，不从常量里猜", () => {
-  const ok = (r: ReturnType<typeof resolveCeoRoleId>): string => (r.ok ? r.roleId : "FAIL:" + r.reason);
+  const ok = (r: ReturnType<typeof resolveCeoRoleId>): string =>
+    r.ok ? r.roleId : "FAIL:" + r.reason;
 
   it("⭐ 根叫 boss 也能认出来。这一条就是探针 A 的判据：名字不参与判定", () => {
     expect(ok(resolveCeoRoleId(undefined, BOSS_GRAPH))).toBe("boss");
@@ -510,7 +587,7 @@ describe("resolveCeoRoleId —— 顶层从图里读，不从常量里猜", () =
     expect(r.reason).toContain("不在这张组织图的节点里");
     expect(r.reason).toContain("[boss]");
   });
-  it("原型键不算角色：\"constructor\" 在 nodes 这个普通对象上【命中】而它不是节点", () => {
+  it('原型键不算角色："constructor" 在 nodes 这个普通对象上【命中】而它不是节点', () => {
     // Object.hasOwn 那一发的证据。用 `nodes[name] !== undefined` 写法时这一条会绿得离谱：
     // 它会返回 ok:true 而 roleId="constructor"，于是顶层判定指向一个不存在的人。
     expect(resolveCeoRoleId("constructor", GRAPH).ok).toBe(false);
@@ -745,7 +822,14 @@ async function newWorld(o: {
       "VALUES ('t1', '做个 AI 笔记应用', ?, ?, 'intake', ?, ?, ?)",
   ).run(o.status, o.role, NOW, NOW, o.graphVersion ?? 1);
   if (o.writeGraph !== false) {
-    db.prepare(INSERT_DELEGATION_GRAPH_SQL).run("g1", 1, JSON.stringify(o.graph ?? GRAPH), NOW, CEO, "测试用组织图");
+    db.prepare(INSERT_DELEGATION_GRAPH_SQL).run(
+      "g1",
+      1,
+      JSON.stringify(o.graph ?? GRAPH),
+      NOW,
+      CEO,
+      "测试用组织图",
+    );
   }
   const cost: { seq: number; cents: number }[] = [];
   const published: { kind: string; seq: number }[] = [];
@@ -798,7 +882,11 @@ async function newWorld(o: {
       bus.publishPersisted(e, seq);
     },
   });
-  const res = await dispatch({ taskId: "t1", nowMs: NOW + 1000, maxBudgetUsd: 0.5 });
+  const res = await dispatch({
+    taskId: "t1",
+    nowMs: NOW + 1000,
+    maxBudgetUsd: 0.5,
+  });
   const events = db.prepare("SELECT * FROM events ORDER BY id").all();
   return {
     q,
@@ -811,7 +899,11 @@ async function newWorld(o: {
     published,
     again: async (t: TurnOutcome) => {
       state.turn = t;
-      return await dispatch({ taskId: "t1", nowMs: NOW + 2000, maxBudgetUsd: 0.5 });
+      return await dispatch({
+        taskId: "t1",
+        nowMs: NOW + 2000,
+        maxBudgetUsd: 0.5,
+      });
     },
   };
 }
@@ -824,7 +916,9 @@ async function newWorld(o: {
  * 因为循环那一发每一轮都是【独立的 dispatch 事务】，写在上一轮就提交了。
  */
 function countRejections(db: Db, id: string): number {
-  const r = db.prepare(REJECTION_COUNT_SQL).get(id) as { n: number | bigint } | undefined;
+  const r = db.prepare(REJECTION_COUNT_SQL).get(id) as
+    | { n: number | bigint }
+    | undefined;
   return r === undefined ? 0 : Number(r.n);
 }
 
@@ -836,7 +930,8 @@ const turn = (text: string, over: Partial<TurnOutcome> = {}): TurnOutcome => ({
   error: null,
   ...over,
 });
-const said = (o: Record<string, unknown>) => "干完了。\n\n<<<OPC_DECISION>>>\n" + JSON.stringify(o);
+const said = (o: Record<string, unknown>) =>
+  "干完了。\n\n<<<OPC_DECISION>>>\n" + JSON.stringify(o);
 
 afterAll(async () => {
   for (const q of queues) {
@@ -861,8 +956,12 @@ describe("dispatch 的写路径（真 schema：约束、索引、守卫只有真
     expect(res.moved).toBe(true);
     const states = events.filter((e) => e["action"] === "state_change");
     expect(states.length).toBe(2);
-    expect(JSON.parse(String(states[0]?.["payload"]))["to"]).toBe("EVIDENCE_SUBMITTED");
-    expect(JSON.parse(String(states[1]?.["payload"]))["from"]).toBe("EVIDENCE_SUBMITTED");
+    expect(JSON.parse(String(states[0]?.["payload"]))["to"]).toBe(
+      "EVIDENCE_SUBMITTED",
+    );
+    expect(JSON.parse(String(states[1]?.["payload"]))["from"]).toBe(
+      "EVIDENCE_SUBMITTED",
+    );
     // 第二条边上【不该】重复挂账单
     const t = db.prepare("SELECT * FROM tasks WHERE id='t1'").get() as Row;
     expect(t["status"]).toBe("IN_REVIEW");
@@ -903,7 +1002,13 @@ describe("dispatch 的写路径（真 schema：约束、索引、守卫只有真
     const { db, res, events } = await newWorld({
       status: "IN_REVIEW",
       role: "director", // 审阅者
-      turn: turn(said({ action: "handoff", to_role: "dev", summary: "登录模块缺鉴权，打回重做" })),
+      turn: turn(
+        said({
+          action: "handoff",
+          to_role: "dev",
+          summary: "登录模块缺鉴权，打回重做",
+        }),
+      ),
       turns,
     });
     expect(res.status).toBe("IN_PROGRESS");
@@ -912,7 +1017,8 @@ describe("dispatch 的写路径（真 schema：约束、索引、守卫只有真
 
     const states = events.filter((e) => e["action"] === "state_change");
     expect(states.length).toBe(2);
-    const leg = (i: number) => JSON.parse(String(states[i]?.["payload"])) as Record<string, string>;
+    const leg = (i: number) =>
+      JSON.parse(String(states[i]?.["payload"])) as Record<string, string>;
     expect(leg(0)?.["to"]).toBe("REJECTED_DOWNWARD");
     expect(leg(1)?.["from"]).toBe("REJECTED_DOWNWARD");
     expect(leg(1)?.["to"]).toBe("IN_PROGRESS");
@@ -966,7 +1072,9 @@ describe("dispatch 的写路径（真 schema：约束、索引、守卫只有真
       status: "IN_REVIEW",
       role: "director",
       rejections: 3, // 已经打回过 3 次
-      turn: turn(said({ action: "handoff", to_role: "dev", summary: "还是缺鉴权" })),
+      turn: turn(
+        said({ action: "handoff", to_role: "dev", summary: "还是缺鉴权" }),
+      ),
       turns,
     });
     // 落 CEO 席位而【不是】IN_PROGRESS/dev
@@ -982,7 +1090,10 @@ describe("dispatch 的写路径（真 schema：约束、索引、守卫只有真
     // （追一跳会写出 REJECTED_DOWNWARD → ESCALATED_TO_CEO，规格里没有那条边）。
     const states = events.filter((e) => e["action"] === "state_change");
     expect(states.length).toBe(1);
-    const leg = JSON.parse(String(states[0]?.["payload"])) as Record<string, string>;
+    const leg = JSON.parse(String(states[0]?.["payload"])) as Record<
+      string,
+      string
+    >;
     expect(leg["from"]).toBe("IN_REVIEW");
     expect(leg["to"]).toBe("ESCALATED_TO_CEO");
     // 审计里那句只能说【已打回 3 次】。曾经这里写的是"这是第 4 次打回"—— 而这一轮
@@ -997,7 +1108,9 @@ describe("dispatch 的写路径（真 schema：约束、索引、守卫只有真
     expect(t["consumed_cents"]).toBe(4);
     // 收件箱里有卡：ESCALATED_TO_CEO 在 HUMAN_EDGES 里 ⇒ needsSeatCard 为真。
     // 这一句是这一发的【落点有效性】—— 落到另一格死路的话，上面那些断言照绿。
-    const cards = db.prepare("SELECT card_key, status FROM approvals WHERE task_id='t1'").all();
+    const cards = db
+      .prepare("SELECT card_key, status FROM approvals WHERE task_id='t1'")
+      .all();
     expect(cards.length).toBe(1);
     expect(String(cards[0]?.["card_key"])).toContain("ESCALATED_TO_CEO");
     expect(cards[0]?.["status"]).toBe("pending");
@@ -1010,12 +1123,24 @@ describe("dispatch 的写路径（真 schema：约束、索引、守卫只有真
       status: "IN_REVIEW",
       role: "director",
       rejections: 2,
-      turn: turn(said({ action: "handoff", to_role: "dev", summary: "缺鉴权" })),
+      turn: turn(
+        said({ action: "handoff", to_role: "dev", summary: "缺鉴权" }),
+      ),
     });
     expect(res.status).toBe("IN_PROGRESS");
     expect(res.role).toBe("dev");
-    expect((db.prepare("SELECT status FROM tasks WHERE id='t1'").get() as Row)["status"]).toBe("IN_PROGRESS");
-    expect((db.prepare("SELECT COUNT(*) AS n FROM approvals WHERE task_id='t1'").get() as Row)["n"]).toBe(0);
+    expect(
+      (db.prepare("SELECT status FROM tasks WHERE id='t1'").get() as Row)[
+        "status"
+      ],
+    ).toBe("IN_PROGRESS");
+    expect(
+      (
+        db
+          .prepare("SELECT COUNT(*) AS n FROM approvals WHERE task_id='t1'")
+          .get() as Row
+      )["n"],
+    ).toBe(0);
   });
 
   it("⭐ ⭐ 打回次数是【无条件】读的：不许按状态/动作筛（筛了上限就永不触发）", async () => {
@@ -1058,8 +1183,20 @@ describe("dispatch 的写路径（真 schema：约束、索引、守卫只有真
       turn: turn(said({ action: "pass", summary: "登录模块写完" })),
     });
     const db = w.db;
-    const status = () => String((db.prepare("SELECT status FROM tasks WHERE id='t1'").get() as Row)["status"]);
-    const role = () => String((db.prepare("SELECT assigned_role FROM tasks WHERE id='t1'").get() as Row)["assigned_role"]);
+    const status = () =>
+      String(
+        (db.prepare("SELECT status FROM tasks WHERE id='t1'").get() as Row)[
+          "status"
+        ],
+      );
+    const role = () =>
+      String(
+        (
+          db
+            .prepare("SELECT assigned_role FROM tasks WHERE id='t1'")
+            .get() as Row
+        )["assigned_role"],
+      );
     const trail: string[] = ["IN_PROGRESS/dev"];
 
     let r = w.res;
@@ -1070,7 +1207,11 @@ describe("dispatch 的写路径（真 schema：约束、索引、守卫只有真
       const next =
         status() === "IN_PROGRESS"
           ? said({ action: "pass", summary: "补上了，再审" }) // dev：交上去
-          : said({ action: "handoff", to_role: "dev", summary: "鉴权还是缺，打回" }); // 审阅者：永远不满意
+          : said({
+              action: "handoff",
+              to_role: "dev",
+              summary: "鉴权还是缺，打回",
+            }); // 审阅者：永远不满意
       r = await w.again(turn(next));
       rounds += 1;
       trail.push(status() + "/" + role());
@@ -1082,11 +1223,21 @@ describe("dispatch 的写路径（真 schema：约束、索引、守卫只有真
     // "有界"这件事本身没有内容：12 轮也有界，而代价是每心跳多烧 5 轮真钱。
     expect(rounds).toBe(7);
     expect(trail.filter((x) => x === "IN_PROGRESS/dev").length).toBe(4); // 初次 + 三次重做
-    expect((db.prepare("SELECT COUNT(*) AS n FROM events WHERE task_id='t1' AND action='state_change' AND json_extract(payload,'$.to')='REJECTED_DOWNWARD'").get() as Row)["n"]).toBe(
-      3,
-    );
+    expect(
+      (
+        db
+          .prepare(
+            "SELECT COUNT(*) AS n FROM events WHERE task_id='t1' AND action='state_change' AND json_extract(payload,'$.to')='REJECTED_DOWNWARD'",
+          )
+          .get() as Row
+      )["n"],
+    ).toBe(3);
     // 而且它【真的进了人的收件箱】—— 不是停在一个没人能动的格子（0050 §8 那一族）
-    const cards = db.prepare("SELECT card_key FROM approvals WHERE task_id='t1' AND status='pending'").all();
+    const cards = db
+      .prepare(
+        "SELECT card_key FROM approvals WHERE task_id='t1' AND status='pending'",
+      )
+      .all();
     expect(cards.length).toBe(1);
   });
 
@@ -1102,7 +1253,14 @@ describe("dispatch 的写路径（真 schema：约束、索引、守卫只有真
       "INSERT INTO tasks (id, title, status, assigned_role, current_node, created_at, updated_at, graph_version) " +
         "VALUES ('t1','x','IN_PROGRESS','dev','intake',?, ?, 1)",
     ).run(NOW, NOW);
-    db.prepare(INSERT_DELEGATION_GRAPH_SQL).run("g1", 1, JSON.stringify(GRAPH), NOW, CEO, "g");
+    db.prepare(INSERT_DELEGATION_GRAPH_SQL).run(
+      "g1",
+      1,
+      JSON.stringify(GRAPH),
+      NOW,
+      CEO,
+      "g",
+    );
     let flipped = false;
     // 真总线 + 真订阅者，而且【在改状态之前】就订上：这一发要断的是「整笔回滚时
     // 一条都不广播」。用桩记调用的话，「广播了一条不存在的状态变化」这个形状
@@ -1113,7 +1271,13 @@ describe("dispatch 的写路径（真 schema：约束、索引、守卫只有真
     const dispatch = makeDispatch({
       writer: q,
       ...gateDepsFrom(db, TMP + "/artifacts"),
-      loadTask: () => ({ id: "t1", title: "x", status: "IN_PROGRESS", role: "dev", graphVersion: 1 }),
+      loadTask: () => ({
+        id: "t1",
+        title: "x",
+        status: "IN_PROGRESS",
+        role: "dev",
+        graphVersion: 1,
+      }),
       modelFamily: (r) => families[r] ?? "",
       rolePrompt: () => "",
       roleSession: () => null,
@@ -1131,15 +1295,27 @@ describe("dispatch 的写路径（真 schema：约束、索引、守卫只有真
       ceoApproved: () => false,
       publish: (e, seq) => bus.publishPersisted(e, seq),
     });
-    await expect(dispatch({ taskId: "t1", nowMs: NOW, maxBudgetUsd: 1 })).rejects.toThrow(/过期认知/);
+    await expect(
+      dispatch({ taskId: "t1", nowMs: NOW, maxBudgetUsd: 1 }),
+    ).rejects.toThrow(/过期认知/);
     // 一条都没广播（bus 的游标还在 0 = 它压根没收到过东西）。
     expect(bus.latestSeq()).toBe(0);
-    expect((db.prepare("SELECT status FROM tasks WHERE id='t1'").get() as Row)["status"]).toBe("BLOCKED");
+    expect(
+      (db.prepare("SELECT status FROM tasks WHERE id='t1'").get() as Row)[
+        "status"
+      ],
+    ).toBe("BLOCKED");
     // 关键断言：那一轮【一条事件都没留下】。留一条就是「审计里有一次从未发生的跃迁」。
     expect(db.prepare("SELECT * FROM events").all().length).toBe(0);
     // 账单同样不记（否则重试像为同一轮又付一遍）。0 是 0001_init.sql 那列的 DEFAULT，
     // 断 0 而不是断 null：null 会是「有人显式写过 NULL」，那是另一件事。
-    expect((db.prepare("SELECT consumed_cents FROM tasks WHERE id='t1'").get() as Row)["consumed_cents"]).toBe(0);
+    expect(
+      (
+        db
+          .prepare("SELECT consumed_cents FROM tasks WHERE id='t1'")
+          .get() as Row
+      )["consumed_cents"],
+    ).toBe(0);
   });
 
   it("wait ⇒ 状态不动，但【留下一行】说明为什么停着，并且结账", async () => {
@@ -1160,7 +1336,11 @@ describe("dispatch 的写路径（真 schema：约束、索引、守卫只有真
     // （理由见 events/bus.ts 那个第 9 个 kind 的注释）。
     expect(p["state"]).toBe("IN_PROGRESS");
     expect(p["costCents"]).toBe(4);
-    expect((db.prepare("SELECT consumed_cents FROM tasks").get() as Row)["consumed_cents"]).toBe(4);
+    expect(
+      (db.prepare("SELECT consumed_cents FROM tasks").get() as Row)[
+        "consumed_cents"
+      ],
+    ).toBe(4);
     expect(cost.length).toBe(1);
   });
 
@@ -1183,7 +1363,12 @@ describe("dispatch 的写路径（真 schema：约束、索引、守卫只有真
   });
 
   it("组织图版本缺失 ⇒ 不跑，且【不退回最新图】（§18.4）", async () => {
-    const { res } = await newWorld({ status: "IN_PROGRESS", role: "dev", turn: turn("x"), graphVersion: 9 });
+    const { res } = await newWorld({
+      status: "IN_PROGRESS",
+      role: "dev",
+      turn: turn("x"),
+      graphVersion: 9,
+    });
     expect(res.moved).toBe(false);
     expect(res.note).toContain("版本 9");
   });
@@ -1193,7 +1378,9 @@ describe("dispatch 的写路径（真 schema：约束、索引、守卫只有真
       status: "IN_PROGRESS",
       role: "dev",
       // qa 是 dev 的平级 —— 越权
-      turn: turn(said({ action: "handoff", to_role: "qa", summary: "交给测试" })),
+      turn: turn(
+        said({ action: "handoff", to_role: "qa", summary: "交给测试" }),
+      ),
     });
     expect(a.res.moved).toBe(false);
     expect(a.res.card).not.toBeNull();
@@ -1201,8 +1388,12 @@ describe("dispatch 的写路径（真 schema：约束、索引、守卫只有真
     expect(cards.length).toBe(1);
     expect(cards[0]?.["status"]).toBe("pending");
     // 按钮是 contracts 那三个长名字（写错会被 .strict() 拒，这里再钉一次落库的形状）
-    expect(String(cards[0]?.["parameters"])).toContain("recommendation_is_not_decision");
-    expect(a.events.filter((e) => e["action"] === "unauthorized_attempt").length).toBe(1);
+    expect(String(cards[0]?.["parameters"])).toContain(
+      "recommendation_is_not_decision",
+    );
+    expect(
+      a.events.filter((e) => e["action"] === "unauthorized_attempt").length,
+    ).toBe(1);
     // 卡片那一行的 action 是 'approval'（与 createCard / 巡检 / http 同一个值），
     // 【不是】unauthorized_attempt：否则任何按 action 数待批的读法都少算引擎这一类。
     expect(a.events.some((e) => e["action"] === "approval")).toBe(true);
@@ -1213,7 +1404,10 @@ describe("dispatch 的写路径（真 schema：约束、索引、守卫只有真
     // 顶层键的读法才会漏掉引擎这一类。engine/charter.test.ts 有一条跨生产者的
     // 键集合比对，这里钉的是【dispatch 这一处】自己别再改回去。
     const cardRow = a.events.find((e) => e["action"] === "approval");
-    const cp = JSON.parse(String(cardRow?.["payload"])) as Record<string, unknown>;
+    const cp = JSON.parse(String(cardRow?.["payload"])) as Record<
+      string,
+      unknown
+    >;
     expect(cp["kind"]).toBe("ApprovalRequired");
     expect(typeof cp["approval_type"]).toBe("string");
     expect(typeof cp["summary"]).toBe("string");
@@ -1223,14 +1417,20 @@ describe("dispatch 的写路径（真 schema：约束、索引、守卫只有真
 
     // 同一本库上再撞一次【同一条边】⇒ 去重键生效。
     // 换一本新库来断这件事是测不出来的（新库里天然只有一张卡，那条断言恒真）。
-    const again = await a.again(turn(said({ action: "handoff", to_role: "qa", summary: "还是想交" })));
+    const again = await a.again(
+      turn(said({ action: "handoff", to_role: "qa", summary: "还是想交" })),
+    );
     expect(again.card).toBeNull(); // 撞键 ⇒ 不重复广播（否则收件箱计数会 +2）
     expect(a.db.prepare("SELECT * FROM approvals").all().length).toBe(1);
-    expect(a.db.prepare("SELECT * FROM events WHERE action='approval'").all().length).toBe(1);
+    expect(
+      a.db.prepare("SELECT * FROM events WHERE action='approval'").all().length,
+    ).toBe(1);
 
     // 【但越权那一行不能跟着去重】。去重键管的是卡片不重复，不是尝试不重复：
     // 一个角色每分钟试一次同一条非法边时，§4.5 那个「试了几次」必须数得出来。
-    const attempts = a.db.prepare("SELECT * FROM events WHERE action='unauthorized_attempt'").all();
+    const attempts = a.db
+      .prepare("SELECT * FROM events WHERE action='unauthorized_attempt'")
+      .all();
     expect(attempts.length).toBe(2);
     // 第二次的 target 落在【角色名】而不是上次那张卡的 id：那一次批准请求并没有因为
     // 本轮这次尝试而发出，指着旧卡等于让审计记录一次没发生过的批准请求。
@@ -1253,7 +1453,11 @@ describe("dispatch 的写路径（真 schema：约束、索引、守卫只有真
     // 这一段的语义从「不同源即推进」改成「不同源 ⇒ 只剩门 4 一扇门，它今天全量拦」。
     expect(blocked.res.moved).toBe(false);
     expect(blocked.res.status).toBe("IN_REVIEW");
-    const blockedKey = String((blocked.db.prepare("SELECT card_key FROM approvals").all() as Row[])[0]?.["card_key"] ?? "");
+    const blockedKey = String(
+      (
+        blocked.db.prepare("SELECT card_key FROM approvals").all() as Row[]
+      )[0]?.["card_key"] ?? "",
+    );
     expect(blockedKey).toContain("gate-blocked:");
     expect(blockedKey).not.toContain("same-family-review:");
 
@@ -1282,8 +1486,15 @@ describe("dispatch 的写路径（真 schema：约束、索引、守卫只有真
     // 被拦下的是它的【资格】，而资格不足是这台机器的属性（只有一个模型家族），
     // 不是某个角色的越权。记进去会让「按 action 统计越权」这个 §4.5 要读的数
     // 被系统自己的配置长期污染。
-    expect(same.db.prepare("SELECT * FROM events WHERE action='unauthorized_attempt'").all().length).toBe(0);
-    expect(same.db.prepare("SELECT * FROM events WHERE action='approval'").all().length).toBe(1);
+    expect(
+      same.db
+        .prepare("SELECT * FROM events WHERE action='unauthorized_attempt'")
+        .all().length,
+    ).toBe(0);
+    expect(
+      same.db.prepare("SELECT * FROM events WHERE action='approval'").all()
+        .length,
+    ).toBe(1);
 
     // 同一件事 CEO 批过 ⇒ 门 3 放行（不建 same-family 卡），但门 4 仍全量拦。
     // 语义变化点：未接门 4 前这一格是 moved=true；现在同源豁免只过得了门 3，
@@ -1299,7 +1510,9 @@ describe("dispatch 的写路径（真 schema：约束、索引、守卫只有真
     expect(approved.res.status).toBe("IN_REVIEW");
     // 同源豁免生效的痕迹：库里【没有】 same-family-review 卡（那扇门过了），
     // 拦下它的是 gate-blocked 卡（那扇门没过）。
-    const keys = (approved.db.prepare("SELECT card_key FROM approvals").all() as Row[]).map((r) => String(r["card_key"]));
+    const keys = (
+      approved.db.prepare("SELECT card_key FROM approvals").all() as Row[]
+    ).map((r) => String(r["card_key"]));
     expect(keys.some((k) => k.startsWith("same-family-review:"))).toBe(false);
     expect(keys.some((k) => k.startsWith("gate-blocked:"))).toBe(true);
   });
@@ -1324,11 +1537,9 @@ describe("dispatch 的写路径（真 schema：约束、索引、守卫只有真
       turn: turn(said({ action: "pass", summary: "看着没问题" })),
     });
     const keyOf = () =>
-      (
-        w.db
-          .prepare("SELECT card_key FROM approvals")
-          .all() as Row[]
-      ).map((r) => String(r["card_key"]));
+      (w.db.prepare("SELECT card_key FROM approvals").all() as Row[]).map((r) =>
+        String(r["card_key"]),
+      );
     expect(w.res.moved).toBe(false);
     expect(w.res.status).toBe("IN_REVIEW");
     // 键里带 code：一个前缀下面要能分辨「缺边 / 家族没配 / 自审 / 查不到产出方」，
@@ -1346,9 +1557,8 @@ describe("dispatch 的写路径（真 schema：约束、索引、守卫只有真
         .all().length,
     ).toBe(0);
     expect(
-      w.db
-        .prepare("SELECT * FROM events WHERE action='review_decision'")
-        .all().length,
+      w.db.prepare("SELECT * FROM events WHERE action='review_decision'").all()
+        .length,
     ).toBe(0);
     // 卡片这一侧必须真的进了审计（一张只落在 approvals、没有 ApprovalRequired 的卡
     // 在界面上不存在：收件箱计数读的是事件流）。
@@ -1363,7 +1573,9 @@ describe("dispatch 的写路径（真 schema：约束、索引、守卫只有真
 
     // 第二轮（同一个库）不建第二张：去重靠那条 partial unique index，
     // 而它只在 status='pending' 时生效 —— 这张还挂着，所以本轮一条都不写。
-    const again = await w.again(turn(said({ action: "pass", summary: "看着没问题" })));
+    const again = await w.again(
+      turn(said({ action: "pass", summary: "看着没问题" })),
+    );
     expect(again.moved).toBe(false);
     expect(w.db.prepare("SELECT * FROM approvals").all().length).toBe(1);
   });
@@ -1400,9 +1612,9 @@ describe("dispatch 的写路径（真 schema：约束、索引、守卫只有真
       graph: { nodes: GRAPH.nodes, edges: noEdge },
       turn: turn(said({ action: "pass", summary: "看着没问题" })),
     });
-    const card = w.db
-      .prepare("SELECT id FROM approvals")
-      .get() as Row | undefined;
+    const card = w.db.prepare("SELECT id FROM approvals").get() as
+      | Row
+      | undefined;
     const out = await approveCard(
       w.q,
       {
@@ -1426,13 +1638,15 @@ describe("dispatch 的写路径（真 schema：约束、索引、守卫只有真
     // 只认 same-family-review: 这个键，这一族故意避开它 —— 否则「组织图上缺一条
     // 带门控的出边」会被一次点击算成「CEO 已接受同源审阅」。
     const waiverKey = SAME_FAMILY_REVIEW_KEY_PREFIX + "director->dev";
-    const cred = w.db
-      .prepare(CEO_APPROVED_SQL)
-      .get("t1", waiverKey) as Row | undefined;
+    const cred = w.db.prepare(CEO_APPROVED_SQL).get("t1", waiverKey) as
+      | Row
+      | undefined;
     expect(cred).toBeUndefined();
     // 旧卡离开 pending ⇒ 那条 partial unique index 不再压制 ⇒
     // 下一轮重新建一张（边仍然没补，这件事仍然没人解决，它必须继续出现）。
-    const again = await w.again(turn(said({ action: "pass", summary: "看着没问题" })));
+    const again = await w.again(
+      turn(said({ action: "pass", summary: "看着没问题" })),
+    );
     expect(again.moved).toBe(false);
     const cards = w.db
       .prepare("SELECT card_key, status FROM approvals")
@@ -1445,7 +1659,9 @@ describe("dispatch 的写路径（真 schema：约束、索引、守卫只有真
     // 家族那一维本轮是过的，凭空建一张「CEO 请接受同源审阅」是把 CEO 往
     // 一条并不存在的风险上引。
     expect(
-      cards.every((c) => String(c["card_key"]).startsWith(REVIEW_BLOCK_KEY_PREFIX)),
+      cards.every((c) =>
+        String(c["card_key"]).startsWith(REVIEW_BLOCK_KEY_PREFIX),
+      ),
     ).toBe(true);
     expect(
       cards.some((c) =>
@@ -1486,26 +1702,31 @@ describe("dispatch 的写路径（真 schema：约束、索引、守卫只有真
         "补上 director→CEO 的门控边",
       );
     w.db.prepare("UPDATE tasks SET graph_version = 2 WHERE id='t1'").run();
-    const fixed = await w.again(turn(said({ action: "pass", summary: "看着没问题" })));
+    const fixed = await w.again(
+      turn(said({ action: "pass", summary: "看着没问题" })),
+    );
     // 判据 3 修复的证据：review-blocked 卡（no_independent_reviewer_path 那族）不再出现。
     // 门 4 依然拦着（gate-blocked 卡出现），所以任务还在 IN_REVIEW、角色还是 dev。
     expect(fixed.moved).toBe(false);
     expect(fixed.status).toBe("IN_REVIEW");
     expect(fixed.role).toBe("dev");
-    const cardKeys = (w.db.prepare("SELECT card_key FROM approvals").all() as Row[]).map(
-      (r) => String(r["card_key"]),
-    );
+    const cardKeys = (
+      w.db.prepare("SELECT card_key FROM approvals").all() as Row[]
+    ).map((r) => String(r["card_key"]));
     // v1 那张是判据 3 拦的；卡还留在库里（点过才能消失）—— 但 v2 这一轮
     // 【没有再新增】 review-blocked 卡，而是新增了一张 gate-blocked 卡。
     // 即：同样是「卡住不动」，拦它的门从判据 3 换成了门 4。
-    expect(cardKeys.filter((k) => k.startsWith(REVIEW_BLOCK_KEY_PREFIX)).length).toBe(1);
-    expect(cardKeys.filter((k) => k.startsWith("gate-blocked:")).length).toBe(1);
+    expect(
+      cardKeys.filter((k) => k.startsWith(REVIEW_BLOCK_KEY_PREFIX)).length,
+    ).toBe(1);
+    expect(cardKeys.filter((k) => k.startsWith("gate-blocked:")).length).toBe(
+      1,
+    );
     // 被拦的那一轮一条 ReviewDecided 都没发；v2 这轮被门 4 拦下也同样不发
     // （门 4 的审计走 RoleTurnReported/tool_call 那条线，§8.2 判负不落 review_decision）。
     const decided = w.db
       .prepare(
-        "SELECT * FROM events WHERE action='review_decision' " +
-          "ORDER BY id",
+        "SELECT * FROM events WHERE action='review_decision' " + "ORDER BY id",
       )
       .all() as Row[];
     expect(decided.length).toBe(0);
@@ -1527,10 +1748,17 @@ describe("dispatch 的写路径（真 schema：约束、索引、守卫只有真
     expect(res.status).toBe("IN_PROGRESS");
     expect(res.costCents).toBe(7);
     expect(res.note).toContain("budget exceeded");
-    expect((db.prepare("SELECT consumed_cents FROM tasks").get() as Row)["consumed_cents"]).toBe(7);
+    expect(
+      (db.prepare("SELECT consumed_cents FROM tasks").get() as Row)[
+        "consumed_cents"
+      ],
+    ).toBe(7);
     expect(events.length).toBe(1);
     expect(events[0]?.["action"]).toBe("tool_call");
-    expect(db.prepare("SELECT * FROM events WHERE action='state_change'").all().length).toBe(0);
+    expect(
+      db.prepare("SELECT * FROM events WHERE action='state_change'").all()
+        .length,
+    ).toBe(0);
   });
 
   it("决策段缺失 ⇒ 状态不动 + 留下一行原因（不默认往下走）", async () => {
@@ -1540,7 +1768,9 @@ describe("dispatch 的写路径（真 schema：约束、索引、守卫只有真
       turn: turn("我觉得差不多了吧"),
     });
     expect(res.status).toBe("IN_PROGRESS");
-    expect(JSON.parse(String(events[0]?.["payload"]))["note"]).toContain("<<<OPC_DECISION>>>");
+    expect(JSON.parse(String(events[0]?.["payload"]))["note"]).toContain(
+      "<<<OPC_DECISION>>>",
+    );
   });
 
   it("记账钩子拿到的 seq 是【真实存在】的 events.id（BudgetTracker 的幂等键靠它）", async () => {
@@ -1550,7 +1780,9 @@ describe("dispatch 的写路径（真 schema：约束、索引、守卫只有真
       turn: turn(said({ action: "wait", summary: "再推一次" })),
     });
     expect(cost.length).toBe(1);
-    const hit = db.prepare("SELECT id FROM events WHERE id = ?").all((cost[0] as { seq: number }).seq);
+    const hit = db
+      .prepare("SELECT id FROM events WHERE id = ?")
+      .all((cost[0] as { seq: number }).seq);
     expect(hit.length).toBe(1);
   });
 
@@ -1560,17 +1792,53 @@ describe("dispatch 的写路径（真 schema：约束、索引、守卫只有真
     // 两个集合就不相等 —— 于是「新加一条 appendAudit 而忘了进 outgoing」这种
     // 将来一定会发生的改动，会在【加它的那一次提交】里红掉。
     const cases = [
-      { name: "状态轮", status: "IN_PROGRESS", role: "dev", turn: turn(said({ action: "pass", summary: "写完" })) },
-      { name: "等待轮", status: "IN_PROGRESS", role: "dev", turn: turn(said({ action: "wait", summary: "等 CI" })) },
-      { name: "越权轮", status: "IN_PROGRESS", role: "dev", turn: turn(said({ action: "handoff", to_role: "qa", summary: "交出去" })) },
-      { name: "失败轮", status: "IN_PROGRESS", role: "dev", turn: turn("x", { ok: false, error: "boom", costCents: 3 }) },
+      {
+        name: "状态轮",
+        status: "IN_PROGRESS",
+        role: "dev",
+        turn: turn(said({ action: "pass", summary: "写完" })),
+      },
+      {
+        name: "等待轮",
+        status: "IN_PROGRESS",
+        role: "dev",
+        turn: turn(said({ action: "wait", summary: "等 CI" })),
+      },
+      {
+        name: "越权轮",
+        status: "IN_PROGRESS",
+        role: "dev",
+        turn: turn(
+          said({ action: "handoff", to_role: "qa", summary: "交出去" }),
+        ),
+      },
+      {
+        name: "失败轮",
+        status: "IN_PROGRESS",
+        role: "dev",
+        turn: turn("x", { ok: false, error: "boom", costCents: 3 }),
+      },
     ] as const;
     for (const c of cases) {
-      const w = await newWorld({ status: c.status, role: c.role, turn: c.turn });
-      const written = w.db.prepare("SELECT id FROM events ORDER BY id").all().map((r) => Number(r["id"]));
+      const w = await newWorld({
+        status: c.status,
+        role: c.role,
+        turn: c.turn,
+      });
+      const written = w.db
+        .prepare("SELECT id FROM events ORDER BY id")
+        .all()
+        .map((r) => Number(r["id"]));
       const sent = w.published.map((p) => p.seq);
       // 断言消息带上用例名：四个 case 里红一个时，光看两个数组看不出是哪一轮。
-      expect(sent, c.name + "：写下的 seq " + JSON.stringify(written) + "，广播的 " + JSON.stringify(sent)).toEqual(written);
+      expect(
+        sent,
+        c.name +
+          "：写下的 seq " +
+          JSON.stringify(written) +
+          "，广播的 " +
+          JSON.stringify(sent),
+      ).toEqual(written);
       // 顺序也得对：真总线对 seq 严格递增有守卫（乱序推送当场抛错），所以这一发
       // 同时是在证明「按写入顺序推送」这件事成立。
       expect(sent.slice().sort((a, b) => a - b)).toEqual(sent);
@@ -1581,7 +1849,9 @@ describe("dispatch 的写路径（真 schema：约束、索引、守卫只有真
 
   it("任务不存在 ⇒ 抛错，而不是返回一个「什么都没发生」的成功", async () => {
     const { WriteQueue } = await import("../../src/db/write-queue.js");
-    const q = (new WriteQueue(TMP + "/none-" + process.pid + ".db") as unknown as Queue);
+    const q = new WriteQueue(
+      TMP + "/none-" + process.pid + ".db",
+    ) as unknown as Queue;
     queues.push(q);
     const db = q.writeConnection();
     migrate(db);
@@ -1601,7 +1871,9 @@ describe("dispatch 的写路径（真 schema：约束、索引、守卫只有真
       // 等于允许装配时漏传，而漏传的后果是 TS 不响、测试照绿、只有前端看得见空洞。
       publish: () => {},
     });
-    await expect(dispatch({ taskId: "ghost", nowMs: NOW, maxBudgetUsd: 1 })).rejects.toThrow(/不存在的任务烧 token/);
+    await expect(
+      dispatch({ taskId: "ghost", nowMs: NOW, maxBudgetUsd: 1 }),
+    ).rejects.toThrow(/不存在的任务烧 token/);
   });
 });
 
@@ -1657,17 +1929,27 @@ describe("0047 顶层判定与「下一位是人类」的写路径", () => {
 
     // ⭐ 那行假审计【一行都没有】：CEO 没有以 agent 身份跑过任何一轮
     const fake = db
-      .prepare("SELECT COUNT(*) AS n FROM events WHERE actor_type='agent' AND actor_id='ceo'")
+      .prepare(
+        "SELECT COUNT(*) AS n FROM events WHERE actor_type='agent' AND actor_id='ceo'",
+      )
       .get() as Row;
     expect(Number(fake["n"])).toBe(0);
 
     // 负责角色保持产出方，【没有】被改成 ceo（否则一次"升给 CEO 看"= 一次组织分配）
-    expect(String((db.prepare("SELECT assigned_role FROM tasks").get() as Row)["assigned_role"])).toBe("manager");
+    expect(
+      String(
+        (db.prepare("SELECT assigned_role FROM tasks").get() as Row)[
+          "assigned_role"
+        ],
+      ),
+    ).toBe("manager");
 
     // 0046 那一发：停在人席 ⇒ 手上必须有一张卡，否则这一发只是换了个姿势的死路
     const cards = db.prepare("SELECT * FROM approvals").all();
     expect(cards.length).toBe(1);
-    expect(String(cards[0]?.["card_key"])).toBe("seat:ESCALATED_TO_CEO:" + String(res.stateEventSeq));
+    expect(String(cards[0]?.["card_key"])).toBe(
+      "seat:ESCALATED_TO_CEO:" + String(res.stateEventSeq),
+    );
     expect(res.card).not.toBeNull();
   });
 
@@ -1770,8 +2052,14 @@ describe("0047 顶层判定与「下一位是人类」的写路径", () => {
  * ⚠ 值域是 `null | "pass" | "reject"`，而 `null` 那一格【必须写出理由】。
  * 静默的 null 与"想清楚了这里不算判定"在断言里长得一模一样，而后者才是可审的。
  */
-const EXPECT_VERDICT: Record<string, { readonly verdict: "pass" | "reject" | null; readonly why: string }> = {
-  APPROVED_UPWARD: { verdict: "pass", why: "那一格 literally 是【审过了，往上走】" },
+const EXPECT_VERDICT: Record<
+  string,
+  { readonly verdict: "pass" | "reject" | null; readonly why: string }
+> = {
+  APPROVED_UPWARD: {
+    verdict: "pass",
+    why: "那一格 literally 是【审过了，往上走】",
+  },
   REJECTED_DOWNWARD: { verdict: "reject", why: "那一格是【打回】" },
   ESCALATED_TO_CEO: {
     verdict: null,
@@ -1782,17 +2070,31 @@ const EXPECT_VERDICT: Record<string, { readonly verdict: "pass" | "reject" | nul
   },
   DECOMPOSING: { verdict: null, why: "拆解不是审阅" },
   IN_PROGRESS: { verdict: null, why: "接活儿重做，不是判定" },
-  EVIDENCE_SUBMITTED: { verdict: null, why: "产出方自己那一轮：它交东西，不判自己" },
+  EVIDENCE_SUBMITTED: {
+    verdict: null,
+    why: "产出方自己那一轮：它交东西，不判自己",
+  },
 };
 
 describe("ReviewDecided —— 落点表反向穷尽（漏归类时这一发红）", () => {
   /** 每条边怎么走到：状态 + 角色 + 动作。缺了它就没法把 AGENT_EDGES 的每一条都真走一遍。 */
-  const REACH: Record<string, { status: string; role: string; toRole?: string }> = {
+  const REACH: Record<
+    string,
+    { status: string; role: string; toRole?: string }
+  > = {
     "CHARTER_APPROVED/pass": { status: "CHARTER_APPROVED", role: "director" },
-    "DECOMPOSING/handoff": { status: "DECOMPOSING", role: "director", toRole: "dev" },
+    "DECOMPOSING/handoff": {
+      status: "DECOMPOSING",
+      role: "director",
+      toRole: "dev",
+    },
     "IN_PROGRESS/pass": { status: "IN_PROGRESS", role: "dev" },
     "IN_REVIEW/pass": { status: "IN_REVIEW", role: "director" },
-    "IN_REVIEW/handoff": { status: "IN_REVIEW", role: "director", toRole: "dev" },
+    "IN_REVIEW/handoff": {
+      status: "IN_REVIEW",
+      role: "director",
+      toRole: "dev",
+    },
     "IN_REVIEW/blocked": { status: "IN_REVIEW", role: "director" },
     "BUDGET_PAUSED/blocked": { status: "BUDGET_PAUSED", role: "director" },
   };
@@ -1803,16 +2105,25 @@ describe("ReviewDecided —— 落点表反向穷尽（漏归类时这一发红�
       for (const action of Object.keys(byAction ?? {})) {
         const e = AGENT_EDGES[status as TaskState]?.[action as RoleAction];
         if (e !== undefined) landings.add(e.to);
-        expect(REACH[status + "/" + action], "边 " + status + "/" + action + " 没有走法夹具").toBeDefined();
+        expect(
+          REACH[status + "/" + action],
+          "边 " + status + "/" + action + " 没有走法夹具",
+        ).toBeDefined();
       }
     }
     // 反向也判：这份表里不许躺着【边表已经没有】的落点（那是一份没人用的抄本，
     // 它的存在只会让下一次读它的人以为那条边还在）。
     for (const landing of landings) {
-      expect(EXPECT_VERDICT[landing], "落点 " + landing + " 没被归类").toBeDefined();
+      expect(
+        EXPECT_VERDICT[landing],
+        "落点 " + landing + " 没被归类",
+      ).toBeDefined();
     }
     for (const landing of Object.keys(EXPECT_VERDICT)) {
-      expect(landings.has(landing), "抄本里的 " + landing + " 在边表里已不存在").toBe(true);
+      expect(
+        landings.has(landing),
+        "抄本里的 " + landing + " 在边表里已不存在",
+      ).toBe(true);
     }
   });
 
@@ -1821,13 +2132,21 @@ describe("ReviewDecided —— 落点表反向穷尽（漏归类时这一发红�
       for (const action of Object.keys(byAction ?? {})) {
         const edge = AGENT_EDGES[status as TaskState]?.[action as RoleAction];
         if (edge === undefined) continue;
-        const r = REACH[status + "/" + action] as { status: string; role: string; toRole?: string };
+        const r = REACH[status + "/" + action] as {
+          status: string;
+          role: string;
+          toRole?: string;
+        };
         const handoffTo = r.toRole ?? null;
         const p = planEdge({
           status: r.status as never,
           role: r.role,
           graph: GRAPH,
-          decision: { action: action as never, summary: "干了活", ...(handoffTo === null ? {} : { to_role: handoffTo }) },
+          decision: {
+            action: action as never,
+            summary: "干了活",
+            ...(handoffTo === null ? {} : { to_role: handoffTo }),
+          },
           handoffTo,
           blockedHandoff: null,
           // 同源性判定【不是这一发要判的东西】，而 pass 在 IN_REVIEW 上会被它拦住：
@@ -1836,7 +2155,10 @@ describe("ReviewDecided —— 落点表反向穷尽（漏归类时这一发红�
           review: { ok: true },
           ceoRoleId: CEO,
         });
-        const want = EXPECT_VERDICT[edge.to] as { verdict: "pass" | "reject" | null; why: string };
+        const want = EXPECT_VERDICT[edge.to] as {
+          verdict: "pass" | "reject" | null;
+          why: string;
+        };
         const label = status + "/" + action + " → " + edge.to;
         // 只有真的跃迁了才谈得上带判定：越权 / 没有上级那几支会 stay，
         // 而 stay 的分支结构上带不了 review（EdgePlan 的判别式管的）。
@@ -1845,9 +2167,14 @@ describe("ReviewDecided —— 落点表反向穷尽（漏归类时这一发红�
           continue;
         }
         if (want.verdict === null) {
-          expect(p.review, label + " 不该带审阅判定（" + want.why + "）").toBeUndefined();
+          expect(
+            p.review,
+            label + " 不该带审阅判定（" + want.why + "）",
+          ).toBeUndefined();
         } else {
-          expect(p.review?.decision, label + " 该带 " + want.verdict).toBe(want.verdict);
+          expect(p.review?.decision, label + " 该带 " + want.verdict).toBe(
+            want.verdict,
+          );
           // 理由必须带上那一轮的 summary：§24 风险 2 要的就是这句人话，
           // 而它【只进 payload】—— 线上形状被 web 投影吃死了。
           expect(p.review?.note).toBe("干了活");
@@ -1859,7 +2186,11 @@ describe("ReviewDecided —— 落点表反向穷尽（漏归类时这一发红�
 
 describe("ReviewDecided —— 真库里发的那一行", () => {
   const decided = (db: Db): Row[] =>
-    db.prepare("SELECT * FROM events WHERE action='review_decision' ORDER BY id").all() as Row[];
+    db
+      .prepare(
+        "SELECT * FROM events WHERE action='review_decision' ORDER BY id",
+      )
+      .all() as Row[];
 
   it("审过了 ⇒ 一行 review_decision，署【审阅者本人】而不是 system/hub", async () => {
     // round359 语义变更（门 4 全量拦）：同一句 pass 现在有两种下场 ——
@@ -1874,7 +2205,13 @@ describe("ReviewDecided —— 真库里发的那一行", () => {
       role: "director",
       lastProducer: "dev",
       // handoff ⇒ review.ok=false ⇒ 门 4 不触发（它只判 pass）。打回照样推进。
-      turn: turn(said({ action: "handoff", to_role: "dev", summary: "接口对得上，测试也齐" })),
+      turn: turn(
+        said({
+          action: "handoff",
+          to_role: "dev",
+          summary: "接口对得上，测试也齐",
+        }),
+      ),
     });
     expect(res.moved).toBe(true);
 
@@ -1887,7 +2224,10 @@ describe("ReviewDecided —— 真库里发的那一行", () => {
     expect(row["actor_id"]).toBe("director");
     // gate 指认出「审的是谁的产出」—— §24 风险 1（审阅共谋）事后要查的就是这一格。
     expect(row["target"]).toBe("in_review:dev->director");
-    const payload = JSON.parse(String(row["payload"])) as Record<string, unknown>;
+    const payload = JSON.parse(String(row["payload"])) as Record<
+      string,
+      unknown
+    >;
     expect(payload["kind"]).toBe("ReviewDecided");
     expect(payload["decision"]).toBe("reject");
     // ⚠ 打回那一支，note 是「打回理由 + 给产出方的订阅广播」那条线上的一句话；
@@ -1904,7 +2244,9 @@ describe("ReviewDecided —— 真库里发的那一行", () => {
       status: "IN_REVIEW",
       role: "director",
       lastProducer: "dev",
-      turn: turn(said({ action: "handoff", to_role: "dev", summary: "缺错误分支" })),
+      turn: turn(
+        said({ action: "handoff", to_role: "dev", summary: "缺错误分支" }),
+      ),
     });
     const rows = decided(db);
     expect(rows).toHaveLength(1);
@@ -1959,12 +2301,17 @@ describe("ReviewDecided —— 真库里发的那一行", () => {
       role: "director",
       lastProducer: "dev",
       rejections: 3,
-      turn: turn(said({ action: "handoff", to_role: "dev", summary: "第三次还是不行" })),
+      turn: turn(
+        said({ action: "handoff", to_role: "dev", summary: "第三次还是不行" }),
+      ),
     });
     expect(res.status).toBe("ESCALATED_TO_CEO");
     const rows = decided(db);
     expect(rows).toHaveLength(1);
-    const payload = JSON.parse(String(rows[0]?.["payload"])) as Record<string, unknown>;
+    const payload = JSON.parse(String(rows[0]?.["payload"])) as Record<
+      string,
+      unknown
+    >;
     expect(payload["decision"]).toBe("reject");
     expect(String(payload["note"])).toContain("第三次还是不行");
   });
@@ -2018,7 +2365,11 @@ describe("ReviewDecided —— 真库里发的那一行", () => {
           status: "IN_REVIEW",
           role: "director",
           lastProducer: "dev",
-          turn: turn(said({ action: "pass", summary: "半截" }), { ok: false, error: "boom", costCents: 2 }),
+          turn: turn(said({ action: "pass", summary: "半截" }), {
+            ok: false,
+            error: "boom",
+            costCents: 2,
+          }),
         },
       },
       {
@@ -2053,11 +2404,19 @@ describe("ReviewDecided —— 真库里发的那一行", () => {
       lastProducer: "dev",
       turn: turn(said({ action: "handoff", to_role: "dev", summary: "过了" })),
     });
-    const actions = w.db.prepare("SELECT action FROM events ORDER BY id").all().map((r) => String(r["action"]));
+    const actions = w.db
+      .prepare("SELECT action FROM events ORDER BY id")
+      .all()
+      .map((r) => String(r["action"]));
     expect(actions.indexOf("review_decision")).toBeGreaterThanOrEqual(0);
-    expect(actions.indexOf("review_decision")).toBeLessThan(actions.indexOf("state_change"));
+    expect(actions.indexOf("review_decision")).toBeLessThan(
+      actions.indexOf("state_change"),
+    );
     // 洞：写下的每一条都得广播（真总线对 seq 严格递增有守卫，乱序当场抛）。
-    const written = w.db.prepare("SELECT id FROM events ORDER BY id").all().map((r) => Number(r["id"]));
+    const written = w.db
+      .prepare("SELECT id FROM events ORDER BY id")
+      .all()
+      .map((r) => Number(r["id"]));
     expect(w.published.map((p) => p.seq)).toEqual(written);
   });
 
@@ -2074,7 +2433,9 @@ describe("ReviewDecided —— 真库里发的那一行", () => {
     expect(decided(w.db)).toHaveLength(1);
     // 第二轮：任务已经离开 IN_REVIEW（打回 ⇒ dev 接手重做）⇒ 再跑同一句
     // 打回不再落第二条判定。
-    await w.again(turn(said({ action: "handoff", to_role: "dev", summary: "又打回一次" })));
+    await w.again(
+      turn(said({ action: "handoff", to_role: "dev", summary: "又打回一次" })),
+    );
     expect(decided(w.db)).toHaveLength(1);
   });
 });

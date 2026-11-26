@@ -55,13 +55,13 @@
 
 import { randomUUID } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
-import {
-  charterSchema,
-  type Charter,
-  type CharterInput,
-} from "@opc/contracts";
-import { assertParamCount, assertSingleStatement, type Writer } from "../db/write-queue.js";
+import { type Charter, type CharterInput, charterSchema } from "@opc/contracts";
 import { requireScopeDb } from "../checkpoint/tx-scope.js";
+import {
+  assertParamCount,
+  assertSingleStatement,
+  type Writer,
+} from "../db/write-queue.js";
 import { appendAudit } from "../events/recorder.js";
 import {
   criteriaFromCharter,
@@ -194,7 +194,10 @@ export function validateCharterDraft(
   }
   const parsed = charterSchema.safeParse(config);
   if (!parsed.success) {
-    const issues = parsed.error.issues as readonly { path: readonly (string | number | symbol)[]; code: string }[];
+    const issues = parsed.error.issues as readonly {
+      path: readonly (string | number | symbol)[];
+      code: string;
+    }[];
     const paths = issues.map((i) => i.path.join(".") + "(" + i.code + ")");
     return {
       ok: false,
@@ -265,7 +268,14 @@ export async function saveCharterVersion(
     const db = requireScopeDb("saveCharterVersion");
     const next = latestCharterVersion(db, o.roleId) + 1;
     const id = randomUUID();
-    const params: unknown[] = [id, o.roleId, next, configJson, o.nowMs, CHARTER_ACTOR.actorId];
+    const params: unknown[] = [
+      id,
+      o.roleId,
+      next,
+      configJson,
+      o.nowMs,
+      CHARTER_ACTOR.actorId,
+    ];
     assertSingleStatement(INSERT_CHARTER_VERSION_SQL);
     assertParamCount(INSERT_CHARTER_VERSION_SQL, params);
     db.prepare(INSERT_CHARTER_VERSION_SQL).run(...(params as never[]));
@@ -275,7 +285,8 @@ export async function saveCharterVersion(
     // 日预算改成 $5」若只写岗位书，执行侧会**继续按老数字放行**，而屏幕上写着 $5。
     // 两个源各存一份、谁生效看谁后写 —— 那就不是配置，是巧合。
     // 详细取舍（为什么不另开一条审计）写在 budget-sync.ts 的 applyBudgetRowsInTx 头上。
-    const applied = budgetRows.length > 0 ? applyBudgetRowsInTx(db, budgetRows) : [];
+    const applied =
+      budgetRows.length > 0 ? applyBudgetRowsInTx(db, budgetRows) : [];
     const silenced = applied.filter((r) => r.alarmSilenced);
 
     const prev = next - 1;
@@ -316,7 +327,9 @@ export async function saveCharterVersion(
           // 是「预算已收紧、一切正常」。
           // 键名与 budget-sync 那条审计【刻意同名】(alarm_silenced)：
           // 收件箱/日报要筛的是「有没有哑掉的格」这一维，不该因为写它的人不同而换名。
-          alarm_silenced: silenced.map((r) => budgetRowId(r.scope, r.scopeId, r.period)),
+          alarm_silenced: silenced.map((r) =>
+            budgetRowId(r.scope, r.scopeId, r.period),
+          ),
         },
         // 前后快照。before 是从库里读的那一版原文（可能为 null = 这是第一版），
         // after 是这次写入的。放 state_snapshot 而不是 payload：与 org/commit 同一口径
@@ -341,7 +354,12 @@ export async function saveCharterVersion(
       reason: "事务没有返回结果（WriteQueue 那一层给出空）—— 未写入，未审计。",
     };
   }
-  return { ok: true, charterId: wrote.id, version: wrote.version, auditSeq: wrote.seq };
+  return {
+    ok: true,
+    charterId: wrote.id,
+    version: wrote.version,
+    auditSeq: wrote.seq,
+  };
 }
 
 /** 取某一版的 config **原文**（不解，给审计快照用）。那一版不存在 ⇒ undefined。 */
@@ -363,7 +381,11 @@ function readCharterConfigRaw(
   } catch {
     // 快照读不出来不影响写入（写的是另一件事），但必须在这里留话：
     // 静默把 before 变成 null 会让审计里出现「从空变更成这一版」的假事实。
-    return { degraded: true, raw: row.config, reason: "上一版的 config 不是合法 JSON" };
+    return {
+      degraded: true,
+      raw: row.config,
+      reason: "上一版的 config 不是合法 JSON",
+    };
   }
 }
 
@@ -422,7 +444,10 @@ export function readCharterConfig(
 }
 
 /** 最新一版。一个角色都没有 ⇒ undefined。 */
-export function readLatestCharter(db: DatabaseSync, roleId: string): Charter | undefined {
+export function readLatestCharter(
+  db: DatabaseSync,
+  roleId: string,
+): Charter | undefined {
   const v = latestCharterVersion(db, roleId);
   if (v === 0) return undefined;
   return readCharterConfig(db, roleId, v);
@@ -526,8 +551,10 @@ export function assertCharterShape(roleId: string, c: unknown): Charter {
     }
     // 只有 array / object 两档多判一层，判的是【会不会一拆就崩】。
     // present 走到这里就结束了 —— 见上面那张表：它刻意不查类型。
-    if (kind === "array" && !Array.isArray(v)) missing.push(path + "(必须是数组)");
-    if (kind === "object" && typeof v !== "object") missing.push(path + "(必须是对象)");
+    if (kind === "array" && !Array.isArray(v))
+      missing.push(path + "(必须是数组)");
+    if (kind === "object" && typeof v !== "object")
+      missing.push(path + "(必须是对象)");
   }
   if (missing.length > 0) {
     throw new Error(

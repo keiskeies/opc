@@ -46,7 +46,7 @@
 少了它们，界面只能自己抄一份清单，而**那份抄件没有任何测试能发现它和这里不一致**
 （变异测试跑在 hub 侧，看不见 web 侧）。发出判据之后，看板那一页是**拿着服务端给的清单在筛**：
 
-`packages/web/public/app.js:845` —— `attention.includes(tk.status) || overBudget(tk)`，
+`packages/web/public/app.js:850` —— `attention.includes(tk.status) || overBudget(tk)`，
 左边是服务端发的状态集合，右边是两个服务端给的数比一下（算术，不构成状态机判定，所以留在界面）。
 
 **⚠ 这一句在本篇内被修正过一次**：第一版只发**三份**清单，而且把 `active_statuses`
@@ -183,7 +183,7 @@
 
 ## 4. `silent_over_scopes` —— 一个只在今天这一页能看见的数
 
-`packages/hub/src/charter/budget-sync.ts:449` 的 `silentOverBudgets` 数的是
+`packages/hub/src/charter/budget-sync.ts:506` 的 `silentOverBudgets` 数的是
 「已超限而**突破警报已哑**」的预算格子（把上限调到已消费量之下会永久关闭警报，0015 文件头 ②）。
 数还在、警报没了 —— 除了这一格，全仓没有任何地方报它。这一发也是本篇与 charter 模块的**唯一**新边，
 它把一条写了很久的守卫判红，见 §6。

@@ -41,19 +41,22 @@
  */
 import { mkdirSync, rmSync } from "node:fs";
 import type { DatabaseSync } from "node:sqlite";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
-
 import type { OrgGraph } from "@opc/contracts";
-import { fixtureTmp } from "../fixtures/fixture-dir.js";
-import { WriteQueue } from "../../src/db/write-queue.js";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { migrate } from "../../src/db/migrate.js";
-import { INSERT_DELEGATION_GRAPH_SQL } from "../../src/org/commit.js";
-import { InMemoryEventBus, type EventBus } from "../../src/events/bus.js";
-import { makeRuntime } from "../../src/engine/runtime.js";
-import { makeDispatch, type RunTurnInput, type TurnOutcome } from "../../src/engine/dispatch.js";
-import { ensureCharterCard } from "../../src/engine/charter.js";
+import { WriteQueue } from "../../src/db/write-queue.js";
 import { approveCard, pendingCards } from "../../src/engine/approve.js";
+import { ensureCharterCard } from "../../src/engine/charter.js";
+import {
+  makeDispatch,
+  type RunTurnInput,
+  type TurnOutcome,
+} from "../../src/engine/dispatch.js";
+import { makeRuntime } from "../../src/engine/runtime.js";
+import { type EventBus, InMemoryEventBus } from "../../src/events/bus.js";
 import { insertTask } from "../../src/http/real-deps.js";
+import { INSERT_DELEGATION_GRAPH_SQL } from "../../src/org/commit.js";
+import { fixtureTmp } from "../fixtures/fixture-dir.js";
 
 const TMP = fixtureTmp("acceptance-idea-to-delivered", import.meta.url);
 const NOW = 1_700_000_000_000;
@@ -90,7 +93,11 @@ type Row = Record<string, unknown>;
  *   症状是每一级都建一张 review-blocked 卡 —— 由这一发自己暴露。
  */
 function graphOf(families: Record<string, string>): OrgGraph {
-  const node = (roleId: string, reportsTo: string | null, canManage: boolean): OrgGraph["nodes"][string] => ({
+  const node = (
+    roleId: string,
+    reportsTo: string | null,
+    canManage: boolean,
+  ): OrgGraph["nodes"][string] => ({
     role_id: roleId,
     can_manage: canManage,
     reports_to: reportsTo,
@@ -127,7 +134,8 @@ afterAll(async () => {
 });
 
 /** 角色吐出来的那段文字里，决策块之外的部分是【给人看的正文】。 */
-const said = (o: Record<string, unknown>) => "干完了。\n\n<<<OPC_DECISION>>>\n" + JSON.stringify(o);
+const said = (o: Record<string, unknown>) =>
+  "干完了。\n\n<<<OPC_DECISION>>>\n" + JSON.stringify(o);
 
 interface World {
   readonly q: WriteQueue;
@@ -202,10 +210,18 @@ async function world(families: Record<string, string>): Promise<World> {
   });
 
   const status = () =>
-    String((db.prepare("SELECT status FROM tasks WHERE id = ?").get(TASK_ID) as Row)["status"]);
+    String(
+      (db.prepare("SELECT status FROM tasks WHERE id = ?").get(TASK_ID) as Row)[
+        "status"
+      ],
+    );
   const roleAt = () =>
     String(
-      (db.prepare("SELECT assigned_role FROM tasks WHERE id = ?").get(TASK_ID) as Row)["assigned_role"],
+      (
+        db
+          .prepare("SELECT assigned_role FROM tasks WHERE id = ?")
+          .get(TASK_ID) as Row
+      )["assigned_role"],
     );
 
   /**
@@ -214,11 +230,17 @@ async function world(families: Record<string, string>): Promise<World> {
    * 没预料到的路」伪装成「这一轮没推进」，而这一发要测的恰恰是路走对了没有。
    */
   const lineFor = (s: string): Record<string, unknown> => {
-    if (s === "CHARTER_APPROVED") return { action: "pass", summary: "章程已签，这件事拆给 dev" };
-    if (s === "DECOMPOSING") return { action: "handoff", to_role: "dev", summary: "先做最小可用版" };
-    if (s === "IN_PROGRESS") return { action: "pass", summary: "写完了，覆盖率 92%，3 个 P2 待后续" };
-    if (s === "IN_REVIEW") return { action: "pass", summary: "独立审过了，可上线" };
-    throw new Error("走到一条这一发没预期的格子：" + s + "（不该继续，别用默认台词糊过去）");
+    if (s === "CHARTER_APPROVED")
+      return { action: "pass", summary: "章程已签，这件事拆给 dev" };
+    if (s === "DECOMPOSING")
+      return { action: "handoff", to_role: "dev", summary: "先做最小可用版" };
+    if (s === "IN_PROGRESS")
+      return { action: "pass", summary: "写完了，覆盖率 92%，3 个 P2 待后续" };
+    if (s === "IN_REVIEW")
+      return { action: "pass", summary: "独立审过了，可上线" };
+    throw new Error(
+      "走到一条这一发没预期的格子：" + s + "（不该继续，别用默认台词糊过去）",
+    );
   };
   let say: Record<string, unknown> = { action: "pass", summary: "(还没轮到)" };
 
@@ -258,7 +280,11 @@ async function world(families: Record<string, string>): Promise<World> {
       },
     );
     if (charter.outcome !== "drafted") {
-      throw new Error("章程卡没起草出来（outcome=" + charter.outcome + "），下面每一步都会假红");
+      throw new Error(
+        "章程卡没起草出来（outcome=" +
+          charter.outcome +
+          "），下面每一步都会假红",
+      );
     }
 
     const cells: string[] = [];
@@ -280,7 +306,14 @@ async function world(families: Record<string, string>): Promise<World> {
       if (pending.length > 0) {
         // 一格【至多欠一个决定】。多于一个就是 0041 §5 / 0046 §7 那两格登记的
         // 「收件箱里同一条任务两张 pending」的形状，那种情况下点哪张都不对。
-        expect(pending.length, "第 " + i + " 步：收件箱里同一条任务欠了 " + pending.length + " 个决定").toBe(1);
+        expect(
+          pending.length,
+          "第 " +
+            i +
+            " 步：收件箱里同一条任务欠了 " +
+            pending.length +
+            " 个决定",
+        ).toBe(1);
         // walk 的终点是【第一张 gate-blocked 卡】：那是全量拦在端到端里的最终形态
         // （门 1/2/3 全过之后只剩门 4 一扇门，它今天全量拦）。
         //   · charter:proposal          → 点掉，继续（那是起点，不算拦）；
@@ -310,11 +343,18 @@ async function world(families: Record<string, string>): Promise<World> {
         clicks.push(r.from + "→" + r.to);
         push();
         // 「建了一张点不动的卡」比「收件箱空着」更难查（seat-card 那条金色路径同一条理由）
-        if (r.to !== "IN_REVIEW") expect(r.edgeExists, "卡片指着一条没有出边的格子：" + r.to).toBe(true);
+        if (r.to !== "IN_REVIEW")
+          expect(r.edgeExists, "卡片指着一条没有出边的格子：" + r.to).toBe(
+            true,
+          );
         continue;
       }
       say = lineFor(status());
-      const r = await dispatch({ taskId: TASK_ID, nowMs: NOW + 2000 + rounds, maxBudgetUsd: 0.5 });
+      const r = await dispatch({
+        taskId: TASK_ID,
+        nowMs: NOW + 2000 + rounds,
+        maxBudgetUsd: 0.5,
+      });
       // 与 driver.ts:76 同一形状。不调它 = 真花掉的 token 在执行日志里消失。
       await rt.recordTurn({
         taskId: r.taskId,
@@ -333,7 +373,14 @@ async function world(families: Record<string, string>): Promise<World> {
       // 是本发要抓的：钱花了而屏幕上什么都没有（0050 §6.1 那一族）。
       if (!r.moved && r.card === null) {
         throw new Error(
-          "第 " + rounds + " 轮【既没推进也没建卡】 状态=" + status() + "/" + roleAt() + " note=" + r.note,
+          "第 " +
+            rounds +
+            " 轮【既没推进也没建卡】 状态=" +
+            status() +
+            "/" +
+            roleAt() +
+            " note=" +
+            r.note,
         );
       }
       push();
@@ -352,13 +399,16 @@ async function world(families: Record<string, string>): Promise<World> {
  */
 function onlyCardId(pending: readonly { readonly id: string }[]): string {
   const first = pending[0];
-  if (first === undefined) throw new Error("收件箱刚被读成非空而下一句就空了（同一事务内不该可能）");
+  if (first === undefined)
+    throw new Error("收件箱刚被读成非空而下一句就空了（同一事务内不该可能）");
   return first.id;
 }
 
 /** 事件表里真实存在的 seq 集合，与总线上收到的集合比对 ⇒ 有没有洞。 */
 function eventSeqs(db: DatabaseSync): number[] {
-  return (db.prepare("SELECT id FROM events ORDER BY id").all() as Row[]).map((r) => Number(r["id"]));
+  return (db.prepare("SELECT id FROM events ORDER BY id").all() as Row[]).map(
+    (r) => Number(r["id"]),
+  );
 }
 
 describe("⭐ 一条想法从下发走到交付（引擎路线上的端到端）", () => {
@@ -435,27 +485,43 @@ describe("⭐ 一条想法从下发走到交付（引擎路线上的端到端）
     // ── 门 4 的账：这一轮在库里的完整痕迹 ─────────────────────────────
     // ① review_gates 第一次在【端到端】上有一行：引擎审阅被拒，且它代表了
     //    那一次具体判定（gate_blocked 卡指向它）。
-    const gates = w.db.prepare("SELECT gate_type, decision FROM review_gates").all() as Row[];
-    expect(gates).toEqual([{ gate_type: "engine_review", decision: "rejected" }]);
+    const gates = w.db
+      .prepare("SELECT gate_type, decision FROM review_gates")
+      .all() as Row[];
+    expect(gates).toEqual([
+      { gate_type: "engine_review", decision: "rejected" },
+    ]);
     // ② 被拦那一轮发了 RoleTurnReported，note 说清是门控拦的（§8.2 审计口径）。
     // 完整 note 是 evaluateGate 第 1 步（空标准 ⇒ reject）的那句原话 ——
     // 断两端：note 必须点名前缀「门控」与「没有任何验收标准可判」两条，
     // 且 gate_decision 是 reject。少一端，审计就有人看不出这是一次门控拦截。
     const gateNoteRows = w.db
-      .prepare("SELECT payload FROM events WHERE action='tool_call' AND payload LIKE '%门控%' ORDER BY id")
+      .prepare(
+        "SELECT payload FROM events WHERE action='tool_call' AND payload LIKE '%门控%' ORDER BY id",
+      )
       .all() as Row[];
     expect(gateNoteRows.length).toBeGreaterThanOrEqual(1);
     expect(String(gateNoteRows[0]?.["payload"])).toContain("门控");
-    expect(String(gateNoteRows[0]?.["payload"])).toContain("没有任何验收标准可判");
-    expect(String(gateNoteRows[0]?.["payload"])).toContain('"gate_decision":"reject"');
+    expect(String(gateNoteRows[0]?.["payload"])).toContain(
+      "没有任何验收标准可判",
+    );
+    expect(String(gateNoteRows[0]?.["payload"])).toContain(
+      '"gate_decision":"reject"',
+    );
     // ③ 一个 review_decision 都不该发：被门 4 拦下的轮次不是一次「做成了」的判定。
     expect(
-      w.db.prepare("SELECT COUNT(*) AS n FROM events WHERE action='review_decision'").get() as Row,
+      w.db
+        .prepare(
+          "SELECT COUNT(*) AS n FROM events WHERE action='review_decision'",
+        )
+        .get() as Row,
     ).toMatchObject({ n: 0 });
 
     // ── 钱与账：这条路上真的花过钱，而钱落在【库里】而不只在进程里 ────
     const budget = w.db
-      .prepare("SELECT scope_type, limit_cents, consumed_cents FROM budgets WHERE scope_id = ?")
+      .prepare(
+        "SELECT scope_type, limit_cents, consumed_cents FROM budgets WHERE scope_id = ?",
+      )
       .get(TASK_ID) as Row;
     expect(String(budget["scope_type"])).toBe("task");
     // 4 轮 × 4 美分 + 章程那一发 3 美分 = 19。钉死这个数字的理由同 0050 §6.7：
@@ -510,7 +576,9 @@ describe("⭐ 一条想法从下发走到交付（引擎路线上的端到端）
     // 每一个落库的 seq 都被广播过（写库而不广播 = 活连接上每次批准撞一个空洞）。
     // 判据是【两个集合相等】而不是"广播数 > 0"：后者在一条都没广播时也成立不了，
     // 但它挡不住"广播了三条而库里有九条"这种少广播的形状。
-    expect([...w.broadcast.keys()].sort((a, b) => a - b)).toEqual(eventSeqs(w.db));
+    expect([...w.broadcast.keys()].sort((a, b) => a - b)).toEqual(
+      eventSeqs(w.db),
+    );
   });
 
   it("B 发：全家同一模型家族（今天的真实配置）⇒ 先被门 3 拦一次（同源豁免），再被门 4 全量拦", async () => {
@@ -552,14 +620,18 @@ describe("⭐ 一条想法从下发走到交付（引擎路线上的端到端）
       "IN_REVIEW→IN_REVIEW",
     ]);
     // 收件箱里躺着 gate-blocked 卡（与 A 发同形状）。
-    expect(pendingCards(w.q, TASK_ID).map((p) => (p as { cardKey: string | null }).cardKey)).toEqual([
-      "gate-blocked:dev->director#r0:reject",
-    ]);
+    expect(
+      pendingCards(w.q, TASK_ID).map(
+        (p) => (p as { cardKey: string | null }).cardKey,
+      ),
+    ).toEqual(["gate-blocked:dev->director#r0:reject"]);
     // 负责角色是审阅者 director（同 A 发）—— 门 4 拦下时停在审阅那一格。
     expect(role(w.db)).toBe("director");
 
     // 5 轮 × 4 + 章程 3 = 23
-    const budget = w.db.prepare("SELECT consumed_cents FROM budgets WHERE scope_id = ?").get(TASK_ID) as Row;
+    const budget = w.db
+      .prepare("SELECT consumed_cents FROM budgets WHERE scope_id = ?")
+      .get(TASK_ID) as Row;
     expect(Number(budget["consumed_cents"])).toBe(23);
 
     // 状态边【与 A 发逐条相同】= 5 条。这是上面那句「轨迹相同」的另一半证据：
@@ -584,6 +656,10 @@ describe("⭐ 一条想法从下发走到交付（引擎路线上的端到端）
 
 function role(db: DatabaseSync): string {
   return String(
-    (db.prepare("SELECT assigned_role FROM tasks WHERE id = ?").get(TASK_ID) as Row)["assigned_role"],
+    (
+      db
+        .prepare("SELECT assigned_role FROM tasks WHERE id = ?")
+        .get(TASK_ID) as Row
+    )["assigned_role"],
   );
 }

@@ -76,7 +76,8 @@ async function hubFetch(path: string, body: unknown) {
 async function hubGet(path: string): Promise<Record<string, unknown>> {
   const res = await fetch(`${api}${path}`);
   const text = await res.text();
-  if (!res.ok) throw new Error(`${path} -> ${res.status} ${text.slice(0, 200)}`);
+  if (!res.ok)
+    throw new Error(`${path} -> ${res.status} ${text.slice(0, 200)}`);
   return JSON.parse(text) as Record<string, unknown>;
 }
 
@@ -162,11 +163,7 @@ function cellValue(painted: Draw[], row: number, col: number): string {
   const x0 = 5 + 100 * col;
   const y0 = 12 + 25 * row;
   const inCell = painted.filter(
-    (d) =>
-      d.x >= x0 &&
-      d.x < x0 + 95 &&
-      d.y >= y0 - 3 &&
-      d.y < y0 + 22,
+    (d) => d.x >= x0 && d.x < x0 + 95 && d.y >= y0 - 3 && d.y < y0 + 22,
   );
   const last = inCell[inCell.length - 1];
   return last === undefined ? "" : last.t;
@@ -174,10 +171,9 @@ function cellValue(painted: Draw[], row: number, col: number): string {
 
 /** 打开文档并等画布真出现（库在 loadData 之后才挂 canvas）。 */
 async function openSheet(page: Page, docId: string): Promise<void> {
-  await page.goto(
-    `http://127.0.0.1:${webPort}/#/documents/${docId}`,
-    { waitUntil: "load" },
-  );
+  await page.goto(`http://127.0.0.1:${webPort}/#/documents/${docId}`, {
+    waitUntil: "load",
+  });
   await expect(page.locator(".sheet-canvas canvas")).toBeVisible();
 }
 
@@ -264,7 +260,13 @@ test.describe("表格文档：打开就是一张完整的表", () => {
 
   test("S1 画布铺满正文区，且真把数据画出来", async ({ page }) => {
     const docId = await seedSheet("表格验收铺满", [
-      { name: "Sheet1", rows: [["甲", "乙", "丙"], ["1", "2", "3"]] },
+      {
+        name: "Sheet1",
+        rows: [
+          ["甲", "乙", "丙"],
+          ["1", "2", "3"],
+        ],
+      },
     ]);
     await installDrawSpy(page);
     await openSheet(page, docId);
@@ -306,15 +308,27 @@ test.describe("表格文档：打开就是一张完整的表", () => {
     expect(m.tabs).toContain("Sheet1");
     // 数据真画出来了：正文里的「甲」「丙」必须出现在 fillText 采样里。
     const painted = await draws(page);
-    expect(painted.map((d) => d.t), "画布里找不到正文的「甲」").toContain("甲");
-    expect(painted.map((d) => d.t), "画布里找不到正文的「丙」").toContain("丙");
+    expect(
+      painted.map((d) => d.t),
+      "画布里找不到正文的「甲」",
+    ).toContain("甲");
+    expect(
+      painted.map((d) => d.t),
+      "画布里找不到正文的「丙」",
+    ).toContain("丙");
   });
 
   test("S2 打字改一格 → 自动保存回 hub，正文形状与体积都守得住", async ({
     page,
   }) => {
     const docId = await seedSheet("表格验收回写", [
-      { name: "Sheet1", rows: [["编号", "数量"], ["A00123", "7"]] },
+      {
+        name: "Sheet1",
+        rows: [
+          ["编号", "数量"],
+          ["A00123", "7"],
+        ],
+      },
     ]);
     await openSheet(page, docId);
     const patches: string[] = [];
@@ -397,14 +411,10 @@ test.describe("表格文档：打开就是一张完整的表", () => {
       cellValue(painted, 1, 1),
       "SUM 没算出 10（遇文本格 x 应跳过，不是拼出 NaN）",
     ).toBe("10");
-    expect(
-      cellValue(painted, 1, 2),
-      "COUNT 没算出 2 ⇒ 补丁二没打上",
-    ).toBe("2");
-    expect(
-      cellValue(painted, 1, 3),
-      "ROUND 没算出 2.3 ⇒ 补丁二没打上",
-    ).toBe("2.3");
+    expect(cellValue(painted, 1, 2), "COUNT 没算出 2 ⇒ 补丁二没打上").toBe("2");
+    expect(cellValue(painted, 1, 3), "ROUND 没算出 2.3 ⇒ 补丁二没打上").toBe(
+      "2.3",
+    );
     expect(
       painted.map((d) => d.t),
       "画布出现 #ERROR! ⇒ 公式表坏了",
@@ -415,14 +425,25 @@ test.describe("表格文档：打开就是一张完整的表", () => {
     page,
   }) => {
     const docId = await seedSheet("表格验收坏公式", [
-      { name: "Sheet1", rows: [["甲", "乙", "丙"], ["1", "2", "3"]] },
+      {
+        name: "Sheet1",
+        rows: [
+          ["甲", "乙", "丙"],
+          ["1", "2", "3"],
+        ],
+      },
     ]);
     await installDrawSpy(page);
     // 监听必须在动作之前挂：这一发要证的正是「异常有没有抛到页面级」，
     // 动作之后再注册等于只看清了后半段。
     const errors: string[] = [];
     page.on("pageerror", (e) =>
-      errors.push(String(e.stack ?? e).split("\n").slice(0, 6).join(" | ")),
+      errors.push(
+        String(e.stack ?? e)
+          .split("\n")
+          .slice(0, 6)
+          .join(" | "),
+      ),
     );
     await openSheet(page, docId);
     await resetDraws(page);
@@ -474,7 +495,13 @@ test.describe("表格文档：只读那一档是真边界", () => {
 
   test("S5 只读：工具栏/增删入口不在，真点下去数据也没变", async ({ page }) => {
     const docId = await seedSheet("表格验收只读", [
-      { name: "Sheet1", rows: [["甲", "乙"], ["1", "2"]] },
+      {
+        name: "Sheet1",
+        rows: [
+          ["甲", "乙"],
+          ["1", "2"],
+        ],
+      },
     ]);
     await installDrawSpy(page);
     await asReader(page, docId);
@@ -504,9 +531,11 @@ test.describe("表格文档：只读那一档是真边界", () => {
     expect(shape.saveDisabled, "只读可保存").toBe(true);
 
     // 三条库不看 mode 的写路径，真点一遍。
-    const tab = page.locator(
-      ".sheet-canvas .x-spreadsheet-bottombar .x-spreadsheet-menu > li",
-    ).nth(1);
+    const tab = page
+      .locator(
+        ".sheet-canvas .x-spreadsheet-bottombar .x-spreadsheet-menu > li",
+      )
+      .nth(1);
     await tab.dblclick();
     await page.keyboard.type("改名了");
     await page.keyboard.press("Enter");
@@ -519,10 +548,7 @@ test.describe("表格文档：只读那一档是真边界", () => {
     );
     // 底栏 li[0] 是隐藏的「+」新建钮（display:none，见 shape.addLiDisplay），li[1] 才是真页签。
     // 判「改名被挡」要看行为：改名的字没落进任何页签、真页签（我们双击的那个）仍是 Sheet1。
-    expect(
-      tabTexts,
-      "只读把页签名改成了「改名了」",
-    ).not.toContain("改名了");
+    expect(tabTexts, "只读把页签名改成了「改名了」").not.toContain("改名了");
     expect(tabTexts[1], "只读改了页签名").toBe("Sheet1");
     // 键盘改格（mode:'read' 挡的那条）也真点一次，确保不是只测了补刀。
     await clickCell(page, 0, 0);
@@ -534,10 +560,12 @@ test.describe("表格文档：只读那一档是真边界", () => {
     expect(patches, `只读发出了 ${patches.length} 次保存`).toHaveLength(0);
     const stored = await hubGet(`/documents/${docId}`);
     const body = (stored["document"] as { body_text?: string }).body_text ?? "";
-    expect(
-      body,
-      "只读用户把数据改回去了",
-    ).toContain(JSON.stringify([["甲", "乙"], ["1", "2"]]));
+    expect(body, "只读用户把数据改回去了").toContain(
+      JSON.stringify([
+        ["甲", "乙"],
+        ["1", "2"],
+      ]),
+    );
     const painted = await draws(page);
     // painted 是 {t,x,y}[]，toContain 得先映射到文字（对对象数组直接 toContain("甲")
     // 永远 false —— 元素是对象不是字符串）。只读挡下键盘改格后，正文仍应是甲/乙。

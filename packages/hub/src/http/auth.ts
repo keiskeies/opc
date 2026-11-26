@@ -20,7 +20,13 @@
  *    进程重启就换一个。落盘的代价是重启不换，那正是它想避免的。
  */
 
-import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
+import {
+  createHash,
+  createHmac,
+  randomBytes,
+  randomUUID,
+  timingSafeEqual,
+} from "node:crypto";
 
 /** 签名允许的时间偏移。太短会让本机时钟抖一下就全 401；太长等于放宽重放窗口。 */
 export const MAX_CLOCK_SKEW_MS = 60_000;
@@ -133,14 +139,18 @@ export type VerifyInput = {
  */
 export function verifyRequest(i: VerifyInput): { ok: true } | VerifyFailure {
   const sig = header(i, HEADER_SIGNATURE);
-  if (sig === null) return { ok: false, code: "missing_header", header: HEADER_SIGNATURE };
+  if (sig === null)
+    return { ok: false, code: "missing_header", header: HEADER_SIGNATURE };
   const tsRaw = header(i, HEADER_TIMESTAMP);
-  if (tsRaw === null) return { ok: false, code: "missing_header", header: HEADER_TIMESTAMP };
+  if (tsRaw === null)
+    return { ok: false, code: "missing_header", header: HEADER_TIMESTAMP };
   const nonceRaw = header(i, HEADER_NONCE);
-  if (nonceRaw === null) return { ok: false, code: "missing_header", header: HEADER_NONCE };
+  if (nonceRaw === null)
+    return { ok: false, code: "missing_header", header: HEADER_NONCE };
 
   const ts = Number(tsRaw);
-  if (!Number.isSafeInteger(ts)) return { ok: false, code: "malformed_timestamp" };
+  if (!Number.isSafeInteger(ts))
+    return { ok: false, code: "malformed_timestamp" };
   const skew = Math.abs(i.now - ts);
   if (skew > MAX_CLOCK_SKEW_MS) {
     return { ok: false, code: "stale_timestamp", skewMs: skew };
@@ -166,10 +176,7 @@ export function verifyRequest(i: VerifyInput): { ok: true } | VerifyFailure {
   return { ok: true };
 }
 
-function header(
-  i: VerifyInput,
-  name: string,
-): string | null {
+function header(i: VerifyInput, name: string): string | null {
   // HTTP 头名大小写不敏感（HTTP/1.1 规范原文），而 Node 的 http 模块会给小写、
   // Hono 的 c.req.header() 自己做了大小写归一。这里不能假设调用方已归一：
   // 只按小写取，一旦某个客户端（或测试夹具）写了 X-OPC-Signature，
@@ -243,13 +250,16 @@ export class NonceGuard {
 }
 
 /** 一次请求的签名材料生成器（客户端侧用；放这里以便与服务端共用规范串实现）。 */
-export function signedHeaders(token: string, o: {
-  readonly method: string;
-  /** 要发出去的【那一整个请求目标】，含 query，原样。见 canonicalString 的文件头。 */
-  readonly target: string;
-  readonly body: string;
-  readonly now: number;
-}): Record<string, string> {
+export function signedHeaders(
+  token: string,
+  o: {
+    readonly method: string;
+    /** 要发出去的【那一整个请求目标】，含 query，原样。见 canonicalString 的文件头。 */
+    readonly target: string;
+    readonly body: string;
+    readonly now: number;
+  },
+): Record<string, string> {
   const nonce = randomUUID();
   // 字段名在两侧不同是刻意的：调用方给的是「现在几点」（now，一个时刻），
   // 而规范串里那一项是「被签名的那个时间戳」（timestamp）。

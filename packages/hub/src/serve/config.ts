@@ -172,7 +172,10 @@ export interface ServeArgs {
 const PORT_MIN = 1024;
 const PORT_MAX = 65_535;
 
-function positiveInt(raw: string | undefined, name: string): number | { error: string } {
+function positiveInt(
+  raw: string | undefined,
+  name: string,
+): number | { error: string } {
   if (raw === undefined) return { error: name + " 后面要跟一个值" };
   if (!/^\d+$/u.test(raw)) {
     return { error: name + " 必须是十进制整数，实到 " + raw };
@@ -192,14 +195,19 @@ function positiveInt(raw: string | undefined, name: string): number | { error: s
  * 而"接受小数"不等于"接受任何东西"：NaN / 负数 / `1e400`（=Infinity）都在这里挡下，
  * 因为 Infinity 传到底下就是一个【没有上限的上限】，而那条参数存在的全部理由就是上限。
  */
-function nonNegativeNumber(raw: string | undefined, name: string): number | { error: string } {
+function nonNegativeNumber(
+  raw: string | undefined,
+  name: string,
+): number | { error: string } {
   if (raw === undefined) return { error: name + " 后面要跟一个值" };
   if (!/^\d+(\.\d+)?$/u.test(raw)) {
     return { error: name + " 必须是一个非负十进制数，实到 " + raw };
   }
   const n = Number(raw);
   if (!Number.isFinite(n)) {
-    return { error: name + " 必须是有限数（不接受 Infinity / NaN），实到 " + raw };
+    return {
+      error: name + " 必须是有限数（不接受 Infinity / NaN），实到 " + raw,
+    };
   }
   return n;
 }
@@ -219,7 +227,11 @@ function fromEnv(env: NodeJS.ProcessEnv, key: string): string | undefined {
  * 而修法（补上路径）与报错指向的方向（查磁盘）完全不同。
  * 允许负数不在这条里：本层收的 token 里没有任何一个允许负值。
  */
-function takeValue(argv: readonly string[], i: number, name: string): string | { error: string } {
+function takeValue(
+  argv: readonly string[],
+  i: number,
+  name: string,
+): string | { error: string } {
   const v = argv[i];
   if (v === undefined || v.startsWith("--")) {
     return { error: name + " 后面要跟一个值（不是另一个参数）" };
@@ -337,7 +349,9 @@ export function parseServeArgs(
       case "--task-limit-cents": {
         const raw = argv[i + 1];
         if (raw !== undefined && raw.startsWith("--")) {
-          return { error: "--task-limit-cents 后面要跟一个值（不是另一个参数）" };
+          return {
+            error: "--task-limit-cents 后面要跟一个值（不是另一个参数）",
+          };
         }
         const v = positiveInt(raw, "--task-limit-cents");
         if (typeof v === "object") return v;
@@ -446,7 +460,7 @@ export function parseServeArgs(
       error:
         "--bind 后面是一个空值。要么给一个 IP 字面量（" +
         "本机回环写 127.0.0.1），要么【整个参数不要给】（默认就是回环）。\n" +
-        "空串在这里不当成「没填」：那会让一次引号打漏（--bind \"\" --port 8787）" +
+        '空串在这里不当成「没填」：那会让一次引号打漏（--bind "" --port 8787）' +
         "变成一个【静默用默认值】的启动，而这个人以为自己显式指定过监听地址。",
     };
   }
@@ -475,18 +489,24 @@ export function parseServeArgs(
    * 而报错文案必须【点名是哪个开关要求的】—— 一句"还缺三个参数"
    * 在命令行上只写了 --driver-pump 的人看起来像答非所问。
    */
-  const pumpFlags = [charterPump ? "--charter-pump" : "", driverPump ? "--driver-pump" : ""].filter(
-    (s) => s !== "",
-  );
+  const pumpFlags = [
+    charterPump ? "--charter-pump" : "",
+    driverPump ? "--driver-pump" : "",
+  ].filter((s) => s !== "");
   if (pumpFlags.length > 0) {
     const missing: string[] = [];
     if (maxBudgetUsd === undefined) missing.push("--max-budget-usd <美元/轮>");
-    if (taskLimitCents === undefined) missing.push("--task-limit-cents <美分/任务>");
-    if (agentCwd === undefined) missing.push("--agent-cwd <角色可读文件的目录>");
+    if (taskLimitCents === undefined)
+      missing.push("--task-limit-cents <美分/任务>");
+    if (agentCwd === undefined)
+      missing.push("--agent-cwd <角色可读文件的目录>");
     if (missing.length > 0) {
       return {
         error:
-          pumpFlags.join(" 与 ") + " 还缺 " + missing.join("、") + "。\n" +
+          pumpFlags.join(" 与 ") +
+          " 还缺 " +
+          missing.join("、") +
+          "。\n" +
           "这两个开关开着 ⇒ 常驻 Hub 每隔一个心跳【自己起 claude 子进程】：\n" +
           "  · --charter-pump 补的是「停在等章程那一格而收件箱里没有卡」的那【一轮起草】\n" +
           "  · --driver-pump   推的是「停在 agent 那一格而没人敲 hub work」的【每一轮】\n" +
@@ -513,12 +533,10 @@ export function parseServeArgs(
    */
   if (
     pumpFlags.length === 0 &&
-    (
-      maxBudgetUsd !== undefined ||
+    (maxBudgetUsd !== undefined ||
       taskLimitCents !== undefined ||
       agentCwd !== undefined ||
-      evidenceRoot !== undefined
-    )
+      evidenceRoot !== undefined)
   ) {
     return {
       error:

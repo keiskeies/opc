@@ -85,7 +85,8 @@ export function artifactPath(
     root,
     safe(bundle.task_id, "task_id"),
     safe(bundle.bundle_type, "bundle_type"),
-    safe(bundle.bundle_id, "bundle_id") + (cleanExt === "" ? "" : "." + cleanExt),
+    safe(bundle.bundle_id, "bundle_id") +
+      (cleanExt === "" ? "" : "." + cleanExt),
   );
 }
 

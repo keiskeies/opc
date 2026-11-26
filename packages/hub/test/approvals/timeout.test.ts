@@ -20,14 +20,14 @@
  */
 import { mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { afterAll, describe, expect, it } from "vitest";
 import type { DatabaseSync } from "node:sqlite";
+import { afterAll, describe, expect, it } from "vitest";
 import { createCard, type NewCardDraft } from "../../src/approvals/cards.js";
 import { runTimeoutPass } from "../../src/approvals/timeout.js";
-import type { DomainEvent } from "../../src/events/bus.js";
 import { openDb } from "../../src/db/driver.js";
 import { migrate } from "../../src/db/migrate.js";
 import { WriteQueue } from "../../src/db/write-queue.js";
+import type { DomainEvent } from "../../src/events/bus.js";
 import { fixtureTmp } from "../fixtures/fixture-dir.js";
 
 const TMP = fixtureTmp("approvals-timeout", import.meta.url);
@@ -84,7 +84,11 @@ function insertExpiredCard(
   db: DatabaseSync,
   parameters: Record<string, unknown> = {},
 ): string {
-  const id = "exp-" + (++seq).toString(16) + "-" + Math.random().toString(16).slice(2, 8);
+  const id =
+    "exp-" +
+    (++seq).toString(16) +
+    "-" +
+    Math.random().toString(16).slice(2, 8);
   const shape = draft(parameters);
   db.prepare(
     "INSERT INTO approvals (id, task_id, approval_type, summary, parameters, recommendation, " +
@@ -107,10 +111,13 @@ function insertExpiredCard(
   return id;
 }
 
-function eventsFor(db: DatabaseSync, target: string): Array<Record<string, unknown>> {
-  return db.prepare("SELECT * FROM events WHERE target = ?").all(target) as Array<
-    Record<string, unknown>
-  >;
+function eventsFor(
+  db: DatabaseSync,
+  target: string,
+): Array<Record<string, unknown>> {
+  return db
+    .prepare("SELECT * FROM events WHERE target = ?")
+    .all(target) as Array<Record<string, unknown>>;
 }
 
 afterAll(async () => {
@@ -140,16 +147,23 @@ describe("① auto_reject 到期：卡片真的被打回，actor 是 system 不�
     const id = insertExpiredCard(db, { timeout_behavior: "auto_reject" });
 
     const published: Array<{ e: DomainEvent; seq: number }> = [];
-    const out = await runTimeoutPass(q, db, T0, (e, s) => published.push({ e, seq: s }));
+    const out = await runTimeoutPass(q, db, T0, (e, s) =>
+      published.push({ e, seq: s }),
+    );
 
     expect(out.handled).toBe(1);
     expect(out.byBehavior["auto_reject"]).toBe(1);
     expect(out.skippedInvalid).toBe(0);
 
     const row = db
-      .prepare("SELECT status, decided_by, decided_at FROM approvals WHERE id = ?")
+      .prepare(
+        "SELECT status, decided_by, decided_at FROM approvals WHERE id = ?",
+      )
       .get(id) as Record<string, unknown>;
-    expect(["rejected", "timeout-executor"]).toEqual([row["status"], row["decided_by"]]);
+    expect(["rejected", "timeout-executor"]).toEqual([
+      row["status"],
+      row["decided_by"],
+    ]);
 
     const ev = eventsFor(db, id);
     expect(ev).toHaveLength(1);
@@ -174,9 +188,16 @@ describe("① auto_reject 到期：卡片真的被打回，actor 是 system 不�
         "recommendation_source, timeout_behavior, timeout_at, status, created_at, evidence_refs) " +
         "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)",
     ).run(
-      id, shape.taskId, shape.approvalType, shape.summary,
-      JSON.stringify(shape.parameters), shape.parameters.recommendation,
-      null, shape.parameters.timeout_behavior, T0 + HOUR, T0,
+      id,
+      shape.taskId,
+      shape.approvalType,
+      shape.summary,
+      JSON.stringify(shape.parameters),
+      shape.parameters.recommendation,
+      null,
+      shape.parameters.timeout_behavior,
+      T0 + HOUR,
+      T0,
       JSON.stringify(shape.evidence_refs),
     );
 
@@ -233,23 +254,29 @@ describe("② auto_approve 到期：自动通过，但不可逆+auto_approve 建
     const { db, q } = fresh();
     addTask(db, "t-1");
     await expect(
-      createCard(q, {
-        taskId: "t-1",
-        approvalType: "irreversible_action",
-        summary: "一次不可逆的动作",
-        parameters: {
-          impact_scope: "生产环境",
-          irreversible: true,
-          recommendation: "推荐：批准（推荐，非决定）",
-          recommendation_is_not_decision: true,
-          timeout_behavior: "auto_approve",
-        },
-        evidence_refs: ["task:t-1/evidence"],
-        buttons: ["approve", "reject_with_comment", "defer_deep_review"],
-      } as NewCardDraft, { nowMs: T0 }),
+      createCard(
+        q,
+        {
+          taskId: "t-1",
+          approvalType: "irreversible_action",
+          summary: "一次不可逆的动作",
+          parameters: {
+            impact_scope: "生产环境",
+            irreversible: true,
+            recommendation: "推荐：批准（推荐，非决定）",
+            recommendation_is_not_decision: true,
+            timeout_behavior: "auto_approve",
+          },
+          evidence_refs: ["task:t-1/evidence"],
+          buttons: ["approve", "reject_with_comment", "defer_deep_review"],
+        } as NewCardDraft,
+        { nowMs: T0 },
+      ),
     ).rejects.toThrow(/auto_approve/u);
     // 库里没有留下任何行（拒建发生在 INSERT 之前）。
-    expect(db.prepare("SELECT COUNT(*) AS c FROM approvals").get()).toEqual({ c: 0 });
+    expect(db.prepare("SELECT COUNT(*) AS c FROM approvals").get()).toEqual({
+      c: 0,
+    });
   });
 });
 
@@ -260,7 +287,9 @@ describe("③ escalate 到期：原卡不动，新建一张 escalation 卡", () 
     const id = insertExpiredCard(db, { timeout_behavior: "escalate" });
 
     const published: Array<{ e: DomainEvent; seq: number }> = [];
-    const out = await runTimeoutPass(q, db, T0, (e, s) => published.push({ e, seq: s }));
+    const out = await runTimeoutPass(q, db, T0, (e, s) =>
+      published.push({ e, seq: s }),
+    );
     expect(out.handled).toBe(1);
     expect(out.byBehavior["escalate"]).toBe(1);
 
@@ -332,7 +361,9 @@ describe("④ 行为取值非法（旁路数据）：数进 skippedInvalid，不
     addTask(db, "t-1");
     const id = insertExpiredCard(db, { timeout_behavior: "auto_reject" });
     // 直接改库：把 timeout_behavior 改成契约外的值（旁路插入才能到这一步）。
-    db.prepare("UPDATE approvals SET timeout_behavior = 'explode' WHERE id = ?").run(id);
+    db.prepare(
+      "UPDATE approvals SET timeout_behavior = 'explode' WHERE id = ?",
+    ).run(id);
 
     const published: unknown[] = [];
     const out = await runTimeoutPass(q, db, T0, (e) => published.push(e));

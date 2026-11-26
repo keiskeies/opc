@@ -40,8 +40,8 @@
 import {
   APPROVAL_BUTTONS,
   APPROVAL_STATUS_PENDING,
-  type ResumeValue,
   RESUME_VALUES,
+  type ResumeValue,
 } from "@opc/contracts";
 // 只 import 一个纯谓词。为什么 channels 会 import 一个 http/ 下的模块，
 // 理由与代价都写在 `channelIneligibleReason` 上面那段（不要在这里再讲一遍）。
@@ -322,8 +322,11 @@ export function boundedPush(
  * 解析失败在通道边界上已经被抹平了，剩下一个 `{}`，而 `{}` 看上去像「可逆」。
  * 那一刻脏 JSON 恰好给最危险的那张卡开出通道，且零报错（tokens.ts 文件头原话）。
  */
-export function channelIneligibleReason(snap: ChannelCardSnapshot): string | null {
-  if (isIrreversibleApproval(snap.approvalType, snap.parametersJson)) return IRREVERSIBLE_HINT;
+export function channelIneligibleReason(
+  snap: ChannelCardSnapshot,
+): string | null {
+  if (isIrreversibleApproval(snap.approvalType, snap.parametersJson))
+    return IRREVERSIBLE_HINT;
   return null;
 }
 
@@ -354,7 +357,10 @@ export const IRREVERSIBLE_HINT =
  * `deliveryId` 只进 `channelDeliveryKey`，作为**额外一层**（有就更细），
  * 而不是作为**唯一一层**（没有就整条判据消失）。
  */
-export function channelActionKey(e: ChannelEnvelope, action: CardAction): string {
+export function channelActionKey(
+  e: ChannelEnvelope,
+  action: CardAction,
+): string {
   return [
     e.message.channelId,
     e.message.conversationId,
@@ -366,7 +372,9 @@ export function channelActionKey(e: ChannelEnvelope, action: CardAction): string
 
 /** 平台投递去重（可选的那一层）。 */
 export function channelDeliveryKey(e: ChannelEnvelope): string | null {
-  return e.deliveryId === null ? null : e.message.channelId + ACTION_KEY_SEP + e.deliveryId;
+  return e.deliveryId === null
+    ? null
+    : e.message.channelId + ACTION_KEY_SEP + e.deliveryId;
 }
 
 /* ------------------------------------------------------------------ *
@@ -414,7 +422,9 @@ export interface ChannelRuntimeDeps {
    * IM 这条路上**没有票**，记它就是造一条没发生过的凭据消费记录，
    * 而且它会被那道过滤器**当成非决定**丢掉 —— 一个既虚假又隐形的双重错误。
    */
-  readonly act?: (o: ChannelActRequest) => Promise<ChannelActResult> | ChannelActResult;
+  readonly act?: (
+    o: ChannelActRequest,
+  ) => Promise<ChannelActResult> | ChannelActResult;
 }
 
 /** 运行时给一次入站的判决。 */
@@ -435,7 +445,11 @@ export type ChannelVerdict =
    * 这一条的修法是「什么都不用做，已经有人批过了」。混在一起的代价见
    * handleInbound 第⑤步那段（那是我这次写的一发，最初两格是合成一发的）。
    */
-  | { readonly kind: "card_decided"; readonly approvalId: string; readonly status: string }
+  | {
+      readonly kind: "card_decided";
+      readonly approvalId: string;
+      readonly status: string;
+    }
   | { readonly kind: "not_actionable"; readonly reason: string }
   /** 通道本身不许承载决定（`canAct` 那一格）。 */
   | { readonly kind: "channel_refused"; readonly reason: string }
@@ -639,7 +653,10 @@ export function createChannelRuntime(o: CreateChannelRuntime): ChannelRuntime {
    * 而那个 self-reference 在对象字面量里要用一个中间变量绕，
    * 绕的方式有一种（先构造对象再补方法）会让「方法里的 this」变成运行期才成立的东西。
    */
-  async function handleOne(channel: Channel, e: ChannelEnvelope): Promise<ChannelVerdict> {
+  async function handleOne(
+    channel: Channel,
+    e: ChannelEnvelope,
+  ): Promise<ChannelVerdict> {
     const msg = e.message;
     // ① 不是卡片动作 ⇒ 直接不处理。**不报错**。
     //
@@ -649,7 +666,8 @@ export function createChannelRuntime(o: CreateChannelRuntime): ChannelRuntime {
     if (msg.kind !== "card_action") return { kind: "ignored_not_action" };
 
     const action = parseCardAction(msg);
-    if (action === null) return { kind: "failed", why: "card_action 载荷不完整" };
+    if (action === null)
+      return { kind: "failed", why: "card_action 载荷不完整" };
 
     // ② 身份。放在最前面，在**任何**库读之前。
     //
@@ -658,7 +676,10 @@ export function createChannelRuntime(o: CreateChannelRuntime): ChannelRuntime {
     // （这不是防 DoS 的主要手段 —— 那是 §20 网络边界的事 ——
     //  但「先鉴权再查库」是一条不需要成本就该守的顺序，而反过来的写法
     //  在 code review 里几乎不可能被看出来。）
-    const actor = o.actorFor?.({ senderId: msg.senderId, channelId: msg.channelId });
+    const actor = o.actorFor?.({
+      senderId: msg.senderId,
+      channelId: msg.channelId,
+    });
     if (actor === null || actor === undefined) {
       return { kind: "unauthorized", senderId: msg.senderId };
     }
@@ -698,7 +719,11 @@ export function createChannelRuntime(o: CreateChannelRuntime): ChannelRuntime {
       // 与上面那格一样**不记键**：重放本来就被 applyDecision 的条件 UPDATE
       // 挡住（`replayed: true`），而把「已经批过」报成一个明确判决，
       // 比把它压进一次静默去重要有用。
-      return { kind: "card_decided", approvalId: action.approvalId, status: card.status };
+      return {
+        kind: "card_decided",
+        approvalId: action.approvalId,
+        status: card.status,
+      };
     }
     const ineligible = channelIneligibleReason(card);
     if (ineligible !== null) {
@@ -821,9 +846,17 @@ export function createChannelRuntime(o: CreateChannelRuntime): ChannelRuntime {
           // 这正是计划 Task 4.4 那句「不得静默吞掉审批」字面禁止的事。
           // 修法没有第二种：取走就必须交给 handleOne。
           // 而它【必须】能被测试发现 —— 所以判决要带出去，而不是只留一个 got 数字。
-          handled.push({ key: channelEnvelopeKey(e), verdict: await handleOne(c, e) });
+          handled.push({
+            key: channelEnvelopeKey(e),
+            verdict: await handleOne(c, e),
+          });
         }
-        out.push({ channelId: c.id, got: envelopes.length, handled, failedOpen: false });
+        out.push({
+          channelId: c.id,
+          got: envelopes.length,
+          handled,
+          failedOpen: false,
+        });
       }
       return out;
     },
@@ -997,7 +1030,9 @@ export async function deliverCard(
   // 一张本来可批的卡，走在收不到回传的通道上，就必须以只读的形态出去。
   const declared = opts?.ineligible ?? channelIneligibleReason(snap);
   const reason =
-    channel.supportsActionReturn === true ? declared : (declared ?? ACTION_RETURN_HINT);
+    channel.supportsActionReturn === true
+      ? declared
+      : (declared ?? ACTION_RETURN_HINT);
   const card = outboundCardOf(snap, { ineligible: reason });
   try {
     await channel.send(card);

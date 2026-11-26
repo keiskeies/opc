@@ -36,23 +36,31 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterAll, describe, expect, it } from "vitest";
 import type { DatabaseSync } from "node:sqlite";
+import { afterAll, describe, expect, it } from "vitest";
 
 import { openDb } from "../../src/db/driver.js";
 import { migrate } from "../../src/db/migrate.js";
 import { WriteQueue } from "../../src/db/write-queue.js";
+import type { AdvanceResult, AdvanceTurnLog } from "../../src/engine/driver.js";
+import { EXIT_USAGE } from "../../src/heartbeat/maintenance.js";
 import type { HubDeps } from "../../src/http/app.js";
 import type { HubServer } from "../../src/http/server.js";
-import type { LockAcquire } from "../../src/serve/lock.js";
 import { INSERT_DELEGATION_GRAPH_SQL } from "../../src/org/commit.js";
-import type { AdvanceResult, AdvanceTurnLog } from "../../src/engine/driver.js";
+import {
+  type BootResult,
+  boot,
+  type ServeIo,
+  shutdownOrderLine,
+} from "../../src/serve/assemble.js";
 import type { PumpRoundResult } from "../../src/serve/charter-pump.js";
-import type { DriveRoundResult, DriveTaskFn } from "../../src/serve/driver-pump.js";
-import { boot, shutdownOrderLine, type BootResult, type ServeIo } from "../../src/serve/assemble.js";
 import type { ServeArgs } from "../../src/serve/config.js";
+import type {
+  DriveRoundResult,
+  DriveTaskFn,
+} from "../../src/serve/driver-pump.js";
+import type { LockAcquire } from "../../src/serve/lock.js";
 import { createFakeScheduler } from "../../src/serve/timer.js";
-import { EXIT_USAGE } from "../../src/heartbeat/maintenance.js";
 
 const dirs: string[] = [];
 function tmp(): string {
@@ -116,23 +124,36 @@ function dbWithWorkingTasks(ids: readonly string[]): string {
   const path = join(tmp(), "hub.db");
   const dbh: DatabaseSync = openDb(path);
   migrate(dbh as never);
-  dbh
-    .prepare(INSERT_DELEGATION_GRAPH_SQL)
-    .run(
-      "g1",
-      1,
-      JSON.stringify({
-        nodes: {
-          ceo: { role_id: "ceo", can_manage: true, reports_to: null, model_family: "opus" },
-          manager: { role_id: "manager", can_manage: true, reports_to: "ceo", model_family: "opus" },
-          dev: { role_id: "dev", can_manage: false, reports_to: "manager", model_family: "opus" },
+  dbh.prepare(INSERT_DELEGATION_GRAPH_SQL).run(
+    "g1",
+    1,
+    JSON.stringify({
+      nodes: {
+        ceo: {
+          role_id: "ceo",
+          can_manage: true,
+          reports_to: null,
+          model_family: "opus",
         },
-        edges: [],
-      }),
-      NOW,
-      "ceo",
-      "测试用组织图",
-    );
+        manager: {
+          role_id: "manager",
+          can_manage: true,
+          reports_to: "ceo",
+          model_family: "opus",
+        },
+        dev: {
+          role_id: "dev",
+          can_manage: false,
+          reports_to: "manager",
+          model_family: "opus",
+        },
+      },
+      edges: [],
+    }),
+    NOW,
+    "ceo",
+    "测试用组织图",
+  );
   const ins = dbh.prepare(
     "INSERT INTO tasks (id, title, status, assigned_role, current_node, created_at, updated_at, graph_version) " +
       "VALUES (?, ?, 'IN_PROGRESS', 'manager', 'manager', ?, ?, 1)",
@@ -153,7 +174,11 @@ function plantStalledTask(path: string, id: string): void {
         "INSERT INTO tasks (id, title, status, assigned_role, current_node, created_at, updated_at, graph_version) " +
           "VALUES (?, '停滞夹具', 'IN_PROGRESS', 'dev', 'dev', ?, ?, 1)",
       )
-      .run(id, Date.parse("2020-01-01T00:00:00Z"), Date.parse("2020-01-01T00:00:00Z"));
+      .run(
+        id,
+        Date.parse("2020-01-01T00:00:00Z"),
+        Date.parse("2020-01-01T00:00:00Z"),
+      );
   } finally {
     dbh.close();
   }
@@ -196,7 +221,9 @@ const kindCount = (path: string, kind: string): number => {
     return Number(
       (
         dbh
-          .prepare("SELECT COUNT(*) AS n FROM events WHERE json_extract(payload, '$.kind') = ?")
+          .prepare(
+            "SELECT COUNT(*) AS n FROM events WHERE json_extract(payload, '$.kind') = ?",
+          )
           .get(kind) as { n: number | bigint }
       ).n,
     );
@@ -224,7 +251,13 @@ function stalledAdvance(taskId: string): AdvanceResult {
     recorded: true,
     why: "已留痕",
   };
-  return { taskId, turns: [log], stopped: "stalled", totalCostCents: 0, status: "IN_PROGRESS" };
+  return {
+    taskId,
+    turns: [log],
+    stopped: "stalled",
+    totalCostCents: 0,
+    status: "IN_PROGRESS",
+  };
 }
 
 const happens = async (cond: () => boolean, ms = 4000): Promise<boolean> => {
@@ -268,7 +301,10 @@ const driverArgs = (path: string, extra: Partial<ServeArgs> = {}): ServeArgs =>
  * 是类型错误（显式 undefined 不算"省略"），而"省略"才是"没开"的合法表达 ——
  * assemble.ts 读的是 `args.driverPump === true`，少一行就是关着的。
  */
-const driverArgsNoPump = (path: string, extra: Partial<ServeArgs> = {}): ServeArgs =>
+const driverArgsNoPump = (
+  path: string,
+  extra: Partial<ServeArgs> = {},
+): ServeArgs =>
   ({
     dbPath: path,
     port: 8787,
@@ -285,14 +321,19 @@ function spyDrive(
   calls: { taskId: string; nowMs: number }[],
   o: { readonly throwFor?: string } = {},
 ): DriveTaskFn {
-  return async (taskId: string, maxBudgetUsd: number, maxTurns: number): Promise<AdvanceResult> => {
+  return async (
+    taskId: string,
+    maxBudgetUsd: number,
+    maxTurns: number,
+  ): Promise<AdvanceResult> => {
     void maxBudgetUsd;
     void maxTurns;
     // nowMs 不在 DriveTaskFn 的签名里（它是 DriveOptions 的一格），
     // 所以 B 组要的那个值只能从【认领行】读回来 —— 见 claimTimes。
     // 这里记 taskId 是为了让"推了哪几条"这一判据不依赖读库。
     calls.push({ taskId, nowMs: 0 });
-    if (o.throwFor !== undefined && o.throwFor === taskId) throw new Error("推这一发炸了（夹具）");
+    if (o.throwFor !== undefined && o.throwFor === taskId)
+      throw new Error("推这一发炸了（夹具）");
     return stalledAdvance(taskId);
   };
 }
@@ -367,31 +408,27 @@ describe("A 组：默认不开 = 一分钱不花", () => {
     const s = createFakeScheduler(NOW);
     const { io, warn } = ioOf();
     const r = needOk(
-      await boot(
-        driverArgsNoPump(path, { charterPump: true }),
-        io,
-        {
-          acquire: () => OK_LOCK,
-          serve: fakeServer().serve,
-          scheduler: s,
-          now: () => s.now(),
-          driveTask: spyDrive(calls),
-          // 章程泵那一侧【也要注入】，否则这一发会变成"真起子进程去起草章程"——
-          // 那正是这一发要避免的副作用本身。它同时充当**分母**：下面断它被调过，
-          // 证明这趟心跳【确实跑到了泵那一段】，于是上面那个 calls 为空
-          // 不是"心跳什么都没干"造成的（0044 §9.2 那条：空断言必须先有分母）。
-          charterPumpVia: (): Promise<PumpRoundResult> => {
-            pumpCalls.push(1);
-            return Promise.resolve({
-              cards: [],
-              costCents: 0,
-              abandoned: [],
-              turns: [],
-              blocked: [],
-            });
-          },
+      await boot(driverArgsNoPump(path, { charterPump: true }), io, {
+        acquire: () => OK_LOCK,
+        serve: fakeServer().serve,
+        scheduler: s,
+        now: () => s.now(),
+        driveTask: spyDrive(calls),
+        // 章程泵那一侧【也要注入】，否则这一发会变成"真起子进程去起草章程"——
+        // 那正是这一发要避免的副作用本身。它同时充当**分母**：下面断它被调过，
+        // 证明这趟心跳【确实跑到了泵那一段】，于是上面那个 calls 为空
+        // 不是"心跳什么都没干"造成的（0044 §9.2 那条：空断言必须先有分母）。
+        charterPumpVia: (): Promise<PumpRoundResult> => {
+          pumpCalls.push(1);
+          return Promise.resolve({
+            cards: [],
+            costCents: 0,
+            abandoned: [],
+            turns: [],
+            blocked: [],
+          });
         },
-      ),
+      }),
     );
     s.advance(3 * 60_000);
     await r.heartbeat.tick();
@@ -578,7 +615,9 @@ describe("D 组：关机等到落地，而等待时长【从配置算】", () =>
     // 「确实有一趟在飞」这条前置【必须真的断言】（恒真的等会绿在"根本没派发"上）。
     expect(await happens(() => calls === 1)).toBe(true);
     const shutting = r.shutdown();
-    expect(await happens(() => warn.join(" ").includes("等它落地再关队列"))).toBe(true);
+    expect(
+      await happens(() => warn.join(" ").includes("等它落地再关队列")),
+    ).toBe(true);
     const line = warn.join("\n");
     // 最坏等待 = 2 × 12 × 180s = 72 分钟 = 1 小时 12 分。
     // 断【具体那句】而不是断"含小时"：0048 第一版那句写的是"最坏 180 秒"（抄章程泵的量级），
@@ -685,7 +724,10 @@ describe("E 组：横幅按【各自的开关】说话", () => {
     // 那条既有先例把它抽成 shutdownOrderLine，两个分支就有了分母。
     // 【这一发证不了】runServeCli 真的把这句话打出来了 —— 那一格本机没有覆盖度，
     // 与 serveBannerOf 文件头自己写的那句取舍同一条，不假装它被覆盖了。
-    const driverOn = shutdownOrderLine({ driverPump: true } as ServeArgs, false);
+    const driverOn = shutdownOrderLine(
+      { driverPump: true } as ServeArgs,
+      false,
+    );
     expect(driverOn).toContain("在飞的驱动轮");
     expect(driverOn).toContain("不要 kill -9");
     // 驱动开着时【不给具体秒数】：那句等待时长由横幅按配置算，这里指回它。
@@ -697,13 +739,18 @@ describe("E 组：横幅按【各自的开关】说话", () => {
     expect(driverOn).toContain("上面那条驱动器横幅");
     expect(driverOn).toContain("这里不重算一份");
     // 反向对照：只开章程泵时那句【不该】提驱动轮，也【不该】指回一条不存在的横幅。
-    const charterOnly = shutdownOrderLine({ charterPump: true } as ServeArgs, false);
+    const charterOnly = shutdownOrderLine(
+      { charterPump: true } as ServeArgs,
+      false,
+    );
     expect(charterOnly).not.toContain("在飞的驱动轮");
     expect(charterOnly).toContain("最坏等 180 秒");
     expect(charterOnly).not.toContain("上面那条驱动器横幅");
 
     // 两个都关着：与只开章程泵同一支（那一步真的什么都不等）。
-    expect(shutdownOrderLine({} as ServeArgs, false)).not.toContain("在飞的驱动轮");
+    expect(shutdownOrderLine({} as ServeArgs, false)).not.toContain(
+      "在飞的驱动轮",
+    );
     // 只开驱动器：顺序里有驱动那一格，而那句 180 秒仍然只属于章程那一格。
     expect(driverOn).toContain("章程起草在飞最坏等 180 秒");
   });
@@ -748,7 +795,9 @@ describe("G 组：花钱的门挡着时【终端上要有声音】", () => {
         driveTask: spyDrive(calls),
       }),
     );
-    expect(await happens(() => warn.join("\n").includes("花钱的门关着"))).toBe(true);
+    expect(await happens(() => warn.join("\n").includes("花钱的门关着"))).toBe(
+      true,
+    );
     expect(calls).toEqual([]);
     // 认领行【一条都没有】：被门挡住的任务按定义不在候选里，
     // 写了就会把停滞计时器拨着 —— 那会被读成"这一格有人在看着"。
@@ -779,7 +828,9 @@ describe("G 组：花钱的门挡着时【终端上要有声音】", () => {
       s.advance(60_000);
       await r.heartbeat.tick();
     }
-    expect(await happens(() => warn.join("\n").includes("花钱的门关着"))).toBe(true);
+    expect(await happens(() => warn.join("\n").includes("花钱的门关着"))).toBe(
+      true,
+    );
     const said = warn.filter((m) => m.includes("花钱的门关着")).length;
     expect(said).toBe(1);
     // 分母：确实跑了多轮，否则"只说一次"可能只是"只跑了一次"。
@@ -827,7 +878,9 @@ describe("H 组：放弃那一格【当场】响", () => {
         driverMaxAttempts: 1,
       }),
     );
-    expect(await happens(() => warn.join("\n").includes("驱动器【不再推】"))).toBe(true);
+    expect(
+      await happens(() => warn.join("\n").includes("驱动器【不再推】")),
+    ).toBe(true);
     const line = warn.join("\n");
     expect(line).toContain("没有人推它");
     // ⚠ 这一句【不许】说成"巡检永远不会报"（0048 那处读错的原文），
@@ -856,7 +909,9 @@ describe("H 组：放弃那一格【当场】响", () => {
           Promise.reject(new Error("no such table: tasks（夹具）")),
       }),
     );
-    expect(await happens(() => warn.join(" ").includes("本轮没有结论"))).toBe(true);
+    expect(await happens(() => warn.join(" ").includes("本轮没有结论"))).toBe(
+      true,
+    );
     expect(warn.join(" ")).toContain("no such table: tasks（夹具）");
     expect(r.heartbeat.consecutiveFailures).toBe(0);
     expect(r.heartbeat.stopped).toBe(false);
@@ -878,7 +933,9 @@ describe("H 组：放弃那一格【当场】响", () => {
         driverMaxAttempts: 5,
       }),
     );
-    expect(await happens(() => warn.join("\n").includes("一条任务推不动"))).toBe(true);
+    expect(
+      await happens(() => warn.join("\n").includes("一条任务推不动")),
+    ).toBe(true);
     // 抛过的那一次【照样留了认领行】—— 上限的地基就是这件事（driver-pump F 组同一条）。
     expect(kindCount(path, "DriverTurnClaimed")).toBe(1);
     expect(warn.join("\n")).toContain("推这一发炸了（夹具）");

@@ -242,7 +242,11 @@ describe("保存门控配置时的总入口（拒绝必须发生在保存时）"
   });
 
   it("放行时不附带任何理由字段（避免调用方误以为「有 reason 就是被拦」）", () => {
-    const ok = gateConfigBlock({ producer: DEV, reviewer: TEST, edges: OK_EDGES });
+    const ok = gateConfigBlock({
+      producer: DEV,
+      reviewer: TEST,
+      edges: OK_EDGES,
+    });
     expect(ok.ok).toBe(true);
     expect(Object.hasOwn(ok, "reason")).toBe(false);
   });

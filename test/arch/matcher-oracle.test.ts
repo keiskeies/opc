@@ -97,7 +97,9 @@ describe("比较型断言对无枚举键的类型有分辨力（夹具瞎过一�
     expect({ m: new Map([["k", 1]]) }).not.toMatchObject({
       m: new Map([["k", 2]]),
     });
-    expect({ m: new Map([["k", 1]]) }).toMatchObject({ m: new Map([["k", 1]]) });
+    expect({ m: new Map([["k", 1]]) }).toMatchObject({
+      m: new Map([["k", 1]]),
+    });
   });
 
   it("toMatchObject 是【递归子集】，数组那一维是【等长逐元素】", () => {

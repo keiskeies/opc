@@ -36,29 +36,33 @@
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import type { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
 import { afterAll, describe, expect, it } from "vitest";
-import type { DatabaseSync } from "node:sqlite";
 
 import { openDb } from "../../src/db/driver.js";
 import { migrate } from "../../src/db/migrate.js";
 import { WriteQueue } from "../../src/db/write-queue.js";
+import { CHARTER_CARD_KEY } from "../../src/engine/charter.js";
+import { DECISION_MARK } from "../../src/engine/claude.js";
+import { EXIT_USAGE } from "../../src/heartbeat/maintenance.js";
 import type { HubDeps } from "../../src/http/app.js";
 import type { HubServer } from "../../src/http/server.js";
-import type { LockAcquire } from "../../src/serve/lock.js";
 import { INSERT_DELEGATION_GRAPH_SQL } from "../../src/org/commit.js";
-import { DECISION_MARK } from "../../src/engine/claude.js";
-import { CHARTER_CARD_KEY } from "../../src/engine/charter.js";
-import type { CharterCardDeps, PumpOptions, PumpRoundResult } from "../../src/serve/charter-pump.js";
 import {
+  type BootResult,
   boot,
   pumpBoundsOf,
-  type BootResult,
   type ServeIo,
 } from "../../src/serve/assemble.js";
+import type {
+  CharterCardDeps,
+  PumpOptions,
+  PumpRoundResult,
+} from "../../src/serve/charter-pump.js";
 import type { ServeArgs } from "../../src/serve/config.js";
+import type { LockAcquire } from "../../src/serve/lock.js";
 import { createFakeScheduler } from "../../src/serve/timer.js";
-import { EXIT_USAGE } from "../../src/heartbeat/maintenance.js";
 
 const dirs: string[] = [];
 function tmp(): string {
@@ -123,26 +127,37 @@ const fakeServer = (): {
  * CHARTER_PENDING 是不是活跃状态由 patrol 的判据决定，那条任务又被泵自己改动过，
  * 两个事实共用一行的话，红的时候说不清是谁坏了。
  */
-function dbWithCharterTasks(ids: readonly string[], alsoStalled?: string): string {
+function dbWithCharterTasks(
+  ids: readonly string[],
+  alsoStalled?: string,
+): string {
   const path = join(tmp(), "hub.db");
   const dbh: DatabaseSync = openDb(path);
   migrate(dbh as never);
-  dbh
-    .prepare(INSERT_DELEGATION_GRAPH_SQL)
-    .run(
-      "g1",
-      1,
-      JSON.stringify({
-        nodes: {
-          ceo: { role_id: "ceo", can_manage: true, reports_to: null, model_family: "opus" },
-          intake: { role_id: "intake", can_manage: true, reports_to: "ceo", model_family: "sonnet" },
+  dbh.prepare(INSERT_DELEGATION_GRAPH_SQL).run(
+    "g1",
+    1,
+    JSON.stringify({
+      nodes: {
+        ceo: {
+          role_id: "ceo",
+          can_manage: true,
+          reports_to: null,
+          model_family: "opus",
         },
-        edges: [],
-      }),
-      NOW,
-      "ceo",
-      "测试用组织图",
-    );
+        intake: {
+          role_id: "intake",
+          can_manage: true,
+          reports_to: "ceo",
+          model_family: "sonnet",
+        },
+      },
+      edges: [],
+    }),
+    NOW,
+    "ceo",
+    "测试用组织图",
+  );
   const ins = dbh.prepare(
     "INSERT INTO tasks (id, title, status, assigned_role, current_node, created_at, updated_at, graph_version) " +
       "VALUES (?, ?, 'CHARTER_PENDING', 'intake', 'intake', ?, ?, 1)",
@@ -156,7 +171,11 @@ function dbWithCharterTasks(ids: readonly string[], alsoStalled?: string): strin
         "INSERT INTO tasks (id, title, status, assigned_role, current_node, created_at, updated_at, graph_version) " +
           "VALUES (?, '停滞夹具', 'IN_PROGRESS', 'intake', 'intake', ?, ?, 1)",
       )
-      .run(alsoStalled, Date.parse("2020-01-01T00:00:00Z"), Date.parse("2020-01-01T00:00:00Z"));
+      .run(
+        alsoStalled,
+        Date.parse("2020-01-01T00:00:00Z"),
+        Date.parse("2020-01-01T00:00:00Z"),
+      );
   }
   dbh.close();
   return path;
@@ -166,7 +185,10 @@ function dbWithCharterTasks(ids: readonly string[], alsoStalled?: string): strin
  * 一份不 spawn 的起草回调。ok:true 那一支交出的文本要能被 parseCharterDraft 认出来，
  * 否则"起草成功"会变成"跑了而没建出卡"，而本组要断的正是【卡进了收件箱】。
  */
-function cardDeps(calls: string[], o: { readonly ok?: boolean } = {}): () => CharterCardDeps {
+function cardDeps(
+  calls: string[],
+  o: { readonly ok?: boolean } = {},
+): () => CharterCardDeps {
   const ok = o.ok !== false;
   return () => ({
     runTurn: async (i) => {
@@ -178,7 +200,10 @@ function cardDeps(calls: string[], o: { readonly ok?: boolean } = {}): () => Cha
           ? "业务目标：做个 AI 笔记应用\n可量化验收标准：三条\n预算上限：200 美元\n\n" +
             DECISION_MARK +
             "\n" +
-            JSON.stringify({ action: "wait", summary: "章程提案已拟好，等 CEO 签署" })
+            JSON.stringify({
+              action: "wait",
+              summary: "章程提案已拟好，等 CEO 签署",
+            })
           : "",
         costCents: ok ? 6 : 0,
         sessionId: null,
@@ -229,7 +254,11 @@ function plantStalledTask(path: string, id: string): void {
         "INSERT INTO tasks (id, title, status, assigned_role, current_node, created_at, updated_at, graph_version) " +
           "VALUES (?, '停滞夹具二号', 'IN_PROGRESS', 'intake', 'intake', ?, ?, 1)",
       )
-      .run(id, Date.parse("2020-01-01T00:00:00Z"), Date.parse("2020-01-01T00:00:00Z"));
+      .run(
+        id,
+        Date.parse("2020-01-01T00:00:00Z"),
+        Date.parse("2020-01-01T00:00:00Z"),
+      );
   } finally {
     dbh.close();
   }
@@ -238,7 +267,14 @@ function plantStalledTask(path: string, id: string): void {
 /** 读装配源码本身（形状守卫用）。路径按测试文件的相对位置算，不写死绝对路径。 */
 function s_of_assemble(): string {
   return readFileSync(
-    join(dirname(fileURLToPath(import.meta.url)), "..", "..", "src", "serve", "assemble.ts"),
+    join(
+      dirname(fileURLToPath(import.meta.url)),
+      "..",
+      "..",
+      "src",
+      "serve",
+      "assemble.ts",
+    ),
     "utf8",
   );
 }
@@ -281,7 +317,10 @@ const pumpArgs = (path: string, extra: Partial<ServeArgs> = {}): ServeArgs =>
  * pumpArgs 之后【删掉】几格：exactOptionalPropertyTypes 下显式写
  * `charterPump: undefined` 在字面量里非法，覆盖已设的开关/上限只能删了再说。
  */
-const pumpArgsWithout = (path: string, keys: readonly ("charterPump" | "maxBudgetUsd" | "taskLimitCents")[]): ServeArgs => {
+const pumpArgsWithout = (
+  path: string,
+  keys: readonly ("charterPump" | "maxBudgetUsd" | "taskLimitCents")[],
+): ServeArgs => {
   const a = { ...pumpArgs(path) } as Record<string, unknown>;
   for (const k of keys) delete a[k];
   return a as ServeArgs;
@@ -294,11 +333,13 @@ describe("A 组：默认不开 = 一分钱不花", () => {
     const s = createFakeScheduler(NOW);
     const { io } = ioOf();
     const r = needOk(
-      await boot(
-        pumpArgsWithout(path, ["charterPump", "maxBudgetUsd"]),
-        io,
-        { acquire: () => OK_LOCK, serve: fakeServer().serve, scheduler: s, now: () => s.now(), pumpCardDeps: cardDeps(calls) },
-      ),
+      await boot(pumpArgsWithout(path, ["charterPump", "maxBudgetUsd"]), io, {
+        acquire: () => OK_LOCK,
+        serve: fakeServer().serve,
+        scheduler: s,
+        now: () => s.now(),
+        pumpCardDeps: cardDeps(calls),
+      }),
     );
     s.advance(3 * 60_000);
     await r.heartbeat.tick();
@@ -472,7 +513,13 @@ describe("C 组：一次起草不得让巡检停摆（本篇最容易被【改�
         now: () => s.now(),
         charterPumpVia: (): Promise<PumpRoundResult> => {
           calls++;
-          return held.then(() => ({ cards: [], costCents: 0, abandoned: [], turns: [], blocked: [] }));
+          return held.then(() => ({
+            cards: [],
+            costCents: 0,
+            abandoned: [],
+            turns: [],
+            blocked: [],
+          }));
         },
       }),
     );
@@ -532,7 +579,9 @@ describe("C 组：一次起草不得让巡检停摆（本篇最容易被【改�
         pumpMaxAttempts: 1,
       }),
     );
-    expect(await happens(() => warn.join("\n").includes("【不再试】"))).toBe(true);
+    expect(await happens(() => warn.join("\n").includes("【不再试】"))).toBe(
+      true,
+    );
     // 那句必须是【警告】而不是 log：它是唯一一种"系统不会再自己往下走"的结论。
     expect(warn.join("\n")).toContain("系统不会自己解决");
     const dbh = openDb(path);
@@ -541,7 +590,9 @@ describe("C 组：一次起草不得让巡检停摆（本篇最容易被【改�
         Number(
           (
             dbh
-              .prepare("SELECT COUNT(*) AS n FROM events WHERE json_extract(payload, '$.kind') = ?")
+              .prepare(
+                "SELECT COUNT(*) AS n FROM events WHERE json_extract(payload, '$.kind') = ?",
+              )
               .get("CharterDraftAbandoned") as { n: number | bigint }
           ).n,
         ),
@@ -581,16 +632,26 @@ describe("C 组：一次起草不得让巡检停摆（本篇最容易被【改�
       .join("\n");
     const START = "const giveUpInner = async (): Promise<void> => {";
     const a = src.indexOf(START);
-    expect(a, "giveUpInner 找不到：清理出口被改名或拆开了，这一发要跟着改").toBeGreaterThan(-1);
+    expect(
+      a,
+      "giveUpInner 找不到：清理出口被改名或拆开了，这一发要跟着改",
+    ).toBeGreaterThan(-1);
     const region = src.slice(a, a + 900);
     const firstAwait = region.search(/\bawait\b/);
     expect(firstAwait).toBeGreaterThan(-1);
-    for (const must of ["backupWatch.beginCancel()", "pumpWatch.beginCancel()"]) {
+    for (const must of [
+      "backupWatch.beginCancel()",
+      "pumpWatch.beginCancel()",
+    ]) {
       const at = region.indexOf(must);
-      expect(at, "清理路径里少了 " + must + "：关机之后【还能派新活】").toBeGreaterThan(-1);
+      expect(
+        at,
+        "清理路径里少了 " + must + "：关机之后【还能派新活】",
+      ).toBeGreaterThan(-1);
       expect(
         at < firstAwait,
-        must + " 落在了第一个 await【之后】：那条缝里一次关机能插进来，而泵会在队列关闭后写库",
+        must +
+          " 落在了第一个 await【之后】：那条缝里一次关机能插进来，而泵会在队列关闭后写库",
       ).toBe(true);
     }
     /**
@@ -628,10 +689,13 @@ describe("C 组：一次起草不得让巡检停摆（本篇最容易被【改�
         serve: fakeServer().serve,
         scheduler: s,
         now: () => s.now(),
-        charterPumpVia: (): Promise<PumpRoundResult> => Promise.reject(new Error("no such table: tasks（夹具）")),
+        charterPumpVia: (): Promise<PumpRoundResult> =>
+          Promise.reject(new Error("no such table: tasks（夹具）")),
       }),
     );
-    expect(await happens(() => warn.join(" ").includes("本轮没有结论"))).toBe(true);
+    expect(await happens(() => warn.join(" ").includes("本轮没有结论"))).toBe(
+      true,
+    );
     expect(warn.join(" ")).toContain("no such table: tasks（夹具）");
     expect(r.heartbeat.consecutiveFailures).toBe(0);
     expect(r.heartbeat.stopped).toBe(false);
@@ -669,7 +733,13 @@ describe("D 组：关机等到起草落地", () => {
           calls++;
           return new Promise<PumpRoundResult>((res) => {
             releaseGate.fn = () => {
-              res({ cards: [], costCents: 0, abandoned: [], turns: [], blocked: [] });
+              res({
+                cards: [],
+                costCents: 0,
+                abandoned: [],
+                turns: [],
+                blocked: [],
+              });
             };
           });
         },
@@ -682,7 +752,9 @@ describe("D 组：关机等到起草落地", () => {
     const shutting = r.shutdown();
     // 「在等什么」必须说出来：一句承诺了六步停止顺序的横幅后面藏着最坏三分钟，
     // 读的人会以为进程卡死而去 kill -9 —— 那一步才会真留下没关的连接与半个事务。
-    expect(await happens(() => warn.join(" ").includes("等它落地再关队列"))).toBe(true);
+    expect(
+      await happens(() => warn.join(" ").includes("等它落地再关队列")),
+    ).toBe(true);
     // 起草还没放行 ⇒ 队列【不许】被关。
     await new Promise((res) => setTimeout(res, 20));
     expect(closed).toBe(false);
@@ -708,7 +780,12 @@ describe("E 组 / 纯函数：上限缺失时不能起", () => {
   });
 
   it("每一格单独坏 ⇒ 只点名那一格（三条一起报会让人以为自己三处都写错了）", () => {
-    const full = { charterPump: true, maxBudgetUsd: 0.5, taskLimitCents: 500, agentCwd: "/tmp/w" };
+    const full = {
+      charterPump: true,
+      maxBudgetUsd: 0.5,
+      taskLimitCents: 500,
+      agentCwd: "/tmp/w",
+    };
     expect(pumpBoundsOf(full as ServeArgs).ok).toBe(true);
     const one = (drop: string): string => {
       const a = { ...full } as Record<string, unknown>;
@@ -724,12 +801,21 @@ describe("E 组 / 纯函数：上限缺失时不能起", () => {
     expect(one("taskLimitCents")).toContain("--task-limit-cents");
     expect(one("agentCwd")).toContain("--agent-cwd");
     // 形状判据：Infinity 是「没有上限的上限」，小数美分不是整数。
-    const inf = pumpBoundsOf({ ...full, maxBudgetUsd: Number.POSITIVE_INFINITY } as ServeArgs);
+    const inf = pumpBoundsOf({
+      ...full,
+      maxBudgetUsd: Number.POSITIVE_INFINITY,
+    } as ServeArgs);
     expect(inf.ok).toBe(false);
-    expect(pumpBoundsOf({ ...full, taskLimitCents: 500.5 } as ServeArgs).ok).toBe(false);
-    expect(pumpBoundsOf({ ...full, agentCwd: "   " } as ServeArgs).ok).toBe(false);
+    expect(
+      pumpBoundsOf({ ...full, taskLimitCents: 500.5 } as ServeArgs).ok,
+    ).toBe(false);
+    expect(pumpBoundsOf({ ...full, agentCwd: "   " } as ServeArgs).ok).toBe(
+      false,
+    );
     // 0 是【允许】的（有人要把上限设成"一分都不许花"来验证形状）。
-    expect(pumpBoundsOf({ ...full, maxBudgetUsd: 0 } as ServeArgs).ok).toBe(true);
+    expect(pumpBoundsOf({ ...full, maxBudgetUsd: 0 } as ServeArgs).ok).toBe(
+      true,
+    );
   });
 
   it("⭐ boot 那一发：泵开着而缺上限 ⇒ 退 2，且【不监听】", async () => {
@@ -737,11 +823,10 @@ describe("E 组 / 纯函数：上限缺失时不能起", () => {
     const { io, warn } = ioOf();
     const srv = fakeServer();
     const r = needErr(
-      await boot(
-        pumpArgsWithout(path, ["maxBudgetUsd"]),
-        io,
-        { acquire: () => OK_LOCK, serve: srv.serve },
-      ),
+      await boot(pumpArgsWithout(path, ["maxBudgetUsd"]), io, {
+        acquire: () => OK_LOCK,
+        serve: srv.serve,
+      }),
     );
     expect(r.code).toBe(EXIT_USAGE);
     // 判的是【返回值 r.message】而不是 io.warn —— boot 的契约是「不抛、失败翻成
@@ -762,13 +847,17 @@ describe("E 组 / 纯函数：上限缺失时不能起", () => {
     const s = createFakeScheduler(NOW);
     const { io, warn } = ioOf();
     const r = needOk(
-      await boot(pumpArgs(path, { agentCwd: join(tmp(), "没有这个目录") }), io, {
-        acquire: () => OK_LOCK,
-        serve: fakeServer().serve,
-        scheduler: s,
-        now: () => s.now(),
-        pumpCardDeps: cardDeps(calls),
-      }),
+      await boot(
+        pumpArgs(path, { agentCwd: join(tmp(), "没有这个目录") }),
+        io,
+        {
+          acquire: () => OK_LOCK,
+          serve: fakeServer().serve,
+          scheduler: s,
+          now: () => s.now(),
+          pumpCardDeps: cardDeps(calls),
+        },
+      ),
     );
     expect(warn.join(" ")).toContain("【不存在】");
     expect(await happens(() => calls.length === 1)).toBe(true);
@@ -803,7 +892,9 @@ describe("H 组：花钱的门挡住时【终端上要有声音】", () => {
     );
     s.advance(60_000);
     await r.heartbeat.tick();
-    expect(await happens(() => warn.join("\n").includes("花钱的门关着"))).toBe(true);
+    expect(await happens(() => warn.join("\n").includes("花钱的门关着"))).toBe(
+      true,
+    );
     // 三样一起断，缺一样都可能是"巧合地绿"：
     //  ① 一次都没起草（门真的挡住了）
     expect(calls).toEqual([]);
@@ -839,7 +930,9 @@ describe("H 组：花钱的门挡住时【终端上要有声音】", () => {
       s.advance(60_000);
       await r.heartbeat.tick();
     }
-    expect(await happens(() => warn.join("\n").includes("花钱的门关着"))).toBe(true);
+    expect(await happens(() => warn.join("\n").includes("花钱的门关着"))).toBe(
+      true,
+    );
     const said = warn.filter((m) => m.includes("花钱的门关着")).length;
     expect(said).toBe(1);
     // 反向对照：确实跑了 5 轮（否则"只说一次"可能只是"只跑了一次"）。
@@ -903,4 +996,5 @@ function spendIn(path: string, taskId: string, cents: number): void {
 function stallWarnCount(warn: readonly string[]): number {
   return warn.filter((m) => m.includes("巡检：本轮新增停滞")).length;
 }
-const stalledWarned = (warn: readonly string[]): boolean => stallWarnCount(warn) > 0;
+const stalledWarned = (warn: readonly string[]): boolean =>
+  stallWarnCount(warn) > 0;

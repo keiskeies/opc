@@ -168,7 +168,10 @@ const EXEMPT = new Map([
   // 为空 ⇒ 内容从未变）；ffae248（round314 入库）改写 0008 后不再匹配任一 index。
   // 与 98a4b9d5（台账自摘要）同族：写入当时成立，过期不等于说过 —— 不是腐烂。
   // 三条覆盖全部现存截断形态（7/8/16 位），同族改文件后若再红应查新 blob 的 sha256。
-  ["03bf24d", "round241 还原基准 = 0008 旧内容 sha256 截断，0008 被 ffae248 改写后过期"],
+  [
+    "03bf24d",
+    "round241 还原基准 = 0008 旧内容 sha256 截断，0008 被 ffae248 改写后过期",
+  ],
   ["03bf24d1", "同上（8 位截断）"],
   ["03bf24d15241da01", "同上（16 位截断）"],
   [
@@ -591,7 +594,9 @@ ok(
   exemptLater.length === 0,
   exemptLater.length
     ? "今天没进④的豁免：" +
-        exemptLater.map(([k]) => k + "(出现" + exemptSeen.get(k) + "次)").join(", ") +
+        exemptLater
+          .map(([k]) => k + "(出现" + exemptSeen.get(k) + "次)")
+          .join(", ") +
         " —— 要么是本该被更早桶放行的前瞻豁免，要么是根本没人盯的死放行口"
     : "表长 " + EXEMPT.size + "，条条都在④承重",
 );

@@ -40,22 +40,25 @@
  * 一张坏了不拖累整批（心跳 job 的 onError 会报它）。
  */
 import type { DatabaseSync } from "node:sqlite";
-import { requireScopeDb } from "../checkpoint/tx-scope.js";
-import { appendAudit } from "../events/recorder.js";
-import type { DomainEvent } from "../events/bus.js";
 import {
   approvalRequiredEvent,
   insertCard,
   type NewCardDraft,
 } from "../approvals/cards.js";
+import { requireScopeDb } from "../checkpoint/tx-scope.js";
 import {
   assertParamCount,
   assertSingleStatement,
   type Writer,
 } from "../db/write-queue.js";
+import type { DomainEvent } from "../events/bus.js";
+import { appendAudit } from "../events/recorder.js";
 
 /** 超时执行的审计演员：机器决定，绝不署 human（0026 §2 / O10 验收第 3 条）。 */
-export const TIMEOUT_ACTOR = { actorType: "system" as const, actorId: "timeout-executor" } as const;
+export const TIMEOUT_ACTOR = {
+  actorType: "system" as const,
+  actorId: "timeout-executor",
+} as const;
 
 /**
  * 超时执行的认领：只认【还没被决定】的卡。`status = 'pending'` 那半条
@@ -149,10 +152,11 @@ async function processCard(
   card: DueApproval,
   w: Writer,
   nowMs: number,
-): Promise<
-  | { event: DomainEvent | null; seq: number; skipped: boolean }
-  | null
-> {
+): Promise<{
+  event: DomainEvent | null;
+  seq: number;
+  skipped: boolean;
+} | null> {
   const b = card.timeoutBehavior;
   if (b !== "auto_reject" && b !== "auto_approve" && b !== "escalate") {
     return { event: null, seq: 0, skipped: true };
@@ -176,9 +180,19 @@ async function applyMachineDecision(
   card: DueApproval,
   behavior: "auto_reject" | "auto_approve",
   nowMs: number,
-): Promise<{ event: DomainEvent | null; seq: number; skipped: boolean } | null> {
+): Promise<{
+  event: DomainEvent | null;
+  seq: number;
+  skipped: boolean;
+} | null> {
   const status = behavior === "auto_reject" ? "rejected" : "approved";
-  const params: unknown[] = [status, TIMEOUT_ACTOR.actorId, nowMs, card.id, "pending"];
+  const params: unknown[] = [
+    status,
+    TIMEOUT_ACTOR.actorId,
+    nowMs,
+    card.id,
+    "pending",
+  ];
   assertSingleStatement(CLAIM_TIMEOUT_SQL);
   assertParamCount(CLAIM_TIMEOUT_SQL, params);
   const info = db.prepare(CLAIM_TIMEOUT_SQL).run(...(params as never[])) as {
@@ -244,7 +258,11 @@ async function applyEscalate(
   db: DatabaseSync,
   card: DueApproval,
   nowMs: number,
-): Promise<{ event: DomainEvent | null; seq: number; skipped: boolean } | null> {
+): Promise<{
+  event: DomainEvent | null;
+  seq: number;
+  skipped: boolean;
+} | null> {
   if (card.taskId === null) return null;
   const taskRow = db
     .prepare("SELECT status FROM tasks WHERE id = ?")
@@ -255,7 +273,12 @@ async function applyEscalate(
     taskId: card.taskId,
     approvalType: "escalation",
     cardKey: "timeout-escalate:" + card.id,
-    summary: "审批卡片 " + card.id + "（任务 " + card.taskId + "）超时未决，升级请重新裁定",
+    summary:
+      "审批卡片 " +
+      card.id +
+      "（任务 " +
+      card.taskId +
+      "）超时未决，升级请重新裁定",
     parameters: {
       impact_scope: "审批卡片 " + card.id + "（任务 " + card.taskId + "）超时",
       irreversible: false,

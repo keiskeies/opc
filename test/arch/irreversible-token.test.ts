@@ -67,9 +67,7 @@ describe("不可逆⇒一次性令牌：真仓库今天自洽", () => {
     for (const [name, text] of corpus()) {
       if (/UPDATE\s+approvals\s+SET\s+status/isu.test(text)) writers.push(name);
     }
-    expect(writers.sort()).toEqual(
-      APPROVE_PATHS.map((e) => e.file).sort(),
-    );
+    expect(writers.sort()).toEqual(APPROVE_PATHS.map((e) => e.file).sort());
   });
 });
 
@@ -108,7 +106,9 @@ describe("不可逆⇒一次性令牌：变异判别力（合成输入）", () =
     const cards = realSrc().get("approvals/cards.ts") as string;
     expect(
       checkIrreversibleToken(
-        corpus({ "approvals/cards.ts": cards.replaceAll(REJECT_BUILD_MARKER, "已移除") }),
+        corpus({
+          "approvals/cards.ts": cards.replaceAll(REJECT_BUILD_MARKER, "已移除"),
+        }),
       ),
     ).toContain(REJECT_BUILD_MARKER);
   });

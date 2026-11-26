@@ -23,16 +23,16 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
   BASE_BACKOFF_MS,
+  backoffMs,
+  classifyFailure,
+  decideRetry,
   FAILURE_KINDS,
   MAX_BACKOFF_MS,
   MAX_RETRIES,
   NON_RETRYABLE_KINDS,
   RETRYABLE_KINDS,
-  backoffMs,
-  classifyFailure,
-  decideRetry,
-  withRetry,
   type RetryOutcome,
+  withRetry,
 } from "../../src/heartbeat/retry.js";
 
 const HUB = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
@@ -58,7 +58,9 @@ describe("① 分类：认结构化声明，不猜错误消息", () => {
   it("三个状态名 marker 被认成对应分类（调用方不必再翻译一遍）", () => {
     expect(classifyFailure({ code: "BUDGET_PAUSED" })).toBe("budget_exhausted");
     expect(classifyFailure({ code: "UNAUTHORIZED" })).toBe("policy_denied");
-    expect(classifyFailure({ code: "ILLEGAL_TRANSITION" })).toBe("invariant_broken");
+    expect(classifyFailure({ code: "ILLEGAL_TRANSITION" })).toBe(
+      "invariant_broken",
+    );
   });
 
   it("认不出来就是 unknown，不做近义匹配", () => {
@@ -81,7 +83,9 @@ describe("① 分类：认结构化声明，不猜错误消息", () => {
   });
 
   it("可重试 + 不可重试 = 全部枚举，两边都不许手写漏项", () => {
-    expect(RETRYABLE_KINDS.length + NON_RETRYABLE_KINDS.length).toBe(FAILURE_KINDS.length);
+    expect(RETRYABLE_KINDS.length + NON_RETRYABLE_KINDS.length).toBe(
+      FAILURE_KINDS.length,
+    );
     for (const k of RETRYABLE_KINDS) {
       expect(NON_RETRYABLE_KINDS).not.toContain(k);
     }
@@ -106,7 +110,9 @@ describe("② 退避与额度", () => {
     expect(() => backoffMs(1, { jitter: () => Number.NaN })).toThrow();
     expect(() => backoffMs(1, { jitter: () => MAX_BACKOFF_MS * 3 })).toThrow();
     // 反向对照：合拍的抖动照常返回
-    expect(backoffMs(1, { jitter: (x) => x * 1.5 })).toBe(BASE_BACKOFF_MS * 1.5);
+    expect(backoffMs(1, { jitter: (x) => x * 1.5 })).toBe(
+      BASE_BACKOFF_MS * 1.5,
+    );
   });
 
   it("retryNo 从 1 起，0 与负数当场拒（静默按 1 处理会把序列整体错位一格）", () => {
@@ -126,7 +132,13 @@ describe("② 退避与额度", () => {
   });
 
   it("不可重试三类【第一次】就升级，不消耗额度", () => {
-    for (const k of ["budget_exhausted", "policy_denied", "invariant_broken", "cancelled", "unknown"] as const) {
+    for (const k of [
+      "budget_exhausted",
+      "policy_denied",
+      "invariant_broken",
+      "cancelled",
+      "unknown",
+    ] as const) {
       const d = decideRetry(k, 1);
       expect(d.action).toBe("escalate");
       // reason 里必须带分类：卡片上「为什么没重试」不能只写「失败」
@@ -162,7 +174,9 @@ describe("③ withRetry：三种出口，没有第四种", () => {
     const r = await withRetry(
       () => {
         n += 1;
-        return n < 2 ? Promise.reject(new Error("网络断了")) : Promise.resolve("回来了");
+        return n < 2
+          ? Promise.reject(new Error("网络断了"))
+          : Promise.resolve("回来了");
       },
       { kind: "transient", sleep: s.sleep },
     );
@@ -192,7 +206,11 @@ describe("③ withRetry：三种出口，没有第四种", () => {
       expect(r.gaveUp.reason).toContain(String(MAX_RETRIES));
     }
     // 三次重试 ⇒ 三段退避，逐值可断言（区间断言看不住「退避没生效」）
-    expect(s.slept).toEqual([BASE_BACKOFF_MS, BASE_BACKOFF_MS * 2, BASE_BACKOFF_MS * 4]);
+    expect(s.slept).toEqual([
+      BASE_BACKOFF_MS,
+      BASE_BACKOFF_MS * 2,
+      BASE_BACKOFF_MS * 4,
+    ]);
     expect(attempts).toEqual([1, 2, 3, 4]);
   });
 
@@ -224,7 +242,10 @@ describe("③ withRetry：三种出口，没有第四种", () => {
         kind: "transient",
         sleep: s.sleep,
         onAttempt: (a) => {
-          seen.push({ attempt: a.attempt, message: (a.error as Error).message });
+          seen.push({
+            attempt: a.attempt,
+            message: (a.error as Error).message,
+          });
         },
       },
     );
@@ -252,10 +273,13 @@ describe("③ withRetry：三种出口，没有第四种", () => {
 
   it("fn 正常返回就不看内容（结果合不合格是门控的活）", async () => {
     const s = recorder();
-    const r = await withRetry(() => Promise.resolve({ pass: false, coverage: 12 }), {
-      kind: "transient",
-      sleep: s.sleep,
-    });
+    const r = await withRetry(
+      () => Promise.resolve({ pass: false, coverage: 12 }),
+      {
+        kind: "transient",
+        sleep: s.sleep,
+      },
+    );
     expect(r.ok).toBe(true);
     if (r.ok) expect(r.value).toEqual({ pass: false, coverage: 12 });
     expect(s.slept).toEqual([]);
@@ -293,7 +317,9 @@ describe("④ 分层：判定不该拖进图运行时", () => {
     // 本模块刻意【零 import】，所以这里反向对照数的是 export 条数而不是 import 条数
     // （数 import 会恒真：0 === 0）。零 import 是它能被图侧、CLI、测试三方共用的前提。
     expect((src.match(/^export /gmu) ?? []).length).toBeGreaterThanOrEqual(10);
-    const imported = [...src.matchAll(/from\s+"([^"]+)"/gmu)].map((m) => m[1] ?? "");
+    const imported = [...src.matchAll(/from\s+"([^"]+)"/gmu)].map(
+      (m) => m[1] ?? "",
+    );
     expect(imported).toEqual([]);
     // 而【注释里】确实出现过这些词 —— 钉住「必须先剥注释」这一步不是装饰（0018 §6 第 4 条）
     expect(readSrc().includes("@langchain")).toBe(true);
@@ -305,7 +331,5 @@ function readSrc(): string {
 }
 
 function codeOnly(text: string): string {
-  return text
-    .replace(/\/\*[\s\S]*?\*\//gu, "")
-    .replace(/^\s*\/\/.*$/gmu, "");
+  return text.replace(/\/\*[\s\S]*?\*\//gu, "").replace(/^\s*\/\/.*$/gmu, "");
 }

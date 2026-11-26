@@ -71,9 +71,9 @@
 import { createHash, randomBytes } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 import { APPROVAL_STATUS_PENDING } from "@opc/contracts";
+import { assertParamCount, assertSingleStatement } from "../db/write-queue.js";
 import type { DomainEvent } from "../events/bus.js";
 import { appendAudit } from "../events/recorder.js";
-import { assertParamCount, assertSingleStatement } from "../db/write-queue.js";
 
 /**
  * token 的原文长度。32 字节 = sha256 的原生输出宽度，也是 HMAC 的推荐键长；
@@ -223,7 +223,9 @@ export function issueToken(
     // 抛而不是返回一个 {ok:false}：签发方此刻正在一个事务里建卡，
     // 一个「悄悄没签成」的返回值会被当成成功，然后远程端拿到一张指向不存在的卡的票。
     throw new Error(
-      "签发审批 token 失败：卡片 " + o.approvalId + " 不存在。" +
+      "签发审批 token 失败：卡片 " +
+        o.approvalId +
+        " 不存在。" +
         "im_tokens.approval_id 上没有外键（0001 那张表没写 REFERENCES），" +
         "所以这件事数据库挡不住，只能在这里挡。",
     );
@@ -298,10 +300,15 @@ export function redeemToken(
   // 过期判在「用过」之前还是之后？过期在前。理由：一张【既过期又用过】的票，
   // 报 expired 的修法（重签）是对的，报 already_used 的修法（去看结果）是错的 ——
   // 它过期了，那张卡可能早就被别的路径处理完或者超时了，「去看结果」把人支去查一件无关的事。
-  if (Number(row.expires_at) <= o.nowMs) return { ok: false, reason: "expired" };
-  if (Number(row.used) !== TOKEN_UNUSED) return { ok: false, reason: "already_used" };
+  if (Number(row.expires_at) <= o.nowMs)
+    return { ok: false, reason: "expired" };
+  if (Number(row.used) !== TOKEN_UNUSED)
+    return { ok: false, reason: "already_used" };
 
-  if (o.expectedApprovalId !== undefined && o.expectedApprovalId !== row.approval_id) {
+  if (
+    o.expectedApprovalId !== undefined &&
+    o.expectedApprovalId !== row.approval_id
+  ) {
     // 这一发【不烧票】：一张用错了地方的票不该被消耗掉，
     // 否则「在手机上点错了卡片」会连带把那张卡的正经批准机会一起烧掉。
     return { ok: false, reason: "approval_mismatch" };
@@ -361,7 +368,13 @@ export function redeemToken(
     () => o.nowMs,
   );
 
-  return { ok: true, approvalId: row.approval_id, taskId: row.task_id, seq, event };
+  return {
+    ok: true,
+    approvalId: row.approval_id,
+    taskId: row.task_id,
+    seq,
+    event,
+  };
 }
 
 /**
@@ -409,7 +422,8 @@ export function isIrreversibleApproval(
   } catch {
     return true;
   }
-  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return true;
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed))
+    return true;
   const flag = (parsed as Record<string, unknown>)["irreversible"];
   // 【只认真 true】。这里刻意宽松一档（"true" 字符串、1 都不算）是**不安全方向**的
   // 选择，必须说明为什么：这一维上「误判成可逆」的代价是开出一条不该开的通道，
@@ -464,11 +478,20 @@ export type TokenIssueReject =
 export function precheckIssue(
   db: DatabaseSync,
   approvalId: string,
-): { readonly ok: true; readonly taskId: string } | { readonly ok: false; readonly reason: TokenIssueReject } {
+):
+  | { readonly ok: true; readonly taskId: string }
+  | { readonly ok: false; readonly reason: TokenIssueReject } {
   const row = db
-    .prepare("SELECT task_id, status, approval_type, parameters FROM approvals WHERE id = ?")
+    .prepare(
+      "SELECT task_id, status, approval_type, parameters FROM approvals WHERE id = ?",
+    )
     .get(approvalId) as
-    | { task_id: string; status: string; approval_type: string; parameters: string | null }
+    | {
+        task_id: string;
+        status: string;
+        approval_type: string;
+        parameters: string | null;
+      }
     | undefined;
   if (row === undefined) return { ok: false, reason: "approval_missing" };
   if (row.status !== APPROVAL_STATUS_PENDING) {

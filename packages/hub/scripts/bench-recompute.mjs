@@ -90,8 +90,12 @@ function timed(f, k = 9) {
   }
   return median(a);
 }
-const ms = (x) => (typeof x === "number" ? x.toFixed(2).padStart(8) + " ms" : String(x).padStart(11));
-const head = (s) => console.log("\n── " + s + " " + "─".repeat(Math.max(0, 62 - s.length)));
+const ms = (x) =>
+  typeof x === "number"
+    ? x.toFixed(2).padStart(8) + " ms"
+    : String(x).padStart(11);
+const head = (s) =>
+  console.log("\n── " + s + " " + "─".repeat(Math.max(0, 62 - s.length)));
 
 // ── 建库 ────────────────────────────────────────────────────────────
 {
@@ -110,18 +114,30 @@ const q = new WriteQueue(PATH_);
   const t0 = performance.now();
   let written = 0;
   while (written < EVENTS) {
-    const r = await appendAuditBatch(q, rows(written, Math.min(2000, EVENTS - written)), () => 1);
+    const r = await appendAuditBatch(
+      q,
+      rows(written, Math.min(2000, EVENTS - written)),
+      () => 1,
+    );
     written += r.written;
   }
   head("建库");
   console.log(
-    "  " + EVENTS + " 事件 / " + TASKS + " 任务，用 " + ((performance.now() - t0) / 1000).toFixed(1) + "s",
+    "  " +
+      EVENTS +
+      " 事件 / " +
+      TASKS +
+      " 任务，用 " +
+      ((performance.now() - t0) / 1000).toFixed(1) +
+      "s",
   );
 }
 const read = q.readConnection();
 const w = openDb(PATH_); // 只有这里需要 DDL：DROP / CREATE 那条受控索引
 const hasIdx = () =>
-  w.prepare("SELECT 1 AS x FROM sqlite_master WHERE type='index' AND name=?").get(IDX) !== undefined;
+  w
+    .prepare("SELECT 1 AS x FROM sqlite_master WHERE type='index' AND name=?")
+    .get(IDX) !== undefined;
 const dropIdx = () => w.exec("DROP INDEX IF EXISTS " + IDX);
 /**
  * 与 0003 那份 DDL 同一句表达式（守卫缺失会静默改结论，见 0003 文件头）。
@@ -133,7 +149,8 @@ const createIdx = (cols, where) =>
   w.exec(
     `CREATE INDEX ${IDX} ON events(${cols})` + (where ? ` WHERE ${where}` : ""),
   );
-const KIND_EXPR = "CASE WHEN json_valid(payload) THEN json_extract(payload, '$.kind') END";
+const KIND_EXPR =
+  "CASE WHEN json_valid(payload) THEN json_extract(payload, '$.kind') END";
 
 /**
  * ⚠ 每次改过 DDL 之后，【必须换一条新连接】去取 EXPLAIN 与计时。
@@ -172,7 +189,9 @@ function armTime(sql) {
 }
 
 // ── §1 第 9 条：巡检那条索引的效果 ────────────────────────────────────
-head("§1-9 巡检 PATROL_SQL：同一份库，只差 events 上那一条索引（每臂新开连接）");
+head(
+  "§1-9 巡检 PATROL_SQL：同一份库，只差 events 上那一条索引（每臂新开连接）",
+);
 /**
  * 每一臂的索引形状【由这条数据本身决定】，不在分支里另写一遍。
  * 第一版这里是个 if/else 链，把形状硬编码在各分支里，而 label 在数组里 ——
@@ -189,14 +208,27 @@ head("§1-9 巡检 PATROL_SQL：同一份库，只差 events 上那一条索引�
 const arms = [
   { name: "① 0003 那条索引在（默认状态）", keep: true },
   { name: "② 摘掉，只剩 0001 那两条", drop: true },
-  { name: "③ kind 放末位 (task,created,kind)", cols: ["task_id", "created_at", "K"] },
-  { name: "④ 部分索引，索引里【不含】created_at", cols: ["task_id", "K"], partial: true },
-  { name: "⑤ 部分索引，索引里【含】created_at", cols: ["task_id", "K", "created_at"], partial: true },
+  {
+    name: "③ kind 放末位 (task,created,kind)",
+    cols: ["task_id", "created_at", "K"],
+  },
+  {
+    name: "④ 部分索引，索引里【不含】created_at",
+    cols: ["task_id", "K"],
+    partial: true,
+  },
+  {
+    name: "⑤ 部分索引，索引里【含】created_at",
+    cols: ["task_id", "K", "created_at"],
+    partial: true,
+  },
   { name: "⑥ 0003 原形状，无 WHERE", cols: ["task_id", "K", "created_at"] },
 ];
 const actualDdl = () =>
   String(
-    w.prepare("SELECT sql FROM sqlite_master WHERE type='index' AND name=?").get(IDX)?.sql ?? "（无）",
+    w
+      .prepare("SELECT sql FROM sqlite_master WHERE type='index' AND name=?")
+      .get(IDX)?.sql ?? "（无）",
   ).replace(/\s+/g, " ");
 for (const a of arms) {
   if (a.keep) {
@@ -249,7 +281,9 @@ if (!hasIdx()) {
  *     这里靠末尾那次 rebuild 补回来，而现网库上【没有这个退路可言】：
  *     rebuild 本身要 1~3 s 且同步（§6 那一档），期间检索结果不完整。
  */
-head("§1-9 + §3 写侧代价：索引与 FTS 触发器各占多少（三档交替，每档 2000 行 × 3 轮）");
+head(
+  "§1-9 + §3 写侧代价：索引与 FTS 触发器各占多少（三档交替，每档 2000 行 × 3 轮）",
+);
 const FT_TRIGGER_DDL =
   "CREATE TRIGGER events_fts_insert AFTER INSERT ON events " +
   "BEGIN INSERT INTO events_fts(rowid, payload) VALUES (new.id, new.payload); END;";
@@ -257,19 +291,41 @@ const IDX_DDL = `CREATE INDEX ${IDX} ON events(task_id, ${KIND_EXPR}, created_at
 const ROWS_PER_ARM = 2000;
 const ROUNDS = 3;
 const armState = {
-  A: { setup: () => { ensureIdx(); ensureTrigger(); } },
-  B: { setup: () => { dropIdx(); ensureTrigger(); } },
-  C: { setup: () => { ensureIdx(); w.exec("DROP TRIGGER IF EXISTS events_fts_insert"); } },
+  A: {
+    setup: () => {
+      ensureIdx();
+      ensureTrigger();
+    },
+  },
+  B: {
+    setup: () => {
+      dropIdx();
+      ensureTrigger();
+    },
+  },
+  C: {
+    setup: () => {
+      ensureIdx();
+      w.exec("DROP TRIGGER IF EXISTS events_fts_insert");
+    },
+  },
 };
 function ensureIdx() {
   if (!hasIdx()) w.exec(IDX_DDL);
 }
 function ensureTrigger() {
-  if (w.prepare("SELECT 1 AS x FROM sqlite_master WHERE type='trigger' AND name='events_fts_insert'").get() === undefined) {
+  if (
+    w
+      .prepare(
+        "SELECT 1 AS x FROM sqlite_master WHERE type='trigger' AND name='events_fts_insert'",
+      )
+      .get() === undefined
+  ) {
     w.exec(FT_TRIGGER_DDL);
   }
 }
-const rowCount = () => openDb(PATH_).prepare("SELECT count(*) AS n FROM events").get().n;
+const rowCount = () =>
+  openDb(PATH_).prepare("SELECT count(*) AS n FROM events").get().n;
 const samples = { A: [], B: [], C: [] };
 const sizes = { A: [], B: [], C: [] };
 let writeOffset = 5_000_000;
@@ -292,9 +348,16 @@ const label = {
 };
 for (const key of ["A", "B", "C"]) {
   console.log(
-    "  " + label[key] + " " + ms(median(samples[key])) +
-      "  逐轮 [" + samples[key].map((x) => x.toFixed(0)).join(", ") + "] ms" +
-      "   库大小 " + span(sizes[key]) + " 行",
+    "  " +
+      label[key] +
+      " " +
+      ms(median(samples[key])) +
+      "  逐轮 [" +
+      samples[key].map((x) => x.toFixed(0)).join(", ") +
+      "] ms" +
+      "   库大小 " +
+      span(sizes[key]) +
+      " 行",
   );
 }
 const a = median(samples.A);
@@ -306,8 +369,12 @@ const c = median(samples.C);
 // 更阴的一次是：我写下「它跳过 35%~93%」那句警告的【同一次运行】就打出了 +20%，
 // 当场证伪了我自己刚写下的那个区间。所以警告里给的是【运行次数的口径】而不是一个新范围。
 console.log(
-  "  ⇒ 0003 索引的写侧代价 +" + (((a - b) / b) * 100).toFixed(0) + "%（口径：三档中位数之比）   " +
-    "FTS 触发器占批量写的 " + (((a - c) / a) * 100).toFixed(0) + "%",
+  "  ⇒ 0003 索引的写侧代价 +" +
+    (((a - b) / b) * 100).toFixed(0) +
+    "%（口径：三档中位数之比）   " +
+    "FTS 触发器占批量写的 " +
+    (((a - c) / a) * 100).toFixed(0) +
+    "%",
 );
 console.log(
   "  ⚠ 上面那两个百分比【单次值不可引用】：逐轮原始值就在上面。索引代价这一项本机三次运行" +
@@ -324,11 +391,17 @@ console.log(
 ensureIdx();
 ensureTrigger();
 w.exec("INSERT INTO events_fts(events_fts) VALUES('rebuild')");
-const check = openDb(PATH_).prepare(
-  "SELECT (SELECT count(*) FROM events) AS e, (SELECT count(*) FROM events_fts) AS f",
-).get();
+const check = openDb(PATH_)
+  .prepare(
+    "SELECT (SELECT count(*) FROM events) AS e, (SELECT count(*) FROM events_fts) AS f",
+  )
+  .get();
 console.log(
-  "  已装回并 rebuild：" + check.e + " 行 vs fts " + check.f + " 行" +
+  "  已装回并 rebuild：" +
+    check.e +
+    " 行 vs fts " +
+    check.f +
+    " 行" +
     (check.e === check.f ? "（一致）" : "  ⚠ 不一致 ⇒ 后面所有检索档都不可信"),
 );
 
@@ -340,7 +413,11 @@ console.log(
 // 位置也有意义：必须在【插标记行之前】，这样它量的是基准夹具本身（~10 万行），
 // 而不是我为另一节临时造出来的形状。
 const rowsAtRebuild = read.prepare("SELECT count(*) AS n FROM events").get().n;
-head("§6 FTS rebuild 一趟的代价（此刻 " + rowsAtRebuild + " 行）+ 只读连接跑不跑得动");
+head(
+  "§6 FTS rebuild 一趟的代价（此刻 " +
+    rowsAtRebuild +
+    " 行）+ 只读连接跑不跑得动",
+);
 console.log(
   "  写连接 rebuild      " +
     ms(
@@ -349,8 +426,21 @@ console.log(
       }, 3),
     ),
 );
-console.log("  只读连接 rebuild  " + ms(timed(() => read.prepare("INSERT INTO events_fts(events_fts) VALUES('rebuild')").run(), 1)));
-console.log("  ↑ 这一档【应当】是 throw（0018 §5：rebuild 是写操作，只读连接跑不了）");
+console.log(
+  "  只读连接 rebuild  " +
+    ms(
+      timed(
+        () =>
+          read
+            .prepare("INSERT INTO events_fts(events_fts) VALUES('rebuild')")
+            .run(),
+        1,
+      ),
+    ),
+);
+console.log(
+  "  ↑ 这一档【应当】是 throw（0018 §5：rebuild 是写操作，只读连接跑不了）",
+);
 
 // ── 插入【命中数已知】的标记行 ───────────────────────────────────────
 // 命中数必须由【构造】决定，不能靠「正文里行号的前缀」去凑：
@@ -375,15 +465,29 @@ const MARKS = [1, 12, 123, 1234, 12345, 55555, 100000];
       const chunk = Math.min(2000, target - made);
       const data = rows(20_000_000 + n, chunk).map((r, i) => ({
         ...r,
-        payload: { kind: "TaskStateChanged", taskId: r.taskId, note: tok(target) + " 标记行 " + (made + i) },
+        payload: {
+          kind: "TaskStateChanged",
+          taskId: r.taskId,
+          note: tok(target) + " 标记行 " + (made + i),
+        },
       }));
       const r2 = await appendAuditBatch(q, data, () => 1);
       made += r2.written;
       n += r2.written;
     }
   }
-  console.log("  +" + n + " 行（" + MARKS.map(tok).join(" / ") + "），用 " + ((performance.now() - t0) / 1000).toFixed(1) + "s");
-  console.log("  ⚠ 从这一节起 events 不再是 10 万行；巡检与写侧已在上面测完，不受影响");
+  console.log(
+    "  +" +
+      n +
+      " 行（" +
+      MARKS.map(tok).join(" / ") +
+      "），用 " +
+      ((performance.now() - t0) / 1000).toFixed(1) +
+      "s",
+  );
+  console.log(
+    "  ⚠ 从这一节起 events 不再是 10 万行；巡检与写侧已在上面测完，不受影响",
+  );
 }
 
 // 正确性【先于】性能：改这条 SQL 的理由是「快三个数量级」，
@@ -392,7 +496,9 @@ const MARKS = [1, 12, 123, 1234, 12345, 55555, 100000];
 // 组合取：限定/全库 × 时间序/最近序 × 命中多的词/命中少的词/命不中的词。
 head("§1-10 前置：两种写法【结果逐行相同】（不比时间，只比集合与顺序）");
 const hitsOf = (kw) =>
-  openDb(PATH_).prepare("SELECT count(*) AS n FROM events_fts WHERE events_fts MATCH ?").get(kw).n;
+  openDb(PATH_)
+    .prepare("SELECT count(*) AS n FROM events_fts WHERE events_fts MATCH ?")
+    .get(kw).n;
 const EQ_KWS = [tok(12345), tok(123), "绝不可能出现在这份库里的词zz"];
 const TASK_OF = ["T7", undefined];
 const shapes = [];
@@ -425,12 +531,19 @@ for (const kwRaw of EQ_KWS) {
       const cap = hitsOf(kw) + 10;
       const oldS =
         "SELECT rowid AS id FROM events_fts WHERE events_fts MATCH ? " +
-        (sh.scoped ? "AND rowid IN (SELECT id FROM events WHERE task_id = ?) " : "") +
-        (sh.order === "recent" ? "ORDER BY rank, rowid DESC" : "ORDER BY rowid ASC") +
+        (sh.scoped
+          ? "AND rowid IN (SELECT id FROM events WHERE task_id = ?) "
+          : "") +
+        (sh.order === "recent"
+          ? "ORDER BY rank, rowid DESC"
+          : "ORDER BY rowid ASC") +
         " LIMIT ? OFFSET ?";
       const c = openDb(PATH_);
       // 两种写法【各自新连接】，谁都不欠谁一个缓存（§1 第 13 条同一条纪律）
-      const a = c.prepare(oldS).all(...args, cap, 0).map((r) => Number(r.id));
+      const a = c
+        .prepare(oldS)
+        .all(...args, cap, 0)
+        .map((r) => Number(r.id));
       c.close();
       const c2 = openDb(PATH_);
       const b = c2
@@ -452,23 +565,41 @@ for (const kwRaw of EQ_KWS) {
       if (!ok) {
         eqBad++;
         console.log(
-          "  ⚠ 不一致：" + (sh.scoped ? "限定 " + task : "全库") + " × " + sh.order + " × " + kwRaw +
-            "  旧 " + a.length + " 行 / 新 " + b.length + " 行",
+          "  ⚠ 不一致：" +
+            (sh.scoped ? "限定 " + task : "全库") +
+            " × " +
+            sh.order +
+            " × " +
+            kwRaw +
+            "  旧 " +
+            a.length +
+            " 行 / 新 " +
+            b.length +
+            " 行",
         );
       }
     }
   }
 }
 console.log(
-  "  比了 " + eqCells + " 格，其中 " + eqReal + " 格【有行】（LIMIT 覆盖全部命中；" +
-    "时间序比顺序，最近序只比集合）：" + (eqBad === 0 ? "全部一致 ✔" : eqBad + " 格不一致 ✘"),
+  "  比了 " +
+    eqCells +
+    " 格，其中 " +
+    eqReal +
+    " 格【有行】（LIMIT 覆盖全部命中；" +
+    "时间序比顺序，最近序只比集合）：" +
+    (eqBad === 0 ? "全部一致 ✔" : eqBad + " 格不一致 ✘"),
 );
 console.log(
-  "  （其余 " + (eqCells - eqReal) + " 格是【两边都空】：它们只证明两种写法在没命中时【同样不命中】，" +
+  "  （其余 " +
+    (eqCells - eqReal) +
+    " 格是【两边都空】：它们只证明两种写法在没命中时【同样不命中】，" +
     "不证明行的顺序一致 —— 所以单独数出来，不混进【比过】那个数里）",
 );
 if (eqBad > 0) {
-  console.log("  ⇒ 生产那条 EXISTS 改动的【正确性前提】不成立，性能收益不足以留下它");
+  console.log(
+    "  ⇒ 生产那条 EXISTS 改动的【正确性前提】不成立，性能收益不足以留下它",
+  );
   process.exitCode = 1;
 }
 
@@ -482,7 +613,11 @@ if (eqBad > 0) {
  *
  * 对照必须【同库同词同任务同 LIMIT】只差 SQL 写法这一个变量（§1 第 13 条）。
  */
-head("§1-10 FTS 限定任务：IN 子查询 vs EXISTS 主键定位（词 " + tok(12345) + "，命中 12345）");
+head(
+  "§1-10 FTS 限定任务：IN 子查询 vs EXISTS 主键定位（词 " +
+    tok(12345) +
+    "，命中 12345）",
+);
 const KW = '"' + tok(12345) + '"';
 /**
  * 旧写法【两种序各一发】。第一版只测了时间序那一发，
@@ -497,7 +632,15 @@ const oldSql = (order) =>
   (order === "recent" ? "ORDER BY rank, rowid DESC" : "ORDER BY rowid ASC") +
   " LIMIT ? OFFSET ?";
 const timeOf = (sql, ...params) =>
-  ms(timed(() => openDb(PATH_).prepare(sql).all(...params, 50, 0).length, 3));
+  ms(
+    timed(
+      () =>
+        openDb(PATH_)
+          .prepare(sql)
+          .all(...params, 50, 0).length,
+      3,
+    ),
+  );
 const OLD = oldSql("timeline");
 const NEW = ftsSearchSql({ scope: true, order: "timeline" });
 // 计划文本【新旧各取一次】，并且各自标注是哪个 —— 第一版这里打的是
@@ -511,52 +654,97 @@ const planOf = (sql) =>
     .join(" | ");
 console.log("  FTS 命中数 " + hitsOf(KW) + "（应为 12345）");
 console.log(
-  "  计划含 BLOOM —— 旧写法 " + /BLOOM/.test(planOf(OLD)) + " / 新写法 " + /BLOOM/.test(planOf(NEW)) +
+  "  计划含 BLOOM —— 旧写法 " +
+    /BLOOM/.test(planOf(OLD)) +
+    " / 新写法 " +
+    /BLOOM/.test(planOf(NEW)) +
     "（期望 旧 true / 新 false）",
 );
 for (const o of ["timeline", "recent"]) {
   console.log(
-    "  " + (o === "timeline" ? "时间序" : "最近序").padEnd(6) +
-      " 旧 " + timeOf(oldSql(o), KW, "T7") + "   新 " + timeOf(ftsSearchSql({ scope: true, order: o }), KW, "T7"),
+    "  " +
+      (o === "timeline" ? "时间序" : "最近序").padEnd(6) +
+      " 旧 " +
+      timeOf(oldSql(o), KW, "T7") +
+      "   新 " +
+      timeOf(ftsSearchSql({ scope: true, order: o }), KW, "T7"),
   );
 }
 console.log(
   "  searchEvents 生产入口（限定+时间序）P50 " +
-    ms(timed(() => searchEvents(read, { keyword: tok(12345), taskId: "T7", order: "timeline", limit: 50 }))),
+    ms(
+      timed(() =>
+        searchEvents(read, {
+          keyword: tok(12345),
+          taskId: "T7",
+          order: "timeline",
+          limit: 50,
+        }),
+      ),
+    ),
 );
 if (process.env.BENCH_HEAVY === "1") {
   const heavy = '"' + tok(100000) + '"';
   console.log(
-    "  [BENCH_HEAVY] 命中 " + hitsOf(heavy) + " 时旧写法最近序 " +
-      ms(timed(() => openDb(PATH_).prepare(oldSql("recent")).all(heavy, "T7", 50, 0).length, 1)) +
+    "  [BENCH_HEAVY] 命中 " +
+      hitsOf(heavy) +
+      " 时旧写法最近序 " +
+      ms(
+        timed(
+          () =>
+            openDb(PATH_).prepare(oldSql("recent")).all(heavy, "T7", 50, 0)
+              .length,
+          1,
+        ),
+      ) +
       "   （文档里那个 18 338 ms 的头档）",
   );
 } else {
-  console.log("  （旧写法【命中 10 万 × 最近序】那一档默认不跑，约 2 分钟；BENCH_HEAVY=1 打开）");
+  console.log(
+    "  （旧写法【命中 10 万 × 最近序】那一档默认不跑，约 2 分钟；BENCH_HEAVY=1 打开）",
+  );
 }
 
 // ── §6 第一条：rank 排序的代价构成 ────────────────────────────────────
 head("§6 ORDER BY rank 的代价是【命中数】的函数（LIMIT 恒 50）");
 const RANK = ftsSearchSql({ scope: false, order: "recent" });
-const ROWID_ONLY = RANK.replace("ORDER BY rank, rowid DESC", "ORDER BY rowid DESC");
-if (ROWID_ONLY === RANK) console.log("  ⚠ 没替换成功：search.ts 的 recent 排序子句改了，这一档失效");
+const ROWID_ONLY = RANK.replace(
+  "ORDER BY rank, rowid DESC",
+  "ORDER BY rowid DESC",
+);
+if (ROWID_ONLY === RANK)
+  console.log("  ⚠ 没替换成功：search.ts 的 recent 排序子句改了，这一档失效");
 const RANK_SCOPED = ftsSearchSql({ scope: true, order: "recent" });
 const TIMELINE_SCOPED = ftsSearchSql({ scope: true, order: "timeline" });
-console.log("  FTS命中数 | 全库rank  | 全库rowid | 限定rank  | 限定时间序   （命中数应当等于造的行数）");
+console.log(
+  "  FTS命中数 | 全库rank  | 全库rowid | 限定rank  | 限定时间序   （命中数应当等于造的行数）",
+);
 for (const target of MARKS) {
   const kw = '"' + tok(target) + '"';
   let n = -1;
   try {
-    n = read.prepare("SELECT count(*) AS n FROM events_fts WHERE events_fts MATCH ?").get(kw).n;
+    n = read
+      .prepare("SELECT count(*) AS n FROM events_fts WHERE events_fts MATCH ?")
+      .get(kw).n;
   } catch (e) {
     console.log("  " + kw + " 解析失败: " + e.message);
     continue;
   }
   const ok = n === target ? "" : "  ⚠ 命中 " + n + " ≠ 造的 " + target;
-  const f = (sql, ...p) => ms(timed(() => read.prepare(sql).all(...p, 50, 0), 5));
+  const f = (sql, ...p) =>
+    ms(timed(() => read.prepare(sql).all(...p, 50, 0), 5));
   console.log(
-    "  " + String(n).padStart(9) + " | " + f(RANK, kw) + " | " + f(ROWID_ONLY, kw) +
-      " | " + f(RANK_SCOPED, kw, "T7") + " | " + f(TIMELINE_SCOPED, kw, "T7") + ok,
+    "  " +
+      String(n).padStart(9) +
+      " | " +
+      f(RANK, kw) +
+      " | " +
+      f(ROWID_ONLY, kw) +
+      " | " +
+      f(RANK_SCOPED, kw, "T7") +
+      " | " +
+      f(TIMELINE_SCOPED, kw, "T7") +
+      ok,
   );
 }
 
@@ -566,9 +754,11 @@ async function worstLanding(block) {
   const done = [];
   const t0 = performance.now();
   const writes = Array.from({ length: 20 }, (_, i) =>
-    appendAuditBatch(q, rows(9_000_000 + i * 10, 10), () => Date.now()).then(() => {
-      done.push(performance.now() - t0);
-    }),
+    appendAuditBatch(q, rows(9_000_000 + i * 10, 10), () => Date.now()).then(
+      () => {
+        done.push(performance.now() - t0);
+      },
+    ),
   );
   const b0 = performance.now();
   block();
@@ -581,7 +771,8 @@ const search = await worstLanding(() => {
   // 「正文1」这种词的命中数取决于上面生成的行号里有多少以 1 开头，
   // 每次跑都不一样 ⇒ 这一档的数无法跟别人比。qk100000x 恒命中 10 万行，
   // 也正是 §6 那张表里最坏的一档，拿它做阻塞对照才对得上「以后审计页会撞上」那句话。
-  for (let k = 0; k < 20; k++) searchEvents(read, { keyword: tok(100000), order: "recent", limit: 50 });
+  for (let k = 0; k < 20; k++)
+    searchEvents(read, { keyword: tok(100000), order: "recent", limit: 50 });
 });
 /**
  * 空转对照的时长【取搜索那一档实测占用的时长】，不写死常量。
@@ -597,24 +788,41 @@ const spin = await worstLanding(() => {
   }
 });
 const onlyWrites = await worstLanding(() => {});
-console.log("  只有写                    最晚 " + onlyWrites.worst.toFixed(0).padStart(5) + " ms");
 console.log(
-  "  写 + 20 次全库检索（占 " + search.blockMs.toFixed(0).padStart(5) + "ms）最晚 " +
-    search.worst.toFixed(0).padStart(5) + " ms",
+  "  只有写                    最晚 " +
+    onlyWrites.worst.toFixed(0).padStart(5) +
+    " ms",
 );
 console.log(
-  "  写 + 同步空转（占 " + spin.blockMs.toFixed(0).padStart(5) + "ms）最晚 " +
-    spin.worst.toFixed(0).padStart(5) + " ms",
+  "  写 + 20 次全库检索（占 " +
+    search.blockMs.toFixed(0).padStart(5) +
+    "ms）最晚 " +
+    search.worst.toFixed(0).padStart(5) +
+    " ms",
 );
 console.log(
-  "  两侧占用时长差 " + Math.abs(search.blockMs - spin.blockMs).toFixed(0) + "ms；落地时刻差 " +
-    Math.abs(search.worst - spin.worst).toFixed(0) + "ms ⇒ 同形 ⇒ 因是【同步占主线程】",
+  "  写 + 同步空转（占 " +
+    spin.blockMs.toFixed(0).padStart(5) +
+    "ms）最晚 " +
+    spin.worst.toFixed(0).padStart(5) +
+    " ms",
 );
-console.log("  （限定任务 + 时间序那一档在 test/acceptance/perf-thresholds.test.ts ④ 里断着）");
+console.log(
+  "  两侧占用时长差 " +
+    Math.abs(search.blockMs - spin.blockMs).toFixed(0) +
+    "ms；落地时刻差 " +
+    Math.abs(search.worst - spin.worst).toFixed(0) +
+    "ms ⇒ 同形 ⇒ 因是【同步占主线程】",
+);
+console.log(
+  "  （限定任务 + 时间序那一档在 test/acceptance/perf-thresholds.test.ts ④ 里断着）",
+);
 
 await q.close();
 w.close();
 rmSync(PATH_, { force: true });
 rmSync(PATH_ + "-wal", { force: true });
 rmSync(PATH_ + "-shm", { force: true });
-console.log("\n完成。这些数是【本机单次实测】，与 0019 记录的允许有机器差异；量级不符才算复算失败。\n");
+console.log(
+  "\n完成。这些数是【本机单次实测】，与 0019 记录的允许有机器差异；量级不符才算复算失败。\n",
+);

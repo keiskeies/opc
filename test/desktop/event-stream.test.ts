@@ -24,13 +24,20 @@
  *     node --experimental-transform-types --import /tmp/opc-harness/register.mjs \
  *     --test "test/desktop/event-stream.test.ts"
  */
-import { type Server, type ServerResponse, createServer } from "node:http";
+import { createServer, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterEach, describe, expect, it } from "vitest";
-import { encodeSseFrame, reconnectDelayMs } from "../../packages/contracts/src/api.js";
-import { verifyRequest } from "../../packages/hub/src/http/auth.js";
-import { LINK_EVENT, openEventStream, type LinkStatus } from "../../packages/desktop/src/main/event-stream.js";
+import {
+  encodeSseFrame,
+  reconnectDelayMs,
+} from "../../packages/contracts/src/api.js";
+import {
+  LINK_EVENT,
+  type LinkStatus,
+  openEventStream,
+} from "../../packages/desktop/src/main/event-stream.js";
 import type { HubEventPayload } from "../../packages/desktop/src/preload/api.js";
+import { verifyRequest } from "../../packages/hub/src/http/auth.js";
 
 const TOKEN = "desktop-stream-test-token";
 
@@ -63,7 +70,9 @@ interface FakeHub {
 
 let live: FakeHub[] = [];
 
-async function startHub(onConnect: (cursor: number, conn: Conn) => void): Promise<FakeHub> {
+async function startHub(
+  onConnect: (cursor: number, conn: Conn) => void,
+): Promise<FakeHub> {
   let current: ServerResponse | null = null;
   let pendingFail: { status: number; body: string } | null = null;
   let skipAuth = false;
@@ -174,7 +183,8 @@ function fakeClock() {
     },
     async runOne(): Promise<number> {
       const p = pending.shift();
-      if (p === undefined) throw new Error("没有待调度的重连 ⇒ 它要么放弃了，要么根本没失败过");
+      if (p === undefined)
+        throw new Error("没有待调度的重连 ⇒ 它要么放弃了，要么根本没失败过");
       p.fn();
       await tick();
       return p.ms;
@@ -208,7 +218,8 @@ const tick = async (turns = 12): Promise<void> => {
 };
 
 /** 断言「没有发生」用的：那种地方没有条件可轮询，只能给一段时间，然后看计数没变。 */
-const settle = (ms = 40): Promise<void> => new Promise((r) => setTimeout(r, ms));
+const settle = (ms = 40): Promise<void> =>
+  new Promise((r) => setTimeout(r, ms));
 
 function collector() {
   const got: HubEventPayload[] = [];
@@ -235,9 +246,20 @@ function collector() {
 describe("① 帧切分与推送形状", () => {
   it("快照帧【不带 seq】而事件帧【带 seq】，顺序与 Hub 推的一致", async () => {
     const h = await startHub((cursor, conn) => {
-      conn.push({ event: "snapshot", data: JSON.stringify({ source: "tasks", as_of_seq: cursor, body: [] }) });
-      conn.push({ event: "TaskStateChanged", data: '{"task_id":"t1"}', id: String(cursor + 1) });
-      conn.push({ event: "ApprovalRequired", data: '{"task_id":"t1"}', id: String(cursor + 2) });
+      conn.push({
+        event: "snapshot",
+        data: JSON.stringify({ source: "tasks", as_of_seq: cursor, body: [] }),
+      });
+      conn.push({
+        event: "TaskStateChanged",
+        data: '{"task_id":"t1"}',
+        id: String(cursor + 1),
+      });
+      conn.push({
+        event: "ApprovalRequired",
+        data: '{"task_id":"t1"}',
+        id: String(cursor + 2),
+      });
     });
     const c = collector();
     const stream = openEventStream({
@@ -247,7 +269,11 @@ describe("① 帧切分与推送形状", () => {
       onStatus: c.onStatus,
     });
     await tick();
-    expect(c.events.map((p) => p.event)).toEqual(["snapshot", "TaskStateChanged", "ApprovalRequired"]);
+    expect(c.events.map((p) => p.event)).toEqual([
+      "snapshot",
+      "TaskStateChanged",
+      "ApprovalRequired",
+    ]);
     // 快照帧【没有】seq —— 它不对应任何 events.id，给它编一个是伪造游标（sse.ts 原话）。
     expect(c.events[0]?.seq).toBeUndefined();
     expect(c.events[1]?.seq).toBe(1);
@@ -262,14 +288,20 @@ describe("① 帧切分与推送形状", () => {
     // 而真线上「一帧被切在任意字节位置」是常态而不是异常。
     const h = await startHub((_cursor, conn) => {
       conn.write("event: TaskState");
-      conn.write("Changed\nid: 7\ndata: {\"a\"");
+      conn.write('Changed\nid: 7\ndata: {"a"');
       conn.write(":1}\n");
       conn.write("\n");
     });
     const c = collector();
-    const stream = openEventStream({ token: TOKEN, hubAddress: "127.0.0.1:" + h.port, push: c.push });
+    const stream = openEventStream({
+      token: TOKEN,
+      hubAddress: "127.0.0.1:" + h.port,
+      push: c.push,
+    });
     await tick();
-    expect(c.events).toEqual([{ seq: 7, event: "TaskStateChanged", data: '{"a":1}' }]);
+    expect(c.events).toEqual([
+      { seq: 7, event: "TaskStateChanged", data: '{"a":1}' },
+    ]);
     expect(stream.cursor).toBe(7);
     stream.close();
   });
@@ -277,11 +309,16 @@ describe("① 帧切分与推送形状", () => {
   it("两帧在同一次 write 里 ⇒ 两条都推", async () => {
     const h = await startHub((_cursor, conn) => {
       conn.write(
-        encodeSseFrame({ event: "A", data: "1", id: "1" }) + encodeSseFrame({ event: "B", data: "2", id: "2" }),
+        encodeSseFrame({ event: "A", data: "1", id: "1" }) +
+          encodeSseFrame({ event: "B", data: "2", id: "2" }),
       );
     });
     const c = collector();
-    const stream = openEventStream({ token: TOKEN, hubAddress: "127.0.0.1:" + h.port, push: c.push });
+    const stream = openEventStream({
+      token: TOKEN,
+      hubAddress: "127.0.0.1:" + h.port,
+      push: c.push,
+    });
     await tick();
     expect(c.events.map((p) => p.event)).toEqual(["A", "B"]);
     stream.close();
@@ -292,10 +329,16 @@ describe("① 帧切分与推送形状", () => {
     // 推过去的话投影会收到一条 data 是毫秒数的"事件"。
     const h = await startHub((_cursor, conn) => {
       conn.write("retry: 3000\n\n");
-      conn.write(encodeSseFrame({ event: "TaskStateChanged", data: "{}", id: "1" }));
+      conn.write(
+        encodeSseFrame({ event: "TaskStateChanged", data: "{}", id: "1" }),
+      );
     });
     const c = collector();
-    const stream = openEventStream({ token: TOKEN, hubAddress: "127.0.0.1:" + h.port, push: c.push });
+    const stream = openEventStream({
+      token: TOKEN,
+      hubAddress: "127.0.0.1:" + h.port,
+      push: c.push,
+    });
     await tick();
     expect(c.events.map((p) => p.event)).toEqual(["TaskStateChanged"]);
     stream.close();
@@ -303,10 +346,16 @@ describe("① 帧切分与推送形状", () => {
 
   it("多行 data 原样拼回来（不吞换行）", async () => {
     const h = await startHub((_cursor, conn) => {
-      conn.write(encodeSseFrame({ event: "NoteAdded", data: '第一行\n第二行', id: "1" }));
+      conn.write(
+        encodeSseFrame({ event: "NoteAdded", data: "第一行\n第二行", id: "1" }),
+      );
     });
     const c = collector();
-    const stream = openEventStream({ token: TOKEN, hubAddress: "127.0.0.1:" + h.port, push: c.push });
+    const stream = openEventStream({
+      token: TOKEN,
+      hubAddress: "127.0.0.1:" + h.port,
+      push: c.push,
+    });
     await tick();
     expect(c.events[0]?.data).toBe("第一行\n第二行");
     stream.close();
@@ -320,8 +369,16 @@ describe("② ⭐ 重连必须带上手上最大的 seq", () => {
     const h = await startHub((cursor, conn) => {
       conn.push({ event: "snapshot", data: "[]" }); // 不写 id 键，而不是写 id: undefined
       // 模拟"这个连接能看到的两条"。第二次连接时 cursor 已经是 2，服务端从这里续。
-      conn.push({ event: "TaskStateChanged", data: '{"seq_seen":' + cursor + "}", id: String(cursor + 1) });
-      conn.push({ event: "TaskStateChanged", data: '{"seq_seen":' + cursor + "}", id: String(cursor + 2) });
+      conn.push({
+        event: "TaskStateChanged",
+        data: '{"seq_seen":' + cursor + "}",
+        id: String(cursor + 1),
+      });
+      conn.push({
+        event: "TaskStateChanged",
+        data: '{"seq_seen":' + cursor + "}",
+        id: String(cursor + 2),
+      });
       // 推完就断（Hub 重启的形状）
       conn.end();
     });
@@ -342,7 +399,10 @@ describe("② ⭐ 重连必须带上手上最大的 seq", () => {
     expect(clock.waiting).toBe(1);
     const waited = await clock.runOne();
     expect(waited).toBe(reconnectDelayMs(0)); // 曲线出自 contracts，不在这里重抄
-    expect(h.cursors, "重连没带游标 ⇒ 断线期间落库的那几条永远不会被投递").toEqual([0, 2]);
+    expect(
+      h.cursors,
+      "重连没带游标 ⇒ 断线期间落库的那几条永远不会被投递",
+    ).toEqual([0, 2]);
     expect(stream.cursor).toBe(4);
     stream.close();
   });
@@ -383,8 +443,16 @@ describe("② ⭐ 重连必须带上手上最大的 seq", () => {
     // 变异 M2 就是交换那两行，第一版【全绿】—— 因为我没有一发测试让 push 抛过。
     // 真触发条件很普通：关窗口时主进程还握着这条流。
     const h = await startHub((cursor, conn) => {
-      conn.push({ event: "TaskStateChanged", data: '{"n":1}', id: String(cursor + 1) });
-      conn.push({ event: "TaskStateChanged", data: '{"n":2}', id: String(cursor + 2) });
+      conn.push({
+        event: "TaskStateChanged",
+        data: '{"n":1}',
+        id: String(cursor + 1),
+      });
+      conn.push({
+        event: "TaskStateChanged",
+        data: '{"n":2}',
+        id: String(cursor + 2),
+      });
     });
     const got: HubEventPayload[] = [];
     const c = collector();
@@ -448,7 +516,8 @@ describe("② ⭐ 重连必须带上手上最大的 seq", () => {
     await tick();
     const link = c.lastLink();
     expect(link?.state).toBe("retrying");
-    if (link?.state !== "retrying") throw new Error("类型收窄用（形状已在上一行判过）");
+    if (link?.state !== "retrying")
+      throw new Error("类型收窄用（形状已在上一行判过）");
     expect(link.attempt).toBe(1);
     expect(link.delayMs).toBe(reconnectDelayMs(0));
     // 状态【也走推送】：渲染进程只有这一条通道，光调 onStatus 它看不见。
@@ -493,7 +562,9 @@ describe("② ⭐ 重连必须带上手上最大的 seq", () => {
     // 在曲线被改成常数 0 时也成立 —— 而常数 0 就是把退避删掉了。
     for (let i = 0; i < 8; i++) {
       expect(clock.waiting, "第 " + i + " 次应当排着一个重连").toBe(1);
-      expect(await clock.runOne(), "第 " + i + " 次退避时长").toBe(reconnectDelayMs(i));
+      expect(await clock.runOne(), "第 " + i + " 次退避时长").toBe(
+        reconnectDelayMs(i),
+      );
     }
     expect(clock.waiting, "放弃之后不该再排重连").toBe(0);
     const link = c.lastLink();
@@ -527,7 +598,10 @@ describe("② ⭐ 重连必须带上手上最大的 seq", () => {
     await tick();
     expect(stream.attempt).toBe(1); // 断过一次
     await clock.runOne();
-    expect(stream.attempt, "连上了就该归零，否则下一次真断线时直接从第 8 档开始退避").toBe(0);
+    expect(
+      stream.attempt,
+      "连上了就该归零，否则下一次真断线时直接从第 8 档开始退避",
+    ).toBe(0);
     stream.close();
   });
 });
@@ -596,7 +670,10 @@ describe("③ 4xx 分界：哪些重试有意义", () => {
         setTimeoutImpl: clock.setTimeoutImpl,
       });
       await tick();
-      expect(clock.waiting, status + (shouldRetry ? " 该重连" : " 不该重连")).toBe(shouldRetry ? 1 : 0);
+      expect(
+        clock.waiting,
+        status + (shouldRetry ? " 该重连" : " 不该重连"),
+      ).toBe(shouldRetry ? 1 : 0);
       expect(c.lastLink()?.state).toBe(shouldRetry ? "retrying" : "down");
       stream.close();
     }
@@ -611,7 +688,11 @@ describe("④ 签名真的到了线上", () => {
     // 「所有带 query 的请求 401，而普通 JSON 请求全好」）。
     // 服务器那侧用的是 hub 的 verifyRequest，所以这里绿【不是】我对上了我自己的抄件。
     const h = await startHub((cursor, conn) => {
-      conn.push({ event: "TaskStateChanged", data: "{}", id: String(cursor + 1) });
+      conn.push({
+        event: "TaskStateChanged",
+        data: "{}",
+        id: String(cursor + 1),
+      });
       conn.end();
     });
     const clock = fakeClock();
@@ -627,7 +708,9 @@ describe("④ 签名真的到了线上", () => {
     await clock.runOne();
     // 两次连接【都】收到了帧 ⇒ 两次都过了验签（401 的话一条帧都收不到）
     expect(h.cursors).toEqual([0, 1]);
-    expect(c.events.filter((p) => p.event === "TaskStateChanged").length).toBe(2);
+    expect(c.events.filter((p) => p.event === "TaskStateChanged").length).toBe(
+      2,
+    );
     expect(h.targets).toEqual(["/events", "/events?cursor=1"]);
     stream.close();
   });
@@ -659,7 +742,11 @@ describe("④ 签名真的到了线上", () => {
     });
     h.skipAuthOnce();
     const c = collector();
-    const stream = openEventStream({ token: "wrong-token-entirely", hubAddress: "127.0.0.1:" + h.port, push: c.push });
+    const stream = openEventStream({
+      token: "wrong-token-entirely",
+      hubAddress: "127.0.0.1:" + h.port,
+      push: c.push,
+    });
     await tick();
     expect(c.events.map((p) => p.event)).toEqual(["TaskStateChanged"]);
     stream.close();
@@ -700,7 +787,11 @@ describe("⑤ 生命周期", () => {
   it("close() 幂等（调两次不抛）", async () => {
     const h = await startHub(() => {});
     const c = collector();
-    const stream = openEventStream({ token: TOKEN, hubAddress: "127.0.0.1:" + h.port, push: c.push });
+    const stream = openEventStream({
+      token: TOKEN,
+      hubAddress: "127.0.0.1:" + h.port,
+      push: c.push,
+    });
     await tick();
     stream.close();
     expect(() => stream.close()).not.toThrow();
@@ -710,9 +801,19 @@ describe("⑤ 生命周期", () => {
     const c = collector();
     // 与 signedFetch 的空 token 同一条纪律：配置缺失要说得出是配置缺失，
     // 不要以「Hub 没起来」的形状出现（那一支桌面壳每天都在走）。
-    expect(() => openEventStream({ token: TOKEN, hubAddress: "", push: c.push })).toThrow(/host:port/);
-    expect(() => openEventStream({ token: TOKEN, hubAddress: "localhost", push: c.push })).toThrow(/host:port/);
-    expect(() => openEventStream({ token: TOKEN, hubAddress: "localhost:abc", push: c.push })).toThrow(/host:port/);
+    expect(() =>
+      openEventStream({ token: TOKEN, hubAddress: "", push: c.push }),
+    ).toThrow(/host:port/);
+    expect(() =>
+      openEventStream({ token: TOKEN, hubAddress: "localhost", push: c.push }),
+    ).toThrow(/host:port/);
+    expect(() =>
+      openEventStream({
+        token: TOKEN,
+        hubAddress: "localhost:abc",
+        push: c.push,
+      }),
+    ).toThrow(/host:port/);
   });
 
   it("token 空串 ⇒ 构造时就抛，不签出一个必然 401 的头", () => {
@@ -722,13 +823,29 @@ describe("⑤ 生命周期", () => {
     // signedHeaders（里面的 assertUsableToken 是「每次签时」的那一次调用时机），
     // 且 connect() 在 openEventStream 返回之前同步执行 ⇒ 这发与上面
     // hubAddress 那发同形状：配置缺失在构造时当面说，不进重连曲线。
-    expect(() => openEventStream({ token: "", hubAddress: "127.0.0.1:9999", push: c.push })).toThrow(/空串/);
-    expect(() => openEventStream({ token: "   ", hubAddress: "127.0.0.1:9999", push: c.push })).toThrow(/空串/);
+    expect(() =>
+      openEventStream({
+        token: "",
+        hubAddress: "127.0.0.1:9999",
+        push: c.push,
+      }),
+    ).toThrow(/空串/);
+    expect(() =>
+      openEventStream({
+        token: "   ",
+        hubAddress: "127.0.0.1:9999",
+        push: c.push,
+      }),
+    ).toThrow(/空串/);
   });
 
   it("initialCursor 让壳【冷启动就续订】（渲染进程重挂后不该从头重放）", async () => {
     const h = await startHub((cursor, conn) => {
-      conn.push({ event: "TaskStateChanged", data: "{}", id: String(cursor + 1) });
+      conn.push({
+        event: "TaskStateChanged",
+        data: "{}",
+        id: String(cursor + 1),
+      });
     });
     const c = collector();
     const stream = openEventStream({

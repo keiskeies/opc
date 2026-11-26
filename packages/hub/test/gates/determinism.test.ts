@@ -247,7 +247,7 @@ describe("确定性（§24 风险 5）", () => {
     // 少了这一条，stripComments 写坏（比如把整篇剥成空串）时，上面那条静态守卫
     // 会因为「什么都扫不到」而【永远通过】—— 那是假绿最舒服的形态。
     const sample = [
-      '// Date.now() 不许出现',
+      "// Date.now() 不许出现",
       "/* Math.random() 也不许 */",
       "const ok = 1;",
       "fetch(x);",
@@ -334,7 +334,10 @@ describe("空标准必须 reject（计划点名的最危险静默失效）", () 
       input({
         bundle: bundle({ metrics: { coverage: 61 } }),
         criteria: [
-          criterion({ condition: "metric:coverage < 80", message: "覆盖率不足" }),
+          criterion({
+            condition: "metric:coverage < 80",
+            message: "覆盖率不足",
+          }),
         ],
       }),
     );
@@ -345,7 +348,10 @@ describe("空标准必须 reject（计划点名的最危险静默失效）", () 
       input({
         bundle: bundle({ metrics: { coverage: 91 } }),
         criteria: [
-          criterion({ condition: "metric:coverage < 80", message: "覆盖率不足" }),
+          criterion({
+            condition: "metric:coverage < 80",
+            message: "覆盖率不足",
+          }),
         ],
       }),
     );

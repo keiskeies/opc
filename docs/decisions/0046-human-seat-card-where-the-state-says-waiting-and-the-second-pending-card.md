@@ -172,7 +172,7 @@ pending 卡 = 2 ["handoff-block:dev->dev / escalation","seat:ESCALATED_TO_CEO:4 
    不保证「会自己走到人席」。**顺序是刻意的**：先建入口再建泵 ——
    先建泵只会更快把任务送进那一格（0045 §6 同一条判断）。
    【round321 复核：本条的「至今没有生产调用方」已过期。`advance()` 今天有两个生产调用方：
-   `engine/work.ts:483`（`runTurn` 那一轮）与 `serve/driver-pump.ts:780`（`--driver-pump` 泵，
+   `engine/work.ts:597`（`runTurn` 那一轮）与 `serve/driver-pump.ts:868`（`--driver-pump` 泵，
    经 `assemble.ts` 每心跳派发）—— 「常驻驱动器」在 0048 落了真泵，这一格「没人让任务自己走」
    已由生产代码补上。本篇写作时的读数保留。】
 4. **`MEETING_REQUIRED` / `BLOCKED` 仍然是死路**（两张边表里都没有出边）。
@@ -293,7 +293,7 @@ TEXT 主键，`ORDER BY id` 排的是**字典序**，与插入顺序**无关**�
 排在 §7 之后。round343 把这一发落在了**通道桥层**：`makeChannelAct`（IM 那一路
 `approveCard`）现在把这两条 outcome 折叠成可机读的状态码提示。
 
-- `channels/abstraction.ts:584` —— `ChannelActResult` 的失败支
+- `channels/abstraction.ts:598` —— `ChannelActResult` 的失败支
   增加可选字段 `readonly statusHint?: 422 | 409`；doc 块写明语义（调用方请求不成立）
   与场合（打回没理由 → 422，点过期卡 → 409）。
 - `channels/approval-bridge.ts:228-233` —— `makeChannelAct`：

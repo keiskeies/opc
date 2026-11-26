@@ -26,10 +26,10 @@
  */
 import { describe, expect, it } from "vitest";
 import {
+  canonicalString,
   HEADER_NONCE,
   HEADER_SIGNATURE,
   HEADER_TIMESTAMP,
-  canonicalString,
   signRequest,
 } from "../../packages/hub/src/http/auth.js";
 import { devSign } from "../../packages/web/src/dev-sign.js";
@@ -49,12 +49,23 @@ const FIXED: Inputs = { method: "GET", target: "/today", body: "" };
 
 /** 服务端那一侧的签名，用【它自己的】canonicalString —— 不是本文件重写一份。 */
 function hubSign(i: Inputs, now = NOW, nonce = NONCE, token = TOKEN): string {
-  return signRequest({ token, method: i.method, target: i.target, body: i.body, timestamp: now, nonce });
+  return signRequest({
+    token,
+    method: i.method,
+    target: i.target,
+    body: i.body,
+    timestamp: now,
+    nonce,
+  });
 }
 
 describe("dev-server 的签名与 hub 的验签逐字节一致", () => {
   it("① 同一组输入 ⇒ 三个头全部相等（GET，空 body）", () => {
-    const got = devSign(FIXED.method, FIXED.target, FIXED.body, { now: NOW, nonce: NONCE, token: TOKEN });
+    const got = devSign(FIXED.method, FIXED.target, FIXED.body, {
+      now: NOW,
+      nonce: NONCE,
+      token: TOKEN,
+    });
     expect(got[HEADER_SIGNATURE]).toBe(hubSign(FIXED));
     // 时间戳与 nonce 也得对上：验签方是先按 header 取回这两样、再重算规范串的，
     // 签名对而头不对 ⇒ 服务端用【另一个时间戳】重算 ⇒ 一样 401。
@@ -66,7 +77,11 @@ describe("dev-server 的签名与 hub 的验签逐字节一致", () => {
     // query：auth.ts 文件头明写「不做 query 规范化」，而 dev-server 曾经差点
     // 「先摘 query 再签」—— 那一版的症状是【所有 /events?cursor=… 恒 401】，
     // 即断线续订整条死掉，而普通 JSON 请求全好（因为它们的 target 没有 query）。
-    const sse: Inputs = { method: "GET", target: "/events?cursor=17&task=t1", body: "" };
+    const sse: Inputs = {
+      method: "GET",
+      target: "/events?cursor=17&task=t1",
+      body: "",
+    };
     // body：POST 的 body 按【原始字节】摘要，不重新序列化 JSON。
     const post: Inputs = {
       method: "POST",
@@ -74,12 +89,16 @@ describe("dev-server 的签名与 hub 的验签逐字节一致", () => {
       body: '{"resume":"approve","note":"带 中文 与 \\" 引号"}',
     };
     for (const i of [sse, post]) {
-      const got = devSign(i.method, i.target, i.body, { now: NOW, nonce: NONCE, token: TOKEN });
+      const got = devSign(i.method, i.target, i.body, {
+        now: NOW,
+        nonce: NONCE,
+        token: TOKEN,
+      });
       expect(got[HEADER_SIGNATURE], i.method + " " + i.target).toBe(hubSign(i));
     }
   });
 
-  it("① 正向对照：canonicalString 不是空壳（否则上一条在比两个 HMAC(\"\")）", () => {
+  it('① 正向对照：canonicalString 不是空壳（否则上一条在比两个 HMAC("")）', () => {
     // 少了这一发，上面两条的「相等」有可能来自两边【都没把输入用进去】。
     // 这一发钉的是被 import 的那一位【确实是那个五段规范串】本身：
     // 四个 \n、五段、段 1 是大写方法、段 2 是原样 target（含 query）。
@@ -103,18 +122,34 @@ describe("dev-server 的签名与 hub 的验签逐字节一致", () => {
   });
 
   it("② 反向：逐个承重位单独扰动 ⇒ 签名必须变", () => {
-    const base = devSign(FIXED.method, FIXED.target, FIXED.body, { now: NOW, nonce: NONCE, token: TOKEN });
+    const base = devSign(FIXED.method, FIXED.target, FIXED.body, {
+      now: NOW,
+      nonce: NONCE,
+      token: TOKEN,
+    });
     const sig = (
       i: Inputs,
       o: { now?: number; nonce?: string; token?: string } = {},
-    ): string => devSign(i.method, i.target, i.body, { now: NOW, nonce: NONCE, token: TOKEN, ...o })[HEADER_SIGNATURE] as string;
+    ): string =>
+      devSign(i.method, i.target, i.body, {
+        now: NOW,
+        nonce: NONCE,
+        token: TOKEN,
+        ...o,
+      })[HEADER_SIGNATURE] as string;
     const cases: readonly (readonly [string, string])[] = [
       ["body 变一个字符", sig({ ...FIXED, body: "{}" })],
       ["target 多个 query", sig({ ...FIXED, target: "/today?window_ms=1" })],
       // query 里【只有一个字符】不同也必须变 —— 挡的是「对 query 做了规范化/排序」
-      ["query 顺序换了", sig({ method: "GET", target: "/events?b=2&a=1", body: "" })],
+      [
+        "query 顺序换了",
+        sig({ method: "GET", target: "/events?b=2&a=1", body: "" }),
+      ],
       ["时间戳 +1ms", sig(FIXED, { now: NOW + 1 })],
-      ["nonce 换一个", sig(FIXED, { nonce: "66666666-7777-8888-9999-000000000000" })],
+      [
+        "nonce 换一个",
+        sig(FIXED, { nonce: "66666666-7777-8888-9999-000000000000" }),
+      ],
       ["token 换一个", sig(FIXED, { token: "other" })],
       ["方法【换成另一个】", sig({ ...FIXED, method: "POST" })],
     ];
@@ -135,8 +170,14 @@ describe("dev-server 的签名与 hub 的验签逐字节一致", () => {
   });
 
   it("② 缺省 nonce 每次不同（否则重放防护是个摆设）", () => {
-    const a = devSign(FIXED.method, FIXED.target, FIXED.body, { now: NOW, token: TOKEN });
-    const b = devSign(FIXED.method, FIXED.target, FIXED.body, { now: NOW, token: TOKEN });
+    const a = devSign(FIXED.method, FIXED.target, FIXED.body, {
+      now: NOW,
+      token: TOKEN,
+    });
+    const b = devSign(FIXED.method, FIXED.target, FIXED.body, {
+      now: NOW,
+      token: TOKEN,
+    });
     expect(a[HEADER_NONCE]).not.toBe(b[HEADER_NONCE]);
   });
 });

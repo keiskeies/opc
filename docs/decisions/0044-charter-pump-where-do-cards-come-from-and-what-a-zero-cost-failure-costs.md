@@ -123,7 +123,7 @@ CREATE UNIQUE INDEX idx_approvals_card_identity
 ## 4. 泵挂在心跳上的形状：非阻塞派发
 
 心跳一轮做的是巡检 + 备份相位；起草一轮要起子进程，上限 **180 秒**
-（`engine/claude.ts:226` 那个（round312 复算坐标：文件头诚实标注段按改口重写，本行一字未变；round363 再复算：T6 的 `--model` 接线在超时支上方插了 13 行，本行一字未变） `i.timeoutMs ?? 180_000` 到点 `SIGKILL`【round305 坐标 +90：
+（`engine/claude.ts:229` 那个（round312 复算坐标：文件头诚实标注段按改口重写，本行一字未变；round363 再复算：T6 的 `--model` 接线在超时支上方插了 13 行，本行一字未变） `i.timeoutMs ?? 180_000` 到点 `SIGKILL`【round305 坐标 +90：
 claude.ts 为 Task 6.1 的重试判据加了 `started`/`spawnErrno` 两格与那张瞬时 errno 表，
 超时那一支的本体没动 —— 它今天反而是判据里被点名的一格：`costUsd` 写 0 而 `started:true`，
 「没记到钱」不等于「没花钱」】。
@@ -142,7 +142,7 @@ key 换成一个「看着像」的行号它不认，只认「这一行是不是�
 
 所以泵在 `job` 里是**派发**而不是 `await`（`serve/assemble.ts` 里 `pumpWatch.start(...)`）。
 如果 await 它：一轮起草期间心跳不结束 ⇒ 下一轮起跳时 `inFlight` 还在 ⇒
-`serve/timer.ts:336` 那个 `skipped++` 分支被走到，**巡检与备份被起草牵连**。
+`serve/timer.ts:350` 那个 `skipped++` 分支被走到，**巡检与备份被起草牵连**。
 一条章程提案起草不动，不该让停滞检测从此不再运行。
 
 ⚠ 我此前把那个分支记成「**静默**跳过」，那是错的，写这篇时读了 `timer.ts` 才发现：
@@ -192,9 +192,9 @@ key 换成一个「看着像」的行号它不认，只认「这一行是不是�
 
 - **不新开 `DomainEvent` 的 kind ⇒ 不广播。** 加 kind 要么改 contracts（跨包、web 投影要接），
   要么 cast 一个联合外的值。而后者走不通的理由**我原来写错了**，留在这里（下面那条撤回）。
-- **⚠ 撤回：我原来写的理由是假的。** 我写的是「`overview/today.ts:41` 把'payload 解不出 kind 的行'判为脏数据，
+- **⚠ 撤回：我原来写的理由是假的。** 我写的是「`overview/today.ts:39` 把'payload 解不出 kind 的行'判为脏数据，
   前端解不出来会标 stale，等于制造一个脏流」。写这篇时逐处重读，三件事都不符：
-  两处坐标指错（`overview/today.ts:41` 是一句 import 注释，脏数据探针实际在 `MALFORMED_PROBE_SQL`；
+  两处坐标指错（`overview/today.ts:39` 是一句 import 注释，脏数据探针实际在 `MALFORMED_PROBE_SQL`；
   `http/sse.ts:48` 讲的是 seq 去重，不是帧形状），而**结论方向是反的**：
   `contracts/api.ts` 的 `feedItemSchema` 里 `kind` 是 `z.string().min(1)` 且 schema 是 `.passthrough()`
   ⇒ 联合外的 kind **通得过**校验；web 投影的 switch 未命中落 `default` 那一支，注释明写
@@ -347,7 +347,7 @@ CEO 用 `reject_with_comment` 退回一份章程提案之后：
    我原来写的是「泵的 15 + 28 发全部注入一份不 spawn 的 `cardDeps`，而『能不能起子进程』在
    `claude.test.ts` / `runtime.test.ts` 里各自钉着」。这句话有**两处**错，方向不同：
 
-   - **对 CLI 那条路说重了**：`engine/work.test.ts:266` 早就用 `fixtures/fake-claude.mjs`
+   - **对 CLI 那条路说重了**：`engine/work.test.ts:326` 早就用 `fixtures/fake-claude.mjs`
      （真可执行 + shebang，非 mock）把 `hub work` 整条链真跑通过 —— 起真子进程、真解析、真记账。
      所以"本机验不了真子进程"这句从一开始就不成立。
    - **对泵自己那一支也说轻了**：它当时是**零覆盖**，而我用"别处钉着"把它解释掉了。

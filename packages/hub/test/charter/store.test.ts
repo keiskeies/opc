@@ -14,11 +14,8 @@
 import { mkdirSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { CharterInput } from "@opc/contracts";
+import type { CharterInput, EvidenceBundle } from "@opc/contracts";
 import { afterAll, describe, expect, it } from "vitest";
-import { fixtureTmp } from "../fixtures/fixture-dir.js";
-import { relPosix, toPosix } from "../fixtures/paths.js";
-import { WriteQueue } from "../../src/db/write-queue.js";
 import {
   assertCharterShape,
   CHARTER_ACTOR,
@@ -32,8 +29,13 @@ import {
   validateCharterDraft,
 } from "../../src/charter/store.js";
 import { migrate } from "../../src/db/migrate.js";
-import { evaluateGate, type GateCriterion } from "../../src/graph/gates/evaluate.js";
-import type { EvidenceBundle } from "@opc/contracts";
+import { WriteQueue } from "../../src/db/write-queue.js";
+import {
+  evaluateGate,
+  type GateCriterion,
+} from "../../src/graph/gates/evaluate.js";
+import { fixtureTmp } from "../fixtures/fixture-dir.js";
+import { relPosix, toPosix } from "../fixtures/paths.js";
 
 const HUB = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const TMP = fixtureTmp("charter", import.meta.url);
@@ -56,7 +58,9 @@ async function newQ(): Promise<{ q: WriteQueue; db: AnyDb }> {
   const path = join(TMP, "ch-" + process.pid + "-" + ++fileSeq + ".db");
   const q = new WriteQueue(path) as WriteQueue;
   queues.push(q);
-  const db = (q as unknown as { writeConnection: () => AnyDb }).writeConnection();
+  const db = (
+    q as unknown as { writeConnection: () => AnyDb }
+  ).writeConnection();
   migrate(db as never);
   // 刻意【不】插任务：岗位书变更不属于任何任务（审计 task_id = null，同 org_graph_changed），
   // 插一条会让「task_id 是 null」这条断言即使被写成任务 id 也没有对照可见。
@@ -81,14 +85,23 @@ const draft = (over: Partial<CharterInput> = {}): CharterInput => ({
   // 全绿而门控从不拦任何东西，正是那一节点名「我自己第一版就这么写错过一次」的形状，
   // 我隔了几轮又写了一遍。区别只是这次被自己的夹具用例当场拦住（前一次靠人指出）。
   acceptance_criteria: [
-    { condition: "metric:coverage < 80", action: "reject", message: "覆盖率不足 80" },
+    {
+      condition: "metric:coverage < 80",
+      action: "reject",
+      message: "覆盖率不足 80",
+    },
   ],
   forbidden_actions: [],
   tool_permissions: ["read"],
   model_tier: "execution",
   budget: { daily_usd: 15, per_task_usd: 5 },
   decision_scope: { autonomous: [], requires_consultation: [], forbidden: [] },
-  judgment_mode: { type: "strict_rules", strict_rules: [], bounded_judgment: [], full_discretion: [] },
+  judgment_mode: {
+    type: "strict_rules",
+    strict_rules: [],
+    bounded_judgment: [],
+    full_discretion: [],
+  },
   escalation_triggers: [],
   ...over,
 });
@@ -151,9 +164,16 @@ const bundle = (metrics: Record<string, number>): EvidenceBundle =>
   }) as unknown as EvidenceBundle;
 
 /** 读 budgets 里某一格的限额（夹具与断言共用）。 */
-function limitOf(db: AnyDb, scope: string, scopeId: string, period: string): number | undefined {
+function limitOf(
+  db: AnyDb,
+  scope: string,
+  scopeId: string,
+  period: string,
+): number | undefined {
   const r = db
-    .prepare("SELECT limit_cents FROM budgets WHERE scope_type=? AND scope_id=? AND period=?")
+    .prepare(
+      "SELECT limit_cents FROM budgets WHERE scope_type=? AND scope_id=? AND period=?",
+    )
     .get(scope, scopeId, period);
   return r === undefined ? undefined : Number(r["limit_cents"]);
 }
@@ -199,13 +219,17 @@ describe("① 存：只有 CEO、只有合法草案、每次一版", () => {
     expect(r.version).toBe(1);
 
     const row = db
-      .prepare("SELECT * FROM role_charters WHERE role_id = 'dev' AND version = 1")
+      .prepare(
+        "SELECT * FROM role_charters WHERE role_id = 'dev' AND version = 1",
+      )
       .get();
     expect(row?.["created_by"]).toBe("ceo");
     expect(row?.["effective_from"]).toBe(NOW);
     // 存的是**归一后**的 camelCase（与 org/commit.ts 的 bump 同一个形状）。
     // 如果这里存的是原始 snake_case，同一个字段会在两张来源不同的行里有两种键名。
-    expect(Object.keys(JSON.parse(String(row?.["config"])))).toContain("acceptanceCriteria");
+    expect(Object.keys(JSON.parse(String(row?.["config"])))).toContain(
+      "acceptanceCriteria",
+    );
 
     const ev = db.prepare("SELECT * FROM events WHERE id = ?").get(r.auditSeq);
     expect(ev?.["actor_type"]).toBe(CHARTER_ACTOR.actorType);
@@ -213,7 +237,10 @@ describe("① 存：只有 CEO、只有合法草案、每次一版", () => {
     // action 必须是枚举里现成的 state_change（AUDIT_ACTIONS 是 §22.1 的 10 值封闭枚举）。
     expect(ev?.["action"]).toBe("state_change");
     expect(ev?.["task_id"]).toBeNull();
-    const payload = JSON.parse(String(ev?.["payload"])) as Record<string, unknown>;
+    const payload = JSON.parse(String(ev?.["payload"])) as Record<
+      string,
+      unknown
+    >;
     expect(payload["kind"]).toBe(CHARTER_AUDIT_KIND);
     expect(payload["previous_version"]).toBeNull();
     expect(ev?.["target"]).toBe("dev@v1");
@@ -221,29 +248,52 @@ describe("① 存：只有 CEO、只有合法草案、每次一版", () => {
 
   it("第二版是 v2 且不动 v1（就地 UPDATE 会让「当时按哪版验收」永久消失）", async () => {
     const { q, db } = await newQ();
-    await saveCharterVersion(q, { roleId: "dev", config: draft(), nowMs: NOW, changeSummary: "第一版" });
+    await saveCharterVersion(q, {
+      roleId: "dev",
+      config: draft(),
+      nowMs: NOW,
+      changeSummary: "第一版",
+    });
     const r2 = await saveCharterVersion(q, {
       roleId: "dev",
-      config: draft({ acceptance_criteria: [{ condition: "metric:coverage < 95", action: "reject", message: "更严" }] }),
+      config: draft({
+        acceptance_criteria: [
+          {
+            condition: "metric:coverage < 95",
+            action: "reject",
+            message: "更严",
+          },
+        ],
+      }),
       nowMs: NOW + 1,
       changeSummary: "把覆盖率抬到 95",
     });
     expect(r2.ok && r2.version === 2).toBe(true);
-    const rows = db.prepare("SELECT version, config FROM role_charters WHERE role_id='dev' ORDER BY version").all();
+    const rows = db
+      .prepare(
+        "SELECT version, config FROM role_charters WHERE role_id='dev' ORDER BY version",
+      )
+      .all();
     expect(rows.length).toBe(2);
     // v1 的原文必须**逐字还在**（append-only 的配置面等价物）。
-    expect(JSON.parse(String(rows[0]?.["config"]))["acceptanceCriteria"][0]["condition"]).toBe(
-      "metric:coverage < 80",
-    );
-    expect(JSON.parse(String(rows[1]?.["config"]))["acceptanceCriteria"][0]["condition"]).toBe(
-      "metric:coverage < 95",
-    );
+    expect(
+      JSON.parse(String(rows[0]?.["config"]))["acceptanceCriteria"][0][
+        "condition"
+      ],
+    ).toBe("metric:coverage < 80");
+    expect(
+      JSON.parse(String(rows[1]?.["config"]))["acceptanceCriteria"][0][
+        "condition"
+      ],
+    ).toBe("metric:coverage < 95");
     expect(latestCharterVersion(db as never, "dev")).toBe(2);
   });
 
   it("校验不过 ⇒ 一行都不写、一条审计都不写", async () => {
     const { q, db } = await newQ();
-    const before = Number(db.prepare("SELECT COUNT(*) c FROM events").get()?.["c"]);
+    const before = Number(
+      db.prepare("SELECT COUNT(*) c FROM events").get()?.["c"],
+    );
     const r = await saveCharterVersion(q, {
       roleId: "dev",
       // acceptance_criteria 空数组：charterSchema 要 min(1)
@@ -253,9 +303,13 @@ describe("① 存：只有 CEO、只有合法草案、每次一版", () => {
     });
     expect(r.ok).toBe(false);
     expect(!r.ok && r.reason).toContain("未过校验");
-    expect(Number(db.prepare("SELECT COUNT(*) c FROM role_charters").get()?.["c"])).toBe(0);
+    expect(
+      Number(db.prepare("SELECT COUNT(*) c FROM role_charters").get()?.["c"]),
+    ).toBe(0);
     // 半套状态是这一族最贵的失效：为一次【没发生】的变更留一条删不掉的审计。
-    expect(Number(db.prepare("SELECT COUNT(*) c FROM events").get()?.["c"])).toBe(before);
+    expect(
+      Number(db.prepare("SELECT COUNT(*) c FROM events").get()?.["c"]),
+    ).toBe(before);
   });
 
   it("roleId 与 config.role_id 不一致 ⇒ 拒（不取其中之一为准）", async () => {
@@ -268,12 +322,19 @@ describe("① 存：只有 CEO、只有合法草案、每次一版", () => {
     });
     expect(r.ok).toBe(false);
     expect(!r.ok && r.reason).toContain("不一致");
-    expect(Number(db.prepare("SELECT COUNT(*) c FROM role_charters").get()?.["c"])).toBe(0);
+    expect(
+      Number(db.prepare("SELECT COUNT(*) c FROM role_charters").get()?.["c"]),
+    ).toBe(0);
   });
 
   it("changeSummary 空串被拒：它是回放里唯一人可读的那句「为什么改」", async () => {
     const { q } = await newQ();
-    const r = await saveCharterVersion(q, { roleId: "dev", config: draft(), nowMs: NOW, changeSummary: "   " });
+    const r = await saveCharterVersion(q, {
+      roleId: "dev",
+      config: draft(),
+      nowMs: NOW,
+      changeSummary: "   ",
+    });
     expect(r.ok).toBe(false);
   });
 
@@ -285,7 +346,12 @@ describe("① 存：只有 CEO、只有合法草案、每次一版", () => {
       version: 1,
       acceptanceCriteria: [{ condition: "c", action: "reject", message: "m" }],
     } as unknown as CharterInput;
-    const r = await saveCharterVersion(q, { roleId: "dev", config: camel, nowMs: NOW, changeSummary: "错形状" });
+    const r = await saveCharterVersion(q, {
+      roleId: "dev",
+      config: camel,
+      nowMs: NOW,
+      changeSummary: "错形状",
+    });
     expect(r.ok).toBe(false);
     expect(!r.ok && r.reason).toContain("snake_case");
     // 上面那条【本身是分辨得出来的】—— 它第一次就是红的，红在 reason 是那句
@@ -314,20 +380,33 @@ describe("② 读：读不到 vs 读坏了，必须是两种结果", () => {
   it("那一版不存在 ⇒ undefined；存在但 JSON 坏了 ⇒ 抛（两种「没有」修法相反）", async () => {
     const { q, db } = await newQ();
     expect(readCharterConfig(db as never, "dev", 1)).toBeUndefined();
-    await saveCharterVersion(q, { roleId: "dev", config: draft(), nowMs: NOW, changeSummary: "v1" });
+    await saveCharterVersion(q, {
+      roleId: "dev",
+      config: draft(),
+      nowMs: NOW,
+      changeSummary: "v1",
+    });
     // 绕过 appendAudit 那层校验，直写一条坏 config（append-only 表没有 UPDATE 触发器，
     // 这一发是真能发生的：外部改库 / 迁移事故）。
-    db.exec("UPDATE role_charters SET config = '{not json' WHERE role_id = 'dev' AND version = 1");
-    expect(() => readCharterConfig(db as never, "dev", 1)).toThrow(/不是合法 JSON/u);
+    db.exec(
+      "UPDATE role_charters SET config = '{not json' WHERE role_id = 'dev' AND version = 1",
+    );
+    expect(() => readCharterConfig(db as never, "dev", 1)).toThrow(
+      /不是合法 JSON/u,
+    );
     // 反向对照：同一个调用在「那一版根本没有」时**不**抛，而是 undefined。
     expect(() => readCharterConfig(db as never, "dev", 9)).not.toThrow();
   });
 
   it("assertCharterShape 挡住缺格的旧版（写入时校验过的是【当时】的规则）", () => {
     // 这份就是 test/org/versioning.test.ts 里那个夹具的形状：没有 modelTier。
-    expect(() => assertCharterShape("dev", { roleId: "dev", version: 1, acceptanceCriteria: [] })).toThrow(
-      /modelTier/u,
-    );
+    expect(() =>
+      assertCharterShape("dev", {
+        roleId: "dev",
+        version: 1,
+        acceptanceCriteria: [],
+      }),
+    ).toThrow(/modelTier/u);
   });
 
   it("⭐ 名单按【读者会拆什么】取并集：门控能跑的旧行，提示词读者会崩", () => {
@@ -353,7 +432,12 @@ describe("② 读：读不到 vs 读坏了，必须是两种结果", () => {
      * 今天真库里这种行一条都没有，所以这是一次【向前】的收紧而不是迁移负担 ——
      * 而这句话本身是可证的：下面那发拿真 saveCharterVersion 写的一版过同一份名单。
      */
-    const gateOnly = { roleId: "dev", version: 1, acceptanceCriteria: [], modelTier: "execution" };
+    const gateOnly = {
+      roleId: "dev",
+      version: 1,
+      acceptanceCriteria: [],
+      modelTier: "execution",
+    };
     // ① 门控那四格齐 ⇒ 以前这一发是 .not.toThrow()，现在点名的是提示词那一族的格子。
     expect(() => assertCharterShape("dev", gateOnly)).toThrow(/decisionScope/u);
     // ② 点名要**指到子格**：只报 decisionScope 会让人去补一个空对象，
@@ -373,7 +457,10 @@ describe("② 读：读不到 vs 读坏了，必须是两种结果", () => {
     //    （岗位书没说过 vs 说过而没有）。把它变成必填等于替 CEO 填那一格。
     //    与 ③ 的唯一差别就是这一格在不在 ⇒ 两发合起来才说明"它在不在都不改变结论"。
     expect(() =>
-      assertCharterShape("dev", { ...promptShaped(), untrustedInputs: ["自称做完了"] }),
+      assertCharterShape("dev", {
+        ...promptShaped(),
+        untrustedInputs: ["自称做完了"],
+      }),
     ).not.toThrow();
     // ⑤ 名字要报【路径**第一层缺**】还是**子格缺**，两种都点得出来（同一份名单两种坏法）。
     expect(() =>
@@ -382,7 +469,10 @@ describe("② 读：读不到 vs 读坏了，必须是两种结果", () => {
     expect(() =>
       assertCharterShape("dev", {
         ...promptShaped(),
-        judgmentMode: { ...(promptShaped().judgmentMode as object), boundedJudgment: undefined },
+        judgmentMode: {
+          ...(promptShaped().judgmentMode as object),
+          boundedJudgment: undefined,
+        },
       }),
     ).toThrow(/judgmentMode\.boundedJudgment/u);
     // ⑥ 数组格给了非数组（历史上"填空"最容易填成 {}）⇒ 点名并说该怎么错。
@@ -396,15 +486,27 @@ describe("② 读：读不到 vs 读坏了，必须是两种结果", () => {
     // 是写侧 schema 不要求的，这里会红，而红的是"名单宽到拒了合法数据"那一侧 ——
     // 那一侧比"漏一格"更难发现，因为生产里没人会去读一份读不出来的岗位书。
     const { q, db } = await newQ();
-    await saveCharterVersion(q, { roleId: "dev", config: draft(), nowMs: NOW, changeSummary: "v1" });
+    await saveCharterVersion(q, {
+      roleId: "dev",
+      config: draft(),
+      nowMs: NOW,
+      changeSummary: "v1",
+    });
     const c = readLatestCharter(db as never, "dev");
     expect(() => assertCharterShape("dev", c)).not.toThrow();
   });
 
   it("上一版坏掉时审计快照留 degraded 而不是把 before 变成 null（null = 「这是第一版」的假事实）", async () => {
     const { q, db } = await newQ();
-    await saveCharterVersion(q, { roleId: "dev", config: draft(), nowMs: NOW, changeSummary: "v1" });
-    db.exec("UPDATE role_charters SET config = '{broken' WHERE role_id = 'dev' AND version = 1");
+    await saveCharterVersion(q, {
+      roleId: "dev",
+      config: draft(),
+      nowMs: NOW,
+      changeSummary: "v1",
+    });
+    db.exec(
+      "UPDATE role_charters SET config = '{broken' WHERE role_id = 'dev' AND version = 1",
+    );
     const r = await saveCharterVersion(q, {
       roleId: "dev",
       config: draft({ display_name: "开发二号" }),
@@ -413,7 +515,13 @@ describe("② 读：读不到 vs 读坏了，必须是两种结果", () => {
     });
     expect(r.ok).toBe(true);
     if (!r.ok) return;
-    const snap = JSON.parse(String(db.prepare("SELECT state_snapshot FROM events WHERE id = ?").get(r.auditSeq)?.["state_snapshot"]));
+    const snap = JSON.parse(
+      String(
+        db
+          .prepare("SELECT state_snapshot FROM events WHERE id = ?")
+          .get(r.auditSeq)?.["state_snapshot"],
+      ),
+    );
     expect(snap.before?.degraded).toBe(true);
     expect(snap.before).not.toBeNull();
   });
@@ -423,7 +531,12 @@ describe("③ 门控消费口：Task 3.6 那条 Test 的可测形态", () => {
   it("改 acceptance_criteria ⇒ 同一份产出的门控结论【反过来】（计划 Test 原文）", async () => {
     const { q, db } = await newQ();
     // 第一版：覆盖率 ≥ 80。产出实测 90 ⇒ 该过。
-    await saveCharterVersion(q, { roleId: "dev", config: draft(), nowMs: NOW, changeSummary: "阈值 80" });
+    await saveCharterVersion(q, {
+      roleId: "dev",
+      config: draft(),
+      nowMs: NOW,
+      changeSummary: "阈值 80",
+    });
     const bundle90 = bundle({ coverage: 90 });
     const before = evaluateGate({
       gate: "dev_to_test",
@@ -438,7 +551,15 @@ describe("③ 门控消费口：Task 3.6 那条 Test 的可测形态", () => {
     // CEO 把阈值抬到 95 —— **产出一个字没改**。
     await saveCharterVersion(q, {
       roleId: "dev",
-      config: draft({ acceptance_criteria: [{ condition: "metric:coverage < 95", action: "reject", message: "覆盖率不足 95" }] }),
+      config: draft({
+        acceptance_criteria: [
+          {
+            condition: "metric:coverage < 95",
+            action: "reject",
+            message: "覆盖率不足 95",
+          },
+        ],
+      }),
       nowMs: NOW + 1,
       changeSummary: "抬到 95",
     });
@@ -467,7 +588,9 @@ describe("③ 门控消费口：Task 3.6 那条 Test 的可测形态", () => {
   it("这条变化【只可能】来自库：criteriaFromCharter 与 evaluateGate 都不读库，中间那一步是本模块", () => {
     // 判据：同样的 criteria 数组喂给 evaluateGate，结论与上面一致 ⇒
     // 差异不在门控，在「criteria 从哪来」。
-    const mk = (c: string): GateCriterion[] => [{ condition: c, action: "reject", message: "m" }];
+    const mk = (c: string): GateCriterion[] => [
+      { condition: c, action: "reject", message: "m" },
+    ];
     const base = {
       gate: "dev_to_test",
       producer: { roleId: "dev", modelFamily: "claude" },
@@ -475,37 +598,70 @@ describe("③ 门控消费口：Task 3.6 那条 Test 的可测形态", () => {
       integrityOk: true,
     } as const;
     expect(
-      evaluateGate({ ...base, bundle: bundle({ coverage: 90 }), criteria: mk("metric:coverage < 80") }).decision,
+      evaluateGate({
+        ...base,
+        bundle: bundle({ coverage: 90 }),
+        criteria: mk("metric:coverage < 80"),
+      }).decision,
     ).toBe("pass");
     expect(
-      evaluateGate({ ...base, bundle: bundle({ coverage: 90 }), criteria: mk("metric:coverage < 95") }).decision,
+      evaluateGate({
+        ...base,
+        bundle: bundle({ coverage: 90 }),
+        criteria: mk("metric:coverage < 95"),
+      }).decision,
     ).toBe("reject");
   });
 
   it("回放语义：指定版本读那一版，【不退回最新版】", async () => {
     const { q, db } = await newQ();
-    await saveCharterVersion(q, { roleId: "dev", config: draft(), nowMs: NOW, changeSummary: "阈值 80" });
     await saveCharterVersion(q, {
       roleId: "dev",
-      config: draft({ acceptance_criteria: [{ condition: "metric:coverage < 95", action: "reject", message: "更严" }] }),
+      config: draft(),
+      nowMs: NOW,
+      changeSummary: "阈值 80",
+    });
+    await saveCharterVersion(q, {
+      roleId: "dev",
+      config: draft({
+        acceptance_criteria: [
+          {
+            condition: "metric:coverage < 95",
+            action: "reject",
+            message: "更严",
+          },
+        ],
+      }),
       nowMs: NOW + 1,
       changeSummary: "阈值 95",
     });
-    expect(gateCriteriaForRoleAtVersion(db as never, "dev", 1)[0]?.condition).toBe("metric:coverage < 80");
-    expect(gateCriteriaForRoleAtVersion(db as never, "dev", 2)[0]?.condition).toBe("metric:coverage < 95");
-    expect(() => gateCriteriaForRoleAtVersion(db as never, "dev", 7)).toThrow(/刻意不退回最新版/u);
+    expect(
+      gateCriteriaForRoleAtVersion(db as never, "dev", 1)[0]?.condition,
+    ).toBe("metric:coverage < 80");
+    expect(
+      gateCriteriaForRoleAtVersion(db as never, "dev", 2)[0]?.condition,
+    ).toBe("metric:coverage < 95");
+    expect(() => gateCriteriaForRoleAtVersion(db as never, "dev", 7)).toThrow(
+      /刻意不退回最新版/u,
+    );
   });
 
   it("库里一版都没有 ⇒ 抛且不退回 YAML 模板（两个源永远可能不一致）", async () => {
     const { db } = await newQ();
-    expect(() => gateCriteriaForRole(db as never, "dev")).toThrow(/没有任何版本/u);
+    expect(() => gateCriteriaForRole(db as never, "dev")).toThrow(
+      /没有任何版本/u,
+    );
   });
 
   it("存进去的标准里带 escalate 而无 target ⇒ 写的时候就拒（不留给门控去猜）", async () => {
     const { q } = await newQ();
     const r = await saveCharterVersion(q, {
       roleId: "dev",
-      config: draft({ acceptance_criteria: [{ condition: "metric:x > 1", action: "escalate", message: "m" }] }),
+      config: draft({
+        acceptance_criteria: [
+          { condition: "metric:x > 1", action: "escalate", message: "m" },
+        ],
+      }),
       nowMs: NOW,
       changeSummary: "escalate 不给 target",
     });
@@ -531,7 +687,11 @@ describe("④ 接线状态", () => {
     };
     const callers = walk(SRC)
       .filter((f) => !f.endsWith("charter/store.ts"))
-      .filter((f) => /saveCharterVersion\(|gateCriteriaForRole\(/u.test(readFileSync(f, "utf8")));
+      .filter((f) =>
+        /saveCharterVersion\(|gateCriteriaForRole\(/u.test(
+          readFileSync(f, "utf8"),
+        ),
+      );
     // 与 0014 §3 同一条：这条【今天成立】，接上那天它会红，逼着接的人同时更新文档。
     //
     // ⚠ 它已经红了，红在 O2 动作 2 那条播种命令上（charter/seed.ts）。而**改期望值之前
@@ -545,7 +705,10 @@ describe("④ 接线状态", () => {
     // 多出一个真调用方仍然会红，而红因是"有人接了第三条路"。
     // ⚠ 本块的行数改动要保持【行号中性】：0058 §5 在 doc-refs.test.ts 里钉着本文件
     //   第 675 行的快照，多删少删都会把那条活坐标顶漂（同一文件的第 ④ 节扫描）。
-    expect(callers.map((f) => relPosix(f, SRC))).toEqual(["charter/seed.ts", "http/charter.ts"]);
+    expect(callers.map((f) => relPosix(f, SRC))).toEqual([
+      "charter/seed.ts",
+      "http/charter.ts",
+    ]);
   });
 
   it("保存岗位书【同时】把 budget 落进 budgets 表（否则屏幕显示新数字而执行侧按老数字放行）", async () => {
@@ -565,12 +728,17 @@ describe("④ 接线状态", () => {
     expect(limitOf(db, "role", "dev", "daily")).toBe(500);
     expect(limitOf(db, "role", "dev", "per_task")).toBe(200);
     // 落库结果挂在【同一条】审计上，不另开一条事件（岗位书变更与限流变更同生同死）。
-    const ev = db.prepare("SELECT * FROM events WHERE id = ?").get(
-      (r as { auditSeq: number }).auditSeq,
-    );
-    const payload = JSON.parse(String(ev?.["payload"])) as Record<string, unknown>;
+    const ev = db
+      .prepare("SELECT * FROM events WHERE id = ?")
+      .get((r as { auditSeq: number }).auditSeq);
+    const payload = JSON.parse(String(ev?.["payload"])) as Record<
+      string,
+      unknown
+    >;
     expect((payload["limits_applied"] as unknown[]).length).toBe(2);
-    expect(Number(db.prepare("SELECT COUNT(*) c FROM events").get()?.["c"])).toBe(1);
+    expect(
+      Number(db.prepare("SELECT COUNT(*) c FROM events").get()?.["c"]),
+    ).toBe(1);
   });
 
   it("applyBudgets:false ⇒ 只存岗位书、【不动】限流表（两种失败形状都要能表达）", async () => {
@@ -598,9 +766,15 @@ describe("④ 接线状态", () => {
     expect(!r.ok && r.reason).toContain("岗位书本身合法");
     // 关键是这条：校验失败必须与岗位书写入【一起】不发生。
     // 只测「被拒」而岗位书已落库 = 版本序列里多了一版跑不过预算换算的配置。
-    expect(Number(db.prepare("SELECT COUNT(*) c FROM role_charters").get()?.["c"])).toBe(0);
-    expect(Number(db.prepare("SELECT COUNT(*) c FROM budgets").get()?.["c"])).toBe(0);
-    expect(Number(db.prepare("SELECT COUNT(*) c FROM events").get()?.["c"])).toBe(0);
+    expect(
+      Number(db.prepare("SELECT COUNT(*) c FROM role_charters").get()?.["c"]),
+    ).toBe(0);
+    expect(
+      Number(db.prepare("SELECT COUNT(*) c FROM budgets").get()?.["c"]),
+    ).toBe(0);
+    expect(
+      Number(db.prepare("SELECT COUNT(*) c FROM events").get()?.["c"]),
+    ).toBe(0);
   });
 
   it("调低预算到已消费量之下 ⇒ 审计里 alarm_silenced 点名那一格（警报哑了必须被说出来）", async () => {
@@ -616,9 +790,11 @@ describe("④ 接线状态", () => {
       changeSummary: "收到 $5，而今天已花 $20",
     });
     const payload = JSON.parse(
-      String(db.prepare("SELECT payload FROM events WHERE id = ?").get(
-        (r as { auditSeq: number }).auditSeq,
-      )?.["payload"]),
+      String(
+        db
+          .prepare("SELECT payload FROM events WHERE id = ?")
+          .get((r as { auditSeq: number }).auditSeq)?.["payload"],
+      ),
     ) as Record<string, unknown>;
     expect(payload["alarm_silenced"]).toEqual(["role|dev|daily"]);
   });
@@ -655,8 +831,11 @@ describe("④ 接线状态", () => {
      * 这里保留的是【写】那一半：三个会写 budgets / 会追加审计的入口，
      * 在 charter/ 之外【一个调用方都不许有】。
      */
-    const writers = outsideCharter
-      .filter((f) => /applyBudgetRowsInTx\(|upsertLimit\(|syncCharterBudgets\(/u.test(readFileSync(f, "utf8")));
+    const writers = outsideCharter.filter((f) =>
+      /applyBudgetRowsInTx\(|upsertLimit\(|syncCharterBudgets\(/u.test(
+        readFileSync(f, "utf8"),
+      ),
+    );
     expect(writers.map((f) => f.replace(SRC_PREFIX, ""))).toEqual([]);
 
     /**
@@ -665,19 +844,36 @@ describe("④ 接线状态", () => {
      * 谁哪天在同一行 import 里夹一个 writer 进来，这条会红，而上面那条也会红（双保险）。
      * 反过来把 writer 从这条的名单里删掉是不行的：那等于承认它可以被外部调用。
      */
-    const READ_ONLY = new Set(["silentOverBudgets", "readBudgetTiers", "budgetTierSummary"]);
+    const READ_ONLY = new Set([
+      "silentOverBudgets",
+      "readBudgetTiers",
+      "budgetTierSummary",
+    ]);
     const imports = outsideCharter
       .map((f) => {
-        const m = /import\s*\{([^}]*)\}\s*from\s*"[^"]*charter\/budget-sync/u.exec(readFileSync(f, "utf8"));
+        const m =
+          /import\s*\{([^}]*)\}\s*from\s*"[^"]*charter\/budget-sync/u.exec(
+            readFileSync(f, "utf8"),
+          );
         // m[1] 在 noUncheckedIndexedAccess 下是 `string | undefined`：三元里的 m 非空
         // 不传递到它的捕获组上（TS 不做这个推理）。老代码在这里直接 .split 而它一直
         // 没人发现，是因为 tsc -b 根本不含 test/**（本轮把测试拉进临时 tsconfig 才露出来）。
-        return m ? { f, names: (m[1] ?? "").split(",").map((s) => s.trim().split(" ")[0]).filter(Boolean) } : null;
+        return m
+          ? {
+              f,
+              names: (m[1] ?? "")
+                .split(",")
+                .map((s) => s.trim().split(" ")[0])
+                .filter(Boolean),
+            }
+          : null;
       })
       .filter((x): x is { f: string; names: string[] } => x !== null);
     // 反向对照：今天【确实】有一个外部只读消费者。少了这一发，上面那条在
     // 「谁都不 import」的世界里也全绿 —— 而那时它对 READ_ONLY 的判别力是零。
-    expect(imports.map((x) => x.f.replace(SRC_PREFIX, ""))).toEqual(["overview/today.ts"]);
+    expect(imports.map((x) => x.f.replace(SRC_PREFIX, ""))).toEqual([
+      "overview/today.ts",
+    ]);
     for (const x of imports) {
       for (const n of x.names) {
         expect(READ_ONLY.has(n), x.f + " import 了非只读的 " + n).toBe(true);
@@ -689,7 +885,12 @@ describe("④ 接线状态", () => {
     const v = validateCharterDraft("dev", draft());
     expect(v.ok).toBe(true);
     if (!v.ok) return;
-    await saveCharterVersion(q, { roleId: "dev", config: draft(), nowMs: NOW, changeSummary: "v1" });
+    await saveCharterVersion(q, {
+      roleId: "dev",
+      config: draft(),
+      nowMs: NOW,
+      changeSummary: "v1",
+    });
     // 归一化只发生一次：写入前一次，读回来应当与它完全相同。
     expect(readLatestCharter(db as never, "dev")).toEqual(v.charter);
   });

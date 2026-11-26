@@ -23,10 +23,10 @@ import { describe, expect, it } from "vitest";
 import {
   createsTmpDir,
   explainFixtureDirHit,
+  fixedTmpDirNames,
   fixtureDirHits,
   fixtureRoot,
   fixtureTmp,
-  fixedTmpDirNames,
   GUARD_SELF_PATHS,
   helperFixtureNames,
   inScopeForFixtureGuard,
@@ -49,7 +49,8 @@ const SCAN_ROOTS = [resolve(HERE, ".."), join(REPO_ROOT, "test")];
 function walk(dir: string): string[] {
   const out: string[] = [];
   for (const e of readdirSync(dir, { withFileTypes: true })) {
-    if (e.name === ".tmp" || e.name === "node_modules" || e.name === "dist") continue;
+    if (e.name === ".tmp" || e.name === "node_modules" || e.name === "dist")
+      continue;
     const p = join(dir, e.name);
     if (e.isDirectory()) out.push(...walk(p));
     else if (e.name.endsWith(".ts")) out.push(p);
@@ -62,7 +63,10 @@ function realSources(): Map<string, string> {
   const out = new Map<string, string>();
   for (const root of SCAN_ROOTS) {
     for (const abs of walk(root)) {
-      const rel = abs.slice(REPO_ROOT.length + 1).split("\\").join("/"); // Windows 下统一为 '/' 分隔符
+      const rel = abs
+        .slice(REPO_ROOT.length + 1)
+        .split("\\")
+        .join("/"); // Windows 下统一为 '/' 分隔符
       out.set(rel, readFileSync(abs, "utf8"));
     }
   }
@@ -99,9 +103,14 @@ describe("① 名字与属主：pid 后缀那一格的三种认法", () => {
   });
 
   it("反向对照：全活 ⇒ 一个都不该收（否则清掉的是别人正在用的库）", () => {
-    expect(staleFixtureDirs(["migrate-111", "migrate-222"], "migrate", 999, () => true)).toEqual(
-      [],
-    );
+    expect(
+      staleFixtureDirs(
+        ["migrate-111", "migrate-222"],
+        "migrate",
+        999,
+        () => true,
+      ),
+    ).toEqual([]);
   });
 
   it("探活函数自己：我们自己恒在，0 与负数恒不在", () => {
@@ -118,7 +127,9 @@ describe("① 名字与属主：pid 后缀那一格的三种认法", () => {
 describe("② fixtureTmp：路径形状与「不建目录」", () => {
   it("目录名 = <名字>-<本进程 pid>", () => {
     const dir = fixtureTmp("guardprobe", import.meta.url);
-    expect(dir).toBe(join(fixtureRoot(import.meta.url), `guardprobe-${process.pid}`));
+    expect(dir).toBe(
+      join(fixtureRoot(import.meta.url), `guardprobe-${process.pid}`),
+    );
   });
 
   it("夹具根锚定 import.meta.url，不锚定 cwd", () => {
@@ -131,9 +142,9 @@ describe("② fixtureTmp：路径形状与「不建目录」", () => {
   it("非 file:// 的 callerUrl 必须抛，而不是悄悄落到别处", () => {
     // 名字用两字符以上：单字符会被 NAME_PATTERN 先拦掉（它要求首尾都是字母数字），
     // 那就变成在测另一条判据了 —— 我第一次就写了 "x"，红的是名字那发。
-    expect(() => fixtureTmp("probe", "packages/hub/test/http/server.test.ts")).toThrow(
-      /import\.meta\.url/,
-    );
+    expect(() =>
+      fixtureTmp("probe", "packages/hub/test/http/server.test.ts"),
+    ).toThrow(/import\.meta\.url/);
   });
 
   it("非法夹具名抛错：它会直接拼进磁盘路径", () => {
@@ -153,7 +164,9 @@ describe("② fixtureTmp：路径形状与「不建目录」", () => {
       root: "/tmp/definitely-not-a-fixture-root",
       prune: false,
     });
-    expect(dir).toBe(join("/tmp/definitely-not-a-fixture-root", `guardprobe-${process.pid}`));
+    expect(dir).toBe(
+      join("/tmp/definitely-not-a-fixture-root", `guardprobe-${process.pid}`),
+    );
   });
 });
 
@@ -180,7 +193,9 @@ afterAll(() => {
       `const TMP = join(HUB, ".tmp", "demo");`, // 原写法，反向对照
     ]) {
       expect(fixedTmpDirNames(src), src).toEqual(["demo"]);
-      const hits = fixtureDirHits(new Map([["packages/hub/test/a/x.test.ts", src]]));
+      const hits = fixtureDirHits(
+        new Map([["packages/hub/test/a/x.test.ts", src]]),
+      );
       expect(hits.length, src).toBe(1);
     }
   });
@@ -195,7 +210,12 @@ afterAll(() => {
 
   it("阳性对照：固定名的 join 被认出来", () => {
     const hits = fixtureDirHits(
-      new Map([["packages/hub/test/a/x.test.ts", `const TMP = join(HUB, ".tmp", "demo");`]]),
+      new Map([
+        [
+          "packages/hub/test/a/x.test.ts",
+          `const TMP = join(HUB, ".tmp", "demo");`,
+        ],
+      ]),
     );
     expect(hits).toHaveLength(1);
     expect(hits[0]?.why).toBe("fixed-name");
@@ -203,25 +223,26 @@ afterAll(() => {
   });
 
   it("转换完的样子零命中（同一份判据的另一侧）", () => {
-    expect(fixtureDirHits(new Map([["packages/hub/test/a/x.test.ts", CONVERTED]]))).toEqual([]);
+    expect(
+      fixtureDirHits(new Map([["packages/hub/test/a/x.test.ts", CONVERTED]])),
+    ).toEqual([]);
   });
 
   it("⭐ no-cleanup 那一支真的走得通：用了 helper 而没清理 ⇒ 命中", () => {
     // 这一发是本判据最容易被写成恒不成立的地方：转换做完之后源码里
     // 不再有任何 ".tmp" 字面量，射程若只按 ".tmp" 算，这一支永远不执行。
-    const noCleanup = CONVERTED.replace(
-      /afterAll\([\s\S]*\}\);\n?/u,
-      "",
-    );
+    const noCleanup = CONVERTED.replace(/afterAll\([\s\S]*\}\);\n?/u, "");
     expect(noCleanup).toContain('fixtureTmp("demo"');
     expect(noCleanup).not.toContain("rmSync");
-    const hits = fixtureDirHits(new Map([["packages/hub/test/a/x.test.ts", noCleanup]]));
+    const hits = fixtureDirHits(
+      new Map([["packages/hub/test/a/x.test.ts", noCleanup]]),
+    );
     expect(hits).toHaveLength(1);
     expect(hits[0]?.why).toBe("no-cleanup");
     expect(hits[0]?.names).toEqual(["demo"]);
   });
 
-  it("射程不靠 \".tmp\" 字面量：转换后的源码仍在射程内", () => {
+  it('射程不靠 ".tmp" 字面量：转换后的源码仍在射程内', () => {
     expect(CONVERTED.includes('".tmp"')).toBe(false);
     expect(createsTmpDir(CONVERTED)).toBe(false);
     expect(inScopeForFixtureGuard(CONVERTED)).toBe(true);
@@ -232,7 +253,9 @@ afterAll(() => {
     // 要求名单带 pid 是荒谬的：磁盘上那个目录名恒为 .tmp，写成 .tmp-4242 才是真错。
     const skipList = `const SKIP = new Set(["node_modules", ".tmp"]);\nif (SKIP.has(name)) continue;`;
     expect(createsTmpDir(skipList)).toBe(false);
-    expect(fixtureDirHits(new Map([["test/arch/y.test.ts", skipList]]))).toEqual([]);
+    expect(
+      fixtureDirHits(new Map([["test/arch/y.test.ts", skipList]])),
+    ).toEqual([]);
   });
 
   it("名字是变量时不报，但也绝不假装它合法（射程照旧）", () => {
@@ -240,11 +263,15 @@ afterAll(() => {
     expect(fixedTmpDirNames(src)).toEqual([]);
     expect(inScopeForFixtureGuard(src)).toBe(true); // 在射程里，只是这一条认不出
     // 已知漏口（0035 §别当成做到了）：它不报。写宽会把人推向「改成字面量」这种绕法。
-    expect(fixtureDirHits(new Map([["packages/hub/test/a/z.test.ts", src]]))).toEqual([]);
+    expect(
+      fixtureDirHits(new Map([["packages/hub/test/a/z.test.ts", src]])),
+    ).toEqual([]);
   });
 
   it("helper 名字解析只吃字面量", () => {
-    expect(helperFixtureNames(`fixtureTmp("demo", import.meta.url)`)).toEqual(["demo"]);
+    expect(helperFixtureNames(`fixtureTmp("demo", import.meta.url)`)).toEqual([
+      "demo",
+    ]);
     expect(helperFixtureNames(`fixtureTmp(name, import.meta.url)`)).toEqual([]);
   });
 
@@ -313,7 +340,9 @@ afterAll(() => {
     // 关于代码的事实，写测试时容易被当成"手滑"而改掉断言写法、把前提那一发删掉。
     expect(src.indexOf(CLOSE, src.indexOf(OPEN) + 2)).toBeGreaterThan(-1);
     // 【老实现会红而新实现要绿】这条判别式直接写在测试里：老那两条 replace 的等价式。
-    const legacy = src.replace(/\/\*[\s\S]*?\*\//gu, "").replace(/^\s*\/\/.*$/gmu, "");
+    const legacy = src
+      .replace(/\/\*[\s\S]*?\*\//gu, "")
+      .replace(/^\s*\/\/.*$/gmu, "");
     expect("老实现确实吞掉 afterAll: " + legacy.includes("afterAll(")).toBe(
       "老实现确实吞掉 afterAll: false",
     );
@@ -322,11 +351,15 @@ afterAll(() => {
     expect(code).toContain("afterAll(");
     expect(code).toContain("rmSync(TMP");
     expect(code).toContain("const tail = 1;");
-    expect(fixtureDirHits(new Map([["packages/hub/test/a/clean.test.ts", src]]))).toEqual([]);
+    expect(
+      fixtureDirHits(new Map([["packages/hub/test/a/clean.test.ts", src]])),
+    ).toEqual([]);
     // 行注释的内容仍然要剥干净（否则本文件那条 glob 会命中 fixed-name 那一支）。
     expect(code).not.toContain("块注释起始串");
     // 反向：块注释本身照旧剥掉，这一发不能把老功能换掉。
-    expect(stripComments(`/* rmSync(TMP, 1) */\nconst y = 2;`)).not.toContain("rmSync");
+    expect(stripComments(`/* rmSync(TMP, 1) */\nconst y = 2;`)).not.toContain(
+      "rmSync",
+    );
     // 字符串里的两种定界符都不是注释（URL 里的双斜杠是这一条的日常形状）。
     const u = `const url = "https://example.com/a";\nconst after = 1;`;
     expect(stripComments(u)).toContain("https://example.com/a");
@@ -351,7 +384,9 @@ describe("④ 真仓库普查：一棵树上不许再有两个进程共用一份
   it("两棵树都扫到了（射程不是一棵空树）", () => {
     const files = realSources();
     expect(files.size).toBeGreaterThan(80);
-    const inScope = [...files].filter(([, s]) => inScopeForFixtureGuard(stripComments(s)));
+    const inScope = [...files].filter(([, s]) =>
+      inScopeForFixtureGuard(stripComments(s)),
+    );
     expect(inScope.length).toBeGreaterThan(25);
     // ⚠ 断言的是「helper 用了几处」而不是「恰好 33」：数字会随测试文件增删变，
     // 而它唯一要证的是 `no-cleanup` 那一支有东西可判（不是恒不执行的装饰）。
@@ -386,7 +421,10 @@ describe("④ 真仓库普查：一棵树上不许再有两个进程共用一份
   it("例外表恰好两个文件，且都在扫描视野内", () => {
     const files = realSources();
     for (const self of GUARD_SELF_PATHS) {
-      expect([...files.keys()].some((p) => p.endsWith(self)), self).toBe(true);
+      expect(
+        [...files.keys()].some((p) => p.endsWith(self)),
+        self,
+      ).toBe(true);
     }
     expect(GUARD_SELF_PATHS).toHaveLength(2);
     /*
@@ -400,7 +438,9 @@ describe("④ 真仓库普查：一棵树上不许再有两个进程共用一份
      * 「今天恒绿的守卫要自己声明恒绿」同一件事。
      */
     const helper = files.get(
-      [...files.keys()].find((p) => p.endsWith("test/fixtures/fixture-dir.ts"))!,
+      [...files.keys()].find((p) =>
+        p.endsWith("test/fixtures/fixture-dir.ts"),
+      )!,
     )!;
     const code = stripComments(helper);
     expect(fixedTmpDirNames(code)).toEqual([]); // 例外表今天无实际作用，读数在此

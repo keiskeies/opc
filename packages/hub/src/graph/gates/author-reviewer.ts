@@ -59,10 +59,16 @@ export function sameFamilyReviewBlock(
   approval?: SameFamilyApproval,
 ): BlockResult {
   if (producer.roleId.trim() === "") {
-    return block("self_review", "产出方 role_id 为空：无法判定审阅独立性，拒绝保存。");
+    return block(
+      "self_review",
+      "产出方 role_id 为空：无法判定审阅独立性，拒绝保存。",
+    );
   }
   if (reviewer.roleId.trim() === "") {
-    return block("self_review", "审阅方 role_id 为空：无法判定审阅独立性，拒绝保存。");
+    return block(
+      "self_review",
+      "审阅方 role_id 为空：无法判定审阅独立性，拒绝保存。",
+    );
   }
   if (producer.roleId === reviewer.roleId) {
     return block(
@@ -77,7 +83,10 @@ export function sameFamilyReviewBlock(
   // 这是我第一版写错的地方：当时写成 producer.modelFamily !== "" && 相等才拦，
   // 于是「不填家族」就成了一条绕过 §24 风险 1 的通路 —— 判据的失效方向必须是收紧，
   // 缺信息时必须落到【有人来判】，不能落到放行。
-  if (producer.modelFamily.trim() === "" || reviewer.modelFamily.trim() === "") {
+  if (
+    producer.modelFamily.trim() === "" ||
+    reviewer.modelFamily.trim() === ""
+  ) {
     return block(
       "unknown_model_family",
       "产出方或审阅方的 model_family 为空，无法判定是否同源（§5.9 第 1 条 / §24 风险 1）。" +
@@ -229,10 +238,7 @@ export function gateConfigBlock(o: {
   if (problems.length === 0) return { ok: true };
   const first = problems[0] as Block;
   if (problems.length === 1) return first;
-  return block(
-    first.code,
-    problems.map((p) => p.reason).join("；"),
-  );
+  return block(first.code, problems.map((p) => p.reason).join("；"));
 }
 
 /**

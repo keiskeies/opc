@@ -3,7 +3,11 @@
  * 而放宽方向的判据最容易被后人「顺手改准」而没人复核命中面。
  */
 import { describe, expect, it } from "vitest";
-import { hitsToRefs, searchGranted, type SearchHit } from "../../src/search/mcp.js";
+import {
+  hitsToRefs,
+  type SearchHit,
+  searchGranted,
+} from "../../src/search/mcp.js";
 
 describe("搜索工具的授予（子串口径，含它的误授予面）", () => {
   it("三种真实叫法都命中（精确名单会漏后两种）", () => {

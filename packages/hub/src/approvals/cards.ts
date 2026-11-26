@@ -48,20 +48,20 @@
 
 import { randomUUID } from "node:crypto";
 import {
+  APPROVAL_STATUS_PENDING,
   type ApprovalCardDraft,
   approvalCardDraftSchema,
-  APPROVAL_STATUS_PENDING,
   type TimeoutBehavior,
 } from "@opc/contracts";
+import { requireScopeDb } from "../checkpoint/tx-scope.js";
 import {
   assertParamCount,
   assertSingleStatement,
   type Writer,
 } from "../db/write-queue.js";
-import type { EscalationResult } from "../graph/routing/escalation.js";
 import type { DomainEvent } from "../events/bus.js";
 import { appendAudit, serializePayload } from "../events/recorder.js";
-import { requireScopeDb } from "../checkpoint/tx-scope.js";
+import type { EscalationResult } from "../graph/routing/escalation.js";
 
 /**
  * 「同一张卡」的稳定身份 = `card_key` 这一列的值（见 migration 0004）。
@@ -150,7 +150,9 @@ export type ApprovalType = (typeof APPROVAL_TYPES)[number];
  * 而那次改动的人根本不会想到颜色。两条轴各留各的名单，配下面那条用例钉住
  * 「charter 在这条轴上是琥珀的」。
  */
-export const OPERATIONAL_APPROVAL_TYPES: readonly string[] = ["budget_override"];
+export const OPERATIONAL_APPROVAL_TYPES: readonly string[] = [
+  "budget_override",
+];
 
 /**
  * 卡片初始状态取自 contracts 的 `APPROVAL_STATUS_PENDING`（这里再导出一次，
@@ -373,7 +375,9 @@ export function insertCard(
   const approvalType: string = draft.approvalType;
   if (!(APPROVAL_TYPES as readonly string[]).includes(approvalType)) {
     throw new Error(
-      "approval_type 取值非法（实到 " + String(approvalType) + "）。候选：" +
+      "approval_type 取值非法（实到 " +
+        String(approvalType) +
+        "）。候选：" +
         APPROVAL_TYPES.join(" / ") +
         " —— 加一格的口径见本文件 APPROVAL_TYPES 上方（0025 §8.2 由 0026 拍板）。",
     );
@@ -408,7 +412,9 @@ export function insertCard(
     // 升级判定结果，而那条路径历史上可以给空。这一列是「卡片背后有没有证据包」
     // 在库里的唯一答案 —— NULL / [] 读作「无证据包」，UI 明说而不是假装有证据。
     // 序列化口径与 parameters 同一条：undefined 显式折 NULL（不落 "undefined" 字面量）。
-    draft.evidence_refs.length === 0 ? null : JSON.stringify(draft.evidence_refs),
+    draft.evidence_refs.length === 0
+      ? null
+      : JSON.stringify(draft.evidence_refs),
   ];
   assertSingleStatement(INSERT_CARD_SQL);
   assertParamCount(INSERT_CARD_SQL, params);
@@ -417,7 +423,12 @@ export function insertCard(
     db.prepare(INSERT_CARD_SQL).run(...(params as never[]));
   } catch (e) {
     if (isUniqueCardKeyViolation(e)) {
-      return { created: false, approvalId, recorded: false, skipped: "duplicate" };
+      return {
+        created: false,
+        approvalId,
+        recorded: false,
+        skipped: "duplicate",
+      };
     }
     throw e;
   }
@@ -443,7 +454,8 @@ export function isUniqueCardKeyViolation(e: unknown): boolean {
   if (/FOREIGN KEY constraint failed/iu.test(msg)) return false;
   if (typeof e === "object" && e !== null && "errcode" in e) {
     const code = (e as { readonly errcode?: unknown }).errcode;
-    if (typeof code === "number" && code === SQLITE_CONSTRAINT_UNIQUE) return true;
+    if (typeof code === "number" && code === SQLITE_CONSTRAINT_UNIQUE)
+      return true;
   }
   return /UNIQUE constraint failed: approvals\.task_id, approvals\.card_key/u.test(
     msg,

@@ -28,34 +28,34 @@
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { APPROVAL_BUTTONS } from "@opc/contracts";
 import { describe, expect, it } from "vitest";
 import {
   ACTION_KEY_SEP,
   ACTION_RETURN_HINT,
   boundedPush,
+  type CardAction,
+  type Channel,
+  type ChannelActor,
+  type ChannelActRequest,
+  type ChannelActVerdict,
+  type ChannelCardSnapshot,
+  type ChannelEnvelope,
+  type ChannelPollRound,
+  type ChannelRuntime,
   channelActionKey,
   channelIneligibleReason,
   createChannelRuntime,
   deliverCard,
   encodeCardAction,
   IRREVERSIBLE_HINT,
+  type NormalizedMessageKind,
+  type OutboundApprovalCard,
   outboundCardOf,
   parseCardAction,
   parseParametersObject,
   shutdownChannels,
-  type CardAction,
-  type Channel,
-  type ChannelActRequest,
-  type ChannelActVerdict,
-  type ChannelActor,
-  type ChannelCardSnapshot,
-  type ChannelEnvelope,
-  type ChannelPollRound,
-  type ChannelRuntime,
-  type NormalizedMessageKind,
-  type OutboundApprovalCard,
 } from "../../src/channels/abstraction.js";
-import { APPROVAL_BUTTONS } from "@opc/contracts";
 
 const T0 = 1_700_000_000_000;
 
@@ -101,7 +101,9 @@ interface FakeHandle {
 }
 
 type Act = ChannelActVerdict | undefined;
-type ChannelWithAct = Channel & { canAct?: (a: ChannelActor) => ChannelActVerdict };
+type ChannelWithAct = Channel & {
+  canAct?: (a: ChannelActor) => ChannelActVerdict;
+};
 
 function msgOf(
   channelId: string,
@@ -131,7 +133,7 @@ function makeQueueFake(o: FakeOpts = {}): FakeHandle {
   const closed = { n: 0 };
   const overflowed: ChannelEnvelope[] = [];
   const limit = o.queueLimit ?? 256;
-  let queue: ChannelEnvelope[] = [];
+  const queue: ChannelEnvelope[] = [];
   let canAct: Act = o.canAct;
   let seq = 0;
   const channel: ChannelWithAct = {
@@ -171,13 +173,17 @@ function makeQueueFake(o: FakeOpts = {}): FakeHandle {
         message: msgOf(channel.id, kind, over),
         // 每条一个不同的到达时刻：「在路上走了多久」那一发要看它能不能穿过边界。
         receivedAtMs: T0 + ++seq,
-        deliveryId: over.deliveryId === undefined ? "d-" + seq : over.deliveryId,
+        deliveryId:
+          over.deliveryId === undefined ? "d-" + seq : over.deliveryId,
       };
       boundedPush(queue, e, (d) => overflowed.push(d), limit);
       return e;
     },
     injectAction(action, over = {}) {
-      return handle.inject("card_action", { text: encodeCardAction(action), ...over });
+      return handle.inject("card_action", {
+        text: encodeCardAction(action),
+        ...over,
+      });
     },
   };
   return handle;
@@ -235,7 +241,8 @@ function makeBatchFake(o: FakeOpts = {}): FakeHandle {
     verdict = v;
     if (v === undefined) delete channel.canAct;
     else
-      channel.canAct = (): ChannelActVerdict => (verdict === undefined ? { ok: true } : verdict);
+      channel.canAct = (): ChannelActVerdict =>
+        verdict === undefined ? { ok: true } : verdict;
   };
   arm(o.canAct);
   const handle: FakeHandle = {
@@ -268,7 +275,10 @@ function makeBatchFake(o: FakeOpts = {}): FakeHandle {
       return e;
     },
     injectAction(action, over = {}) {
-      return handle.inject("card_action", { text: encodeCardAction(action), ...over });
+      return handle.inject("card_action", {
+        text: encodeCardAction(action),
+        ...over,
+      });
     },
   };
   return handle;
@@ -304,7 +314,9 @@ function snap(over: Partial<ChannelCardSnapshot> = {}): ChannelCardSnapshot {
   };
 }
 
-type ActResult = { readonly ok: true; readonly replayed?: boolean } | { readonly ok: false; readonly why: string };
+type ActResult =
+  | { readonly ok: true; readonly replayed?: boolean }
+  | { readonly ok: false; readonly why: string };
 
 interface RuntimeHandle {
   readonly rt: ChannelRuntime;
@@ -355,7 +367,9 @@ function runtime(
                 failWhy = null;
                 return { ok: false, why };
               }
-              return o.actResult === undefined ? { ok: true } : o.actResult(req);
+              return o.actResult === undefined
+                ? { ok: true }
+                : o.actResult(req);
             },
           }),
     },
@@ -424,7 +438,9 @@ const CASES: readonly Case[] = [
       const h = runtime(make);
       h.fake.inject("text", { text: "今天开会吗", atBot: true });
       const round = await oneRound(h);
-      expect(round.handled.map((x) => x.verdict.kind)).toEqual(["ignored_not_action"]);
+      expect(round.handled.map((x) => x.verdict.kind)).toEqual([
+        "ignored_not_action",
+      ]);
       // 「不报错」的具体形态：没有 failed，没有键，没有库读。
       expect(h.rt.seenCount()).toBe(0);
       expect(h.loadCalls).toEqual([]);
@@ -449,7 +465,9 @@ const CASES: readonly Case[] = [
     run: async (make) => {
       // 【规格】§11.2：QQ 是只读通道。而这张卡【可逆】—— 也就是说
       // 「逐条判可逆」那一条会放行它，只有通道级判据挡得住。
-      const h = runtime(make, { fake: { canAct: { ok: false, reason: "本通道只读" } } });
+      const h = runtime(make, {
+        fake: { canAct: { ok: false, reason: "本通道只读" } },
+      });
       h.fake.injectAction(CLICK);
       expect(await verdictsOf(h)).toEqual(["channel_refused"]);
       expect(h.calls).toEqual([]);
@@ -542,14 +560,18 @@ const CASES: readonly Case[] = [
   {
     name: "⭐ 不可逆的卡 ⇒ not_actionable，而文案说清【去哪做】",
     run: async (make) => {
-      const h = runtime(make, { cards: [snap({ parametersJson: '{"irreversible": true}' })] });
+      const h = runtime(make, {
+        cards: [snap({ parametersJson: '{"irreversible": true}' })],
+      });
       h.fake.injectAction(CLICK);
       const round = await oneRound(h);
       const v = round.handled[0]?.verdict;
       expect(v?.kind).toBe("not_actionable");
       // 只说「不允许」会让人点第二遍、第三遍，然后把卡片丢掉 ——
       // 那一格的后果不是报错，是【这张卡永远没人处理】。
-      expect(v && v.kind === "not_actionable" ? v.reason : "").toBe(IRREVERSIBLE_HINT);
+      expect(v && v.kind === "not_actionable" ? v.reason : "").toBe(
+        IRREVERSIBLE_HINT,
+      );
       expect(IRREVERSIBLE_HINT).toMatch(/桌面端/u);
       expect(h.calls).toEqual([]);
     },
@@ -560,7 +582,9 @@ const CASES: readonly Case[] = [
       // 这一发是 `ChannelCardSnapshot` 带【原始 JSON 文本】而不是解析后对象的唯一守卫。
       // 换成对象的话，「解析失败」在边界上已被抹平成 `{}`，而 `{}` 看上去像「可逆」——
       // 那一刻一条脏 JSON 恰好给最危险的那张卡开出 IM 通道，且零报错。
-      const h = runtime(make, { cards: [snap({ parametersJson: "{不是 JSON" })] });
+      const h = runtime(make, {
+        cards: [snap({ parametersJson: "{不是 JSON" })],
+      });
       h.fake.injectAction(CLICK);
       expect(await verdictsOf(h)).toEqual(["not_actionable"]);
       expect(h.calls).toEqual([]);
@@ -581,7 +605,11 @@ const CASES: readonly Case[] = [
         ],
       });
       h.fake.injectAction({ approvalId: "a-1", resume: "approve" });
-      h.fake.injectAction({ approvalId: "a-2", resume: "reject_with_comment", note: "先看成本" });
+      h.fake.injectAction({
+        approvalId: "a-2",
+        resume: "reject_with_comment",
+        note: "先看成本",
+      });
       h.fake.injectAction({ approvalId: "a-3", resume: "defer_deep_review" });
       const round = await oneRound(h);
       // 三个数一起看才杀得掉那一发坏写法（`got: c.pull().length`，取走又不处理）：
@@ -589,13 +617,17 @@ const CASES: readonly Case[] = [
       expect(round.got).toBe(3);
       expect(round.handled.length).toBe(3);
       expect(h.fake.queued()).toBe(0);
-      expect(round.handled.map((x) => (x.verdict.kind === "acted" ? x.verdict.approvalId : "?"))).toEqual([
-        "a-1",
-        "a-2",
-        "a-3",
-      ]);
+      expect(
+        round.handled.map((x) =>
+          x.verdict.kind === "acted" ? x.verdict.approvalId : "?",
+        ),
+      ).toEqual(["a-1", "a-2", "a-3"]);
       expect(h.calls.map((c) => c.approvalId)).toEqual(["a-1", "a-2", "a-3"]);
-      expect(h.calls.map((c) => c.resume)).toEqual(["approve", "reject_with_comment", "defer_deep_review"]);
+      expect(h.calls.map((c) => c.resume)).toEqual([
+        "approve",
+        "reject_with_comment",
+        "defer_deep_review",
+      ]);
       // note 也必须穿过边界（reject 无理由 = 产出方拿到「被拒了，为什么不知道」）。
       expect(h.calls[1]?.note).toBe("先看成本");
     },
@@ -639,7 +671,10 @@ const CASES: readonly Case[] = [
       const e = h.fake.injectAction(CLICK);
       // 这里自己取 Date.now() 的话，队列积压与离线重投都会被打成「刚刚到达」，
       // 而计划 Task 4.4 那句「离线期间到达的回调…不得静默吞掉审批」在代码上无处可表。
-      await h.rt.handleInbound(h.fake.channel, { ...e, receivedAtMs: e.receivedAtMs + 86_400_000 });
+      await h.rt.handleInbound(h.fake.channel, {
+        ...e,
+        receivedAtMs: e.receivedAtMs + 86_400_000,
+      });
       expect(h.calls[0]?.receivedAtMs).toBe(e.receivedAtMs + 86_400_000);
     },
   },
@@ -648,17 +683,36 @@ const CASES: readonly Case[] = [
     run: async (make) => {
       // 两条消息的字段里带 `|`。如果键是用 `|` join 出来的，二者会撞成同一个键，
       // 后果是**第二次的决定被当成重复而吞掉**（不报错）。
-      const h = runtime(make, { cards: [snap({ approvalId: "a-1" }), snap({ approvalId: "a-2" })] });
-      h.fake.injectAction({ approvalId: "a-1", resume: "approve" }, { conversationId: "x|y", senderId: "z" });
-      h.fake.injectAction({ approvalId: "a-2", resume: "approve" }, { conversationId: "x", senderId: "y|z" });
+      const h = runtime(make, {
+        cards: [snap({ approvalId: "a-1" }), snap({ approvalId: "a-2" })],
+      });
+      h.fake.injectAction(
+        { approvalId: "a-1", resume: "approve" },
+        { conversationId: "x|y", senderId: "z" },
+      );
+      h.fake.injectAction(
+        { approvalId: "a-2", resume: "approve" },
+        { conversationId: "x", senderId: "y|z" },
+      );
       const round = await oneRound(h);
-      expect(round.handled.map((x) => x.verdict.kind)).toEqual(["acted", "acted"]);
+      expect(round.handled.map((x) => x.verdict.kind)).toEqual([
+        "acted",
+        "acted",
+      ]);
       // 只测行为的话，「两条恰好因为 approvalId 不同而没撞」会溜过去，所以直接钉键本身：
       // 下面这两条除了拼接方式之外**完全等价**，撞键的写法会让它们相等。
       const key = (senderId: string, conversationId: string): string =>
         channelActionKey(
           {
-            message: { channelId: "c", platform: "fake", senderId, conversationId, text: "", atBot: false, kind: "card_action" },
+            message: {
+              channelId: "c",
+              platform: "fake",
+              senderId,
+              conversationId,
+              text: "",
+              atBot: false,
+              kind: "card_action",
+            },
             receivedAtMs: T0,
             deliveryId: null,
           },
@@ -676,7 +730,10 @@ const CASES: readonly Case[] = [
       h.fake.inject("card_action", { text: "a-1|不是按钮值" });
       h.fake.injectAction(CLICK);
       const round = await oneRound(h);
-      expect(round.handled.map((x) => x.verdict.kind)).toEqual(["failed", "acted"]);
+      expect(round.handled.map((x) => x.verdict.kind)).toEqual([
+        "failed",
+        "acted",
+      ]);
       expect(round.failedOpen).toBe(false);
       expect(h.calls.length).toBe(1);
     },
@@ -686,7 +743,11 @@ const CASES: readonly Case[] = [
     run: async (make) => {
       const note = "先跟财务对一下|然后走 B 方案";
       const h = runtime(make);
-      h.fake.injectAction({ approvalId: "a-1", resume: "reject_with_comment", note });
+      h.fake.injectAction({
+        approvalId: "a-1",
+        resume: "reject_with_comment",
+        note,
+      });
       expect(await verdictsOf(h)).toEqual(["acted"]);
       expect(h.calls[0]?.note).toBe(note);
     },
@@ -696,7 +757,9 @@ const CASES: readonly Case[] = [
     run: async (make) => {
       // 顺手钉掉一个可能的装饰字段：运行时若把 replayed 吞了，上面所有断言照绿，
       // 而界面会把「别人已经批了」报成一次失败。
-      const h = runtime(make, { actResult: () => ({ ok: true, replayed: true }) });
+      const h = runtime(make, {
+        actResult: () => ({ ok: true, replayed: true }),
+      });
       h.fake.injectAction(CLICK);
       const round = await oneRound(h);
       const v = round.handled[0]?.verdict;
@@ -709,7 +772,9 @@ const CASES: readonly Case[] = [
     run: (make) => {
       const h = runtime(make, { fake: { id: "dup" } });
       // 覆盖成法的后果是「安静的孤儿连接」：先那个通道的长连接还活着而没人取它的消息。
-      expect(() => h.rt.register(make({ id: "dup" }).channel)).toThrow(/id 冲突/u);
+      expect(() => h.rt.register(make({ id: "dup" }).channel)).toThrow(
+        /id 冲突/u,
+      );
       // 同对象放行不是随手加的宽松：热重载与测试装配都拿同一实例注册两次，
       // 那种情况造不出孤儿。判据要精确命中坏形状（**不同**实例抢同一 id）。
       const first = h.fake.channel;
@@ -747,12 +812,16 @@ const CASES: readonly Case[] = [
       // 抹平成 [] 会渲染出「证据：无」，那是把【系统的缺口】说成【产出方没交东西】，
       // 而后者会被当成一次追责依据。
       expect(card.evidenceRefs).toBeNull();
-      expect(outboundCardOf(snap({ evidenceRefs: [] })).evidenceRefs).toEqual([]);
+      expect(outboundCardOf(snap({ evidenceRefs: [] })).evidenceRefs).toEqual(
+        [],
+      );
       // 参数解析失败只影响渲染，不影响可批性判据（两次解析不会漂出安全问题）。
       expect(parseParametersObject("{坏")).toBeNull();
       expect(parseParametersObject("[1,2]")).toBeNull();
       expect(parseParametersObject(null)).toBeNull();
-      expect(outboundCardOf(snap({ parametersJson: "{坏" })).parameters).toBeNull();
+      expect(
+        outboundCardOf(snap({ parametersJson: "{坏" })).parameters,
+      ).toBeNull();
     },
   },
   {
@@ -818,9 +887,19 @@ const CASES: readonly Case[] = [
   {
     name: "parseCardAction 的取舍：多余段并进 note，缺段/未知取值 ⇒ null 而【不抛】",
     run: () => {
-      const base = { channelId: "c", platform: "fake", senderId: "s", conversationId: "x", atBot: false, kind: "card_action" } as const;
+      const base = {
+        channelId: "c",
+        platform: "fake",
+        senderId: "s",
+        conversationId: "x",
+        atBot: false,
+        kind: "card_action",
+      } as const;
       const parse = (text: string) => parseCardAction({ ...base, text });
-      expect(parse("a-1|approve")).toEqual({ approvalId: "a-1", resume: "approve" });
+      expect(parse("a-1|approve")).toEqual({
+        approvalId: "a-1",
+        resume: "approve",
+      });
       expect(parse("a-1|approve|备注一|备注二")?.note).toBe("备注一|备注二");
       // 未知取值 ⇒ null。这一档挡住的是「平台回传了一个我们没定义的按钮」，
       // 那种情况判成 approve 与判成 reject 都是编造，只能判成「不认识」。
@@ -829,7 +908,15 @@ const CASES: readonly Case[] = [
       expect(parse("只有半截")).toBeNull();
       expect(parse("a-1|")).toBeNull();
       // 编解码成对：只测解码的话，编码器改坏了（少写一段）测试仍然绿。
-      expect(parseCardAction({ ...base, text: encodeCardAction({ approvalId: "a", resume: "defer_deep_review" }) })).toEqual({
+      expect(
+        parseCardAction({
+          ...base,
+          text: encodeCardAction({
+            approvalId: "a",
+            resume: "defer_deep_review",
+          }),
+        }),
+      ).toEqual({
         approvalId: "a",
         resume: "defer_deep_review",
       });
@@ -858,7 +945,10 @@ const CASES: readonly Case[] = [
       });
       const fake = make({ id: "who" });
       rt.register(fake.channel);
-      fake.injectAction(CLICK, { senderId: "ext-88", conversationId: "conv-7" });
+      fake.injectAction(CLICK, {
+        senderId: "ext-88",
+        conversationId: "conv-7",
+      });
       return rt.pollAll().then(() => {
         // 变异跑过：把 actorFor 的入参换成任何常量（含 `'ceo'`、空 senderId）这里就红。
         expect(seen.length).toBe(1);
@@ -899,12 +989,22 @@ it("⭐ 两个 fake 跑的是【同一份】清单，而清单条数被钉住", 
  * 一条测形状（跑不到也能挡 —— 比如「今天没有任何用例走到那条查表代码」这种情况）。
  */
 const CHANNELS_SRC = readFileSync(
-  join(dirname(fileURLToPath(import.meta.url)), "..", "..", "src", "channels", "abstraction.ts"),
+  join(
+    dirname(fileURLToPath(import.meta.url)),
+    "..",
+    "..",
+    "src",
+    "channels",
+    "abstraction.ts",
+  ),
   "utf8",
 );
 
 it("⭐ 源码层面：通道层【不自己造角色、不碰库】", () => {
-  const code = CHANNELS_SRC.replace(/\/\*[\s\S]*?\*\//gu, "").replace(/^\s*\/\/.*$/gmu, "");
+  const code = CHANNELS_SRC.replace(/\/\*[\s\S]*?\*\//gu, "").replace(
+    /^\s*\/\/.*$/gmu,
+    "",
+  );
   // 反向对照：剥注释【确实剥到了东西】，否则这条扫描可能只是在比原文，
   // 而一个读错路径读到空串的 readFileSync 会让下面三条绿得非常好看了当门禁。
   expect(code.length).toBeLessThan(CHANNELS_SRC.length - 500);
@@ -1027,7 +1127,8 @@ describe("违约实验：把 fake 改坏，清单必须恰好红在管那一维�
         // 数量随清单增长，把它写死就是把一次重构变成一次考古（0027 §4 那个「3 红」）。
         expect(
           broken.some((n) => n.includes(want)),
-          `违约「${s.name}」本该让用例「${want}」红，实际红的是：` + JSON.stringify(broken),
+          `违约「${s.name}」本该让用例「${want}」红，实际红的是：` +
+            JSON.stringify(broken),
         ).toBe(true);
       }
       if (s.mustBreakContaining.length > 0) {
@@ -1053,11 +1154,16 @@ describe("违约实验：把 fake 改坏，清单必须恰好红在管那一维�
  */
 describe("两个 fake 的旋钮一一对应，而且每个都真的承重", () => {
   /** 每一项返回「旋钮有没有改变可观测行为」。false = 这个旋钮在这个 fake 上是装饰品。 */
-  const KNOBS: readonly (readonly [string, (make: MakeFake) => void | Promise<void>])[] = [
+  const KNOBS: readonly (readonly [
+    string,
+    (make: MakeFake) => void | Promise<void>,
+  ])[] = [
     [
       "canAct=false 挡住一次可逆审批",
       async (make) => {
-        const blocked = runtime(make, { fake: { canAct: { ok: false, reason: "只读" } } });
+        const blocked = runtime(make, {
+          fake: { canAct: { ok: false, reason: "只读" } },
+        });
         blocked.fake.injectAction(CLICK);
         const open = runtime(make);
         open.fake.injectAction(CLICK);
@@ -1068,7 +1174,10 @@ describe("两个 fake 的旋钮一一对应，而且每个都真的承重", () =
     [
       "supportsActionReturn=false 让卡片变只读",
       async (make) => {
-        const ro = await deliverCard(make({ supportsActionReturn: false }).channel, snap());
+        const ro = await deliverCard(
+          make({ supportsActionReturn: false }).channel,
+          snap(),
+        );
         const rw = await deliverCard(make().channel, snap());
         expect(ro.kind === "sent" ? ro.card.actionable : null).toBe(false);
         expect(rw.kind === "sent" ? rw.card.actionable : null).toBe(true);
@@ -1077,14 +1186,18 @@ describe("两个 fake 的旋钮一一对应，而且每个都真的承重", () =
     [
       "sendThrows=true 让 deliverCard 报 send_failed",
       async (make) => {
-        expect((await deliverCard(make({ sendThrows: true }).channel, snap())).kind).toBe("send_failed");
+        expect(
+          (await deliverCard(make({ sendThrows: true }).channel, snap())).kind,
+        ).toBe("send_failed");
         expect((await deliverCard(make().channel, snap())).kind).toBe("sent");
       },
     ],
     [
       "pullThrows=true 让那一轮标 failedOpen",
       async (make) => {
-        const bad = await runtime(make, { fake: { pullThrows: true } }).rt.pollAll();
+        const bad = await runtime(make, {
+          fake: { pullThrows: true },
+        }).rt.pollAll();
         const fine = await runtime(make).rt.pollAll();
         expect(bad[0]?.failedOpen).toBe(true);
         expect(fine[0]?.failedOpen).toBe(false);
@@ -1093,7 +1206,9 @@ describe("两个 fake 的旋钮一一对应，而且每个都真的承重", () =
     [
       "closeThrows=true 让 shutdownChannels 报出这一条",
       async (make) => {
-        expect(await shutdownChannels([make({ closeThrows: true }).channel])).toHaveLength(1);
+        expect(
+          await shutdownChannels([make({ closeThrows: true }).channel]),
+        ).toHaveLength(1);
         expect(await shutdownChannels([make().channel])).toEqual([]);
       },
     ],
@@ -1104,7 +1219,9 @@ describe("两个 fake 的旋钮一一对应，而且每个都真的承重", () =
         f.injectAction({ approvalId: "a-1", resume: "approve" });
         f.injectAction({ approvalId: "a-2", resume: "approve" });
         expect(f.queued()).toBe(1);
-        expect(f.overflowed.map((e) => e.message.text)).toEqual(["a-1|approve"]);
+        expect(f.overflowed.map((e) => e.message.text)).toEqual([
+          "a-1|approve",
+        ]);
       },
     ],
     [
@@ -1123,7 +1240,9 @@ describe("两个 fake 的旋钮一一对应，而且每个都真的承重", () =
         try {
           await check(make);
         } catch (e) {
-          throw new Error(`旋钮「${label}」在 ${fakeLabel} 上不生效（装饰品）：` + String(e));
+          throw new Error(
+            `旋钮「${label}」在 ${fakeLabel} 上不生效（装饰品）：` + String(e),
+          );
         }
       }
     });

@@ -21,8 +21,9 @@
  * （thread.ts、real-deps.ts、以及 assemble.ts 文件头）。
  * 代价是两个可执行入口，已登记在 0025 §7。
  */
-import { serveMain } from "./assemble.js";
+
 import { isDirectRun } from "../internal/direct-run.js";
+import { serveMain } from "./assemble.js";
 
 if (isDirectRun(import.meta.url, process.argv[1])) {
   await serveMain(process.argv.slice(2));

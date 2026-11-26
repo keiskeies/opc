@@ -41,10 +41,10 @@ import type {
   CodexThreadOptionsLite,
 } from "../../../src/harness/adapters/codex.js";
 import {
+  CodexCliAdapter,
   codexApprovalModeFor,
   codexSandboxModeFor,
   codexToolCallsFor,
-  CodexCliAdapter,
 } from "../../../src/harness/adapters/codex.js";
 import type { GatewayDeps } from "../../../src/harness/gateway.js";
 import { callHarness } from "../../../src/harness/gateway.js";
@@ -104,9 +104,7 @@ function itemEv(
 ): CodexEventLite {
   return { type, item };
 }
-async function* evs(
-  list: CodexEventLite[],
-): AsyncGenerator<CodexEventLite> {
+async function* evs(list: CodexEventLite[]): AsyncGenerator<CodexEventLite> {
   for (const e of list) yield e;
 }
 
@@ -212,9 +210,9 @@ describe("codexToolCallsFor —— 词表翻译逐格", () => {
     expect(codexToolCallsFor(cmdItem("i-1", "rm -rf /"))).toEqual([
       { tool: "Bash", args: { command: "rm -rf /" } },
     ]);
-    expect(
-      codexToolCallsFor({ id: "i-2", type: "command_execution" }),
-    ).toEqual([{ tool: "Bash", args: { command: "" } }]);
+    expect(codexToolCallsFor({ id: "i-2", type: "command_execution" })).toEqual(
+      [{ tool: "Bash", args: { command: "" } }],
+    );
   });
 
   it("mcp_tool_call⇒mcp__server__tool；缺格用 unknown 顶名不顶判据", () => {
@@ -226,9 +224,7 @@ describe("codexToolCallsFor —— 词表翻译逐格", () => {
         tool: "create_issue",
         arguments: { title: "x" },
       }),
-    ).toEqual([
-      { tool: "mcp__jira__create_issue", args: { title: "x" } },
-    ]);
+    ).toEqual([{ tool: "mcp__jira__create_issue", args: { title: "x" } }]);
     expect(codexToolCallsFor({ id: "i-2", type: "mcp_tool_call" })).toEqual([
       { tool: "mcp__unknown__unknown", args: null },
     ]);
@@ -247,9 +243,7 @@ describe("codexToolCallsFor —— 词表翻译逐格", () => {
       { tool: "Edit", args: { path: WS + "/a.ts", kind: "update" } },
       { tool: "Edit", args: { path: WS + "/b.ts", kind: "add" } },
     ]);
-    expect(
-      codexToolCallsFor({ id: "i-2", type: "file_change" }),
-    ).toEqual([]);
+    expect(codexToolCallsFor({ id: "i-2", type: "file_change" })).toEqual([]);
   });
 
   it("web_search⇒WebSearch；agent_message/todo/error 不发工具", () => {
@@ -257,9 +251,7 @@ describe("codexToolCallsFor —— 词表翻译逐格", () => {
       codexToolCallsFor({ id: "i-1", type: "web_search", query: "codex sdk" }),
     ).toEqual([{ tool: "WebSearch", args: { query: "codex sdk" } }]);
     expect(codexToolCallsFor(msgItem("i-2", "想想"))).toEqual([]);
-    expect(
-      codexToolCallsFor({ id: "i-3", type: "todo_list" }),
-    ).toEqual([]);
+    expect(codexToolCallsFor({ id: "i-3", type: "todo_list" })).toEqual([]);
     expect(
       codexToolCallsFor({ id: "i-4", type: "error", message: "炸了" }),
     ).toEqual([]);
@@ -270,7 +262,9 @@ describe("codexToolCallsFor —— 词表翻译逐格", () => {
 
 describe("CodexCliAdapter × execute —— 流形状与三态", () => {
   it("成功一轮：四段事件顺序、tool_call 译成 Bash、usage 带 token 真读数", async () => {
-    const a = new CodexCliAdapter({ codexCtor: stubCodex(successEvents()).ctor });
+    const a = new CodexCliAdapter({
+      codexCtor: stubCodex(successEvents()).ctor,
+    });
     const ev = await collect(a.execute(req(), APPROVE_ALL));
     expect(ev.map((e: HarnessEvent): string => e.kind)).toEqual([
       "session_started",
@@ -292,11 +286,11 @@ describe("CodexCliAdapter × execute —— 流形状与三态", () => {
   });
 
   it("finished 唯一且最后：exitCode null（SDK 路线没有退出码），output 来自 agent_message", async () => {
-    const a = new CodexCliAdapter({ codexCtor: stubCodex(successEvents()).ctor });
+    const a = new CodexCliAdapter({
+      codexCtor: stubCodex(successEvents()).ctor,
+    });
     const ev = await collect(a.execute(req(), APPROVE_ALL));
-    const fins = ev.filter(
-      (e: HarnessEvent): boolean => e.kind === "finished",
-    );
+    const fins = ev.filter((e: HarnessEvent): boolean => e.kind === "finished");
     expect(fins).toHaveLength(1);
     const fin = fins[0];
     if (fin?.kind !== "finished") throw new Error("finished 应在");
@@ -420,9 +414,7 @@ describe("CodexCliAdapter × execute —— 流形状与三态", () => {
       ).ctor,
     });
     const ev = await collect(a.execute(req(), APPROVE_ALL));
-    const tcs = ev.filter(
-      (e: HarnessEvent): boolean => e.kind === "tool_call",
-    );
+    const tcs = ev.filter((e: HarnessEvent): boolean => e.kind === "tool_call");
     expect(tcs).toHaveLength(2);
     const args0 = (tcs[0] as { redactedArgs: unknown }).redactedArgs;
     expect(args0).toEqual({ path: WS + "/a.ts", kind: "update" });
@@ -458,9 +450,7 @@ describe("CodexCliAdapter × execute —— 流形状与三态", () => {
     });
     const ev = await collect(a.execute(req(), APPROVE_ALL));
     expect(
-      ev.filter(
-        (e: HarnessEvent): boolean => e.kind === "session_started",
-      ),
+      ev.filter((e: HarnessEvent): boolean => e.kind === "session_started"),
     ).toHaveLength(0);
     expect(a.takeRun()?.sessionId).toBeNull();
   });
@@ -484,9 +474,7 @@ describe("CodexCliAdapter × execute —— 流形状与三态", () => {
       expect(ev[0].sessionId).toBe("th-9");
     }
     expect(
-      ev.filter(
-        (e: HarnessEvent): boolean => e.kind === "session_started",
-      ),
+      ev.filter((e: HarnessEvent): boolean => e.kind === "session_started"),
     ).toHaveLength(1);
     expect(s.rec.resume).toHaveLength(1);
     expect(s.rec.resume[0]?.id).toBe("th-9");
@@ -495,14 +483,16 @@ describe("CodexCliAdapter × execute —— 流形状与三态", () => {
   });
 
   it("resume() 没有 seedResumeRequest ⇒ 抛，而不是编一个默认工作区", () => {
-    const a = new CodexCliAdapter({ codexCtor: stubCodex(successEvents()).ctor });
-    expect(() => a.resume("th-1", APPROVE_ALL)).toThrow(
-      /seedResumeRequest/,
-    );
+    const a = new CodexCliAdapter({
+      codexCtor: stubCodex(successEvents()).ctor,
+    });
+    expect(() => a.resume("th-1", APPROVE_ALL)).toThrow(/seedResumeRequest/);
   });
 
   it("getCost 如实抛：SDK 路线没有跨调用会话账，返回全零会是假话", async () => {
-    const a = new CodexCliAdapter({ codexCtor: stubCodex(successEvents()).ctor });
+    const a = new CodexCliAdapter({
+      codexCtor: stubCodex(successEvents()).ctor,
+    });
     await expect(a.getCost("th-1")).rejects.toThrow(/会话账/);
   });
 
@@ -584,7 +574,9 @@ describe("CodexCliAdapter × execute —— 流形状与三态", () => {
 
 describe("CodexCliAdapter × callHarness —— 声明即判据", () => {
   it("能力逐格如实声明（谎报任一格 ⇒ 本发与下面几发一起红）", () => {
-    const a = new CodexCliAdapter({ codexCtor: stubCodex(successEvents()).ctor });
+    const a = new CodexCliAdapter({
+      codexCtor: stubCodex(successEvents()).ctor,
+    });
     expect(a.capabilities).toEqual({
       budgetHardCap: false,
       toolApproval: false,
@@ -631,7 +623,9 @@ describe("CodexCliAdapter × callHarness —— 声明即判据", () => {
   });
 
   it("never 档成功落账：prevention=observed_only（这一家没有否决权，审计如实写）", async () => {
-    const a = new CodexCliAdapter({ codexCtor: stubCodex(successEvents()).ctor });
+    const a = new CodexCliAdapter({
+      codexCtor: stubCodex(successEvents()).ctor,
+    });
     const d = deps();
     const g = await callHarness(a, req(), d);
     expect(g.ok).toBe(true);

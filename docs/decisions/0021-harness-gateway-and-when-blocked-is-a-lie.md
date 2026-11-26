@@ -15,7 +15,7 @@
 `packages/hub/test/harness/gateway.test.ts` 里（命中条数我故意不写死：那是个会随我后续加用例
 单调上涨的计数，0019 记过同一条纪律）。
 【round322 复核：本句「callHarness 在生产里零调用方」已过期。现在生产引擎路径
-`engine/runtime.ts:483` → `runViaGateway` → `harness/harness-runner.ts:81` 调用
+`engine/runtime.ts:491` → `runViaGateway` → `harness/harness-runner.ts:81` 调用
 `callHarness`（Task 5.5 / 5.3 的接线在 0009 依赖解锁后完成，gateway 层本身
 round312 起由 O6 接线。round363 坐标复算：T6 把执行器共用的出口表搬进
 harness-runner.ts 的 `runHarnessViaGateway`，callHarness 那一发随实现同行搬家，

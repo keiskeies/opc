@@ -1,4 +1,6 @@
 /* T11: same-origin desktop client. User content is always inserted as text/DOM nodes. */
+
+import { renderMarkdown } from "/markdown.js";
 import {
   avatarUrl,
   browserSpeech,
@@ -7,7 +9,6 @@ import {
   speakWithBrowser,
 } from "/src/humanizer.ts";
 import { mountThemeToggle } from "/theme.js";
-import { renderMarkdown } from "/markdown.js";
 
 const API = "/api/v1";
 const $ = (selector, root = document) => root.querySelector(selector);
@@ -5126,7 +5127,11 @@ function renderDocumentEditor(view) {
     paneHost.dataset.mode = mode;
     modeBar = h(
       "div",
-      { class: "editor-toolbar doc-mode-bar", role: "group", "aria-label": "正文视图" },
+      {
+        class: "editor-toolbar doc-mode-bar",
+        role: "group",
+        "aria-label": "正文视图",
+      },
       ...modeButtons.values(),
       h("span", { class: "spacer" }),
       h("span", {
@@ -5162,15 +5167,21 @@ function renderDocumentEditor(view) {
         { class: "actions" },
         button(
           "恢复本地草稿",
-          () => restoreDraft(doc, watermark, title, status, () => repaintPanes?.()),
+          () =>
+            restoreDraft(doc, watermark, title, status, () => repaintPanes?.()),
           "",
           { id: "docDraftRestore" },
         ),
-        button("丢弃草稿", () => {
-          removeDraft(doc.doc_id);
-          state.draft = null;
-          renderMain();
-        }, "", { id: "docDraftDiscard" }),
+        button(
+          "丢弃草稿",
+          () => {
+            removeDraft(doc.doc_id);
+            state.draft = null;
+            renderMain();
+          },
+          "",
+          { id: "docDraftDiscard" },
+        ),
         iconButton("close", "关闭草稿提示", () => draftBar.remove()),
       ),
     );
@@ -5187,11 +5198,16 @@ function renderDocumentEditor(view) {
         h(
           "div",
           { class: "doc-head-line" },
-          iconButton("chevron", "返回文档中心", () => {
-            state.selectedDocument = null;
-            renderList();
-            renderMain();
-          }, { class: "icon-button doc-back" }),
+          iconButton(
+            "chevron",
+            "返回文档中心",
+            () => {
+              state.selectedDocument = null;
+              renderList();
+              renderMain();
+            },
+            { class: "icon-button doc-back" },
+          ),
           title,
         ),
         h("p", {

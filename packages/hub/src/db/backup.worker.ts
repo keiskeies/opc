@@ -35,7 +35,11 @@
  */
 
 import { parentPort, workerData } from "node:worker_threads";
-import { createBackup, type BackupRequest, type BackupResult } from "./backup.js";
+import {
+  type BackupRequest,
+  type BackupResult,
+  createBackup,
+} from "./backup.js";
 
 /** 过界的数据只能是这几个字段。多一个都在主线程那边先拒掉。 */
 export type BackupWorkerRequest = {
@@ -161,11 +165,15 @@ const req = workerData as Partial<BackupWorkerRequest> | undefined;
  * 这边只是一句装配自检，不需要占用一条业务失败码。
  */
 if (typeof req?.dbPath !== "string" || req.dbPath === "") {
-  throw new TypeError("backup.worker 没收到 dbPath（workerData = " + JSON.stringify(req) + "）");
+  throw new TypeError(
+    "backup.worker 没收到 dbPath（workerData = " + JSON.stringify(req) + "）",
+  );
 }
 if (typeof req.backupDir !== "string" || req.backupDir === "") {
   throw new TypeError(
-    "backup.worker 没收到 backupDir（workerData = " + JSON.stringify(req) + "）",
+    "backup.worker 没收到 backupDir（workerData = " +
+      JSON.stringify(req) +
+      "）",
   );
 }
 

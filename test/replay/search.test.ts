@@ -30,23 +30,23 @@ import { mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { migrate } from "../../packages/hub/src/db/migrate.js";
-import { fixtureTmp } from "../../packages/hub/test/fixtures/fixture-dir.js";
-import {
-  DEFAULT_SEARCH_LIMIT,
-  escapeLikePattern,
-  ftsSearchSql,
-  FTS_SEARCH_SQL,
-  LIKE_SEARCH_SQL,
-  likeSearchSql,
-  quoteFtsPhrase,
-  searchEvents,
-  type SearchOrder,
-  TRIGRAM_MIN_CHARS,
-} from "../../packages/hub/src/replay/search.js";
 import {
   buildReplayView,
   REPLAY_EVENTS_SQL,
 } from "../../packages/hub/src/replay/query.js";
+import {
+  DEFAULT_SEARCH_LIMIT,
+  escapeLikePattern,
+  FTS_SEARCH_SQL,
+  ftsSearchSql,
+  LIKE_SEARCH_SQL,
+  likeSearchSql,
+  quoteFtsPhrase,
+  type SearchOrder,
+  searchEvents,
+  TRIGRAM_MIN_CHARS,
+} from "../../packages/hub/src/replay/search.js";
+import { fixtureTmp } from "../../packages/hub/test/fixtures/fixture-dir.js";
 
 const TMP = fixtureTmp("replay", import.meta.url);
 
@@ -65,7 +65,9 @@ const open: { close: () => Promise<void> }[] = [];
 let fileSeq = 0;
 
 async function newDb(): Promise<{ db: Db; w: Wq; path: string }> {
-  const { WriteQueue } = await import("../../packages/hub/src/db/write-queue.js");
+  const { WriteQueue } = await import(
+    "../../packages/hub/src/db/write-queue.js"
+  );
   const path = join(TMP, "r-" + process.pid + "-" + ++fileSeq + ".db");
   const q = new WriteQueue(path) as unknown as Wq;
   open.push(q as unknown as { close: () => Promise<void> });
@@ -109,12 +111,11 @@ function audit(
     actorId?: string;
   },
 ): number {
-  const exists = db
-    .prepare("SELECT id FROM tasks WHERE id = ?")
-    .get(o.taskId);
+  const exists = db.prepare("SELECT id FROM tasks WHERE id = ?").get(o.taskId);
   if (exists === undefined) addTask(db, o.taskId);
   const before = Number(
-    db.prepare("SELECT COALESCE(MAX(id), 0) AS v FROM events").get()?.["v"] ?? 0,
+    db.prepare("SELECT COALESCE(MAX(id), 0) AS v FROM events").get()?.["v"] ??
+      0,
   );
   db.prepare(
     "INSERT INTO events (task_id, actor_type, actor_id, action, target, payload, " +
@@ -292,9 +293,7 @@ describe("① 检索：trigram 优先、LIKE 兜底", () => {
     audit(db, { taskId: "t1", payload: { text: "b" } });
     expect(searchEvents(db as never, { keyword: "" })).toHaveLength(0);
     // 直接查库证明「两行确实在」，否则上一条会因为「表本来就是空的」而恒真。
-    expect(
-      db.prepare("SELECT id FROM events").all(),
-    ).toHaveLength(2);
+    expect(db.prepare("SELECT id FROM events").all()).toHaveLength(2);
   });
 
   it("关键词是 FTS 操作符（AND / NEAR / 带 OR）⇒ 不抛、按字面查", async () => {
@@ -323,7 +322,9 @@ describe("① 检索：trigram 优先、LIKE 兜底", () => {
     let rawThrew = 0;
     for (const kw of ["AND", "覆盖率 OR", "-a"]) {
       try {
-        db.prepare("SELECT rowid AS id FROM events_fts WHERE events_fts MATCH ?").all(kw);
+        db.prepare(
+          "SELECT rowid AS id FROM events_fts WHERE events_fts MATCH ?",
+        ).all(kw);
       } catch {
         rawThrew += 1;
       }
@@ -364,9 +365,13 @@ describe("① 检索：trigram 优先、LIKE 兜底", () => {
       .prepare("SELECT id, payload FROM events ORDER BY id")
       .all() as unknown as { id: number; payload: string }[];
     const oracle = (kw: string): number[] =>
-      stored.filter((r): boolean => r.payload.includes(kw)).map((r): number => Number(r.id));
+      stored
+        .filter((r): boolean => r.payload.includes(kw))
+        .map((r): number => Number(r.id));
     for (const kw of ["%", "_", "\\"]) {
-      const got = searchEvents(db as never, { keyword: kw }).map((h): number => h.id);
+      const got = searchEvents(db as never, { keyword: kw }).map(
+        (h): number => h.id,
+      );
       expect(got).toEqual(oracle(kw));
       // 反向：这一格必须在【两种实现】之间选边，否则它守的是零。
       const naive = db
@@ -397,7 +402,9 @@ describe("① 检索：trigram 优先、LIKE 兜底", () => {
         .map((r): number => Number((r as { id: number }).id));
     const discriminating: string[] = [];
     for (const kw of ["%", "_", "\\", "%的"]) {
-      const right = searchEvents(db as never, { keyword: kw }).map((h): number => h.id);
+      const right = searchEvents(db as never, { keyword: kw }).map(
+        (h): number => h.id,
+      );
       if (right.join(",") !== noEscape(kw).join(",")) discriminating.push(kw);
     }
     expect(discriminating.length > 0).toBe(true);
@@ -406,7 +413,8 @@ describe("① 检索：trigram 优先、LIKE 兜底", () => {
     //    也是这条用例存在的理由：后果不是报错，是 CEO 在回放里看到一堆
     //    与该关键词无关的事件并当「确实有这些事件」读（§4.5：假样本会被拿去做真决定）。
     expect(
-      db.prepare("SELECT id FROM events WHERE payload LIKE ?").all("%%%").length,
+      db.prepare("SELECT id FROM events WHERE payload LIKE ?").all("%%%")
+        .length,
     ).toBe(stored.length);
 
     expect(LIKE_SEARCH_SQL).toContain("ESCAPE");
@@ -435,8 +443,10 @@ describe("② 只读连接 + 分页：读不阻塞写（WAL）", () => {
     const ro = w.readConnection() as Db;
     let threw = "";
     try {
-      ro.prepare("INSERT INTO events (task_id, actor_type, actor_id, action, payload, created_at) " +
-        "VALUES ('x','agent','dev','state_change','{}',1)").run();
+      ro.prepare(
+        "INSERT INTO events (task_id, actor_type, actor_id, action, payload, created_at) " +
+          "VALUES ('x','agent','dev','state_change','{}',1)",
+      ).run();
     } catch (e) {
       threw = e instanceof Error ? e.message : String(e);
     }
@@ -488,14 +498,28 @@ describe("② 只读连接 + 分页：读不阻塞写（WAL）", () => {
     for (let i = 0; i < 5; i++) {
       audit(db, { taskId: "t1", payload: { text: "第" + i + "条覆盖率记录" } });
     }
-    const page1 = searchEvents(db as never, { keyword: "覆盖率", limit: 2, offset: 0 });
-    const page2 = searchEvents(db as never, { keyword: "覆盖率", limit: 2, offset: 2 });
+    const page1 = searchEvents(db as never, {
+      keyword: "覆盖率",
+      limit: 2,
+      offset: 0,
+    });
+    const page2 = searchEvents(db as never, {
+      keyword: "覆盖率",
+      limit: 2,
+      offset: 2,
+    });
     expect(page1).toHaveLength(2);
     expect(page2).toHaveLength(2);
     // 两页【不重叠】。这条看着显然，但它测的是「ORDER BY 稳定」——
     // 没有确定的全序时，LIMIT/OFFSET 翻页可以两页都给同一批行。
-    const ids1 = page1.map((h) => h.id).sort((a, b) => a - b).join(",");
-    const ids2 = page2.map((h) => h.id).sort((a, b) => a - b).join(",");
+    const ids1 = page1
+      .map((h) => h.id)
+      .sort((a, b) => a - b)
+      .join(",");
+    const ids2 = page2
+      .map((h) => h.id)
+      .sort((a, b) => a - b)
+      .join(",");
     expect(ids1 === ids2).toBe(false);
     const all = searchEvents(db as never, { keyword: "覆盖率" });
     expect(all).toHaveLength(5);
@@ -533,8 +557,12 @@ describe("② 只读连接 + 分页：读不阻塞写（WAL）", () => {
     addTask(db, "t2");
     audit(db, { taskId: "t1", payload: { text: "覆盖率一" } });
     audit(db, { taskId: "t2", payload: { text: "覆盖率二" } });
-    expect(FTS_SEARCH_SQL).toBe(ftsSearchSql({ scope: false, order: "recent" }));
-    expect(LIKE_SEARCH_SQL).toBe(likeSearchSql({ scope: false, order: "recent" }));
+    expect(FTS_SEARCH_SQL).toBe(
+      ftsSearchSql({ scope: false, order: "recent" }),
+    );
+    expect(LIKE_SEARCH_SQL).toBe(
+      likeSearchSql({ scope: false, order: "recent" }),
+    );
     /*
      * 四种组合逐格跑【行为】：跑一遍才知道拼出来的 SQL 合法、且限定与排序真的生效。
      * 两个关键词分别踩到两档：『覆盖率』3 字走 FTS，『覆盖』2 字 FTS 必 0 ⇒ 走 LIKE。
@@ -558,13 +586,21 @@ describe("② 只读连接 + 分页：读不阻塞写（WAL）", () => {
         expect(hits.length).toBe(want);
         // 走的是哪一档也要对得上，否则「四格都过」可能是四格都走了同一档。
         const via = kw.length === 3 ? "fts" : "like";
-        expect(hits.map((h): string => h.via)).toEqual(hits.map((): string => via));
+        expect(hits.map((h): string => h.via)).toEqual(
+          hits.map((): string => via),
+        );
       }
     }
     // 因果序与最近序在【scope=false】时必须给出相反的两串，否则上面四格里
     // order 参数其实没生效（两种序在 2 行夹具上可以同序 —— 本轮第二次踩同形夹具）。
-    const asc = searchEvents(db as never, { keyword: "覆盖率", order: "timeline" }).map((h): number => h.id);
-    const desc = searchEvents(db as never, { keyword: "覆盖率", order: "recent" }).map((h): number => h.id);
+    const asc = searchEvents(db as never, {
+      keyword: "覆盖率",
+      order: "timeline",
+    }).map((h): number => h.id);
+    const desc = searchEvents(db as never, {
+      keyword: "覆盖率",
+      order: "recent",
+    }).map((h): number => h.id);
     expect(asc.join(",")).toBe([...desc].reverse().join(","));
     expect(asc[0]).not.toBe(desc[0]);
     // 反向对照：给 LIKE 拼上 FTS 才有的 rank 排序，SQLite 必须报。
@@ -642,9 +678,7 @@ describe("③ 时间线：一行读坏不让整段回放不可用，也不静默
     audit(db, { taskId: "t1", payload: { n: 3 }, createdAt: 1000 });
     const view = await buildReplayView(db as never, { taskId: "t1" });
     if (view === null) throw new Error("任务存在");
-    const byId = view.entries.map(
-      (e) => (e.payload as { n: number }).n,
-    );
+    const byId = view.entries.map((e) => (e.payload as { n: number }).n);
     expect(byId).toEqual([1, 2, 3]);
 
     // 反向对照：直接问库「按 created_at 升序」得到什么。
@@ -707,7 +741,9 @@ describe("③ 时间线：一行读坏不让整段回放不可用，也不静默
     // （0013 §8 那条已知缺口）；round319 实测 @langchain/core@1.3.5 可装，
     // query.ts 已接上 decodeCheckpoint —— 现在这条要证的是【真解码成功】，
     // 坏 blob 那条留作降级对照（decoded 必须 false 而不是抛）。
-    const { JsonPlusSerializer } = await import("@langchain/langgraph-checkpoint");
+    const { JsonPlusSerializer } = await import(
+      "@langchain/langgraph-checkpoint"
+    );
     const serde = new JsonPlusSerializer();
     const [type, blob] = await serde.dumpsTyped({
       channel_values: { messages: [{ text: "一眼" }], task: { id: "t1" } },
@@ -751,8 +787,12 @@ describe("④ 回放幂等：同一任务连续两次逐字节相同", () => {
     for (let i = 0; i < 6; i++) {
       audit(db, { taskId: "t1", payload: { n: i }, createdAt: NOW });
     }
-    const a = JSON.stringify(await buildReplayView(db as never, { taskId: "t1" }));
-    const b = JSON.stringify(await buildReplayView(db as never, { taskId: "t1" }));
+    const a = JSON.stringify(
+      await buildReplayView(db as never, { taskId: "t1" }),
+    );
+    const b = JSON.stringify(
+      await buildReplayView(db as never, { taskId: "t1" }),
+    );
     expect(a).toBe(b);
     // 而且要真的拿到 6 条（否则「两次都是空」也满足上一条）。
     expect((a.match(/"seq":/gu) ?? []).length).toBe(6);
@@ -807,7 +847,9 @@ describe("⑤ 回放标注当时那一版组织图，不退回当前版", () => 
     const fresh = await buildReplayView(db as never, { taskId: "t-new" });
     if (old === null || fresh === null) throw new Error("两条任务都存在");
     expect(old.graph.ok === true && old.graph.reports_to["dev"]).toBe("tech");
-    expect(fresh.graph.ok === true && fresh.graph.reports_to["dev"]).toBe("ceo");
+    expect(fresh.graph.ok === true && fresh.graph.reports_to["dev"]).toBe(
+      "ceo",
+    );
   });
 
   it("那一版图不存在 ⇒ degraded + 原因，【不】退回当前图", async () => {
@@ -844,19 +886,37 @@ describe("⑥ 关键词过滤：检索接进时间线", () => {
     // 同毫秒：与④节同一条理由 —— 时间戳并列时 SQLite 不保证顺序，
     // 用递增时间戳做夹具会让这条断言在错误实现下也成立（恒真夹具）。
     for (let i = 1; i <= 4; i++) {
-      audit(db, { taskId: "t1", payload: { n: i, text: "覆盖率第" + i + "次" }, createdAt: NOW });
+      audit(db, {
+        taskId: "t1",
+        payload: { n: i, text: "覆盖率第" + i + "次" },
+        createdAt: NOW,
+      });
     }
-    audit(db, { taskId: "t1", payload: { n: 99, text: "与关键词无关" }, createdAt: NOW });
+    audit(db, {
+      taskId: "t1",
+      payload: { n: 99, text: "与关键词无关" },
+      createdAt: NOW,
+    });
 
-    const view = await buildReplayView(db as never, { taskId: "t1", keyword: "覆盖率" });
-    const ns = (view?.entries ?? []).map((e): unknown => (e.payload as { n: number }).n);
+    const view = await buildReplayView(db as never, {
+      taskId: "t1",
+      keyword: "覆盖率",
+    });
+    const ns = (view?.entries ?? []).map(
+      (e): unknown => (e.payload as { n: number }).n,
+    );
     expect(ns).toEqual([1, 2, 3, 4]);
     // 反向对照：把默认序直接拿来用会得到 [4,3,2,1]。
     // 少了这一半，上面那条在「两种排序恰好同序」的夹具上是恒真的（本轮第三次踩同一坑，
     // 见①节那条 byTime 的反向对照）。
-    const recent = searchEvents(db as never, { keyword: "覆盖率", order: "recent" });
+    const recent = searchEvents(db as never, {
+      keyword: "覆盖率",
+      order: "recent",
+    });
     const reversed = [...recent].reverse().map((h): number => h.id);
-    expect(reversed.join(",")).toBe((view?.entries ?? []).map((e): number => e.seq).join(","));
+    expect(reversed.join(",")).toBe(
+      (view?.entries ?? []).map((e): number => e.seq).join(","),
+    );
   });
 
   it("关键词只命中【本任务】的事件：别的任务里同样的词不混进来", async () => {
@@ -865,9 +925,14 @@ describe("⑥ 关键词过滤：检索接进时间线", () => {
     addTask(db, "t2");
     audit(db, { taskId: "t1", payload: { text: "本任务的覆盖率" } });
     audit(db, { taskId: "t2", payload: { text: "别的任务的覆盖率" } });
-    const view = await buildReplayView(db as never, { taskId: "t1", keyword: "覆盖率" });
+    const view = await buildReplayView(db as never, {
+      taskId: "t1",
+      keyword: "覆盖率",
+    });
     expect(view?.entries).toHaveLength(1);
-    expect((view?.entries[0]?.payload as { text: string })?.text).toContain("本任务");
+    expect((view?.entries[0]?.payload as { text: string })?.text).toContain(
+      "本任务",
+    );
     // 反向对照：不限定任务时两条都在。少了这一半，「只命中一条」可能只是因为
     // 限定条件写成了恒假（那也是一种「隔离生效」的错觉）。
     expect(searchEvents(db as never, { keyword: "覆盖率" })).toHaveLength(2);
@@ -877,7 +942,10 @@ describe("⑥ 关键词过滤：检索接进时间线", () => {
     const { db } = await newDb();
     addTask(db, "t1");
     audit(db, { taskId: "t1", payload: { text: "有内容" } });
-    const view = await buildReplayView(db as never, { taskId: "t1", keyword: "根本没有这个词" });
+    const view = await buildReplayView(db as never, {
+      taskId: "t1",
+      keyword: "根本没有这个词",
+    });
     expect(view).not.toBeNull();
     expect(view?.entries).toHaveLength(0);
     // 空结果【不是】「读坏了」，所以 complete 是真的。把两者混成一个信号，
@@ -891,7 +959,10 @@ describe("⑥ 关键词过滤：检索接进时间线", () => {
     addTask(db, "t1");
     audit(db, { taskId: "t1", payload: { text: "a" } });
     audit(db, { taskId: "t1", payload: { text: "b" } });
-    expect((await buildReplayView(db as never, { taskId: "t1", keyword: "" }))?.entries).toHaveLength(2);
+    expect(
+      (await buildReplayView(db as never, { taskId: "t1", keyword: "" }))
+        ?.entries,
+    ).toHaveLength(2);
     // 而直接问检索函数，空串是【空集】（①节那条）。两个语义必须不同，
     // 且分工清楚：过滤发生在 buildReplayView（空=不筛），
     // 「别拿空串去扫全库」发生在 searchEvents（空=不查）。
@@ -908,13 +979,26 @@ describe("⑥ 关键词过滤：检索接进时间线", () => {
     const { db } = await newDb();
     addTask(db, "t1");
     for (let i = 1; i <= 5; i++) {
-      audit(db, { taskId: "t1", payload: { n: i, hit: i % 2 === 1, text: "第" + i + "条" } });
+      audit(db, {
+        taskId: "t1",
+        payload: { n: i, hit: i % 2 === 1, text: "第" + i + "条" },
+      });
     }
     audit(db, { taskId: "t1", payload: { n: 90, text: "噪声甲" } });
     audit(db, { taskId: "t1", payload: { n: 91, text: "噪声乙" } });
     audit(db, { taskId: "t1", payload: { n: 92, text: "噪声丙" } });
-    const p1 = await buildReplayView(db as never, { taskId: "t1", keyword: '"hit":true', limit: 2, offset: 0 });
-    const p2 = await buildReplayView(db as never, { taskId: "t1", keyword: '"hit":true', limit: 2, offset: 2 });
+    const p1 = await buildReplayView(db as never, {
+      taskId: "t1",
+      keyword: '"hit":true',
+      limit: 2,
+      offset: 0,
+    });
+    const p2 = await buildReplayView(db as never, {
+      taskId: "t1",
+      keyword: '"hit":true',
+      limit: 2,
+      offset: 2,
+    });
     const ns = (v: typeof p1): number[] =>
       (v?.entries ?? []).map((e): number => (e.payload as { n: number }).n);
     expect(ns(p1)).toEqual([1, 3]);
@@ -932,9 +1016,16 @@ describe("⑥ 关键词过滤：检索接进时间线", () => {
      */
     const { db } = await newDb();
     addTask(db, "t1");
-    const view = await buildReplayView(db as never, { taskId: "t1", keyword: "覆盖率", limit: 500 });
+    const view = await buildReplayView(db as never, {
+      taskId: "t1",
+      keyword: "覆盖率",
+      limit: 500,
+    });
     expect(view?.effective_limit).toBe(200);
-    const plain = await buildReplayView(db as never, { taskId: "t1", limit: 500 });
+    const plain = await buildReplayView(db as never, {
+      taskId: "t1",
+      limit: 500,
+    });
     expect(plain?.effective_limit).toBe(500);
   });
 
@@ -944,7 +1035,10 @@ describe("⑥ 关键词过滤：检索接进时间线", () => {
     audit(db, { taskId: "t1", payload: { text: "正常覆盖率一行" } });
     // 直接写一条非法 JSON 的 payload（绕过 recorder 的形状，与③节同一手法）。
     const bad = audit(db, { taskId: "t1", payload: "{坏掉的覆盖率" });
-    const view = await buildReplayView(db as never, { taskId: "t1", keyword: "覆盖率" });
+    const view = await buildReplayView(db as never, {
+      taskId: "t1",
+      keyword: "覆盖率",
+    });
     expect(view?.entries).toHaveLength(2);
     expect(view?.complete).toBe(false);
     expect(view?.entries.some((e): boolean => e.degraded === true)).toBe(true);

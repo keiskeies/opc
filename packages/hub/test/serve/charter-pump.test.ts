@@ -33,31 +33,33 @@
  *     --test packages/hub/test/serve/charter-pump.test.ts
  */
 import { mkdirSync, realpathSync, rmSync } from "node:fs";
+import type { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import type { DatabaseSync } from "node:sqlite";
-
-import { fixtureTmp } from "../fixtures/fixture-dir.js";
-import { migrate } from "../../src/db/migrate.js";
-import { INSERT_DELEGATION_GRAPH_SQL } from "../../src/org/commit.js";
-import { InMemoryEventBus, type DomainEvent } from "../../src/events/bus.js";
-import { DECISION_MARK } from "../../src/engine/claude.js";
-import { CHARTER_CARD_KEY, charterCardDraft } from "../../src/engine/charter.js";
 import { insertCard } from "../../src/approvals/cards.js";
+import { migrate } from "../../src/db/migrate.js";
+import {
+  CHARTER_CARD_KEY,
+  charterCardDraft,
+} from "../../src/engine/charter.js";
+import { DECISION_MARK } from "../../src/engine/claude.js";
+import { type DomainEvent, InMemoryEventBus } from "../../src/events/bus.js";
+import { INSERT_DELEGATION_GRAPH_SQL } from "../../src/org/commit.js";
 import {
   CHARTER_ATTEMPTS_SQL,
   CHARTER_BLOCKED_SQL,
   CHARTER_CANDIDATES_SQL,
   CHARTER_GAVE_UP_KIND,
+  type CharterCardDeps,
   DEFAULT_CHARTER_MAX_ATTEMPTS,
   PUMP_ACTOR,
   PUMP_GAVE_UP_TARGET,
-  pumpCharterCards,
-  underTaskBudgetSql,
-  type CharterCardDeps,
   type PumpOptions,
   type PumpRoundResult,
+  pumpCharterCards,
+  underTaskBudgetSql,
 } from "../../src/serve/charter-pump.js";
+import { fixtureTmp } from "../fixtures/fixture-dir.js";
 
 const TMP = fixtureTmp("serve-charter-pump", import.meta.url);
 const NOW = 1_700_000_000_000;
@@ -109,7 +111,12 @@ interface World {
   withBus(bus: InMemoryEventBus): World;
 }
 
-function makeWorld(db: Db, q: Queue, bus: InMemoryEventBus, turns: string[]): World {
+function makeWorld(
+  db: Db,
+  q: Queue,
+  bus: InMemoryEventBus,
+  turns: string[],
+): World {
   return {
     db,
     q,
@@ -124,9 +131,13 @@ function makeWorld(db: Db, q: Queue, bus: InMemoryEventBus, turns: string[]): Wo
  * CHARTER_PENDING 的任务」这个【状态】，而不是「建任务那条路对不对」
  * （后者由 http 那一层管）。走 createTask 会让本文件红的时候说不清是谁坏了。
  */
-async function world(o: { readonly tasks?: readonly string[]; readonly status?: string } = {}): Promise<World> {
+async function world(
+  o: { readonly tasks?: readonly string[]; readonly status?: string } = {},
+): Promise<World> {
   const { WriteQueue } = await import("../../src/db/write-queue.js");
-  const q = new WriteQueue(TMP + "/p-" + process.pid + "-" + ++fileSeq + ".db") as unknown as Queue;
+  const q = new WriteQueue(
+    TMP + "/p-" + process.pid + "-" + ++fileSeq + ".db",
+  ) as unknown as Queue;
   queues.push(q);
   const db = q.writeConnection();
   migrate(db as unknown as Parameters<typeof migrate>[0]);
@@ -135,8 +146,18 @@ async function world(o: { readonly tasks?: readonly string[]; readonly status?: 
     1,
     JSON.stringify({
       nodes: {
-        ceo: { role_id: "ceo", can_manage: true, reports_to: null, model_family: "opus" },
-        intake: { role_id: "intake", can_manage: true, reports_to: "ceo", model_family: "sonnet" },
+        ceo: {
+          role_id: "ceo",
+          can_manage: true,
+          reports_to: null,
+          model_family: "opus",
+        },
+        intake: {
+          role_id: "intake",
+          can_manage: true,
+          reports_to: "ceo",
+          model_family: "sonnet",
+        },
       },
       edges: [],
     }),
@@ -148,12 +169,23 @@ async function world(o: { readonly tasks?: readonly string[]; readonly status?: 
   return makeWorld(db, q, new InMemoryEventBus(), []);
 }
 
-function addTasks(db: Db, ids: readonly string[], status: string | undefined, base = 0): void {
+function addTasks(
+  db: Db,
+  ids: readonly string[],
+  status: string | undefined,
+  base = 0,
+): void {
   ids.forEach((id, i) => {
     db.prepare(
       "INSERT INTO tasks (id, title, status, assigned_role, current_node, created_at, updated_at, graph_version) " +
         "VALUES (?, ?, ?, 'intake', 'intake', ?, ?, 1)",
-    ).run(id, "想法 " + id, status ?? "CHARTER_PENDING", NOW + base + i, NOW + base + i);
+    ).run(
+      id,
+      "想法 " + id,
+      status ?? "CHARTER_PENDING",
+      NOW + base + i,
+      NOW + base + i,
+    );
   });
 }
 
@@ -248,12 +280,18 @@ function gaveUpRows(w: World): Row[] {
 }
 function pendingCards(w: World, taskId: string): number {
   const r = w.db
-    .prepare("SELECT COUNT(*) AS c FROM approvals WHERE task_id = ? AND card_key = ? AND status = 'pending'")
+    .prepare(
+      "SELECT COUNT(*) AS c FROM approvals WHERE task_id = ? AND card_key = ? AND status = 'pending'",
+    )
     .get(taskId, CHARTER_CARD_KEY) as Row | undefined;
   return Number(r?.["c"] ?? 0);
 }
 function status(w: World, taskId: string): string {
-  return String((w.db.prepare("SELECT status FROM tasks WHERE id = ?").get(taskId) as Row)["status"]);
+  return String(
+    (w.db.prepare("SELECT status FROM tasks WHERE id = ?").get(taskId) as Row)[
+      "status"
+    ],
+  );
 }
 function attempts(w: World, taskId: string): number {
   const r = w.db.prepare(CHARTER_ATTEMPTS_SQL).get(taskId) as Row | undefined;
@@ -281,8 +319,14 @@ function candidates(
 }
 
 /** 被门挡住的那一批（与候选那条共用谓词，见 CHARTER_BLOCKED_SQL 那格）。 */
-function blockedRows(w: World, taskLimitCents: number, maxAttempts = DEFAULT_CHARTER_MAX_ATTEMPTS): Row[] {
-  return w.db.prepare(CHARTER_BLOCKED_SQL).all(CHARTER_CARD_KEY, maxAttempts, taskLimitCents) as Row[];
+function blockedRows(
+  w: World,
+  taskLimitCents: number,
+  maxAttempts = DEFAULT_CHARTER_MAX_ATTEMPTS,
+): Row[] {
+  return w.db
+    .prepare(CHARTER_BLOCKED_SQL)
+    .all(CHARTER_CARD_KEY, maxAttempts, taskLimitCents) as Row[];
 }
 
 /**
@@ -312,7 +356,13 @@ function spend(w: World, taskId: string, cents: number): void {
  * 于是反向对照会退化成它自己的分母（实测：改成列说话后它红在这里）。
  * 生产里这一行由 POST /budget 的 UPSERT 或章程批准同步写出来，形状一样。
  */
-function budgetRow(w: World, taskId: string, limitCents: number, consumedCents: number, hardStop = 1): void {
+function budgetRow(
+  w: World,
+  taskId: string,
+  limitCents: number,
+  consumedCents: number,
+  hardStop = 1,
+): void {
   w.db
     .prepare(
       "INSERT INTO budgets (id, scope_type, scope_id, period, limit_cents, consumed_cents, hard_stop) " +
@@ -320,7 +370,13 @@ function budgetRow(w: World, taskId: string, limitCents: number, consumedCents: 
         "ON CONFLICT(scope_type, scope_id, period) DO UPDATE " +
         "SET limit_cents = excluded.limit_cents, consumed_cents = excluded.consumed_cents",
     )
-    .run("task|" + taskId + "|per_task", taskId, limitCents, consumedCents, hardStop);
+    .run(
+      "task|" + taskId + "|per_task",
+      taskId,
+      limitCents,
+      consumedCents,
+      hardStop,
+    );
 }
 
 /**
@@ -364,7 +420,11 @@ describe("A. 有界：一个反复失败的任务不能永远重试", () => {
     // 第四次：候选 SQL 就该把它滤掉
     const r4 = await pump(w, { ok: false, maxAttempts: 3 });
     expect(w.turns).toHaveLength(3);
-    expect(r4.cards.filter((c) => c.outcome === "drafted" || c.outcome === "attempted")).toHaveLength(0);
+    expect(
+      r4.cards.filter(
+        (c) => c.outcome === "drafted" || c.outcome === "attempted",
+      ),
+    ).toHaveLength(0);
     expect(r4.costCents).toBe(0);
   });
 
@@ -418,8 +478,12 @@ describe("B. 不去碰已经有卡的任务", () => {
     const w = await world({});
     await pump(w);
     // 手工模拟推进（决策写路径由 decision-engine-route.test.ts 管，这里不重测）
-    w.db.prepare("UPDATE approvals SET status = 'approved' WHERE task_id = 't1'").run();
-    w.db.prepare("UPDATE tasks SET status = 'CHARTER_APPROVED' WHERE id = 't1'").run();
+    w.db
+      .prepare("UPDATE approvals SET status = 'approved' WHERE task_id = 't1'")
+      .run();
+    w.db
+      .prepare("UPDATE tasks SET status = 'CHARTER_APPROVED' WHERE id = 't1'")
+      .run();
     const r = await pump(w);
     expect(r.cards).toHaveLength(0);
     expect(w.turns).toHaveLength(1);
@@ -441,7 +505,9 @@ describe("B. 不去碰已经有卡的任务", () => {
     // 比"有没有一张待批卡"宽一格 —— 0006 之后这两者【不再是同一件事】。
     const w = await world({});
     await pump(w);
-    w.db.prepare("UPDATE approvals SET status = 'approved' WHERE task_id = 't1'").run();
+    w.db
+      .prepare("UPDATE approvals SET status = 'approved' WHERE task_id = 't1'")
+      .run();
     const r = await pump(w);
     expect(r.cards).toHaveLength(0);
     expect(w.turns).toHaveLength(1); // 一次都没多：一分钱不烧
@@ -462,7 +528,9 @@ describe("B. 不去碰已经有卡的任务", () => {
     // 【看见】自己改的是一条被钉住的行为，而不是顺手放宽一个筛选条件。
     const w = await world({});
     await pump(w);
-    w.db.prepare("UPDATE approvals SET status = 'rejected' WHERE task_id = 't1'").run();
+    w.db
+      .prepare("UPDATE approvals SET status = 'rejected' WHERE task_id = 't1'")
+      .run();
     const r = await pump(w);
     expect(r.cards).toHaveLength(0);
     expect(w.turns).toHaveLength(1);
@@ -482,7 +550,9 @@ describe("B. 不去碰已经有卡的任务", () => {
   it("ORDER BY created_at：最老的想法先补（不确定排序 + limit 会饿死后来的）", async () => {
     const w = await world({});
     // 时间【与 id 顺序相反】，否则这一发测的是插入顺序而不是排序。
-    w.db.prepare("UPDATE tasks SET created_at = ? WHERE id = 't1'").run(NOW + 30);
+    w.db
+      .prepare("UPDATE tasks SET created_at = ? WHERE id = 't1'")
+      .run(NOW + 30);
     addTasks(w.db, ["t2"], undefined, 20);
     addTasks(w.db, ["t3"], undefined, 10);
     expect(candidates(w, 3, 2)).toEqual(["t3", "t2"]);
@@ -593,19 +663,31 @@ describe("C. 「不再试了」这件事留得下痕", () => {
         if (id !== "t2") return;
         fired = true;
         w.db
-          .prepare("UPDATE approvals SET status = 'approved' WHERE task_id = 't1'")
+          .prepare(
+            "UPDATE approvals SET status = 'approved' WHERE task_id = 't1'",
+          )
           .run();
       },
     });
     // ── 前置：这一发必须真的走到了那一格 ────────────────────────────
     expect(fired, "起草 t2 的插入动作没触发 ⇒ 下面全是假绿").toBe(true);
     expect(
-      (w.db.prepare("SELECT status FROM approvals WHERE task_id = 't1'").get() as Row)["status"],
+      (
+        w.db
+          .prepare("SELECT status FROM approvals WHERE task_id = 't1'")
+          .get() as Row
+      )["status"],
       "t1 的卡在泵跑完时必须是【approved】—— 它不是 pending 才是这一发要的那一格",
     ).toBe("approved");
-    expect(attempts(w, "t1"), "attempts 没到上限 ⇒ 判放弃那一循环根本没看 t1").toBe(1);
+    expect(
+      attempts(w, "t1"),
+      "attempts 没到上限 ⇒ 判放弃那一循环根本没看 t1",
+    ).toBe(1);
     // ── 承重的那一条 ───────────────────────────────────────────────
-    expect(r.abandoned, "CEO 已批的任务【不是】「试到上限」—— 别给它写放弃行").toEqual([]);
+    expect(
+      r.abandoned,
+      "CEO 已批的任务【不是】「试到上限」—— 别给它写放弃行",
+    ).toEqual([]);
     expect(gaveUpRows(w)).toHaveLength(0);
   });
 
@@ -625,7 +707,13 @@ describe("C. 「不再试了」这件事留得下痕", () => {
     expect(r3.abandoned).toEqual([]);
     expect(w.turns).toHaveLength(2); // 第三轮一次都没起
     // 账仍然是真账：两次各 4 美分，落进 tasks.consumed_cents
-    expect(Number((w.db.prepare("SELECT consumed_cents FROM tasks").get() as Row)["consumed_cents"])).toBe(8);
+    expect(
+      Number(
+        (w.db.prepare("SELECT consumed_cents FROM tasks").get() as Row)[
+          "consumed_cents"
+        ],
+      ),
+    ).toBe(8);
   });
 });
 
@@ -636,7 +724,11 @@ describe("D. 那个表达式索引【还在被用上】", () => {
    */
   it("计数那条 SQL 的计划里有 idx_events_task_kind_created", async () => {
     const w = await world({});
-    const plan = (w.db.prepare("EXPLAIN QUERY PLAN " + CHARTER_ATTEMPTS_SQL).all("t1") as Row[])
+    const plan = (
+      w.db
+        .prepare("EXPLAIN QUERY PLAN " + CHARTER_ATTEMPTS_SQL)
+        .all("t1") as Row[]
+    )
       .map((r) => String(r["detail"]))
       .join("\n");
     expect(plan).toContain("idx_events_task_kind_created");
@@ -647,7 +739,9 @@ describe("D. 那个表达式索引【还在被用上】", () => {
     // 加不加别名都能匹配，所以索引计划那一发挡不住"有人把两处写法改散了"。
     // 这里钉的是【两处用的是同一个 kindOf】：都带 `p.` 前缀，且没有裸 payload 那一份。
     expect(CHARTER_CANDIDATES_SQL).toContain("json_valid(p.payload)");
-    expect(CHARTER_CANDIDATES_SQL).toContain("json_extract(p.payload, '$.kind')");
+    expect(CHARTER_CANDIDATES_SQL).toContain(
+      "json_extract(p.payload, '$.kind')",
+    );
     expect(CHARTER_ATTEMPTS_SQL).toContain("json_valid(p.payload)");
     expect(CHARTER_ATTEMPTS_SQL).not.toMatch(/json_valid\(payload\)/u);
     expect(CHARTER_CANDIDATES_SQL).not.toMatch(/json_valid\(e\.payload\)/u);
@@ -656,7 +750,11 @@ describe("D. 那个表达式索引【还在被用上】", () => {
   it("索引【真被删掉】时计划里没有那个名字（反向对照：上面那发不是恒绿）", async () => {
     const w = await world({});
     w.db.exec("DROP INDEX idx_events_task_kind_created");
-    const plan = (w.db.prepare("EXPLAIN QUERY PLAN " + CHARTER_ATTEMPTS_SQL).all("t1") as Row[])
+    const plan = (
+      w.db
+        .prepare("EXPLAIN QUERY PLAN " + CHARTER_ATTEMPTS_SQL)
+        .all("t1") as Row[]
+    )
       .map((r) => String(r["detail"]))
       .join("\n");
     expect(plan).not.toContain("idx_events_task_kind_created");
@@ -673,7 +771,13 @@ describe("E. 不牵连：一张坏了不影响同轮另外几张", () => {
       runTurn: async () => {
         n += 1;
         if (n === 1) throw new Error("子进程没起来");
-        return { ok: true, text: draftText(), costCents: 6, sessionId: null, error: null };
+        return {
+          ok: true,
+          text: draftText(),
+          costCents: 6,
+          sessionId: null,
+          error: null,
+        };
       },
       rolePrompt: (r) => "你是角色 " + r,
     });
@@ -703,7 +807,9 @@ describe("E. 不牵连：一张坏了不影响同轮另外几张", () => {
     // 组织图缺失是【配置问题】，重试一万次也不会好。把它计入上限，
     // 表现是"CEO 加了角色之后这条任务已经被告终"，而那件事没人能想到。
     const w = await world({});
-    w.db.prepare("UPDATE tasks SET assigned_role = 'ghost' WHERE id = 't1'").run();
+    w.db
+      .prepare("UPDATE tasks SET assigned_role = 'ghost' WHERE id = 't1'")
+      .run();
     let recorded = 0;
     const r = await pumpCharterCards(w.q, w.bus, {
       nowMs: NOW + 1000,
@@ -754,7 +860,13 @@ describe("E. 不牵连：一张坏了不影响同轮另外几张", () => {
               "VALUES ('a-race','t1','charter',?, '别人建的', '{}', '', '', 'escalate', 'pending', ?)",
           )
           .run(CHARTER_CARD_KEY, NOW);
-        return { ok: true, text: draftText(), costCents: 6, sessionId: null, error: null };
+        return {
+          ok: true,
+          text: draftText(),
+          costCents: 6,
+          sessionId: null,
+          error: null,
+        };
       },
       rolePrompt: (r) => "你是角色 " + r,
     });
@@ -774,7 +886,13 @@ describe("E. 不牵连：一张坏了不影响同轮另外几张", () => {
     // 只有一张卡：唯一索引挡住了第二张（0014 §3：那张错的卡片删不掉，所以只能挡住）
     expect(pendingCards(w, "t1")).toBe(1);
     // 钱【照记】：token 真花了（charter.ts 那两支都调 bill）
-    expect(Number((w.db.prepare("SELECT consumed_cents FROM tasks").get() as Row)["consumed_cents"])).toBe(6);
+    expect(
+      Number(
+        (w.db.prepare("SELECT consumed_cents FROM tasks").get() as Row)[
+          "consumed_cents"
+        ],
+      ),
+    ).toBe(6);
     // 而执行日志【不记】—— already_pending 有两支而返回值分不开（一支真起了子进程、
     // 一支没有），宁可少一行也不在执行日志里造出一笔说不清是否发生过的调用。
     expect(recorded).toBe(0);
@@ -786,7 +904,9 @@ describe("F. 广播与 seq", () => {
   it("起草成功那一轮：总线收到的与 events.id 逐条对齐，最大 seq 不落空", async () => {
     const w = await world({});
     await pump(w);
-    const ids = rows(w, "SELECT id FROM events ORDER BY id").map((x) => Number(x["id"]));
+    const ids = rows(w, "SELECT id FROM events ORDER BY id").map((x) =>
+      Number(x["id"]),
+    );
     const got = await drainedWithSeq(w);
     expect(got.map((g) => g.seq)).toEqual(ids);
     expect(w.bus.latestSeq()).toBe(ids[ids.length - 1]);
@@ -795,7 +915,9 @@ describe("F. 广播与 seq", () => {
   it("零花费的失败轮【也广播】（写了 events 就得发，0010 §4 那条 seq 空洞）", async () => {
     const w = await world({});
     await pump(w, { ok: false, maxAttempts: 3 });
-    const ids = rows(w, "SELECT id FROM events ORDER BY id").map((x) => Number(x["id"]));
+    const ids = rows(w, "SELECT id FROM events ORDER BY id").map((x) =>
+      Number(x["id"]),
+    );
     expect(ids).toHaveLength(1);
     expect((await drainedWithSeq(w)).map((g) => g.seq)).toEqual(ids);
   });
@@ -804,12 +926,22 @@ describe("F. 广播与 seq", () => {
 describe("G. 执行日志（recordTurn）", () => {
   it("跑了一轮 ⇒ 记一笔；没跑一轮 ⇒ 【不造】一笔", async () => {
     const w = await world({});
-    const seen: { taskId: string; ok: boolean; costCents: number; role: string }[] = [];
+    const seen: {
+      taskId: string;
+      ok: boolean;
+      costCents: number;
+      role: string;
+    }[] = [];
     const r = await pumpCharterCards(w.q, w.bus, {
       nowMs: NOW + 1000,
       cardDeps: fakeCardDeps(w),
       recordTurn: async (i) => {
-        seen.push({ taskId: i.taskId, ok: i.ok, costCents: i.costCents, role: i.role });
+        seen.push({
+          taskId: i.taskId,
+          ok: i.ok,
+          costCents: i.costCents,
+          role: i.role,
+        });
         return { recorded: true, why: "" };
       },
       maxBudgetUsd: 0.5,
@@ -817,7 +949,9 @@ describe("G. 执行日志（recordTurn）", () => {
       cwd: TMP,
       evidenceRoot: TMP + "/artifacts",
     });
-    expect(seen).toEqual([{ taskId: "t1", ok: true, costCents: 6, role: "intake" }]);
+    expect(seen).toEqual([
+      { taskId: "t1", ok: true, costCents: 6, role: "intake" },
+    ]);
     expect(r.turns).toEqual([{ taskId: "t1", recorded: true, why: "" }]);
 
     // 第二轮已有卡 ⇒ 一次都没跑 ⇒ 一条都不记。
@@ -827,7 +961,12 @@ describe("G. 执行日志（recordTurn）", () => {
       nowMs: NOW + 2000,
       cardDeps: fakeCardDeps(w),
       recordTurn: async () => {
-        seen.push({ taskId: "SHOULD-NOT-HAPPEN", ok: true, costCents: 0, role: "" });
+        seen.push({
+          taskId: "SHOULD-NOT-HAPPEN",
+          ok: true,
+          costCents: 0,
+          role: "",
+        });
         return { recorded: true, why: "" };
       },
       maxBudgetUsd: 0.5,
@@ -894,13 +1033,18 @@ describe("G. 执行日志（recordTurn）", () => {
  * 桩是 test/engine/fixtures/fake-claude.mjs（真可执行 + shebang，非 mock；
  * 它的存在理由与"为什么不能是 mock"写在那个文件头与 work.test.ts 里，不在这里重述）。
  * ────────────────────────────────────────────────────────────────────────── */
-const FAKE_CLI = fileURLToPath(new URL("../engine/fixtures/fake-claude.mjs", import.meta.url));
+const FAKE_CLI = fileURLToPath(
+  new URL("../engine/fixtures/fake-claude.mjs", import.meta.url),
+);
 
 /**
  * 跑一趟【不注入 cardDeps】的泵 —— 这一句就是这一组的全部意义。
  * A–G 用的是 pump()，那一格永远有假回调；这里刻意一格都不给。
  */
-async function pumpReal(w: World, o: { readonly maxAttempts?: number } = {}): Promise<PumpRoundResult> {
+async function pumpReal(
+  w: World,
+  o: { readonly maxAttempts?: number } = {},
+): Promise<PumpRoundResult> {
   return pumpCharterCards(w.q, w.bus, {
     nowMs: NOW + 1000,
     maxBudgetUsd: 0.5,
@@ -939,7 +1083,10 @@ describe("H. 默认那一支（makeRuntime + 真子进程 + 真执行日志）",
     expect(r.cards[0]?.outcome).toBe("drafted");
     expect(pendingCards(w, "t1")).toBe(1);
 
-    const card = rows(w, "SELECT summary, parameters FROM approvals WHERE task_id = 't1'")[0] as Row;
+    const card = rows(
+      w,
+      "SELECT summary, parameters FROM approvals WHERE task_id = 't1'",
+    )[0] as Row;
     // ⭐ 这一句是这一发的心脏，也是它不恒绿的全部理由：
     // "方案已成型，交技术总监审阅" 只存在于【那个 .mjs 文件里】。
     // 卡片上是这句话 ⇒ 起的一定是它 ⇒ o.bin 真的透到了 spawn(argv)。
@@ -950,11 +1097,15 @@ describe("H. 默认那一支（makeRuntime + 真子进程 + 真执行日志）",
     // ⚠ 断的是【解出 JSON 之后】的那一行，不是原始字符串里的 `"budget":"0.5"`：
     //   impact_scope 本身是被 JSON 转义过的，原始串里那个形状是 `\"budget\":\"0.5\"`，
     //   照着字面断会红在一个纯粹的转义上（第一次跑就是这么红的）。
-    const params = JSON.parse(String(card["parameters"])) as { impact_scope?: string };
+    const params = JSON.parse(String(card["parameters"])) as {
+      impact_scope?: string;
+    };
     expect(String(params["impact_scope"])).toContain('"budget":"0.5"');
 
     // 桩报 0.042 美元 = 4 美分。走的是真的 usdToCents 与真的 bill()。
-    const t = w.db.prepare("SELECT consumed_cents FROM tasks WHERE id = 't1'").get() as Row;
+    const t = w.db
+      .prepare("SELECT consumed_cents FROM tasks WHERE id = 't1'")
+      .get() as Row;
     expect(Number(t["consumed_cents"])).toBe(4);
 
     // ⭐ 执行日志那一行是【真 recordTurn】写的（默认那一支的 recordTurn 走 runtime）。
@@ -1024,8 +1175,13 @@ describe("H. 默认那一支（makeRuntime + 真子进程 + 真执行日志）",
     });
     expect(r.cards[0]?.outcome).toBe("drafted");
 
-    const card = rows(w, "SELECT parameters FROM approvals WHERE task_id = 't1'")[0] as Row;
-    const params = JSON.parse(String(card["parameters"])) as { impact_scope?: string };
+    const card = rows(
+      w,
+      "SELECT parameters FROM approvals WHERE task_id = 't1'",
+    )[0] as Row;
+    const params = JSON.parse(String(card["parameters"])) as {
+      impact_scope?: string;
+    };
     const scope = String(params["impact_scope"]);
     // realpath 而不是原样比：macOS 的 tmp 在 /tmp -> /private/tmp 那条软链下面，
     // 子进程的 process.cwd() 报的是【物理路径】。直接比会红在符号链接上而不是红在判据上。
@@ -1077,7 +1233,9 @@ describe("I. 花钱的门：到上限就不再为这条任务起子进程", () =
     // 反向对照：少一分钱就放行。少了这一句，"恰好相等"这一发与"门整个不在"不可区分。
     const w2 = await world({});
     budgetRow(w2, "t1", 100, 99);
-    expect((await pump(w2, { taskLimitCents: 100_000 })).cards[0]?.outcome).toBe("drafted");
+    expect(
+      (await pump(w2, { taskLimitCents: 100_000 })).cards[0]?.outcome,
+    ).toBe("drafted");
   });
 
   it("⭐ taskLimit=1 时门【还是门】：两个相邻的整数没被绑串", async () => {
@@ -1117,7 +1275,9 @@ describe("I. 花钱的门：到上限就不再为这条任务起子进程", () =
     // 反向对照：同一个库同一刻只把【列】抬到 200，CLI 一个字没动 ⇒ 放行。
     // 少了这一句，上面那发分不清是"列挡住了"还是"这一轮本来就没事做"。
     budgetRow(w, "t1", 200, 100);
-    expect((await pump(w, { taskLimitCents: 100_000 })).cards[0]?.outcome).toBe("drafted");
+    expect((await pump(w, { taskLimitCents: 100_000 })).cards[0]?.outcome).toBe(
+      "drafted",
+    );
   });
 
   it("⭐ 列比 CLI 大 ⇒ 追加预算【真的把门打开】（产品口径的那一格）", async () => {
@@ -1135,7 +1295,9 @@ describe("I. 花钱的门：到上限就不再为这条任务起子进程", () =
     // 花过钱的任务【一定】有行（runtime 的 onCost 先 ENSERT 再 ADD_CONSUMED），
     // 所以这一格保护的是新任务与手工建的那条。
     const w = await world({});
-    expect((await pump(w, { taskLimitCents: 100 })).cards[0]?.outcome).toBe("drafted");
+    expect((await pump(w, { taskLimitCents: 100 })).cards[0]?.outcome).toBe(
+      "drafted",
+    );
     // 反向对照：CLI 给 0 ⇒ 无行时照样全挡。回落值不是装饰，它能独立关门。
     const w2 = await world({});
     expect((await pump(w2, { taskLimitCents: 0 })).cards).toHaveLength(0);
@@ -1156,7 +1318,9 @@ describe("I. 花钱的门：到上限就不再为这条任务起子进程", () =
     // 生效值换成列之后它必须还成立，否则 PUT /budget 写 hard_stop=0 会静默失效。
     const w = await world({});
     budgetRow(w, "t1", 100, 500, 0);
-    expect((await pump(w, { taskLimitCents: 100 })).cards[0]?.outcome).toBe("drafted");
+    expect((await pump(w, { taskLimitCents: 100 })).cards[0]?.outcome).toBe(
+      "drafted",
+    );
   });
 
   it("⭐ 被挡住的那条【在 blocked 里】，而且【穿过候选为空的早退】", async () => {
@@ -1168,16 +1332,23 @@ describe("I. 花钱的门：到上限就不再为这条任务起子进程", () =
     spend(w, "t1", 150);
     const r = await pump(w, { taskLimitCents: 100 });
     expect(r.cards).toHaveLength(0); // 整轮无事可做 ⇒ 走的就是那条早退
-    expect(r.blocked).toEqual([{ taskId: "t1", title: "想法 t1", consumedCents: 150 }]);
+    expect(r.blocked).toEqual([
+      { taskId: "t1", title: "想法 t1", consumedCents: 150 },
+    ]);
   });
 
   it("⭐ blocked 数的正是【本来会成为候选而因为钱没成为候选】那批", async () => {
     // 三种"没被起草"必须【只有第三种】进 blocked，否则这句话会把人指向错的方向：
     //   已有卡的（那一格已经有东西在回答）、状态不对的（不归泵管）、超限的（这才是要说的）。
-    const w = await world({ tasks: ["t1", "t2", "t3", "t4"], status: "CHARTER_PENDING" });
+    const w = await world({
+      tasks: ["t1", "t2", "t3", "t4"],
+      status: "CHARTER_PENDING",
+    });
     spend(w, "t1", 150); // 超限 ⇒ 该进 blocked
     await addCharterCard(w, "t2"); // 已有卡 ⇒ 不该进
-    w.db.prepare("UPDATE tasks SET status = 'IN_PROGRESS' WHERE id = 't3'").run(); // 不归泵管 ⇒ 不该进
+    w.db
+      .prepare("UPDATE tasks SET status = 'IN_PROGRESS' WHERE id = 't3'")
+      .run(); // 不归泵管 ⇒ 不该进
     // t4 什么都没做 ⇒ 它是正常候选，会被起草，也不该在 blocked 里
     const r = await pump(w, { taskLimitCents: 100 });
     expect(r.blocked.map((b) => b.taskId)).toEqual(["t1"]);
@@ -1188,7 +1359,9 @@ describe("I. 花钱的门：到上限就不再为这条任务起子进程", () =
     expect(CHARTER_CANDIDATES_SQL).toContain(underTaskBudgetSql("t"));
     // 再问一次【还是它】：这一格要说的是"这句话每轮都在"，而不是"说过一次就销案"。
     // （assemble 那一侧的去重是【终端】的去重，不是【事实】的销案 —— 见 pumpBudgetWarned。）
-    expect((blockedRows(w, 100) as Row[]).map((b) => String(b["id"]))).toEqual(["t1"]);
+    expect((blockedRows(w, 100) as Row[]).map((b) => String(b["id"]))).toEqual([
+      "t1",
+    ]);
   });
 
   it("没花钱过的任务【不受门影响】（门不在时也要放行 ⇒ 反向对照）", async () => {
@@ -1208,7 +1381,9 @@ describe("I. 花钱的门：到上限就不再为这条任务起子进程", () =
  * 照 decision-engine-route.test.ts 那个 feed 的形状：先取 latestSeq 再 subscribe(0)，
  * 迭代【 owed 次】后 close。迭代到 done 会挂着不走（异步可迭代对象在空队列上不结束）。
  */
-async function drainedWithSeq(w: World): Promise<{ kind: string; seq: number }[]> {
+async function drainedWithSeq(
+  w: World,
+): Promise<{ kind: string; seq: number }[]> {
   const owed = w.bus.latestSeq();
   const sub = w.bus.subscribe(0);
   const it = sub[Symbol.asyncIterator]();

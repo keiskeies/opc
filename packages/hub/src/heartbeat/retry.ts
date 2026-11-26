@@ -73,7 +73,9 @@ export const RETRYABLE_KINDS: readonly FailureKind[] = Object.freeze([
  * 认不出来就叫人，叫人永远是安全的。
  */
 export const NON_RETRYABLE_KINDS: readonly FailureKind[] = Object.freeze(
-  FAILURE_KINDS.filter((k) => !(RETRYABLE_KINDS as readonly string[]).includes(k)),
+  FAILURE_KINDS.filter(
+    (k) => !(RETRYABLE_KINDS as readonly string[]).includes(k),
+  ),
 );
 
 /**
@@ -111,8 +113,10 @@ function declaredKind(e: unknown): FailureKind | undefined {
   // 而它不在上面七个词里 —— 与其让调用方再翻译一遍（翻译表就是第二份判据），
   // 不如在这里认一次，并且【只认这三个】。
   const marker = typeof bag["code"] === "string" ? bag["code"] : "";
-  if (marker === "BUDGET_PAUSED" || marker === "BUDGET_EXHAUSTED") return "budget_exhausted";
-  if (marker === "UNAUTHORIZED" || marker === "POLICY_DENIED") return "policy_denied";
+  if (marker === "BUDGET_PAUSED" || marker === "BUDGET_EXHAUSTED")
+    return "budget_exhausted";
+  if (marker === "UNAUTHORIZED" || marker === "POLICY_DENIED")
+    return "policy_denied";
   if (marker === "ILLEGAL_TRANSITION") return "invariant_broken";
   return undefined;
 }
@@ -173,7 +177,11 @@ export function backoffMs(
 }
 
 export type RetryDecision =
-  | { readonly action: "retry"; readonly retryNo: number; readonly delayMs: number }
+  | {
+      readonly action: "retry";
+      readonly retryNo: number;
+      readonly delayMs: number;
+    }
   | { readonly action: "escalate"; readonly reason: string };
 
 /**
@@ -189,7 +197,9 @@ export function decideRetry(
   o: { baseMs?: number; capMs?: number; jitter?: (ms: number) => number } = {},
 ): RetryDecision {
   if (!Number.isInteger(attemptsSoFar) || attemptsSoFar < 1) {
-    throw new Error("attemptsSoFar 必须是 ≥1 的整数，收到 " + String(attemptsSoFar));
+    throw new Error(
+      "attemptsSoFar 必须是 ≥1 的整数，收到 " + String(attemptsSoFar),
+    );
   }
   if (!(RETRYABLE_KINDS as readonly string[]).includes(kind)) {
     return {
@@ -228,8 +238,16 @@ export interface RetryRunOptions {
   /** 注入的睡眠。生产传 setTimeout 包装；测试记时长而不真等。 */
   readonly sleep: (ms: number) => Promise<void>;
   /** 每次重试前回调：这是「第 N 次尝试」唯一的可见出口。 */
-  readonly onRetry?: (d: { retryNo: number; delayMs: number; error: unknown }) => void;
-  readonly backoff?: { baseMs?: number; capMs?: number; jitter?: (ms: number) => number };
+  readonly onRetry?: (d: {
+    retryNo: number;
+    delayMs: number;
+    error: unknown;
+  }) => void;
+  readonly backoff?: {
+    baseMs?: number;
+    capMs?: number;
+    jitter?: (ms: number) => number;
+  };
   /** 每【次】执行都回调一次（含首次）。用来写审计。 */
   readonly onAttempt?: (a: { attempt: number; error: unknown }) => void;
 }
@@ -265,7 +283,12 @@ export async function withRetry<T>(
       if (d.action === "escalate") {
         return {
           ok: false,
-          gaveUp: { kind: o.kind, attempts: attempt, reason: d.reason, lastError: e },
+          gaveUp: {
+            kind: o.kind,
+            attempts: attempt,
+            reason: d.reason,
+            lastError: e,
+          },
         };
       }
       o.onRetry?.({ retryNo: d.retryNo, delayMs: d.delayMs, error: e });

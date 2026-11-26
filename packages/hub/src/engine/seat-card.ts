@@ -43,16 +43,17 @@
  * 而 CEO 会看到两条"批准章程"（重复比缺失吵，但这里更坏：点了其中一张，
  * 另一张永远点不动，因为任务已经不在那一格了）。
  */
-import type { TaskState } from "../graph/status.js";
-import { appendAudit, KIND_TO_ACTION } from "../events/recorder.js";
-import { currentScope } from "../checkpoint/tx-scope.js";
+
+import type { EscalationReason } from "@opc/contracts";
 import {
+  type ApprovalRequiredEvent,
   approvalRequiredEvent,
   insertCard,
-  type ApprovalRequiredEvent,
   type NewCardDraft,
 } from "../approvals/cards.js";
-import type { EscalationReason } from "@opc/contracts";
+import { currentScope } from "../checkpoint/tx-scope.js";
+import { appendAudit, KIND_TO_ACTION } from "../events/recorder.js";
+import type { TaskState } from "../graph/status.js";
 import { CHARTER_CARD_KEY } from "./charter.js";
 import { HUMAN_EDGES } from "./dispatch.js";
 
@@ -111,7 +112,10 @@ export function seatCardKey(status: TaskState, arrivalSeq: number): string {
  * CHARTER_PENDING 那一格认的是 charter.ts 的键：那张卡的生产者是它而不是本模块
  * （见 needsSeatCard 的排除），所以"它自己的入口卡"由它自己定义。
  */
-export function isSeatOwnCard(status: TaskState, cardKey: string | null): boolean {
+export function isSeatOwnCard(
+  status: TaskState,
+  cardKey: string | null,
+): boolean {
   if (cardKey === null) return false;
   if (status === "CHARTER_PENDING") return cardKey === CHARTER_CARD_KEY;
   return cardKey.startsWith(SEAT_CARD_KEY_PREFIX + ":" + status + ":");
@@ -137,11 +141,12 @@ export interface PendingCardLite {
  *   同一格真有多张自己的卡时，它们【都】能推进这一格，那是对的 ——
  *   它们问的是同一格的决定，而认领那一步的 `WHERE status='pending'` 保证只有第一次算数。
  */
-export function ownCardsOf(status: TaskState, pending: readonly PendingCardLite[]): PendingCardLite[] {
+export function ownCardsOf(
+  status: TaskState,
+  pending: readonly PendingCardLite[],
+): PendingCardLite[] {
   return pending.filter((c) => isSeatOwnCard(status, c.cardKey));
 }
-
-
 
 /**
  * 「为什么升上来」的枚举值。
@@ -222,7 +227,6 @@ export function mintSeatCard(
     );
   }
   if (!needsSeatCard(o.status)) {
-
     return {
       event: null,
       seq: null,
@@ -257,10 +261,18 @@ export function mintSeatCard(
       event: null,
       seq: null,
       created: false,
-      note: "卡片没建：这一次到达的键（" + String(draft.cardKey) + "）已经有一张卡了。",
+      note:
+        "卡片没建：这一次到达的键（" +
+        String(draft.cardKey) +
+        "）已经有一张卡了。",
     };
   }
-  const evt = approvalRequiredEvent(o.taskId, res.approvalId, draft, draft.approvalType);
+  const evt = approvalRequiredEvent(
+    o.taskId,
+    res.approvalId,
+    draft,
+    draft.approvalType,
+  );
   const seq = appendAudit(
     db,
     {

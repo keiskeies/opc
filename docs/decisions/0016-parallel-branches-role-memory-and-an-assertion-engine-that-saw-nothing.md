@@ -36,13 +36,13 @@ Task 3.7。计划那行给的 Files 是 `src/graph/branches.ts`、`src/memory/ro
    「策略引擎有调用方」是它其实没有，是同一件事：**规格的宾语不存在**。
    处置沿用 0014 §3：不硬造生产者（脏了的审计库删不掉），改成**读取口 + 把「空」报成数据**，
    并把这条空**钉成断言**（`role-memory.test.ts` ③ 节：跑完全部迁移的库里
-   `has_review_decisions === false`，见 `packages/hub/src/memory/role-memory.ts:835`）。
+   `has_review_decisions === false`，见 `packages/hub/src/memory/role-memory.ts:860`）。
    哪天有人接上写入方，那一发会红。
 2. **唯一有生产写入方的「角色决定」是 CEO 那一条。**
    `packages/hub/src/http/real-deps.ts:300` 写 `action: "approval"`，
    `payload = {approvalId, resume}`（决定本身）、`state_snapshot = {note}`（理由）。
    ⚠ **0043 之后这一格的落点分成了两处，而本篇那一处不再是默认那一条**：
-   默认装配（没交图工厂）走 `packages/hub/src/engine/approve.ts:408`，写的**是同一个 `action` 值**
+   默认装配（没交图工厂）走 `packages/hub/src/engine/approve.ts:437`，写的**是同一个 `action` 值**
    （从 `KIND_TO_ACTION.ApprovalDecided` 取，`packages/hub/src/events/recorder.ts:38` ⇒ `"approval"`），
    `real-deps.ts` 那条 `applyDecision` 只在**显式交了图工厂**时才被走到。
    所以「只有 CEO 那一格今天真有数据」这句话**照旧成立**，但今天再读它要读两处，
@@ -208,7 +208,7 @@ expect(new Set(viaAppend)).toEqual(new Set(["p,o,t"]));
 一条 **CEO 在 dev 的任务上做的战略决定**，会带着 `scope = "work"` 进 dev 的自读结果。
 因为那一行的 `actor_id` 是 `ceo`，而桶的 owner 是 `dev`。
 
-修法：判据下沉到**行级** —— 见 `packages/hub/src/memory/role-memory.ts:619`：
+修法：判据下沉到**行级** —— 见 `packages/hub/src/memory/role-memory.ts:633`：
 
 ```ts
 const strategic =
@@ -227,7 +227,7 @@ const strategic =
 **自读根本不经过它**，所以 dev 自读照样把 strategic 行放过去。
 也就是说 4a 那个修法只修了「别人来读」那一路，而漏洞真正在「自己读自己」那一路。
 
-修法：**两道互相独立的闸门**（`packages/hub/src/memory/role-memory.ts:735`）：
+修法：**两道互相独立的闸门**（`packages/hub/src/memory/role-memory.ts:756`）：
 
 ```ts
 const ceoReadingOwn =

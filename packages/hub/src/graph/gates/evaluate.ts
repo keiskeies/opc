@@ -18,10 +18,7 @@
  */
 
 import type { Charter, EvidenceBundle } from "@opc/contracts";
-import {
-  HANDOFF_BUNDLE_TYPES,
-  unresolvableClaimIndexes,
-} from "@opc/contracts";
+import { HANDOFF_BUNDLE_TYPES, unresolvableClaimIndexes } from "@opc/contracts";
 
 /** 判定入参里的产出方信息。modelFamily 在【家族】粒度上比，见 evidence.ts 的注释。 */
 export interface ProducerInfo {
@@ -366,9 +363,7 @@ export function evaluateGate(input: GateInput): GateVerdict {
  * 岗位书 → 门控标准。放在这里而不是 loader 里，因为它是【门控的输入适配】，
  * 不是岗位书的校验规则（校验规则的唯一定义在 @opc/contracts）。
  */
-export function criteriaFromCharter(
-  charter: Charter,
-): GateCriterion[] {
+export function criteriaFromCharter(charter: Charter): GateCriterion[] {
   return charter.acceptanceCriteria.map((a) => ({
     condition: a.condition,
     action: a.action,

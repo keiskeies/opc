@@ -79,8 +79,12 @@
 
 import { randomUUID } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
-import { assertParamCount, assertSingleStatement, type Writer } from "../db/write-queue.js";
 import { requireScopeDb } from "../checkpoint/tx-scope.js";
+import {
+  assertParamCount,
+  assertSingleStatement,
+  type Writer,
+} from "../db/write-queue.js";
 
 /**
  * 允许绑定的平台。**这张表白名单严格小于 `ChannelPlatform`（4 个值）是刻意的**：
@@ -205,7 +209,9 @@ export const SELECT_VERIFIED_BINDING_SQL =
 
 /** 判定用：把「有行但没验过」与「压根没这行」分开（两种情形界面上说两句话）。 */
 export const SELECT_BINDING_BY_IDENTITY_SQL =
-  "SELECT " + BINDING_COLUMNS + " FROM im_bindings WHERE platform = ? AND external_user_id = ?";
+  "SELECT " +
+  BINDING_COLUMNS +
+  " FROM im_bindings WHERE platform = ? AND external_user_id = ?";
 
 /** 列表（给界面看「谁申请了什么、谁验过」）。已验证的排前面，其余按申请时间。 */
 export const SELECT_BINDINGS_SQL =
@@ -228,10 +234,16 @@ export type RequestBindingResult =
   | { readonly kind: "requested"; readonly id: string; readonly role: string }
   /** 已经有一行了（可能待校验，也可能已校验）。不覆盖它 —— 见下面那段。 */
   | { readonly kind: "already_bound" }
-  | { readonly kind: "rejected_platform"; readonly reason: "empty" | "unknown_platform" | "test_channel" }
+  | {
+      readonly kind: "rejected_platform";
+      readonly reason: "empty" | "unknown_platform" | "test_channel";
+    }
   /** 角色不在注入的那份集合里（不注入 = 不判，见文件头）。 */
   | { readonly kind: "unknown_role"; readonly role: string }
-  | { readonly kind: "invalid_input"; readonly field: "role" | "external_user_id" };
+  | {
+      readonly kind: "invalid_input";
+      readonly field: "role" | "external_user_id";
+    };
 
 export type MarkVerifiedResult =
   | { readonly kind: "verified"; readonly verifiedAtMs: number }
@@ -242,14 +254,23 @@ export type MarkVerifiedResult =
       readonly kind: "invalid_input";
       readonly field: "verified_by" | "external_user_id";
     }
-  | { readonly kind: "rejected_platform"; readonly reason: "empty" | "unknown_platform" | "test_channel" };
+  | {
+      readonly kind: "rejected_platform";
+      readonly reason: "empty" | "unknown_platform" | "test_channel";
+    };
 
 export type RebindResult =
   | { readonly kind: "rebound"; readonly role: string }
   | { readonly kind: "not_found" }
   | { readonly kind: "unknown_role"; readonly role: string }
-  | { readonly kind: "invalid_input"; readonly field: "role" | "external_user_id" }
-  | { readonly kind: "rejected_platform"; readonly reason: "empty" | "unknown_platform" | "test_channel" };
+  | {
+      readonly kind: "invalid_input";
+      readonly field: "role" | "external_user_id";
+    }
+  | {
+      readonly kind: "rejected_platform";
+      readonly reason: "empty" | "unknown_platform" | "test_channel";
+    };
 
 /** 读侧判决：null 之外还要交出**为什么**，因为界面上那是三句不同的话。 */
 export type ResolveResult =
@@ -257,7 +278,10 @@ export type ResolveResult =
   | { readonly kind: "unbound" }
   /** 有人申请过但还没人校验。**这句必须能说出来**：否则人只会反复申请。 */
   | { readonly kind: "pending_verification"; readonly role: string }
-  | { readonly kind: "rejected_platform"; readonly reason: "empty" | "unknown_platform" | "test_channel" }
+  | {
+      readonly kind: "rejected_platform";
+      readonly reason: "empty" | "unknown_platform" | "test_channel";
+    }
   /** 角色不在注入的那份集合里（注入过才可能走到这一支）。 */
   | { readonly kind: "unknown_role"; readonly role: string };
 
@@ -281,7 +305,10 @@ function invalidText(raw: string): boolean {
   return raw.trim() === "";
 }
 
-function knownRole(role: string, knownRoles: ReadonlySet<string> | undefined): boolean {
+function knownRole(
+  role: string,
+  knownRoles: ReadonlySet<string> | undefined,
+): boolean {
   return knownRoles === undefined || knownRoles.has(role);
 }
 
@@ -345,12 +372,15 @@ export async function requestBinding(
 ): Promise<RequestBindingResult> {
   const p = normalizePlatform(o.platform);
   if (!p.ok) return { kind: "rejected_platform", reason: p.reason };
-  if (invalidText(o.externalUserId)) return { kind: "invalid_input", field: "external_user_id" };
+  if (invalidText(o.externalUserId))
+    return { kind: "invalid_input", field: "external_user_id" };
   if (invalidText(o.role)) return { kind: "invalid_input", field: "role" };
   const role = o.role.trim();
   if (!knownRole(role, o.knownRoles)) return { kind: "unknown_role", role };
   if (!Number.isFinite(o.nowMs)) {
-    throw new Error("requestBinding: nowMs 必须是有限数，实到 " + String(o.nowMs));
+    throw new Error(
+      "requestBinding: nowMs 必须是有限数，实到 " + String(o.nowMs),
+    );
   }
   const id = (o.newId ?? randomUUID)();
   const params = [id, p.platform, o.externalUserId, role, o.nowMs];
@@ -410,10 +440,14 @@ export async function markVerified(
 ): Promise<MarkVerifiedResult> {
   const p = normalizePlatform(o.platform);
   if (!p.ok) return { kind: "rejected_platform", reason: p.reason };
-  if (invalidText(o.verifiedBy)) return { kind: "invalid_input", field: "verified_by" };
-  if (invalidText(o.externalUserId)) return { kind: "invalid_input", field: "external_user_id" };
+  if (invalidText(o.verifiedBy))
+    return { kind: "invalid_input", field: "verified_by" };
+  if (invalidText(o.externalUserId))
+    return { kind: "invalid_input", field: "external_user_id" };
   if (!Number.isFinite(o.nowMs)) {
-    throw new Error("markVerified: nowMs 必须是有限数，实到 " + String(o.nowMs));
+    throw new Error(
+      "markVerified: nowMs 必须是有限数，实到 " + String(o.nowMs),
+    );
   }
   const by = o.verifiedBy.trim();
   const params = [o.nowMs, by, p.platform, o.externalUserId];
@@ -422,7 +456,8 @@ export async function markVerified(
     assertSingleStatement(MARK_VERIFIED_SQL);
     assertParamCount(MARK_VERIFIED_SQL, params);
     const info = db.prepare(MARK_VERIFIED_SQL).run(...(params as never[]));
-    if (Number(info.changes) === 1) return { kind: "verified", verifiedAtMs: o.nowMs };
+    if (Number(info.changes) === 1)
+      return { kind: "verified", verifiedAtMs: o.nowMs };
     // changes === 0 有两种，分开报（0026 那条「两种『拿不到』必须分开」同族）。
     const row = db
       .prepare(SELECT_BINDING_BY_IDENTITY_SQL)
@@ -451,7 +486,8 @@ export async function rebindRole(
 ): Promise<RebindResult> {
   const p = normalizePlatform(o.platform);
   if (!p.ok) return { kind: "rejected_platform", reason: p.reason };
-  if (invalidText(o.externalUserId)) return { kind: "invalid_input", field: "external_user_id" };
+  if (invalidText(o.externalUserId))
+    return { kind: "invalid_input", field: "external_user_id" };
   if (invalidText(o.role)) return { kind: "invalid_input", field: "role" };
   const role = o.role.trim();
   if (!knownRole(role, o.knownRoles)) return { kind: "unknown_role", role };
@@ -548,7 +584,8 @@ export function resolveBinding(
   if (hit !== undefined) {
     const b = toBinding(hit);
     if (b === null) return { kind: "unbound" };
-    if (!knownRole(b.role, o.knownRoles)) return { kind: "unknown_role", role: b.role };
+    if (!knownRole(b.role, o.knownRoles))
+      return { kind: "unknown_role", role: b.role };
     return { kind: "resolved", binding: b };
   }
   // 没查到已验证的 ⇒ 再问一次「有没有待校验的」。
@@ -601,7 +638,11 @@ export function makeChannelActorResolver(
   return (actor) => {
     const platform = o.platformOfChannel(actor.channelId);
     if (platform === null) return null;
-    const r = resolveBinding(db, { platform, externalUserId: actor.senderId, ...(o.knownRoles === undefined ? {} : { knownRoles: o.knownRoles }) });
+    const r = resolveBinding(db, {
+      platform,
+      externalUserId: actor.senderId,
+      ...(o.knownRoles === undefined ? {} : { knownRoles: o.knownRoles }),
+    });
     o.onResolve?.(actor.senderId, r);
     return r.kind === "resolved"
       ? { senderId: actor.senderId, channelId: actor.channelId }
@@ -625,4 +666,3 @@ export function listBindings(
   }
   return out;
 }
-

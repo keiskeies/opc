@@ -139,14 +139,18 @@ export class BudgetTracker {
     this.#db.prepare(sql).run(...(params as never[]));
   }
 
-  limitCents(scope: BudgetScope, scopeId: string, period: BudgetPeriod): number {
+  limitCents(
+    scope: BudgetScope,
+    scopeId: string,
+    period: BudgetPeriod,
+  ): number {
     const sql = SELECT_LIMIT_SQL;
     assertSingleStatement(sql);
     const params = [scope, scopeId, period];
     assertParamCount(sql, params);
-    const row = this.#db
-      .prepare(sql)
-      .get(...(params as never[])) as { limit_cents: number } | undefined;
+    const row = this.#db.prepare(sql).get(...(params as never[])) as
+      | { limit_cents: number }
+      | undefined;
     if (row === undefined) {
       throw new Error(
         "作用域 [" +
@@ -268,9 +272,9 @@ export class BudgetTracker {
     assertSingleStatement(sql);
     const params = [i.scope, i.scopeId, i.period];
     assertParamCount(sql, params);
-    const row = this.#db
-      .prepare(sql)
-      .get(...(params as never[])) as { consumed_cents: number | null } | undefined;
+    const row = this.#db.prepare(sql).get(...(params as never[])) as
+      | { consumed_cents: number | null }
+      | undefined;
     if (row === undefined) {
       throw new Error(
         "作用域 [" +
@@ -286,7 +290,6 @@ export class BudgetTracker {
     // 但 DEFAULT 只在 INSERT 未列该列时生效，显式 INSERT NULL 会存进 NULL。
     return row.consumed_cents ?? 0;
   }
-
 }
 
 /**

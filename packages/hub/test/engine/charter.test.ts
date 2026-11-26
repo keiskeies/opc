@@ -26,20 +26,19 @@
  */
 import { mkdirSync, rmSync } from "node:fs";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-
-import { fixtureTmp } from "../fixtures/fixture-dir.js";
 import { migrate } from "../../src/db/migrate.js";
-import { INSERT_DELEGATION_GRAPH_SQL } from "../../src/org/commit.js";
-import { InMemoryEventBus } from "../../src/events/bus.js";
-import { KIND_TO_ACTION } from "../../src/events/recorder.js";
-import { DECISION_MARK } from "../../src/engine/claude.js";
+import type { HubWriter } from "../../src/db/write-queue.js";
 import {
-  CHARTER_CARD_KEY,
   buildCharterDraftPrompt,
+  CHARTER_CARD_KEY,
   ensureCharterCard,
   parseCharterDraft,
 } from "../../src/engine/charter.js";
-import type { HubWriter } from "../../src/db/write-queue.js";
+import { DECISION_MARK } from "../../src/engine/claude.js";
+import { InMemoryEventBus } from "../../src/events/bus.js";
+import { KIND_TO_ACTION } from "../../src/events/recorder.js";
+import { INSERT_DELEGATION_GRAPH_SQL } from "../../src/org/commit.js";
+import { fixtureTmp } from "../fixtures/fixture-dir.js";
 
 const TMP = fixtureTmp("engine-charter", import.meta.url);
 const NOW = 1_700_000_000_000;
@@ -76,7 +75,9 @@ afterAll(async () => {
 });
 
 /** 一段「模型正常交出提案」的输出。末尾那份结构化决策是 parseDecision 认的形状。 */
-function draftText(body = "业务目标：做个 AI 笔记应用\n可量化验收标准：三条\n预算上限：200 美元"): string {
+function draftText(
+  body = "业务目标：做个 AI 笔记应用\n可量化验收标准：三条\n预算上限：200 美元",
+): string {
   return (
     body +
     "\n\n" +
@@ -101,22 +102,40 @@ async function world(o: {
   readonly graphVersion?: number;
 }): Promise<World> {
   const { WriteQueue } = await import("../../src/db/write-queue.js");
-  const q = new WriteQueue(TMP + "/c-" + process.pid + "-" + ++fileSeq + ".db") as unknown as Queue;
+  const q = new WriteQueue(
+    TMP + "/c-" + process.pid + "-" + ++fileSeq + ".db",
+  ) as unknown as Queue;
   queues.push(q);
   const db = q.writeConnection();
   migrate(db as unknown as Parameters<typeof migrate>[0]);
   db.prepare(
     "INSERT INTO tasks (id, title, status, assigned_role, current_node, created_at, updated_at, graph_version) " +
       "VALUES ('t1','做个 AI 笔记应用', ?, ?, 'intake', ?, ?, ?)",
-  ).run(o.status ?? "CHARTER_PENDING", o.role ?? "intake", NOW, NOW, o.graphVersion ?? 1);
+  ).run(
+    o.status ?? "CHARTER_PENDING",
+    o.role ?? "intake",
+    NOW,
+    NOW,
+    o.graphVersion ?? 1,
+  );
   if (o.writeGraph !== false) {
     db.prepare(INSERT_DELEGATION_GRAPH_SQL).run(
       "g1",
       1,
       JSON.stringify({
         nodes: {
-          ceo: { role_id: "ceo", can_manage: true, reports_to: null, model_family: "opus" },
-          intake: { role_id: "intake", can_manage: true, reports_to: "ceo", model_family: "sonnet" },
+          ceo: {
+            role_id: "ceo",
+            can_manage: true,
+            reports_to: null,
+            model_family: "opus",
+          },
+          intake: {
+            role_id: "intake",
+            can_manage: true,
+            reports_to: "ceo",
+            model_family: "sonnet",
+          },
         },
         edges: [],
       }),
@@ -137,7 +156,12 @@ async function world(o: {
  */
 async function draft(
   w: World,
-  o: { readonly text?: string; readonly ok?: boolean; readonly costCents?: number; readonly error?: string } = {},
+  o: {
+    readonly text?: string;
+    readonly ok?: boolean;
+    readonly costCents?: number;
+    readonly error?: string;
+  } = {},
 ): Promise<{
   outcome: string;
   note: string;
@@ -180,7 +204,12 @@ async function draft(
       },
     },
   );
-  return { outcome: res.outcome, note: res.note, costCents: res.costCents, calls };
+  return {
+    outcome: res.outcome,
+    note: res.note,
+    costCents: res.costCents,
+    calls,
+  };
 }
 
 function task(w: World): Row {
@@ -196,8 +225,14 @@ describe("起草那一轮【不推进状态】：agent 只起草，CEO 才签", 
     expect(r.outcome).toBe("drafted");
     expect(String(task(w)["status"])).toBe("CHARTER_PENDING");
     // 也没有多写一条状态变化审计：有的只是「跑了一轮」+「有件事要批」
-    const actions = w.db.prepare("SELECT action FROM events ORDER BY id").all().map((x) => String(x["action"]));
-    expect(actions).toEqual([KIND_TO_ACTION.RoleTurnReported, KIND_TO_ACTION.ApprovalRequired]);
+    const actions = w.db
+      .prepare("SELECT action FROM events ORDER BY id")
+      .all()
+      .map((x) => String(x["action"]));
+    expect(actions).toEqual([
+      KIND_TO_ACTION.RoleTurnReported,
+      KIND_TO_ACTION.ApprovalRequired,
+    ]);
     expect(actions).not.toContain("state_change");
   });
 
@@ -221,7 +256,9 @@ describe("起草那一轮【不推进状态】：agent 只起草，CEO 才签", 
     // 断在这里而不是去 approvals 找一个不存在的列：这一格读错地方，
     // 下一条用例（「指针解得开」）就无从谈起。
     const card = w.db
-      .prepare("SELECT payload FROM events WHERE action = ? ORDER BY id DESC LIMIT 1")
+      .prepare(
+        "SELECT payload FROM events WHERE action = ? ORDER BY id DESC LIMIT 1",
+      )
       .get(KIND_TO_ACTION.ApprovalRequired) as Row | undefined;
     const cp = JSON.parse(String(card?.["payload"])) as Record<string, unknown>;
     const refs = cp["evidence_refs"] as string[];
@@ -233,15 +270,22 @@ describe("起草那一轮【不推进状态】：agent 只起草，CEO 才签", 
     const w = await world({});
     await draft(w);
     const card = w.db
-      .prepare("SELECT payload FROM events WHERE action = ? ORDER BY id DESC LIMIT 1")
+      .prepare(
+        "SELECT payload FROM events WHERE action = ? ORDER BY id DESC LIMIT 1",
+      )
       .get(KIND_TO_ACTION.ApprovalRequired) as Row | undefined;
     const cp = JSON.parse(String(card?.["payload"])) as Record<string, unknown>;
     const ref = String((cp["evidence_refs"] as string[])[0] ?? "");
     const m = /^events:(\d+)#/u.exec(ref);
     expect(m).not.toBeNull();
-    const row = w.db.prepare("SELECT state_snapshot FROM events WHERE id = ?").get(Number(m?.[1]));
+    const row = w.db
+      .prepare("SELECT state_snapshot FROM events WHERE id = ?")
+      .get(Number(m?.[1]));
     expect(row).toBeDefined();
-    const snap = JSON.parse(String(row?.["state_snapshot"])) as Record<string, unknown>;
+    const snap = JSON.parse(String(row?.["state_snapshot"])) as Record<
+      string,
+      unknown
+    >;
     expect(String(snap["draft"])).toContain("业务目标：做个 AI 笔记应用");
   });
 });
@@ -256,9 +300,13 @@ describe("去重：不为一张已存在的卡再烧一次 token", () => {
     expect(b.outcome).toBe("already_pending");
     // 这是这一发的核心断言：唯一索引只挡【第二张卡】，挡不住【第二次烧钱】。
     expect(b.calls.n).toBe(0);
-    expect(w.db.prepare("SELECT count(*) AS c FROM approvals").get()?.["c"]).toBe(1);
+    expect(
+      w.db.prepare("SELECT count(*) AS c FROM approvals").get()?.["c"],
+    ).toBe(1);
     // 第二次连一条事件都没写 ⇒ 收件箱角标不会 +2
-    expect(w.db.prepare("SELECT count(*) AS c FROM events").get()?.["c"]).toBe(2);
+    expect(w.db.prepare("SELECT count(*) AS c FROM events").get()?.["c"]).toBe(
+      2,
+    );
   });
 });
 
@@ -268,7 +316,9 @@ describe("前置不满足时【一个 token 都不烧】", () => {
     const r = await draft(w);
     expect(r.outcome).toBe("not_charter_pending");
     expect(r.calls.n).toBe(0);
-    expect(w.db.prepare("SELECT count(*) AS c FROM approvals").get()?.["c"]).toBe(0);
+    expect(
+      w.db.prepare("SELECT count(*) AS c FROM approvals").get()?.["c"],
+    ).toBe(0);
   });
 
   it("任务不存在 ⇒ task_missing，不起角色", async () => {
@@ -302,15 +352,24 @@ describe("那一轮没交出提案：钱照记，【卡不建】", () => {
     const w = await world({});
     const r = await draft(w, { text: "我觉得这个想法挺好的，可以再聊聊。" });
     expect(r.outcome).toBe("no_draft");
-    expect(w.db.prepare("SELECT count(*) AS c FROM approvals").get()?.["c"]).toBe(0);
+    expect(
+      w.db.prepare("SELECT count(*) AS c FROM approvals").get()?.["c"],
+    ).toBe(0);
     // 真花了钱 ⇒ 必须落账。「卡没建就当没发生」会让账面比实际乐观
     expect(r.costCents).toBe(6);
-    expect(w.db.prepare("SELECT amount_cents FROM budget_events").get()?.["amount_cents"]).toBe(6);
+    expect(
+      w.db.prepare("SELECT amount_cents FROM budget_events").get()?.[
+        "amount_cents"
+      ],
+    ).toBe(6);
     expect(Number(task(w)["consumed_cents"])).toBe(6);
     // 而且审计里有这一轮（回放要答得出「这段时间花了钱而任务没动」）
-    expect(w.db.prepare("SELECT action FROM events").all().map((x) => String(x["action"]))).toEqual([
-      KIND_TO_ACTION.RoleTurnReported,
-    ]);
+    expect(
+      w.db
+        .prepare("SELECT action FROM events")
+        .all()
+        .map((x) => String(x["action"])),
+    ).toEqual([KIND_TO_ACTION.RoleTurnReported]);
   });
 
   it("执行失败（ok:false）⇒ 同样 no_draft + 钱照记", async () => {
@@ -318,7 +377,11 @@ describe("那一轮没交出提案：钱照记，【卡不建】", () => {
     const r = await draft(w, { ok: false, text: "", error: "CLI 超时" });
     expect(r.outcome).toBe("no_draft");
     expect(r.note).toContain("CLI 超时");
-    expect(w.db.prepare("SELECT consumed_cents FROM tasks").get()?.["consumed_cents"]).toBe(6);
+    expect(
+      w.db.prepare("SELECT consumed_cents FROM tasks").get()?.[
+        "consumed_cents"
+      ],
+    ).toBe(6);
   });
 
   /**
@@ -345,22 +408,36 @@ describe("那一轮没交出提案：钱照记，【卡不建】", () => {
    */
   it("⭐ 零成本的失败轮【照样留痕】—— 重试要有界，就得先数得出", async () => {
     const w = await world({});
-    const r = await draft(w, { ok: false, text: "", costCents: 0, error: "压根没起来" });
+    const r = await draft(w, {
+      ok: false,
+      text: "",
+      costCents: 0,
+      error: "压根没起来",
+    });
     expect(r.outcome).toBe("no_draft");
     const rows = w.db.prepare("SELECT action, payload FROM events").all();
-    expect(rows.map((x) => String(x["action"]))).toEqual([KIND_TO_ACTION.RoleTurnReported]);
+    expect(rows.map((x) => String(x["action"]))).toEqual([
+      KIND_TO_ACTION.RoleTurnReported,
+    ]);
     // 留痕而【不记账】：两条判据各走各的，这一发同时断两面。
     expect(Number(task(w)["consumed_cents"])).toBe(0);
-    expect(w.db.prepare("SELECT count(*) AS c FROM budget_events").get()?.["c"]).toBe(0);
+    expect(
+      w.db.prepare("SELECT count(*) AS c FROM budget_events").get()?.["c"],
+    ).toBe(0);
     // 事件里带着那句失败原因（回放要答得出「这一格试过而没成」），并且明说没花钱。
-    const payload = JSON.parse(String(rows[0]?.["payload"])) as Record<string, unknown>;
+    const payload = JSON.parse(String(rows[0]?.["payload"])) as Record<
+      string,
+      unknown
+    >;
     expect(String(payload["note"])).toContain("压根没起来");
     expect(String(payload["note"])).toContain("没花钱");
     expect(payload["costCents"]).toBe(0);
     // 写了 events 就必须广播（少一条就是活连接上的 seq 空洞，0010 §4）。
     expect(w.published.map((p) => p.kind)).toEqual(["RoleTurnReported"]);
     // 卡仍然不建 —— 这一格从来没被放宽过。
-    expect(w.db.prepare("SELECT count(*) AS c FROM approvals").get()?.["c"]).toBe(0);
+    expect(
+      w.db.prepare("SELECT count(*) AS c FROM approvals").get()?.["c"],
+    ).toBe(0);
   });
 
   it("⭐ 连续两次零成本失败 ⇒ 审计里两条，数得出「这是第二次」", async () => {
@@ -372,7 +449,11 @@ describe("那一轮没交出提案：钱照记，【卡不建】", () => {
     const notes = w.db
       .prepare("SELECT payload FROM events ORDER BY id")
       .all()
-      .map((x) => String((JSON.parse(String(x["payload"])) as Record<string, unknown>)["note"]));
+      .map((x) =>
+        String(
+          (JSON.parse(String(x["payload"])) as Record<string, unknown>)["note"],
+        ),
+      );
     expect(notes).toHaveLength(2);
     expect(notes[0]).toContain("第一次");
     expect(notes[1]).toContain("第二次");
@@ -383,12 +464,18 @@ describe("广播：本轮消费了 seq 的每一行都发出去", () => {
   it("drafted 那一发：留痕 + 卡片两条都广播，seq 与 events.id 逐条对齐", async () => {
     const w = await world({});
     await draft(w);
-    const ids = w.db.prepare("SELECT id FROM events ORDER BY id").all().map((x) => Number(x["id"]));
+    const ids = w.db
+      .prepare("SELECT id FROM events ORDER BY id")
+      .all()
+      .map((x) => Number(x["id"]));
     expect(w.published.map((p) => p.seq).sort((a, b) => a - b)).toEqual(ids);
     // 【洞】是这一发的重点：总线收到的最大 seq 就是最后一行 events.id，
     // 中间的都发过 ⇒ 活着的 SSE 订阅不会把链路标成 stale（0010 §4）。
     expect(w.bus.latestSeq()).toBe(ids[ids.length - 1]);
-    expect(w.published.map((p) => p.kind)).toEqual(["RoleTurnReported", "ApprovalRequired"]);
+    expect(w.published.map((p) => p.kind)).toEqual([
+      "RoleTurnReported",
+      "ApprovalRequired",
+    ]);
   });
 });
 
@@ -410,9 +497,13 @@ describe("卡片审计那一行的 payload 形状【与 createCard 一致】", (
     const w = await world({});
     await draft(w);
     const engineRow = w.db
-      .prepare("SELECT payload FROM events WHERE action = ? ORDER BY id DESC LIMIT 1")
+      .prepare(
+        "SELECT payload FROM events WHERE action = ? ORDER BY id DESC LIMIT 1",
+      )
       .get(KIND_TO_ACTION.ApprovalRequired) as Row | undefined;
-    const engineKeys = Object.keys(JSON.parse(String(engineRow?.["payload"])) as Record<string, unknown>).sort();
+    const engineKeys = Object.keys(
+      JSON.parse(String(engineRow?.["payload"])) as Record<string, unknown>,
+    ).sort();
 
     const { createCard } = await import("../../src/approvals/cards.js");
     const res = await createCard(
@@ -437,13 +528,20 @@ describe("卡片审计那一行的 payload 形状【与 createCard 一致】", (
     expect(res.result.created).toBe(true);
     const httpRow = w.db
       .prepare("SELECT payload FROM events WHERE action = ? AND target = ?")
-      .get(KIND_TO_ACTION.ApprovalRequired, res.result.approvalId) as Row | undefined;
-    const httpKeys = Object.keys(JSON.parse(String(httpRow?.["payload"])) as Record<string, unknown>).sort();
+      .get(KIND_TO_ACTION.ApprovalRequired, res.result.approvalId) as
+      | Row
+      | undefined;
+    const httpKeys = Object.keys(
+      JSON.parse(String(httpRow?.["payload"])) as Record<string, unknown>,
+    ).sort();
 
     expect(engineKeys).toEqual(httpKeys);
     // 再钉一层【顶层键】而不是整份 JSON：两份的内容本来就该不同
     // （charter vs escalation、各自的 summary），能漂移的是【形状】。
-    const e = JSON.parse(String(engineRow?.["payload"])) as Record<string, unknown>;
+    const e = JSON.parse(String(engineRow?.["payload"])) as Record<
+      string,
+      unknown
+    >;
     expect(typeof e["approval_type"]).toBe("string");
     expect(typeof e["summary"]).toBe("string");
     expect(Array.isArray(e["evidence_refs"])).toBe(true);
@@ -462,7 +560,11 @@ describe("简报本身：CEO 的想法要送到角色手上", () => {
   });
 
   it("buildCharterDraftPrompt 不会把角色名拼成 undefined", () => {
-    const s = buildCharterDraftPrompt({ title: "T", role: "intake", ceoRoleId: "ceo" });
+    const s = buildCharterDraftPrompt({
+      title: "T",
+      role: "intake",
+      ceoRoleId: "ceo",
+    });
     expect(s).not.toContain("undefined");
     expect(s).toContain("T");
   });
@@ -471,8 +573,10 @@ describe("简报本身：CEO 的想法要送到角色手上", () => {
 describe("parseCharterDraft：只有结构化决策在的时候才算有提案", () => {
   it("取不到 ⇒ null；取到了 summary 是那句摘要", () => {
     expect(parseCharterDraft("随便说点什么")).toBeNull();
-    expect(parseCharterDraft(DECISION_MARK + "\n{\"action\":\"wait\"}")).toBeNull(); // 没有 summary
-    expect(parseCharterDraft(DECISION_MARK + "\n{\"action\":\"wait\",\"summary\":\"   \"}")).toBeNull();
+    expect(parseCharterDraft(DECISION_MARK + '\n{"action":"wait"}')).toBeNull(); // 没有 summary
+    expect(
+      parseCharterDraft(DECISION_MARK + '\n{"action":"wait","summary":"   "}'),
+    ).toBeNull();
     const d = parseCharterDraft(draftText());
     expect(d?.summary).toBe("章程提案已拟好，等 CEO 签署");
     expect(d?.text).toContain("业务目标");

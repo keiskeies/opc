@@ -22,7 +22,7 @@
    `grep -rn "evaluateGate(" --include='*.ts' packages/hub/src` 去掉定义文件 ⇒ **零行**。
    整个词出现 4 处，其中 3 处是注释或类型注解（`escalation.ts` 与 `auto-approve.ts`
    各一处解释「我消费它那个返回值」，而那两个模块自己也没人调）。
-   【round322 复核：本条第 1 句「evaluateGate 零调用方」已过期。`harness/verifier.ts:640`
+   【round322 复核：本条第 1 句「evaluateGate 零调用方」已过期。`harness/verifier.ts:699`
    现在调用 `evaluateGate`（0023 §6 认定的「只差上移一环」已上移，0023 那一族的接线）；
    `graph/gates/evaluate.ts` 也不是只有它自己的测试在调。第 2 条
     
