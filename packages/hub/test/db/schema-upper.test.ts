@@ -662,7 +662,7 @@ describe("0019/0020/0021 平台面", () => {
 });
 
 describe("跨表形状抽查", () => {
-  it("assets 按 sha 去重：同字节第二条炸", async () => {
+  it("assets 按 (sha, purpose) 去重：同用途同字节第二条炸", async () => {
     const db = await migrated();
     db.prepare(
       "INSERT INTO assets (asset_id, purpose, mime, size_bytes, sha256, data, created_at) VALUES ('a1', 'avatar', 'image/png', 1, 'sha1', X'89', 1)",
@@ -674,6 +674,27 @@ describe("跨表形状抽查", () => {
         )
         .run(),
     ).toThrow(/UNIQUE/iu);
+  });
+
+  // 0029：去重键的第二维是 purpose。同一份字节换用途必须是【另一行】——
+  // 否则「先当附件传过的图想当头像再传」会拿回附件行，头像绑定那道门必拒（0074）。
+  it("assets 换用途不共键：同字节不同 purpose 各存一行", async () => {
+    const db = await migrated();
+    db.prepare(
+      "INSERT INTO assets (asset_id, purpose, mime, size_bytes, sha256, data, created_at) VALUES ('a1', 'attachment', 'image/png', 1, 'sha1', X'89', 1)",
+    ).run();
+    db.prepare(
+      "INSERT INTO assets (asset_id, purpose, mime, size_bytes, sha256, data, created_at) VALUES ('a2', 'avatar', 'image/png', 1, 'sha1', X'89', 2)",
+    ).run();
+    const rows = db
+      .prepare(
+        "SELECT asset_id, purpose FROM assets WHERE sha256 = 'sha1' ORDER BY asset_id",
+      )
+      .all();
+    expect(rows).toEqual([
+      { asset_id: "a1", purpose: "attachment" },
+      { asset_id: "a2", purpose: "avatar" },
+    ]);
   });
 
   it("群引用任务：task_id 立项前可空、立项后必须是真任务", async () => {

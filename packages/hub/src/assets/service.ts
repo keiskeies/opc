@@ -57,7 +57,8 @@ interface AssetRow {
 }
 
 const SELECT_METADATA_SQL =
-  "SELECT asset_id, purpose, mime, size_bytes, sha256, created_at FROM assets WHERE sha256 = ?";
+  "SELECT asset_id, purpose, mime, size_bytes, sha256, created_at FROM assets " +
+  "WHERE sha256 = ? AND purpose = ?";
 const INSERT_ASSET_SQL =
   "INSERT INTO assets (asset_id, purpose, mime, size_bytes, sha256, data, created_at) " +
   "VALUES (?, ?, ?, ?, ?, ?, ?)";
@@ -80,8 +81,13 @@ function metadata(row: AssetRow): AssetMetadata {
   };
 }
 
-function findMetadata(db: DbLike, sha256: string): AssetMetadata | undefined {
-  const params = [sha256];
+// 键的维度必须与 0029 那条索引一致：少一维 = 别的用途占着同一份字节时静默命中它的行。
+function findMetadata(
+  db: DbLike,
+  sha256: string,
+  purpose: AssetPurpose,
+): AssetMetadata | undefined {
+  const params = [sha256, purpose];
   assertSingleStatement(SELECT_METADATA_SQL);
   assertParamCount(SELECT_METADATA_SQL, params);
   const row = db.prepare(SELECT_METADATA_SQL).get(...(params as never[])) as
@@ -90,7 +96,7 @@ function findMetadata(db: DbLike, sha256: string): AssetMetadata | undefined {
   return row === undefined ? undefined : metadata(row);
 }
 
-/** Store one immutable asset; equal bytes reuse the existing row regardless of purpose. */
+/** Store one immutable asset; equal bytes with the same purpose reuse the row. */
 export async function putAsset(
   writer: Writer,
   options: PutAssetOptions,
@@ -111,7 +117,7 @@ export async function putAsset(
   const sha256 = createHash("sha256").update(options.data).digest("hex");
   return writer.node(() => {
     const db = requireScopeDb("putAsset");
-    const existing = findMetadata(db, sha256);
+    const existing = findMetadata(db, sha256, options.purpose);
     if (existing !== undefined) {
       return { ok: true, asset: existing, created: false } as const;
     }
@@ -127,7 +133,7 @@ export async function putAsset(
     assertSingleStatement(INSERT_ASSET_SQL);
     assertParamCount(INSERT_ASSET_SQL, params);
     db.prepare(INSERT_ASSET_SQL).run(...(params as never[]));
-    const saved = findMetadata(db, sha256);
+    const saved = findMetadata(db, sha256, options.purpose);
     if (saved === undefined) {
       throw new Error("putAsset：写入后读不到资产，事务回滚。");
     }

@@ -47,6 +47,12 @@ const MARKET_MEMBER_NAME = "人才市场验收产品经理";
 const INITIAL_PERSONA = "先给结论，再列用户价值";
 const REFRESHED_PERSONA = "先给结论，再列可验证里程碑";
 const PRIVATE_EXECUTION_REPLY = "老板私聊自动化回复";
+/** 1×1 透明 PNG —— 头像上传验收用的真字节，走的是真 multipart 之外的 base64 通道。 */
+const AVATAR_PNG_BASE64 =
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFAAH/q842iQAAAABJRU5ErkJggg==";
+/** 每个用例一份字节：内容寻址去重会让后跑的用例复用先跑用例留下的行。 */
+const HIRE_AVATAR_PNG_BASE64 =
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGNQSlsFAAHgATONopnaAAAAAElFTkSuQmCC";
 let directory = "";
 let queue: WriteQueue | null = null;
 let hub: HubServer | null = null;
@@ -551,6 +557,89 @@ test("招聘落座：真实入职后在群会话出现成员署名报到", async
   await expect(greeting).toContainText(`大家好，我是${memberName}`);
   await expect(greeting).toContainText("岗位是开发工程师");
   await expect(greeting).toContainText("我会以直接的方式沟通");
+  expectNoBrowserErrors(browserErrors);
+});
+
+// 招聘表单里那枚图片选择器是另一根线（与成员设置页那两处不是同一格 DOM）：
+// 上传必须把 asset_id 交给【本次招聘】的请求体，否则招进来的成员头像仍是生成的。
+test("招聘用工照：选图上传后入职请求带的是 avatar_asset_id 而不是种子", async ({
+  page,
+}) => {
+  const browserErrors = watchBrowserErrors(page);
+  await page.goto(`${webOrigin}/`);
+  await page.locator('[data-nav="talent"]').click();
+  await page.getByRole("button", { name: "开始招聘", exact: true }).click();
+  const submit = page.getByRole("button", {
+    name: "完成招聘并入职",
+    exact: true,
+  });
+  const form = page.locator("form").filter({ has: submit });
+  const memberName = "用工照入职验收员";
+  await form.locator('input[name="name"]').fill(memberName);
+  await form.locator('select[name="role_id"]').selectOption("dev");
+  await form.locator('select[name="tone"]').selectOption("direct");
+  await form.locator('input[name="persona_style"]').fill("先给证据");
+  await form.locator('input[name="persona_honesty"]').fill("不确定就说明");
+  await form.locator('input[name="skill_id"]').fill("avatar-check");
+  await form.locator('input[name="skill_name"]').fill("头像链路验收");
+
+  const uploaded = page.waitForResponse(
+    (response) =>
+      response.request().method() === "POST" &&
+      new URL(response.url()).pathname === "/api/v1/assets",
+  );
+  const chooserPromise = page.waitForEvent("filechooser");
+  await form
+    .getByRole("button", { name: "上传图片作为头像", exact: true })
+    .click();
+  const chooser = await chooserPromise;
+  await chooser.setFiles({
+    name: "hire-avatar.png",
+    mimeType: "image/png",
+    buffer: Buffer.from(HIRE_AVATAR_PNG_BASE64, "base64"),
+  });
+  const uploadResponse = await uploaded;
+  expect(uploadResponse.ok()).toBe(true);
+  expect(uploadResponse.request().postDataJSON()).toMatchObject({
+    purpose: "avatar",
+  });
+  const assetId = (
+    (await uploadResponse.json()) as {
+      asset: { asset_id: string };
+    }
+  ).asset.asset_id;
+  await expect(form.locator('input[name="avatar_asset_id"]')).toHaveValue(
+    assetId,
+  );
+
+  const hirePromise = page.waitForResponse(
+    (response) =>
+      response.request().method() === "POST" &&
+      new URL(response.url()).pathname === "/api/v1/members",
+  );
+  await submit.click();
+  const hireResponse = await hirePromise;
+  expect(hireResponse.ok()).toBe(true);
+  expect(hireResponse.request().postDataJSON()).toMatchObject({
+    name: memberName,
+    avatar_asset_id: assetId,
+  });
+  const hired = (await hireResponse.json()) as {
+    member: { member_id: string; avatar_asset_id: string | null };
+  };
+  expect(hired.member.avatar_asset_id).toBe(assetId);
+
+  const stored = await page.evaluate(async (id) => {
+    const res = await fetch("/api/v1/members");
+    const body = (await res.json()) as {
+      members: { member_id: string; avatar_asset_id: string | null }[];
+    };
+    return (
+      body.members.find((m) => m.member_id === id)?.avatar_asset_id ?? null
+    );
+  }, hired.member.member_id);
+  expect(stored).toBe(assetId);
+
   expectNoBrowserErrors(browserErrors);
 });
 
@@ -2181,6 +2270,162 @@ test("黄金路径：建群 → 树里点开 → 富文本真打字 → 自动�
   }, docId);
   expect(permissions).toContain(grantee);
   expect(permissions).toContain("editor");
+
+  expectNoBrowserErrors(browserErrors);
+});
+
+// 头像那根线在 0074 之前压根不存在：界面让人手填一个 asset_id，而没有任何地方
+// 产出 purpose='avatar' 的资产。所以这发要证的是【上传】这一侧 —— 选图真发出
+// purpose=avatar 的 POST /assets、返回的 asset_id 真落到隐藏域、保存真落到
+// /members/:id/avatar，最后跨刷新还在（只有本地状态的话这一条会红）。
+test("头像上传：选图即传 avatar 资产，保存后头像指向该资产且跨刷新仍在", async ({
+  page,
+}) => {
+  const browserErrors = watchBrowserErrors(page);
+  await page.goto(`${webOrigin}/`);
+  await page.getByRole("button", { name: "设置", exact: true }).click();
+  await page
+    .locator("[data-member-row]")
+    .filter({ has: page.locator("strong", { hasText: /^产品经理$/ }) })
+    .click();
+  const saveAvatar = page.getByRole("button", {
+    name: "更新头像",
+    exact: true,
+  });
+  const avatarForm = page.locator("form").filter({ has: saveAvatar });
+  await expect(avatarForm).toBeVisible();
+
+  const uploaded = page.waitForResponse(
+    (response) =>
+      response.request().method() === "POST" &&
+      new URL(response.url()).pathname === "/api/v1/assets",
+  );
+  const chooserPromise = page.waitForEvent("filechooser");
+  await avatarForm
+    .getByRole("button", { name: "上传图片作为头像", exact: true })
+    .click();
+  const chooser = await chooserPromise;
+  await chooser.setFiles({
+    name: "avatar.png",
+    mimeType: "image/png",
+    buffer: Buffer.from(AVATAR_PNG_BASE64, "base64"),
+  });
+  const uploadResponse = await uploaded;
+  expect(uploadResponse.ok()).toBe(true);
+  expect(uploadResponse.request().postDataJSON()).toMatchObject({
+    purpose: "avatar",
+    mime: "image/png",
+  });
+  const uploadedBody = (await uploadResponse.json()) as {
+    created: boolean;
+    asset: { asset_id: string; purpose: string };
+  };
+  expect(uploadedBody.created).toBe(true);
+  expect(uploadedBody.asset.purpose).toBe("avatar");
+  const assetId = uploadedBody.asset.asset_id;
+
+  // 上传只登记，绑定仍是保存按钮那一次：隐藏域落 id，种子被清空（否则二选一必拒）。
+  await expect(avatarForm.locator('input[name="avatar_asset_id"]')).toHaveValue(
+    assetId,
+  );
+  await expect(avatarForm.locator('input[name="avatar_seed"]')).toHaveValue("");
+  await expect(page.locator("#toastRegion")).toContainText("头像图片已上传");
+
+  const bound = page.waitForResponse(
+    (response) =>
+      response.request().method() === "POST" &&
+      new URL(response.url()).pathname === "/api/v1/members/pm-ui/avatar",
+  );
+  await avatarForm
+    .getByRole("button", { name: "更新头像", exact: true })
+    .click();
+  const boundResponse = await bound;
+  expect(boundResponse.ok()).toBe(true);
+  expect(boundResponse.request().postDataJSON()).toEqual({
+    avatar_asset_id: assetId,
+  });
+  await expect(page.locator("#toastRegion")).toContainText("头像已更新");
+
+  // 跨刷新仍指向那枚资产：读的是服务端 members 行，不是本页的内存态。
+  await page.reload();
+  const stored = await page.evaluate(async () => {
+    const res = await fetch("/api/v1/members");
+    const body = (await res.json()) as {
+      members: { member_id: string; avatar_asset_id: string | null }[];
+    };
+    const member = body.members.find((m) => m.member_id === "pm-ui");
+    return member?.avatar_asset_id ?? null;
+  });
+  expect(stored).toBe(assetId);
+
+  // 头像位真的画出这枚资产（URL 由 avatarUrl 按 avatar_asset_id 拼）。
+  await page.getByRole("button", { name: "设置", exact: true }).click();
+  await page
+    .locator("[data-member-row]")
+    .filter({ has: page.locator("strong", { hasText: /^产品经理$/ }) })
+    .click();
+  const rebuiltForm = page.locator("form").filter({ has: saveAvatar });
+  await expect(rebuiltForm.locator(".avatar img")).toHaveAttribute(
+    "src",
+    `/api/v1/assets/${assetId}`,
+  );
+
+  // 二选一那道守卫的承重格：重传同一张图（同用途 ⇒ 拿回同一行，不新增），再手填
+  // 一个种子，此时保存必须【当场拦下且一个请求都不发】—— 否则后写的种子会把刚绑
+  // 好的图片头像顶掉，而界面上两次操作都显示成功。
+  const secondUpload = page.waitForResponse(
+    (response) =>
+      response.request().method() === "POST" &&
+      new URL(response.url()).pathname === "/api/v1/assets",
+  );
+  const secondChooser = page.waitForEvent("filechooser");
+  await rebuiltForm
+    .getByRole("button", { name: "上传图片作为头像", exact: true })
+    .click();
+  const secondFile = await secondChooser;
+  await secondFile.setFiles({
+    name: "avatar.png",
+    mimeType: "image/png",
+    buffer: Buffer.from(AVATAR_PNG_BASE64, "base64"),
+  });
+  const secondResponse = await secondUpload;
+  const secondBody = (await secondResponse.json()) as {
+    created: boolean;
+    asset: { asset_id: string };
+  };
+  expect(secondBody.created).toBe(false);
+  expect(secondBody.asset.asset_id).toBe(assetId);
+
+  await rebuiltForm.locator('input[name="avatar_seed"]').fill("late-seed");
+  let avatarWrites = 0;
+  page.on("request", (req) => {
+    if (
+      req.method() === "POST" &&
+      new URL(req.url()).pathname === "/api/v1/members/pm-ui/avatar"
+    )
+      avatarWrites += 1;
+  });
+  await saveAvatar.click();
+  await expect(page.locator("#toastRegion")).toContainText("只能二选一");
+  expect(avatarWrites).toBe(0);
+
+  // 拦下之后服务端仍是那次图片绑定：头像资产没被种子顶掉。
+  const afterGuard = await page.evaluate(async () => {
+    const res = await fetch("/api/v1/members");
+    const body = (await res.json()) as {
+      members: {
+        member_id: string;
+        avatar_asset_id: string | null;
+        avatar_seed: string;
+      }[];
+    };
+    const member = body.members.find((m) => m.member_id === "pm-ui");
+    return {
+      asset: member?.avatar_asset_id ?? null,
+      seed: member?.avatar_seed ?? null,
+    };
+  });
+  expect(afterGuard).toEqual({ asset: assetId, seed: "" });
 
   expectNoBrowserErrors(browserErrors);
 });

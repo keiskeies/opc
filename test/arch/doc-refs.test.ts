@@ -1276,6 +1276,13 @@ const SNAP: Record<string, string> = {
   // 读那一列，这一行必动 ⇒ 快照红，逼改的人去看界面侧（B 列）同没动。
   "CEO-决策简报-2026-11-22.md>serve/driver-pump.ts:518":
     ".all(...states, maxAttempts, o.taskLimitCents, perRound) as unknown as {",
+  // ── 0074（头像上传链路：两道用途门 + 界面上传器本体）───────────────────
+  // 三条都是活坐标：门被放宽（不再判 purpose）或上传器被摘掉，0074 钉的
+  // 「同字节换用途拿不到别人的行」与「界面上有生产者」同时失去物证。
+  "0074-avatar-upload-never-worked-a-dedupe-key-one-dimension-short-and-a-ui-with-no-uploader.md>packages/hub/src/members/service.ts:265": `"SELECT 1 AS ok FROM assets WHERE asset_id = ? AND purpose = 'avatar'";`,
+  "0074-avatar-upload-never-worked-a-dedupe-key-one-dimension-short-and-a-ui-with-no-uploader.md>packages/hub/src/http/people.ts:440": `"SELECT 1 AS ok FROM assets WHERE asset_id = ? AND purpose = 'avatar'";`,
+  "0074-avatar-upload-never-worked-a-dedupe-key-one-dimension-short-and-a-ui-with-no-uploader.md>packages/web/public/group.js:6027":
+    "function avatarImagePicker() {",
 };
 
 describe("决策文档里的「文件:行号」引用不漂移", () => {

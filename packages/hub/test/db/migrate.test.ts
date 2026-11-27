@@ -381,6 +381,9 @@ it("schema_migrations 记录版本与 Unix 毫秒时间戳", async () => {
     "0026_documents_soft_delete",
     "0027_research_artifacts",
     "0028_boss_private_conversations",
+    // 0029：assets 去重键补上 purpose —— 0012 那条索引比它文件头写的性质宽一整维，
+    // 跨用途重传同一份字节会让头像绑定必拒（见 0074）。
+    "0029_assets_dedupe_per_purpose",
   ]);
   // applied_at 必须是 Unix 毫秒整数：审计要能还原「这张表什么时候建的」
   for (const r of rows) {

@@ -6022,6 +6022,46 @@ async function uploadAssetBase64(file, purpose) {
     },
   });
 }
+// 头像上传走的是真 POST /assets（purpose 固定 avatar）：选完文件 asset_id 就落到
+// 同表单的隐藏域里，保存按钮仍是唯一一次绑定写入 —— 上传与绑定各自只发生一次。
+function avatarImagePicker() {
+  const picker = input("avatar_image", "", "file", {
+    accept: "image/*",
+    hidden: true,
+    "aria-label": "选择头像图片",
+    onchange: async (event) => {
+      const node = event.currentTarget;
+      const file = node.files?.[0];
+      node.value = "";
+      if (!file) return;
+      if (!/^image\//u.test(file.type)) {
+        toast("请选择图片文件。", true);
+        return;
+      }
+      try {
+        const asset = await uploadAssetBase64(file, "avatar");
+        const assetId = asset?.asset?.asset_id || asset?.asset_id;
+        if (typeof assetId !== "string" || !assetId)
+          throw new Error("头像上传响应缺少 asset_id。");
+        const form = node.closest("form");
+        const slot = form?.querySelector('input[name="avatar_asset_id"]');
+        if (!slot) throw new Error("头像资产落点缺失，上传结果没有登记。");
+        slot.value = assetId;
+        const seed = form.querySelector('input[name="avatar_seed"]');
+        if (seed) seed.value = "";
+        toast("头像图片已上传，点保存按钮生效。");
+      } catch (error) {
+        toast(errorMessage(error), true);
+      }
+    },
+  });
+  return h(
+    "span",
+    null,
+    button("上传图片作为头像", () => picker.click()),
+    picker,
+  );
+}
 async function importDocument() {
   const picker = input("importFile", "", "file", {
     accept: ".docx,.xlsx,.md,.markdown,.txt",
@@ -6546,10 +6586,14 @@ function hireForm() {
         }),
       ),
       field(
-        "头像资产 ID（可选）",
-        input("avatar_asset_id", "", "text", {
-          placeholder: "先通过 assets 上传，勿与种子同时填写",
-        }),
+        "头像",
+        h(
+          "span",
+          null,
+          input("avatar_asset_id", "", "text", { hidden: true }),
+          avatarImagePicker(),
+        ),
+        "选图即上传为 avatar 资产；不选图就按下面的种子生成。",
       ),
       field(
         "风格 / 口头禅",
@@ -7998,14 +8042,13 @@ function renderSettings(view) {
         ),
         h("p", {
           class: "help",
-          text: "保存种子会替换当前头像；上传图片需先得到 avatar 用途的 asset_id。",
+          text: "保存种子会替换当前头像；上传图片即传为 avatar 资产，点保存按钮生效。",
         }),
-        h("input", {
-          name: "avatar_asset_id",
-          type: "text",
-          placeholder: "或填写 avatar asset_id",
+        input("avatar_asset_id", "", "text", {
+          hidden: true,
           "aria-label": "头像资产 ID",
         }),
+        avatarImagePicker(),
       ),
       h("button", { class: "btn", type: "submit" }, "更新头像"),
     ),
@@ -8170,14 +8213,17 @@ async function updateAvatar(event) {
   event.preventDefault();
   const data = new FormData(event.currentTarget);
   const assetId = data.get("avatar_asset_id").trim();
+  const seed = data.get("avatar_seed").trim();
+  if (assetId && seed) {
+    toast("头像资产与生成种子只能二选一：再选一次图片，或清空种子。", true);
+    return;
+  }
   try {
     await request(
       `/members/${encodeURIComponent(state.settingsMember)}/avatar`,
       {
         method: "POST",
-        body: assetId
-          ? { avatar_asset_id: assetId }
-          : { avatar_seed: data.get("avatar_seed").trim() },
+        body: assetId ? { avatar_asset_id: assetId } : { avatar_seed: seed },
       },
     );
     await loadCore();

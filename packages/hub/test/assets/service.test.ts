@@ -87,6 +87,77 @@ describe("content-addressed assets", () => {
     });
   });
 
+  // 0074：去重键少 purpose 那一维时，这条链是屏幕上无解的死路 ——
+  // 先当附件传过的字节再当头像传，拿回的是那条 attachment 行，绑头像必拒。
+  it("same bytes under another purpose become a new row that passes the avatar gate", async () => {
+    const { q, db } = world();
+    const bytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 9, 8, 7]);
+    const asAttachment = await putAsset(q, {
+      purpose: "attachment",
+      mime: "image/png",
+      data: bytes,
+      nowMs: NOW,
+      newId: () => "asset-att",
+    });
+    expect(asAttachment).toMatchObject({ ok: true, created: true });
+    const asAvatar = await putAsset(q, {
+      purpose: "avatar",
+      mime: "image/png",
+      data: bytes,
+      nowMs: NOW + 1,
+      newId: () => "asset-ava",
+    });
+    expect(asAvatar).toMatchObject({
+      ok: true,
+      created: true,
+      asset: { asset_id: "asset-ava", purpose: "avatar" },
+    });
+    // 头像门（http/people.ts 与 members/service.ts 共用的那道 SQL 形状）逐字复用。
+    const gate =
+      "SELECT 1 AS ok FROM assets WHERE asset_id = ? AND purpose = 'avatar'";
+    expect(db.prepare(gate).get("asset-ava")).toEqual({ ok: 1 });
+    expect(db.prepare(gate).get("asset-att")).toBeUndefined();
+    expect(db.prepare("SELECT COUNT(*) AS count FROM assets").get()).toEqual({
+      count: 2,
+    });
+  });
+
+  it("reverse direction keeps each purpose's own metadata", async () => {
+    const { q, db } = world();
+    const bytes = new Uint8Array([1, 2, 3, 4, 5, 6]);
+    expect(
+      await putAsset(q, {
+        purpose: "avatar",
+        mime: "image/png",
+        data: bytes,
+        nowMs: NOW,
+        newId: () => "rev-ava",
+      }),
+    ).toMatchObject({ ok: true, created: true });
+    const asAttachment = await putAsset(q, {
+      purpose: "attachment",
+      mime: "application/pdf",
+      data: bytes,
+      nowMs: NOW + 1,
+      newId: () => "rev-att",
+    });
+    expect(asAttachment).toMatchObject({
+      ok: true,
+      created: true,
+      asset: { asset_id: "rev-att", mime: "application/pdf" },
+    });
+    const rows = db
+      .prepare(
+        "SELECT purpose, mime FROM assets WHERE sha256 = (" +
+          "SELECT sha256 FROM assets WHERE asset_id = ?) ORDER BY purpose",
+      )
+      .all("rev-att") as { purpose: string; mime: string }[];
+    expect(rows).toEqual([
+      { purpose: "attachment", mime: "application/pdf" },
+      { purpose: "avatar", mime: "image/png" },
+    ]);
+  });
+
   it("rejects empty, oversized, or invalid-purpose uploads", async () => {
     const { q } = world();
     expect(
