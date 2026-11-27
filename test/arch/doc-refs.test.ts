@@ -785,7 +785,7 @@ const SNAP: Record<string, string> = {
   //   行号对这个主张不是证据，正文里那段**逐字引文**才是（0048 §9 同一条判断）。
   "0050-abandoned-task-never-resumes-and-a-knob-that-does-not-exist.md>app.js:964":
     'msg: "这台 Hub 没开驱动器：想法停在 agent 那一格之后，不会有任何东西去推它。要自动推进请带 --driver-pump 起 Hub，或手工 hub work。",',
-  "0050-abandoned-task-never-resumes-and-a-knob-that-does-not-exist.md>app.js:1134":
+  "0050-abandoned-task-never-resumes-and-a-knob-that-does-not-exist.md>app.js:1140":
     '<span class="admin-pill ${statusClass(tk.status)}">${esc(tk.status)}</span>',
   // 275 → 290 与 1667 → 1904：round281 在 BootOverrides 加了 env / imFetchImpl 两格、
   // 在 BootResult 加了 imWired、在 boot 里加了 IM 装配 + 横幅 + 心跳派发三段，
@@ -966,7 +966,7 @@ const SNAP: Record<string, string> = {
   // 它们在 ⇒ 「改成就地豁免」真的发生过；它们没了 ⇒ 那一节得重写。
   "0066-a-format-sweep-that-broke-three-line-shaped-criteria-and-a-rekey-script-i-was-told-not-to-write.md>packages/web/public/markdown.js:28":
     "// biome-ignore lint/suspicious/noControlCharactersInRegex: 剥控制符的正则本身必须字面写出码位段，规则警告的性质正是这条防线的用途",
-  "0066-a-format-sweep-that-broke-three-line-shaped-criteria-and-a-rekey-script-i-was-told-not-to-write.md>packages/web/public/app.js:3379":
+  "0066-a-format-sweep-that-broke-three-line-shaped-criteria-and-a-rekey-script-i-was-told-not-to-write.md>packages/web/public/app.js:3385":
     "// biome-ignore lint/suspicious/noAssignInExpressions: SSE 分帧的标准惯用法，indexOf 与终止条件写在一处",
   // 与 INDEX.md 那格【同一行、不同文档】：键含文档基名，所以两条各判各的 ——
   // 这不是重复登记，是两处引用各自的坐标各自失效各自报警（0029 引它论证 NUL，
@@ -1062,7 +1062,7 @@ const SNAP: Record<string, string> = {
   // 直接打印（守卫比的是 trim 后整行，23 条手抄 = 23 次打错的机会，而打错的快照比没快照更坏 ——
   // 它会把「引用漂了」读成「代码变了」）。判断仍留在坐标里：生成器只回答"这一行现在写了什么"。
   "INDEX.md>0001_init.sql:249": "CREATE TABLE im_bindings (",
-  "INDEX.md>app.js:1134":
+  "INDEX.md>app.js:1140":
     '<span class="admin-pill ${statusClass(tk.status)}">${esc(tk.status)}</span>',
   "INDEX.md>app.ts:603": "const impossible: never = routeHit;",
   "INDEX.md>approvals/cards.ts:293":
@@ -1257,6 +1257,17 @@ const SNAP: Record<string, string> = {
     "mkdirSync(o.backupDir, { recursive: true });",
   "INDEX.md>packages/hub/src/http/real-deps.ts:936":
     "...(o.orgBackupDir === undefined || o.orgDbPath === undefined",
+  // ── 0072（钱那一档那句话的前提：门读列 / 那次保存写列 / 那一行怎么来的 / 0 从哪来）──
+  // 四条都是活坐标：任意一条指的东西被改，0072 屏幕上那句「去预算页改那一行」就跟不上，
+  // 而那正是本篇花一整篇钉住的东西。值由目标文件当场读出（同 round288 那条纪律）。
+  "0072-a-sentence-that-was-true-until-the-gate-moved-and-nobody-re-measured.md>packages/web/public/app.js:1046":
+    "return `不再推：花到了这一格的单条上限 · 放开它在预算页：把 task/${row.task_id}/per_task 那一行改大（还没有那一行就新增一行），不必重启 · ${when}`;",
+  "0072-a-sentence-that-was-true-until-the-gate-moved-and-nobody-re-measured.md>packages/hub/src/http/budget.ts:149":
+    "export const UPSERT_BUDGET_ROW_SQL =",
+  "0072-a-sentence-that-was-true-until-the-gate-moved-and-nobody-re-measured.md>packages/hub/src/engine/runtime.ts:630":
+    "db.prepare(ENSERT_BUDGET_SQL).run(",
+  "0072-a-sentence-that-was-true-until-the-gate-moved-and-nobody-re-measured.md>packages/hub/src/serve/config.ts:175":
+    "function positiveInt(",
   // ── CEO-决策简报-2026-11-22（B8 那一格）───────────────────────────────
   // 简报正文写的是裸名 `driver-pump.ts:489`，键登记成 `serve/driver-pump.ts:489`
   // 并把正文一并对齐 —— 与 0049 §12 / INDEX 引用【同一条坐标】用【同一个键形态】：

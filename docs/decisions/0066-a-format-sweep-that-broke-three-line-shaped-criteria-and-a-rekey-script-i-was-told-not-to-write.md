@@ -146,7 +146,7 @@ function importStatements(src: string, onlyRuntime = false): string[] {
 此前登记的四个类目归零，其中两个的落法是**就地 `biome-ignore` + 理由**：
 
 - `packages/web/public/markdown.js:28`、`:69`（`noControlCharactersInRegex` ×2 处）
-- `packages/web/public/app.js:3379`（`noAssignInExpressions`，SSE 分帧惯用法）
+- `packages/web/public/app.js:3385`（`noAssignInExpressions`，SSE 分帧惯用法）
 
 round378 当时选【登记基线】而【不 biome-ignore】的唯一理由是「别动 markdown.js 的行号」
 （那文件的行号被 doc-refs 快照钉着）。这一轮全仓 format 收敛**必然**重排 markdown.js，

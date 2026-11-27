@@ -43,6 +43,7 @@ import {
 } from "../../src/http/app.js";
 import { newLocalToken, signedHeaders } from "../../src/http/auth.js";
 import { LOOPBACK_HOST } from "../../src/http/bind.js";
+import { UPSERT_BUDGET_ROW_SQL } from "../../src/http/budget.js";
 import {
   type DriverRuntimeState,
   readDriverStatus,
@@ -684,8 +685,54 @@ describe("C 「被钱挡住」与「试到上限」是两档，下一步动作�
     expect(readDriverStatus(w.db as never, unknown).stopped).toEqual([]);
   });
 
+  it("⭐ 命令行那份【救不了】已有的一行：只有那一列能开门（round386）", () => {
+    // 这一发钉的是屏幕那句话的前提（app.js 的 driverLine 钱那一档说的是
+    // 「预算页把 task/<id>/per_task 那一行改大」而【不是】「带更高的 --task-limit-cents 重启」）。
+    // 探针量的是同一份库、命令行一个字不动（500），只把 limit_cents 从 500 存成 5000
+    // ⇒ 候选 0 → 1、看板那行自己消失；反向把命令行抬到 9999 而列留 100 ⇒ 门照旧关着。
+    // c5 那一发只证了「CLI=null 时列赢」—— 它排不掉「取两者较大」这种写法；
+    // 这一发把 CLI 抬到【比列大】才排得掉，而那是屏幕上唯一会选错的方向。
+    //
+    // ⚠ 改那一格走 UPSERT_BUDGET_ROW_SQL —— 与 PUT/POST /budget 同一条语句。
+    //   手拼一条 UPDATE 也能让门开，但那样这一发就与【屏幕上那次保存】脱钩了：
+    //   将来有人把那条语句改成不写 limit_cents（只写 hard_stop 之类），
+    //   界面上那句话立刻是假的，而这发仍会绿（同 0071「每根线要有自己的那次动作」）。
+    const w = world();
+    task(w.db, "c6");
+    entered(w.db, "c6", "IN_PROGRESS");
+    budget(w.db, "c6", 100, 200);
+    /** 屏幕上那一次保存：同一个作用域，只改上限。 */
+    const clickSave = (limitCents: number): void => {
+      w.db
+        .prepare(UPSERT_BUDGET_ROW_SQL)
+        .run("b-c6", "task", "c6", "per_task", limitCents, 1);
+    };
+    const bigCli: DriverRuntimeState = {
+      enabled: true,
+      pumping: true,
+      taskLimitCents: 9999,
+    };
+    expect(causesOf(readDriverStatus(w.db as never, bigCli))).toEqual({
+      c6: "no_budget",
+    });
+    // 分母：同一个 9999 一个字没动，只把那一格存大 ⇒ 门开了（= 下一心跳会被推）。
+    clickSave(5000);
+    expect(readDriverStatus(w.db as never, bigCli).stopped).toEqual([]);
+    // 反向对照：那次保存把上限存回超支，而命令行再往上抬也救不回来。
+    clickSave(100);
+    expect(
+      causesOf(
+        readDriverStatus(w.db as never, {
+          enabled: true,
+          pumping: true,
+          taskLimitCents: 99999,
+        }),
+      ),
+    ).toEqual({ c6: "no_budget" });
+  });
+
   it("⭐ 到顶那一档【优先于】钱：两个条件同时成立时说是到顶", () => {
-    // 钱那一档的下一步是"追加预算"，到顶那一档的下一步是"看为什么推不动"。
+    // 钱那一档的下一步是"去预算页把那一行改大"，到顶那一档的下一步是"看为什么推不动"。
     // 同一条任务上两句都说等于什么都没说；而"推过了而没推动"是比
     // "没让它推"更强的事实 —— 前者追加预算也解决不了。
     const w = world();

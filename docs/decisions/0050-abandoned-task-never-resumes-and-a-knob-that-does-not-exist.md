@@ -62,7 +62,7 @@
 我就此以为"这两格在屏幕上没有任何标记"。实际去看渲染那几行：
 
 ```js
-<span class="admin-pill ${statusClass(tk.status)}">${esc(tk.status)}</span>   // app.js:1134
+<span class="admin-pill ${statusClass(tk.status)}">${esc(tk.status)}</span>   // app.js:1140
 ```
 
 - 卡片上那枚 pill 渲的是**状态名原文** —— `BLOCKED` 三个字就在屏幕上。
