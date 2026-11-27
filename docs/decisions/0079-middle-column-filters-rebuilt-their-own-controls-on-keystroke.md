@@ -52,13 +52,13 @@ paint；`packages/web/public/group.css` 不动；新守卫 `test/web/list-filter
 
 ## 4. 落地：两半拆法 + 一个第二写入点
 
-`packages/web/public/group.js:1405` `renderDocumentList(content, toolbar)` 只 append 控件（一枚
+`packages/web/public/group.js:1407` `renderDocumentList(content, toolbar)` 只 append 控件（一枚
 搜索框 + 「文档类型」+「所属群」两枚下拉），收尾叫一发 `paintDocumentRows(content)`；
-`packages/web/public/group.js:1467` `paintDocumentRows(content)` 自己 `content.replaceChildren()`
-之后只画树或空态。待办侧 `packages/web/public/group.js:1656` /
-`packages/web/public/group.js:1670` 同一形状。三枚文档 handler 分别落在搜索框
-`packages/web/public/group.js:1415`、类型下拉 `packages/web/public/group.js:1426`、所属群下拉
-`packages/web/public/group.js:1444`，待办 `packages/web/public/group.js:1663`
+`packages/web/public/group.js:1469` `paintDocumentRows(content)` 自己 `content.replaceChildren()`
+之后只画树或空态。待办侧 `packages/web/public/group.js:1658` /
+`packages/web/public/group.js:1697` 同一形状。三枚文档 handler 分别落在搜索框
+`packages/web/public/group.js:1417`、类型下拉 `packages/web/public/group.js:1428`、所属群下拉
+`packages/web/public/group.js:1446`，待办 `packages/web/public/group.js:1665`
 —— 四发全部只叫 paint，一发行都不叫 builder。
 
 `state.docFilter.kind` 还有**第二个写入者**（人才卡那一格，它叫的是完整 `renderList()`）：那条
@@ -142,12 +142,12 @@ paint；`packages/web/public/group.css` 不动；新守卫 `test/web/list-filter
 
 - 其余长栏（会话 / 联系人 / 人才 / 设置）仍由 `renderList` 整栏重画 ⇒ 每次切栏都跳回列表顶部。
   本轮只给「带输入控件的两栏」拆了行区，因为它们才有「正在被敲的节点」这一格。
-- 界面读列表是整份拉回再在内存里筛（`packages/web/public/group.js:974`
-  `/documents?limit=100`、`packages/web/public/group.js:949` `/backlog?limit=200`），
+- 界面读列表是整份拉回再在内存里筛（`packages/web/public/group.js:976`
+  `/documents?limit=100`、`packages/web/public/group.js:951` `/backlog?limit=200`），
   服务端 `listDocuments(deps.db, req.query, BOSS)` 认查询参数、界面一个都不发 ⇒ 100 篇之后的文档
   搜不到。这就是 0077 那个游标形状换了个面重复。
 - 搜索命中 `task` 面仍旧 `location.href = "/"`
-  （`packages/web/public/group.js:9095`），0076 §记下来但没动的 里就挂着，仍未接。
+  （`packages/web/public/group.js:9124`），0076 §记下来但没动的 里就挂着，仍未接。
 - 全站 grep `X-Content-Type-Options` / `nosniff` 命中 **0** —— 资产读取没有这个响应头。
 - `docs/review/check-gate.mjs` 的 C7 存量分布扫的是 `git ls-files docs` ⇒ **未跟踪的新台账压根不进
   那份计数**（本轮实测：本篇有 6 处轮次相对说法，而它没出现在 0079 之前的分布里）。C7 判失败只看
@@ -155,7 +155,9 @@ paint；`packages/web/public/group.css` 不动；新守卫 `test/web/list-filter
   语料有多大】—— 未提交前拿它当基数复算会差一整篇。改成扫文件系统会牵动那条计数的历史可比性，
   属门禁自身的口径变更，另案。
 - 待办那一栏只有一枚搜索框，所以文档侧的下拉两根线（M2/M3）在待办侧没有对应物；真要补的是待办的
-  「按群筛」，那是功能缺口不是本轮形状。
+  「按群筛」，那是功能缺口不是本轮形状。⭐ 0080 已按这个口径落地（state 升格 `{ q, group }` +
+  下拉 + AND 谓词，M2/M3 在待办侧自此有了对应物 N2/N3），本篇 11 根线一个字没改、待办三根
+  （线 9-11）仍是关键词那一头的形状。
 
 ## 8. 实跑读数
 
@@ -163,7 +165,7 @@ paint；`packages/web/public/group.css` 不动；新守卫 `test/web/list-filter
   `{"searches":3,"selects":6,"trees":3,"leaves":92,"emptyStates":0,"focusInToolbar":true,
   "focusTag":"INPUT","searchText":"筛验"}`。⚠ 注意 `focusInToolbar` 与 `searchText` 是**绿的** ——
   缺陷本体（自递归追加）并没有换掉正在敲的节点，追加的那一排是**新增**兄弟；丢焦点是**被否决那个
-  修法**的症状，不是缺陷的症状。这一点写进 `packages/web/public/group.js:1405` 上面的注释，免得
+  修法**的症状，不是缺陷的症状。这一点写进 `packages/web/public/group.js:1407` 上面的注释，免得
   后来人以为「修好焦点」就是修好了这一发。
 - 修复后 e2e 单发：`1 passed (4.0s)`。
 - 新守卫：`Tests 8 passed (8)`。
@@ -179,12 +181,15 @@ paint；`packages/web/public/group.css` 不动；新守卫 `test/web/list-filter
   于是「一条键写两遍」会让两条引用同时失去快照。本轮实测 301 键 / 重复 0。
 - ⚠ **verify 与全量 vitest 并发 ⇒ 两发假红**（本轮实跑撞上，是「全量中勿跑 verify 系」的第三次复演，
   这次病因完整复原了）：`test/arch/exempt-pierce.test.ts` 的穿透探针在【磁盘上】临时改
-  `docs/review/verify-open-invariants.mjs` —— 把豁免项 `["83697c4", …]` 整条删掉、把 `"521daf21"`
+  `docs/review/verify-open-invariants.mjs` —— 把豁免项 `["83697c`+`4", …]` 整条删掉、把 `"521daf21"`
   换成非 hex 的 `"zzzzzzz"`，spawn 子进程验完再逐字节还原。我在全量还在跑的时候起了 verify，正好落进
-  那个窗口，于是同一趟红两条：① `83697c4 @ .workbuddy\scratch\unit-run.txt:669 | 离真提交 83697c3
+  那个窗口，于是同一趟红两条：① `83697c`+`4 @ .workbuddy\scratch\unit-run.txt:669 | 离真提交 83697c3
   只差一位`（豁免项刚被探针从表里删走，而 `83697c3` 是真提交 ⇒ ①d 直接算腐烂、不进任何跳过桶）；
   ② `zzzzzzz 在被扫 prose 里从不作为 token 出现`（探针注入的脏基准自己成了「从未出现」的豁免条目）。
   ⇒ **判定**：撞红先 `git status` 看 `M docs/review/verify-open-invariants.mjs`、`ps` 看有没有 vitest
   还活着，两样都干净再裸跑一发；本轮还原后裸跑 `exit 0`（腐烂=0，豁免表 17 条条条承重）。
   **别去动豁免表、也别删那份 scratch**：`.txt` 在采集面里（`walk` 收 `.txt|.md|.mjs`），删掉只是把
   这一格变成「没有读者」，而那正是本轮 §2 判的静默成因。
+- ⚠ 上面那个假哈希在本篇一律写成 `` `83697c`+`4` ``（0056 §6b 的写法）。`test/arch/doc-coords.ts` 的
+  `hashProblems` 对散文里【恰好 7 位且含 a-f】的 token 一律当作提交引用、且没有任何豁免口 —— 假哈希
+  合写一次就红一发，而它不是引用、不该进豁免。所以别把它「顺手改回」连写。

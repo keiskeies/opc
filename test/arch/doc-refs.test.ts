@@ -1281,19 +1281,19 @@ const SNAP: Record<string, string> = {
   // 「同字节换用途拿不到别人的行」与「界面上有生产者」同时失去物证。
   "0074-avatar-upload-never-worked-a-dedupe-key-one-dimension-short-and-a-ui-with-no-uploader.md>packages/hub/src/members/service.ts:265": `"SELECT 1 AS ok FROM assets WHERE asset_id = ? AND purpose = 'avatar'";`,
   "0074-avatar-upload-never-worked-a-dedupe-key-one-dimension-short-and-a-ui-with-no-uploader.md>packages/hub/src/http/people.ts:440": `"SELECT 1 AS ok FROM assets WHERE asset_id = ? AND purpose = 'avatar'";`,
-  "0074-avatar-upload-never-worked-a-dedupe-key-one-dimension-short-and-a-ui-with-no-uploader.md>packages/web/public/group.js:6301":
+  "0074-avatar-upload-never-worked-a-dedupe-key-one-dimension-short-and-a-ui-with-no-uploader.md>packages/web/public/group.js:6330":
     "function avatarImagePicker() {",
   // ── 0075（模板生产者 + 守门的方法维）────────────────────────────────────
   // 每条都是活坐标：按钮/弹窗被摘、INSERT 的 builtin 或展开行被动、hitsUi 升维，
   // 0075 钉的「界面有生产者」「服务端早已承重」「门只看路径」同时失去或改变物证。
   // 末两条是探针三个病因里两处现场的物证：转发函数签名 / 拼接出的空路径段。
-  "0075-template-library-had-a-display-and-no-producer.md>packages/web/public/group.js:3977":
+  "0075-template-library-had-a-display-and-no-producer.md>packages/web/public/group.js:4006":
     'async function backlogMutation(path, method = "PATCH", body) {',
   "0075-template-library-had-a-display-and-no-producer.md>packages/web/public/app.js:2706":
     '"/charter/" + encodeURIComponent(charterRole),',
-  "0075-template-library-had-a-display-and-no-producer.md>packages/web/public/group.js:4222":
+  "0075-template-library-had-a-display-and-no-producer.md>packages/web/public/group.js:4251":
     'button("新建模板", () => templateCreateModal(), "small"),',
-  "0075-template-library-had-a-display-and-no-producer.md>packages/web/public/group.js:8705":
+  "0075-template-library-had-a-display-and-no-producer.md>packages/web/public/group.js:8734":
     "function templateCreateModal() {",
   "0075-template-library-had-a-display-and-no-producer.md>packages/hub/src/http/documents.ts:429":
     "async function createTemplateRoute(",
@@ -1319,15 +1319,15 @@ const SNAP: Record<string, string> = {
     "if (value === null || value === undefined || value === false) continue;",
   "0076-search-had-seven-faces-and-six-ui-slots.md>packages/web/public/group.js:124":
     'group: "群",',
-  "0076-search-had-seven-faces-and-six-ui-slots.md>packages/web/public/group.js:6493":
+  "0076-search-had-seven-faces-and-six-ui-slots.md>packages/web/public/group.js:6522":
     "(entry) => entry.group_id === id,",
-  "0076-search-had-seven-faces-and-six-ui-slots.md>packages/web/public/group.js:9041":
+  "0076-search-had-seven-faces-and-six-ui-slots.md>packages/web/public/group.js:9070":
     '"data-face": hit.face,',
-  "0076-search-had-seven-faces-and-six-ui-slots.md>packages/web/public/group.js:9042":
+  "0076-search-had-seven-faces-and-six-ui-slots.md>packages/web/public/group.js:9071":
     '"data-id": hit.id,',
-  "0076-search-had-seven-faces-and-six-ui-slots.md>packages/web/public/group.js:9092":
+  "0076-search-had-seven-faces-and-six-ui-slots.md>packages/web/public/group.js:9121":
     "await selectGroup(hit.id);",
-  "0076-search-had-seven-faces-and-six-ui-slots.md>packages/web/public/group.js:9095":
+  "0076-search-had-seven-faces-and-six-ui-slots.md>packages/web/public/group.js:9124":
     'location.href = "/";',
   "0076-search-had-seven-faces-and-six-ui-slots.md>test/e2e/group-workbench.spec.ts:2518":
     'test("全局搜索群命中：徽标是「群」且点击真落到该群会话", async ({ page }) => {',
@@ -1351,21 +1351,21 @@ const SNAP: Record<string, string> = {
     "const page = listMessages(db, conversationId, { before_seq: 4, limit: 2 });",
   "0077-chat-history-had-a-paging-cursor-and-no-producer.md>packages/web/public/app.js:2924":
     "function replayHasMore(rawLen, effectiveLimit) {",
-  "0077-chat-history-had-a-paging-cursor-and-no-producer.md>packages/web/public/group.js:639":
+  "0077-chat-history-had-a-paging-cursor-and-no-producer.md>packages/web/public/group.js:641":
     "function historyHasMore(pageLen, limit) {",
-  "0077-chat-history-had-a-paging-cursor-and-no-producer.md>packages/web/public/group.js:653":
+  "0077-chat-history-had-a-paging-cursor-and-no-producer.md>packages/web/public/group.js:655":
     "function historyCursor(messages) {",
-  "0077-chat-history-had-a-paging-cursor-and-no-producer.md>packages/web/public/group.js:671":
+  "0077-chat-history-had-a-paging-cursor-and-no-producer.md>packages/web/public/group.js:673":
     "function retainOlderThan(current, page) {",
-  "0077-chat-history-had-a-paging-cursor-and-no-producer.md>packages/web/public/group.js:689":
+  "0077-chat-history-had-a-paging-cursor-and-no-producer.md>packages/web/public/group.js:691":
     "function applyHistoryWindow(id, page) {",
-  "0077-chat-history-had-a-paging-cursor-and-no-producer.md>packages/web/public/group.js:2118":
+  "0077-chat-history-had-a-paging-cursor-and-no-producer.md>packages/web/public/group.js:2147":
     "async function loadMessages(id, markRead) {",
-  "0077-chat-history-had-a-paging-cursor-and-no-producer.md>packages/web/public/group.js:2183":
+  "0077-chat-history-had-a-paging-cursor-and-no-producer.md>packages/web/public/group.js:2212":
     "async function loadOlderMessages(id) {",
-  "0077-chat-history-had-a-paging-cursor-and-no-producer.md>packages/web/public/group.js:2606":
+  "0077-chat-history-had-a-paging-cursor-and-no-producer.md>packages/web/public/group.js:2635":
     "if (state.messagesHasMore) {",
-  "0077-chat-history-had-a-paging-cursor-and-no-producer.md>packages/web/public/group.js:2659":
+  "0077-chat-history-had-a-paging-cursor-and-no-producer.md>packages/web/public/group.js:2688":
     "dataset: { messageId: message.message_id, seq: message.seq_in_conv },",
   "0077-chat-history-had-a-paging-cursor-and-no-producer.md>test/e2e/group-workbench.spec.ts:2585":
     'test("\u4f1a\u8bdd\u5386\u53f2\u7ffb\u9875\uff1a\u6ee1\u4e00\u9875\u540e\u6709\u300c\u67e5\u770b\u66f4\u65e9\u300d\uff0c\u70b9\u51fb\u5e26\u6e38\u6807 prepend \u4e14\u5230\u5e95\u6536\u8d77", async ({',
@@ -1385,25 +1385,25 @@ const SNAP: Record<string, string> = {
   // 是那一跳挂在「没有锚点」上的两支行；:2194 是往旧翻那把【不同的尺子】—— 它被
   // 「统一」成 scrollTop 时这条快照会红，逼读者重读 0078 §4 那句两把尺子各管一头。
   // 末两条是守卫的提取器：提取器一坏，守卫就变成永远绿的空壳。
-  "0078-background-reload-kept-yanking-the-chat-viewport-back-to-bottom.md>packages/web/public/group.js:712":
+  "0078-background-reload-kept-yanking-the-chat-viewport-back-to-bottom.md>packages/web/public/group.js:714":
     "const CHAT_BOTTOM_STICK_PX = 80;",
-  "0078-background-reload-kept-yanking-the-chat-viewport-back-to-bottom.md>packages/web/public/group.js:732":
+  "0078-background-reload-kept-yanking-the-chat-viewport-back-to-bottom.md>packages/web/public/group.js:734":
     "function chatScrollAnchor(stream) {",
-  "0078-background-reload-kept-yanking-the-chat-viewport-back-to-bottom.md>packages/web/public/group.js:747":
+  "0078-background-reload-kept-yanking-the-chat-viewport-back-to-bottom.md>packages/web/public/group.js:749":
     "function applyChatScrollAnchor(stream, anchor) {",
-  "0078-background-reload-kept-yanking-the-chat-viewport-back-to-bottom.md>packages/web/public/group.js:1985":
+  "0078-background-reload-kept-yanking-the-chat-viewport-back-to-bottom.md>packages/web/public/group.js:2014":
     'const chatAnchor = chatScrollAnchor($(".message-stream"));',
-  "0078-background-reload-kept-yanking-the-chat-viewport-back-to-bottom.md>packages/web/public/group.js:2041":
+  "0078-background-reload-kept-yanking-the-chat-viewport-back-to-bottom.md>packages/web/public/group.js:2070":
     'applyChatScrollAnchor($(".message-stream", view), chatAnchor);',
-  "0078-background-reload-kept-yanking-the-chat-viewport-back-to-bottom.md>packages/web/public/group.js:2125":
+  "0078-background-reload-kept-yanking-the-chat-viewport-back-to-bottom.md>packages/web/public/group.js:2154":
     "const scrollAnchor =",
-  "0078-background-reload-kept-yanking-the-chat-viewport-back-to-bottom.md>packages/web/public/group.js:2129":
+  "0078-background-reload-kept-yanking-the-chat-viewport-back-to-bottom.md>packages/web/public/group.js:2158":
     "state.messageLoading = true;",
-  "0078-background-reload-kept-yanking-the-chat-viewport-back-to-bottom.md>packages/web/public/group.js:2160":
+  "0078-background-reload-kept-yanking-the-chat-viewport-back-to-bottom.md>packages/web/public/group.js:2189":
     "if (scrollAnchor === null) stream.scrollTop = stream.scrollHeight;",
-  "0078-background-reload-kept-yanking-the-chat-viewport-back-to-bottom.md>packages/web/public/group.js:2161":
+  "0078-background-reload-kept-yanking-the-chat-viewport-back-to-bottom.md>packages/web/public/group.js:2190":
     "else applyChatScrollAnchor(stream, scrollAnchor);",
-  "0078-background-reload-kept-yanking-the-chat-viewport-back-to-bottom.md>packages/web/public/group.js:2223":
+  "0078-background-reload-kept-yanking-the-chat-viewport-back-to-bottom.md>packages/web/public/group.js:2252":
     "if (stream) stream.scrollTop = stream.scrollHeight - anchorOffset;",
   "0078-background-reload-kept-yanking-the-chat-viewport-back-to-bottom.md>test/e2e/group-workbench.spec.ts:2764":
     'test("会话滚动位置：翻上去读旧史时背景重读留在原地，用户自己的动作照旧跳底", async ({',
@@ -1416,36 +1416,70 @@ const SNAP: Record<string, string> = {
   // 「控件 + 行区」混建（或直接内联回 handler），0079 §4 的拆法就没有物证了；
   // spec:3254 是那发链路用例的声明行，M1–M8 八把尺子全挂在同一条 -g 上，
   // 声明行漂了意味着整族尺子的坐标同时失效。
-  "0079-middle-column-filters-rebuilt-their-own-controls-on-keystroke.md>packages/web/public/group.js:1405":
+  "0079-middle-column-filters-rebuilt-their-own-controls-on-keystroke.md>packages/web/public/group.js:1407":
     "function renderDocumentList(content, toolbar) {",
   // 拆法本体两对 + 四发 handler：§4 的主张是「builder 只 append 控件、paint 只画行区、
   // 四发 handler 全部只叫 paint」。这几行就是那句话的物证 —— 谁把某发 handler 改回
   // builder、或把 paint 的清空抹掉，对应那条快照当场红。
-  "0079-middle-column-filters-rebuilt-their-own-controls-on-keystroke.md>packages/web/public/group.js:1415":
+  "0079-middle-column-filters-rebuilt-their-own-controls-on-keystroke.md>packages/web/public/group.js:1417":
     "paintDocumentRows(content);",
-  "0079-middle-column-filters-rebuilt-their-own-controls-on-keystroke.md>packages/web/public/group.js:1426":
+  "0079-middle-column-filters-rebuilt-their-own-controls-on-keystroke.md>packages/web/public/group.js:1428":
     "paintDocumentRows(content);",
-  "0079-middle-column-filters-rebuilt-their-own-controls-on-keystroke.md>packages/web/public/group.js:1444":
+  "0079-middle-column-filters-rebuilt-their-own-controls-on-keystroke.md>packages/web/public/group.js:1446":
     "paintDocumentRows(content);",
-  "0079-middle-column-filters-rebuilt-their-own-controls-on-keystroke.md>packages/web/public/group.js:1467":
+  "0079-middle-column-filters-rebuilt-their-own-controls-on-keystroke.md>packages/web/public/group.js:1469":
     "function paintDocumentRows(content) {",
-  "0079-middle-column-filters-rebuilt-their-own-controls-on-keystroke.md>packages/web/public/group.js:1656":
+  "0079-middle-column-filters-rebuilt-their-own-controls-on-keystroke.md>packages/web/public/group.js:1658":
     "function renderBacklogList(content, toolbar) {",
-  "0079-middle-column-filters-rebuilt-their-own-controls-on-keystroke.md>packages/web/public/group.js:1663":
+  "0079-middle-column-filters-rebuilt-their-own-controls-on-keystroke.md>packages/web/public/group.js:1665":
     "paintBacklogRows(content);",
-  "0079-middle-column-filters-rebuilt-their-own-controls-on-keystroke.md>packages/web/public/group.js:1670":
+  "0079-middle-column-filters-rebuilt-their-own-controls-on-keystroke.md>packages/web/public/group.js:1697":
     "function paintBacklogRows(content) {",
   // §7 那两条「记下来但没动的」也钉：limit=100 / limit=200 是「界面整份拉回再内存筛」的
   // 唯一物证（0077 游标形状的另一个面），task 面那发跳转是 0076 挂下来的旧账。
   // 这两格一旦有人真去接分页／接 face，快照会红着提醒把 §7 划掉，而不是留一段假遗留。
-  "0079-middle-column-filters-rebuilt-their-own-controls-on-keystroke.md>packages/web/public/group.js:949":
+  "0079-middle-column-filters-rebuilt-their-own-controls-on-keystroke.md>packages/web/public/group.js:951":
     'request("/backlog?limit=200"),',
-  "0079-middle-column-filters-rebuilt-their-own-controls-on-keystroke.md>packages/web/public/group.js:974":
+  "0079-middle-column-filters-rebuilt-their-own-controls-on-keystroke.md>packages/web/public/group.js:976":
     'request("/documents?limit=100"),',
-  "0079-middle-column-filters-rebuilt-their-own-controls-on-keystroke.md>packages/web/public/group.js:9095":
+  "0079-middle-column-filters-rebuilt-their-own-controls-on-keystroke.md>packages/web/public/group.js:9124":
     'location.href = "/";',
   "0079-middle-column-filters-rebuilt-their-own-controls-on-keystroke.md>test/e2e/group-workbench.spec.ts:3268":
     'test("中栏筛选器：逐字符敲不累加控件、不重复列表，焦点/取值/滚动留在原处", async ({',
+  // 0080：待办「按群筛」。四格物证各钉一处 —— state 形状（升格成 { q, group } 那一行）、
+  // 下拉存在（aria-label 是 e2e 选择器与 N5 变异的锚）、AND 谓词两行（合取项一旦被改成
+  // 覆盖或删除，对应变异当场红）、option 的 selected（切栏重建时选中值长回来的物证）；
+  // 服务端三格（契约 optional / HTTP 递 query / SQL 的 (? IS NULL OR group_id = ?)）钉的是
+  // §1「门早就开着」这句话 —— 谁把服务端参数收紧或改名，快照会红着要他改台账口径。
+  // group.js:951 与 0079 §7 同形：limit=200 是 §4「刻意内存筛」的物证，切服务端筛时须一起划掉。
+  "0080-backlog-list-had-no-per-group-filter-and-the-server-param-had-no-caller.md>packages/web/public/group.js:609":
+    'backlogFilter: { q: "", group: "" },',
+  "0080-backlog-list-had-no-per-group-filter-and-the-server-param-had-no-caller.md>packages/web/public/group.js:951":
+    'request("/backlog?limit=200"),',
+  "0080-backlog-list-had-no-per-group-filter-and-the-server-param-had-no-caller.md>packages/web/public/group.js:1675":
+    '"aria-label": "所属群",',
+  "0080-backlog-list-had-no-per-group-filter-and-the-server-param-had-no-caller.md>packages/web/public/group.js:1687":
+    "selected: state.backlogFilter.group === group.group_id,",
+  "0080-backlog-list-had-no-per-group-filter-and-the-server-param-had-no-caller.md>packages/web/public/group.js:1700":
+    "(!state.backlogFilter.group ||",
+  "0080-backlog-list-had-no-per-group-filter-and-the-server-param-had-no-caller.md>packages/web/public/group.js:1701":
+    "item.group_id === state.backlogFilter.group) &&",
+  "0080-backlog-list-had-no-per-group-filter-and-the-server-param-had-no-caller.md>packages/contracts/src/backlog.ts:115":
+    "group_id: z.string().min(1).max(200).optional(),",
+  "0080-backlog-list-had-no-per-group-filter-and-the-server-param-had-no-caller.md>packages/hub/src/http/work.ts:113":
+    "const result = listBacklog(deps.db, req.query);",
+  "0080-backlog-list-had-no-per-group-filter-and-the-server-param-had-no-caller.md>packages/hub/src/backlog/service.ts:90":
+    '" WHERE (? IS NULL OR group_id = ?) AND (? IS NULL OR state = ?)" +',
+  "0080-backlog-list-had-no-per-group-filter-and-the-server-param-had-no-caller.md>test/e2e/group-workbench.spec.ts:3502":
+    "await expect(todoGroupSelect).toHaveCount(1);",
+  // INDEX.md 的 0080 入口行自己复述了服务端三格坐标（「门早就开着」是这条主张的载体），
+  // 与台账同名三键值同 —— 键不同（文档 = INDEX.md）所以不撞车，dup 审计认得到。
+  "INDEX.md>packages/contracts/src/backlog.ts:115":
+    "group_id: z.string().min(1).max(200).optional(),",
+  "INDEX.md>packages/hub/src/http/work.ts:113":
+    "const result = listBacklog(deps.db, req.query);",
+  "INDEX.md>packages/hub/src/backlog/service.ts:90":
+    '" WHERE (? IS NULL OR group_id = ?) AND (? IS NULL OR state = ?)" +',
 };
 
 describe("决策文档里的「文件:行号」引用不漂移", () => {

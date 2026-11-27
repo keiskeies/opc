@@ -42,7 +42,7 @@ const DOC_GROUP = [
   "        paintDocumentRows(content);",
 ].join("\n");
 const TODO_Q = [
-  "        state.backlogFilter = event.target.value;",
+  "        state.backlogFilter.q = event.target.value;",
   "        paintBacklogRows(content);",
 ].join("\n");
 
@@ -84,7 +84,7 @@ const MUTATIONS_ALL = [
     id: "M5-backlog-search-self-recursion",
     file: GROUP,
     from: TODO_Q,
-    to: "        state.backlogFilter = event.target.value;\n        renderBacklogList(content, toolbar);",
+    to: "        state.backlogFilter.q = event.target.value;\n        renderBacklogList(content, toolbar);",
     ...e2e("中栏筛选器"),
     expect: "线 9-11（待办那一头）",
   },

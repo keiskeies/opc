@@ -49,7 +49,7 @@
 
 ## 3. 界面侧补生产者
 
-`avatarImagePicker()`（`packages/web/public/group.js:6301`）：隐藏 `<input type=file>` +
+`avatarImagePicker()`（`packages/web/public/group.js:6330`）：隐藏 `<input type=file>` +
 按钮「上传图片作为头像」，选中即 `uploadAssetBase64(file, "avatar")` 走真
 `POST /api/v1/assets`，把返回的 `asset_id` 写进**同一张表单**的隐藏 `avatar_asset_id`
 并清空种子，toast「点头像已上传…点保存按钮生效」的口径（toast 文案是

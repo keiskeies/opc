@@ -3449,3 +3449,107 @@ test("中栏筛选器：逐字符敲不累加控件、不重复列表，焦点/�
 
   expectNoBrowserErrors(browserErrors);
 });
+
+test("待办按群筛：下拉筛的是这个群的待办，且不与搜索框互相打架", async ({
+  page,
+}) => {
+  const browserErrors = watchBrowserErrors(page);
+  // 两个群各灌一批待办：按群筛这一发的判据是「乙群那几条从甲群的屏上消失」，
+  // 单群数据永远证不了这件事（全部/本群两种读数的行数一样）。
+  await page.goto(`${webOrigin}/`);
+  const alpha = await createGroupThroughUi(
+    page,
+    "筛群甲群",
+    "待办按群筛的验收群 A",
+    false,
+  );
+  const beta = await createGroupThroughUi(
+    page,
+    "筛群乙群",
+    "待办按群筛的验收群 B",
+    false,
+  );
+  const seeded = (await page.evaluate(
+    async ({ aid, bid }: { aid: string; bid: string }) => {
+      const statuses: number[] = [];
+      const post = async (title: string, gid: string) => {
+        const res = await fetch("/api/v1/backlog", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ title, group_id: gid }),
+        });
+        statuses.push(res.status);
+      };
+      for (let i = 0; i < 16; i += 1) await post(`筛群待办${i}`, aid);
+      for (let i = 0; i < 4; i += 1) await post(`筛群乙办${i}`, bid);
+      return statuses;
+    },
+    { aid: alpha.group.group_id, bid: beta.group.group_id },
+  )) as number[];
+  expect(seeded.every((status) => status === 201)).toBe(true);
+  // 真 reload：同 0079 —— goto 只触发 hashchange，不重读 backlog 的话筛的是旧读数。
+  await page.goto(`${webOrigin}/#/backlog`);
+  await page.reload();
+  const rows = page.locator("#listContent > .doc-list-item");
+  await expect(rows.filter({ hasText: "筛群待办15" })).toHaveCount(1);
+  const todoGroupSelect = page.locator(
+    '#listToolbar select[aria-label="所属群"]',
+  );
+  const todoSearch = page.locator("#listToolbar input[type=search]");
+
+  // 线 0（控件存在且只有一份）：待办工具条有且只有一枚「所属群」下拉。
+  // 未修时这一发就红：待办栏只有搜索框，下拉数为 0 —— 「按群筛」压根不存在。
+  await expect(todoGroupSelect).toHaveCount(1);
+  await expect(todoSearch).toHaveCount(1);
+  let state = await listState(page);
+  expect(state.selects).toBe(1);
+
+  // 线 1（关键词与群 AND）：先关键词收到 7 条（待办1 / 10…15），再选甲群 ⇒ 还是这 7 条；
+  // 选乙群 ⇒ 0 条 + 一份空态。两维必须同时生效，谁也不许覆盖谁。
+  await page.evaluate(markSearchNode());
+  await todoSearch.first().fill("筛群待办1");
+  await expect(rows.filter({ hasText: "筛群待办1" })).toHaveCount(7);
+  await todoGroupSelect.first().selectOption(alpha.group.group_id);
+  state = await listState(page);
+  expect(state.rows).toBe(7);
+  expect(state.emptyStates).toBe(0);
+  await todoGroupSelect.first().selectOption(beta.group.group_id);
+  state = await listState(page);
+  expect(state.rows).toBe(0);
+  expect(state.emptyStates).toBe(1);
+  await expect(page.locator("#listContent")).toContainText("没有匹配的待办");
+  // 线 2（节点同一性 + 取值）：换群不该换掉正在用的搜索框（同 0079 的尺子：
+  // focusTag/focusInToolbar 认不出「换了一枚崭新同款 input」，只有标记能认）。
+  // ⚠ 这一注释必须在乙群那几发断言【之后】：选乙群是线 1 的动作，它的 0 行断言
+  // 划进线 2 会把「群谓词被删」误报成焦点线红（round396 N1 第一版就错归到这里）。
+  state = await listState(page);
+  expect(state.focusMark).toBe("same");
+  expect(state.searchText).toBe("筛群待办1");
+  // 线 3（清关键词 ⇒ 群维度单独生效）：乙群此刻该是它那 4 条，甲群 0 条。
+  await todoSearch.first().fill("");
+  await expect(rows.filter({ hasText: "筛群乙办" })).toHaveCount(4);
+  await expect(rows.filter({ hasText: "筛群待办" })).toHaveCount(0);
+  // 线 4（换回全部）：两群都在，16 + 4。
+  await todoGroupSelect.first().selectOption("");
+  await expect(rows.filter({ hasText: "筛群待办" })).toHaveCount(16);
+  await expect(rows.filter({ hasText: "筛群乙办" })).toHaveCount(4);
+  // 线 5（只筛群不筛字）：选甲群 ⇒ 16 条，乙群消失。
+  await todoGroupSelect.first().selectOption(alpha.group.group_id);
+  await expect(rows.filter({ hasText: "筛群待办" })).toHaveCount(16);
+  await expect(rows.filter({ hasText: "筛群乙办" })).toHaveCount(0);
+  // 线 6（控件不累加）：上面换了 4 次群、动了 2 次搜索框，控件仍各一枚、行区不重复
+  // （0079 病根的回归位：下拉若把 renderBacklogList 叫回来，这里 selects 会涨）。
+  state = await listState(page);
+  expect(state.selects).toBe(1);
+  expect(state.searches).toBe(1);
+  expect(state.rows).toBe(16);
+  expect(state.trees).toBe(0);
+  // 线 7（切栏回来仍是一份）：钉 toolbar.replaceChildren 对这一栏同样生效。
+  await page.locator('[data-nav="messages"]').click();
+  await page.locator('[data-nav="backlog"]').click();
+  state = await listState(page);
+  expect(state.selects).toBe(1);
+  expect(state.searches).toBe(1);
+
+  expectNoBrowserErrors(browserErrors);
+});

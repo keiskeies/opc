@@ -287,7 +287,7 @@ function loadFilterFns(src: string): {
     groups: { group_id: string; title: string }[];
     docFilter: { q: string; kind: string; group: string };
     backlog: Todo[];
-    backlogFilter: string;
+    backlogFilter: { q: string; group: string };
     selectedBacklog: string;
     selectedDocument: string;
   };
@@ -309,7 +309,7 @@ function loadFilterFns(src: string): {
     groups: [] as { group_id: string; title: string }[],
     docFilter: { q: "", kind: "", group: "" },
     backlog: [] as Todo[],
-    backlogFilter: "",
+    backlogFilter: { q: "", group: "" },
     selectedBacklog: "",
     selectedDocument: "",
   };
@@ -367,7 +367,7 @@ describe("中栏筛选器：控件建一次、handler 只重画行区", () => {
     }
   });
 
-  it("三个文档 handler 与一个待办 handler 各叫一发 paint，外加构建末尾各一发", () => {
+  it("三个文档 handler 与两个待办 handler 各叫一发 paint，外加构建末尾各一发", () => {
     // 少一发 = 某个 handler 不重画行了（筛选按下去没反应）；多发没有意义。
     expect(
       paintCalls(
@@ -380,7 +380,7 @@ describe("中栏筛选器：控件建一次、handler 只重画行区", () => {
         functionDecl(groupSrc, "function renderBacklogList("),
         "paintBacklogRows",
       ),
-    ).toBe(2); // 搜索 + 构建末尾
+    ).toBe(3); // 搜索 + 群组（0080）+ 构建末尾
   });
 
   it("行区重画拿不到工具条：paint 的签名里只有 content", () => {
@@ -498,8 +498,12 @@ describe("真按两下：控件与行区各只有一份", () => {
     expect(find(toolbar, (n) => n.tag === "select")[0]).toBe(kindSelect);
   });
 
-  it("待办列表：连敲两下不累加搜索框、不累加行", () => {
+  it("待办列表：连敲两下不累加搜索框、不累加行，按群筛与关键词是 AND", () => {
     const { renderBacklogList, state } = loadFilterFns(groupSrc);
+    state.groups = [
+      { group_id: "g1", title: "筛验群" },
+      { group_id: "g2", title: "隔壁群" },
+    ];
     state.backlog = [
       {
         id: "b1",
@@ -519,10 +523,10 @@ describe("真按两下：控件与行区各只有一份", () => {
       },
       {
         id: "b3",
-        title: "别的",
+        title: "筛验隔壁",
         priority: 3,
         state: "done",
-        group_id: "g1",
+        group_id: "g2",
         due_at: null,
       },
     ];
@@ -531,18 +535,31 @@ describe("真按两下：控件与行区各只有一份", () => {
     renderBacklogList(content, toolbar);
     const read = () => ({
       searches: find(toolbar, (n) => n.tag === "input").length,
+      selects: find(toolbar, (n) => n.tag === "select").length,
       rows: countClass(content, "doc-list-item"),
       states: countClass(content, "state"),
     });
-    expect(read()).toEqual({ searches: 1, rows: 3, states: 0 });
+    expect(read()).toEqual({ searches: 1, selects: 1, rows: 3, states: 0 });
     const search = find(toolbar, (n) => n.tag === "input")[0] as VNode;
     fire(search, "input", "筛验");
-    expect(read()).toEqual({ searches: 1, rows: 2, states: 0 });
+    expect(read()).toEqual({ searches: 1, selects: 1, rows: 3, states: 0 });
     fire(search, "input", "筛验待办一");
-    expect(read()).toEqual({ searches: 1, rows: 1, states: 0 });
+    expect(read()).toEqual({ searches: 1, selects: 1, rows: 1, states: 0 });
     expect(find(toolbar, (n) => n.tag === "input")[0]).toBe(search);
+    // 0080：群维度与关键词 AND —— 在「筛验待办一」上选隔壁群 ⇒ 0 行 + 一份空态；
+    // 清掉关键词 ⇒ 隔壁群那条留下；切回全部群组 ⇒ 3 条都回来。
+    const groupSelect = find(toolbar, (n) => n.tag === "select")[0] as VNode;
+    fire(groupSelect, "change", "g2");
+    expect(read()).toEqual({ searches: 1, selects: 1, rows: 0, states: 1 });
+    fire(search, "input", "");
+    expect(read()).toEqual({ searches: 1, selects: 1, rows: 1, states: 0 });
+    fire(groupSelect, "change", "");
+    expect(read()).toEqual({ searches: 1, selects: 1, rows: 3, states: 0 });
+    // 换群不许换掉正在用的控件节点（与 input 同一把尺子）。
+    expect(find(toolbar, (n) => n.tag === "input")[0]).toBe(search);
+    expect(find(toolbar, (n) => n.tag === "select")[0]).toBe(groupSelect);
     fire(search, "input", "没有这个");
-    expect(read()).toEqual({ searches: 1, rows: 0, states: 1 });
+    expect(read()).toEqual({ searches: 1, selects: 1, rows: 0, states: 1 });
   });
 });
 
@@ -597,15 +614,15 @@ describe("守卫本身有判别力（否则本节是恒绿装饰）", () => {
     expect(find(grownToolbar, (n) => n.tag === "select").length).toBe(4);
     expect(countClass(grownContent, "doc-list-item")).toBe(1);
 
-    // ② 待办 handler 同样退回自递归 ⇒ 搜索框从 1 枚变 2 枚。
+    // ② 待办 handler 同样退回自递归 ⇒ 搜索框 1 枚变 2 枚、下拉 1 枚变 2 枚。
     const backlogHandler = [
-      "        state.backlogFilter = event.target.value;",
+      "        state.backlogFilter.q = event.target.value;",
       "        paintBacklogRows(content);",
     ].join("\n");
     expect(groupSrc.split(backlogHandler).length - 1).toBe(1);
     const backlogSelf = groupSrc.replace(
       backlogHandler,
-      "        state.backlogFilter = event.target.value;\n        renderBacklogList(content, toolbar);",
+      "        state.backlogFilter.q = event.target.value;\n        renderBacklogList(content, toolbar);",
     );
     expect(backlogSelf).not.toBe(groupSrc);
     const grownTodo = loadFilterFns(backlogSelf);
@@ -628,6 +645,7 @@ describe("守卫本身有判别力（否则本节是恒绿装饰）", () => {
       "筛验",
     );
     expect(find(todoToolbar, (n) => n.tag === "input").length).toBe(2);
+    expect(find(todoToolbar, (n) => n.tag === "select").length).toBe(2);
     expect(
       rebuildCalls(
         functionDecl(backlogSelf, "function renderBacklogList("),

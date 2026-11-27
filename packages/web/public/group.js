@@ -604,7 +604,9 @@ const state = {
   searchTimer: null,
   searchAbort: null,
   docFilter: { q: "", kind: "", group: "" },
-  backlogFilter: "",
+  // 与 docFilter 同形（0080）：待办列的是全部群的条目，此前只有一枚关键词框，
+  // 「这个群的待办有哪几条」在界面上没有任何落点 —— 服务端 group_id 参数一直没人发。
+  backlogFilter: { q: "", group: "" },
   chatTab: "messages",
   taskTab: "backlog",
   rhythmKind: "",
@@ -1655,14 +1657,39 @@ function docTreeLeaf(doc) {
  */
 function renderBacklogList(content, toolbar) {
   toolbar.append(
-    input("backlogSearch", state.backlogFilter, "search", {
+    input("backlogSearch", state.backlogFilter.q, "search", {
       placeholder: "筛选待办",
       "aria-label": "筛选待办",
       oninput: (event) => {
-        state.backlogFilter = event.target.value;
+        state.backlogFilter.q = event.target.value;
         paintBacklogRows(content);
       },
     }),
+  );
+  // 0080：按群筛。选项与文档栏「所属群」同源（state.groups），值走 group_id；
+  // 与关键词是 AND —— 两维各自只写自己那格 state，一起交给 paintBacklogRows。
+  toolbar.append(
+    h(
+      "select",
+      {
+        "aria-label": "所属群",
+        onchange: (event) => {
+          state.backlogFilter.group = event.target.value;
+          paintBacklogRows(content);
+        },
+      },
+      h("option", { value: "", text: "全部群组" }),
+      ...state.groups.map((group) =>
+        h(
+          "option",
+          {
+            value: group.group_id,
+            selected: state.backlogFilter.group === group.group_id,
+          },
+          group.title,
+        ),
+      ),
+    ),
   );
   paintBacklogRows(content);
 }
@@ -1670,8 +1697,10 @@ function renderBacklogList(content, toolbar) {
 function paintBacklogRows(content) {
   const items = state.backlog.filter(
     (item) =>
-      !state.backlogFilter ||
-      item.title.toLowerCase().includes(state.backlogFilter.toLowerCase()),
+      (!state.backlogFilter.group ||
+        item.group_id === state.backlogFilter.group) &&
+      (!state.backlogFilter.q ||
+        item.title.toLowerCase().includes(state.backlogFilter.q.toLowerCase())),
   );
   content.replaceChildren();
   for (const item of items)
