@@ -12,6 +12,9 @@
 
 import type { ChildProcess } from "node:child_process";
 import { EventEmitter } from "node:events";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { BootResult, ServeIo } from "../../src/serve/assemble.js";
 import type { ServeArgs } from "../../src/serve/config.js";
@@ -99,6 +102,10 @@ function harness(
   migrations: string[][];
   shutdowns: { v: number };
   unregistered: { v: number };
+  /** harness 里 ensureDir 收到的目录（默认那一支不走这里，见下面第三发）。 */
+  dirs: string[];
+  /** 装配动作的落地次序：migrate / dir / boot / web 各在自己的注入点记一格。 */
+  order: string[];
   web: ReturnType<typeof fakeWeb>;
   /**
    * 模拟一次 Ctrl-C：先立「正在停止」的标记，再让停止等待落地 ——
@@ -117,6 +124,9 @@ function harness(
   const booted: ServeArgs[] = [];
   const bootOverrides: Record<string, unknown>[] = [];
   const migrations: string[][] = [];
+  // ensureDir 收到的目录，与四个装配动作的落地次序 —— 两根线各自有自己的那次记录。
+  const dirs: string[] = [];
+  const order: string[] = [];
   const shutdowns = { v: 0 };
   const unregistered = { v: 0 };
   let emitStop: () => void = () => {};
@@ -131,8 +141,12 @@ function harness(
   };
   const deps: DevDeps = {
     io,
-    ensureDir: () => {},
+    ensureDir: (dir) => {
+      dirs.push(dir);
+      order.push("dir");
+    },
     bootHub: (args, _io, ov) => {
+      order.push("boot");
       booted.push(args);
       bootOverrides.push(ov as Record<string, unknown>);
       return o.boot
@@ -144,10 +158,12 @@ function harness(
           );
     },
     spawnWeb: (spec) => {
+      order.push("web");
       spawned.push(spec);
       return web.child;
     },
     runMigrate: (argv) => {
+      order.push("migrate");
       migrations.push([...argv]);
       return { code: o.migrateCode ?? 0 };
     },
@@ -173,6 +189,8 @@ function harness(
     bootOverrides,
     spawned,
     migrations,
+    dirs,
+    order,
     shutdowns,
     unregistered,
     web,
@@ -242,6 +260,61 @@ describe("webSpawnArgs：命令行那一格", () => {
       WEB_PORT: "5678",
       ORG_TOKEN: "T",
     });
+  });
+});
+
+describe("ensureDir：备份目录那一格（注入 + 装配序 + 默认那一支）", () => {
+  it("注入的 ensureDir 真被调用，且收到的正是 orgBackupDir", async () => {
+    const h = harness();
+    // 等 runDev 注册完 waitStop/onStopSignals 再按停止键（理由见下面那发 180 秒挂死的注释）。
+    await new Promise((r) => setTimeout(r, 0));
+    h.signal();
+    await h.done;
+    expect(h.dirs.map((d) => d.replaceAll("\\", "/"))).toEqual([
+      ROOT + "/.opc-os/backups",
+    ]);
+  });
+
+  it("装配序：迁移 → 建目录 → boot → 起 web（目录必须排在 boot 之前）", async () => {
+    const h = harness();
+    await new Promise((r) => setTimeout(r, 0));
+    h.signal();
+    await h.done;
+    expect(h.order).toEqual(["migrate", "dir", "boot", "web"]);
+  });
+
+  it("不注入 ⇒ 默认那一支【真】建目录（临时根下，落不到仓库里）", async () => {
+    const root = mkdtempSync(join(tmpdir(), "opc-dev-entry-dir-"));
+    const web = fakeWeb();
+    const first = runDev(
+      {
+        dbPath: join(root, "dev.db"),
+        hubPort: DEV_HUB_PORT,
+        webPort: DEV_WEB_PORT,
+        token: "t",
+        tokenGenerated: false,
+        orgBackupDir: join(root, "a", "b", "backups"),
+      },
+      {
+        io: { log: () => {}, warn: () => {} },
+        bootHub: async () => fakeBootOk(),
+        spawnWeb: () => web.child,
+        runMigrate: () => ({ code: 0 }),
+        // 刻意【不留】ensureDir：这一发判的就是默认那一支。
+        waitStop: () => new Promise<number>(() => {}),
+      },
+      root,
+    );
+    // 默认那一支发生在 boot 之前 ⇒ 等它跑到 race 再让子进程先退，否则永远等不到。
+    await new Promise((res) => setTimeout(res, 0));
+    web.fireExit(0);
+    try {
+      const r = await first;
+      expect(r.code).toBe(EXIT_CHILD_GONE);
+      expect(existsSync(join(root, "a", "b", "backups"))).toBe(true);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });
 

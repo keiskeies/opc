@@ -1240,6 +1240,23 @@ const SNAP: Record<string, string> = {
   // 内容行按 `sed -n '618p'` 现读再抄（不是从 0070 正文复制措辞）。
   "0070-the-browser-half-of-an-acceptance-line-that-had-never-actually-run.md>app.js:618":
     '<div class="admin-num admin-mono">${esc(n)}</div><div class="admin-lbl">${esc(label)}</div>',
+  // 0071 的三格都是「这一格【没有】用户症状」那半句的物证：备自己会建目录（272）、
+  // worker 跑的就是同一个 createBackup（135）、挡门的是 orgBackupDir 在不在（936）。
+  // 值一律 `sed -n '<N>p'` 现读，不按 diff 推算。三条键都写【完整路径】而不是基名：
+  // 基名今天各自唯一（walk 在任意深度跳 .tmp/.workbuddy，副本不进取材），但完整形态
+  // 不依赖「将来没人再建一个同名文件」这件事。
+  "0071-an-injection-point-that-was-never-called-and-a-mutation-that-was-void.md>packages/hub/src/db/backup.ts:272":
+    "mkdirSync(o.backupDir, { recursive: true });",
+  "0071-an-injection-point-that-was-never-called-and-a-mutation-that-was-void.md>packages/hub/src/db/backup.worker.ts:135":
+    "result: createBackup(request),",
+  "0071-an-injection-point-that-was-never-called-and-a-mutation-that-was-void.md>packages/hub/src/http/real-deps.ts:936":
+    "...(o.orgBackupDir === undefined || o.orgDbPath === undefined",
+  // 同两条坐标在 INDEX 那一行里也出现（守卫取材是整篇散文，不分正文与索引）⇒
+  // 键按【提出它的那份文档】各登记一次，值同上（同一行的同一句）。
+  "INDEX.md>packages/hub/src/db/backup.ts:272":
+    "mkdirSync(o.backupDir, { recursive: true });",
+  "INDEX.md>packages/hub/src/http/real-deps.ts:936":
+    "...(o.orgBackupDir === undefined || o.orgDbPath === undefined",
   // ── CEO-决策简报-2026-11-22（B8 那一格）───────────────────────────────
   // 简报正文写的是裸名 `driver-pump.ts:489`，键登记成 `serve/driver-pump.ts:489`
   // 并把正文一并对齐 —— 与 0049 §12 / INDEX 引用【同一条坐标】用【同一个键形态】：

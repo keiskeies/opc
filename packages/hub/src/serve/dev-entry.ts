@@ -206,6 +206,11 @@ function defaultStopSignals(onStopping: () => void): () => void {
   };
 }
 
+/** DevDeps.ensureDir 的默认实现：真建目录，幂等。 */
+function defaultEnsureDir(dir: string): void {
+  mkdirSync(dir, { recursive: true });
+}
+
 /**
  * 一次 dev 的完整编排：迁移 → boot Hub → 起 web → 打横幅 → 等信号 → 两侧收尾。
  *
@@ -235,8 +240,7 @@ export async function runDev(
   // 目录不存在 ⇒ 组织提交那份快照写不出来。mkdir 幂等，且必须【在 boot 之前】：
   // 备份目录是在装配期读一次的（assemble.ts 里 orgBackupDir 那一格），启动后再补
   // 就等于装配时判定「没备份」，501 照旧。
-  deps.ensureDir ??
-    ((dir) => mkdirSync(dir, { recursive: true }))(p.orgBackupDir);
+  (deps.ensureDir ?? defaultEnsureDir)(p.orgBackupDir);
 
   const r = await deps.bootHub(
     { dbPath: p.dbPath, port: p.hubPort, noBackup: true },
