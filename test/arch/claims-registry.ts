@@ -2303,7 +2303,7 @@ export function nodeKeyIdentityCheck(f: Files): string {
       checkedAt: "2026-11-17",
       source: {
         doc: "docs/OPC-OS-功能优化设计.md",
-        line: 1830,
+        line: 1833,
         sentence: "本篇之外还有一份计划文档，而它的出口门前提今天不成立",
       },
       check: r10LintGuardCheck,
@@ -2322,7 +2322,7 @@ export function nodeKeyIdentityCheck(f: Files): string {
       checkedAt: "2026-11-17",
       source: {
         doc: "docs/OPC-OS-功能优化设计.md",
-        line: 1921,
+        line: 1924,
         sentence: "上一格那条计划引用守卫，落地后被自己的变异打回过一次",
       },
       check: r11PlanRefsGuardCheck,
@@ -2341,7 +2341,7 @@ export function nodeKeyIdentityCheck(f: Files): string {
       checkedAt: "2026-11-17",
       source: {
         doc: "docs/OPC-OS-功能优化设计.md",
-        line: 1952,
+        line: 1955,
         sentence: "计划的 6 道出口门禁，今天",
       },
       check: r12GatePathGuardCheck,
@@ -2363,7 +2363,7 @@ export function nodeKeyIdentityCheck(f: Files): string {
       checkedAt: "2026-11-17",
       source: {
         doc: "docs/OPC-OS-功能优化设计.md",
-        line: 2016,
+        line: 2019,
         sentence:
           "今天真的员工身上唯一生效的安全边界，此前一条守卫都没有 —— 顺带量到 `tsc -b` 从不检查测试",
       },
@@ -2386,7 +2386,7 @@ export function nodeKeyIdentityCheck(f: Files): string {
       checkedAt: "2026-11-17",
       source: {
         doc: "docs/OPC-OS-功能优化设计.md",
-        line: 2072,
+        line: 2075,
         sentence: "本篇自己的坐标从来没有门禁",
       },
       check: claimCoordsGuardCheck,
@@ -2474,7 +2474,7 @@ export function nodeKeyIdentityCheck(f: Files): string {
       checkedAt: "2026-11-19",
       source: {
         doc: "docs/OPC-OS-功能优化设计.md",
-        line: 2113,
+        line: 2116,
         sentence: "O8 那条端到端验收写出来了",
       },
       check: orgAddNodeGapCheck,
@@ -2687,7 +2687,7 @@ export function nodeKeyIdentityCheck(f: Files): string {
       checkedAt: "2026-11-18",
       source: {
         doc: "docs/OPC-OS-功能优化设计.md",
-        line: 2039,
+        line: 2042,
         sentence: "round285：这一格接成了门禁，形状是棘轮（登记为 r19）",
       },
       check: testTypeRatchetCheck,
@@ -2737,7 +2737,7 @@ export function nodeKeyIdentityCheck(f: Files): string {
       checkedAt: "2026-11-17",
       source: {
         doc: "docs/OPC-OS-功能优化设计.md",
-        line: 1584,
+        line: 1587,
         sentence: "round293 落地并登记为 r20",
       },
       check: censusRecomputeCheck,
@@ -2783,7 +2783,7 @@ export function nodeKeyIdentityCheck(f: Files): string {
       checkedAt: "2026-11-17",
       source: {
         doc: "docs/OPC-OS-功能优化设计.md",
-        line: 2353,
+        line: 2356,
         sentence: "round293 第二段落地并登记为 r21",
       },
       check: gateExemptionAccountCheck,
@@ -2860,7 +2860,7 @@ export function nodeKeyIdentityCheck(f: Files): string {
       checkedAt: "2026-11-17",
       source: {
         doc: "docs/OPC-OS-功能优化设计.md",
-        line: 2477,
+        line: 2480,
         sentence: "round294 落地并登记为 r22",
       },
       check: addNodeDispatchCheck,
@@ -2928,7 +2928,7 @@ export function nodeKeyIdentityCheck(f: Files): string {
       checkedAt: "2026-11-18",
       source: {
         doc: "docs/OPC-OS-功能优化设计.md",
-        line: 2594,
+        line: 2597,
         sentence: "round298 落地并登记为 r23",
       },
       check: delegationEdgeSelfCheckCheck,
@@ -3001,7 +3001,7 @@ export function nodeKeyIdentityCheck(f: Files): string {
       checkedAt: "2026-11-18",
       source: {
         doc: "docs/OPC-OS-功能优化设计.md",
-        line: 2667,
+        line: 2670,
         sentence: "round299 落地并登记为 r24",
       },
       check: nodeKeyIdentityCheck,

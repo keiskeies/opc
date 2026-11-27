@@ -1231,6 +1231,15 @@ const SNAP: Record<string, string> = {
     "const r = await deliverCard(channel, snap);",
   "0030-im-binding-identity-and-three-holes-i-did-not-design.md>channels/deliver.ts:257":
     "const r = await deliverCard(channel, snap);",
+  // ── round384 落地块（0070 §5）新引用的一格 ─────────────────────────────
+  // 活坐标：0070 §5 ① 那条「别把断言修成 toContainText("0")」的论据，全押在
+  // 「数字与标签是同一行的两个兄弟 div」这件事上 —— 有人哪天把 stat() 改成一行一个 div
+  // （或合并成一格），拼串断言就重新可写了，而那一格红才提示他 §5 ① 那条判据变了。
+  // 键写裸名与 0050 / 0060 那几格一致：`walk` 在任意深度跳过 `.tmp`，所以
+  // `.workbuddy/.tmp/head-biome/` 那份副本不在语料里，app.js 当前唯一可解析。
+  // 内容行按 `sed -n '618p'` 现读再抄（不是从 0070 正文复制措辞）。
+  "0070-the-browser-half-of-an-acceptance-line-that-had-never-actually-run.md>app.js:618":
+    '<div class="admin-num admin-mono">${esc(n)}</div><div class="admin-lbl">${esc(label)}</div>',
   // ── CEO-决策简报-2026-11-22（B8 那一格）───────────────────────────────
   // 简报正文写的是裸名 `driver-pump.ts:489`，键登记成 `serve/driver-pump.ts:489`
   // 并把正文一并对齐 —— 与 0049 §12 / INDEX 引用【同一条坐标】用【同一个键形态】：

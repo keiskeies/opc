@@ -220,7 +220,7 @@ describe("verify-open-invariants EXEMPT 穿透（round346）", () => {
       // 断言一：输出绝不能含"脏基准拒绝"（round353h 修的就是这个误伤）。
       // 断言二：必须真的【跑到了测试】—— gate 拦截是 0 tests（模块级 throw 在
       //   describe 外，vitest 报 no tests）；走到了描述阶段才有测试数。
-      //   （多出的 1234abcd 会让"16 条 key"断言红，那是穿透的正常语义，
+      //   （多出的 1234abcd 会让「EXEMPT 表 N 条 key」那条计数断言红，那是穿透的正常语义，
       //   但测试数非 0 证明 gate 没有把整个文件拦在门外。）
       const r = spawnSync(
         process.execPath,
@@ -282,8 +282,8 @@ describe("verify-open-invariants EXEMPT 穿透（round346）", () => {
     expect(r.green, r.out.slice(-1400)).toBe(true);
   });
 
-  it("EXEMPT 表 16 条 key 全部提取到且锚点唯一", () => {
-    expect(keys.length).toBe(16);
+  it("EXEMPT 表 17 条 key 全部提取到且锚点唯一", () => {
+    expect(keys.length).toBe(17);
     for (const k of keys) {
       const n = ORIGINAL.split(`"${k}"`).length - 1;
       expect(n, `${k} 的引号锚点应唯一命中`).toBe(1);
@@ -313,9 +313,10 @@ describe("verify-open-invariants EXEMPT 穿透（round346）", () => {
   }
 
   it("全还原后复跑 ⇒ 脚本恢复绿", () => {
-    expect(readFileSync(TARGET, "utf8"), "16 条逐字节还原后应干净").toBe(
-      ORIGINAL,
-    );
+    expect(
+      readFileSync(TARGET, "utf8"),
+      `${keys.length} 条逐字节还原后应干净`,
+    ).toBe(ORIGINAL);
     const r = runScript();
     expect(r.green, r.out.slice(-1400)).toBe(true);
   });
