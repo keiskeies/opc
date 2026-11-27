@@ -1284,8 +1284,13 @@ const SNAP: Record<string, string> = {
   "0074-avatar-upload-never-worked-a-dedupe-key-one-dimension-short-and-a-ui-with-no-uploader.md>packages/web/public/group.js:6028":
     "function avatarImagePicker() {",
   // ── 0075（模板生产者 + 守门的方法维）────────────────────────────────────
-  // 六条都是活坐标：按钮/弹窗被摘、INSERT 的 builtin 或展开行被动、hitsUi 升维，
+  // 每条都是活坐标：按钮/弹窗被摘、INSERT 的 builtin 或展开行被动、hitsUi 升维，
   // 0075 钉的「界面有生产者」「服务端早已承重」「门只看路径」同时失去或改变物证。
+  // 末两条是探针三个病因里两处现场的物证：转发函数签名 / 拼接出的空路径段。
+  "0075-template-library-had-a-display-and-no-producer.md>packages/web/public/group.js:3704":
+    'async function backlogMutation(path, method = "PATCH", body) {',
+  "0075-template-library-had-a-display-and-no-producer.md>packages/web/public/app.js:2706":
+    '"/charter/" + encodeURIComponent(charterRole),',
   "0075-template-library-had-a-display-and-no-producer.md>packages/web/public/group.js:3949":
     'button("新建模板", () => templateCreateModal(), "small"),',
   "0075-template-library-had-a-display-and-no-producer.md>packages/web/public/group.js:8432":
