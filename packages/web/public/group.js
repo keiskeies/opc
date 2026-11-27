@@ -1387,6 +1387,21 @@ function renderGroupList(content, toolbar) {
     );
   }
 }
+/**
+ * 文档：中栏筛选栏（一次性构建）+ 行区重画。
+ *
+ * 拆成两半是必须的：筛选栏过去挂在 renderDocumentList 自己里，oninput/onchange 又回调
+ * renderDocumentList 本身，而【清空】只在调用方 renderList 里做 —— 于是每敲一个字符，
+ * 搜索框和两个下拉各多一套、整棵文档树多挂一份（实测敲「筛验」两下：搜索框 1→3、
+ * 下拉 2→6、树 1→3）。
+ *
+ * 现在控件只在这函数里 append 一次，三个 handler 只叫 paintDocumentRows：被换的只有行区。
+ *
+ * ⚠ 别把它改成「handler 直接叫 renderList」——那是份数全对的另一种修法，但它每次把
+ * 工具条整个清空：用户正在敲的那枚 input 当场离开文档，焦点落在新生成的空框上，
+ * 下一个字符凭空丢失（中文输入法更糟：拼音还没上屏，承载组字的节点已经没了）。
+ * 这一格的红由 e2e 的「焦点仍在打标记那一枚 input」那发钉住。
+ */
 function renderDocumentList(content, toolbar) {
   toolbar.append(
     h(
@@ -1397,7 +1412,7 @@ function renderDocumentList(content, toolbar) {
         "aria-label": "筛选文档",
         oninput: (event) => {
           state.docFilter.q = event.target.value;
-          renderDocumentList(content, toolbar);
+          paintDocumentRows(content);
         },
       }),
     ),
@@ -1408,7 +1423,7 @@ function renderDocumentList(content, toolbar) {
       "aria-label": "文档类型",
       onchange: (event) => {
         state.docFilter.kind = event.target.value;
-        renderDocumentList(content, toolbar);
+        paintDocumentRows(content);
       },
     },
     h("option", { value: "", text: "全部类型" }),
@@ -1426,7 +1441,7 @@ function renderDocumentList(content, toolbar) {
       "aria-label": "所属群",
       onchange: (event) => {
         state.docFilter.group = event.target.value;
-        renderDocumentList(content, toolbar);
+        paintDocumentRows(content);
       },
     },
     h("option", { value: "", text: "全部群组" }),
@@ -1446,6 +1461,10 @@ function renderDocumentList(content, toolbar) {
   toolbar.append(
     h("div", { class: "toolbar doc-filter-kinds" }, kinds, groups),
   );
+  paintDocumentRows(content);
+}
+/** 文档：只重画行区（树或空态）。控件一个字节都不碰，见 renderDocumentList。 */
+function paintDocumentRows(content) {
   const filtered = state.documents.filter(
     (doc) =>
       (!state.docFilter.kind || doc.kind === state.docFilter.kind) &&
@@ -1455,6 +1474,7 @@ function renderDocumentList(content, toolbar) {
           .toLowerCase()
           .includes(state.docFilter.q.toLowerCase())),
   );
+  content.replaceChildren();
   if (!filtered.length) {
     content.append(
       emptyState(
@@ -1629,6 +1649,10 @@ function docTreeLeaf(doc) {
       : null,
   );
 }
+/**
+ * 待办：与 renderDocumentList 同一拆法 —— 控件建一次，行区单独重画。
+ * 理由见 renderDocumentList 上面那段（每敲一字多一枚搜索框 + 换掉正在敲的节点）。
+ */
 function renderBacklogList(content, toolbar) {
   toolbar.append(
     input("backlogSearch", state.backlogFilter, "search", {
@@ -1636,15 +1660,20 @@ function renderBacklogList(content, toolbar) {
       "aria-label": "筛选待办",
       oninput: (event) => {
         state.backlogFilter = event.target.value;
-        renderBacklogList(content, toolbar);
+        paintBacklogRows(content);
       },
     }),
   );
+  paintBacklogRows(content);
+}
+/** 待办：只重画行区。控件一个字节都不碰。 */
+function paintBacklogRows(content) {
   const items = state.backlog.filter(
     (item) =>
       !state.backlogFilter ||
       item.title.toLowerCase().includes(state.backlogFilter.toLowerCase()),
   );
+  content.replaceChildren();
   for (const item of items)
     content.append(
       h(

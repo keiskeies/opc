@@ -3157,3 +3157,295 @@ async function settledChatFrame(
     .toBe(true);
   return last;
 }
+
+/** 中栏一次求值读全的快照（筛选栏 + 列表 + 焦点 + 滚动），见 LIST_STATE_PROBE。 */
+interface ListState {
+  readonly searches: number;
+  readonly selects: number;
+  readonly trees: number;
+  readonly leaves: number;
+  readonly rows: number;
+  readonly emptyStates: number;
+  readonly scrollTop: number;
+  readonly scrollable: boolean;
+  readonly focusInToolbar: boolean;
+  readonly focusTag: string;
+  readonly focusMark: string;
+  readonly searchText: string;
+}
+
+/**
+ * 中栏读数：一次 evaluate 拿全，避免逐条 locator 各自轮询跨帧。
+ *
+ * ⚠ 页内探针一律写成字符串 IIFE：tsconfig 给页侧没有 node 类型，箭头函数串会被
+ * 当成【函数值】原样返回（读到 undefined 而不是读数）。
+ */
+const LIST_STATE_PROBE = `(() => {
+  const toolbar = document.querySelector("#listToolbar");
+  const content = document.querySelector("#listContent");
+  const search = document.querySelector("#listToolbar input[type=search]");
+  const active = document.activeElement;
+  return {
+    searches: toolbar.querySelectorAll("input[type=search]").length,
+    selects: toolbar.querySelectorAll("select").length,
+    trees: content.querySelectorAll(".doc-tree").length,
+    leaves: content.querySelectorAll(".doc-tree .doc-list-item").length,
+    rows: content.querySelectorAll("#listContent > .doc-list-item").length,
+    emptyStates: content.querySelectorAll(".state").length,
+    scrollTop: content.scrollTop,
+    scrollable: content.scrollHeight > content.clientHeight + 40,
+    focusInToolbar: toolbar.contains(active) && active !== toolbar,
+    focusTag: active ? active.tagName : "",
+    focusMark: active ? String(active.dataset.filterProbe || "") : "",
+    searchText: search ? String(search.value) : "",
+  };
+})()`;
+
+async function listState(page: Page): Promise<ListState> {
+  return (await page.evaluate(LIST_STATE_PROBE)) as unknown as ListState;
+}
+
+/**
+ * 逐字符真敲（不是 fill）：这一发测的就是「多敲一下会发生什么」。
+ *
+ * ⚠ 一律 .first()：未修时筛选栏会长出一排同款控件，locator 撞上多个元素会先抛
+ * strict mode violation —— 红是红了，但读数是「locator 有歧义」而不是「控件长了几个」。
+ * 计数全部走 LIST_STATE_PROBE 的 querySelectorAll，所以这里 .first() 不会放松判据。
+ */
+async function typeIntoSearch(page: Page, text: string): Promise<void> {
+  await page.locator("#listToolbar input[type=search]").first().focus();
+  await page.keyboard.type(text, { delay: 60 });
+}
+
+/**
+ * 给【当前这一枚】搜索框打一个数据标记，之后用它认「焦点还在不在同一枚节点上」。
+ *
+ * focusTag === "INPUT" 与 focusInToolbar 都认不出节点被换过：整栏重画后焦点落在一枚
+ * 崭新的 input 上，标签一样、也还在工具条里，两根读数全绿；用户那一头却是「第二个
+ * 字符发给了刚从 DOM 里摘掉的旧节点」——字凭空少一个。节点同一性才是这一格的尺子。
+ */
+function markSearchNode(): string {
+  return `(() => {
+    const el = document.querySelector("#listToolbar input[type=search]");
+    el.setAttribute("data-filter-probe", "same");
+    return 1;
+  })()`;
+}
+
+/**
+ * 真滚中栏列表（悬停 + 滚轮），别用 scrollTop = N。
+ *
+ * 滚轮走的是用户拖动那一条路：内容不够长时浏览器【不滚】，滚动是合成器线程上的异步事，
+ * 所以要 poll 到 scrollTop 真的动起来才继续 —— 滚不动会带着这条消息红给我看。
+ * scrollTop = N 反过来：写多少读回多少（哪怕内容根本不滚），判据看着绿其实什么都没量。
+ *
+ * ⚠ 要等的不是「动起来」而是【停下来】：只判 `> 0` 会在滚轮动画半途就把基线取走，而基线
+ * 自己还在长。全量里实测抓到过 —— 基线读到 120，动画落定是 240，于是后面那根「敲完滚动
+ * 不动」的线恒红（单跑快、动画在第一次 poll 前就落完，所以只在负载下现形）。判据改成
+ * 「相邻两读数相同且 > 0」，并且返回那一次读数本身：中途取的值不能当基线。
+ */
+async function scrollListDown(page: Page): Promise<ListState> {
+  await page.locator("#listContent").hover();
+  await page.mouse.wheel(0, 120);
+  let prev = -1;
+  await expect
+    .poll(
+      async () => {
+        const top = (await listState(page)).scrollTop;
+        const stable = top > 0 && top === prev;
+        prev = top;
+        return stable;
+      },
+      {
+        message:
+          "中栏列表滚不动，或滚动一直停不下来：滚动那根判据拿不到稳定基线，不许继续",
+      },
+    )
+    .toBe(true);
+  return listState(page);
+}
+
+test("中栏筛选器：逐字符敲不累加控件、不重复列表，焦点/取值/滚动留在原处", async ({
+  page,
+}) => {
+  const browserErrors = watchBrowserErrors(page);
+  await page.goto(`${webOrigin}/`);
+  await expect(page.locator("#listTitle")).toHaveText("消息");
+  const created = await createGroupThroughUi(
+    page,
+    "筛选器验收群",
+    "把中栏筛选器敲坏的那一发",
+    false,
+  );
+  const groupId = created.group.group_id;
+  // 文档与待办按【写入链路】灌进来：这一发测的是筛选器，不是创建器。
+  //
+  // 标题统一带「筛验」这个词：中栏列的是【全部群】的文档/待办，而这台 hub 的库是整份
+  // e2e 共用的，别家用例早就往里灌过一堆名字。只有按一个独占词筛，条数才是我说了算的
+  // （建群还会自动生成一篇「立项：…」章程文档，也一起被这个词筛掉）。
+  // 30 篇 / 24 条是为了让 .list-content 真的能滚：滚动那两根线要有一个可滚的对象，
+  // 否则 scrollTop 恒为 0，「跳回顶部」压根不会红。
+  const seeded = (await page.evaluate(async (gid) => {
+    const results: number[] = [];
+    const post = async (path: string, body: unknown) => {
+      const res = await fetch(`/api/v1/${path}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      results.push(res.status);
+    };
+    await post("documents", {
+      title: "筛验甲",
+      kind: "markdown",
+      group_id: gid,
+      body_text: "甲正文",
+    });
+    await post("documents", {
+      title: "筛验乙",
+      kind: "markdown",
+      group_id: gid,
+      body_text: "乙正文",
+    });
+    await post("documents", {
+      title: "筛验丙",
+      kind: "doc",
+      group_id: gid,
+      body_text: "丙正文",
+    });
+    for (let i = 0; i < 27; i += 1)
+      await post("documents", {
+        title: `筛验档${i}`,
+        kind: "markdown",
+        group_id: gid,
+        body_text: `长列表正文${i}`,
+      });
+    for (let i = 0; i < 24; i += 1)
+      await post("backlog", { title: `筛验待办${i}`, group_id: gid });
+    return results;
+  }, groupId)) as number[];
+  expect(seeded.every((status) => status === 201)).toBe(true);
+
+  // 灌完数据必须【真 reload】一次：goto 一个只是 hash 不同的地址并不会重载文档，
+  // 它只触发 hashchange，state.documents 仍是建群那次读回来的旧读数（只有那篇章程），
+  // 于是筛选永远命中 0 篇 —— 判据会红，但红的是我的准备没做对，不是产品。
+  // reload 让 boot() 带着 #/documents 重跑一遍，读回来的才是用户打开这一栏看到的那一屏。
+  await page.goto(`${webOrigin}/#/documents`);
+  await page.reload();
+  const trees = page.locator("#listContent .doc-tree");
+  await expect(trees).toHaveCount(1);
+  const search = page.locator("#listToolbar input[type=search]");
+  await expect(search).toHaveCount(1);
+  const kindSelect = page.locator('#listToolbar select[aria-label="文档类型"]');
+  const groupSelect = page.locator('#listToolbar select[aria-label="所属群"]');
+
+  // 线 1（文档：控件不翻倍）：逐字符敲「筛验」。旧形状下每一下把整份筛选栏
+  // 再 append 一遍（搜索框 1→2→3、下拉 2→4→6），所以这一发就是缺陷本体。
+  await page.evaluate(markSearchNode());
+  await typeIntoSearch(page, "筛验");
+  let state = await listState(page);
+  expect(state.searches).toBe(1);
+  expect(state.selects).toBe(2);
+  // 线 3（文档：打字打到一半不许丢焦点/丢字）：焦点还在【打标记那一枚】搜索框里，
+  // 框里的值就是敲进去的那两个字。
+  //
+  // ⚠ 这一组必须排在叶子计数【之前】：整栏重画那一发（把 handler 改回 renderList）
+  // 控件份数全对，只有这里会红 —— 而它同时会让第二个字符丢失，读数成「筛」命中 31 篇
+  // （多出来那篇是建群自动生成的「立项：筛选器验收群」章程）。谁排前面，M8 就红在谁身上，
+  // 焦点这一格就不再有自己那次动作；排在这里，31 那一发红的是线 2，各归各。
+  expect(state.focusInToolbar).toBe(true);
+  expect(state.focusTag).toBe("INPUT");
+  expect(state.focusMark).toBe("same");
+  expect(state.searchText).toBe("筛验");
+  // 线 2（文档：列表不重复）：命中 30 篇就是 30 篇叶子，不会每敲一下再挂一份树。
+  expect(state.trees).toBe(1);
+  expect(state.leaves).toBe(30);
+
+  // 线 4（文档：空态只有一份）：接着敲成不匹配的关键词 ⇒ 一份空态，不是每敲一下叠一份。
+  await typeIntoSearch(page, "zzz");
+  state = await listState(page);
+  expect(state.emptyStates).toBe(1);
+  await expect(page.locator("#listContent")).toContainText("没有匹配的文档");
+  expect(state.leaves).toBe(0);
+  expect(state.searches).toBe(1);
+
+  // 线 5（文档：改回能命中的关键词）：换回「筛验」⇒ 30 篇回来，仍然只有一棵树。
+  await search.first().fill("筛验");
+  state = await listState(page);
+  expect(state.leaves).toBe(30);
+  expect(state.trees).toBe(1);
+  expect(state.emptyStates).toBe(0);
+
+  // 线 6（文档：形态下拉自己那一次动作）：换形态 ⇒ 只剩富文本那一篇的补集，
+  // 下拉数量不涨（这一发的落点是 select 的 onchange，与搜索框那两条各自独立）。
+  await kindSelect.first().selectOption("doc");
+  state = await listState(page);
+  expect(state.leaves).toBe(1);
+  expect(state.selects).toBe(2);
+  await expect(
+    page.locator("#listContent .doc-list-item").filter({ hasText: "筛验丙" }),
+  ).toHaveCount(1);
+  await kindSelect.first().selectOption("");
+  await expect(
+    page.locator("#listContent .doc-tree .doc-list-item"),
+  ).toHaveCount(30);
+
+  // 线 7（文档：换筛选条件时列表滚动位置留在原处）：这条是【防我改坏】的那根，不是缺陷复现 ——
+  // 未修时内容只增不清、容器不换，scrollTop 自然不掉；改成整栏重画后一旦把 #listContent
+  // 里的孩子全清掉，浏览器会把 scrollTop 夹回 0，换一个下拉就跳回顶部。
+  // 这里用「所属群」而不是搜索框：这一发筛掉 0 条，列表长度不变，
+  // 「scrollTop 该留在原处」才有唯一答案（内容变短时浏览器自己就会夹上去）。
+  const scrolled = await scrollListDown(page);
+  expect(scrolled.scrollable).toBe(true);
+  await groupSelect.first().selectOption(groupId);
+  state = await listState(page);
+  expect(state.leaves).toBe(30);
+  expect(state.selects).toBe(2);
+  expect(state.scrollTop).toBe(scrolled.scrollTop);
+  await groupSelect.first().selectOption("");
+
+  // 线 8（切栏一趟回来筛选栏仍是一份）：钉住 renderList 里那句 toolbar.replaceChildren。
+  await page.locator('[data-nav="messages"]').click();
+  await page.locator('[data-nav="documents"]').click();
+  state = await listState(page);
+  expect(state.searches).toBe(1);
+  expect(state.selects).toBe(2);
+  expect(state.trees).toBe(1);
+
+  // 线 9（待办：同形缺陷的第二个落点）：待办只有一枚搜索框，逐字符敲之后仍然只有一枚，
+  // 24 条一行不重复；这一发把 renderBacklogList 那处自递归单独钉住。
+  await page.locator('[data-nav="backlog"]').click();
+  const backlogSearch = page.locator("#listToolbar input[type=search]");
+  await expect(backlogSearch).toHaveCount(1);
+  await typeIntoSearch(page, "筛验");
+  state = await listState(page);
+  expect(state.searches).toBe(1);
+  expect(state.rows).toBe(24);
+  expect(state.emptyStates).toBe(0);
+  expect(state.focusInToolbar).toBe(true);
+  expect(state.searchText).toBe("筛验");
+
+  // 线 10（待办：滚动位置留在原处）：接着往下敲「待办」——24 条标题都含这两个字，
+  // 行数不变，所以滚动位置该留在原处；焦点也必须在原框里才敲得进去（继续敲本身就靠它）。
+  const backlogScrolled = await scrollListDown(page);
+  expect(backlogScrolled.scrollable).toBe(true);
+  await typeIntoSearch(page, "待办");
+  state = await listState(page);
+  expect(state.rows).toBe(24);
+  expect(state.scrollTop).toBe(backlogScrolled.scrollTop);
+  expect(state.searches).toBe(1);
+  expect(state.searchText).toBe("筛验待办");
+
+  // 线 11（待办：收窄到一条 / 收到不匹配只留一份空态）。
+  await backlogSearch.first().fill("筛验待办3");
+  state = await listState(page);
+  expect(state.rows).toBe(1);
+  expect(state.searches).toBe(1);
+  await backlogSearch.first().fill("筛验不存在的关键字");
+  state = await listState(page);
+  expect(state.emptyStates).toBe(1);
+  expect(state.rows).toBe(0);
+  await expect(page.locator("#listContent")).toContainText("没有匹配的待办");
+
+  expectNoBrowserErrors(browserErrors);
+});
