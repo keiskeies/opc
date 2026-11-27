@@ -51,7 +51,7 @@
   `state.messages.length` —— 那是累计已加载，翻过一页之后它早就不等于本页条数。
 - **`applyHistoryWindow`**（`packages/web/public/group.js:689`）= 重读消息数组的唯一入口，
   数组、游标、「还有更早」三格一起重算，并且**只保留该保留的**。落地时首屏读取有两处
-  （`packages/web/public/group.js:2024` 的 `loadMessages`，以及 `runRefreshAll` 里
+  （`packages/web/public/group.js:2089` 的 `loadMessages`，以及 `runRefreshAll` 里
   「用户正在输入框里」那个替身），首版我只在 `loadMessages` 里补了重算 —— 第二处也是
   整体覆盖，游标会指着一条已不在数组里的消息，下一发 `before_seq` 就从错误位置往旧翻
   （静默跳过一段历史）。守卫 `test/web/history-cursor-producer.test.ts:96` 因此钉
@@ -70,16 +70,16 @@
   的整个窗口（取新来的那一页 = 游标退回，同一段会被再要一遍）。守卫
   `test/web/history-cursor-producer.test.ts:173` 把判据建在这个函数体上（不是散文上），
   五条各自点名，负向一发改退回「无条件整体覆盖」那一版 ⇒ 五条逐条报缺口。
-- **`loadOlderMessages`**（`packages/web/public/group.js:2076`）发第二发，按服务端
+- **`loadOlderMessages`**（`packages/web/public/group.js:2154`）发第二发，按服务端
   docstring 说的 prepend（`fresh.concat(state.messages)`，不许 reverse、不许整体覆盖），
   游标只许单调变小、空页不清空。**不抢 `renderToken`/`messageRequestToken`**：它既不是
   新快照也不是切会话，抢 token 会让并发在飞的 `loadMessages` 白投一次；本发只靠
   `conversation_id` 自证结果还属于当前会话。按 `message_id` 去重兜住翻页窗口与 SSE
   推送重叠那一瞬。视口锚点取「视口顶到内容底的距离」，prepend 之后按同一差值还原，
   否则每点一次「更早」屏幕就跳走。
-- **按钮**（`packages/web/public/group.js:2499`）挂在消息循环之前 = 流的最顶端；
+- **按钮**（`packages/web/public/group.js:2577`）挂在消息循环之前 = 流的最顶端；
   `messagesHasMore=false` 时这一格根本不画，不留一枚点了空手而回的按钮。
-- **`data-seq`**（`packages/web/public/group.js:2552`）：消息行带自己那条的会话内序号。
+- **`data-seq`**（`packages/web/public/group.js:2630`）：消息行带自己那条的会话内序号。
   这一条同样不是为测试加的装饰 —— 翻页的正确性唯一可判的形态是「首行是最早那条」，
   而文案相同的历史消息（同一句「收到」聊 50 遍）在屏幕上长得一样；序号是服务端事实，
   判据不靠渲染时刻的几何、也不靠文案 uniqueness。
@@ -186,6 +186,8 @@ M9/M11 两发的价值不在「又多两发红」，在于它们与预检是同�
   来一条新消息，屏幕会跳走。这一格真正的修法是「用户已不在最新位置时抑制跳底」，属滚动
   位置管理一整格（还要定「多近算在底部」的口径），不属本篇。**判据已先在位**：第五根线钉的是
   【数据与按钮】，跳底是视口问题，两者不混在一发里判（混了就归不了因）。
+  【0078 已按这个口径落地：0078 单独装了滚动锚点那一族，容差口径、两把尺子的分工与
+  「读锚点的时机」都在那里判；本篇的五根内容线一个字没改，只另加了一条实测几何线。】
 - **首版把这条当成「有意取舍」写进本节**：原文是「保住用户翻到的窗口就得同时记住用户已经
   不在最新位置并抑制新消息跳底 —— 那是滚动位置管理一整格，不属本篇」。前一半是错的：
   保住窗口不需要滚动位置管理，只需要别把旧行覆盖掉（就是 `retainOlderThan` 那九行）。

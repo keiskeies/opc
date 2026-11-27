@@ -2677,6 +2677,12 @@ test("会话历史翻页：满一页后有「查看更早」，点击带游标 p
   // wait 挂在动作之前（家法）：点完再挂，响应可能已在两次 await 之间落地。
   // 谓词点名 before_seq —— 会话的 GET /messages 不止一发（SSE 触发的重取也算），
   // 只认 pathname 会让首屏那一发把 wait 提前喂饱。
+  // 先把屏幕放到流的最顶端，让基线与点击时刻【同一处】：#load-older 就长在流的头
+  // 上，Playwright 点它会自己滚上去，拿打开时那一发（贴在最新消息）当基线，量的
+  // 就不是那对锚点动的这一段。
+  await setChatScroll(page, 0);
+  const beforePaging = await settledChatFrame(page, { rows: 200 });
+  expect(beforePaging.top).toBe(0);
   const pagedPromise = page.waitForResponse(
     (response) =>
       new URL(response.url()).pathname ===
@@ -2713,6 +2719,16 @@ test("会话历史翻页：满一页后有「查看更早」，点击带游标 p
   expect(afterPaging.ascending).toBe(true);
   expect(afterPaging.button).toBe(false);
 
+  // 第 3.5 根线（往旧翻那一头的滚动锚点）：prepend 在【上方】加了一段内容，
+  // 视口必须停在原来正看着的那条消息上 —— 也就是往下走「恰好新加那一段」的高度。
+  // 尺子用实测：scrollTop == 新内容高 − 旧内容高（锚点写的是 scrollHeight − 旧 scrollTop，
+  // 而基线 scrollTop=0），不写死行高（行高会变，这个恒等式不会）。
+  // 剪掉 loadOlderMessages 的恢复 ⇒ 新节点 scrollTop 停在 0（屏幕跳到流头）；
+  // 把两把尺子「统一」成 chatScrollAnchor（留住 scrollTop）⇒ 同样写回 0：两种写法
+  // 都在这一发红，而上面那五条内容判据对这两者全都无感（首行的 data-seq 与锚点无关）。
+  expect(afterPaging.top).toBeGreaterThan(0);
+  expect(afterPaging.top).toBe(afterPaging.sh - beforePaging.sh);
+
   // 第五根线：到底之后逼一次【背景整页重读】（刷新按钮走 runRefreshAll，与 SSE
   // 事件触发的是同一条 loadMessages 路径）。它读的是最新一页，若直接整体覆盖数组，
   // 刚翻出来的「史前消息 000」会被吞回去、游标退回 2、「查看更早」原地复活 ——
@@ -2745,6 +2761,247 @@ test("会话历史翻页：满一页后有「查看更早」，点击带游标 p
   expectNoBrowserErrors(browserErrors);
 });
 
+test("会话滚动位置：翻上去读旧史时背景重读留在原地，用户自己的动作照旧跳底", async ({
+  page,
+}) => {
+  const browserErrors = watchBrowserErrors(page);
+  await page.goto(`${webOrigin}/`);
+  const created = await createGroupThroughUi(
+    page,
+    "滚动锚点验收群",
+    "验证背景重读不把视口跳回底部",
+  );
+  const groupId = created.group.group_id;
+
+  // 与 0077 同一手：先在文档页灌种子。每条 POST 都发 SSE 事件，停在消息页时
+  // 每个事件都触发一发重读 —— 那会把「谁改了滚动位置」变成归不了因的一团。
+  await page.locator('[data-nav="documents"]').click();
+  await expect(page).toHaveURL(/#\/documents/u);
+  const conversationId = await page.evaluate(async (id) => {
+    const res = await fetch("/api/v1/conversations");
+    const body = (await res.json()) as {
+      conversations: { conversation_id: string; group_id: string | null }[];
+    };
+    return (
+      body.conversations.find((entry) => entry.group_id === id)
+        ?.conversation_id ?? ""
+    );
+  }, groupId);
+  expect(conversationId).not.toBe("");
+
+  // 60 条：够把消息流撑出【两屏以上】的溢出（判据要能在上下两头分辨位置），
+  // 又不到页界 200（本发测的是「重读不改视口」，不掺翻页的保留段）。
+  const SEED = 60;
+  const seeded = await page.evaluate(
+    async ({ cid, count }: { cid: string; count: number }) => {
+      let written = 0;
+      for (let i = 0; i < count; i += 1) {
+        const res = await fetch(
+          `/api/v1/conversations/${encodeURIComponent(cid)}/messages`,
+          {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+              body: `锚点消息 ${String(i).padStart(2, "0")}`,
+            }),
+          },
+        );
+        if (!res.ok) throw new Error(`种子第 ${String(i)} 条写入失败`);
+        written += 1;
+      }
+      return written;
+    },
+    { cid: conversationId, count: SEED },
+  );
+  expect(seeded).toBe(SEED);
+
+  await page.goto(
+    `${webOrigin}/#/messages/${encodeURIComponent(conversationId)}`,
+  );
+  const opened = await settledChatFrame(page, { rows: SEED });
+  // 尺子的前提：这一屏真能滚（sh>ch），且打开时落在最新消息上。
+  // 前提红在前提自己 —— 若消息流压根不滚（overflow 不是 auto），后面每一发
+  // 「位置不动」都是 scrollTop 恒为 0 的假绿。
+  expect(opened.sh).toBeGreaterThan(opened.ch);
+  expect(opened.dist).toBe(0);
+
+  // 往上翻到溢出段的一半（不写死像素：行高与视口会变，但「一半」恒在贴底带之外）。
+  const halfway = (await page.evaluate(CHAT_HALF_SCROLL_PROBE)) as number;
+  expect(halfway).toBeGreaterThan(0);
+  await setChatScroll(page, halfway);
+  const upHere = await settledChatFrame(page, { rows: SEED });
+  // 浏览器没把 scrollTop 夹回去（= 这一屏确实在 600 那个量级之上还能滚）。
+  expect(upHere.top).toBe(halfway);
+  // ⚠ 80 = group.js 的 CHAT_BOTTOM_STICK_PX：这一发必须在贴底带【之外】，
+  // 否则「留在原地」与「跟随底部」在这里根本分不开。
+  expect(upHere.dist).toBeGreaterThan(80);
+
+  // 第一根线（背景重读那一头）：刷新按钮走 loadMessages，与 SSE 事件同一条路径。
+  // 判据 = 读到的是【新帧】且 scrollTop 逐像素不动、距底距离也不动。
+  const beforeRefresh = upHere;
+  const refreshed = page.waitForResponse(
+    (response) =>
+      new URL(response.url()).pathname ===
+        `/api/v1/conversations/${conversationId}/messages` &&
+      !new URL(response.url()).searchParams.has("before_seq") &&
+      response.ok(),
+    { timeout: 20_000 },
+  );
+  await page.getByRole("button", { name: "刷新消息" }).click();
+  await refreshed;
+  const afterRefresh = await settledChatFrame(page, {
+    afterRenderId: beforeRefresh.renderId,
+    rows: SEED,
+  });
+  // 帧号必须换：不换 = 量的是重读之前的旧帧，「位置没动」等于什么都没量。
+  expect(afterRefresh.renderId).not.toBe(beforeRefresh.renderId);
+  expect(afterRefresh.top).toBe(beforeRefresh.top);
+  expect(afterRefresh.dist).toBe(beforeRefresh.dist);
+
+  // 第二根线（下方长了东西）：别人发了一条 → 背景重读把它读进来。新增落在【下方】，
+  // 所以视口仍该停在原地，而不是被拽去看那条新消息。
+  const arrived = page.waitForResponse(
+    (response) =>
+      new URL(response.url()).pathname ===
+        `/api/v1/conversations/${conversationId}/messages` &&
+      !new URL(response.url()).searchParams.has("before_seq") &&
+      response.ok(),
+    { timeout: 20_000 },
+  );
+  const posted = await page.evaluate(async (cid) => {
+    const res = await fetch(
+      `/api/v1/conversations/${encodeURIComponent(cid)}/messages`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ body: "别人刚发的插话" }),
+      },
+    );
+    return res.ok;
+  }, conversationId);
+  expect(posted).toBe(true);
+  await arrived;
+  // SSE 那一发（若先到）与手动刷新任一都行：只要读到【比上一发更新的正文帧】，
+  // 且行数真的多了一条（= 新增落在下方这件事成立了）。
+  await page.getByRole("button", { name: "刷新消息" }).click();
+  const withNew = await settledChatFrame(page, {
+    afterRenderId: afterRefresh.renderId,
+    rows: SEED + 1,
+  });
+  expect(withNew.top).toBe(afterRefresh.top);
+  expect(withNew.firstText).toBe(afterRefresh.firstText);
+  expect(withNew.dist).toBeGreaterThan(80);
+
+  // 第三根线（用户自己的动作 = 重画）：点「回复」引起一次整格重画，内容没变，
+  // 视口也不该动。这一发是 renderMain 那对锚点唯一的动作 —— 摘下来的节点量不到
+  // 几何（scrollHeight/clientHeight 一律 0），所以锚点只能读在拆之前。
+  // ⚠ 挑一枚【已在视口正中】的回复按钮：Playwright 点击前会 scrollIntoViewIfNeeded，
+  // 拿视口外的按钮就会自己把 scrollTop 改了，红了分不清是缺陷还是自动滚动。
+  const replyIndex = (await page.evaluate(CHAT_REPLY_ROW_PROBE)) as number;
+  expect(replyIndex).toBeGreaterThanOrEqual(0);
+  const replied = await settledChatFrame(page, { rows: SEED + 1 });
+  await page
+    .locator(".message-row")
+    .nth(replyIndex)
+    .getByRole("button", { name: "回复" })
+    .click();
+  await expect(page.locator(".reply-bar")).toBeVisible();
+  const afterReply = await settledChatFrame(page, {
+    afterRenderId: replied.renderId,
+    rows: SEED + 1,
+  });
+  expect(afterReply.renderId).not.toBe(replied.renderId);
+  expect(afterReply.top).toBe(replied.top);
+
+  // 第四根线：取消回复（按钮在 composer 里，不在消息流内 ⇒ 无自动滚动干扰）
+  // 又是一次 renderMain，位置照旧不动。
+  const cancelled = await settledChatFrame(page, { rows: SEED + 1 });
+  await page.getByRole("button", { name: "取消回复" }).click();
+  await expect(page.locator(".reply-bar")).toHaveCount(0);
+  const afterCancel = await settledChatFrame(page, {
+    afterRenderId: cancelled.renderId,
+    rows: SEED + 1,
+  });
+  expect(afterCancel.top).toBe(cancelled.top);
+
+  // 第四根半（正向的另一半）：贴在底部的人【要】跟着新消息走 —— 只判「翻上去不动」
+  // 会把修法写成「永不跳底」，那一半在这里红。滚到底 → 背景重读 → 仍贴底。
+  await scrollChatToBottom(page);
+  const atBottom = await settledChatFrame(page, { rows: SEED + 1 });
+  expect(atBottom.dist).toBe(0);
+  await page.getByRole("button", { name: "刷新消息" }).click();
+  const afterBottomRefresh = await settledChatFrame(page, {
+    afterRenderId: atBottom.renderId,
+    rows: SEED + 1,
+  });
+  expect(afterBottomRefresh.renderId).not.toBe(atBottom.renderId);
+  expect(afterBottomRefresh.dist).toBe(0);
+
+  // 第四根¾（贴底那一支自己的动作）：贴着底部时【来了新消息】，必须跟着走。
+  // 少了这一发，「贴底判定」这一格是抓不到的 —— pinned 恒写成 false 时，重读写回的
+  // 是 anchor.top = 当时的最大滚动量，内容没变就等于贴底（上一发照旧绿）；只有内容
+  // 长高才露馅：停在旧底 = 离底差一整条消息。判据用 dist===0（正确代码下恒等），
+  // 不写行高阈值。
+  const pinnedArrived = page.waitForResponse(
+    (response) =>
+      new URL(response.url()).pathname ===
+        `/api/v1/conversations/${conversationId}/messages` &&
+      !new URL(response.url()).searchParams.has("before_seq") &&
+      response.ok(),
+    { timeout: 20_000 },
+  );
+  const postedAgain = await page.evaluate(async (cid) => {
+    const res = await fetch(
+      `/api/v1/conversations/${encodeURIComponent(cid)}/messages`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ body: "贴着底部时来的那条" }),
+      },
+    );
+    return res.ok;
+  }, conversationId);
+  expect(postedAgain).toBe(true);
+  await pinnedArrived;
+  await page.getByRole("button", { name: "刷新消息" }).click();
+  const followed = await settledChatFrame(page, {
+    afterRenderId: afterBottomRefresh.renderId,
+    rows: SEED + 2,
+  });
+  expect(followed.dist).toBe(0);
+  expect(followed.firstText).toBe(afterBottomRefresh.firstText);
+
+  // 第五根线（反向）：发送那一发【必须】跳到底 —— 用户自己的动作。
+  // ⚠ 先退回半途再发：上面刚贴过底，而贴底的人【不加那一行也会】被锚点送到底
+  // （renderMain 与 loadMessages 都读到 pinned=true）—— 那一行就成了不承重的装饰。
+  // 从半途发才分得开：没有发送那一跳，两对锚点都会把他留在半途 ⇒ 红。
+  await setChatScroll(page, halfway);
+  const beforeSend = await settledChatFrame(page, { rows: SEED + 2 });
+  expect(beforeSend.top).toBe(halfway);
+  expect(beforeSend.dist).toBeGreaterThan(80);
+  const sending = page.waitForResponse(
+    (response) =>
+      new URL(response.url()).pathname ===
+        `/api/v1/conversations/${conversationId}/messages` &&
+      !new URL(response.url()).searchParams.has("before_seq") &&
+      response.ok(),
+    { timeout: 20_000 },
+  );
+  await page.locator('textarea[name="body"]').fill("我自己发的最新一条");
+  await page.getByRole("button", { name: "发送", exact: true }).click();
+  await sending;
+  const afterSend = await settledChatFrame(page, {
+    afterRenderId: beforeSend.renderId,
+    rows: SEED + 3,
+  });
+  expect(afterSend.renderId).not.toBe(beforeSend.renderId);
+  expect(afterSend.top).toBeGreaterThan(beforeSend.top);
+  // 贴底读数 = 正看着自己刚发的那条（不是「离底还有一屏」）。
+  expect(afterSend.dist).toBe(0);
+
+  expectNoBrowserErrors(browserErrors);
+});
+
 interface ChatFrame {
   readonly renderId: string;
   readonly skeleton: boolean;
@@ -2754,6 +3011,10 @@ interface ChatFrame {
   readonly ascending: boolean;
   readonly button: boolean;
   readonly prehistoric: number;
+  readonly top: number;
+  readonly sh: number;
+  readonly ch: number;
+  readonly dist: number;
 }
 
 /**
@@ -2762,6 +3023,10 @@ interface ChatFrame {
  * renderId 是这一帧宿主节点的标记：renderChat 每次 view.replaceChildren() 重建
  * .message-stream，给节点打标等于给「这一帧」领了号 —— 调用方由此能证明读到的帧
  * 晚于它做动作的那一次，而不是页面刚切过来时的旧帧。
+ *
+ * 滚动几何（top/sh/ch/dist）与帧号【同一次求值】读出：分开两次读，中间就可能插进
+ * 一发重画，量到的是「上一帧的位置 + 这一帧的内容」。dist = scrollHeight - scrollTop
+ * - clientHeight，即「距底」，0 = 正看着最新消息。
  */
 const CHAT_FRAME_PROBE = `
 (() => {
@@ -2784,7 +3049,75 @@ const CHAT_FRAME_PROBE = `
     ascending: seqs.every((seq, i) => i === 0 || seqs[i - 1] <= seq),
     button: document.querySelector("#load-older") !== null,
     prehistoric: bubbles.filter((b) => (b?.textContent ?? "") === "史前消息 000").length,
+    top: stream === null ? -1 : stream.scrollTop,
+    sh: stream === null ? -1 : stream.scrollHeight,
+    ch: stream === null ? -1 : stream.clientHeight,
+    dist:
+      stream === null
+        ? -1
+        : stream.scrollHeight - stream.scrollTop - stream.clientHeight,
   };
+})()
+`;
+
+/**
+ * 页侧几何操作（全部字符串形式：types:[node] 下页内闭包拿不到外层标识符，
+ * 写成箭头函数会整片报 TS2584，round377 记过这一手）。
+ */
+const CHAT_HALF_SCROLL_PROBE = `
+(() => {
+  const stream = document.querySelector(".message-stream");
+  if (stream === null) return -1;
+  return Math.floor((stream.scrollHeight - stream.clientHeight) / 2);
+})()
+`;
+
+/**
+ * 把消息流滚到给定像素。
+ *
+ * ⚠ 像素是拼进串里的【数字】，不是页内闭包、也不走 evaluate 的 arg ——
+ * types:[node] 下页内箭头函数会整片报 TS2584（round377 记过这一手），而字符串
+ * pageFunction 配 arg 的求值形状不是本仓验过的路子。数字拼串对判据无损：
+ * 量的是「滚完之后停在哪」，怎么滚进来的这一发不需要承重。
+ */
+async function setChatScroll(page: Page, px: number): Promise<void> {
+  await page.evaluate(
+    `(() => { const s = document.querySelector(".message-stream"); if (s) s.scrollTop = ${String(
+      px,
+    )}; return s === null ? -1 : s.scrollTop; })()`,
+  );
+}
+
+async function scrollChatToBottom(page: Page): Promise<void> {
+  await page.evaluate(CHAT_TO_BOTTOM_PROBE);
+}
+
+/** 滚到底 = 用户正看着最新消息（贴底）。 */
+const CHAT_TO_BOTTOM_PROBE = `
+(() => {
+  const stream = document.querySelector(".message-stream");
+  if (stream) stream.scrollTop = stream.scrollHeight;
+  return stream === null ? -1 : stream.scrollTop;
+})()
+`;
+
+/**
+ * 找一枚【整行都在视口内】的消息行下标。
+ *
+ * ⚠ Playwright 点击前会 scrollIntoViewIfNeeded —— 拿视口外的按钮就会自己改掉
+ * scrollTop，红了分不清是缺陷还是自动滚动，所以这一发必须由页侧先把行选好。
+ */
+const CHAT_REPLY_ROW_PROBE = `
+(() => {
+  const stream = document.querySelector(".message-stream");
+  if (stream === null) return -1;
+  const box = stream.getBoundingClientRect();
+  const rows = Array.from(document.querySelectorAll(".message-row"));
+  for (let i = 0; i < rows.length; i += 1) {
+    const r = rows[i].getBoundingClientRect();
+    if (r.top > box.top + 60 && r.bottom < box.bottom - 60) return i;
+  }
+  return -1;
 })()
 `;
 

@@ -701,6 +701,59 @@ function applyHistoryWindow(id, page) {
       ? state.messagesHasMore
       : historyHasMore(page.length, MESSAGES_PAGE_LIMIT);
 }
+/**
+ * 「用户正贴在最新消息上」的容差（像素）。
+ *
+ * 不能写成 0：scrollTop 是浏览器【向下取整】的整数，分数 DPI / 分数行高下
+ * scrollHeight - clientHeight 落在两行之间，滚到底读回来的「距底」可能是 0 也可能
+ * 是 1；反过来差几像素没到底的人，被要求「精确为 0 才跟随」会莫名其妙地不再跟随。
+ * 阈值同时兜住这两头：小于它算贴底，明显往上翻了才算「在读旧史」。
+ */
+const CHAT_BOTTOM_STICK_PX = 80;
+/**
+ * 重画消息流【之前】读一眼这一屏，产出一枚交给 applyChatScrollAnchor 的锚点。
+ *
+ * 返回 null = 屏幕上压根没有消息流（首次打开、切到别的会话、加载中），没什么可留的，
+ * 由调用方走「落到最新一条」。
+ *
+ * ⚠ 唯一正确的测量时机是【重画之前、且屏幕上还是正文的那一帧】。renderChat 每发都
+ * view.replaceChildren() 重建 .message-stream，新节点的 scrollTop 天然是 0；而
+ * messageLoading=true 那一帧画的是 chatSkeleton（3 行、撑不满一屏 ⇒ 无溢出），在它
+ * 上面量会得到「贴底」，于是每次背景重读都把视口送回底部：判据永远成立，实际量的是
+ * 加载骨架。round392 在 0077 的判据上撞过同一个形状（见 0077 §5），本轮量的是它的前半段。
+ * 所以这一格自己认骨架：流里一行正文都没有 ⇒ 交回 null（没位置可留），绝不在骨架上
+ * 量出「贴底」。
+ *
+ * ⚠ 留住的是 scrollTop 本身，不是「距底距离」（loadOlderMessages 的锚点用的是后者）：
+ * 背景重读新增的消息落在【下方】，上方那段一条没动，同一个 scrollTop 就是同一屏像素；
+ * 距底距离在内容变高之后会把屏幕连着一块往下滑。往旧翻是往【上方】加内容，距底距离
+ * 才是对的尺子 —— 两对锚点各管一头，别互相「统一」。
+ */
+function chatScrollAnchor(stream) {
+  if (!stream || stream.querySelectorAll(".message-row").length === 0)
+    return null;
+  const pinned =
+    stream.scrollHeight - stream.clientHeight <= CHAT_BOTTOM_STICK_PX ||
+    stream.scrollHeight - stream.scrollTop - stream.clientHeight <=
+      CHAT_BOTTOM_STICK_PX;
+  return { pinned, top: stream.scrollTop };
+}
+/**
+ * 把 chatScrollAnchor 读到的那一屏放回重画后的消息流上。锚点为空时不动（调用方自己决定去不去底部）。
+ *
+ * 未贴底那一支夹上界：重读可能把尾部几条读掉了（窗口换页），不夹就会写一个超界的
+ * scrollTop，浏览器按它自己的口径乱夹 —— 判据就读不到「停在原地」这件事了。
+ */
+function applyChatScrollAnchor(stream, anchor) {
+  if (!stream || !anchor) return false;
+  stream.scrollTop = anchor.pinned
+    ? stream.scrollHeight
+    : Math.max(
+        0,
+        Math.min(anchor.top, stream.scrollHeight - stream.clientHeight),
+      );
+  return true;
+}
 let teamPanelToken = 0;
 let coreLoaded = false;
 let refreshTimer = null;
@@ -1894,6 +1947,13 @@ function renderMain() {
   const focusedId = view.contains(document.activeElement)
     ? document.activeElement.id
     : "";
+  // 消息流的锚点在【拆之前】读：renderChat 每发都重建 .message-stream，而摘下来的节点
+  // 量不到任何东西（scrollHeight/clientHeight 一律 0，实测见 0078 §4）—— 等进了
+  // renderChat 再读只剩 0，量到的是「没有溢出 = 贴底」这种假读数。
+  // 这一对管的是【用户动作引起的重画】（点回复、取消回复、切页签…）：它们不改内容，
+  // 却会把视口送回顶部。背景重读那一头由 loadMessages 自己那对锚点管（读得更早，
+  // 盖住骨架帧那一段），发送那一发在它之后无条件跳底 —— 用户自己的动作。
+  const chatAnchor = chatScrollAnchor($(".message-stream"));
   view.replaceChildren();
   $("#listPane").hidden = false;
   if (state.route !== "admin" && adminMounted) {
@@ -1945,6 +2005,11 @@ function renderMain() {
   } catch (error) {
     view.append(banner(errorMessage(error), "error", () => renderMain()));
   }
+  // 只有【屏幕上是这一会话的窗口】才许把锚点压回去（同 loadMessages 的窗口归属门）：
+  // 刚切会话时 renderMain 收到的 chatAnchor 读的是上一个会话的流，压到新会话上会让
+  // 它停在半屏而不是最新消息。窗口属主还没换到新会话 = 这一屏不是他的，不动。
+  if (state.messagesWindowId === state.selectedConversation)
+    applyChatScrollAnchor($(".message-stream", view), chatAnchor);
   if (focusedId)
     document.getElementById(focusedId)?.focus({ preventScroll: true });
 }
@@ -2024,6 +2089,14 @@ async function openConversation(id) {
 async function loadMessages(id, markRead) {
   const token = ++renderToken;
   const requestToken = ++messageRequestToken;
+  // 锚点读在【任何重画之前】：再往下一行 messageLoading=true 会画骨架帧，那时量到的是
+  // 「没有溢出 = 贴底」，每次重读都会把视口送回底部（见 chatScrollAnchor）。
+  // 窗口按 conversation_id 认（同 0077 的 messagesWindowId）：屏幕上还是上一个会话时，
+  // 它的滚动位置与新会话无关 —— 带过去会让新会话停在半屏而不是最新消息。
+  const scrollAnchor =
+    state.messagesWindowId === id
+      ? chatScrollAnchor($(".message-stream"))
+      : null;
   state.messageLoading = true;
   if (state.route === "messages" && state.selectedConversation === id)
     renderChat($("#view"), token);
@@ -2052,7 +2125,12 @@ async function loadMessages(id, markRead) {
     if (state.route === "messages" && state.selectedConversation === id) {
       renderChat($("#view"), token);
       const stream = $(".message-stream");
-      if (stream) stream.scrollTop = stream.scrollHeight;
+      // 只有用户本来就贴在最新消息上才跳到底；往上翻着旧史时把他留在原地。
+      // 没有锚点（首次打开 / 刚切到这一会话 / 那一屏不是这一会话）= 落到最新消息。
+      if (stream) {
+        if (scrollAnchor === null) stream.scrollTop = stream.scrollHeight;
+        else applyChatScrollAnchor(stream, scrollAnchor);
+      }
     }
   } catch (error) {
     if (requestToken !== messageRequestToken) return;
