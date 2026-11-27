@@ -2510,3 +2510,68 @@ test("头像上传：选图即传 avatar 资产，保存后头像指向该资产
 
   expectNoBrowserErrors(browserErrors);
 });
+
+// 全局搜索在 0076 之前有六面的落点、七面的数据：服务端 GROUP_SQL 一直真发群命中，
+// 渲染侧却既没有 group 这一格标签（h() 对 undefined 是静默跳过属性 ⇒ 空白徽标），
+// 也没有 group 这条分支（点下去下拉关掉、屏幕原地不动）。所以这发证两面：
+// 徽标读得出「群」，点下去真落到那个群的会话（不是停在原地）。
+test("全局搜索群命中：徽标是「群」且点击真落到该群会话", async ({ page }) => {
+  const browserErrors = watchBrowserErrors(page);
+  await page.goto(`${webOrigin}/`);
+  const groupTitle = "搜索落点验收群";
+  const created = await createGroupThroughUi(
+    page,
+    groupTitle,
+    "验证搜索命中群",
+  );
+  const groupId = created.group.group_id;
+
+  // 换一个群命中不在眼前的页面再搜：这样「点击后换了屏」才是这一发观察得到的事。
+  // 停在消息页时刚建的群本来就是选中会话，剪掉分支也可能因为已在原地而假绿。
+  await page.locator('[data-nav="documents"]').click();
+  await expect(page).toHaveURL(/#\/documents/u);
+
+  const conversationId = await page.evaluate(async (id) => {
+    const res = await fetch("/api/v1/conversations");
+    const body = (await res.json()) as {
+      conversations: { conversation_id: string; group_id: string | null }[];
+    };
+    return (
+      body.conversations.find((entry) => entry.group_id === id)
+        ?.conversation_id ?? ""
+    );
+  }, groupId);
+  // 前提不成立就别往下走：没有群会话时落点会是群详情而不是会话，那条 URL 断言
+  // 红的就不是「分支缺失」而是这个用例自己的前提。
+  expect(conversationId).not.toBe("");
+
+  const searched = page.waitForResponse(
+    (response) =>
+      new URL(response.url()).pathname === "/api/v1/search" && response.ok(),
+    { timeout: 20_000 },
+  );
+  await page.locator("#globalSearch").fill(groupTitle);
+  const hits = (await (await searched).json()) as {
+    hits: { face: string; id: string }[];
+  };
+  // 服务端这一面真有数据（否则下面徽标/点击绿的是「压根没有群命中」）。
+  expect(
+    hits.hits.some((hit) => hit.face === "group" && hit.id === groupId),
+  ).toBe(true);
+
+  const row = page.locator(
+    `.search-result[data-face="group"][data-id="${groupId}"]`,
+  );
+  await expect(row).toBeVisible();
+  // 徽标那一格：faceLabels 少 group 键时 h() 静默不写这个属性，这里是空字符串。
+  await expect(row.locator(".search-face")).toHaveText("群");
+
+  await row.click();
+  // 分支的落点：会话 id 进 hash（setRoute 写的那一枚）+ 群会话面板真画出来。
+  await expect
+    .poll(() => page.evaluate(`window.location.hash`))
+    .toBe(`#/messages/${encodeURIComponent(conversationId)}`);
+  await expect(page.locator("#group-chat-panel")).toHaveCount(1);
+
+  expectNoBrowserErrors(browserErrors);
+});

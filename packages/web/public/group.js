@@ -117,7 +117,11 @@ const labels = {
   active: "在职",
   archived: "已归档",
 };
+// 键集必须与 contracts 的 SEARCH_FACES 逐一对应（test/web/search-face-parity.test.ts
+// 钉这条奇偶）：少一个键时 h() 对 undefined 是【静默跳过整个属性】，
+// 那一面的徽标就是空白而不是报错。
 const faceLabels = {
+  group: "群",
   task: "任务",
   member: "成员",
   message: "消息",
@@ -8763,6 +8767,10 @@ async function globalSearch(query) {
               type: "button",
               class: "search-result",
               role: "option",
+              // 同一枚标题可以同时出现在好几面（群的章程文档就叫群名），所以行上
+              // 必须自带【是哪一面、哪一条】：只靠标题文本挑行会挑到别一面的那一行。
+              "data-face": hit.face,
+              "data-id": hit.id,
               onclick: () => {
                 closeMenus();
                 openSearchHit(hit);
@@ -8808,6 +8816,11 @@ async function openSearchHit(hit) {
     if (hit.face === "backlog") {
       state.selectedBacklog = hit.id;
       setRoute("backlog", hit.id);
+    }
+    if (hit.face === "group") {
+      // 落点沿用侧栏点群的同一个函数：它自己会找群会话并进去，没有会话才落到群详情。
+      // 少这一支时点群命中是【静默什么都不发生】—— 下拉关掉了，屏幕还停在原地。
+      await selectGroup(hit.id);
     }
     if (hit.face === "task") {
       location.href = "/";

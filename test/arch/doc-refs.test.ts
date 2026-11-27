@@ -1281,19 +1281,19 @@ const SNAP: Record<string, string> = {
   // 「同字节换用途拿不到别人的行」与「界面上有生产者」同时失去物证。
   "0074-avatar-upload-never-worked-a-dedupe-key-one-dimension-short-and-a-ui-with-no-uploader.md>packages/hub/src/members/service.ts:265": `"SELECT 1 AS ok FROM assets WHERE asset_id = ? AND purpose = 'avatar'";`,
   "0074-avatar-upload-never-worked-a-dedupe-key-one-dimension-short-and-a-ui-with-no-uploader.md>packages/hub/src/http/people.ts:440": `"SELECT 1 AS ok FROM assets WHERE asset_id = ? AND purpose = 'avatar'";`,
-  "0074-avatar-upload-never-worked-a-dedupe-key-one-dimension-short-and-a-ui-with-no-uploader.md>packages/web/public/group.js:6028":
+  "0074-avatar-upload-never-worked-a-dedupe-key-one-dimension-short-and-a-ui-with-no-uploader.md>packages/web/public/group.js:6032":
     "function avatarImagePicker() {",
   // ── 0075（模板生产者 + 守门的方法维）────────────────────────────────────
   // 每条都是活坐标：按钮/弹窗被摘、INSERT 的 builtin 或展开行被动、hitsUi 升维，
   // 0075 钉的「界面有生产者」「服务端早已承重」「门只看路径」同时失去或改变物证。
   // 末两条是探针三个病因里两处现场的物证：转发函数签名 / 拼接出的空路径段。
-  "0075-template-library-had-a-display-and-no-producer.md>packages/web/public/group.js:3704":
+  "0075-template-library-had-a-display-and-no-producer.md>packages/web/public/group.js:3708":
     'async function backlogMutation(path, method = "PATCH", body) {',
   "0075-template-library-had-a-display-and-no-producer.md>packages/web/public/app.js:2706":
     '"/charter/" + encodeURIComponent(charterRole),',
-  "0075-template-library-had-a-display-and-no-producer.md>packages/web/public/group.js:3949":
+  "0075-template-library-had-a-display-and-no-producer.md>packages/web/public/group.js:3953":
     'button("新建模板", () => templateCreateModal(), "small"),',
-  "0075-template-library-had-a-display-and-no-producer.md>packages/web/public/group.js:8432":
+  "0075-template-library-had-a-display-and-no-producer.md>packages/web/public/group.js:8436":
     "function templateCreateModal() {",
   "0075-template-library-had-a-display-and-no-producer.md>packages/hub/src/http/documents.ts:429":
     "async function createTemplateRoute(",
@@ -1305,6 +1305,36 @@ const SNAP: Record<string, string> = {
     "export function hitsUi(",
   "0075-template-library-had-a-display-and-no-producer.md>test/e2e/group-workbench.spec.ts:2282":
     'test("模板生产：新建模板真发 POST /templates，跨刷新还在且能被用来建文档", async ({',
+  // ── 0076（全局搜索七面对六个界面槽位）──────────────────────────────────
+  // 前两条是「服务端早就七面承重」的物证：契约里的面数组 / hub 侧逐面断言。
+  // group.js:28 是静默机制本身（undefined 属性整个被跳过），:124 与 :8823 是
+  // 补上的那一格徽标与那一条落点分支，:8772/:8773 是行上自证身份的 attribute，
+  // :6224 是复用侧栏点群时真正改的那一行，:8826 是仍然留着没接的 task 面。
+  // 末两条是守卫自己的取材函数：提取器一坏，守卫就变成永远绿的空壳。
+  "0076-search-had-seven-faces-and-six-ui-slots.md>packages/contracts/src/search.ts:11":
+    "export const SEARCH_FACES = [",
+  "0076-search-had-seven-faces-and-six-ui-slots.md>packages/hub/test/search/service.test.ts:45":
+    'it("finds group/task/member/message/document/meeting/backlog and sorts by time", () => {',
+  "0076-search-had-seven-faces-and-six-ui-slots.md>packages/web/public/group.js:28":
+    "if (value === null || value === undefined || value === false) continue;",
+  "0076-search-had-seven-faces-and-six-ui-slots.md>packages/web/public/group.js:124":
+    'group: "群",',
+  "0076-search-had-seven-faces-and-six-ui-slots.md>packages/web/public/group.js:6224":
+    "(entry) => entry.group_id === id,",
+  "0076-search-had-seven-faces-and-six-ui-slots.md>packages/web/public/group.js:8772":
+    '"data-face": hit.face,',
+  "0076-search-had-seven-faces-and-six-ui-slots.md>packages/web/public/group.js:8773":
+    '"data-id": hit.id,',
+  "0076-search-had-seven-faces-and-six-ui-slots.md>packages/web/public/group.js:8823":
+    "await selectGroup(hit.id);",
+  "0076-search-had-seven-faces-and-six-ui-slots.md>packages/web/public/group.js:8826":
+    'location.href = "/";',
+  "0076-search-had-seven-faces-and-six-ui-slots.md>test/e2e/group-workbench.spec.ts:2518":
+    'test("全局搜索群命中：徽标是「群」且点击真落到该群会话", async ({ page }) => {',
+  "0076-search-had-seven-faces-and-six-ui-slots.md>test/web/search-face-parity.test.ts:45":
+    "function faceLabelKeys(src: string): string[] {",
+  "0076-search-had-seven-faces-and-six-ui-slots.md>test/web/search-face-parity.test.ts:55":
+    "function routedFaces(src: string): string[] {",
 };
 
 describe("决策文档里的「文件:行号」引用不漂移", () => {
