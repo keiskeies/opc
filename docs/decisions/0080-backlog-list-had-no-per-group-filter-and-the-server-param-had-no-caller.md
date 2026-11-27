@@ -81,6 +81,8 @@ total/cursor），两栏一起
 - `group_id` 走服务端 + limit 游标：见 §4，与 0079 §7 那条 limit 挂账同案，另案。
 - 服务端列表参数 `state`（待办状态）契约里有、SQL 里有，界面仍没人发 —— 待办栏加「状态」下拉
   是同一形状的下一格；本轮没做是因为「按群筛」是 0079 白纸黑字挂的账，状态筛选还没有挂账。
+  挂账现已挂上，但挂的不是工程账：`scheduled` / `doing` / `done` 全仓没有任何生产者，状态集合、
+  合法跳转、由谁触发都是产品口径 —— 见 CEO-决策简报-2026-11-22 的 B11 那一格（那条下拉的前置）。
 - 群改名后下拉里旧名会留到下次切栏（选项表挂在 `renderList` 的栏重建上，paint 不重建控件是
   0079 的定盘）；群增删本来就走切栏/刷新，改名是同一格。
 - 本轮过程账两条（判据自身）：其一，线注释就是区间表的刻度 —— 首版把「线 2（焦点）」注释写在
@@ -125,3 +127,37 @@ total/cursor），两栏一起
   `` `\u001b` ``，落到磁盘是真控制字节（`JSON.stringify` 打印两种形状一模一样，肉眼与日志都分不出，
   只能按码位量）。本轮改写为不含反斜杠的措辞（「要写反斜杠 u001b」），判定用
   `split(String.fromCharCode(27)).length - 1` 这种不依赖字面量的数法。
+
+## 8. §6 那条状态挂账的去向：CEO 简报 B11（挂账本身也要过门禁）
+
+§6 说的「状态筛选还没有挂账」现已挂上：CEO-决策简报新增 B11 那一格（状态集合、
+合法跳转、由谁触发是产品口径，工程不代拍），并给它配了三样承重物，防止这条挂账
+变成一句会被读散的散文：
+
+- **简报正文 + 总览表行**：简报正文 11 处完整形态引用全部进 SNAP，加本节自己复述的
+  那一条，快照总数 314 → 325（dup 审计 325 / 去重 325 / 重复 0）；其中 4 条钉的是
+  「零生产者」的物证（两处 INSERT 字面量 backlog、两处
+  UPDATE 字面量 cancelled）—— 谁接上 `scheduled`/`doing`/`done` 的写入方，快照必红，
+  逼他回 B11 更新口径。
+- **claims-registry 的 B8 行号锚**：总览表加一行把 B8 标题从 134 行顶到 135 行，
+  `test/arch/claims-registry.ts` 里的登记行号同步 134 → 135。
+- **0080 §6 的回指**：挂账处写明「见 CEO 简报 B11」，那条状态下拉的前置有了编号。
+
+实跑读数（挂账落地那次）：
+
+- 变异机 `.workbuddy/round397-b11-mutation.mjs` 三发全部「变异⇒红、还原⇒逐字节
+  SHA 一致且复绿」：M1 抹掉 PATCH 三选一守卫的快照键 ⇒ doc-refs 红；M2 把枚举键的
+  快照值改一个字节 ⇒ doc-refs 红；M3 把 B8 锚行号退回 134 ⇒ claim-coords 红
+  （`expected [ Array(1) ] to deeply equal []`）。
+- ⚠ M3 第一发【绿了】——不是变异没抹字节，是它打在 `claims-registry.test.ts` 上，
+  而判 `source.line` 的门禁是 `test/arch/claim-coords.ts:73`（那座「此前只是一次性
+  脚本」的门禁化）；判据尺子拿错，绿就是测了个寂寞。改指 claim-coords 后红。
+- 守卫：doc-refs / doc-coords / decision-index / doc-ids / comment-citations 五文件
+  36 passed；claim-coords、claims-registry（174）全绿；check-gate exit 0（入口轮次
+  相对指称 0）；SNAP 键 325 / 去重 325 / 重复 0；tsc 两门 exit 0；biome 净新增 0
+  （新增 SNAP 块触发一条 noUselessEscapeInString + format，已按 biome 自己的
+  --write 形状落地，非基线豁免）。
+- 全量单测 205 文件 / 4241 passed | 6 skipped（4247，与挂账前基线一致 —— 改动只在
+  文档与登记元数据，无生产代码）；verify exit 0：腐烂 0、豁免表 17 条条条承重、
+  桶分项和 726 == token 726、提交引用 498 条全可解析（verify 只在单测收尾后跑）。
+- 字节检查：简报 / 0080 / doc-refs / claims-registry 四文件 U+FFFD 0、裸 ESC 0。

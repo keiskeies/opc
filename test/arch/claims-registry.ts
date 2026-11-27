@@ -3037,7 +3037,8 @@ export function nodeKeyIdentityCheck(f: Files): string {
       checkedAt: "2026-11-23",
       source: {
         doc: "docs/CEO-决策简报-2026-11-22.md",
-        line: 134,
+        // B8 标题原在 134；总览表加 B11 那一行后整篇下移 1 行 → 135。
+        line: 135,
         sentence:
           "### B8. 预算分母 / 追加预算按钮语义（0049 §12(B) → 0045 §7）",
       },

@@ -1276,6 +1276,33 @@ const SNAP: Record<string, string> = {
   // 读那一列，这一行必动 ⇒ 快照红，逼改的人去看界面侧（B 列）同没动。
   "CEO-决策简报-2026-11-22.md>serve/driver-pump.ts:518":
     ".all(...states, maxAttempts, o.taskLimitCents, perRound) as unknown as {",
+  // ── CEO-决策简报-2026-11-22（B11 那一格：状态机没有生产者）──────────────
+  // 这一格守的是「枚举里有五个状态，但只有两个写得进去」。前四条是【零生产者】的
+  // 物证：两处 INSERT 字面量 'backlog' + 两处 UPDATE 字面量 'cancelled'。谁哪天接上
+  // scheduled/doing/done 的写入方，这四行必动 ⇒ 快照红，逼改的人回 B11 更新口径
+  // （甲：照设计文档五状态改名并迁移；乙：保留枚举补 backlog→doing→done）。
+  // 后四条是「那三个状态并非全无痕迹」的对照：CHECK 认它、契约枚举列它、列表能按它筛、
+  // 门会因它卡 —— 缺的只有跳转本身。
+  "CEO-决策简报-2026-11-22.md>packages/contracts/src/backlog.ts:11":
+    "export const BACKLOG_STATES = [",
+  "CEO-决策简报-2026-11-22.md>packages/hub/resources/migrations/0018_backlog.sql:28":
+    "('backlog', 'scheduled', 'doing', 'done', 'cancelled')),",
+  "CEO-决策简报-2026-11-22.md>packages/hub/src/backlog/service.ts:103":
+    "\" VALUES (?, ?, NULL, ?, ?, 'backlog', ?, ?, ?, NULL, ?, ?)\";",
+  "CEO-决策简报-2026-11-22.md>packages/hub/src/backlog/service.ts:120":
+    "\" VALUES (?, ?, NULL, ?, ?, 'backlog', ?, ?, ?, NULL, ?, ?)\";",
+  "CEO-决策简报-2026-11-22.md>packages/hub/src/backlog/service.ts:111":
+    "\"UPDATE backlog_items SET state = 'cancelled', updated_at = ? WHERE id = ?\";",
+  "CEO-决策简报-2026-11-22.md>packages/hub/src/backlog/service.ts:114":
+    "\"UPDATE backlog_items SET state = 'cancelled', merged_into = ?,\" +",
+  "CEO-决策简报-2026-11-22.md>packages/hub/src/http/work.ts:154":
+    "if (Number(hasGroup) + Number(hasDue) + Number(hasPriority) !== 1) {",
+  "CEO-决策简报-2026-11-22.md>packages/hub/src/backlog/service.ts:539":
+    'if (before.state === "done" && o.actor.kind !== "boss") {',
+  "CEO-决策简报-2026-11-22.md>packages/contracts/src/backlog.ts:116":
+    "state: z.enum(BACKLOG_STATES).optional(),",
+  "CEO-决策简报-2026-11-22.md>packages/hub/src/backlog/service.ts:90":
+    '" WHERE (? IS NULL OR group_id = ?) AND (? IS NULL OR state = ?)" +',
   // ── 0074（头像上传链路：两道用途门 + 界面上传器本体）───────────────────
   // 三条都是活坐标：门被放宽（不再判 purpose）或上传器被摘掉，0074 钉的
   // 「同字节换用途拿不到别人的行」与「界面上有生产者」同时失去物证。
@@ -1472,6 +1499,10 @@ const SNAP: Record<string, string> = {
     '" WHERE (? IS NULL OR group_id = ?) AND (? IS NULL OR state = ?)" +',
   "0080-backlog-list-had-no-per-group-filter-and-the-server-param-had-no-caller.md>test/e2e/group-workbench.spec.ts:3502":
     "await expect(todoGroupSelect).toHaveCount(1);",
+  // §8 记 M3 第一发「绿了个寂寞」时点名了判 source.line 的那一行 —— 它就是那座
+  // 门禁的心脏：这行若被删（不再核对行号），claim-coords 全体主张锚同时失效。
+  "0080-backlog-list-had-no-per-group-filter-and-the-server-param-had-no-caller.md>test/arch/claim-coords.ts:73":
+    "if (located.includes(e.source.line)) continue;",
   // INDEX.md 的 0080 入口行自己复述了服务端三格坐标（「门早就开着」是这条主张的载体），
   // 与台账同名三键值同 —— 键不同（文档 = INDEX.md）所以不撞车，dup 审计认得到。
   "INDEX.md>packages/contracts/src/backlog.ts:115":
