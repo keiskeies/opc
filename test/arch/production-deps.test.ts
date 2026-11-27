@@ -349,6 +349,20 @@ describe("运行期夹具名单本身", () => {
       // ⚠ 这一格的成立条件是【那个 mjs 正则还在】：哪天改成收 .ts 并往仓库根走就作废。
       "mutation-parser-screen.test.ts",
       "pending-decisions.test.ts",
+      // round382 新增（ui-caller-probe 守卫）。两处 readdirSync 走的是【渲染侧】：
+      // 主扫描根是 UI_ROOT = packages/web/public，另一发反向对照刻意扫 packages/web/src。
+      // 两者都在 packages/hub/src【之外】，且它判的是「界面有没有调某条端点」，
+      // 与生产 src 的夹具毫无关系 ⇒ OUT_OF_SCOPE。
+      // ⚠ 成立条件是【那两个根还在 web/ 之下】：哪天把扫描根扩到仓库根（例如为了
+      //    一并扫 packages/desktop 的渲染层），这一格立刻作废 —— 它得搬去 NEEDS。
+      "ui-caller-probe.test.ts",
+      // 0069 新增（ui-caller-roster 守卫）。readdirSync 只有一处：walk(join(ROOT, UI_ROOT))，
+      // 也就是 packages/web/public，且 SKIP 里排掉 vendor（quill / xspreadsheet 那堆第三方
+      // 路径字面量会把模式集合灌成一堆假命中）。另一端取材读的是 packages/contracts/src/api.ts
+      // 这一个文件 ⇒ 两处都到不了 packages/hub/src ⇒ OUT_OF_SCOPE。
+      // ⚠ 成立条件是【那个 UI_ROOT 还在 web/ 之下且 SKIP 还在】：哪天把扫描根扩到仓库根
+      //    （例如一并扫 packages/desktop 的渲染层），这一格作废、搬去 NEEDS。
+      "ui-caller-roster.test.ts",
       // 它调 readdirSync 只为在 node_modules/.pnpm 里找 typescript 的 tsc，
       // 一个目录名都不碰 packages/hub/src ⇒ 短命探针天然不在射程里。
       // ⚠ 它【同时】是个扫全仓的守卫（tsc 吃 test/** 与 packages/*/test/**），
