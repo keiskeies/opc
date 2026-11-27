@@ -1320,7 +1320,7 @@ const SNAP: Record<string, string> = {
     '"/charter/" + encodeURIComponent(charterRole),',
   "0075-template-library-had-a-display-and-no-producer.md>packages/web/public/group.js:4251":
     'button("新建模板", () => templateCreateModal(), "small"),',
-  "0075-template-library-had-a-display-and-no-producer.md>packages/web/public/group.js:8734":
+  "0075-template-library-had-a-display-and-no-producer.md>packages/web/public/group.js:8837":
     "function templateCreateModal() {",
   "0075-template-library-had-a-display-and-no-producer.md>packages/hub/src/http/documents.ts:429":
     "async function createTemplateRoute(",
@@ -1348,13 +1348,13 @@ const SNAP: Record<string, string> = {
     'group: "群",',
   "0076-search-had-seven-faces-and-six-ui-slots.md>packages/web/public/group.js:6522":
     "(entry) => entry.group_id === id,",
-  "0076-search-had-seven-faces-and-six-ui-slots.md>packages/web/public/group.js:9070":
+  "0076-search-had-seven-faces-and-six-ui-slots.md>packages/web/public/group.js:9173":
     '"data-face": hit.face,',
-  "0076-search-had-seven-faces-and-six-ui-slots.md>packages/web/public/group.js:9071":
+  "0076-search-had-seven-faces-and-six-ui-slots.md>packages/web/public/group.js:9174":
     '"data-id": hit.id,',
-  "0076-search-had-seven-faces-and-six-ui-slots.md>packages/web/public/group.js:9121":
+  "0076-search-had-seven-faces-and-six-ui-slots.md>packages/web/public/group.js:9224":
     "await selectGroup(hit.id);",
-  "0076-search-had-seven-faces-and-six-ui-slots.md>packages/web/public/group.js:9124":
+  "0076-search-had-seven-faces-and-six-ui-slots.md>packages/web/public/group.js:9227":
     'location.href = "/";',
   "0076-search-had-seven-faces-and-six-ui-slots.md>test/e2e/group-workbench.spec.ts:2518":
     'test("全局搜索群命中：徽标是「群」且点击真落到该群会话", async ({ page }) => {',
@@ -1469,7 +1469,7 @@ const SNAP: Record<string, string> = {
     'request("/backlog?limit=200"),',
   "0079-middle-column-filters-rebuilt-their-own-controls-on-keystroke.md>packages/web/public/group.js:976":
     'request("/documents?limit=100"),',
-  "0079-middle-column-filters-rebuilt-their-own-controls-on-keystroke.md>packages/web/public/group.js:9124":
+  "0079-middle-column-filters-rebuilt-their-own-controls-on-keystroke.md>packages/web/public/group.js:9227":
     'location.href = "/";',
   "0079-middle-column-filters-rebuilt-their-own-controls-on-keystroke.md>test/e2e/group-workbench.spec.ts:3268":
     'test("中栏筛选器：逐字符敲不累加控件、不重复列表，焦点/取值/滚动留在原处", async ({',
@@ -1511,6 +1511,74 @@ const SNAP: Record<string, string> = {
     "const result = listBacklog(deps.db, req.query);",
   "INDEX.md>packages/hub/src/backlog/service.ts:90":
     '" WHERE (? IS NULL OR group_id = ?) AND (? IS NULL OR state = ?)" +',
+  // 0081 台账与其 INDEX 入口行复述的坐标：两条 DELETE 的路由字面量、判别联合两格、
+  // 服务端的 empty_executor_chain、新行构造器与两个新 handler。INDEX 那组键与台账同名同值、
+  // 键不同（文档 = INDEX.md），与上面 0080 那组同一处理。
+  "INDEX.md>packages/hub/src/http/people.ts:797":
+    '"DELETE /api/v1/members/:id/skills/:skillId",',
+  "0081-member-settings-panel-had-no-way-to-add-or-remove-skills-and-executors.md>packages/contracts/src/member.ts:38":
+    'export const executorConfigSchema = z.discriminatedUnion("kind", [',
+  "0081-member-settings-panel-had-no-way-to-add-or-remove-skills-and-executors.md>packages/contracts/src/member.ts:80":
+    ".superRefine((data, ctx) => {",
+  "0081-member-settings-panel-had-no-way-to-add-or-remove-skills-and-executors.md>packages/hub/src/http/people.ts:797":
+    '"DELETE /api/v1/members/:id/skills/:skillId",',
+  "0081-member-settings-panel-had-no-way-to-add-or-remove-skills-and-executors.md>packages/hub/src/http/people.ts:871":
+    '"DELETE /api/v1/members/:id/executors/:seq",',
+  "0081-member-settings-panel-had-no-way-to-add-or-remove-skills-and-executors.md>packages/hub/src/members/service.ts:897":
+    '"empty_executor_chain",',
+  "0081-member-settings-panel-had-no-way-to-add-or-remove-skills-and-executors.md>packages/web/public/group.js:6775":
+    "function bindExecutorKind(kind, config) {",
+  "0081-member-settings-panel-had-no-way-to-add-or-remove-skills-and-executors.md>packages/web/public/group.js:6777":
+    'kind.addEventListener("change", () => {',
+  "0081-member-settings-panel-had-no-way-to-add-or-remove-skills-and-executors.md>packages/web/public/group.js:6790":
+    "function skillSettingsRow(skill = {}, remove = null) {",
+  "0081-member-settings-panel-had-no-way-to-add-or-remove-skills-and-executors.md>packages/web/public/group.js:6809":
+    'row.append(iconButton("close", remove.label, () => remove.onClick(row)));',
+  "0081-member-settings-panel-had-no-way-to-add-or-remove-skills-and-executors.md>packages/web/public/group.js:6814":
+    "function executorSettingsRow(executor, remove = null) {",
+  "0081-member-settings-panel-had-no-way-to-add-or-remove-skills-and-executors.md>packages/web/public/group.js:6844":
+    'row.append(iconButton("close", remove.label, () => remove.onClick(row)));',
+  "0081-member-settings-panel-had-no-way-to-add-or-remove-skills-and-executors.md>packages/web/public/group.js:7016":
+    'button("添加技能", () => addSkill(), "small"),',
+  "0081-member-settings-panel-had-no-way-to-add-or-remove-skills-and-executors.md>packages/web/public/group.js:7027":
+    'button("添加执行器", () => addExecutor(), "small"),',
+  "0081-member-settings-panel-had-no-way-to-add-or-remove-skills-and-executors.md>packages/web/public/group.js:8355":
+    "skillsEditor.insertBefore(",
+  "0081-member-settings-panel-had-no-way-to-add-or-remove-skills-and-executors.md>packages/web/public/group.js:8374":
+    "member.executors.length > 1",
+  "0081-member-settings-panel-had-no-way-to-add-or-remove-skills-and-executors.md>packages/web/public/group.js:8392":
+    "const nextSeq = Math.max(0, ...rows.map((el) => Number(el.value))) + 1;",
+  "0081-member-settings-panel-had-no-way-to-add-or-remove-skills-and-executors.md>packages/web/public/group.js:8548":
+    "async function updateSkills(event) {",
+  "0081-member-settings-panel-had-no-way-to-add-or-remove-skills-and-executors.md>packages/web/public/group.js:8555":
+    '...(note === "" ? {} : { note }),',
+  "0081-member-settings-panel-had-no-way-to-add-or-remove-skills-and-executors.md>packages/web/public/group.js:8576":
+    'kind: $("[name=executor_kind]", row).value,',
+  "0081-member-settings-panel-had-no-way-to-add-or-remove-skills-and-executors.md>packages/web/public/group.js:8592":
+    "async function removeSkill(memberId, skillId) {",
+  "0081-member-settings-panel-had-no-way-to-add-or-remove-skills-and-executors.md>packages/web/public/group.js:8605":
+    "async function removeExecutor(memberId, seq) {",
+  "0081-member-settings-panel-had-no-way-to-add-or-remove-skills-and-executors.md>test/arch/ui-caller-roster.ts:242":
+    "export const NO_UI_CALLER_ROSTER: readonly NoUiCallerEntry[] = [",
+  "0081-member-settings-panel-had-no-way-to-add-or-remove-skills-and-executors.md>test/e2e/group-workbench.spec.ts:3567":
+    'test("成员设置面板增删技能与执行器：路由早就有，界面到得了吗", async ({',
+  "INDEX.md>packages/contracts/src/member.ts:38":
+    'export const executorConfigSchema = z.discriminatedUnion("kind", [',
+  "INDEX.md>packages/contracts/src/member.ts:80":
+    ".superRefine((data, ctx) => {",
+  "INDEX.md>packages/hub/src/http/people.ts:871":
+    '"DELETE /api/v1/members/:id/executors/:seq",',
+  "INDEX.md>packages/hub/src/members/service.ts:897": '"empty_executor_chain",',
+  "INDEX.md>packages/web/public/group.js:6775":
+    "function bindExecutorKind(kind, config) {",
+  "INDEX.md>packages/web/public/group.js:6790":
+    "function skillSettingsRow(skill = {}, remove = null) {",
+  "INDEX.md>packages/web/public/group.js:6814":
+    "function executorSettingsRow(executor, remove = null) {",
+  "INDEX.md>packages/web/public/group.js:7016":
+    'button("添加技能", () => addSkill(), "small"),',
+  "INDEX.md>packages/web/public/group.js:7027":
+    'button("添加执行器", () => addExecutor(), "small"),',
 };
 
 describe("决策文档里的「文件:行号」引用不漂移", () => {

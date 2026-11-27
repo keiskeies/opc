@@ -1,0 +1,9 @@
+# 0081 取证时的三个 sha256 全值
+# 台账正文故意不抄 hex 前缀：短前缀会被哈希核对（docs/review/verify-open-invariants.mjs）当成 git 对象 ⇒ 报悬空引用。
+# 红探针把 head 那份换进工作树跑红（`.workbuddy/round400-red-probe.log`），再还原成 pre-format 那份并核对逐字节一致；
+# 之后 `biome format` 折行得到 post-format（= 现在工作树这一份）。三个值都留着，只留一个会让人以为台账在撒谎。
+head        154e9eeabd4c8e95c78a014167d1652e93c0a26f6fffc94f0f3c9a9e4097bf35
+pre-format  85f0315f8c05159dd3501a055b5ee41ff684fcfcdb9f26a7f3860c2642356fb3
+post-format ce9e4e7bd300e21e69ad15deef014873cad58b3e9f4dbfbc018219d7aa823c93
+# 复算当前工作树那一格：
+#   node -e 'const c=require("crypto"),f=require("fs");console.log(c.createHash("sha256").update(f.readFileSync("packages/web/public/group.js")).digest("hex"))'

@@ -3553,3 +3553,429 @@ test("待办按群筛：下拉筛的是这个群的待办，且不与搜索框�
 
   expectNoBrowserErrors(browserErrors);
 });
+
+// 0081 红探针 —— 成员入职之后，他挂的技能与执行器链在界面里就冻结了。
+// 招聘弹窗里每行都带 iconButton("close","删除技能") 与「添加技能」，而成员设置面板
+// （skillsEditor / executorsEditor）只有固定行集 + 一枚「保存…列表」：既不能加一行，
+// 也不能摘一行。服务端两条 DELETE 路由（people.ts 的 skills/:skillId、executors/:seq）
+// 连同 404 口径都实现齐了，渲染侧调用方是 0 —— test/arch/ui-caller-roster.ts 把这两格
+// 登在【覆盖】名下，理由是「摘技能这件事在界面里已经能做」。对已入职的成员，那句是假的。
+// 本用例自己招一个人（同 0080 灌待办那样走真 HTTP），免得把种子写进别人也在断言的成员档案；
+// 它在按钮缺位处必红，落地后逐发变绿，每根线各自对应一次真动作。
+const CHURN_MEMBER_NAME = "增删验收成员";
+
+test("成员设置面板增删技能与执行器：路由早就有，界面到得了吗", async ({
+  page,
+}) => {
+  const browserErrors = watchBrowserErrors(page);
+  await page.goto(`${webOrigin}/`);
+  // 一次招聘就把两维的种子灌满：skills 空数组 / 只剩一格执行器的档案量不出
+  // 「有东西可摘」与「还能再加」这两维。
+  const hired = await page.evaluate(async (name) => {
+    const res = await fetch("/api/v1/members", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        name,
+        role_id: "product_director",
+        model_tier: "execution",
+        persona: {
+          style: "先给结论",
+          values: ["可验证"],
+          honesty: "不确定就说明",
+        },
+        skills: [
+          { skill_id: "seed-skill-a", name: "播种技能甲" },
+          { skill_id: "seed-skill-b", name: "播种技能乙" },
+        ],
+        executors: [
+          {
+            seq: 1,
+            kind: "pure-model",
+            config: { kind: "pure-model" },
+            enabled: true,
+          },
+          {
+            seq: 2,
+            kind: "pure-model",
+            config: { kind: "pure-model" },
+            enabled: true,
+          },
+        ],
+        tone: "direct",
+        seat_group_ids: [],
+      }),
+    });
+    const body = (await res.json()) as {
+      member?: { member_id: string };
+      error?: string;
+    };
+    return { status: res.status, memberId: body.member?.member_id ?? "" };
+  }, CHURN_MEMBER_NAME);
+  expect(hired.status).toBe(201);
+  expect(hired.memberId).not.toBe("");
+  // 真 reload（同 0080 那条）：state.members 是页面起来时读的那一份，
+  // 上面那发 fetch 招的人不在里面，不重载量到的永远是旧档案。
+  await page.reload();
+
+  await page.locator('.nav-item[data-nav="settings"]').click();
+  const memberRow = page
+    .locator("#listContent [data-member-row]")
+    .filter({ has: page.locator("strong", { hasText: CHURN_MEMBER_NAME }) });
+  await expect(memberRow).toHaveCount(1);
+  await memberRow.click();
+  // 行区每次 renderMain 都重建，locator 是现解析的：下面 reload / 保存之后不必换名字。
+  const skillsCard = page
+    .locator("#view section.card")
+    .filter({ hasText: "技能配置" });
+  const executorsCard = page
+    .locator("#view section.card")
+    .filter({ hasText: "执行器配置" });
+  await expect(skillsCard.locator(".skill-row")).toHaveCount(2);
+  await expect(executorsCard.locator(".executor-row")).toHaveCount(2);
+
+  // 线 0（技能这一栏有「添加技能」）：未修时这一发红 —— 卡片里 0 枚。
+  await expect(
+    skillsCard.getByRole("button", { name: "添加技能", exact: true }),
+  ).toHaveCount(1);
+  // 线 1（摘一行真的少一行）：每行一枚「删除这一件技能」，点它 ⇒ 发
+  // DELETE /members/{id}/skills/seed-skill-a，行与落库都只剩乙。
+  const skillDelete = skillsCard.getByRole("button", {
+    name: "删除这一件技能",
+    exact: true,
+  });
+  await expect(skillDelete).toHaveCount(2);
+  const removedSkill = page.waitForResponse(
+    (response) =>
+      response.request().method() === "DELETE" &&
+      new URL(response.url()).pathname ===
+        `/api/v1/members/${hired.memberId}/skills/seed-skill-a`,
+  );
+  await skillDelete.first().click();
+  expect((await removedSkill).ok()).toBe(true);
+  await expect(skillsCard.locator(".skill-row")).toHaveCount(1);
+  await expect(skillsCard.locator('[name="skill_id"]').nth(0)).toHaveValue(
+    "seed-skill-b",
+  );
+  await expect(page.locator("#toastRegion")).toContainText("技能已删除");
+  // 线 2（加一行真的多一行，且此刻【不发】请求）：新行还没填，提交时机仍归
+  // 「保存技能列表」那一次 —— 加行若顺手落库，这里读到的就有那一条。
+  expect(await readMemberSkills(page, hired.memberId)).toEqual([
+    "seed-skill-b",
+  ]);
+  await skillsCard
+    .getByRole("button", { name: "添加技能", exact: true })
+    .click();
+  await expect(skillsCard.locator(".skill-row")).toHaveCount(2);
+  expect(await readMemberSkills(page, hired.memberId)).toEqual([
+    "seed-skill-b",
+  ]);
+  // 线 2b（页面里那一行的删除钮）：新加那一行自己也有一枚「删除这一件技能」，点它只撤掉
+  // 这一行 —— 它还没落库，既不该少库里那条，也不该发 DELETE（发了就 404 skill_not_found）。
+  // 「不该发」这一半由下面那组计数自己钉：整条用例末尾那道全局 console 清扫确实会抓到
+  // 404，但那是【全用例共用】的兜底，不是这根线自己的动作 —— 兜底红在末尾，归因就落到
+  // 别处去了（实测：撤掉这组计数后 M3 红在末尾清扫而不是这里）。
+  // 计数按【任意 DELETE】匹配，不按「打到这个成员的那条」做前缀：把 onClick 改成
+  // removeSkill("", "ghost") 那一发变异，路径是 /members//skills/ghost（成员号是空串）。
+  const pageRowDeletes: string[] = [];
+  const countPageRowDelete = (req: {
+    method: () => string;
+    url: () => string;
+  }) => {
+    if (req.method() === "DELETE") pageRowDeletes.push(req.url());
+  };
+  page.on("request", countPageRowDelete);
+  await skillsCard
+    .getByRole("button", { name: "删除这一件技能", exact: true })
+    .nth(1)
+    .click();
+  page.off("request", countPageRowDelete);
+  await expect(skillsCard.locator(".skill-row")).toHaveCount(1);
+  expect(pageRowDeletes, "页面里那一行不该打服务端").toEqual([]);
+  expect(await readMemberSkills(page, hired.memberId)).toEqual([
+    "seed-skill-b",
+  ]);
+  await skillsCard
+    .getByRole("button", { name: "添加技能", exact: true })
+    .click();
+  await skillsCard.locator('[name="skill_id"]').nth(1).fill("ui-added-skill");
+  await skillsCard.locator('[name="skill_name"]').nth(1).fill("界面新增技能");
+  await skillsCard.locator('[name="skill_note"]').nth(1).fill("界面填的备注");
+  const savedSkills = page.waitForResponse(
+    (response) =>
+      response.request().method() === "POST" &&
+      new URL(response.url()).pathname ===
+        `/api/v1/members/${hired.memberId}/skills`,
+  );
+  await skillsCard
+    .getByRole("button", { name: "保存技能列表", exact: true })
+    .click();
+  expect((await savedSkills).ok()).toBe(true);
+  await expect(page.locator("#toastRegion")).toContainText("技能已保存");
+  // 读的是服务端那两行（列表接口 ORDER BY skill_id），不是本页内存态。
+  expect(await readMemberSkills(page, hired.memberId)).toEqual([
+    "seed-skill-b",
+    "ui-added-skill",
+  ]);
+  // 线 2c（新行的三格各自落库）：name 与 note 由这一行自己带 —— updateSkills 里
+  // note 走的是「空串就不写这个键」，删掉那一格时这里读到的是 undefined。
+  const storedSkills = await readMemberSkillRows(page, hired.memberId);
+  const storedAdded = storedSkills.find((s) => s.skill_id === "ui-added-skill");
+  expect(storedAdded?.name).toBe("界面新增技能");
+  expect(storedAdded?.note).toBe("界面填的备注");
+  expect(storedSkills.find((s) => s.skill_id === "seed-skill-b")?.name).toBe(
+    "播种技能乙",
+  );
+  // 线 3（加完不保存就刷新 ⇒ 那一行不该偷偷落库）。
+  await skillsCard
+    .getByRole("button", { name: "添加技能", exact: true })
+    .click();
+  await page.reload();
+  await page.locator('.nav-item[data-nav="settings"]').click();
+  await memberRow.click();
+  await expect(skillsCard.locator(".skill-row")).toHaveCount(2);
+  expect(await readMemberSkills(page, hired.memberId)).toEqual([
+    "seed-skill-b",
+    "ui-added-skill",
+  ]);
+  // 线 4（执行器加行）：有「添加执行器」，新行带 kind 下拉与配套的 config 骨架，
+  // 而且它同样不顺手落库。
+  const addExecutor = executorsCard.getByRole("button", {
+    name: "添加执行器",
+    exact: true,
+  });
+  await expect(addExecutor).toHaveCount(1);
+  await expect(
+    executorsCard.getByRole("button", {
+      name: "删除这一档执行器",
+      exact: true,
+    }),
+  ).toHaveCount(2);
+  await addExecutor.click();
+  await expect(executorsCard.locator(".executor-row")).toHaveCount(3);
+  await expect(executorsCard.locator('[name="executor_kind"]')).toHaveCount(3);
+  await expect(
+    executorsCard.locator('[name="executor_seq"]').nth(0),
+  ).toHaveValue("1");
+  await expect(
+    executorsCard.locator('[name="executor_seq"]').nth(1),
+  ).toHaveValue("2");
+  await expect(
+    executorsCard.locator('[name="executor_seq"]').nth(2),
+  ).toHaveValue("3");
+  expect(await readMemberExecutorSeqs(page, hired.memberId)).toEqual([1, 2]);
+  // 线 4b（换 kind 连带重写那份 config）：判别联合要求 config.kind 与外层 kind 同值
+  // （contracts/src/member.ts 的 superRefine），所以「换个类型但 config 还是旧骨架」提交必 422。
+  // 这一发量的是新加那一行自己的下拉：切到 builtin-plugin ⇒ 骨架里出现 plugin_id/tool_name，
+  // 切回 pure-model ⇒ 那两格又消失（骨架由 kind 生成，不是往上叠字段）。
+  const newKind = executorsCard.locator('[name="executor_kind"]').nth(2);
+  const newConfig = executorsCard.locator('[name="executor_config"]').nth(2);
+  await expect(newConfig).toHaveValue(/"kind":\s*"pure-model"/u);
+  await newKind.selectOption("builtin-plugin");
+  await expect(newConfig).toHaveValue(/"kind":\s*"builtin-plugin"/u);
+  await expect(newConfig).toHaveValue(/plugin_id/u);
+  await expect(newConfig).toHaveValue(/tool_name/u);
+  await expect(newConfig).toHaveAttribute("placeholder", /plugin_id/u);
+  await newKind.selectOption("pure-model");
+  await expect(newConfig).toHaveValue(
+    JSON.stringify({ kind: "pure-model" }, null, 2),
+  );
+  await expect(newConfig).toHaveAttribute("placeholder", /pure-model/u);
+  // 线 4c（执行器页面里那一行的删除钮，且撤的不是最后一行）：再加第二行 ⇒ 1/2/3/4，
+  // 撤掉 nth(2)（页面里那一行的 seq=3）⇒ 1/2/4。留缝合法（服务端只禁重复），界面不替用户重排。
+  await addExecutor.click();
+  await expect(executorsCard.locator(".executor-row")).toHaveCount(4);
+  await expect(
+    executorsCard.locator('[name="executor_seq"]').nth(3),
+  ).toHaveValue("4");
+  await executorsCard
+    .getByRole("button", { name: "删除这一档执行器", exact: true })
+    .nth(2)
+    .click();
+  await expect(executorsCard.locator(".executor-row")).toHaveCount(3);
+  await expect(
+    executorsCard.locator('[name="executor_seq"]').nth(2),
+  ).toHaveValue("4");
+  expect(await readMemberExecutorSeqs(page, hired.memberId)).toEqual([1, 2]);
+  // 线 4d（再一行的序号从行里【现算】，不是数行数）：现有 1/2/4 ⇒ 下一档是 5。
+  // 写成 rows.length + 1 会得 4 —— 与已有那档撞号，提交必 422（seq 重复）。
+  await addExecutor.click();
+  await expect(executorsCard.locator(".executor-row")).toHaveCount(4);
+  await expect(
+    executorsCard.locator('[name="executor_seq"]').nth(3),
+  ).toHaveValue("5");
+  // 线 4e（新行换成 CLI 那一档 + 取消勾选「启用」）：kind 与 config 由这一行自己带，
+  // enabled 那一格也有自己的动作 —— 界面不读它的话这里落库会是 true。
+  const cliKind = executorsCard.locator('[name="executor_kind"]').nth(3);
+  await cliKind.selectOption("claude-cli");
+  await expect(
+    executorsCard.locator('[name="executor_config"]').nth(3),
+  ).toHaveValue(JSON.stringify({ kind: "claude-cli" }, null, 2));
+  await executorsCard.locator('[name="executor_enabled"]').nth(3).uncheck();
+  // 线 5（加的那一行保存后落在库里）：那一档的 kind 与 config 由新行自己带。
+  const savedExecutors = page.waitForResponse(
+    (response) =>
+      response.request().method() === "POST" &&
+      new URL(response.url()).pathname ===
+        `/api/v1/members/${hired.memberId}/executors`,
+  );
+  await executorsCard
+    .getByRole("button", { name: "保存执行器列表", exact: true })
+    .click();
+  expect((await savedExecutors).ok()).toBe(true);
+  await expect(page.locator("#toastRegion")).toContainText("执行器已保存");
+  expect(await readMemberExecutorSeqs(page, hired.memberId)).toEqual([
+    1, 2, 4, 5,
+  ]);
+  const storedExecutors = await readMemberExecutors(page, hired.memberId);
+  expect(storedExecutors.map((e) => e.kind)).toEqual([
+    "pure-model",
+    "pure-model",
+    "pure-model",
+    "claude-cli",
+  ]);
+  expect(storedExecutors.map((e) => e.enabled)).toEqual([
+    true,
+    true,
+    true,
+    false,
+  ]);
+  // 线 6（删中间那一档）：DELETE 掉 seq=2 ⇒ 库里只剩 1 / 4 / 5（留缝合法）。
+  // ⚠ 序号【不】由界面重排：seq 是手填的优先级，服务端只禁重复、允许留缝，
+  // 界面替用户重排等于把手填那一格拿掉（那是另一件事，本轮不做）。
+  const removedExecutor = page.waitForResponse(
+    (response) =>
+      response.request().method() === "DELETE" &&
+      new URL(response.url()).pathname ===
+        `/api/v1/members/${hired.memberId}/executors/2`,
+  );
+  await executorsCard
+    .getByRole("button", { name: "删除这一档执行器", exact: true })
+    .nth(1)
+    .click();
+  expect((await removedExecutor).ok()).toBe(true);
+  await expect(page.locator("#toastRegion")).toContainText("执行器已删除");
+  expect(await readMemberExecutorSeqs(page, hired.memberId)).toEqual([1, 4, 5]);
+  await expect(
+    executorsCard.locator('[name="executor_seq"]').nth(0),
+  ).toHaveValue("1");
+  await expect(
+    executorsCard.locator('[name="executor_seq"]').nth(1),
+  ).toHaveValue("4");
+  // 线 7（只剩一档时删不掉）：把 4 与 5 依次摘掉 ⇒ 只剩 1 档，此时按钮数为 0 ——
+  // 服务端 empty_executor_chain 那条口径在界面上有对应形状，不必等它报错。
+  // 两次删除各等自己的那条 DELETE 响应（一次动作一条线，别拿上一次的响应冒充）。
+  for (const seq of [4, 5]) {
+    const gone = page.waitForResponse(
+      (response) =>
+        response.request().method() === "DELETE" &&
+        new URL(response.url()).pathname ===
+          `/api/v1/members/${hired.memberId}/executors/${seq}`,
+    );
+    await executorsCard
+      .getByRole("button", { name: "删除这一档执行器", exact: true })
+      .nth(1)
+      .click();
+    expect((await gone).ok()).toBe(true);
+  }
+  await expect(executorsCard.locator(".executor-row")).toHaveCount(1);
+  expect(await readMemberExecutorSeqs(page, hired.memberId)).toEqual([1]);
+  await expect(
+    executorsCard.getByRole("button", {
+      name: "删除这一档执行器",
+      exact: true,
+    }),
+  ).toHaveCount(0);
+  // 线 8（技能全摘光 ⇒ 空态文案 + 零行，但「保存」仍在）：契约允许空技能列表，
+  // 界面不该在空档上崩掉。
+  await expect(
+    skillsCard.getByRole("button", { name: "删除这一件技能", exact: true }),
+  ).toHaveCount(2);
+  await skillsCard
+    .getByRole("button", { name: "删除这一件技能", exact: true })
+    .first()
+    .click();
+  await skillsCard
+    .getByRole("button", { name: "删除这一件技能", exact: true })
+    .first()
+    .click();
+  await expect(skillsCard.locator(".skill-row")).toHaveCount(0);
+  expect(await readMemberSkills(page, hired.memberId)).toEqual([]);
+  await expect(
+    skillsCard.getByRole("button", { name: "保存技能列表", exact: true }),
+  ).toHaveCount(1);
+  // 线 9（控件不累加）：上面加过五行、摘过五行、还 reload 过一次，
+  // 两栏各自的那枚按钮仍只有一套（0079 病根的回归位）。
+  await expect(
+    skillsCard.getByRole("button", { name: "添加技能", exact: true }),
+  ).toHaveCount(1);
+  await expect(
+    executorsCard.getByRole("button", { name: "添加执行器", exact: true }),
+  ).toHaveCount(1);
+  await expect(
+    executorsCard.getByRole("button", {
+      name: "保存执行器列表",
+      exact: true,
+    }),
+  ).toHaveCount(1);
+
+  expectNoBrowserErrors(browserErrors);
+});
+
+/** 读服务端该成员的技能 skill_id 列表（不是本页内存态）：加/删是否真落库以此为准。 */
+async function readMemberSkills(
+  page: Page,
+  memberId: string,
+): Promise<string[]> {
+  return page.evaluate(async (id) => {
+    const res = await fetch(`/api/v1/members/${id}`);
+    const body = (await res.json()) as {
+      member?: { skills?: { skill_id: string }[] };
+    };
+    return body.member?.skills?.map((s) => s.skill_id) ?? [];
+  }, memberId);
+}
+
+/** 读服务端该成员的技能整行（name / note 是否真由界面那一行带上去）。 */
+async function readMemberSkillRows(
+  page: Page,
+  memberId: string,
+): Promise<{ skill_id: string; name: string; note?: string }[]> {
+  return page.evaluate(async (id) => {
+    const res = await fetch(`/api/v1/members/${id}`);
+    const body = (await res.json()) as {
+      member?: { skills?: { skill_id: string; name: string; note?: string }[] };
+    };
+    return body.member?.skills ?? [];
+  }, memberId);
+}
+
+/** 读服务端该成员的执行器整行（kind / enabled 由界面哪一格带上去）。 */
+async function readMemberExecutors(
+  page: Page,
+  memberId: string,
+): Promise<{ seq: number; kind: string; enabled: boolean }[]> {
+  return page.evaluate(async (id) => {
+    const res = await fetch(`/api/v1/members/${id}`);
+    const body = (await res.json()) as {
+      member?: {
+        executors?: { seq: number; kind: string; enabled: boolean }[];
+      };
+    };
+    return body.member?.executors ?? [];
+  }, memberId);
+}
+
+/** 读服务端该成员的执行器 seq 列表（同上，读的是库里的那几行）。 */
+async function readMemberExecutorSeqs(
+  page: Page,
+  memberId: string,
+): Promise<number[]> {
+  return page.evaluate(async (id) => {
+    const res = await fetch(`/api/v1/members/${id}`);
+    const body = (await res.json()) as {
+      member?: { executors?: { seq: number }[] };
+    };
+    return body.member?.executors?.map((e) => e.seq) ?? [];
+  }, memberId);
+}

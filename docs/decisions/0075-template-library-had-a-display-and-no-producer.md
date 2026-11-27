@@ -77,7 +77,7 @@
 「从模板开始」卡的 actions 追加第 7 个按钮（`packages/web/public/group.js:4251`），
 空态文案同步改成「点「新建模板」建第一张，或先创建空白文档。」（原来那句只指空白文档，
 在陈列柜语境下是唯一的门）。新函数 `templateCreateModal()`
-（`packages/web/public/group.js:8734`）走 `openModal` 既有形态：名称（必填，≤200）+
+（`packages/web/public/group.js:8837`）走 `openModal` 既有形态：名称（必填，≤200）+
 文档形态下拉（markdown/文档/表格/思维导图，与 `createDocument` 同一套 `docKinds`）+
 模板正文大栏；`onSubmit` 真发 `POST /templates`，成功后 `loadAuxiliary()` 重取
 `state.templates` + `renderMain()` 重渲 —— 新模板**立刻**是芯片、立刻能点。失败形状

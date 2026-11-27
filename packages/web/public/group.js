@@ -6764,6 +6764,86 @@ function renderTalent(view) {
     ),
   );
 }
+/** config 的骨架与占位都由 kind 决定（member.ts 的 executorConfigSchema 是判别联合），
+ *  所以换 kind 必须连带重写骨架 —— 招聘弹窗与成员设置面板共用这一格，
+ *  各写一遍迟早漂成两种口径（一边重写一边不重写，提交就必 422）。 */
+function executorConfigPlaceholder(kind) {
+  return kind === "builtin-plugin"
+    ? '{"kind":"builtin-plugin","plugin_id":"p","tool_name":"t"}'
+    : '{"kind":"pure-model"}';
+}
+function bindExecutorKind(kind, config) {
+  config.placeholder = executorConfigPlaceholder(kind.value);
+  kind.addEventListener("change", () => {
+    config.value = JSON.stringify(
+      kind.value === "builtin-plugin"
+        ? { kind: kind.value, plugin_id: "", tool_name: "" }
+        : { kind: kind.value },
+      null,
+      2,
+    );
+    config.placeholder = executorConfigPlaceholder(kind.value);
+  });
+}
+/** 成员设置面板的一行技能。remove 为 null 时不给删除钮 ——
+ *  「这一件还只活在页面上」的行由调用方传「移除这一行」，已落库的行传服务端 DELETE。 */
+function skillSettingsRow(skill = {}, remove = null) {
+  const row = h(
+    "div",
+    { class: "skill-row" },
+    input("skill_id", skill.skill_id || "", "text", {
+      placeholder: "技能 ID",
+      required: true,
+    }),
+    input("skill_name", skill.name || "", "text", {
+      placeholder: "技能名称",
+      required: true,
+    }),
+    input("skill_note", skill.note || "", "text", {
+      placeholder: "备注（可选）",
+      "aria-label": "技能备注",
+      maxlength: 2000,
+    }),
+  );
+  if (remove)
+    row.append(iconButton("close", remove.label, () => remove.onClick(row)));
+  return row;
+}
+/** 成员设置面板的一档执行器：kind 用下拉（与招聘同一格名 executor_kind，
+ *  提交时 updateExecutors 只认这一个来源），换 kind 连带重写 config 骨架。 */
+function executorSettingsRow(executor, remove = null) {
+  const kind = select("executor_kind", executors, executor.kind);
+  const config = textarea(
+    "executor_config",
+    JSON.stringify(executor.config, null, 2),
+    { required: true },
+  );
+  bindExecutorKind(kind, config);
+  const row = h(
+    "div",
+    { class: "executor-row" },
+    input("executor_seq", executor.seq, "number", {
+      min: 1,
+      max: 99,
+      required: true,
+    }),
+    kind,
+    h(
+      "label",
+      { class: "check-row" },
+      h("input", {
+        type: "checkbox",
+        name: "executor_enabled",
+        ...(executor.enabled ? { checked: true } : {}),
+      }),
+      "启用",
+    ),
+    config,
+  );
+  if (remove)
+    row.append(iconButton("close", remove.label, () => remove.onClick(row)));
+  return row;
+}
 function hireForm() {
   const seed = state.hireSeed || {};
   const skills = h("div", { id: "hireSkills" });
@@ -6799,27 +6879,9 @@ function hireForm() {
       "executor_config",
       JSON.stringify(executor.config || { kind: executor.kind }, null, 2),
       "text",
-      {
-        placeholder:
-          executor.kind === "builtin-plugin"
-            ? '{"kind":"builtin-plugin","plugin_id":"p","tool_name":"t"}'
-            : '{"kind":"pure-model"}',
-        required: true,
-      },
+      { required: true },
     );
-    kind.addEventListener("change", () => {
-      config.value = JSON.stringify(
-        kind.value === "builtin-plugin"
-          ? { kind: kind.value, plugin_id: "", tool_name: "" }
-          : { kind: kind.value },
-        null,
-        2,
-      );
-      config.placeholder =
-        kind.value === "builtin-plugin"
-          ? '{"kind":"builtin-plugin","plugin_id":"p","tool_name":"t"}'
-          : '{"kind":"pure-model"}';
-    });
+    bindExecutorKind(kind, config);
     const row = h(
       "div",
       { class: "executor-row" },
@@ -8281,53 +8343,68 @@ function renderSettings(view) {
     "form",
     { onsubmit: updateSkills },
     ...member.skills.map((skill) =>
-      h(
-        "div",
-        { class: "skill-row" },
-        input("skill_id", skill.skill_id, "text", { required: true }),
-        input("skill_name", skill.name, "text", { required: true }),
-        input("skill_note", skill.note || "", "text", {
-          placeholder: "备注（可选）",
-          "aria-label": "技能备注",
-          maxlength: 2000,
-        }),
-      ),
+      skillSettingsRow(skill, {
+        label: "删除这一件技能",
+        onClick: () => removeSkill(member.member_id, skill.skill_id),
+      }),
     ),
     h("button", { class: "btn small", type: "submit" }, "保存技能列表"),
+    button(
+      "添加技能",
+      () => {
+        skillsEditor.insertBefore(
+          skillSettingsRow(
+            {},
+            { label: "删除这一件技能", onClick: (row) => row.remove() },
+          ),
+          skillsEditor.querySelector("button[type=submit]"),
+        );
+      },
+      "small",
+    ),
   );
+  // 执行器链不能清空（members/service.ts 的 empty_executor_chain），所以只剩一档时
+  // 不给删除钮 —— 与其让用户撞那条 422，不如让界面先长成那个形状。
   const executorsEditor = h(
     "form",
     { onsubmit: updateExecutors },
     ...member.executors.map((executor) =>
-      h(
-        "div",
-        { class: "executor-row" },
-        input("executor_seq", executor.seq, "number", {
-          min: 1,
-          max: 99,
-          required: true,
-        }),
-        h("span", { class: "pill blue", text: executor.kind }),
-        h(
-          "label",
-          { class: "check-row" },
-          h("input", {
-            type: "checkbox",
-            name: "executor_enabled",
-            ...(executor.enabled ? { checked: true } : {}),
-          }),
-          "启用",
-        ),
-        textarea("executor_config", JSON.stringify(executor.config, null, 2), {
-          required: true,
-        }),
+      executorSettingsRow(
+        executor,
+        member.executors.length > 1
+          ? {
+              label: "删除这一档执行器",
+              onClick: () =>
+                removeExecutor(member.member_id, String(executor.seq)),
+            }
+          : null,
       ),
     ),
-    h("button", { class: "btn small", type: "submit" }, "保存执行器列表"),
     h("p", {
       class: "help",
-      text: "保留 JSON 直接编辑。builtin-plugin 的 tool_name 可选但推荐；省略时执行字典序第一个已授权工具。",
+      text: "保留 JSON 直接编辑。换「类型」会连带重写下面那份 config 骨架；builtin-plugin 的 tool_name 可选但推荐；省略时执行字典序第一个已授权工具。只剩一档时没有删除钮 —— 执行器链不能清空（D4），要停用他请归档成员。",
     }),
+    h("button", { class: "btn small", type: "submit" }, "保存执行器列表"),
+    button(
+      "添加执行器",
+      () => {
+        const rows = $$("[name=executor_seq]", executorsEditor);
+        const nextSeq = Math.max(0, ...rows.map((el) => Number(el.value))) + 1;
+        executorsEditor.insertBefore(
+          executorSettingsRow(
+            {
+              seq: nextSeq,
+              kind: "pure-model",
+              config: { kind: "pure-model" },
+              enabled: true,
+            },
+            { label: "删除这一档执行器", onClick: (row) => row.remove() },
+          ),
+          executorsEditor.querySelector("button[type=submit]"),
+        );
+      },
+      "small",
+    ),
   );
   const avatarForm = h(
     "form",
@@ -8496,7 +8573,7 @@ async function updateExecutors(event) {
     const executorsList = $$(".executor-row", event.currentTarget).map(
       (row) => ({
         seq: Number($("[name=executor_seq]", row).value),
-        kind: $(".pill", row).textContent,
+        kind: $("[name=executor_kind]", row).value,
         config: JSON.parse($("textarea", row).value),
         enabled: $("[name=executor_enabled]", row).checked,
       }),
@@ -8508,6 +8585,32 @@ async function updateExecutors(event) {
     await loadCore();
     renderMain();
     toast("执行器已保存");
+  } catch (error) {
+    toast(errorMessage(error), true);
+  }
+}
+async function removeSkill(memberId, skillId) {
+  try {
+    await request(
+      `/members/${encodeURIComponent(memberId)}/skills/${encodeURIComponent(skillId)}`,
+      { method: "DELETE" },
+    );
+    await loadCore();
+    renderMain();
+    toast("技能已删除");
+  } catch (error) {
+    toast(errorMessage(error), true);
+  }
+}
+async function removeExecutor(memberId, seq) {
+  try {
+    await request(
+      `/members/${encodeURIComponent(memberId)}/executors/${encodeURIComponent(seq)}`,
+      { method: "DELETE" },
+    );
+    await loadCore();
+    renderMain();
+    toast("执行器已删除");
   } catch (error) {
     toast(errorMessage(error), true);
   }
