@@ -883,6 +883,7 @@ label.field > input, label.field > select, label.field > textarea { margin-top: 
 .message-stream { flex: 1; min-height: 0; overflow: auto; padding: 18px 24px 10px; scrollbar-width: thin; }
 .message-day { display: flex; align-items: center; gap: var(--space-2); color: var(--faint); font-size: var(--fs-xs); font-weight: var(--fw-medium); margin: 14px 0 18px; }
 .message-day::before, .message-day::after { content: ""; height: 1px; background: var(--line); flex: 1; }
+.history-more { display: flex; justify-content: center; margin: 0 0 14px; }
 .message-row { display: flex; align-items: flex-start; gap: var(--space-2); margin-bottom: 17px; }
 .message-row.boss { flex-direction: row-reverse; }
 .message-body { max-width: min(72%, 760px); min-width: 0; }

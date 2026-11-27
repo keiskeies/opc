@@ -575,6 +575,12 @@ const state = {
   docListCollapsed:
     readStoredJson(STORAGE_KEYS.docListCollapsed, false) === true,
   messages: [],
+  // 会话历史翻页三格：游标（最旧已加载的 seq_in_conv）、是否还有更早、是否正在翻。
+  // windowId 标这三格属于哪个会话 —— 换会话不许把上一群翻出来的那段和「到底」结论带过去。
+  messagesWindowId: null,
+  messagesCursor: null,
+  messagesHasMore: false,
+  loadingOlder: false,
   meetings: [],
   groups: [],
   members: [],
@@ -617,6 +623,84 @@ const state = {
 };
 let renderToken = 0;
 let messageRequestToken = 0;
+// 会话历史一页取多少条 = 契约 listMessagesQuerySchema 的上界（limit 1..200）。
+// 服务端把界是为了防全表拖取，界面取满它 = 首屏少一发翻页请求。
+const MESSAGES_PAGE_LIMIT = 200;
+/**
+ * 「往前还有更早的消息吗」的判据：这一页服务端真返回的条数 == 请求的 limit。
+ *
+ * 与游标分开写（同 app.js 里 replayHasMore 那对：判据与游标各测各的 ——
+ * 判据写错 = 按钮永不出现，游标写错 = 每次都重复同一段）。返回 false 时
+ * 界面收起按钮，不再让人点一发注定空手而回。
+ *
+ * ⚠ 这一发不能拿 state.messages.length 来判：那是【累计已加载】，翻过一页之后
+ * 它早就不等于「这一页返回了几条」。
+ */
+function historyHasMore(pageLen, limit) {
+  return (
+    Number.isInteger(pageLen) &&
+    Number.isInteger(limit) &&
+    pageLen > 0 &&
+    pageLen >= limit
+  );
+}
+/**
+ * 往旧翻的游标 = 已加载消息里最旧那条的 seq_in_conv（服务端语义是
+ * seq_in_conv < before_seq）。恒取最小值而不是直接读 messages[0]：页内升序
+ * 是服务端的约定，游标取错会把整段历史静默跳过。取不到（空页）返回 null
+ * = 没有可翻的位置。
+ */
+function historyCursor(messages) {
+  let oldest = null;
+  for (const message of messages) {
+    const seq = message.seq_in_conv;
+    if (!Number.isInteger(seq)) continue;
+    if (oldest === null || seq < oldest) oldest = seq;
+  }
+  return oldest;
+}
+/**
+ * 同会话背景重读时保留「比这一页更旧」的已加载行。
+ *
+ * 背景刷新读的是【最新一页】，它不知道用户已经往旧翻过：直接整体覆盖会把刚翻出来
+ * 那段又吞回去，游标与「还有更早」也一并退回最新页 —— 屏幕上表现为「查看更早」
+ * 到底之后自己复活、历史凭空少一截，而这两件事都不报错。只丢掉这一页已经覆盖的
+ * 行（seq_in_conv 不小于这一页最旧那条），其余留在原位；页内升序 + 严格小于游标
+ * 保证保留段与这一页不会有同一条消息两次。
+ */
+function retainOlderThan(current, page) {
+  const floor = historyCursor(page);
+  if (floor === null) return current;
+  return current.filter((message) => {
+    const seq = message.seq_in_conv;
+    return !(Number.isInteger(seq) && seq >= floor);
+  });
+}
+/**
+ * 重读消息数组的唯一入口：数组、游标、「还有更早」三格一起重算。
+ *
+ * 两处首屏读取（loadMessages 与「用户正在输入时」的替身）都走这里 —— 游标必须
+ * 跟着数组走，否则它会指着一条已经不在数组里的消息，下一发 before_seq 就从错误
+ * 的位置往旧翻（静默跳掉一段历史）。分开写两次就会只改对一处。
+ *
+ * 窗口按 conversation_id 认：换会话才是真的换了一屏（旧会话翻出来的那段与「到底」
+ * 的结论都不许带过去，否则新会话的按钮会凭空收起）。
+ */
+function applyHistoryWindow(id, page) {
+  const retained =
+    state.messagesWindowId === id ? retainOlderThan(state.messages, page) : [];
+  const list = retained.concat(page);
+  state.messages = list;
+  state.messagesWindowId = id;
+  state.messagesCursor = historyCursor(list);
+  // 翻过页（retained 非空）时「还有更早」维持原值：最新那一页满不满 limit 只能证明
+  // 它自己下面还有没有东西，证明不了用户已经翻到的那段之外还有 —— 拿它重算会让
+  // 已经到底、已经收起的按钮在下一次背景刷新时复活。
+  state.messagesHasMore =
+    retained.length > 0
+      ? state.messagesHasMore
+      : historyHasMore(page.length, MESSAGES_PAGE_LIMIT);
+}
 let teamPanelToken = 0;
 let coreLoaded = false;
 let refreshTimer = null;
@@ -857,9 +941,14 @@ async function runRefreshAll() {
         if (!state.messageSending) {
           if (editingComposer) {
             const result = await request(
-              `/conversations/${encodeURIComponent(state.selectedConversation)}/messages?limit=200`,
+              `/conversations/${encodeURIComponent(state.selectedConversation)}/messages?limit=${MESSAGES_PAGE_LIMIT}`,
             );
-            state.messages = result.messages || [];
+            // 这一格是 loadMessages 的「用户在输入时」替身，同样整体覆盖数组，
+            // 所以走同一个入口 —— 游标不跟着数组走就会指着一条已不在数组里的消息。
+            applyHistoryWindow(
+              state.selectedConversation,
+              result.messages || [],
+            );
           } else await loadMessages(state.selectedConversation, false);
         }
       } else if (state.selectedMeeting)
@@ -1940,11 +2029,12 @@ async function loadMessages(id, markRead) {
     renderChat($("#view"), token);
   try {
     const result = await request(
-      `/conversations/${encodeURIComponent(id)}/messages?limit=200`,
+      `/conversations/${encodeURIComponent(id)}/messages?limit=${MESSAGES_PAGE_LIMIT}`,
     );
     // 发送或切换会话后，旧快照不能覆盖当前消息流。
     if (requestToken !== messageRequestToken) return;
-    state.messages = result.messages || [];
+    // 首屏 = 最新的一页；窗口里比它更旧的那段由 applyHistoryWindow 保留（见那里）。
+    applyHistoryWindow(id, result.messages || []);
     state.messageLoading = false;
     const conversation = state.conversations.find(
       (c) => c.conversation_id === id,
@@ -1971,6 +2061,60 @@ async function loadMessages(id, markRead) {
       $("#view").replaceChildren(
         banner(errorMessage(error), "error", () => loadMessages(id, false)),
       );
+  }
+}
+/**
+ * 「查看更早的消息」：拿 before_seq 游标往旧翻，服务端按升序返回这一页
+ * （见 conversations/service.ts 的 listMessages：「前端上拉历史是 prepend」），
+ * 所以这里直接拼在现有数组头 —— 不许 reverse，也不许整体覆盖
+ * （覆盖会把用户刚翻出来的那段又吞回去）。
+ *
+ * 竞态：翻页不抢 renderToken/messageRequestToken。它既不是新快照也不是切会话，
+ * 抢 token 会让并发在飞的 loadMessages 白投一次；反过来本发只靠 conversation_id
+ * 自证「结果还属于当前会话」，不属于就丢掉。
+ */
+async function loadOlderMessages(id) {
+  // 游标取不到（页内没有一条带整数 seq_in_conv）时没法拼 before_seq，直接不作请求。
+  if (state.loadingOlder || state.messagesCursor === null) return;
+  const before = state.messagesCursor;
+  // 锚点 = 视口顶到内容底的距离。prepend 之后内容整体下移，用这个差值把视口
+  // 拉回原本看着的那条消息，否则每次点「更早」屏幕都会跳走。
+  const streamBefore = $(".message-stream");
+  const anchorOffset = streamBefore
+    ? streamBefore.scrollHeight - streamBefore.scrollTop
+    : 0;
+  state.loadingOlder = true;
+  renderChat($("#view"), renderToken);
+  try {
+    const result = await request(
+      `/conversations/${encodeURIComponent(id)}/messages` +
+        `?limit=${MESSAGES_PAGE_LIMIT}&before_seq=${before}`,
+    );
+    if (state.selectedConversation !== id) return;
+    const page = result.messages || [];
+    // 去重兜住翻页窗口与 SSE 推送重叠那一瞬：服务端游标是严格小于，本身不会
+    // 重复，但这一页与内存里那段之间可能已经插进同一条（同一消息画两遍）。
+    const known = new Set(state.messages.map((m) => m.message_id));
+    const fresh = page.filter((m) => !known.has(m.message_id));
+    state.messages = fresh.concat(state.messages);
+    const next = historyCursor(page);
+    // 游标只许往更小走：页空或算不出更小时保持原位，绝不清空（清空 = 按钮消失，
+    // 而那一屏其实还有更早的历史没读）。
+    if (
+      next !== null &&
+      (state.messagesCursor === null || next < state.messagesCursor)
+    )
+      state.messagesCursor = next;
+    state.messagesHasMore = historyHasMore(page.length, MESSAGES_PAGE_LIMIT);
+  } catch (error) {
+    if (state.selectedConversation === id) toast(errorMessage(error), true);
+  } finally {
+    state.loadingOlder = false;
+    if (state.route === "messages" && state.selectedConversation === id) {
+      renderChat($("#view"), renderToken);
+      const stream = $(".message-stream");
+      if (stream) stream.scrollTop = stream.scrollHeight - anchorOffset;
+    }
   }
 }
 function selectChatTab(tab, focus = false) {
@@ -2350,6 +2494,22 @@ function renderChat(view, token) {
     );
     return;
   }
+  // 按钮挂在消息循环之前 = 流的最顶端（往上翻的东西在上方）。到底了
+  // （messagesHasMore=false）这一格根本不画，不留一枚点了空手而回的按钮。
+  if (state.messagesHasMore) {
+    stream.append(
+      h(
+        "div",
+        { class: "history-more" },
+        button(
+          state.loadingOlder ? "正在加载更早的消息…" : "查看更早的消息",
+          () => loadOlderMessages(conversation.conversation_id),
+          "ghost small",
+          { id: "load-older", disabled: state.loadingOlder || null },
+        ),
+      ),
+    );
+  }
   let day = "";
   for (const message of state.messages) {
     const messageDay = fmtDate(message.created_at);
@@ -2387,7 +2547,9 @@ function messageNode(message) {
     : null;
   const row = h("article", {
     class: `message-row ${message.author_kind}`,
-    dataset: { messageId: message.message_id },
+    // data-seq 是这一发在会话内的序号（服务端事实）：翻页判据靠它钉 prepend
+    // 顺序，不靠渲染时刻的几何。
+    dataset: { messageId: message.message_id, seq: message.seq_in_conv },
     tabindex: 0,
   });
   if (!isSystem)

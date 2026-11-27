@@ -2575,3 +2575,252 @@ test("全局搜索群命中：徽标是「群」且点击真落到该群会话",
 
   expectNoBrowserErrors(browserErrors);
 });
+
+// 契约声明了 before_seq（「往旧翻」游标），服务端实现并测过它，docstring 甚至
+// 点名「前端上拉历史是 prepend」——而 0077 之前的渲染侧只发 ?limit=200 并整体
+// 覆盖数组：超过一页的历史【静默】不可达（不报错，看起来就像历史只有这么多）。
+// 这一发闭环四根线：①首页封顶时「查看更早」出现而更早的消息确实不可见；
+// ②点它真带 before_seq=最旧已加载 seq；③服务端页升序 prepend 到流头
+// （消息自己报 seq，顺序判据不靠渲染时刻）；④短页 = 到底，按钮收起。
+test("会话历史翻页：满一页后有「查看更早」，点击带游标 prepend 且到底收起", async ({
+  page,
+}) => {
+  const browserErrors = watchBrowserErrors(page);
+  await page.goto(`${webOrigin}/`);
+  // 不带成员建群：POST 消息的 CoS 派发在 cos_missing 处立即返回，
+  // 201 发种子各写一条，不触发模型调用。
+  const created = await createGroupThroughUi(
+    page,
+    "历史翻页验收群",
+    "验证超过一页的会话历史可达",
+  );
+  const groupId = created.group.group_id;
+
+  // 先换到文档页再灌种子：每一发 POST 都会发 SSE 事件，停在消息页时每个事件
+  // 都触发一次整页历史重取（loadMessages 覆盖数组）——既慢，又会在点「更早」
+  // 附近留一发可能吞掉 prepend 的迟到快照。换页后刷新只重画文档列表。
+  await page.locator('[data-nav="documents"]').click();
+  await expect(page).toHaveURL(/#\/documents/u);
+
+  const conversationId = await page.evaluate(async (id) => {
+    const res = await fetch("/api/v1/conversations");
+    const body = (await res.json()) as {
+      conversations: { conversation_id: string; group_id: string | null }[];
+    };
+    return (
+      body.conversations.find((entry) => entry.group_id === id)
+        ?.conversation_id ?? ""
+    );
+  }, groupId);
+  // 前提不成立红在前提本身：没有群会话就没有可翻的历史，下面的红会冒充「分支缺失」。
+  expect(conversationId).not.toBe("");
+
+  const TOTAL = 201; // 契约页界 200 + 1：最早那条恰好落在首屏窗口之外。
+  const seeded = await page.evaluate(
+    async ({ cid, count }: { cid: string; count: number }) => {
+      let written = 0;
+      for (let i = 0; i < count; i += 1) {
+        const res = await fetch(
+          `/api/v1/conversations/${encodeURIComponent(cid)}/messages`,
+          {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+              body: `史前消息 ${String(i).padStart(3, "0")}`,
+            }),
+          },
+        );
+        if (!res.ok) throw new Error(`种子第 ${String(i)} 条写入失败`);
+        written += 1;
+      }
+      return written;
+    },
+    { cid: conversationId, count: TOTAL },
+  );
+  expect(seeded).toBe(TOTAL);
+
+  // goto 整页重载 ⇒ 走一次完整的 boot + loadMessages（首页 = 最新 200 条，
+  // seq 2..201），并且这仍是消息页：SSE 重取只会覆盖成最新 200 条，而那正是
+  // 翻页前应有的样子 —— 已翻出的那一页从这一刻作废是设计内的行为。
+  await page.goto(
+    `${webOrigin}/#/messages/${encodeURIComponent(conversationId)}`,
+  );
+  await expect(page.locator("#load-older")).toBeVisible();
+
+  // 服务端权威读数：整序升序、被 limit 截断（seq 1 在响应里缺席）——否则下面
+  // 「按钮出现 + 第一条不可见」绿的是「压根没有超出页界的历史」。
+  const pageOne = await page.evaluate(async (cid) => {
+    const res = await fetch(
+      `/api/v1/conversations/${encodeURIComponent(cid)}/messages?limit=200`,
+    );
+    const body = (await res.json()) as {
+      messages: { seq_in_conv: number; body: string }[];
+    };
+    return body.messages.map((m) => m.seq_in_conv);
+  }, conversationId);
+  expect(pageOne).toHaveLength(200);
+  const seqs = [...pageOne].sort((a, b) => a - b);
+  expect(seqs[0]).toBe(2); // seq 1 被 limit 挡在首屏之外（服务端截断属实）
+  expect(seqs[199]).toBe(201);
+  // 服务端契约：返回升序（prepend 的前提；前端再 reverse 就会翻错）。
+  expect(pageOne).toEqual(seqs);
+
+  // 第一根线：首屏正文帧 = 200 行 + 按钮在位 + 更早那条【在屏幕上不存在】。
+  // 这一发和下一发的「点击后有它」合起来才排除「一直都在、按钮是装饰」。
+  // ⚠ 判据读的是 settledChatFrame（正文帧快照），不是一条条 locator 轮询 ——
+  // 后者跨渲染帧，会把 loadMessages 的骨架帧（0 行、无按钮）当成结论。
+  const firstPage = await settledChatFrame(page, { rows: 200 });
+  expect(firstPage.rows).toBe(200);
+  expect(firstPage.button).toBe(true);
+  expect(firstPage.prehistoric).toBe(0);
+
+  // wait 挂在动作之前（家法）：点完再挂，响应可能已在两次 await 之间落地。
+  // 谓词点名 before_seq —— 会话的 GET /messages 不止一发（SSE 触发的重取也算），
+  // 只认 pathname 会让首屏那一发把 wait 提前喂饱。
+  const pagedPromise = page.waitForResponse(
+    (response) =>
+      new URL(response.url()).pathname ===
+        `/api/v1/conversations/${conversationId}/messages` &&
+      new URL(response.url()).searchParams.has("before_seq") &&
+      response.ok(),
+    { timeout: 20_000 },
+  );
+  await page.locator("#load-older").click();
+  const paged = await pagedPromise;
+  // 第二根线：查询真带游标，且游标 == 最旧已加载的 seq（=2）。「服务端返回 1 条」
+  // 这条判据把游标和 SQL 的严格小于缝死：游标写成 1 ⇒ 返回 0 条，当场红。
+  const sentUrl = new URL(paged.url());
+  expect(sentUrl.searchParams.get("before_seq")).toBe("2");
+  const older = (await paged.json()) as {
+    messages: { seq_in_conv: number }[];
+  };
+  expect(older.messages.map((m) => m.seq_in_conv)).toEqual([1]);
+
+  // 第三根线 + 第四根线：那条消息落到流【头】，且短页（1 < 200）= 到底 ⇒ 按钮收起。
+  // 判据读的是消息自己报的 data-seq（服务端事实），不是渲染时刻的几何。
+  //
+  // ⚠ 两根线读【同一帧的不同字段】不是偷懒：loadOlderMessages 在同一个 try 里 prepend
+  // 并重算 messagesHasMore、finally 才重画，所以「头上是 seq 1」与「按钮已收起」天然
+  // 落在同一帧。两根线仍各自红在不同字段（M5 prepend 改 append 红在 firstSeq/ascending，
+  // M3 判据丢掉「满一整页」红在 button —— 那一格恒真，按钮永不缺席）。
+  //
+  // ⚠ button 必须是【正文帧里】的缺席：骨架帧同样没有按钮，缺席判据在它上面恒真
+  // （round392 变异机在 M3/M5/M11 上报绿的漏检点就在这个形状上）。
+  const afterPaging = await settledChatFrame(page, { rows: 201 });
+  expect(afterPaging.rows).toBe(201);
+  expect(afterPaging.firstSeq).toBe(1);
+  expect(afterPaging.firstText).toBe("史前消息 000");
+  expect(afterPaging.ascending).toBe(true);
+  expect(afterPaging.button).toBe(false);
+
+  // 第五根线：到底之后逼一次【背景整页重读】（刷新按钮走 runRefreshAll，与 SSE
+  // 事件触发的是同一条 loadMessages 路径）。它读的是最新一页，若直接整体覆盖数组，
+  // 刚翻出来的「史前消息 000」会被吞回去、游标退回 2、「查看更早」原地复活 ——
+  // 而这三件事都不报错。首版没有这一发：同一形状在变异机预检里连红两轮，
+  // 红的就是这条被静默吞掉的历史（当时判据只量到「点击之后」那一次）。
+  //
+  // ⚠ 正确代码下重读前后的屏幕【逐像素相同】（保留段的存在就是为了这个），所以
+  // 「读了哪一帧」不能靠内容分辨，只能靠帧号：先领一次号，再要求读到的正文帧
+  // 是【新号】—— 否则这一发量的是重读之前的旧帧，等于什么都没量。
+  const beforeRefresh = await settledChatFrame(page, { rows: 201 });
+  const refreshed = page.waitForResponse(
+    (response) =>
+      new URL(response.url()).pathname ===
+        `/api/v1/conversations/${conversationId}/messages` &&
+      !new URL(response.url()).searchParams.has("before_seq") &&
+      response.ok(),
+    { timeout: 20_000 },
+  );
+  await page.getByRole("button", { name: "刷新消息" }).click();
+  await refreshed;
+  const afterRefresh = await settledChatFrame(page, {
+    afterRenderId: beforeRefresh.renderId,
+  });
+  expect(afterRefresh.renderId).not.toBe(beforeRefresh.renderId);
+  expect(afterRefresh.rows).toBe(201);
+  expect(afterRefresh.firstSeq).toBe(1);
+  expect(afterRefresh.firstText).toBe("史前消息 000");
+  expect(afterRefresh.button).toBe(false);
+
+  expectNoBrowserErrors(browserErrors);
+});
+
+interface ChatFrame {
+  readonly renderId: string;
+  readonly skeleton: boolean;
+  readonly rows: number;
+  readonly firstSeq: number | null;
+  readonly firstText: string;
+  readonly ascending: boolean;
+  readonly button: boolean;
+  readonly prehistoric: number;
+}
+
+/**
+ * 页侧探针（字符串形式：types:[node] 下页内闭包拿不到外层标识符）。
+ *
+ * renderId 是这一帧宿主节点的标记：renderChat 每次 view.replaceChildren() 重建
+ * .message-stream，给节点打标等于给「这一帧」领了号 —— 调用方由此能证明读到的帧
+ * 晚于它做动作的那一次，而不是页面刚切过来时的旧帧。
+ */
+const CHAT_FRAME_PROBE = `
+(() => {
+  const stream = document.querySelector(".message-stream");
+  if (stream && !stream.dataset.frameMark) {
+    const w = window;
+    w.__frameSeq = (w.__frameSeq ?? 0) + 1;
+    stream.dataset.frameMark = String(w.__frameSeq);
+  }
+  const rows = Array.from(document.querySelectorAll(".message-row"));
+  const bubbles = rows.map((row) => row.querySelector(".bubble"));
+  const seqs = rows.map((row) => Number(row.getAttribute("data-seq")));
+  const firstBubble = bubbles.length > 0 ? bubbles[0] : null;
+  return {
+    renderId: stream === null ? "" : (stream.dataset.frameMark ?? ""),
+    skeleton: document.querySelector(".skeleton-chat") !== null,
+    rows: rows.length,
+    firstSeq: rows.length === 0 ? null : Number(rows[0].getAttribute("data-seq")),
+    firstText: firstBubble === null ? "" : (firstBubble.textContent ?? ""),
+    ascending: seqs.every((seq, i) => i === 0 || seqs[i - 1] <= seq),
+    button: document.querySelector("#load-older") !== null,
+    prehistoric: bubbles.filter((b) => (b?.textContent ?? "") === "史前消息 000").length,
+  };
+})()
+`;
+
+/**
+ * 读【一帧正文】的快照：等掉加载骨架、等掉标记之前的旧帧，一次求值读全六项。
+ *
+ * ⚠ 为什么不能用逐条 locator 断言：它们各自轮询、各自跨帧，而 loadMessages 的
+ * 骨架帧里 .message-row 是 0 行、#load-older 也不在 —— 【缺席类】判据会在这一帧
+ * 被凭空喂饱（绿的是「正在加载」，不是「到底收起」）。round392 变异机在 M3/M5/M11
+ * 上报绿正是这个漏检点：同一变异手跑必红、在机器上却撞上骨架帧。缺席要成立，
+ * 必须【在正文帧里】缺席；骨架帧的缺席不是证据。
+ *
+ * 条件必须【点名这一发在等的帧】（行数 / 帧号），不能只写「有行」：
+ * 「有行 + 非骨架」会被点击之前就存在的旧帧喂饱，红了归不了因、绿了也是假绿。
+ * 不设 rows 条件时（第五根线）靠 afterRenderId 保证读到的是重读【之后】的新帧 ——
+ * 保留逻辑正确时重读前后屏幕相同，行数不能当条件，M9 的缺陷帧（行数掉回 200）
+ * 恰恰是要报的东西，条件里排除它反而会把该红的那一帧跳成超时。
+ */
+async function settledChatFrame(
+  page: Page,
+  want: { afterRenderId?: string; rows?: number } = {},
+): Promise<ChatFrame> {
+  let last = (await page.evaluate(CHAT_FRAME_PROBE)) as unknown as ChatFrame;
+  await expect
+    .poll(
+      async () => {
+        last = (await page.evaluate(CHAT_FRAME_PROBE)) as unknown as ChatFrame;
+        return (
+          last.skeleton === false &&
+          (want.rows === undefined || last.rows === want.rows) &&
+          (want.afterRenderId === undefined ||
+            last.renderId !== want.afterRenderId)
+        );
+      },
+      { timeout: 15_000 },
+    )
+    .toBe(true);
+  return last;
+}

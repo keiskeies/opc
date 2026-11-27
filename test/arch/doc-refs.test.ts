@@ -1281,19 +1281,19 @@ const SNAP: Record<string, string> = {
   // 「同字节换用途拿不到别人的行」与「界面上有生产者」同时失去物证。
   "0074-avatar-upload-never-worked-a-dedupe-key-one-dimension-short-and-a-ui-with-no-uploader.md>packages/hub/src/members/service.ts:265": `"SELECT 1 AS ok FROM assets WHERE asset_id = ? AND purpose = 'avatar'";`,
   "0074-avatar-upload-never-worked-a-dedupe-key-one-dimension-short-and-a-ui-with-no-uploader.md>packages/hub/src/http/people.ts:440": `"SELECT 1 AS ok FROM assets WHERE asset_id = ? AND purpose = 'avatar'";`,
-  "0074-avatar-upload-never-worked-a-dedupe-key-one-dimension-short-and-a-ui-with-no-uploader.md>packages/web/public/group.js:6032":
+  "0074-avatar-upload-never-worked-a-dedupe-key-one-dimension-short-and-a-ui-with-no-uploader.md>packages/web/public/group.js:6194":
     "function avatarImagePicker() {",
   // ── 0075（模板生产者 + 守门的方法维）────────────────────────────────────
   // 每条都是活坐标：按钮/弹窗被摘、INSERT 的 builtin 或展开行被动、hitsUi 升维，
   // 0075 钉的「界面有生产者」「服务端早已承重」「门只看路径」同时失去或改变物证。
   // 末两条是探针三个病因里两处现场的物证：转发函数签名 / 拼接出的空路径段。
-  "0075-template-library-had-a-display-and-no-producer.md>packages/web/public/group.js:3708":
+  "0075-template-library-had-a-display-and-no-producer.md>packages/web/public/group.js:3870":
     'async function backlogMutation(path, method = "PATCH", body) {',
   "0075-template-library-had-a-display-and-no-producer.md>packages/web/public/app.js:2706":
     '"/charter/" + encodeURIComponent(charterRole),',
-  "0075-template-library-had-a-display-and-no-producer.md>packages/web/public/group.js:3953":
+  "0075-template-library-had-a-display-and-no-producer.md>packages/web/public/group.js:4115":
     'button("新建模板", () => templateCreateModal(), "small"),',
-  "0075-template-library-had-a-display-and-no-producer.md>packages/web/public/group.js:8436":
+  "0075-template-library-had-a-display-and-no-producer.md>packages/web/public/group.js:8598":
     "function templateCreateModal() {",
   "0075-template-library-had-a-display-and-no-producer.md>packages/hub/src/http/documents.ts:429":
     "async function createTemplateRoute(",
@@ -1319,15 +1319,15 @@ const SNAP: Record<string, string> = {
     "if (value === null || value === undefined || value === false) continue;",
   "0076-search-had-seven-faces-and-six-ui-slots.md>packages/web/public/group.js:124":
     'group: "群",',
-  "0076-search-had-seven-faces-and-six-ui-slots.md>packages/web/public/group.js:6224":
+  "0076-search-had-seven-faces-and-six-ui-slots.md>packages/web/public/group.js:6386":
     "(entry) => entry.group_id === id,",
-  "0076-search-had-seven-faces-and-six-ui-slots.md>packages/web/public/group.js:8772":
+  "0076-search-had-seven-faces-and-six-ui-slots.md>packages/web/public/group.js:8934":
     '"data-face": hit.face,',
-  "0076-search-had-seven-faces-and-six-ui-slots.md>packages/web/public/group.js:8773":
+  "0076-search-had-seven-faces-and-six-ui-slots.md>packages/web/public/group.js:8935":
     '"data-id": hit.id,',
-  "0076-search-had-seven-faces-and-six-ui-slots.md>packages/web/public/group.js:8823":
+  "0076-search-had-seven-faces-and-six-ui-slots.md>packages/web/public/group.js:8985":
     "await selectGroup(hit.id);",
-  "0076-search-had-seven-faces-and-six-ui-slots.md>packages/web/public/group.js:8826":
+  "0076-search-had-seven-faces-and-six-ui-slots.md>packages/web/public/group.js:8988":
     'location.href = "/";',
   "0076-search-had-seven-faces-and-six-ui-slots.md>test/e2e/group-workbench.spec.ts:2518":
     'test("全局搜索群命中：徽标是「群」且点击真落到该群会话", async ({ page }) => {',
@@ -1335,6 +1335,48 @@ const SNAP: Record<string, string> = {
     "function faceLabelKeys(src: string): string[] {",
   "0076-search-had-seven-faces-and-six-ui-slots.md>test/web/search-face-parity.test.ts:55":
     "function routedFaces(src: string): string[] {",
+  // ── 0077（会话历史的 before_seq 游标零生产者）────────────────────────
+  // 前四条是「服务端早就认游标」的物证：契约声明 / SQL 里的严格小于 /
+  // HTTP 把 req.query 整个递进去 / 服务端钉游标语义那一发。app.js:2924 是
+  // 「判据与游标分开写」的既有先例。group.js 七条是落地本体（两个纯函数 +
+  // 保留段 + 覆盖入口 + 首屏读取 + 翻页那一发 + 顶端的按钮 + 行上的 data-seq）。
+  // 末四条是守卫自己的取材函数：提取器一坏，守卫就变成永远绿的空壳。
+  "0077-chat-history-had-a-paging-cursor-and-no-producer.md>packages/contracts/src/conversation.ts:110":
+    "/** \u4f1a\u8bdd\u5386\u53f2\u7ffb\u9875\uff1abefore_seq \u6e38\u6807\uff08\u5f80\u65e7\u7ffb\uff09\uff0climit \u6709\u754c\u9632\u5168\u8868\u62d6\u53d6\u3002 */",
+  "0077-chat-history-had-a-paging-cursor-and-no-producer.md>packages/hub/src/conversations/service.ts:260":
+    '" WHERE conversation_id = ? AND (? IS NULL OR seq_in_conv < ?)" +',
+  "0077-chat-history-had-a-paging-cursor-and-no-producer.md>packages/hub/src/http/social.ts:152":
+    'const result = listMessages(deps.db, params.id ?? "", req.query);',
+  "0077-chat-history-had-a-paging-cursor-and-no-producer.md>packages/hub/test/conversations/service.test.ts:783":
+    "const page = listMessages(db, conversationId, { before_seq: 4, limit: 2 });",
+  "0077-chat-history-had-a-paging-cursor-and-no-producer.md>packages/web/public/app.js:2924":
+    "function replayHasMore(rawLen, effectiveLimit) {",
+  "0077-chat-history-had-a-paging-cursor-and-no-producer.md>packages/web/public/group.js:639":
+    "function historyHasMore(pageLen, limit) {",
+  "0077-chat-history-had-a-paging-cursor-and-no-producer.md>packages/web/public/group.js:653":
+    "function historyCursor(messages) {",
+  "0077-chat-history-had-a-paging-cursor-and-no-producer.md>packages/web/public/group.js:671":
+    "function retainOlderThan(current, page) {",
+  "0077-chat-history-had-a-paging-cursor-and-no-producer.md>packages/web/public/group.js:689":
+    "function applyHistoryWindow(id, page) {",
+  "0077-chat-history-had-a-paging-cursor-and-no-producer.md>packages/web/public/group.js:2024":
+    "async function loadMessages(id, markRead) {",
+  "0077-chat-history-had-a-paging-cursor-and-no-producer.md>packages/web/public/group.js:2076":
+    "async function loadOlderMessages(id) {",
+  "0077-chat-history-had-a-paging-cursor-and-no-producer.md>packages/web/public/group.js:2499":
+    "if (state.messagesHasMore) {",
+  "0077-chat-history-had-a-paging-cursor-and-no-producer.md>packages/web/public/group.js:2552":
+    "dataset: { messageId: message.message_id, seq: message.seq_in_conv },",
+  "0077-chat-history-had-a-paging-cursor-and-no-producer.md>test/e2e/group-workbench.spec.ts:2585":
+    'test("\u4f1a\u8bdd\u5386\u53f2\u7ffb\u9875\uff1a\u6ee1\u4e00\u9875\u540e\u6709\u300c\u67e5\u770b\u66f4\u65e9\u300d\uff0c\u70b9\u51fb\u5e26\u6e38\u6807 prepend \u4e14\u5230\u5e95\u6536\u8d77", async ({',
+  "0077-chat-history-had-a-paging-cursor-and-no-producer.md>test/web/history-cursor-producer.test.ts:32":
+    "function firstArg(src: string, openAt: number): string {",
+  "0077-chat-history-had-a-paging-cursor-and-no-producer.md>test/web/history-cursor-producer.test.ts:61":
+    "function historyQueryStrings(src: string): string[] {",
+  "0077-chat-history-had-a-paging-cursor-and-no-producer.md>test/web/history-cursor-producer.test.ts:96":
+    "function wholeArrayAssignments(src: string): string[] {",
+  "0077-chat-history-had-a-paging-cursor-and-no-producer.md>test/web/history-cursor-producer.test.ts:173":
+    "function historyWindowBody(src: string): string {",
 };
 
 describe("决策文档里的「文件:行号」引用不漂移", () => {
