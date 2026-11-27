@@ -282,7 +282,7 @@ describe("describeAdvance 那句收尾", () => {
       role: "dev",
       graphVersion: 1,
     });
-    expect(s).toContain("hub work");
+    expect(s).toContain("pnpm hub:engine work");
     expect(s).toContain("负责角色：dev");
   });
 });

@@ -59,7 +59,7 @@ export const DEFAULT_SERVE_USAGE: string = [
   "让常驻 Hub 自己往下推任务（默认【不开】，三个上限参数与上面那一组【共用】）：",
   "      --driver-pump --max-budget-usd <美元/轮> --task-limit-cents <美分/任务> --agent-cwd <目录>",
   "      开了之后：CEO 批完一张卡之后，停在 agent 那一格的任务【自己往下走】，",
-  "      不需要有人再敲一次 hub work。走到人席（等章程 / 等裁决 / 等终审）就停下等你点。",
+  "      不需要有人再敲一次 pnpm hub:engine work。走到人席（等章程 / 等裁决 / 等终审）就停下等你点。",
   "      一条任务在同一格【试到上限就不再试】并在终端【说出来】——",
   "      因为「一直在重试」会让停滞巡检以为这一格有人在看着。每一次是第几轮写在审计行",
   "      DriverTurnClaimed / DriverTurnAbandoned 的 payload 里（attempt / max_attempts）；",
@@ -509,7 +509,7 @@ export function parseServeArgs(
           "。\n" +
           "这两个开关开着 ⇒ 常驻 Hub 每隔一个心跳【自己起 claude 子进程】：\n" +
           "  · --charter-pump 补的是「停在等章程那一格而收件箱里没有卡」的那【一轮起草】\n" +
-          "  · --driver-pump   推的是「停在 agent 那一格而没人敲 hub work」的【每一轮】\n" +
+          "  · --driver-pump   推的是「停在 agent 那一格而没人敲 pnpm hub:engine work」的【每一轮】\n" +
           "那是真花钱、真读写文件的一件事。\n" +
           "  · --max-budget-usd 0.5      一轮的美元硬顶（直接落到 --max-budget-usd）\n" +
           "  · --task-limit-cents 500    单条任务的预算上限（美分）\n" +
@@ -542,7 +542,7 @@ export function parseServeArgs(
       error:
         "给了预算/工作目录/制品目录而没给 --charter-pump 或 --driver-pump：两个开关都关着的时候那几个参数【一个都不生效】。\n" +
         "  · 想让 Hub 自己补章程卡 ⇒ 补 --charter-pump\n" +
-        "  · 想让 Hub 自己推 agent 那一格 ⇒ 补 --driver-pump（0048：CEO 批完之后不再需要有人敲 hub work）\n" +
+        "  · 想让 Hub 自己推 agent 那一格 ⇒ 补 --driver-pump（0048：CEO 批完之后不再需要有人敲 pnpm hub:engine work）\n" +
         "  两者打开的都是「每隔一个心跳自己起子进程花钱」，所以必须显式。\n" +
         "  · 不想开 ⇒ 把这三个参数去掉，别留一份【写了而没生效】的配置在命令行里",
     };

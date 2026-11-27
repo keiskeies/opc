@@ -784,7 +784,7 @@ const SNAP: Record<string, string> = {
   //   我插 0050 自己那一条的时候，就把刚登记好的那一行顶走了。
   //   行号对这个主张不是证据，正文里那段**逐字引文**才是（0048 §9 同一条判断）。
   "0050-abandoned-task-never-resumes-and-a-knob-that-does-not-exist.md>app.js:964":
-    'msg: "这台 Hub 没开驱动器：想法停在 agent 那一格之后，不会有任何东西去推它。要自动推进请带 --driver-pump 起 Hub，或手工 hub work。",',
+    'msg: "这台 Hub 没开驱动器：想法停在 agent 那一格之后，不会有任何东西去推它。要自动推进请带 --driver-pump 起 Hub，或手工跑 pnpm hub:engine work。",',
   "0050-abandoned-task-never-resumes-and-a-knob-that-does-not-exist.md>app.js:1140":
     '<span class="admin-pill ${statusClass(tk.status)}">${esc(tk.status)}</span>',
   // 275 → 290 与 1667 → 1904：round281 在 BootOverrides 加了 env / imFetchImpl 两格、

@@ -2018,7 +2018,7 @@ export function makeDispatch(
           recommendation:
             "给 [" +
             reviewSubject +
-            "] 写岗位书并保存（hub charter save）——" +
+            "] 写岗位书并保存（pnpm hub:charter seed 装模板；改已有岗位书走编辑器）——" +
             gateReasonText(gateVerdict) +
             "。批准这张卡不会推进任务：这一族卡片的按钮只是把它记下来。",
           evidence: "dispatch:" + task.id + ":" + gateCardKey,

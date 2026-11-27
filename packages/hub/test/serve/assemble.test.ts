@@ -1703,7 +1703,7 @@ describe("决策写路径是哪一条，启动时就要说出来（两条路线�
     expect(w2).toContain("图那一条");
     // 这一条路线的补救【确实】是 hub resume（图跑得起来的机器上它是能跑的），
     // 所以命令带库路径 + 那句「卡片已经落库」的警告两条都要在。
-    expect(w2).toContain("hub resume --db");
+    expect(w2).toContain("pnpm hub resume --db");
     expect(w2).toContain("卡片已经落库成决策");
     expect(w2).not.toContain("引擎那一条");
     await r2.shutdown();
@@ -1748,7 +1748,7 @@ describe("决策写路径是哪一条，启动时就要说出来（两条路线�
     const g = graphFor("task-42"); // 装配时抛的话，看板也打不开，而真相只是「恢复要人喊一声」
     expect(typeof g.invoke).toBe("function");
     await expect(g.invoke({} as never)).rejects.toThrow(
-      /hub resume --db <库路径> --task task-42/u,
+      /pnpm hub resume --db <库路径> --task task-42/u,
     );
   });
 
@@ -1758,7 +1758,7 @@ describe("决策写路径是哪一条，启动时就要说出来（两条路线�
     // 只留后一条，则传丢时那句报错变成一句看不懂的 `--db <库路径>` 而没人知道坏了。
     const g = unavailableGraphFor("/var/db/opc/hub.db")("task-7");
     await expect(g.invoke({} as never)).rejects.toThrow(
-      /hub resume --db \/var\/db\/opc\/hub\.db --task task-7/u,
+      /pnpm hub resume --db \/var\/db\/opc\/hub\.db --task task-7/u,
     );
     // 空串按【没给】处理：印 `--db ` 后面跟一个空格，是一条【看着完整、必然挂】的命令，
     // 比印占位符更坏 —— 所以这一格不是格式偏好。
@@ -1785,7 +1785,7 @@ describe("决策写路径是哪一条，启动时就要说出来（两条路线�
     const m = graphNotWiredMessage("abc");
     expect(m).toContain(GRAPH_NOT_WIRED);
     expect(m).toContain("0010");
-    expect(m).toContain("hub resume --db <库路径> --task abc");
+    expect(m).toContain("pnpm hub resume --db <库路径> --task abc");
     // 「决策已落库」这一句防止人以为批准丢了而重重点批准 ——
     // 第二次批准是无效转移（审批终态唯一性会拒），症状变成「按钮坏了」。
     expect(m).toContain("决策已经落库");

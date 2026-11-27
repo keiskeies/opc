@@ -280,14 +280,14 @@ describe("入口的分发与退出码", () => {
     const w = await world({});
     const code = await cli(w, ["--help"]);
     expect(code).toBe(0);
-    expect(w.out).toContain("hub work");
-    expect(w.out).toContain("hub decide");
+    expect(w.out).toContain("pnpm hub:engine work");
+    expect(w.out).toContain("pnpm hub:engine decide");
     expect(w.err).toBe("");
   });
   it("什么都没敲 ⇒ 用法在 stderr 且退出 2（打错了，不是在问）", async () => {
     const w = await world({});
     expect(await cli(w, [])).toBe(2);
-    expect(w.err).toContain("hub work");
+    expect(w.err).toContain("pnpm hub:engine work");
     expect(w.out).toBe("");
   });
   it("未知子命令退出 2，并把【有哪两条】打出来", async () => {
@@ -333,7 +333,7 @@ describe("hub work 停在章程那一格：起草 + 建卡 + 把下一步打成�
     expect(cards[0]?.["approval_type"]).toBe("charter");
     // 真的花了钱（假 CLI 报 0.042 美元 = 4 美分），而且落在了 tasks.consumed_cents 上
     expect(Number(task(w)["consumed_cents"])).toBe(4);
-    expect(w.out).toContain("hub decide");
+    expect(w.out).toContain("pnpm hub:engine decide");
   });
 
   it("提示句里那条命令【照抄就能跑】：库路径、任务、卡片 id、按钮四样都在", async () => {
@@ -344,7 +344,10 @@ describe("hub work 停在章程那一格：起草 + 建卡 + 把下一步打成�
     );
     expect(id.length).toBeGreaterThan(10);
     // 这不只是「文案里有个 id」：下面真的拿这一行去跑 decide。
-    const line = w.out.split("\n").find((l) => l.includes("hub decide")) ?? "";
+    // 找行用的是【带 pnpm 前缀的完整形态】：少了前缀那一串不是人能照抄的命令
+    // （hub 只是脚本名，系统里没有 hub 这个可执行名，见 test/arch/cmd-name-runnable.ts）。
+    const line =
+      w.out.split("\n").find((l) => l.includes("pnpm hub:engine decide")) ?? "";
     expect(line).toContain(w.dbPath);
     expect(line).toContain(id);
     expect(line).toContain("--button approve");
@@ -464,7 +467,7 @@ describe("hub decide：收件箱里那一次点击真的把任务推走", () => 
     const code = await cli(w, decideArgv(w, ["--button", "approve"]));
     expect(code).toBe(2);
     expect(w.err).toContain("没有待批的卡片");
-    expect(w.err).toContain("hub work");
+    expect(w.err).toContain("pnpm hub:engine work");
   });
 
   it("两张待批卡 ⇒ 【不替 CEO 猜】办哪一张，把 id 列出来让她指", async () => {
@@ -593,9 +596,24 @@ describe("整条链：下发想法 → 起草 → 签署 → 任务动起来", (
 
 describe("用法文本本身（打错命令的人唯一会读的东西）", () => {
   it("WORK_USAGE 里嵌了 DECIDE_USAGE，两段都在", () => {
-    expect(WORK_USAGE).toContain("hub work");
-    expect(WORK_USAGE).toContain("hub decide");
+    expect(WORK_USAGE).toContain("pnpm hub:engine work");
+    expect(WORK_USAGE).toContain("pnpm hub:engine decide");
     expect(DECIDE_USAGE).toContain("--button");
+  });
+  it("用法教的是【真跑得通的命令名】：hub 不是可执行名，只写 hub work 是假救兵", () => {
+    // 判据取「不含裸形态」而不是「含 pnpm 形态」的补集：两者都要，缺一个就是
+    // 半截 —— 只查含 pnpm 会漏掉同一句里另写了一遍裸形态的情况。
+    expect(WORK_USAGE).not.toMatch(/(?<!pnpm )hub (work|decide)\b/u);
+    expect(DECIDE_USAGE).not.toMatch(/(?<!pnpm )hub (work|decide)\b/u);
+  });
+  it("⭐ 【第一行】就是能照抄的用法：pinned 到行首而不是全文任意处", () => {
+    // 上一发只保证全文某处出现 pnpm 形态 —— 我拿它验过一次变异【存活】：
+    // 把首行的 pnpm 抹掉后，正文里另一句「不是再敲一次 pnpm hub:engine work」
+    // 仍让 toContain 绿。人打错命令时读的是【第一行】，所以判据必须钉行首。
+    expect(WORK_USAGE.split("\n")[0]).toMatch(/^用法：pnpm hub:engine work /u);
+    expect(DECIDE_USAGE.split("\n")[0]).toMatch(
+      /^用法：pnpm hub:engine decide /u,
+    );
   });
   it("用法里明写着【本命令不建任务】这条边界，而不是只写在源码注释里", () => {
     expect(WORK_USAGE).toContain("不建任务");

@@ -961,7 +961,7 @@ function driverNotice(driver) {
   if (!driver.enabled) {
     return {
       level: "warn",
-      msg: "这台 Hub 没开驱动器：想法停在 agent 那一格之后，不会有任何东西去推它。要自动推进请带 --driver-pump 起 Hub，或手工 hub work。",
+      msg: "这台 Hub 没开驱动器：想法停在 agent 那一格之后，不会有任何东西去推它。要自动推进请带 --driver-pump 起 Hub，或手工跑 pnpm hub:engine work。",
     };
   }
   if (!driver.pumping) {

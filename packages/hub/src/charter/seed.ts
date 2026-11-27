@@ -718,7 +718,11 @@ export async function runSeedCli(
  */
 export function summaryOf(dir: string, count: number): string {
   return (
-    "播种岗位书：hub charter seed（模板目录 " + dir + "，共 " + count + " 份）"
+    "播种岗位书：pnpm hub:charter seed（模板目录 " +
+    dir +
+    "，共 " +
+    count +
+    " 份）"
   );
 }
 

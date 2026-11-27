@@ -63,7 +63,7 @@ export interface MaintenanceArgs {
 }
 
 export const MAINTENANCE_USAGE = [
-  "用法：hub-maintenance --db <path> [--backup-dir <dir>] [--no-backup] [--no-patrol]",
+  "用法：pnpm hub:maintenance --db <path> [--backup-dir <dir>] [--no-backup] [--no-patrol]",
   "      设置环境变量 OPC_DB / OPC_BACKUP_DIR 后可省略对应参数",
   "",
   "做五件事，按这个顺序：",

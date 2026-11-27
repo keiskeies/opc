@@ -64,9 +64,9 @@ type Verb = "run" | "status" | "resume";
 const VERBS: readonly Verb[] = ["run", "status", "resume"];
 
 const USAGE = [
-  "用法：hub run    --db <path> --task <id> --idea <一句话想法>",
-  "      hub status --db <path> --task <id>",
-  "      hub resume --db <path> --task <id>",
+  "用法：pnpm hub run    --db <path> --task <id> --idea <一句话想法>",
+  "      pnpm hub status --db <path> --task <id>",
+  "      pnpm hub resume --db <path> --task <id>",
   "      设置环境变量 OPC_DB 后可省略 --db",
   "",
   "说明：",
@@ -219,7 +219,7 @@ function requireExistingDb(
       "\n" +
       "（task_id = " +
       taskId +
-      "；新任务请用 hub run 建库）\n",
+      "；新任务请用 pnpm hub run 建库）\n",
   );
   return { code: 2 };
 }
@@ -376,7 +376,7 @@ async function cmdRun(
   // 守卫必须在 withHub 之前：withHub 里的 openDb 会【创建】文件，
   // 一旦创建成功，"这个库先前存不存在"这个问题就没有答案了（同 requireExistingDb
   // 那条纪律：拼错路径留下的不是一个空文件，是一个此后恒真的存在性判断）。
-  const refused = refuseStubOnForeignDb(dbPath, "hub run", io);
+  const refused = refuseStubOnForeignDb(dbPath, "pnpm hub run", io);
   if (refused !== null) return refused;
   return withHub(dbPath, taskId, async ({ db, auditor, graph, models }) => {
     // 认领这个库。放在 cmdRun 而不是 withHub 里：withHub 也被 status / resume 用，
@@ -390,7 +390,7 @@ async function cmdRun(
       io.error(
         "错误：任务已存在，拒绝重复执行 —— task_id = " +
           taskId +
-          "\n已完成的任务请换一个 --task；未完成的会话用 hub resume 续跑。\n",
+          "\n已完成的任务请换一个 --task；未完成的会话用 pnpm hub resume 续跑。\n",
       );
       return { code: 2 };
     }
@@ -540,7 +540,7 @@ async function cmdResume(
   // resume 同样要挡：它【会写】—— chooseResumeInput 选出的输入会推进节点，
   // 而推进用的还是 StubRegistry。只挡 run 不挡 resume 的话，守卫等于一个
   // 「第一次不许、第二次随便」的门槛，那种门槛比没有更容易让人以为安全。
-  const refused = refuseStubOnForeignDb(dbPath, "hub resume", io);
+  const refused = refuseStubOnForeignDb(dbPath, "pnpm hub resume", io);
   if (refused !== null) return refused;
   return withHub(dbPath, taskId, async ({ db, auditor, graph }) => {
     if (findTask(db, taskId) === undefined) {

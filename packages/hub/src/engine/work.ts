@@ -215,7 +215,7 @@ export function parseWorkArgs(argv: readonly string[]): ParsedArgs<WorkArgs> {
 }
 
 export const DECIDE_USAGE = [
-  "用法：hub decide --db <path> --task <id> [--card <卡片 id>] --button <按钮> [--note <理由>]",
+  "用法：pnpm hub:engine decide --db <path> --task <id> [--card <卡片 id>] --button <按钮> [--note <理由>]",
   "",
   "  · --button：approve / reject_with_comment / defer_deep_review（就这三颗，§8.2 第 4 条）。",
   "  · --card 可以省：那条任务只有一张待批卡时按那张办；【有多张则必须指定】——",
@@ -231,17 +231,17 @@ export const DECIDE_USAGE = [
  * ReferenceError（不是「用法少一段」，是这条命令根本起不来）。
  */
 export const WORK_USAGE = [
-  "用法：hub work --db <path> --task <id> --max-budget-usd <每轮美元硬顶>",
+  "用法：pnpm hub:engine work --db <path> --task <id> --max-budget-usd <每轮美元硬顶>",
   "             --task-limit-cents <任务预算上限（美分）> [--max-turns 12] [--cwd <目录>]",
   "             [--evidence-root <目录>] [--bin claude]",
   "",
   "  · 这一条走【引擎路线】：一个角色 = 一次 claude -p，下一步找谁由它自己说，",
   "    而能不能推进这一步由 hub 判（docs/decisions/0041）。",
   "  · 两个上限【必填】：不给默认值 = 没配也能跑，而跑起来才知道花多少没顶。",
-  "  · 本命令不建任务。建任务走 hub run / POST /tasks（那条路会把 graph_version 与",
+  "  · 本命令不建任务。建任务走 pnpm hub run / POST /tasks（那条路会把 graph_version 与",
   "    任务行放在同一事务里取，§18.4）；这里再写一份 INSERT 就是第二条可能不一致的路径。",
-  "  · 停在人坐的格子（章程待批 / 升 CEO / 终审）时，下一步是 hub decide（或收件箱里",
-  "    的一次点击），不是再敲一次 hub work。",
+  "  · 停在人坐的格子（章程待批 / 升 CEO / 终审）时，下一步是 pnpm hub:engine decide（或收件箱",
+  "    里的一次点击），不是再敲一次 pnpm hub:engine work。",
   "",
   DECIDE_USAGE,
 ].join("\n");
@@ -360,7 +360,7 @@ export async function cmdDecide(
     io.error(
       "错误：数据库文件不存在 —— " +
         a.db +
-        "\n（hub decide 不建库，见 --help）\n",
+        "\n（pnpm hub:engine decide 不建库，见 --help）\n",
     );
     return { code: 2 };
   }
@@ -383,7 +383,7 @@ export async function cmdDecide(
           (t === undefined
             ? "（这条任务也不在库里）"
             : "（它现在在 " + String(t["status"] ?? "") + "）") +
-          "。\nhub decide 只管【收件箱里已有的那一张】；没有卡就去跑 hub work（它会把要人批的东西建成卡），" +
+          "。\npnpm hub:engine decide 只管【收件箱里已有的那一张】；没有卡就去跑 pnpm hub:engine work（它会把要人批的东西建成卡），" +
           "或者确认你指的是不是这条任务。\n",
       );
       return { code: 2 };
@@ -503,7 +503,7 @@ export async function cmdWork(a: WorkArgs, io: WorkIo): Promise<WorkResult> {
     io.error(
       "错误：数据库文件不存在 —— " +
         a.db +
-        "\n（hub work 不建库，先用 hub run 建任务）\n",
+        "\n（pnpm hub:engine work 不建库，先用 pnpm hub run 建任务）\n",
     );
     return { code: 2 };
   }
@@ -529,7 +529,7 @@ export async function cmdWork(a: WorkArgs, io: WorkIo): Promise<WorkResult> {
       io.error(
         "错误：任务不存在 —— task_id = " +
           a.task +
-          "\n（hub work 不建任务，见 --help）\n",
+          "\n（pnpm hub:engine work 不建任务，见 --help）\n",
       );
       return { code: 2 };
     }
@@ -581,7 +581,7 @@ export async function cmdWork(a: WorkArgs, io: WorkIo): Promise<WorkResult> {
       // 名字不一致是事件的既有形状，不是这里能改的（改它等于改 DomainEvent），
       // 但打出来的值必须是对的 —— 否则这一行照抄下去拿到的是「卡片不存在」。
       io.write(
-        "  下一步：hub decide --db " +
+        "  下一步：pnpm hub:engine decide --db " +
           a.db +
           " --task " +
           a.task +

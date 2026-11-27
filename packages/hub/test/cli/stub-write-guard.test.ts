@@ -182,7 +182,7 @@ describe("桩路线的写权限守卫（O1-1）", () => {
     makeRealDb(dbPath);
     const r = hub(["resume", "--db", dbPath, "--task", "T-RES"]);
     expect(r.code).toBe(2);
-    expect(r.err).toContain("hub resume");
+    expect(r.err).toContain("pnpm hub resume");
   });
 
   it("status 不被挡：只读命令不该需要写权限", () => {

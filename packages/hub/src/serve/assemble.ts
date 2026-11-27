@@ -1137,7 +1137,7 @@ export async function boot(
           (charterOn || driverOn
             ? charterOn && driverOn
               ? "这一台 Hub【两个泵都开着】：章程卡由泵起草，之后的每一格由驱动器自己往前推\n" +
-                "  —— 你只在三处出现：批章程、裁决升级、终审。不需要有人敲 hub work。\n"
+                "  —— 你只在三处出现：批章程、裁决升级、终审。不需要有人敲 pnpm hub:engine work。\n"
               : charterOn
                 ? "章程卡【由泵起草】（上面那段就是它开的），CHARTER_APPROVED 之后的每一步仍要有人跑\n"
                 : "章程卡【没人起草】（没开 --charter-pump）：CHARTER_PENDING 那一格仍要有人先跑一次 work，\n" +
@@ -2333,7 +2333,7 @@ export const GRAPH_NOT_WIRED = "graph_not_wired";
  */
 export function resumeCommand(taskId: string, dbPath?: string): string {
   const db = dbPath === undefined || dbPath === "" ? "<库路径>" : dbPath;
-  return "hub resume --db " + db + " --task " + taskId;
+  return "pnpm hub resume --db " + db + " --task " + taskId;
 }
 
 export function graphNotWiredMessage(taskId: string, dbPath?: string): string {

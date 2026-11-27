@@ -186,7 +186,7 @@ export function describeAdvance(
     r.stopped === "human_seat"
       ? "\n下一步在你手上：那一格是【人类席位】，推进它的是审批收件箱里的一次点击。"
       : r.stopped === "stalled"
-        ? "\n角色自己说还没做完，或它的动作对不上 §7.1 的任何一条边。再推一次 hub work 即可。"
+        ? "\n角色自己说还没做完，或它的动作对不上 §7.1 的任何一条边。再推一次 pnpm hub:engine work 即可。"
         : r.stopped === "limit"
           ? "\n撞上轮数上限。通常是「不动就停」那条判据没生效 —— 检查一下最后几轮的 moved。"
           : "\n任务在库里找不到了。";
