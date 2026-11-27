@@ -3946,12 +3946,13 @@ function renderDocumentsHome(view) {
                 "small",
               ),
             ),
+          button("新建模板", () => templateCreateModal(), "small"),
         ),
       ),
       !state.templates.length
         ? emptyState(
             "暂无模板",
-            "可创建空白文档，或稍后从 Hub 模板库选择。",
+            "点「新建模板」建第一张，或先创建空白文档。",
             null,
             "upload",
           )
@@ -8427,6 +8428,45 @@ async function documentCreateModal(template = null, defaultGroupId = "") {
 }
 async function createFromTemplate(template) {
   await documentCreateModal(template);
+}
+function templateCreateModal() {
+  openModal({
+    title: "新建模板",
+    eyebrow: "NEW TEMPLATE",
+    build: () =>
+      formGrid(
+        field(
+          "名称",
+          input("name", "", "text", { required: true, maxlength: 200 }),
+        ),
+        field(
+          "文档形态",
+          select(
+            "kind",
+            docKinds.map((kind) => [kind, labels[kind]]),
+            "markdown",
+          ),
+        ),
+        fullField(
+          "模板正文",
+          textarea("body_text", "", { maxlength: 2000000 }),
+        ),
+      ),
+    submit: "创建模板",
+    onSubmit: async (data) => {
+      await request("/templates", {
+        method: "POST",
+        body: {
+          name: data.get("name"),
+          kind: data.get("kind"),
+          body_text: data.get("body_text"),
+        },
+      });
+      await loadAuxiliary();
+      renderMain();
+      toast("模板已创建");
+    },
+  });
 }
 function meetingCreateModal() {
   if (!state.groups.length) return toast("请先创建一个群", true);

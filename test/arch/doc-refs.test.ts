@@ -1281,8 +1281,25 @@ const SNAP: Record<string, string> = {
   // 「同字节换用途拿不到别人的行」与「界面上有生产者」同时失去物证。
   "0074-avatar-upload-never-worked-a-dedupe-key-one-dimension-short-and-a-ui-with-no-uploader.md>packages/hub/src/members/service.ts:265": `"SELECT 1 AS ok FROM assets WHERE asset_id = ? AND purpose = 'avatar'";`,
   "0074-avatar-upload-never-worked-a-dedupe-key-one-dimension-short-and-a-ui-with-no-uploader.md>packages/hub/src/http/people.ts:440": `"SELECT 1 AS ok FROM assets WHERE asset_id = ? AND purpose = 'avatar'";`,
-  "0074-avatar-upload-never-worked-a-dedupe-key-one-dimension-short-and-a-ui-with-no-uploader.md>packages/web/public/group.js:6027":
+  "0074-avatar-upload-never-worked-a-dedupe-key-one-dimension-short-and-a-ui-with-no-uploader.md>packages/web/public/group.js:6028":
     "function avatarImagePicker() {",
+  // ── 0075（模板生产者 + 守门的方法维）────────────────────────────────────
+  // 六条都是活坐标：按钮/弹窗被摘、INSERT 的 builtin 或展开行被动、hitsUi 升维，
+  // 0075 钉的「界面有生产者」「服务端早已承重」「门只看路径」同时失去或改变物证。
+  "0075-template-library-had-a-display-and-no-producer.md>packages/web/public/group.js:3949":
+    'button("新建模板", () => templateCreateModal(), "small"),',
+  "0075-template-library-had-a-display-and-no-producer.md>packages/web/public/group.js:8432":
+    "function templateCreateModal() {",
+  "0075-template-library-had-a-display-and-no-producer.md>packages/hub/src/http/documents.ts:429":
+    "async function createTemplateRoute(",
+  "0075-template-library-had-a-display-and-no-producer.md>packages/hub/src/documents/service.ts:150":
+    '" VALUES (?, ?, ?, ?, 0)";',
+  "0075-template-library-had-a-display-and-no-producer.md>packages/hub/src/documents/service.ts:803":
+    "body = templateView(templateRow).body_text;",
+  "0075-template-library-had-a-display-and-no-producer.md>test/arch/ui-caller-roster.ts:222":
+    "export function hitsUi(",
+  "0075-template-library-had-a-display-and-no-producer.md>test/e2e/group-workbench.spec.ts:2282":
+    'test("模板生产：新建模板真发 POST /templates，跨刷新还在且能被用来建文档", async ({',
 };
 
 describe("决策文档里的「文件:行号」引用不漂移", () => {

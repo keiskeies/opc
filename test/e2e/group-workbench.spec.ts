@@ -2274,6 +2274,87 @@ test("黄金路径：建群 → 树里点开 → 富文本真打字 → 自动�
   expectNoBrowserErrors(browserErrors);
 });
 
+// 模板库在 0075 之前只有读的一面：界面 GET /templates、也真拿模板正文建新文档，
+// 但 POST /templates（唯一能产出模板的路由）零调用方 —— 「从模板开始」永远只有
+// 迁移种的那四张内置模板。所以这发证的是【生产】这一侧：界面上有入口、点了真发
+// POST、服务端落的是 builtin=0 的新行、跨刷新还在、而且这张新模板马上能被
+// 「从模板开始」消费（建出的文档正文 == 模板正文，正文展开发生在服务端）。
+test("模板生产：新建模板真发 POST /templates，跨刷新还在且能被用来建文档", async ({
+  page,
+}) => {
+  const browserErrors = watchBrowserErrors(page);
+  await page.goto(`${webOrigin}/`);
+  await page.locator('[data-nav="documents"]').click();
+  const tplName = "交付复盘模板";
+  const tplBody = "## 里程碑\n- 待填";
+  const created = page.waitForResponse(
+    (response) =>
+      response.request().method() === "POST" &&
+      new URL(response.url()).pathname === "/api/v1/templates",
+    // 按钮被摘掉/端点写错时立刻报「这个请求根本没发」，别干等默认 4 分钟。
+    { timeout: 20_000 },
+  );
+  await page.getByRole("button", { name: "新建模板", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "新建模板" });
+  await dialog.locator('input[name="name"]').fill(tplName);
+  // 故意选非默认的「富文本」：默认就是 markdown 的话，kind 被写死成 markdown
+  // 的变异在这条用例上是活的 —— 每根线要有自己的那次动作。
+  await dialog.locator('select[name="kind"]').selectOption("doc");
+  await dialog.locator('textarea[name="body_text"]').fill(tplBody);
+  await dialog.getByRole("button", { name: "创建模板", exact: true }).click();
+  const createdResponse = await created;
+  expect(createdResponse.ok()).toBe(true);
+  expect(createdResponse.request().postDataJSON()).toMatchObject({
+    name: tplName,
+    kind: "doc",
+    body_text: tplBody,
+  });
+  const createdBody = (await createdResponse.json()) as {
+    template: { template_id: string; builtin: boolean };
+  };
+  expect(createdBody.template.builtin).toBe(false);
+
+  // 不刷新就该出现在「从模板开始」：证 onSubmit 里那次 loadAuxiliary+renderMain
+  // 真的把新行灌回了界面状态，而不是只活在 toast 里。
+  const tplChip = page
+    .locator("#view .card")
+    .filter({ has: page.locator("h3", { hasText: "从模板开始" }) })
+    .getByRole("button", { name: tplName, exact: true });
+  await expect(tplChip).toBeVisible();
+
+  // 跨刷新还在：只有本地状态（没落库）的话这一条会红。
+  await page.reload();
+  await page.locator('[data-nav="documents"]').click();
+  await expect(tplChip).toBeVisible();
+
+  // 闭环：这张自建模板马上能被消费 —— 点开它、填标题、创建，
+  // 文档正文必须是模板正文（服务端按 template_id 展开，不是 UI 自己拼的）。
+  await tplChip.click();
+  const docDialog = page.getByRole("dialog", { name: `从“${tplName}”起稿` });
+  await docDialog.locator('input[name="title"]').fill("复盘·用自建模板");
+  const docCreated = page.waitForResponse(
+    (response) =>
+      response.request().method() === "POST" &&
+      new URL(response.url()).pathname === "/api/v1/documents",
+    { timeout: 20_000 },
+  );
+  await docDialog
+    .getByRole("button", { name: "创建并打开", exact: true })
+    .click();
+  const docResponse = await docCreated;
+  expect(docResponse.ok()).toBe(true);
+  const docBody = (await docResponse.json()) as {
+    document: { doc_id: string };
+  };
+  const fetched = await page.evaluate(async (id) => {
+    const res = await fetch(`/api/v1/documents/${id}`);
+    return (await res.json()) as { document: { body_text: string } };
+  }, docBody.document.doc_id);
+  expect(fetched.document.body_text).toBe(tplBody);
+
+  expectNoBrowserErrors(browserErrors);
+});
+
 // 头像那根线在 0074 之前压根不存在：界面让人手填一个 asset_id，而没有任何地方
 // 产出 purpose='avatar' 的资产。所以这发要证的是【上传】这一侧 —— 选图真发出
 // purpose=avatar 的 POST /assets、返回的 asset_id 真落到隐藏域、保存真落到
