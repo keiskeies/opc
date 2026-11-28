@@ -85,6 +85,19 @@ const dateInputValue = (value) => {
   const local = new Date(d.getTime() - d.getTimezoneOffset() * 60000);
   return local.toISOString().slice(0, 16);
 };
+/**
+ * 本地日界文本 `YYYY-MM-DD`，与服务端 rhythm/service.ts 的 localDay 同式。
+ *
+ * 不能用 toISOString().slice(0,10)：那是 UTC 日界，东八区早上八点前会翻到昨天去，
+ * 与服务端读到的「今天」差一天 —— 那一格界面对不对，取决于这里和那边数的是同一天。
+ */
+const localDayValue = (offsetDays = 0) => {
+  const d = new Date();
+  d.setDate(d.getDate() + offsetDays);
+  const month = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${d.getFullYear()}-${month}-${day}`;
+};
 const titleCase = (value) =>
   String(value || "")
     .replaceAll("_", " ")
@@ -613,6 +626,9 @@ const state = {
   rhythmGroup: "",
   rhythmEvents: [],
   researchCards: [],
+  // 空 = 不传 day，由服务端时钟定「今天」。契约里 day 一直是 GET /research/today 的
+  // 唯一查询参数（SQL 是 WHERE day = ?），渲染侧此前写死不发 ⇒ 过了零点昨天那批卡没入口。
+  researchDay: "",
   teamWorkLoading: false,
   teamWorkError: "",
   talentTab: "market",
@@ -3257,6 +3273,10 @@ async function loadTeamPanel(tab) {
       if (state.rhythmGroup) query.set("group_id", state.rhythmGroup);
       if (state.rhythmKind) query.set("kind", state.rhythmKind);
       path = `/rhythm/events?${query}`;
+    } else if (state.researchDay) {
+      path = `/research/today?${new URLSearchParams({
+        day: state.researchDay,
+      })}`;
     }
     const result = await request(path);
     if (result?.ok === false)
@@ -3576,17 +3596,27 @@ function renderResearchCard(item) {
   );
 }
 function renderResearchView() {
+  // 读的是哪一天要写在屏上：空 = 不发 day、由服务端时钟定今天；填了就是那一天。
+  // 文案不写死「今日」，否则翻到昨天之后，屏幕上那句「今天还没有调研」就是句假话。
+  const dayText = state.researchDay || localDayValue(0);
   return h(
     "section",
     { class: "team-panel" },
     h("h3", { text: "每日调研" }),
     h("p", {
       class: "muted",
-      text: "汇总今日调研卡，直接打开来源、调研文档与服务端自动创建的待办草稿。",
+      text: `汇总 ${dayText} 的调研卡，直接打开来源、调研文档与服务端自动创建的待办草稿。清空日期回到今天。`,
     }),
     h(
       "div",
       { class: "toolbar team-toolbar" },
+      input("research_day", state.researchDay, "date", {
+        "aria-label": "调研日期",
+        onchange: (event) => {
+          state.researchDay = event.target.value;
+          void loadTeamPanel("research");
+        },
+      }),
       h("span", { class: "spacer" }),
       button("刷新列表", () => loadTeamPanel("research"), "small"),
     ),
@@ -3596,7 +3626,7 @@ function renderResearchView() {
     state.teamWorkLoading ? cardSkeleton(3) : null,
     !state.teamWorkLoading && !state.researchCards.length
       ? emptyState(
-          "今天还没有调研",
+          `${dayText} 还没有调研`,
           "登记一条外部链接或手动调研。没有 URL 时来源请填写 manual，创建后会关联调研文档和待办草稿。",
           button("新增调研", () => researchCreateModal(), "primary"),
           "search",

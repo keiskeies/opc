@@ -3922,6 +3922,139 @@ test("成员设置面板增删技能与执行器：路由早就有，界面到�
   expectNoBrowserErrors(browserErrors);
 });
 
+// 0082 红探针 —— 调研面板把自己钉死在服务端时钟的「今天」上。
+// 契约 GET /api/v1/research/today 的查询里有 day（packages/contracts/src/rhythm.ts 的
+// listResearchQuerySchema，`.strict()`，唯一参数就是它），SQL 是 `WHERE day = ?`，缺省才落回
+// localDay(now)。也就是说「看某一天的调研」服务端一发合法请求就能答，渲染侧却是写死的
+// `path = "/research/today"`（group.js loadTeamPanel 的 research 分支）—— 一个查询参数都不发，
+// 整个 group.js 里连一枚 type=date 的输入都没有。后果不是「少个筛选器」：调研卡按 (day, url)
+// 唯一、每天一批，过了零点昨天那批就在界面上没有任何入口能再看到（列表、搜索、文档面都不读
+// research_cards）。本用例昨天与今天各灌一张卡 —— 单灌今天，「只看今天」与「看全部」的读数
+// 逐像素相同，永远证不了这件事（同 0080 要灌两个群才证得了「按群筛」）。
+// 范围：只补「读」（GET 带 day）。POST 的 day 不接 —— 「把一条调研归到过去某一天」是产品口径，
+// 且那条路径的既有文案（「今日调研已存在」）也跟着今日语义写死；已记进 0082「记下来但没动的」。
+
+/** 服务端 localDay 同式的本地日界文本（负数 = 往前翻）。 */
+function localDayText(offsetDays: number): string {
+  const d = new Date();
+  d.setDate(d.getDate() + offsetDays);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(
+    d.getDate(),
+  ).padStart(2, "0")}`;
+}
+
+test("每日调研按日翻：面板钉在今天，昨天的卡在界面上永远看不到", async ({
+  page,
+}) => {
+  const browserErrors = watchBrowserErrors(page);
+  const today = localDayText(0);
+  const yesterday = localDayText(-1);
+  const dayBefore = localDayText(-2);
+  const todayTitle = "按日调研今天这张";
+  const yesterdayTitle = "按日调研昨天这张";
+
+  await page.goto(`${webOrigin}/`);
+  // 两张卡各自归到某一天：day 是契约参数，直接走真 HTTP 灌，不经界面（界面还没有那一格）。
+  const seeded = (await page.evaluate(
+    async (args: {
+      dayA: string;
+      dayB: string;
+      titleA: string;
+      titleB: string;
+    }) => {
+      const statuses: number[] = [];
+      const post = async (day: string, title: string) => {
+        const res = await fetch("/api/v1/research/today", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            day,
+            source: "manual",
+            title,
+            summary: `${title}的摘要`,
+          }),
+        });
+        statuses.push(res.status);
+      };
+      await post(args.dayA, args.titleA);
+      await post(args.dayB, args.titleB);
+      return statuses;
+    },
+    {
+      dayA: today,
+      dayB: yesterday,
+      titleA: todayTitle,
+      titleB: yesterdayTitle,
+    },
+  )) as number[];
+  expect(seeded.every((status) => status >= 200 && status < 300)).toBe(true);
+
+  await page.locator('[data-nav="backlog"]').click();
+  await page.getByRole("tab", { name: "每日调研", exact: true }).click();
+  const panel = page.locator("#taskPanel");
+  await expect(
+    panel.getByRole("heading", { level: 3, name: "每日调研", exact: true }),
+  ).toBeVisible();
+  const cards = panel.locator(".entry-card.research-card");
+
+  // 线 0（那一格存在且只有一份）：面板工具条有一枚「调研日期」，取值是空 = 今天由服务端定。
+  // 未修时这一发就红：整个 group.js 没有一枚 type=date 的输入，计数是 0。
+  const dayBox = panel.locator('input[type="date"][aria-label="调研日期"]');
+  await expect(dayBox).toHaveCount(1);
+  await expect(dayBox).toHaveValue("");
+  // 线 0b（默认那天由谁定）：没填日期时，屏上那句汇总写的是【今天】这个具体日子。
+  // 这一发是 localDayValue 唯一的目击者：下面几条走的都是 state.researchDay（用户填的那一天），
+  // 剪掉 localDayValue 的其它变异全都还能靠用户填的值蒙过去 —— 默认这一档必须自己站住。
+  await expect(panel.locator("section.team-panel > p.muted")).toContainText(
+    `汇总 ${today} 的调研卡`,
+  );
+
+  // 线 1（默认只看今天）：今天那张在，昨天那张不在。
+  // ⚠ 这一发未修时【也是绿的】—— 它是分母：没有它，「把两天混在一起显示」那种改法也能让
+  // 线 2 变绿。它钉的是「默认那不发 day 的一发仍然是按今天筛」，不是「切日期」这个动作。
+  await expect(cards.filter({ hasText: todayTitle })).toHaveCount(1);
+  await expect(cards.filter({ hasText: yesterdayTitle })).toHaveCount(0);
+
+  // 线 2（切到昨天 ⇒ 换的是服务端返回的那一批，不是客户端把今天的藏起来）：
+  // 填昨天 ⇒ 昨天那张出现、今天那张消失；同一次点击还要【真的】发一条带 day=昨天 的 GET。
+  const dayRequest = page
+    .waitForResponse((response) => {
+      const url = new URL(response.url());
+      return (
+        url.pathname === "/api/v1/research/today" && url.searchParams.has("day")
+      );
+    })
+    .catch(() => null);
+  await dayBox.fill(yesterday);
+  const asked = await dayRequest;
+  expect(asked, "切日期该发一条带 day 的 GET，而不是在本地过滤").not.toBeNull();
+  expect(
+    new URL((asked as { url(): string }).url()).searchParams.get("day"),
+  ).toBe(yesterday);
+  await expect(cards.filter({ hasText: yesterdayTitle })).toHaveCount(1);
+  await expect(cards.filter({ hasText: todayTitle })).toHaveCount(0);
+
+  // 线 3（清空 ⇒ 回到今天）：清掉日期后今天那张回来、昨天那张走。
+  await dayBox.fill("");
+  await expect(cards.filter({ hasText: todayTitle })).toHaveCount(1);
+  await expect(cards.filter({ hasText: yesterdayTitle })).toHaveCount(0);
+
+  // 线 4（空态文案跟着那一天走）：前天没灌卡 ⇒ 空态说的是【那一天】，不再说「今天还没有」。
+  await dayBox.fill(dayBefore);
+  await expect(cards).toHaveCount(0);
+  await expect(panel.locator(".state")).toContainText(dayBefore);
+  await expect(panel.locator(".state")).not.toContainText("今天还没有调研");
+
+  // 线 5（读数与框一致）：整栏重画后框里仍是所填那一天 —— 漏传 value 的话列表是前天、
+  // 框是空，用户下一次刷新就不知道自己看的是哪天。
+  await expect(dayBox).toHaveValue(dayBefore);
+  // 线 5b（重画不累加控件）：切了三次日期、整栏重画三次，工具条仍然只有一枚日期框。
+  // 0079 那一族缺口正是「每次重画往 toolbar 里再塞一套」，这一发判的是同一件事。
+  await expect(dayBox).toHaveCount(1);
+
+  expectNoBrowserErrors(browserErrors);
+});
+
 /** 读服务端该成员的技能 skill_id 列表（不是本页内存态）：加/删是否真落库以此为准。 */
 async function readMemberSkills(
   page: Page,

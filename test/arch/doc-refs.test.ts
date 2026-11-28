@@ -1308,19 +1308,19 @@ const SNAP: Record<string, string> = {
   // 「同字节换用途拿不到别人的行」与「界面上有生产者」同时失去物证。
   "0074-avatar-upload-never-worked-a-dedupe-key-one-dimension-short-and-a-ui-with-no-uploader.md>packages/hub/src/members/service.ts:265": `"SELECT 1 AS ok FROM assets WHERE asset_id = ? AND purpose = 'avatar'";`,
   "0074-avatar-upload-never-worked-a-dedupe-key-one-dimension-short-and-a-ui-with-no-uploader.md>packages/hub/src/http/people.ts:440": `"SELECT 1 AS ok FROM assets WHERE asset_id = ? AND purpose = 'avatar'";`,
-  "0074-avatar-upload-never-worked-a-dedupe-key-one-dimension-short-and-a-ui-with-no-uploader.md>packages/web/public/group.js:6330":
+  "0074-avatar-upload-never-worked-a-dedupe-key-one-dimension-short-and-a-ui-with-no-uploader.md>packages/web/public/group.js:6360":
     "function avatarImagePicker() {",
   // ── 0075（模板生产者 + 守门的方法维）────────────────────────────────────
   // 每条都是活坐标：按钮/弹窗被摘、INSERT 的 builtin 或展开行被动、hitsUi 升维，
   // 0075 钉的「界面有生产者」「服务端早已承重」「门只看路径」同时失去或改变物证。
   // 末两条是探针三个病因里两处现场的物证：转发函数签名 / 拼接出的空路径段。
-  "0075-template-library-had-a-display-and-no-producer.md>packages/web/public/group.js:4006":
+  "0075-template-library-had-a-display-and-no-producer.md>packages/web/public/group.js:4036":
     'async function backlogMutation(path, method = "PATCH", body) {',
   "0075-template-library-had-a-display-and-no-producer.md>packages/web/public/app.js:2706":
     '"/charter/" + encodeURIComponent(charterRole),',
-  "0075-template-library-had-a-display-and-no-producer.md>packages/web/public/group.js:4251":
+  "0075-template-library-had-a-display-and-no-producer.md>packages/web/public/group.js:4281":
     'button("新建模板", () => templateCreateModal(), "small"),',
-  "0075-template-library-had-a-display-and-no-producer.md>packages/web/public/group.js:8837":
+  "0075-template-library-had-a-display-and-no-producer.md>packages/web/public/group.js:8867":
     "function templateCreateModal() {",
   "0075-template-library-had-a-display-and-no-producer.md>packages/hub/src/http/documents.ts:429":
     "async function createTemplateRoute(",
@@ -1344,17 +1344,17 @@ const SNAP: Record<string, string> = {
     'it("finds group/task/member/message/document/meeting/backlog and sorts by time", () => {',
   "0076-search-had-seven-faces-and-six-ui-slots.md>packages/web/public/group.js:28":
     "if (value === null || value === undefined || value === false) continue;",
-  "0076-search-had-seven-faces-and-six-ui-slots.md>packages/web/public/group.js:124":
+  "0076-search-had-seven-faces-and-six-ui-slots.md>packages/web/public/group.js:137":
     'group: "群",',
-  "0076-search-had-seven-faces-and-six-ui-slots.md>packages/web/public/group.js:6522":
+  "0076-search-had-seven-faces-and-six-ui-slots.md>packages/web/public/group.js:6552":
     "(entry) => entry.group_id === id,",
-  "0076-search-had-seven-faces-and-six-ui-slots.md>packages/web/public/group.js:9173":
+  "0076-search-had-seven-faces-and-six-ui-slots.md>packages/web/public/group.js:9203":
     '"data-face": hit.face,',
-  "0076-search-had-seven-faces-and-six-ui-slots.md>packages/web/public/group.js:9174":
+  "0076-search-had-seven-faces-and-six-ui-slots.md>packages/web/public/group.js:9204":
     '"data-id": hit.id,',
-  "0076-search-had-seven-faces-and-six-ui-slots.md>packages/web/public/group.js:9224":
+  "0076-search-had-seven-faces-and-six-ui-slots.md>packages/web/public/group.js:9254":
     "await selectGroup(hit.id);",
-  "0076-search-had-seven-faces-and-six-ui-slots.md>packages/web/public/group.js:9227":
+  "0076-search-had-seven-faces-and-six-ui-slots.md>packages/web/public/group.js:9257":
     'location.href = "/";',
   "0076-search-had-seven-faces-and-six-ui-slots.md>test/e2e/group-workbench.spec.ts:2518":
     'test("全局搜索群命中：徽标是「群」且点击真落到该群会话", async ({ page }) => {',
@@ -1378,21 +1378,21 @@ const SNAP: Record<string, string> = {
     "const page = listMessages(db, conversationId, { before_seq: 4, limit: 2 });",
   "0077-chat-history-had-a-paging-cursor-and-no-producer.md>packages/web/public/app.js:2924":
     "function replayHasMore(rawLen, effectiveLimit) {",
-  "0077-chat-history-had-a-paging-cursor-and-no-producer.md>packages/web/public/group.js:641":
+  "0077-chat-history-had-a-paging-cursor-and-no-producer.md>packages/web/public/group.js:657":
     "function historyHasMore(pageLen, limit) {",
-  "0077-chat-history-had-a-paging-cursor-and-no-producer.md>packages/web/public/group.js:655":
+  "0077-chat-history-had-a-paging-cursor-and-no-producer.md>packages/web/public/group.js:671":
     "function historyCursor(messages) {",
-  "0077-chat-history-had-a-paging-cursor-and-no-producer.md>packages/web/public/group.js:673":
+  "0077-chat-history-had-a-paging-cursor-and-no-producer.md>packages/web/public/group.js:689":
     "function retainOlderThan(current, page) {",
-  "0077-chat-history-had-a-paging-cursor-and-no-producer.md>packages/web/public/group.js:691":
+  "0077-chat-history-had-a-paging-cursor-and-no-producer.md>packages/web/public/group.js:707":
     "function applyHistoryWindow(id, page) {",
-  "0077-chat-history-had-a-paging-cursor-and-no-producer.md>packages/web/public/group.js:2147":
+  "0077-chat-history-had-a-paging-cursor-and-no-producer.md>packages/web/public/group.js:2163":
     "async function loadMessages(id, markRead) {",
-  "0077-chat-history-had-a-paging-cursor-and-no-producer.md>packages/web/public/group.js:2212":
+  "0077-chat-history-had-a-paging-cursor-and-no-producer.md>packages/web/public/group.js:2228":
     "async function loadOlderMessages(id) {",
-  "0077-chat-history-had-a-paging-cursor-and-no-producer.md>packages/web/public/group.js:2635":
+  "0077-chat-history-had-a-paging-cursor-and-no-producer.md>packages/web/public/group.js:2651":
     "if (state.messagesHasMore) {",
-  "0077-chat-history-had-a-paging-cursor-and-no-producer.md>packages/web/public/group.js:2688":
+  "0077-chat-history-had-a-paging-cursor-and-no-producer.md>packages/web/public/group.js:2704":
     "dataset: { messageId: message.message_id, seq: message.seq_in_conv },",
   "0077-chat-history-had-a-paging-cursor-and-no-producer.md>test/e2e/group-workbench.spec.ts:2585":
     'test("\u4f1a\u8bdd\u5386\u53f2\u7ffb\u9875\uff1a\u6ee1\u4e00\u9875\u540e\u6709\u300c\u67e5\u770b\u66f4\u65e9\u300d\uff0c\u70b9\u51fb\u5e26\u6e38\u6807 prepend \u4e14\u5230\u5e95\u6536\u8d77", async ({',
@@ -1412,25 +1412,25 @@ const SNAP: Record<string, string> = {
   // 是那一跳挂在「没有锚点」上的两支行；:2194 是往旧翻那把【不同的尺子】—— 它被
   // 「统一」成 scrollTop 时这条快照会红，逼读者重读 0078 §4 那句两把尺子各管一头。
   // 末两条是守卫的提取器：提取器一坏，守卫就变成永远绿的空壳。
-  "0078-background-reload-kept-yanking-the-chat-viewport-back-to-bottom.md>packages/web/public/group.js:714":
+  "0078-background-reload-kept-yanking-the-chat-viewport-back-to-bottom.md>packages/web/public/group.js:730":
     "const CHAT_BOTTOM_STICK_PX = 80;",
-  "0078-background-reload-kept-yanking-the-chat-viewport-back-to-bottom.md>packages/web/public/group.js:734":
+  "0078-background-reload-kept-yanking-the-chat-viewport-back-to-bottom.md>packages/web/public/group.js:750":
     "function chatScrollAnchor(stream) {",
-  "0078-background-reload-kept-yanking-the-chat-viewport-back-to-bottom.md>packages/web/public/group.js:749":
+  "0078-background-reload-kept-yanking-the-chat-viewport-back-to-bottom.md>packages/web/public/group.js:765":
     "function applyChatScrollAnchor(stream, anchor) {",
-  "0078-background-reload-kept-yanking-the-chat-viewport-back-to-bottom.md>packages/web/public/group.js:2014":
+  "0078-background-reload-kept-yanking-the-chat-viewport-back-to-bottom.md>packages/web/public/group.js:2030":
     'const chatAnchor = chatScrollAnchor($(".message-stream"));',
-  "0078-background-reload-kept-yanking-the-chat-viewport-back-to-bottom.md>packages/web/public/group.js:2070":
+  "0078-background-reload-kept-yanking-the-chat-viewport-back-to-bottom.md>packages/web/public/group.js:2086":
     'applyChatScrollAnchor($(".message-stream", view), chatAnchor);',
-  "0078-background-reload-kept-yanking-the-chat-viewport-back-to-bottom.md>packages/web/public/group.js:2154":
+  "0078-background-reload-kept-yanking-the-chat-viewport-back-to-bottom.md>packages/web/public/group.js:2170":
     "const scrollAnchor =",
-  "0078-background-reload-kept-yanking-the-chat-viewport-back-to-bottom.md>packages/web/public/group.js:2158":
+  "0078-background-reload-kept-yanking-the-chat-viewport-back-to-bottom.md>packages/web/public/group.js:2174":
     "state.messageLoading = true;",
-  "0078-background-reload-kept-yanking-the-chat-viewport-back-to-bottom.md>packages/web/public/group.js:2189":
+  "0078-background-reload-kept-yanking-the-chat-viewport-back-to-bottom.md>packages/web/public/group.js:2205":
     "if (scrollAnchor === null) stream.scrollTop = stream.scrollHeight;",
-  "0078-background-reload-kept-yanking-the-chat-viewport-back-to-bottom.md>packages/web/public/group.js:2190":
+  "0078-background-reload-kept-yanking-the-chat-viewport-back-to-bottom.md>packages/web/public/group.js:2206":
     "else applyChatScrollAnchor(stream, scrollAnchor);",
-  "0078-background-reload-kept-yanking-the-chat-viewport-back-to-bottom.md>packages/web/public/group.js:2252":
+  "0078-background-reload-kept-yanking-the-chat-viewport-back-to-bottom.md>packages/web/public/group.js:2268":
     "if (stream) stream.scrollTop = stream.scrollHeight - anchorOffset;",
   "0078-background-reload-kept-yanking-the-chat-viewport-back-to-bottom.md>test/e2e/group-workbench.spec.ts:2764":
     'test("会话滚动位置：翻上去读旧史时背景重读留在原地，用户自己的动作照旧跳底", async ({',
@@ -1443,33 +1443,33 @@ const SNAP: Record<string, string> = {
   // 「控件 + 行区」混建（或直接内联回 handler），0079 §4 的拆法就没有物证了；
   // spec:3254 是那发链路用例的声明行，M1–M8 八把尺子全挂在同一条 -g 上，
   // 声明行漂了意味着整族尺子的坐标同时失效。
-  "0079-middle-column-filters-rebuilt-their-own-controls-on-keystroke.md>packages/web/public/group.js:1407":
+  "0079-middle-column-filters-rebuilt-their-own-controls-on-keystroke.md>packages/web/public/group.js:1423":
     "function renderDocumentList(content, toolbar) {",
   // 拆法本体两对 + 四发 handler：§4 的主张是「builder 只 append 控件、paint 只画行区、
   // 四发 handler 全部只叫 paint」。这几行就是那句话的物证 —— 谁把某发 handler 改回
   // builder、或把 paint 的清空抹掉，对应那条快照当场红。
-  "0079-middle-column-filters-rebuilt-their-own-controls-on-keystroke.md>packages/web/public/group.js:1417":
+  "0079-middle-column-filters-rebuilt-their-own-controls-on-keystroke.md>packages/web/public/group.js:1433":
     "paintDocumentRows(content);",
-  "0079-middle-column-filters-rebuilt-their-own-controls-on-keystroke.md>packages/web/public/group.js:1428":
+  "0079-middle-column-filters-rebuilt-their-own-controls-on-keystroke.md>packages/web/public/group.js:1444":
     "paintDocumentRows(content);",
-  "0079-middle-column-filters-rebuilt-their-own-controls-on-keystroke.md>packages/web/public/group.js:1446":
+  "0079-middle-column-filters-rebuilt-their-own-controls-on-keystroke.md>packages/web/public/group.js:1462":
     "paintDocumentRows(content);",
-  "0079-middle-column-filters-rebuilt-their-own-controls-on-keystroke.md>packages/web/public/group.js:1469":
+  "0079-middle-column-filters-rebuilt-their-own-controls-on-keystroke.md>packages/web/public/group.js:1485":
     "function paintDocumentRows(content) {",
-  "0079-middle-column-filters-rebuilt-their-own-controls-on-keystroke.md>packages/web/public/group.js:1658":
+  "0079-middle-column-filters-rebuilt-their-own-controls-on-keystroke.md>packages/web/public/group.js:1674":
     "function renderBacklogList(content, toolbar) {",
-  "0079-middle-column-filters-rebuilt-their-own-controls-on-keystroke.md>packages/web/public/group.js:1665":
+  "0079-middle-column-filters-rebuilt-their-own-controls-on-keystroke.md>packages/web/public/group.js:1681":
     "paintBacklogRows(content);",
-  "0079-middle-column-filters-rebuilt-their-own-controls-on-keystroke.md>packages/web/public/group.js:1697":
+  "0079-middle-column-filters-rebuilt-their-own-controls-on-keystroke.md>packages/web/public/group.js:1713":
     "function paintBacklogRows(content) {",
   // §7 那两条「记下来但没动的」也钉：limit=100 / limit=200 是「界面整份拉回再内存筛」的
   // 唯一物证（0077 游标形状的另一个面），task 面那发跳转是 0076 挂下来的旧账。
   // 这两格一旦有人真去接分页／接 face，快照会红着提醒把 §7 划掉，而不是留一段假遗留。
-  "0079-middle-column-filters-rebuilt-their-own-controls-on-keystroke.md>packages/web/public/group.js:951":
+  "0079-middle-column-filters-rebuilt-their-own-controls-on-keystroke.md>packages/web/public/group.js:967":
     'request("/backlog?limit=200"),',
-  "0079-middle-column-filters-rebuilt-their-own-controls-on-keystroke.md>packages/web/public/group.js:976":
+  "0079-middle-column-filters-rebuilt-their-own-controls-on-keystroke.md>packages/web/public/group.js:992":
     'request("/documents?limit=100"),',
-  "0079-middle-column-filters-rebuilt-their-own-controls-on-keystroke.md>packages/web/public/group.js:9227":
+  "0079-middle-column-filters-rebuilt-their-own-controls-on-keystroke.md>packages/web/public/group.js:9257":
     'location.href = "/";',
   "0079-middle-column-filters-rebuilt-their-own-controls-on-keystroke.md>test/e2e/group-workbench.spec.ts:3268":
     'test("中栏筛选器：逐字符敲不累加控件、不重复列表，焦点/取值/滚动留在原处", async ({',
@@ -1479,17 +1479,17 @@ const SNAP: Record<string, string> = {
   // 服务端三格（契约 optional / HTTP 递 query / SQL 的 (? IS NULL OR group_id = ?)）钉的是
   // §1「门早就开着」这句话 —— 谁把服务端参数收紧或改名，快照会红着要他改台账口径。
   // group.js:951 与 0079 §7 同形：limit=200 是 §4「刻意内存筛」的物证，切服务端筛时须一起划掉。
-  "0080-backlog-list-had-no-per-group-filter-and-the-server-param-had-no-caller.md>packages/web/public/group.js:609":
+  "0080-backlog-list-had-no-per-group-filter-and-the-server-param-had-no-caller.md>packages/web/public/group.js:622":
     'backlogFilter: { q: "", group: "" },',
-  "0080-backlog-list-had-no-per-group-filter-and-the-server-param-had-no-caller.md>packages/web/public/group.js:951":
+  "0080-backlog-list-had-no-per-group-filter-and-the-server-param-had-no-caller.md>packages/web/public/group.js:967":
     'request("/backlog?limit=200"),',
-  "0080-backlog-list-had-no-per-group-filter-and-the-server-param-had-no-caller.md>packages/web/public/group.js:1675":
+  "0080-backlog-list-had-no-per-group-filter-and-the-server-param-had-no-caller.md>packages/web/public/group.js:1691":
     '"aria-label": "所属群",',
-  "0080-backlog-list-had-no-per-group-filter-and-the-server-param-had-no-caller.md>packages/web/public/group.js:1687":
+  "0080-backlog-list-had-no-per-group-filter-and-the-server-param-had-no-caller.md>packages/web/public/group.js:1703":
     "selected: state.backlogFilter.group === group.group_id,",
-  "0080-backlog-list-had-no-per-group-filter-and-the-server-param-had-no-caller.md>packages/web/public/group.js:1700":
+  "0080-backlog-list-had-no-per-group-filter-and-the-server-param-had-no-caller.md>packages/web/public/group.js:1716":
     "(!state.backlogFilter.group ||",
-  "0080-backlog-list-had-no-per-group-filter-and-the-server-param-had-no-caller.md>packages/web/public/group.js:1701":
+  "0080-backlog-list-had-no-per-group-filter-and-the-server-param-had-no-caller.md>packages/web/public/group.js:1717":
     "item.group_id === state.backlogFilter.group) &&",
   "0080-backlog-list-had-no-per-group-filter-and-the-server-param-had-no-caller.md>packages/contracts/src/backlog.ts:115":
     "group_id: z.string().min(1).max(200).optional(),",
@@ -1526,37 +1526,37 @@ const SNAP: Record<string, string> = {
     '"DELETE /api/v1/members/:id/executors/:seq",',
   "0081-member-settings-panel-had-no-way-to-add-or-remove-skills-and-executors.md>packages/hub/src/members/service.ts:897":
     '"empty_executor_chain",',
-  "0081-member-settings-panel-had-no-way-to-add-or-remove-skills-and-executors.md>packages/web/public/group.js:6775":
+  "0081-member-settings-panel-had-no-way-to-add-or-remove-skills-and-executors.md>packages/web/public/group.js:6805":
     "function bindExecutorKind(kind, config) {",
-  "0081-member-settings-panel-had-no-way-to-add-or-remove-skills-and-executors.md>packages/web/public/group.js:6777":
+  "0081-member-settings-panel-had-no-way-to-add-or-remove-skills-and-executors.md>packages/web/public/group.js:6807":
     'kind.addEventListener("change", () => {',
-  "0081-member-settings-panel-had-no-way-to-add-or-remove-skills-and-executors.md>packages/web/public/group.js:6790":
+  "0081-member-settings-panel-had-no-way-to-add-or-remove-skills-and-executors.md>packages/web/public/group.js:6820":
     "function skillSettingsRow(skill = {}, remove = null) {",
-  "0081-member-settings-panel-had-no-way-to-add-or-remove-skills-and-executors.md>packages/web/public/group.js:6809":
+  "0081-member-settings-panel-had-no-way-to-add-or-remove-skills-and-executors.md>packages/web/public/group.js:6839":
     'row.append(iconButton("close", remove.label, () => remove.onClick(row)));',
-  "0081-member-settings-panel-had-no-way-to-add-or-remove-skills-and-executors.md>packages/web/public/group.js:6814":
-    "function executorSettingsRow(executor, remove = null) {",
   "0081-member-settings-panel-had-no-way-to-add-or-remove-skills-and-executors.md>packages/web/public/group.js:6844":
+    "function executorSettingsRow(executor, remove = null) {",
+  "0081-member-settings-panel-had-no-way-to-add-or-remove-skills-and-executors.md>packages/web/public/group.js:6874":
     'row.append(iconButton("close", remove.label, () => remove.onClick(row)));',
-  "0081-member-settings-panel-had-no-way-to-add-or-remove-skills-and-executors.md>packages/web/public/group.js:7016":
+  "0081-member-settings-panel-had-no-way-to-add-or-remove-skills-and-executors.md>packages/web/public/group.js:7046":
     'button("添加技能", () => addSkill(), "small"),',
-  "0081-member-settings-panel-had-no-way-to-add-or-remove-skills-and-executors.md>packages/web/public/group.js:7027":
+  "0081-member-settings-panel-had-no-way-to-add-or-remove-skills-and-executors.md>packages/web/public/group.js:7057":
     'button("添加执行器", () => addExecutor(), "small"),',
-  "0081-member-settings-panel-had-no-way-to-add-or-remove-skills-and-executors.md>packages/web/public/group.js:8355":
+  "0081-member-settings-panel-had-no-way-to-add-or-remove-skills-and-executors.md>packages/web/public/group.js:8385":
     "skillsEditor.insertBefore(",
-  "0081-member-settings-panel-had-no-way-to-add-or-remove-skills-and-executors.md>packages/web/public/group.js:8374":
+  "0081-member-settings-panel-had-no-way-to-add-or-remove-skills-and-executors.md>packages/web/public/group.js:8404":
     "member.executors.length > 1",
-  "0081-member-settings-panel-had-no-way-to-add-or-remove-skills-and-executors.md>packages/web/public/group.js:8392":
+  "0081-member-settings-panel-had-no-way-to-add-or-remove-skills-and-executors.md>packages/web/public/group.js:8422":
     "const nextSeq = Math.max(0, ...rows.map((el) => Number(el.value))) + 1;",
-  "0081-member-settings-panel-had-no-way-to-add-or-remove-skills-and-executors.md>packages/web/public/group.js:8548":
+  "0081-member-settings-panel-had-no-way-to-add-or-remove-skills-and-executors.md>packages/web/public/group.js:8578":
     "async function updateSkills(event) {",
-  "0081-member-settings-panel-had-no-way-to-add-or-remove-skills-and-executors.md>packages/web/public/group.js:8555":
+  "0081-member-settings-panel-had-no-way-to-add-or-remove-skills-and-executors.md>packages/web/public/group.js:8585":
     '...(note === "" ? {} : { note }),',
-  "0081-member-settings-panel-had-no-way-to-add-or-remove-skills-and-executors.md>packages/web/public/group.js:8576":
+  "0081-member-settings-panel-had-no-way-to-add-or-remove-skills-and-executors.md>packages/web/public/group.js:8606":
     'kind: $("[name=executor_kind]", row).value,',
-  "0081-member-settings-panel-had-no-way-to-add-or-remove-skills-and-executors.md>packages/web/public/group.js:8592":
+  "0081-member-settings-panel-had-no-way-to-add-or-remove-skills-and-executors.md>packages/web/public/group.js:8622":
     "async function removeSkill(memberId, skillId) {",
-  "0081-member-settings-panel-had-no-way-to-add-or-remove-skills-and-executors.md>packages/web/public/group.js:8605":
+  "0081-member-settings-panel-had-no-way-to-add-or-remove-skills-and-executors.md>packages/web/public/group.js:8635":
     "async function removeExecutor(memberId, seq) {",
   "0081-member-settings-panel-had-no-way-to-add-or-remove-skills-and-executors.md>test/arch/ui-caller-roster.ts:242":
     "export const NO_UI_CALLER_ROSTER: readonly NoUiCallerEntry[] = [",
@@ -1569,16 +1569,75 @@ const SNAP: Record<string, string> = {
   "INDEX.md>packages/hub/src/http/people.ts:871":
     '"DELETE /api/v1/members/:id/executors/:seq",',
   "INDEX.md>packages/hub/src/members/service.ts:897": '"empty_executor_chain",',
-  "INDEX.md>packages/web/public/group.js:6775":
+  "INDEX.md>packages/web/public/group.js:6805":
     "function bindExecutorKind(kind, config) {",
-  "INDEX.md>packages/web/public/group.js:6790":
+  "INDEX.md>packages/web/public/group.js:6820":
     "function skillSettingsRow(skill = {}, remove = null) {",
-  "INDEX.md>packages/web/public/group.js:6814":
+  "INDEX.md>packages/web/public/group.js:6844":
     "function executorSettingsRow(executor, remove = null) {",
-  "INDEX.md>packages/web/public/group.js:7016":
+  "INDEX.md>packages/web/public/group.js:7046":
     'button("添加技能", () => addSkill(), "small"),',
-  "INDEX.md>packages/web/public/group.js:7027":
+  "INDEX.md>packages/web/public/group.js:7057":
     'button("添加执行器", () => addExecutor(), "small"),',
+  "INDEX.md>packages/contracts/src/rhythm.ts:58":
+    "export const listResearchQuerySchema = z",
+  "INDEX.md>packages/contracts/src/rhythm.ts:61":
+    "day: z.string().regex(DAY_RE).optional(),",
+  "INDEX.md>packages/hub/src/rhythm/service.ts:359":
+    "const day = parsed.data.day ?? localDay(nowMs);",
+  "INDEX.md>packages/hub/src/rhythm/service.ts:362":
+    "`SELECT ${RESEARCH_COLS} FROM research_cards WHERE day = ? ORDER BY created_at DESC, card_id`,",
+  "INDEX.md>packages/web/public/group.js:3270": 'let path = "/research/today";',
+  "INDEX.md>packages/web/public/group.js:3276":
+    "} else if (state.researchDay) {",
+  "INDEX.md>packages/web/public/group.js:94":
+    "const localDayValue = (offsetDays = 0) => {",
+  "INDEX.md>packages/contracts/src/rhythm.ts:81":
+    "day: z.string().regex(DAY_RE).optional(),",
+  "INDEX.md>packages/hub/src/rhythm/service.ts:538":
+    "const day = req.day ?? localDay(o.nowMs);",
+  "0082-daily-research-panel-could-not-look-at-any-day-but-today.md>packages/contracts/src/rhythm.ts:58":
+    "export const listResearchQuerySchema = z",
+  "0082-daily-research-panel-could-not-look-at-any-day-but-today.md>packages/contracts/src/rhythm.ts:61":
+    "day: z.string().regex(DAY_RE).optional(),",
+  "0082-daily-research-panel-could-not-look-at-any-day-but-today.md>packages/contracts/src/rhythm.ts:31":
+    "const DAY_RE = /^\\d{4}-\\d{2}-\\d{2}$/u;",
+  "0082-daily-research-panel-could-not-look-at-any-day-but-today.md>packages/hub/src/rhythm/service.ts:348":
+    "export function listResearch(",
+  "0082-daily-research-panel-could-not-look-at-any-day-but-today.md>packages/hub/src/rhythm/service.ts:359":
+    "const day = parsed.data.day ?? localDay(nowMs);",
+  "0082-daily-research-panel-could-not-look-at-any-day-but-today.md>packages/hub/src/rhythm/service.ts:362":
+    "`SELECT ${RESEARCH_COLS} FROM research_cards WHERE day = ? ORDER BY created_at DESC, card_id`,",
+  "0082-daily-research-panel-could-not-look-at-any-day-but-today.md>packages/hub/src/rhythm/service.ts:127":
+    "function localDay(nowMs: number): string {",
+  "0082-daily-research-panel-could-not-look-at-any-day-but-today.md>packages/hub/src/http/work.ts:371":
+    'router.add("GET /api/v1/research/today", ({ deps, req }) =>',
+  "0082-daily-research-panel-could-not-look-at-any-day-but-today.md>packages/web/public/group.js:3270":
+    'let path = "/research/today";',
+  "0082-daily-research-panel-could-not-look-at-any-day-but-today.md>packages/web/public/group.js:3271":
+    'if (tab === "rhythm") {',
+  "0082-daily-research-panel-could-not-look-at-any-day-but-today.md>packages/web/public/group.js:631":
+    'researchDay: "",',
+  "0082-daily-research-panel-could-not-look-at-any-day-but-today.md>packages/web/public/group.js:94":
+    "const localDayValue = (offsetDays = 0) => {",
+  "0082-daily-research-panel-could-not-look-at-any-day-but-today.md>packages/web/public/group.js:3276":
+    "} else if (state.researchDay) {",
+  "0082-daily-research-panel-could-not-look-at-any-day-but-today.md>packages/web/public/group.js:3601":
+    "const dayText = state.researchDay || localDayValue(0);",
+  "0082-daily-research-panel-could-not-look-at-any-day-but-today.md>packages/web/public/group.js:3608":
+    "text: `汇总 ${dayText} 的调研卡，直接打开来源、调研文档与服务端自动创建的待办草稿。清空日期回到今天。`,",
+  "0082-daily-research-panel-could-not-look-at-any-day-but-today.md>packages/web/public/group.js:3629":
+    "`${dayText} 还没有调研`,",
+  "0082-daily-research-panel-could-not-look-at-any-day-but-today.md>packages/web/public/group.js:3613":
+    'input("research_day", state.researchDay, "date", {',
+  "0082-daily-research-panel-could-not-look-at-any-day-but-today.md>packages/web/public/group.js:3457":
+    "state.rhythmGroup = event.target.value;",
+  "0082-daily-research-panel-could-not-look-at-any-day-but-today.md>test/e2e/group-workbench.spec.ts:3946":
+    'test("每日调研按日翻：面板钉在今天，昨天的卡在界面上永远看不到", async ({',
+  "0082-daily-research-panel-could-not-look-at-any-day-but-today.md>packages/contracts/src/rhythm.ts:81":
+    "day: z.string().regex(DAY_RE).optional(),",
+  "0082-daily-research-panel-could-not-look-at-any-day-but-today.md>packages/hub/src/rhythm/service.ts:538":
+    "const day = req.day ?? localDay(o.nowMs);",
 };
 
 describe("决策文档里的「文件:行号」引用不漂移", () => {
