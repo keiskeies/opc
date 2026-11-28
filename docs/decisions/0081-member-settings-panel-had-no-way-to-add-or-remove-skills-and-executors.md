@@ -2,12 +2,12 @@
 
 **日期。** 2026-11-28（round400）。
 **落地。** `packages/web/public/group.js`：抽出两行构造器 `skillSettingsRow`
-（`packages/web/public/group.js:6820`）与 `executorSettingsRow`
-（`packages/web/public/group.js:6844`），两者都带一个可选的 `remove` —— 已落库的行传服务端
+（`packages/web/public/group.js:6833`）与 `executorSettingsRow`
+（`packages/web/public/group.js:6857`），两者都带一个可选的 `remove` —— 已落库的行传服务端
 DELETE，刚加还没存的行传「把这一行从 DOM 里撤掉」；`bindExecutorKind`
-（`packages/web/public/group.js:6805`）把「换 kind 连带重写 config 骨架」从招聘弹窗里搬到
-招聘与设置共用；新 handler `removeSkill`（`packages/web/public/group.js:8622`）与
-`removeExecutor`（`packages/web/public/group.js:8635`）打那两条早就存在的 DELETE。服务端零改动。
+（`packages/web/public/group.js:6818`）把「换 kind 连带重写 config 骨架」从招聘弹窗里搬到
+招聘与设置共用；新 handler `removeSkill`（`packages/web/public/group.js:8635`）与
+`removeExecutor`（`packages/web/public/group.js:8648`）打那两条早就存在的 DELETE。服务端零改动。
 新链路 e2e `test/e2e/group-workbench.spec.ts:3567`（17 段动作）；证据
 `.workbuddy/round400-wire-mutations.mjs`（变异机 15 发、13 该红全红 + 2 控制组该活全活，逐发
 sha256 自还原）。名单同步：`test/arch/ui-caller-roster.ts:242` 的
@@ -20,8 +20,8 @@ sha256 自还原）。名单同步：`test/arch/ui-caller-roster.ts:242` 的
 就接在服务端，0069 把它们登记进「渲染侧零调用方」名单时写的是**【覆盖】**，理由是
 「设置面板走的是同一条整体替换 POST ⇒ 摘一件技能这件事在界面里已经能做」。这句话在服务端
 一侧是对的，在界面一侧是错的：那一栏确实把技能与执行器渲染成一行行，但**行首行尾一个增删
-控件都没有** —— 增删只做在招聘弹窗里（`packages/web/public/group.js:7046` 与
-`packages/web/public/group.js:7057` 那两枚按钮属于 `hireForm`）。于是「已招进来的成员」的
+控件都没有** —— 增删只做在招聘弹窗里（`packages/web/public/group.js:7059` 与
+`packages/web/public/group.js:7070` 那两枚按钮属于 `hireForm`）。于是「已招进来的成员」的
 技能与执行器列表在界面里是**冻住的**：能改一件技能的备注，摘不掉它，也加不上一件。
 
 ## 2. 复算：是判据把这一格顶出来的，不是我重新读了代码
@@ -61,7 +61,7 @@ reason 里得指得出界面上那个控件叫什么。
 拆法是把一行的形状收进构造器，把「删」这件事做成传进去的参数：
 
 - `skillSettingsRow(skill, remove)` 与 `executorSettingsRow(executor, remove)` 的末尾各接同一句
-  （`packages/web/public/group.js:6839` 与 `packages/web/public/group.js:6874` 逐字符相同）：
+  （`packages/web/public/group.js:6852` 与 `packages/web/public/group.js:6887` 逐字符相同）：
   `remove` 为 null 就不渲染删除钮。
 - **`remove` 有两种语义，这一格是这一篇最容易写错的地方**：已落库的行传
   `removeSkill(memberId, skillId)`（真发 DELETE）；刚点「添加技能」还在页面上的行传
@@ -69,25 +69,25 @@ reason 里得指得出界面上那个控件叫什么。
   `skill_not_found`；把前者接到前者上，屏幕上行没了、库里还留着 —— 两边都得有自己的那条线，
   见 §6 的线 2b 与线 4c。
 - 「添加技能」用 `insertBefore(…, querySelector("button[type=submit]"))` 把新行插在提交钮**之前**
-  （`packages/web/public/group.js:8385`）—— 直接 `append` 会把新行甩到「保存」钮下面，
+  （`packages/web/public/group.js:8398`）—— 直接 `append` 会把新行甩到「保存」钮下面，
   视觉上变成表单外面。
 - 「添加执行器」的默认序号是**现算**的：`Math.max(0, …行里的 seq) + 1`
-  （`packages/web/public/group.js:8422`），不是「行数 + 1」。执行器链**允许有缝**
+  （`packages/web/public/group.js:8435`），不是「行数 + 1」。执行器链**允许有缝**
   （删中间那档合法，见 §6 线 6），所以 1/2/4 之后的下一档是 5；写成 `rows.length + 1`
   会撞上已经存在的 4，服务端按重复 seq 拒。
-- **只剩一档执行器时不给删除钮**（`packages/web/public/group.js:8404`）：服务端的
+- **只剩一档执行器时不给删除钮**（`packages/web/public/group.js:8417`）：服务端的
   `empty_executor_chain`（`packages/hub/src/members/service.ts:897`）判的是同一件事
   —— 与其让用户撞一发 422，不如让界面先长成那个约束的形状。技能那一侧没有这条，
   契约允许空列表（`.max(20).default([])`），所以摘光之后是空态 + 「保存」仍在（线 8）。
-- `kind` 与 `config` 的耦合搬进 `bindExecutorKind`（`packages/web/public/group.js:6805`）：
+- `kind` 与 `config` 的耦合搬进 `bindExecutorKind`（`packages/web/public/group.js:6818`）：
   `packages/contracts/src/member.ts:38` 的 `executorConfigSchema` 是**按 `kind` 判别的严格
   判别联合**，`packages/contracts/src/member.ts:80` 的 `superRefine` 还要求
   `config.kind === kind` —— 换了 kind 不重写骨架，提交必 422。招聘弹窗原来自己写了这一格，
-  现在两边共用同一个函数（`packages/web/public/group.js:6807` 那个 change 监听器是唯一的一份）。
+  现在两边共用同一个函数（`packages/web/public/group.js:6820` 那个 change 监听器是唯一的一份）。
 - 提交侧跟着补两格来源：`updateExecutors` 的 `kind` 从行里的下拉读
-  （`packages/web/public/group.js:8606`），`enabled` 从行里的勾选读；`updateSkills`
-  （`packages/web/public/group.js:8578`）的 `note` 走「空串就不写这个键」
-  （`packages/web/public/group.js:8585`），避免把空串塞进可选字段。
+  （`packages/web/public/group.js:8619`），`enabled` 从行里的勾选读；`updateSkills`
+  （`packages/web/public/group.js:8591`）的 `note` 走「空串就不写这个键」
+  （`packages/web/public/group.js:8598`），避免把空串塞进可选字段。
 
 ## 5. 新守卫：零
 
@@ -108,7 +108,7 @@ reason 里得指得出界面上那个控件叫什么。
   一条 DELETE 都没发出**（`page.on("request")` 只挂在点删钮那一下前后）。若把页面行接到
   DELETE，这里会收到 404 `skill_not_found`。
 - **线 2c**：新行填 note ⇒ 保存后 `name` 与 `note` **由这一行自己带**上去（摘掉
-  `packages/web/public/group.js:8585` 那格 ⇒ 这里读到 `undefined`）。
+  `packages/web/public/group.js:8598` 那格 ⇒ 这里读到 `undefined`）。
 - **线 4b**：换 kind ⇒ 骨架连带重写（切 `builtin-plugin` ⇒ 值里出现 `plugin_id`/`tool_name`、
   placeholder 跟着换；切回 `pure-model` ⇒ 值逐字节等于那份骨架）。
 - **线 4c/4d**：再加两行、删掉**不是最后一行**的那档 ⇒ 序号与落库各自对得上；

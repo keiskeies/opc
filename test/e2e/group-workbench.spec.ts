@@ -3931,8 +3931,9 @@ test("成员设置面板增删技能与执行器：路由早就有，界面到�
 // 唯一、每天一批，过了零点昨天那批就在界面上没有任何入口能再看到（列表、搜索、文档面都不读
 // research_cards）。本用例昨天与今天各灌一张卡 —— 单灌今天，「只看今天」与「看全部」的读数
 // 逐像素相同，永远证不了这件事（同 0080 要灌两个群才证得了「按群筛」）。
-// 范围：只补「读」（GET 带 day）。POST 的 day 不接 —— 「把一条调研归到过去某一天」是产品口径，
-// 且那条路径的既有文案（「今日调研已存在」）也跟着今日语义写死；已记进 0082「记下来但没动的」。
+// 范围：只补「读」（GET 带 day）。POST 的 day 当时刻意没接 —— 「把一条调研归到过去某一天」
+// 是产品口径，且那条路径的既有文案（「今日调研已存在」）也跟着今日语义写死；已记进 0082
+// 「记下来但没动的」，由 0083 接上（用例见下一条）。
 
 /** 服务端 localDay 同式的本地日界文本（负数 = 往前翻）。 */
 function localDayText(offsetDays: number): string {
@@ -4051,6 +4052,131 @@ test("每日调研按日翻：面板钉在今天，昨天的卡在界面上永�
   // 线 5b（重画不累加控件）：切了三次日期、整栏重画三次，工具条仍然只有一枚日期框。
   // 0079 那一族缺口正是「每次重画往 toolbar 里再塞一套」，这一发判的是同一件事。
   await expect(dayBox).toHaveCount(1);
+
+  expectNoBrowserErrors(browserErrors);
+});
+
+test("登记调研归到哪天：表单不带 day，昨天翻到的卡只能记到今天", async ({
+  page,
+}) => {
+  const browserErrors = watchBrowserErrors(page);
+  const today = localDayText(0);
+  const yesterday = localDayText(-1);
+  const url = `https://example.com/research-day-${Date.now()}`;
+
+  await page.goto(`${webOrigin}/`);
+  await page.locator('[data-nav="backlog"]').click();
+  await page.getByRole("tab", { name: "每日调研", exact: true }).click();
+  const panel = page.locator("#taskPanel");
+  const dayBox = panel.locator('input[type="date"][aria-label="调研日期"]');
+  await expect(dayBox).toHaveCount(1);
+  // 翻到昨天（0082 已接通的那根线，这里只当入口用）。判据取【汇总句说的是昨天】而不是
+  // 「屏上是空态」：同一份 e2e 库是共享的，上面 0082 那条用例刚往昨天灌过一张卡，
+  // 空态在整串跑里【必然不成立】—— 单跑这条绿、整串跑红就是撞在这一格上。
+  await dayBox.fill(yesterday);
+  await expect(panel.locator("section.team-panel > p.muted")).toContainText(
+    `汇总 ${yesterday} 的调研卡`,
+  );
+
+  // 登记弹窗里的那一枚日期：打开时应跟随屏上正在看的这一天。
+  // 未修时线 1 就红在这里 —— 弹窗压根没有 type=date 的输入，计数是 0。
+  await page
+    .locator(".page-header")
+    .getByRole("button", { name: "新增调研", exact: true })
+    .click();
+  const dialog = page.getByRole("dialog", { name: "新增每日调研" });
+  // 线 1（弹窗默认跟随所看的那一天）：看的是昨天，弹窗就该填着昨天。
+  // 未修时线 1 就红在这里 —— 弹窗压根没有 type=date 的输入，计数是 0。
+  const modalDay = dialog.locator('input[type="date"][aria-label="调研日期"]');
+  await expect(modalDay).toHaveCount(1);
+  await expect(modalDay).toHaveValue(yesterday);
+
+  // 线 2（填了那一天 ⇒ 真的把 day 发到线上）：判的是【发出去的请求体】，不是卡片 DOM。
+  // DOM 上「昨天出现一张卡」也能靠「服务端今天建卡 + 面板不刷新」蒙过去，请求体蒙不了。
+  const sent = page.waitForRequest(
+    (req) =>
+      new URL(req.url()).pathname === "/api/v1/research/today" &&
+      req.method() === "POST",
+  );
+  await dialog.locator('input[name="title"]').fill("归到昨天的调研");
+  await dialog.locator('textarea[name="summary"]').fill("这条要归到昨天。");
+  await dialog.locator('input[name="url"]').fill(url);
+  await dialog.getByRole("button", { name: "登记调研", exact: true }).click();
+  await expect(dialog).toBeHidden();
+  const body = JSON.parse((await sent).postData() ?? "{}") as Record<
+    string,
+    unknown
+  >;
+  expect(
+    body.day,
+    "表单里填的日期必须上请求体，否则卡永远落在服务端时钟那一天",
+  ).toBe(yesterday);
+
+  // 线 3（落点确实是昨天）：仍停在昨天这一屏，刚登记的卡要出现。
+  const cards = panel.locator(".entry-card.research-card");
+  await expect(cards.filter({ hasText: "归到昨天的调研" })).toHaveCount(1);
+
+  // 线 4（查重文案跟着那一天）：同 (day, url) 再登记一次 ⇒ 服务端 created:false，
+  // 文案不能再硬写「今日调研已存在」—— 用户刚说的明明是昨天。
+  const dupSent = page.waitForRequest(
+    (req) =>
+      new URL(req.url()).pathname === "/api/v1/research/today" &&
+      req.method() === "POST",
+  );
+  await page
+    .locator(".page-header")
+    .getByRole("button", { name: "新增调研", exact: true })
+    .click();
+  await dialog.locator('input[name="title"]').fill("归到昨天的调研（重复）");
+  await dialog.locator('textarea[name="summary"]').fill("换一个标题再试一次。");
+  await dialog.locator('input[name="url"]').fill(url);
+  await dialog.getByRole("button", { name: "登记调研", exact: true }).click();
+  await expect(dialog).toBeHidden();
+  const dupBody = JSON.parse((await dupSent).postData() ?? "{}") as Record<
+    string,
+    unknown
+  >;
+  expect(dupBody.day, "查重走的是 (那一天, 那个 URL)").toBe(yesterday);
+  await expect(page.locator("#toastRegion")).toContainText(yesterday);
+  await expect(page.locator("#toastRegion")).not.toContainText(
+    "今日调研已存在",
+  );
+
+  // 线 5（清空 ⇒ 不发明天，交给服务端时钟）：把弹窗里那一格清掉后请求体【不带 day】。
+  // 这一发在未修时【也是绿的】—— 它是分母：没有它，「永远把今天硬写进 day」那种改法
+  // 也能让线 2 变绿。它钉的是「留空 = 不上线」，与 0082 的 GET 同一套哨兵纪律。
+  const blankSent = page.waitForRequest(
+    (req) =>
+      new URL(req.url()).pathname === "/api/v1/research/today" &&
+      req.method() === "POST",
+  );
+  await page
+    .locator(".page-header")
+    .getByRole("button", { name: "新增调研", exact: true })
+    .click();
+  await dialog.locator('input[type="date"][aria-label="调研日期"]').fill("");
+  await dialog.locator('input[name="title"]').fill("不填日期的调研");
+  await dialog
+    .locator('textarea[name="summary"]')
+    .fill("这条归服务端说的今天。");
+  await dialog.getByRole("button", { name: "登记调研", exact: true }).click();
+  await expect(dialog).toBeHidden();
+  const blankBody = JSON.parse((await blankSent).postData() ?? "{}") as Record<
+    string,
+    unknown
+  >;
+  expect(blankBody).not.toHaveProperty("day");
+
+  // 线 6（不填 = 今天，由服务端定）：这条落在今天 ⇒ 今天那一屏看得见、昨天那一屏没有它。
+  // ⚠ 线 5 的下游，【没有】只有它才能杀的变异：任何「空值也发 day」的坏法都先被线 5 抓住
+  // （见归因表 M4/M5 两发全红在线 5）。它钉的是服务端那一档没被本轮改动带坏，不是新接线。
+  await dayBox.fill("");
+  await expect(cards.filter({ hasText: "不填日期的调研" })).toHaveCount(1);
+  await expect(panel.locator("section.team-panel > p.muted")).toContainText(
+    `汇总 ${today} 的调研卡`,
+  );
+  await dayBox.fill(yesterday);
+  await expect(cards.filter({ hasText: "不填日期的调研" })).toHaveCount(0);
 
   expectNoBrowserErrors(browserErrors);
 });

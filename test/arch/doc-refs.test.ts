@@ -1308,19 +1308,19 @@ const SNAP: Record<string, string> = {
   // 「同字节换用途拿不到别人的行」与「界面上有生产者」同时失去物证。
   "0074-avatar-upload-never-worked-a-dedupe-key-one-dimension-short-and-a-ui-with-no-uploader.md>packages/hub/src/members/service.ts:265": `"SELECT 1 AS ok FROM assets WHERE asset_id = ? AND purpose = 'avatar'";`,
   "0074-avatar-upload-never-worked-a-dedupe-key-one-dimension-short-and-a-ui-with-no-uploader.md>packages/hub/src/http/people.ts:440": `"SELECT 1 AS ok FROM assets WHERE asset_id = ? AND purpose = 'avatar'";`,
-  "0074-avatar-upload-never-worked-a-dedupe-key-one-dimension-short-and-a-ui-with-no-uploader.md>packages/web/public/group.js:6360":
+  "0074-avatar-upload-never-worked-a-dedupe-key-one-dimension-short-and-a-ui-with-no-uploader.md>packages/web/public/group.js:6373":
     "function avatarImagePicker() {",
   // ── 0075（模板生产者 + 守门的方法维）────────────────────────────────────
   // 每条都是活坐标：按钮/弹窗被摘、INSERT 的 builtin 或展开行被动、hitsUi 升维，
   // 0075 钉的「界面有生产者」「服务端早已承重」「门只看路径」同时失去或改变物证。
   // 末两条是探针三个病因里两处现场的物证：转发函数签名 / 拼接出的空路径段。
-  "0075-template-library-had-a-display-and-no-producer.md>packages/web/public/group.js:4036":
+  "0075-template-library-had-a-display-and-no-producer.md>packages/web/public/group.js:4049":
     'async function backlogMutation(path, method = "PATCH", body) {',
   "0075-template-library-had-a-display-and-no-producer.md>packages/web/public/app.js:2706":
     '"/charter/" + encodeURIComponent(charterRole),',
-  "0075-template-library-had-a-display-and-no-producer.md>packages/web/public/group.js:4281":
+  "0075-template-library-had-a-display-and-no-producer.md>packages/web/public/group.js:4294":
     'button("新建模板", () => templateCreateModal(), "small"),',
-  "0075-template-library-had-a-display-and-no-producer.md>packages/web/public/group.js:8867":
+  "0075-template-library-had-a-display-and-no-producer.md>packages/web/public/group.js:8880":
     "function templateCreateModal() {",
   "0075-template-library-had-a-display-and-no-producer.md>packages/hub/src/http/documents.ts:429":
     "async function createTemplateRoute(",
@@ -1346,15 +1346,15 @@ const SNAP: Record<string, string> = {
     "if (value === null || value === undefined || value === false) continue;",
   "0076-search-had-seven-faces-and-six-ui-slots.md>packages/web/public/group.js:137":
     'group: "群",',
-  "0076-search-had-seven-faces-and-six-ui-slots.md>packages/web/public/group.js:6552":
+  "0076-search-had-seven-faces-and-six-ui-slots.md>packages/web/public/group.js:6565":
     "(entry) => entry.group_id === id,",
-  "0076-search-had-seven-faces-and-six-ui-slots.md>packages/web/public/group.js:9203":
+  "0076-search-had-seven-faces-and-six-ui-slots.md>packages/web/public/group.js:9216":
     '"data-face": hit.face,',
-  "0076-search-had-seven-faces-and-six-ui-slots.md>packages/web/public/group.js:9204":
+  "0076-search-had-seven-faces-and-six-ui-slots.md>packages/web/public/group.js:9217":
     '"data-id": hit.id,',
-  "0076-search-had-seven-faces-and-six-ui-slots.md>packages/web/public/group.js:9254":
+  "0076-search-had-seven-faces-and-six-ui-slots.md>packages/web/public/group.js:9267":
     "await selectGroup(hit.id);",
-  "0076-search-had-seven-faces-and-six-ui-slots.md>packages/web/public/group.js:9257":
+  "0076-search-had-seven-faces-and-six-ui-slots.md>packages/web/public/group.js:9270":
     'location.href = "/";',
   "0076-search-had-seven-faces-and-six-ui-slots.md>test/e2e/group-workbench.spec.ts:2518":
     'test("全局搜索群命中：徽标是「群」且点击真落到该群会话", async ({ page }) => {',
@@ -1469,7 +1469,7 @@ const SNAP: Record<string, string> = {
     'request("/backlog?limit=200"),',
   "0079-middle-column-filters-rebuilt-their-own-controls-on-keystroke.md>packages/web/public/group.js:992":
     'request("/documents?limit=100"),',
-  "0079-middle-column-filters-rebuilt-their-own-controls-on-keystroke.md>packages/web/public/group.js:9257":
+  "0079-middle-column-filters-rebuilt-their-own-controls-on-keystroke.md>packages/web/public/group.js:9270":
     'location.href = "/";',
   "0079-middle-column-filters-rebuilt-their-own-controls-on-keystroke.md>test/e2e/group-workbench.spec.ts:3268":
     'test("中栏筛选器：逐字符敲不累加控件、不重复列表，焦点/取值/滚动留在原处", async ({',
@@ -1526,37 +1526,37 @@ const SNAP: Record<string, string> = {
     '"DELETE /api/v1/members/:id/executors/:seq",',
   "0081-member-settings-panel-had-no-way-to-add-or-remove-skills-and-executors.md>packages/hub/src/members/service.ts:897":
     '"empty_executor_chain",',
-  "0081-member-settings-panel-had-no-way-to-add-or-remove-skills-and-executors.md>packages/web/public/group.js:6805":
+  "0081-member-settings-panel-had-no-way-to-add-or-remove-skills-and-executors.md>packages/web/public/group.js:6818":
     "function bindExecutorKind(kind, config) {",
-  "0081-member-settings-panel-had-no-way-to-add-or-remove-skills-and-executors.md>packages/web/public/group.js:6807":
-    'kind.addEventListener("change", () => {',
   "0081-member-settings-panel-had-no-way-to-add-or-remove-skills-and-executors.md>packages/web/public/group.js:6820":
+    'kind.addEventListener("change", () => {',
+  "0081-member-settings-panel-had-no-way-to-add-or-remove-skills-and-executors.md>packages/web/public/group.js:6833":
     "function skillSettingsRow(skill = {}, remove = null) {",
-  "0081-member-settings-panel-had-no-way-to-add-or-remove-skills-and-executors.md>packages/web/public/group.js:6839":
+  "0081-member-settings-panel-had-no-way-to-add-or-remove-skills-and-executors.md>packages/web/public/group.js:6852":
     'row.append(iconButton("close", remove.label, () => remove.onClick(row)));',
-  "0081-member-settings-panel-had-no-way-to-add-or-remove-skills-and-executors.md>packages/web/public/group.js:6844":
+  "0081-member-settings-panel-had-no-way-to-add-or-remove-skills-and-executors.md>packages/web/public/group.js:6857":
     "function executorSettingsRow(executor, remove = null) {",
-  "0081-member-settings-panel-had-no-way-to-add-or-remove-skills-and-executors.md>packages/web/public/group.js:6874":
+  "0081-member-settings-panel-had-no-way-to-add-or-remove-skills-and-executors.md>packages/web/public/group.js:6887":
     'row.append(iconButton("close", remove.label, () => remove.onClick(row)));',
-  "0081-member-settings-panel-had-no-way-to-add-or-remove-skills-and-executors.md>packages/web/public/group.js:7046":
+  "0081-member-settings-panel-had-no-way-to-add-or-remove-skills-and-executors.md>packages/web/public/group.js:7059":
     'button("添加技能", () => addSkill(), "small"),',
-  "0081-member-settings-panel-had-no-way-to-add-or-remove-skills-and-executors.md>packages/web/public/group.js:7057":
+  "0081-member-settings-panel-had-no-way-to-add-or-remove-skills-and-executors.md>packages/web/public/group.js:7070":
     'button("添加执行器", () => addExecutor(), "small"),',
-  "0081-member-settings-panel-had-no-way-to-add-or-remove-skills-and-executors.md>packages/web/public/group.js:8385":
+  "0081-member-settings-panel-had-no-way-to-add-or-remove-skills-and-executors.md>packages/web/public/group.js:8398":
     "skillsEditor.insertBefore(",
-  "0081-member-settings-panel-had-no-way-to-add-or-remove-skills-and-executors.md>packages/web/public/group.js:8404":
+  "0081-member-settings-panel-had-no-way-to-add-or-remove-skills-and-executors.md>packages/web/public/group.js:8417":
     "member.executors.length > 1",
-  "0081-member-settings-panel-had-no-way-to-add-or-remove-skills-and-executors.md>packages/web/public/group.js:8422":
+  "0081-member-settings-panel-had-no-way-to-add-or-remove-skills-and-executors.md>packages/web/public/group.js:8435":
     "const nextSeq = Math.max(0, ...rows.map((el) => Number(el.value))) + 1;",
-  "0081-member-settings-panel-had-no-way-to-add-or-remove-skills-and-executors.md>packages/web/public/group.js:8578":
+  "0081-member-settings-panel-had-no-way-to-add-or-remove-skills-and-executors.md>packages/web/public/group.js:8591":
     "async function updateSkills(event) {",
-  "0081-member-settings-panel-had-no-way-to-add-or-remove-skills-and-executors.md>packages/web/public/group.js:8585":
+  "0081-member-settings-panel-had-no-way-to-add-or-remove-skills-and-executors.md>packages/web/public/group.js:8598":
     '...(note === "" ? {} : { note }),',
-  "0081-member-settings-panel-had-no-way-to-add-or-remove-skills-and-executors.md>packages/web/public/group.js:8606":
+  "0081-member-settings-panel-had-no-way-to-add-or-remove-skills-and-executors.md>packages/web/public/group.js:8619":
     'kind: $("[name=executor_kind]", row).value,',
-  "0081-member-settings-panel-had-no-way-to-add-or-remove-skills-and-executors.md>packages/web/public/group.js:8622":
-    "async function removeSkill(memberId, skillId) {",
   "0081-member-settings-panel-had-no-way-to-add-or-remove-skills-and-executors.md>packages/web/public/group.js:8635":
+    "async function removeSkill(memberId, skillId) {",
+  "0081-member-settings-panel-had-no-way-to-add-or-remove-skills-and-executors.md>packages/web/public/group.js:8648":
     "async function removeExecutor(memberId, seq) {",
   "0081-member-settings-panel-had-no-way-to-add-or-remove-skills-and-executors.md>test/arch/ui-caller-roster.ts:242":
     "export const NO_UI_CALLER_ROSTER: readonly NoUiCallerEntry[] = [",
@@ -1569,15 +1569,15 @@ const SNAP: Record<string, string> = {
   "INDEX.md>packages/hub/src/http/people.ts:871":
     '"DELETE /api/v1/members/:id/executors/:seq",',
   "INDEX.md>packages/hub/src/members/service.ts:897": '"empty_executor_chain",',
-  "INDEX.md>packages/web/public/group.js:6805":
+  "INDEX.md>packages/web/public/group.js:6818":
     "function bindExecutorKind(kind, config) {",
-  "INDEX.md>packages/web/public/group.js:6820":
+  "INDEX.md>packages/web/public/group.js:6833":
     "function skillSettingsRow(skill = {}, remove = null) {",
-  "INDEX.md>packages/web/public/group.js:6844":
+  "INDEX.md>packages/web/public/group.js:6857":
     "function executorSettingsRow(executor, remove = null) {",
-  "INDEX.md>packages/web/public/group.js:7046":
+  "INDEX.md>packages/web/public/group.js:7059":
     'button("添加技能", () => addSkill(), "small"),',
-  "INDEX.md>packages/web/public/group.js:7057":
+  "INDEX.md>packages/web/public/group.js:7070":
     'button("添加执行器", () => addExecutor(), "small"),',
   "INDEX.md>packages/contracts/src/rhythm.ts:58":
     "export const listResearchQuerySchema = z",
@@ -1632,12 +1632,55 @@ const SNAP: Record<string, string> = {
     'input("research_day", state.researchDay, "date", {',
   "0082-daily-research-panel-could-not-look-at-any-day-but-today.md>packages/web/public/group.js:3457":
     "state.rhythmGroup = event.target.value;",
-  "0082-daily-research-panel-could-not-look-at-any-day-but-today.md>test/e2e/group-workbench.spec.ts:3946":
+  "0082-daily-research-panel-could-not-look-at-any-day-but-today.md>test/e2e/group-workbench.spec.ts:3947":
     'test("每日调研按日翻：面板钉在今天，昨天的卡在界面上永远看不到", async ({',
-  "0082-daily-research-panel-could-not-look-at-any-day-but-today.md>packages/contracts/src/rhythm.ts:81":
+  "0082-daily-research-panel-could-not-look-at-any-day-but-today.md>packages/hub/src/rhythm/service.ts:542":
+    "`SELECT ${RESEARCH_COLS} FROM research_cards WHERE day = ? AND url = ?`,",
+  "0082-daily-research-panel-could-not-look-at-any-day-but-today.md>packages/hub/resources/migrations/0021_rhythm.sql:40":
+    "CREATE UNIQUE INDEX idx_research_day_url ON research_cards(day, url) WHERE url IS NOT NULL;",
+  "INDEX.md>packages/hub/src/http/work.ts:374":
+    'router.add("POST /api/v1/research/today", ({ deps, req }) =>',
+  "INDEX.md>packages/hub/src/rhythm/service.ts:542":
+    "`SELECT ${RESEARCH_COLS} FROM research_cards WHERE day = ? AND url = ?`,",
+  "INDEX.md>packages/hub/resources/migrations/0021_rhythm.sql:40":
+    "CREATE UNIQUE INDEX idx_research_day_url ON research_cards(day, url) WHERE url IS NOT NULL;",
+  "INDEX.md>packages/web/public/group.js:3755":
+    "const initialDay = state.researchDay;",
+  "INDEX.md>packages/web/public/group.js:3824": "...(day ? { day } : {}),",
+  "INDEX.md>packages/web/public/group.js:3839":
+    "? `${dayLabel} 调研已存在，已刷新关联状态`",
+  "0083-research-card-form-had-no-day-and-could-only-log-against-today.md>packages/contracts/src/rhythm.ts:81":
     "day: z.string().regex(DAY_RE).optional(),",
-  "0082-daily-research-panel-could-not-look-at-any-day-but-today.md>packages/hub/src/rhythm/service.ts:538":
+  "0083-research-card-form-had-no-day-and-could-only-log-against-today.md>packages/hub/src/rhythm/service.ts:538":
     "const day = req.day ?? localDay(o.nowMs);",
+  "0083-research-card-form-had-no-day-and-could-only-log-against-today.md>packages/hub/src/http/work.ts:374":
+    'router.add("POST /api/v1/research/today", ({ deps, req }) =>',
+  "0083-research-card-form-had-no-day-and-could-only-log-against-today.md>packages/contracts/src/rhythm.ts:79":
+    "export const createResearchCardRequestSchema = z",
+  "0083-research-card-form-had-no-day-and-could-only-log-against-today.md>packages/hub/src/rhythm/service.ts:542":
+    "`SELECT ${RESEARCH_COLS} FROM research_cards WHERE day = ? AND url = ?`,",
+  "0083-research-card-form-had-no-day-and-could-only-log-against-today.md>packages/hub/resources/migrations/0021_rhythm.sql:40":
+    "CREATE UNIQUE INDEX idx_research_day_url ON research_cards(day, url) WHERE url IS NOT NULL;",
+  "0083-research-card-form-had-no-day-and-could-only-log-against-today.md>packages/hub/resources/migrations/0021_rhythm.sql:38":
+    "CHECK (url IS NOT NULL OR source = 'manual')",
+  "0083-research-card-form-had-no-day-and-could-only-log-against-today.md>packages/web/public/group.js:3755":
+    "const initialDay = state.researchDay;",
+  "0083-research-card-form-had-no-day-and-could-only-log-against-today.md>packages/web/public/group.js:3779":
+    'input("day", initialDay, "date", { "aria-label": "调研日期" }),',
+  "0083-research-card-form-had-no-day-and-could-only-log-against-today.md>packages/web/public/group.js:3817":
+    'const day = String(data.get("day") || "").trim();',
+  "0083-research-card-form-had-no-day-and-could-only-log-against-today.md>packages/web/public/group.js:3824":
+    "...(day ? { day } : {}),",
+  "0083-research-card-form-had-no-day-and-could-only-log-against-today.md>packages/web/public/group.js:3834":
+    "const dayLabel = day || localDayValue(0);",
+  "0083-research-card-form-had-no-day-and-could-only-log-against-today.md>packages/web/public/group.js:3839":
+    "? `${dayLabel} 调研已存在，已刷新关联状态`",
+  "0083-research-card-form-had-no-day-and-could-only-log-against-today.md>packages/web/public/group.js:1040":
+    "async function refreshAll() {",
+  "0083-research-card-form-had-no-day-and-could-only-log-against-today.md>test/e2e/group-workbench.spec.ts:4059":
+    'test("登记调研归到哪天：表单不带 day，昨天翻到的卡只能记到今天", async ({',
+  "0083-research-card-form-had-no-day-and-could-only-log-against-today.md>packages/hub/src/http/work.ts:371":
+    'router.add("GET /api/v1/research/today", ({ deps, req }) =>',
 };
 
 describe("决策文档里的「文件:行号」引用不漂移", () => {

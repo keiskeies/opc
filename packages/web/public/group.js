@@ -3750,6 +3750,9 @@ function rhythmCreateModal() {
   });
 }
 function researchCreateModal() {
+  // 弹窗默认跟随屏上正在看的那一天：翻到昨天再登记，落点就该是昨天。
+  // 空 = 不上请求体、由服务端时钟定今天（与 GET 那根线同一套哨兵纪律）。
+  const initialDay = state.researchDay;
   openModal({
     title: "新增每日调研",
     eyebrow: "DAILY RESEARCH",
@@ -3770,6 +3773,11 @@ function researchCreateModal() {
               placeholder: "manual 或来源名称",
             }),
             "没有链接时只能填写 manual。",
+          ),
+          field(
+            "日期",
+            input("day", initialDay, "date", { "aria-label": "调研日期" }),
+            "留空则由服务端记在今天。",
           ),
           field(
             "所属群",
@@ -3806,12 +3814,14 @@ function researchCreateModal() {
         throw new Error("请填写来源、标题与摘要。");
       if (!url && source !== "manual")
         throw new Error("没有 URL 时，来源必须填写 manual。");
+      const day = String(data.get("day") || "").trim();
       const result = await request("/research/today", {
         method: "POST",
         body: {
           source,
           title,
           summary,
+          ...(day ? { day } : {}),
           ...(url ? { url } : {}),
           ...(data.get("group_id") ? { group_id: data.get("group_id") } : {}),
         },
@@ -3819,11 +3829,14 @@ function researchCreateModal() {
       if (result?.ok === false)
         throw new Error(result?.reason || result?.error || "新增调研失败");
       const documentFailed = result.document?.ok === false;
+      // 查重命中报的是【表单里那一格】的那一天：留空才说今天。写死「今日」的话，
+      // 用户填了昨天、界面却回答「今日已存在」，等于告诉他去查另一个日子。
+      const dayLabel = day || localDayValue(0);
       toast(
         documentFailed
           ? "调研已登记，但调研文档生成失败"
           : result.created === false
-            ? "今日调研已存在，已刷新关联状态"
+            ? `${dayLabel} 调研已存在，已刷新关联状态`
             : result.item?.backlog_item_id
               ? "调研已登记，待办草稿与调研文档已关联"
               : "调研已登记",

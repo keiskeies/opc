@@ -85,7 +85,7 @@
 
 ## 6. e2e：八段线，每段有自己的那次动作
 
-`test/e2e/group-workbench.spec.ts:3946` 一条用例，前置先 POST 两张卡（今天 + 昨天）并断言都 2xx：
+`test/e2e/group-workbench.spec.ts:3947` 一条用例，前置先 POST 两张卡（今天 + 昨天）并断言都 2xx：
 
 | 线 | 动作 | 断言 | 未修时 |
 | --- | --- | --- | --- |
@@ -150,11 +150,12 @@
 
 ## 9. 记下来但没动的
 
-- **POST 的 `day` 没接**。契约的创建请求里也有 `day`（`packages/contracts/src/rhythm.ts:81`），
-  服务层 `packages/hub/src/rhythm/service.ts:538` 也认。**不接是产品口径，不是忘了**：
-  「把一条调研归到过去某一天」是补录还是错录、去重按 `(day, url)` 还是按 `url`，
-  以及那条路径的既有文案（「今日调研已存在」）整个是围着「今天」写的 —— 工程单方面接上，
-  等于替产品回答了这三个问题。本轮只补「读」。
+- **POST 的 `day` 没接** —— 本篇押后，**0083 已接上**（表单加那一格 + 文案跟着那一天，
+  见 0083 §4）。押后时写的理由里**第二条是读漏了 SQL**：去重一直是按 `(day, url)`，
+  服务层 `packages/hub/src/rhythm/service.ts:542` 的查重条件带着 `day`，库里
+  `packages/hub/resources/migrations/0021_rhythm.sql:40` 更是把 `UNIQUE(day, url)` 建成
+  `WHERE url IS NOT NULL` 的部分唯一索引 —— 这一条不需要谁拍板，读一遍就有答案（0083 §3）。
+  真正留在产品那一格的只剩「归到过去某天算补录还是错录」与「文案围着今天写」，前者用户已答「做」。
 - **`ui-caller-roster` 的方法盲**（§3/§5）：它按路径形状匹配，看不见参数级缺口。0080 的
   `group_id` 与本轮的 `day` 都是它结构上抓不到的那类。修它要做查询串解析，属 0069 的范围。
 - **调研卡仍然只有这一个出口**：`packages/hub/src/rhythm/service.ts` 是 `research_cards` 的唯一

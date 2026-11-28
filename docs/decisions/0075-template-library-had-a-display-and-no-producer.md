@@ -61,7 +61,7 @@
    归因错了不改结论（结论本来就是「探针瞎」），但**错的理由会把下一个人支使去调错的旋钮**，
    所以按 0072「复算病因」的家法在这里更正。
 2. **不认位置参转发**：backlog 五条走 `backlogMutation(path, "POST", body)`
-   （`packages/web/public/group.js:4036`，内部 `request(path, { method, body })`）——
+   （`packages/web/public/group.js:4049`，内部 `request(path, { method, body })`）——
    方法是实参、源码里压根不出现 `method:` 这个标签，「往后找 `method:"…"`」那把尺子
    永远量不到它。
 3. **不认空路径段**：`POST /charter/:roleId` 走 `api("POST", "/charter/" + encodeURIComponent(role))`
@@ -74,10 +74,10 @@
 
 ## 4. 落地：把生产者补上，接法沿用本页既有肌肉
 
-「从模板开始」卡的 actions 追加第 7 个按钮（`packages/web/public/group.js:4281`），
+「从模板开始」卡的 actions 追加第 7 个按钮（`packages/web/public/group.js:4294`），
 空态文案同步改成「点「新建模板」建第一张，或先创建空白文档。」（原来那句只指空白文档，
 在陈列柜语境下是唯一的门）。新函数 `templateCreateModal()`
-（`packages/web/public/group.js:8867`）走 `openModal` 既有形态：名称（必填，≤200）+
+（`packages/web/public/group.js:8880`）走 `openModal` 既有形态：名称（必填，≤200）+
 文档形态下拉（markdown/文档/表格/思维导图，与 `createDocument` 同一套 `docKinds`）+
 模板正文大栏；`onSubmit` 真发 `POST /templates`，成功后 `loadAuxiliary()` 重取
 `state.templates` + `renderMain()` 重渲 —— 新模板**立刻**是芯片、立刻能点。失败形状
@@ -148,7 +148,7 @@ M6/M7 与 M1–M5 分属两个 runner、各打各的既有断言 —— 它们�
 - **守卫**：`test/arch` 全量 **38 文件 / 613 passed** —— doc-refs 新增 0075 活坐标后
   2/2 绿（含「扫描器本身有判别力」那发），decision-index 认账 0075，ui-caller-roster ③/④
   未受影响（templates 从没在名单里，接线后仍不该在）。
-  ⚠ §3 重写后多出两条引用（转发函数 `packages/web/public/group.js:4036`、拼接空段
+  ⚠ §3 重写后多出两条引用（转发函数 `packages/web/public/group.js:4049`、拼接空段
   `packages/web/public/app.js:2706`），doc-refs
   **当场红**并点名这两键「快照里没有这条引用（新增，或文档里已被改写）」⇒ 补登记后复绿。
   这一红是守卫在做它该做的事：台账写一个新坐标而 SNAP 没跟上，正是「引用漂移」的定义。
