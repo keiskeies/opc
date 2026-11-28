@@ -98,7 +98,10 @@
       <svg class="icon"><use href="#i-search"/></svg>
       <input id="globalSearch" type="search" autocomplete="off" placeholder="搜索消息、文档、群、成员、任务、会议" aria-label="全局搜索" aria-controls="searchResults" aria-expanded="false">
       <kbd>Ctrl K</kbd>
-      <div id="searchResults" class="search-results popover" role="listbox" hidden></div>
+      <div id="searchPanel" class="search-panel popover" hidden>
+        <div id="searchFaces" class="search-faces"></div>
+        <div id="searchResults" class="search-results" role="listbox"></div>
+      </div>
     </div>
     <div class="create-wrap">
       <button id="createButton" class="btn primary" type="button" aria-haspopup="menu" aria-expanded="false"><svg class="icon"><use href="#i-plus"/></svg>创建</button>

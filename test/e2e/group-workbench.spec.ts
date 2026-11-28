@@ -4181,6 +4181,134 @@ test("登记调研归到哪天：表单不带 day，昨天翻到的卡只能记�
   expectNoBrowserErrors(browserErrors);
 });
 
+// 服务端早就按 faces 分面取数（contracts 的 faces + catalog 的 split(",") + searchAll 里
+// 那句 selected.has(face)），渲染侧却只发 q 与 limit：七面数据全砸进一个列表，人没法说
+// 「我只要群」。补筛选条这件事有三个【静默】失败形状，各对应下面一条线：少一面（芯片由
+// faceLabels 生成，键漂移就少一枚，界面不报错）、发了 faces 但服务端那半没接上（列表不动，
+// 而下拉看着像在工作）、芯片挂进 role="listbox" 那一层（读屏听到的选项数凭空多七条）。
+test("全局搜索筛选条：七面各一枚芯片，勾掉的这一面真不进列表", async ({
+  page,
+}) => {
+  const browserErrors = watchBrowserErrors(page);
+  const term = "面筛选验收";
+  const groupTitle = `${term}的群`;
+  const backlogTitle = `${term}的待办`;
+  // 留的两面写成 message,backlog：不发 backlog 的那一发里 message 面另有命中，列表非空
+  // 但里面一枚待办也没有。⚠ 别拿「筛到什么都不剩」当判据 —— 共享库里别的用例早往各面
+  // 灌过数据，那种「空」绿的是碰巧，不是这一面被排除（0083 同一条家法）。
+  const facesParam = "message,backlog";
+
+  await page.goto(`${webOrigin}/`);
+  const created = await createGroupThroughUi(page, groupTitle, `${term}的目标`);
+
+  // 待办走真 HTTP 灌：本轮改的是搜索，不在待办界面上绕路。
+  const seeded = (await page.evaluate(async (title: string) => {
+    const res = await fetch("/api/v1/backlog", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title, detail: `${title}的详情` }),
+    });
+    const body = (await res.json()) as { item?: { id?: string } };
+    return { status: res.status, id: body.item?.id ?? "" };
+  }, backlogTitle)) as { status: number; id: string };
+  expect(seeded.status).toBe(201);
+  expect(seeded.id).not.toBe("");
+
+  const search = page.locator("#globalSearch");
+  const panel = page.locator("#searchPanel");
+  const chips = panel.locator("#searchFaces .search-face-chip");
+  const pressedChips = panel.locator(
+    '#searchFaces .search-face-chip[aria-pressed="true"]',
+  );
+
+  // 收的是【每一条】上网的搜索请求的 faces 参数，不是某一条：防抖 260ms，连点芯片时
+  // 中间那几发也可能真发出去。判据一律落在「最后一条」上，否则绿的可能是中间那一发。
+  const facesSeen: (string | null)[] = [];
+  page.on("request", (request) => {
+    const url = new URL(request.url());
+    if (url.pathname !== "/api/v1/search" || url.searchParams.get("q") !== term)
+      return;
+    facesSeen.push(url.searchParams.get("faces"));
+  });
+  /** 轮询到「最后一条搜索请求的 faces == 期望值」。没发过请求时不算命中，继续等。 */
+  const expectFacesOnLastSearch = (expected: string | null) =>
+    expect
+      .poll(() => (facesSeen.length ? facesSeen[facesSeen.length - 1] : "?"), {
+        timeout: 20_000,
+      })
+      .toBe(expected);
+
+  // 线 0（七枚各一次 + 未筛时不上 faces）：未修时这一发红在计数 0（界面上压根没有芯片）。
+  // 它同时是分母：下面各线都在「有芯片」之上量。全集 = 服务端的缺省，多发一条 faces
+  // 等于把「七面」这件事抄两份，抄本必漂移。
+  await search.fill(term);
+  await expect(chips).toHaveCount(7);
+  await expect(chips.nth(0)).toHaveText("群");
+  await expect(chips.nth(6)).toHaveText("待办");
+  await expect(pressedChips).toHaveCount(7);
+  await expectFacesOnLastSearch(null);
+
+  // 线 1（结构：芯片不在 listbox 里）：#searchResults 是 role="listbox"，子元素即选项。
+  // 芯片挂进去 ⇒ 读屏报的选项数凭空多七条，键盘 ArrowDown 也得先跳遍芯片才到结果。
+  await expect(panel.locator("#searchResults .search-face-chip")).toHaveCount(
+    0,
+  );
+  await expect(
+    chips.first().locator('xpath=ancestor::*[@role="listbox"]'),
+  ).toHaveCount(0);
+
+  // 线 2（取消勾选真的落到请求上）：把「消息 / 待办」以外的芯片全点掉 ⇒ 发的是那两面。
+  for (const label of ["群", "任务", "成员", "文档"]) {
+    await chips.filter({ hasText: label }).click();
+  }
+  // 最后一枚单独盯着焦点：芯片若每次勾选都整排重建，刚点中的那一枚会在自己的
+  // onclick 里被换掉 —— 键盘用户等于每按一次就丢一次焦点，屏幕上什么异样都看不见。
+  const lastChipClick = chips.filter({ hasText: "会议" });
+  await lastChipClick.click();
+  await expect(lastChipClick).toBeFocused();
+  await expectFacesOnLastSearch(facesParam);
+  await expect(chips.filter({ hasText: "消息" })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  await expect(chips.filter({ hasText: "群" })).toHaveAttribute(
+    "aria-pressed",
+    "false",
+  );
+
+  // 线 3（服务端真按面取数，不是客户端把别的行藏起来）：同一个词在群与待办两面各有命中，
+  // 只留「消息 / 待办」后群那条消失、待办那条还在。
+  const groupRow = panel.locator(
+    `.search-result[data-face="group"][data-id="${created.group.group_id}"]`,
+  );
+  const backlogRow = panel.locator(
+    `.search-result[data-face="backlog"][data-id="${seeded.id}"]`,
+  );
+  await expect(groupRow).toHaveCount(0);
+  await expect(backlogRow).toHaveCount(1);
+
+  // 线 4（分母）：把「群」勾回来 ⇒ 同一个词又能看见那一面。没有这一发，线 3 的「消失」
+  // 可能只是因为数据压根不存在。
+  await chips.filter({ hasText: "群" }).click();
+  await expectFacesOnLastSearch(`group,${facesParam}`);
+  await expect(groupRow).toHaveCount(1);
+  await expect(backlogRow).toHaveCount(1);
+
+  // 线 5（全不勾 = 回到「没有筛」）：契约的 faces 带 .min(1)，空集发出去是 422 而不是空结果；
+  // 界面也不许停在一枚都不亮的状态上（点掉最后一枚等于点「全要」）。
+  for (const label of ["群", "消息", "待办"]) {
+    await chips.filter({ hasText: label }).click();
+  }
+  await expectFacesOnLastSearch(null);
+  await expect(pressedChips).toHaveCount(7);
+
+  // 线 6（空查询把整块收起来）：只收结果列表的话筛选条会留在屏上悬着。
+  await search.fill("");
+  await expect(panel).toBeHidden();
+
+  expectNoBrowserErrors(browserErrors);
+});
+
 /** 读服务端该成员的技能 skill_id 列表（不是本页内存态）：加/删是否真落库以此为准。 */
 async function readMemberSkills(
   page: Page,

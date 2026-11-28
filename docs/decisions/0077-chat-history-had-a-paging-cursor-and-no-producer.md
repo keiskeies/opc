@@ -43,20 +43,20 @@
 
 ## 4. 落地：判据、游标、覆盖入口各一格，再加一个按钮
 
-- **判据与游标分开写**（`packages/web/public/group.js:657` 的 `historyHasMore` 与
-  `packages/web/public/group.js:671` 的 `historyCursor`）。这不是风格，是沿用
+- **判据与游标分开写**（`packages/web/public/group.js:659` 的 `historyHasMore` 与
+  `packages/web/public/group.js:673` 的 `historyCursor`）。这不是风格，是沿用
   `packages/web/public/app.js:2924` 的 `replayHasMore` 那一对已定盘的形状：
   判据写错 = 按钮永不出现（或到底了还留着），游标写错 = 每次翻同一段 / 静默跳过一段。
   两者叠在一起，红了归不了因。判据是「这一页返回的条数满不满一整页」，⚠ 不能用
   `state.messages.length` —— 那是累计已加载，翻过一页之后它早就不等于本页条数。
-- **`applyHistoryWindow`**（`packages/web/public/group.js:707`）= 重读消息数组的唯一入口，
+- **`applyHistoryWindow`**（`packages/web/public/group.js:709`）= 重读消息数组的唯一入口，
   数组、游标、「还有更早」三格一起重算，并且**只保留该保留的**。落地时首屏读取有两处
-  （`packages/web/public/group.js:2163` 的 `loadMessages`，以及 `runRefreshAll` 里
+  （`packages/web/public/group.js:2165` 的 `loadMessages`，以及 `runRefreshAll` 里
   「用户正在输入框里」那个替身），首版我只在 `loadMessages` 里补了重算 —— 第二处也是
   整体覆盖，游标会指着一条已不在数组里的消息，下一发 `before_seq` 就从错误位置往旧翻
   （静默跳过一段历史）。守卫 `test/web/history-cursor-producer.test.ts:96` 因此钉
   「整条覆盖赋值只剩那一行定义」，把第二处也逼进同一个入口。
-- **同会话重读不许吞掉已翻出的那段**（`packages/web/public/group.js:689` 的
+- **同会话重读不许吞掉已翻出的那段**（`packages/web/public/group.js:691` 的
   `retainOlderThan`）。这一格是**实跑撞出来的**，不是设计时想到的：首版
   `applyHistoryWindow` 无条件 `state.messages = list`，变异机预检（未变异必须绿）
   连红两轮，第五根线（§5）红在「到底后按钮已收起」。病因是背景刷新（SSE 事件、发送后
@@ -70,16 +70,16 @@
   的整个窗口（取新来的那一页 = 游标退回，同一段会被再要一遍）。守卫
   `test/web/history-cursor-producer.test.ts:173` 把判据建在这个函数体上（不是散文上），
   五条各自点名，负向一发改退回「无条件整体覆盖」那一版 ⇒ 五条逐条报缺口。
-- **`loadOlderMessages`**（`packages/web/public/group.js:2228`）发第二发，按服务端
+- **`loadOlderMessages`**（`packages/web/public/group.js:2230`）发第二发，按服务端
   docstring 说的 prepend（`fresh.concat(state.messages)`，不许 reverse、不许整体覆盖），
   游标只许单调变小、空页不清空。**不抢 `renderToken`/`messageRequestToken`**：它既不是
   新快照也不是切会话，抢 token 会让并发在飞的 `loadMessages` 白投一次；本发只靠
   `conversation_id` 自证结果还属于当前会话。按 `message_id` 去重兜住翻页窗口与 SSE
   推送重叠那一瞬。视口锚点取「视口顶到内容底的距离」，prepend 之后按同一差值还原，
   否则每点一次「更早」屏幕就跳走。
-- **按钮**（`packages/web/public/group.js:2651`）挂在消息循环之前 = 流的最顶端；
+- **按钮**（`packages/web/public/group.js:2653`）挂在消息循环之前 = 流的最顶端；
   `messagesHasMore=false` 时这一格根本不画，不留一枚点了空手而回的按钮。
-- **`data-seq`**（`packages/web/public/group.js:2704`）：消息行带自己那条的会话内序号。
+- **`data-seq`**（`packages/web/public/group.js:2706`）：消息行带自己那条的会话内序号。
   这一条同样不是为测试加的装饰 —— 翻页的正确性唯一可判的形态是「首行是最早那条」，
   而文案相同的历史消息（同一句「收到」聊 50 遍）在屏幕上长得一样；序号是服务端事实，
   判据不靠渲染时刻的几何、也不靠文案 uniqueness。

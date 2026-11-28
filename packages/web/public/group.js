@@ -616,6 +616,8 @@ const state = {
   messageSending: false,
   searchTimer: null,
   searchAbort: null,
+  // 空集不是「一面都不搜」，见 toggleSearchFace 里那条归一化。
+  searchFaces: new Set(Object.keys(faceLabels)),
   docFilter: { q: "", kind: "", group: "" },
   // 与 docFilter 同形（0080）：待办列的是全部群的条目，此前只有一枚关键词框，
   // 「这个群的待办有哪几条」在界面上没有任何落点 —— 服务端 group_id 参数一直没人发。
@@ -9175,27 +9177,75 @@ function cancelMeetingModal(meeting) {
 function closeMenus() {
   $("#createMenu").hidden = true;
   $("#createButton").setAttribute("aria-expanded", "false");
-  $("#searchResults").hidden = true;
+  $("#searchPanel").hidden = true;
   $("#globalSearch").setAttribute("aria-expanded", "false");
+}
+// 勾选集归一化：全集与空集都返回【不上 faces】—— 服务端的缺省就是七面全搜，
+// 而契约的 faces 带 .min(1)，空子集发出去是 422 而不是空结果。
+function normalizedSearchFaces() {
+  const all = Object.keys(faceLabels);
+  const picked = all.filter((face) => state.searchFaces.has(face));
+  return picked.length === 0 || picked.length === all.length ? [] : picked;
+}
+// 芯片由 faceLabels 的键生成：契约加一面时 search-face-parity 会逼着 faceLabels
+// 跟着加键，筛选条于是自己长出来，不必第二个地方再登记一遍。
+// 只在建缺格时 replaceChildren —— 每次勾选都重建会把刚点中的那枚连焦点一起抹掉。
+function renderSearchFaces() {
+  const box = $("#searchFaces");
+  const faces = Object.keys(faceLabels);
+  if (box.childElementCount !== faces.length)
+    box.replaceChildren(
+      ...faces.map((face) =>
+        h(
+          "button",
+          {
+            type: "button",
+            class: "search-face-chip",
+            dataset: { face },
+            onclick: () => toggleSearchFace(face),
+          },
+          faceLabels[face],
+        ),
+      ),
+    );
+  for (const chip of box.children)
+    chip.setAttribute(
+      "aria-pressed",
+      state.searchFaces.has(chip.dataset.face) ? "true" : "false",
+    );
+}
+function toggleSearchFace(face) {
+  if (state.searchFaces.has(face)) state.searchFaces.delete(face);
+  else state.searchFaces.add(face);
+  // 全不勾＝「没有筛」，界面不许停在一枚都不亮的状态上（点它等于点「全要」）。
+  if (state.searchFaces.size === 0)
+    state.searchFaces = new Set(Object.keys(faceLabels));
+  renderSearchFaces();
+  globalSearch($("#globalSearch").value);
 }
 async function globalSearch(query) {
   clearTimeout(state.searchTimer);
   const resultBox = $("#searchResults");
   const q = query.trim();
   if (!q) {
-    resultBox.hidden = true;
+    $("#searchPanel").hidden = true;
     return;
   }
   state.searchTimer = setTimeout(async () => {
     state.searchAbort?.abort();
     const controller = new AbortController();
     state.searchAbort = controller;
+    renderSearchFaces();
     resultBox.replaceChildren(loadingState("正在全平台搜索…"));
-    resultBox.hidden = false;
+    $("#searchPanel").hidden = false;
     $("#globalSearch").setAttribute("aria-expanded", "true");
     try {
+      const picked = normalizedSearchFaces();
       const result = await request(
-        `/search?q=${encodeURIComponent(q)}&limit=30`,
+        `/search?q=${encodeURIComponent(q)}&limit=30` +
+          (picked.length
+            ? `&faces=${encodeURIComponent(picked.join(","))}`
+            : ""),
         { signal: controller.signal },
       );
       resultBox.replaceChildren();

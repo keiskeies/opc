@@ -566,7 +566,14 @@ kbd { border: 1px solid var(--line); border-bottom-width: 2px; padding: 0 5px; b
 .create-menu button { width: 100%; display: flex; align-items: center; gap: var(--space-3); padding: 10px; border: 0; border-radius: var(--radius-sm); background: transparent; cursor: pointer; text-align: left; }
 .create-menu button:hover { background: var(--surface-soft); }
 .create-menu small { display: block; color: var(--muted); margin-top: 1px; }
-.search-results { top: 44px; left: 0; right: 0; max-height: min(560px, 70vh); overflow: auto; }
+/* 一层壳装两行：筛选条 + 结果列表。筛选条不许放进 #searchResults —— 那一层是
+   role="listbox"，子元素即选项（0084）。 */
+.search-panel { top: 44px; left: 0; right: 0; }
+.search-faces { display: flex; flex-wrap: wrap; gap: var(--space-2); padding: 0 0 var(--space-2); }
+.search-face-chip { display: inline-flex; align-items: center; gap: var(--space-1); padding: 2px 9px; border: 1px solid var(--line); border-radius: var(--radius-pill); background: var(--surface-soft); color: var(--muted); font-size: var(--fs-xs); cursor: pointer; }
+.search-face-chip:hover { border-color: var(--control-border-hover); }
+.search-face-chip[aria-pressed="true"] { border-color: transparent; background: var(--primary-soft); color: var(--primary-ink); }
+.search-results { max-height: min(560px, 70vh); overflow: auto; }
 .search-result { display: grid; grid-template-columns: auto 1fr auto; align-items: start; gap: var(--space-2); width: 100%; padding: 10px; border: 0; border-radius: var(--radius-md); background: transparent; text-align: left; cursor: pointer; }
 .search-result:hover, .search-result:focus { background: var(--primary-soft); }
 .search-result .result-title { font-weight: var(--fw-strong); }

@@ -50,18 +50,18 @@ POST 有人调 ⇒ 它天然看不见）：
 
 服务端零改动。渲染侧三处：
 
-1. `packages/web/public/group.js:3755` 打开弹窗时取 `const initialDay = state.researchDay;` ——
+1. `packages/web/public/group.js:3757` 打开弹窗时取 `const initialDay = state.researchDay;` ——
    默认跟随**屏上正在看的那一天**。这不是新发明：`state.researchDay`（0082 加的）本来就是
    「用户要的那一天」，空 = 不设那一天，面板与弹窗读的是同一格，不会出现「面板在昨天、弹窗在今天」。
-2. `packages/web/public/group.js:3779` 弹窗里加一枚 `input("day", initialDay, "date")`，
-   `packages/web/public/group.js:3817` 读它，`packages/web/public/group.js:3824` 用
+2. `packages/web/public/group.js:3781` 弹窗里加一枚 `input("day", initialDay, "date")`，
+   `packages/web/public/group.js:3819` 读它，`packages/web/public/group.js:3826` 用
    `...(day ? { day } : {})` 上线 —— 与 0082 的 GET 同一套哨兵纪律：**空 = 不发**，
    绝不发 `day=""`（契约那个 `DAY_RE` 会把空串判 422，弹窗不关、用户以为没点上）。
-3. `packages/web/public/group.js:3834` 的 `dayLabel = day || localDayValue(0)` 把查重文案接回
-   那一天：`packages/web/public/group.js:3839` 原来硬写「今日调研已存在」，用户填了昨天、
+3. `packages/web/public/group.js:3836` 的 `dayLabel = day || localDayValue(0)` 把查重文案接回
+   那一天：`packages/web/public/group.js:3841` 原来硬写「今日调研已存在」，用户填了昨天、
    界面却回答「今日已存在」，等于指他去查另一个日子。留空时才说今天。
 
-`refreshAll()` 从不碰 `state.researchDay`（`packages/web/public/group.js:1040`），
+`refreshAll()` 从不碰 `state.researchDay`（`packages/web/public/group.js:1042`），
 所以登记完停在原地、不跳日子 —— 这一格是线 3 能判的前提，M9 专门剪它。
 
 ## 5. 新守卫：零

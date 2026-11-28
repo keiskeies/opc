@@ -43,12 +43,12 @@
 
 - **徽标**：`packages/web/public/group.js:137` 补 `group: "群"`，键序与 `SEARCH_FACES`
   逐一对齐（守卫把顺序也钉住：同一时刻的命中按面归组时，键序就是阅读顺序）。
-- **落点**：`packages/web/public/group.js:9267` 直接调 `selectGroup(hit.id)`。
+- **落点**：`packages/web/public/group.js:9317` 直接调 `selectGroup(hit.id)`。
   第一版我写的是自己找会话（`state.conversations.find(...)`）+ 找不到再落群详情 ——
-  那是把 `selectGroup` 内部已经有的那一步（`packages/web/public/group.js:6565`）
+  那是把 `selectGroup` 内部已经有的那一步（`packages/web/public/group.js:6567`）
   抄了一遍：既有函数本来就会「找群会话并进去，没有会话才落群详情」。抄一遍得到的是
   同一段逻辑有两个答案（侧栏点群和搜索点群各走一份），所以改成复用。
-- **身份属性**：`packages/web/public/group.js:9216` 与 `packages/web/public/group.js:9217`
+- **身份属性**：`packages/web/public/group.js:9266` 与 `packages/web/public/group.js:9267`
   给每行加 `data-face` / `data-id`。这一条不是为测试加的装饰，是 e2e 第一次真点搜索行时
   当场暴露的：群的章程文档标题 == 群名（建群时服务端一并建章程），所以按标题文本挑行会
   挑到**文档那一面**的那一行 —— 首跑就是红在徽标读出「文档」。同一时刻屏幕上可以同时
@@ -99,7 +99,7 @@
 
 ## 7. 记下来但没动的
 
-- **`task` 那一面的落点仍然是 `location.href = "/"`**（`packages/web/public/group.js:9270`）：
+- **`task` 那一面的落点仍然是 `location.href = "/"`**（`packages/web/public/group.js:9320`）：
   命中里有 task id，落点丢掉它跳到首页。真正的任务看板在控制室（`app.js` 的 `renderBoard`
   + `openDrawer`，hash 协议 `#/admin/board`、抽屉靠 `?id=` 的是回放页而不是看板页），
   要让搜索命中的任务落进看板，需要给看板页加一枚「按 id 直接开抽屉」的 query 语义 +
@@ -107,8 +107,11 @@
   奇偶守卫只钉「有没有分支」，所以 M3 那种「有分支但丢 id」的形态守卫不报，是 e2e 报的。
 - **模板/成员的删改入口、成员离职界面入口、`GET /api/v1/assets/:id` 的 nosniff/CSP**：
   0074/0075 §7 记过，原样保留。
-- **搜索没有「按面过滤」的界面**：契约 `faces` 参数（最多 7 个）服务端支持、界面永远传全部。
+- ⚠⚡ **搜索没有「按面过滤」的界面**：契约 `faces` 参数（最多 7 个）服务端支持、界面永远传全部。
   要不要在界面上给一排出入口属产品拍板。
+  ⚡ 本篇写下这句时它成立；**0084 已落地**（`docs/decisions/0084-search-had-a-faces-param-no-ui-used.md`），
+  界面上现在有七枚芯片、勾掉哪一面请求里就没有那一面。原句留着不删，因为它记的是当时那一格
+  确实空着，而且「服务端认、界面永远传全部」这个静默形状的证据仍然成立。
 
 ## 8. 实跑读数
 
