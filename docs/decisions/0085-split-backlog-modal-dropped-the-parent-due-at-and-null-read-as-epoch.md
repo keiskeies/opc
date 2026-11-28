@@ -9,7 +9,7 @@
 前一轮（0084 §9）把「查询参数面」扫成 15/15 全有调用方后宣告耗尽，这轮换了两根轴：
 
 1. **请求体面**：扫 `packages/contracts` 里 `*Create|Update|Request*Schema` 的字段、`hub` 认得、渲染侧不发 ⇒ 第一版报 **0**。⚠ 先怀疑尺子：正控制一跑，非贪婪 `\}` + 1200 字上限的 schema 取材只见到 43 schema / 126 字段（真值 95 / 463）——0 是「没量到」不是「没有」。改括号配平逐层取键后候选 135 个，但字段名启发式噪声太大（连刚接线的 `search.faces` 都误报成未发，模板拼接的 `${}` 路径提取又吞了 HTML），**字段轴作废**。
-2. **端点轴**：拿 `API_ENDPOINTS`（95 条）对两个入口页（`app.js` 的 `api(method, path)` 拼 `/api`，`group.js` 的 `request(path)` 拼 `/api/v1`）做归一匹配 ⇒ 15 条「前端两端都不请求」。逐条对 `test/arch/ui-caller-roster.ts` 的 `NO_UI_CALLER_ROSTER`（0069 立的守卫，27 发全绿）：bindings 三条、approvals/token、training、talent 详情、dispatch 三条全部**已在册**（【覆盖】【排期】【判断】各类，本轮不动）；`assets/:id` 是 `<img src>` 假阳（`packages/web/public/group.js:4415` 拼 URL）、backlog 五条写操作是 `backlogMutation` 包装假阳（`packages/web/public/group.js:4054` 把 method 转手交给 `request`）、`DELETE /members/:id` 是 method 在第二参数里的提取假阳。**参数轴 + 端点轴双扫之后，真正的净新增缺口只剩这一个**：`children[].due_at`。
+2. **端点轴**：拿 `API_ENDPOINTS`（95 条）对两个入口页（`app.js` 的 `api(method, path)` 拼 `/api`，`group.js` 的 `request(path)` 拼 `/api/v1`）做归一匹配 ⇒ 15 条「前端两端都不请求」。逐条对 `test/arch/ui-caller-roster.ts` 的 `NO_UI_CALLER_ROSTER`（0069 立的守卫，27 发全绿）：bindings 三条、approvals/token、training、talent 详情、dispatch 三条全部**已在册**（【覆盖】【排期】【判断】各类，本轮不动）；`assets/:id` 是 `<img src>` 假阳（`packages/web/public/group.js:4421` 拼 URL）、backlog 五条写操作是 `backlogMutation` 包装假阳（`packages/web/public/group.js:4060` 把 method 转手交给 `request`）、`DELETE /members/:id` 是 method 在第二参数里的提取假阳。**参数轴 + 端点轴双扫之后，真正的净新增缺口只剩这一个**：`children[].due_at`。
 
 选它的理由和 0080-0084 同一形状：契约有、服务端真消费、UI 缺、无 CEO 决策依赖。拆分弹窗已经在继承 `priority`，唯独漏掉 `due_at` ——同弹窗的不对称自己就是证据。
 
@@ -17,17 +17,17 @@
 
 `dateInputValue(item.due_at)` 要预填父项期限，而 `due_at` 可以是 `null`。`new Date(null)` 不抛、不 Invalid——它是 `1970-01-01T00:00:00Z`，`Number.isNaN` 拦不住，于是：
 
-- 「延期」弹窗（`packages/web/public/group.js:4131`，本轮之前就在用这条路径）对无期限的待办预填 `1970-01-01T08:00`（东八区），人看不见「无期限」只看见一个 1970，顺手点保存就写进一条纪元期限；
+- 「延期」弹窗（`packages/web/public/group.js:4137`，本轮之前就在用这条路径）对无期限的待办预填 `1970-01-01T08:00`（东八区），人看不见「无期限」只看见一个 1970，顺手点保存就写进一条纪元期限；
 - 拆分弹窗若照抄这条路径会把同一个坑复制成两枚。
 
-修法在源头：`packages/web/public/group.js:85` 在 `new Date` 之前挡掉 `null`/`undefined`，两扇门一起好。⚠ 锚点教训：`if (value === null || value === undefined) return "";` 这一行在 `payloadText`（`packages/web/public/group.js:3236`）里有一模一样的第二份——变异机锚点必须连着函数头才唯一（预热阶段命中 2 次当场停机那种）。
+修法在源头：`packages/web/public/group.js:85` 在 `new Date` 之前挡掉 `null`/`undefined`，两扇门一起好。⚠ 锚点教训：`if (value === null || value === undefined) return "";` 这一行在 `payloadText`（`packages/web/public/group.js:3242`）里有一模一样的第二份——变异机锚点必须连着函数头才唯一（预热阶段命中 2 次当场停机那种）。
 
 ## 4. 落地
 
 渲染侧三件事（服务端零改动）：
 
-- 拆分弹窗给两枚子项各加一格 `datetime-local`（`packages/web/public/group.js:4199` / `:4205`），预填 `dateInputValue(item.due_at)`；
-- 上送时留空**整枚不发**（`packages/web/public/group.js:4219`）：契约 `children[].due_at` 是 `positive().optional()`，`null` 过不了 schema，省略才是「无期限」的正确线格式；
+- 拆分弹窗给两枚子项各加一格 `datetime-local`（`packages/web/public/group.js:4205` / `:4205`），预填 `dateInputValue(item.due_at)`；
+- 上送时留空**整枚不发**（`packages/web/public/group.js:4225`）：契约 `children[].due_at` 是 `positive().optional()`，`null` 过不了 schema，省略才是「无期限」的正确线格式；
 - `dateInputValue` 的 null 挡（上一节）。
 
 没有新增 CSS（复用 `field()` + `input()` 现有形状），所以 space-scale / compact-scale 无新格。

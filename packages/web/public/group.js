@@ -3020,6 +3020,12 @@ function renderMeeting(view) {
           h("dd", { text: memberName(meeting.owner_member_id) }),
           h("dt", { text: "截止" }),
           h("dd", { class: "mono", text: fmtDateTime(meeting.deadline_at) }),
+          // 取消那刻也写在 concluded_at（CANCEL_SQL 与 CONCLUDE_SQL 同列），所以标签分两支。
+          h("dt", { text: concluded ? "散会于" : "取消于" }),
+          h("dd", {
+            class: "mono",
+            text: fmtDateTime(meeting.concluded_at),
+          }),
         )
       : h(
           "form",

@@ -4533,3 +4533,204 @@ async function readMemberExecutorSeqs(
     return body.member?.executors?.map((e) => e.seq) ?? [];
   }, memberId);
 }
+
+/** 与 group.js 的 fmtDateTime 同一把尺：zh-CN、24 小时制，比字符串不比时区。 */
+const fmtLocal = (value: number) =>
+  new Date(value).toLocaleString("zh-CN", { hour12: false });
+
+test("散会的时刻：详情只写开场于，散会/取消那刻既不进结论区也不进纪要", async ({
+  page,
+}) => {
+  const browserErrors = watchBrowserErrors(page);
+  const term = "散会时刻验收";
+
+  await page.goto(`${webOrigin}/`);
+  // withProductManager=true 把 pm-ui 落进首批成员 —— 主持人必须是坐过席的活跃成员。
+  const created = await createGroupThroughUi(
+    page,
+    `${term}的群`,
+    `${term}的目标`,
+    true,
+  );
+  const groupId = created.group.group_id;
+
+  /** 真 UI 走「发起会议」弹窗开一局；返回服务端那一刻的 meeting_id 与 opened_at。 */
+  const openMeetingThroughUi = async (
+    topic: string,
+  ): Promise<{ meetingId: string; openedAt: number }> => {
+    await page.locator("#createButton").click();
+    await page.locator('[data-create="meeting"]').click();
+    const dialog = page.getByRole("dialog", { name: "发起会议" });
+    // 群必须显式选：库里此时不止一个群（全体用例共用一份库），groups[0] 不保证是本轮的。
+    await dialog
+      .locator('select[name="group_id"]')
+      .selectOption({ value: groupId });
+    // 主持人格由 updateParticipants 异步重建，selectOption 自带「等选项出现」的重试。
+    await dialog
+      .locator('select[name="moderator_member_id"]')
+      .selectOption({ value: "pm-ui" });
+    await dialog.locator('input[name="topic"]').fill(topic);
+    const responsePromise = page.waitForResponse(
+      (response) =>
+        response.request().method() === "POST" &&
+        new URL(response.url()).pathname === "/api/v1/meetings",
+    );
+    await dialog.getByRole("button", { name: "发起会议", exact: true }).click();
+    const response = await responsePromise;
+    expect(response.ok()).toBe(true);
+    const body = (await response.json()) as {
+      meeting?: { meeting_id?: string; opened_at?: number };
+    };
+    const meetingId = String(body.meeting?.meeting_id ?? "");
+    expect(meetingId).not.toBe("");
+    const openedAt = Number(body.meeting?.opened_at ?? 0);
+    expect(openedAt).toBeGreaterThan(0);
+    return { meetingId, openedAt };
+  };
+
+  /**
+   * 把两刻拉开到 1 秒以上：fmtDateTime 的尺子只到秒，开场与散会挤在同一秒时
+   * 「读错列」和「读对列」会渲染出同一个字符串，判据就成了看运气。
+   */
+  const settlePastSecond = async (since: number) => {
+    while (Date.now() - since < 1100) await page.waitForTimeout(100);
+  };
+
+  const { meetingId, openedAt } = await openMeetingThroughUi(`${term}的议题`);
+  const view = page.locator("#view");
+
+  // 线 0（开着的会不该有这一刻）：详情有「开场于」、有发言框，dl 压根不渲染 ⇒ 「散会于」0 行。
+  await expect(view).toContainText("开场于");
+  await expect(view.locator('textarea[name="content"]')).toBeVisible();
+  await expect(view.locator('textarea[name="decision"]')).toBeVisible();
+  await expect(view.locator(".detail-list")).toHaveCount(0);
+  await expect(
+    view.locator(".detail-list dt", { hasText: "散会于" }),
+  ).toHaveCount(0);
+
+  // 线 1（真 UI 走一轮发言）：散会三件套之外先把发言链坐实 —— 纪要判据读的是这份轮次。
+  await view
+    .locator('textarea[name="content"]')
+    .fill(`${term}：同意按双周迭代推进`);
+  const turnResponsePromise = page.waitForResponse(
+    (response) =>
+      response.request().method() === "POST" &&
+      new URL(response.url()).pathname ===
+        `/api/v1/meetings/${meetingId}/turns`,
+  );
+  await view.getByRole("button", { name: "提交发言", exact: true }).click();
+  expect((await turnResponsePromise).ok()).toBe(true);
+  await expect(view.locator(".turn-content")).toHaveCount(1);
+  await expect(view.locator(".turn-content")).toHaveText(
+    `${term}：同意按双周迭代推进`,
+  );
+
+  // 线 2（散会那一刻）：真 UI 提交结论三件套，窗口前后夹住服务端时间戳。
+  await settlePastSecond(openedAt);
+  const before = Date.now();
+  await view.locator('textarea[name="decision"]').fill(`${term}：双周迭代上线`);
+  await view
+    .locator('select[name="owner_member_id"]')
+    .selectOption({ value: "pm-ui" });
+  await view.locator('input[name="deadline_at"]').fill("2026-12-31T18:00");
+  const concludeResponsePromise = page.waitForResponse(
+    (response) =>
+      response.request().method() === "POST" &&
+      new URL(response.url()).pathname.endsWith("/conclude"),
+  );
+  await view
+    .getByRole("button", { name: "散会并生成纪要", exact: true })
+    .click();
+  const concludeBody = (await (await concludeResponsePromise).json()) as {
+    summary?: { ok?: boolean; docId?: string };
+  };
+  const after = Date.now();
+  // 纪要沉淀必须真成功，否则线 5 读的是旧文档、docId 也是空的。
+  expect(concludeBody.summary?.ok).toBe(true);
+  const minutesDocId = String(concludeBody.summary?.docId ?? "");
+  expect(minutesDocId).not.toBe("");
+
+  // 读数分离：库里那一刻（fetch）是数据源，DOM 行是渲染 —— 两侧各证各的。
+  const concludedAt = (await page.evaluate(async (id) => {
+    const res = await fetch(`/api/v1/meetings/${id}`);
+    const body = (await res.json()) as {
+      meeting?: { concluded_at?: number | null };
+    };
+    return body.meeting?.concluded_at ?? null;
+  }, meetingId)) as number | null;
+  expect(concludedAt).not.toBeNull();
+  expect(concludedAt as number).toBeGreaterThanOrEqual(before);
+  expect(concludedAt as number).toBeLessThanOrEqual(after);
+
+  // 散会成功后页面被 openDocument 带去纪要 —— 回详情走 hash 深链（boot 认 meeting: 前缀）。
+  await page.goto(`${webOrigin}/#/messages/meeting:${meetingId}`);
+  await expect(view.locator(".detail-list")).toBeVisible();
+  // 线 3（散会于这一行进结论区）：整对 dt/dd 摘掉时这一发先红。
+  await expect(
+    view.locator(".detail-list dt", { hasText: "散会于" }),
+  ).toHaveCount(1);
+  // 线 4（时间行读的是服务端那个 epoch，不是「页面上有个日期」）：渲染侧换成 fmtDate
+  // 或写死当天都照样绿，所以判据必须是 fmtDateTime(concluded_at) 的同一个字符串。
+  // 尺子自证：两刻渲染成同一个字符串时，这条判据抓不到「读错列」，先把它钉死。
+  expect(fmtLocal(concludedAt as number)).not.toBe(fmtLocal(openedAt));
+  await expect(view.locator(".detail-list dd").last()).toHaveText(
+    fmtLocal(concludedAt as number),
+  );
+
+  // 线 5（纪要正文）：正文声明「会议事实一项不缺」，散会时刻此前恰恰是缺的那一项。
+  const minutes = await page.evaluate(async (id) => {
+    const res = await fetch(`/api/v1/documents/${id}`);
+    const body = (await res.json()) as {
+      document?: { body_text?: string };
+    };
+    return body.document?.body_text ?? "";
+  }, minutesDocId);
+  expect(minutes).toContain(
+    `- 散会时刻：${new Date(concludedAt as number).toISOString()}`,
+  );
+
+  // 线 6（取消那刻同列不同标签）：CANCEL_SQL 与 CONCLUDE_SQL 都写 concluded_at，
+  // 界面必须写「取消于」——把 ternary 写成常量的实现会在这一发红。
+  const second = await openMeetingThroughUi(`${term}的取消会`);
+  await settlePastSecond(second.openedAt);
+  await view.getByRole("button", { name: "取消会议", exact: true }).click();
+  const cancelDialog = page.getByRole("dialog", { name: "取消会议" });
+  await cancelDialog
+    .locator('textarea[name="reason"]')
+    .fill(`${term}：议题并回主会`);
+  const cancelResponsePromise = page.waitForResponse(
+    (response) =>
+      response.request().method() === "POST" &&
+      new URL(response.url()).pathname ===
+        `/api/v1/meetings/${second.meetingId}/cancel`,
+  );
+  const beforeCancel = Date.now();
+  await cancelDialog
+    .getByRole("button", { name: "确认取消", exact: true })
+    .click();
+  expect((await cancelResponsePromise).ok()).toBe(true);
+  const afterCancel = Date.now();
+  await expect(
+    view.locator(".detail-list dt", { hasText: "取消于" }),
+  ).toHaveCount(1);
+  await expect(
+    view.locator(".detail-list dt", { hasText: "散会于" }),
+  ).toHaveCount(0);
+  // 取消那刻也写在 concluded_at 那一列：标签之外，行里的时刻同样得是服务端写进去的那一枚。
+  const cancelledAt = (await page.evaluate(async (id) => {
+    const res = await fetch(`/api/v1/meetings/${id}`);
+    const body = (await res.json()) as {
+      meeting?: { concluded_at?: number | null };
+    };
+    return body.meeting?.concluded_at ?? null;
+  }, second.meetingId)) as number | null;
+  expect(cancelledAt).not.toBeNull();
+  expect(cancelledAt as number).toBeGreaterThanOrEqual(beforeCancel);
+  expect(cancelledAt as number).toBeLessThanOrEqual(afterCancel);
+  expect(fmtLocal(cancelledAt as number)).not.toBe(fmtLocal(second.openedAt));
+  await expect(view.locator(".detail-list dd").last()).toHaveText(
+    fmtLocal(cancelledAt as number),
+  );
+
+  expectNoBrowserErrors(browserErrors);
+});

@@ -22,8 +22,8 @@
   紧跟着 `packages/hub/src/rhythm/service.ts:362` 是 `WHERE day = ?`；`localDay` 本身在
   `packages/hub/src/rhythm/service.ts:127`；
 - **HTTP**：`packages/hub/src/http/work.ts:371` 把 `req.query` 整个递进服务层，没有任何一层拦着；
-- **渲染侧**：`packages/web/public/group.js:3275` 的 `let path = "/research/today";` 是死的，
-  `packages/web/public/group.js:3276` 往下的 `if` 只分 `rhythm` 一档，调研这一档一个参数都不发。
+- **渲染侧**：`packages/web/public/group.js:3281` 的 `let path = "/research/today";` 是死的，
+  `packages/web/public/group.js:3282` 往下的 `if` 只分 `rhythm` 一档，调研这一档一个参数都不发。
 
 四格里前三格都在说「这一天可以选」，最后一格替用户做了决定，而且做得**完全合法** ——
 不传 `day` 是契约允许的形状，返回的就是今天那一批，不报错、不空、看起来没有任何不对。
@@ -57,16 +57,16 @@
    同式（本地时区的 `YYYY-MM-DD`）。**不能用 `toISOString().slice(0, 10)`**：那是 UTC 日界，
    东八区早上八点前会翻到昨天去，界面上写的「今天」和服务端读到的「今天」就不是同一天。
    本轮机器实测的时区是 `Asia/Shanghai`（UTC+8），这个坑每天上午 8 点前都在。
-3. `packages/web/public/group.js:3281` 起的 `else if (state.researchDay)` —— **只在非空时**拼
+3. `packages/web/public/group.js:3287` 起的 `else if (state.researchDay)` —— **只在非空时**拼
    `?day=`，走 `URLSearchParams`；空 ⇒ 整条查询不发，落回服务端的 `?? localDay`。
    这一格的真假在两头发：非空不发 = 翻不了天（M2）；空也照发 = 空串被 `.strict()` 的正则判
    422，初屏直接坏（M9）。
-4. `packages/web/public/group.js:3606` 的 `const dayText = state.researchDay || localDayValue(0);`
+4. `packages/web/public/group.js:3612` 的 `const dayText = state.researchDay || localDayValue(0);`
    把「屏上写哪天」集中到一处，两处文案跟着它走：汇总句
-   `packages/web/public/group.js:3613` 与空态标题 `packages/web/public/group.js:3634`。
-   控件在 `packages/web/public/group.js:3618`，`value` 回填 `state.researchDay`，
+   `packages/web/public/group.js:3619` 与空态标题 `packages/web/public/group.js:3640`。
+   控件在 `packages/web/public/group.js:3624`，`value` 回填 `state.researchDay`，
    `onchange` 写 state + 重读 —— 与既有的 `state.rhythmGroup`（同文件
-   `packages/web/public/group.js:3462`）同一形状，不新造轮子。
+   `packages/web/public/group.js:3468`）同一形状，不新造轮子。
 
 **为什么这一格可以整栏重画**（而 0079 那一族不行）：日期只在 `change` 时变，一次操作一个事件，
 不存在「中文输入法的拼音还没上屏、承载它的节点已经被换掉」那个失败模式；而工具条是

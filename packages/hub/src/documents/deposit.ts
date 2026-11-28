@@ -129,6 +129,7 @@ function meetingSummaryMarkdown(meeting: MeetingView): string {
     `- 决定：${meeting.decision ?? "未记录"}`,
     `- 负责人：${meeting.owner_member_id ?? "未记录"}`,
     `- 截止时间：${deadlineText(meeting.deadline_at)}`,
+    `- 散会时刻：${deadlineText(meeting.concluded_at)}`,
     "",
   ].join("\n");
 }
