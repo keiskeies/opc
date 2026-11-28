@@ -92,8 +92,8 @@ e2e 一发（`test/e2e/group-workbench.spec.ts:4746`），全程真 UI、九个�
 以下读数对应的字节 = 最终提交字节（文档与 SNAP 定稿后，守卫与全量都在其上重跑过）：
 
 - 红探针对 HEAD 版两文件：单测 4 failed、e2e 红在线 1 的 `dt` 计数断言，还原 SHA 逐字节一致；
-- 变异机：预热全绿；**20/20 KILLED** + 控制组如预期活 + 逐线点名 13/13（含 1 根声明守卫线）；两文件收尾 SHA 两侧一致；
-- 重钉：门 0 / 门 0.5 / 门 1 如上，共搬 **72 处**（service.ts 6 + group.js 66）；SNAP **504 键 / 0 重复**；
+- 变异机：预热 21 根锚点各命中 1 次 + 未变异单测/e2e 双绿；**20/20 KILLED** + 控制组如预期活 + 逐线点名 13 根线各有目击者、另 1 根声明守卫线（◆）；两文件收尾 SHA 两侧一致；
+- 重钉：门 0 / 门 0.5 / 门 1 如上，共搬 **72 处**（service.ts 6 + group.js 66）；SNAP **498 键 / 0 重复**（净 +36，见 §7）；
 - 全量 vitest **205 files / 4246 passed | 6 skipped**（本轮净 +5 发单测）；全量 e2e **72 passed**（71 → 72）；
 - `tsc -b` + `tsc -p tsconfig.test.json --noEmit` 双双 exit 0；`pnpm lint` **exit 0 / 0 error**、warnings **106**——与基线**持平、0 增量**（机械核对：本轮 36 枚新 SNAP 键值没有一枚含 `${`，所以 0086 那种「守卫自身键值触发 `noTemplateCurlyInString`」的增量这轮压根不存在；写台账时我先按上一轮形状预期了「+3」，机械数是 +0，**照抄上轮预期与心算同罪**）；
 - `docs/review/check-gate.mjs`「判不了或不符的项：**0**」、`node docs/review/verify-open-invariants.mjs` **SUCCESS**；
