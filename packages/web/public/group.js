@@ -80,6 +80,9 @@ const fmtDate = (value) =>
 const fmtDateTime = (value) =>
   value ? new Date(value).toLocaleString("zh-CN", { hour12: false }) : "—";
 const dateInputValue = (value) => {
+  // null/undefined 必须挡在 new Date 之前：new Date(null) 是纪元 0 时刻（不是 Invalid），
+  // 放行下去会得到 "1970-01-01"——无期限的待办打开「延期」会预填 1970，点保存就把期限写成了纪元。
+  if (value === null || value === undefined) return "";
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return "";
   const local = new Date(d.getTime() - d.getTimezoneOffset() * 60000);
@@ -4191,15 +4194,29 @@ function backlogSplitModal(item) {
           text: "至少创建两个子项；父项保留并建立 parent_id 关联。",
         }),
         field("子项 1", input("child1", "", "text", { required: true })),
+        field(
+          "子项 1 期限",
+          input("child1_due", dateInputValue(item.due_at), "datetime-local"),
+          "留空 = 该子项无期限；预填的是父项当前的期限。",
+        ),
         field("子项 2", input("child2", "", "text", { required: true })),
+        field(
+          "子项 2 期限",
+          input("child2_due", dateInputValue(item.due_at), "datetime-local"),
+        ),
       ),
     submit: "拆分",
     onSubmit: (data) =>
       backlogMutation(`/backlog/${encodeURIComponent(item.id)}/split`, "POST", {
-        children: [data.get("child1"), data.get("child2")].map((title) => ({
-          title,
+        children: [
+          { title: data.get("child1"), due: data.get("child1_due") },
+          { title: data.get("child2"), due: data.get("child2_due") },
+        ].map((child) => ({
+          title: child.title,
           detail: "",
           priority: item.priority,
+          // 契约的 children[].due_at 是 positive 可选：留空整枚不发，服务端落 null。
+          ...(child.due ? { due_at: new Date(child.due).getTime() } : {}),
         })),
       }),
   });

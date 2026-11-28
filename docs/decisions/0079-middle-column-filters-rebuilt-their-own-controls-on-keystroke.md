@@ -52,13 +52,13 @@ paint；`packages/web/public/group.css` 不动；新守卫 `test/web/list-filter
 
 ## 4. 落地：两半拆法 + 一个第二写入点
 
-`packages/web/public/group.js:1425` `renderDocumentList(content, toolbar)` 只 append 控件（一枚
+`packages/web/public/group.js:1428` `renderDocumentList(content, toolbar)` 只 append 控件（一枚
 搜索框 + 「文档类型」+「所属群」两枚下拉），收尾叫一发 `paintDocumentRows(content)`；
-`packages/web/public/group.js:1487` `paintDocumentRows(content)` 自己 `content.replaceChildren()`
-之后只画树或空态。待办侧 `packages/web/public/group.js:1676` /
-`packages/web/public/group.js:1715` 同一形状。三枚文档 handler 分别落在搜索框
-`packages/web/public/group.js:1435`、类型下拉 `packages/web/public/group.js:1446`、所属群下拉
-`packages/web/public/group.js:1464`，待办 `packages/web/public/group.js:1683`
+`packages/web/public/group.js:1490` `paintDocumentRows(content)` 自己 `content.replaceChildren()`
+之后只画树或空态。待办侧 `packages/web/public/group.js:1679` /
+`packages/web/public/group.js:1718` 同一形状。三枚文档 handler 分别落在搜索框
+`packages/web/public/group.js:1438`、类型下拉 `packages/web/public/group.js:1449`、所属群下拉
+`packages/web/public/group.js:1467`，待办 `packages/web/public/group.js:1686`
 —— 四发全部只叫 paint，一发行都不叫 builder。
 
 `state.docFilter.kind` 还有**第二个写入者**（人才卡那一格，它叫的是完整 `renderList()`）：那条
@@ -142,12 +142,12 @@ paint；`packages/web/public/group.css` 不动；新守卫 `test/web/list-filter
 
 - 其余长栏（会话 / 联系人 / 人才 / 设置）仍由 `renderList` 整栏重画 ⇒ 每次切栏都跳回列表顶部。
   本轮只给「带输入控件的两栏」拆了行区，因为它们才有「正在被敲的节点」这一格。
-- 界面读列表是整份拉回再在内存里筛（`packages/web/public/group.js:994`
-  `/documents?limit=100`、`packages/web/public/group.js:969` `/backlog?limit=200`），
+- 界面读列表是整份拉回再在内存里筛（`packages/web/public/group.js:997`
+  `/documents?limit=100`、`packages/web/public/group.js:972` `/backlog?limit=200`），
   服务端 `listDocuments(deps.db, req.query, BOSS)` 认查询参数、界面一个都不发 ⇒ 100 篇之后的文档
   搜不到。这就是 0077 那个游标形状换了个面重复。
 - 搜索命中 `task` 面仍旧 `location.href = "/"`
-  （`packages/web/public/group.js:9320`），0076 §记下来但没动的 里就挂着，仍未接。
+  （`packages/web/public/group.js:9337`），0076 §记下来但没动的 里就挂着，仍未接。
 - 全站 grep `X-Content-Type-Options` / `nosniff` 命中 **0** —— 资产读取没有这个响应头。
 - `docs/review/check-gate.mjs` 的 C7 存量分布扫的是 `git ls-files docs` ⇒ **未跟踪的新台账压根不进
   那份计数**（本轮实测：本篇有 6 处轮次相对说法，而它没出现在 0079 之前的分布里）。C7 判失败只看
@@ -165,7 +165,7 @@ paint；`packages/web/public/group.css` 不动；新守卫 `test/web/list-filter
   `{"searches":3,"selects":6,"trees":3,"leaves":92,"emptyStates":0,"focusInToolbar":true,
   "focusTag":"INPUT","searchText":"筛验"}`。⚠ 注意 `focusInToolbar` 与 `searchText` 是**绿的** ——
   缺陷本体（自递归追加）并没有换掉正在敲的节点，追加的那一排是**新增**兄弟；丢焦点是**被否决那个
-  修法**的症状，不是缺陷的症状。这一点写进 `packages/web/public/group.js:1425` 上面的注释，免得
+  修法**的症状，不是缺陷的症状。这一点写进 `packages/web/public/group.js:1428` 上面的注释，免得
   后来人以为「修好焦点」就是修好了这一发。
 - 修复后 e2e 单发：`1 passed (4.0s)`。
 - 新守卫：`Tests 8 passed (8)`。

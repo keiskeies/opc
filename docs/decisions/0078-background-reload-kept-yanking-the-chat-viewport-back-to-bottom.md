@@ -56,7 +56,7 @@
 `{top: 500, sh: 2000, ch: 120}`；同一个节点 `remove()` 之后读回
 `{top: 0, sh: 0, ch: 0}`。这三个 0 会让 `scrollHeight - clientHeight <= 80` 直接成立
 ⇒ 恒判「贴底」⇒ 每次整格重画都跳到底。所以 `renderMain` 那一眼必须读在拆之前
-（`packages/web/public/group.js:2032`），而不能等进了 `renderChat` 再读
+（`packages/web/public/group.js:2035`），而不能等进了 `renderChat` 再读
 （那里旧节点已经不在了：本轮第一版就写错在 `renderChat` 里，把整对锚点删掉测试一发
 都不红 ⇒ 移走；守卫另有一发判 `renderChat` 里既不许出现 `chatScrollAnchor(` 也不许
 出现 `.scrollTop =`）。
@@ -64,15 +64,15 @@
 **实测二：贴底判定必须留容差。** 浏览器把 `scrollTop` 按**向下取整的整数**交回来，
 分数 DPI / 分数行高下 `scrollHeight - clientHeight` 落在两行之间，滚到底读回的「距底」
 可能是 0 也可能是 1；反过来差几像素没到底的人，被要求「精确为 0 才跟随」会莫名其妙地
-不再跟随。所以阈值是一个非零常量 `packages/web/public/group.js:732`，两侧都兜：小于它
+不再跟随。所以阈值是一个非零常量 `packages/web/public/group.js:735`，两侧都兜：小于它
 算贴底，明显往上翻了才算「在读旧史」。这一格不是装饰 —— 变异机把阈值改成 0（E7）之后，
 守卫在整数取底的假流上判贴底就漂了。
 
 **两把尺子各管一头，不许互相「统一」。**
 `loadOlderMessages`（0077）留的是**距底距离**，落地在
-`packages/web/public/group.js:2270`：往旧翻是往**上方**加内容，只有距底距离能让用户
+`packages/web/public/group.js:2273`：往旧翻是往**上方**加内容，只有距底距离能让用户
 眼里那一条停在原处。本轮这一对留的是 **`scrollTop` 本身**（读取
-`packages/web/public/group.js:752`，落地 `packages/web/public/group.js:767`）：背景重读
+`packages/web/public/group.js:755`，落地 `packages/web/public/group.js:770`）：背景重读
 新增的消息落在**下方**，上方那段一条没动 ⇒ 同一个 `scrollTop` 就是同一屏像素；换成距底
 距离反而会把屏幕连着一块往下滑。两者形状相近、都能编译、内容判据对两者全无感 —— 所以
 守卫点名钉住「`loadOlderMessages` 仍用距底、且压根不调用 `chatScrollAnchor`」。把
@@ -81,11 +81,11 @@
 
 **一道窗口归属门。** 两处压回都要求屏幕上显示的正是这一会话：刚切会话时
 `loadMessages(新 id)` 读到的锚点属于上一个会话，压到新会话上会让新会话停在半屏而不是
-最新消息。锚点读取在 `packages/web/public/group.js:2172`，它必须早于
-`packages/web/public/group.js:2176`（那一行开始画骨架），落地在
-`packages/web/public/group.js:2207` / `packages/web/public/group.js:2208`（无锚点 = 首次
+最新消息。锚点读取在 `packages/web/public/group.js:2175`，它必须早于
+`packages/web/public/group.js:2179`（那一行开始画骨架），落地在
+`packages/web/public/group.js:2210` / `packages/web/public/group.js:2211`（无锚点 = 首次
 打开或那一屏不是这一会话 ⇒ 落到最新消息；有锚点 ⇒ 交回锚点）。`renderMain` 那一头在
-`packages/web/public/group.js:2088`。
+`packages/web/public/group.js:2091`。
 
 ## 5. 判据：e2e 真滚动几何 + 源扫描点名每一处跳底
 

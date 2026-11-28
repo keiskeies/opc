@@ -4309,6 +4309,173 @@ test("全局搜索筛选条：七面各一枚芯片，勾掉的这一面真不�
   expectNoBrowserErrors(browserErrors);
 });
 
+const DAY_MS = 86_400_000;
+
+test("拆分带上限的活：弹窗没有期限格，父项的期限拆完就丢", async ({ page }) => {
+  const browserErrors = watchBrowserErrors(page);
+  const term = "拆分期限验收";
+  const parentTitle = `${term}的父项`;
+  // 期限落在「未来 3 天」，与任何既有待办的默认（无期限）区分得开。
+  // 整分钟取齐：datetime-local 只认到分钟，种子带上秒数的话「预填回读等于父项期限」
+  // 这条判据永远差那一截 —— 那是尺子的分辨率，不是缺陷。
+  const due = Math.floor((Date.now() + 3 * DAY_MS) / 60_000) * 60_000;
+
+  await page.goto(`${webOrigin}/`);
+  const groupTitle = `${term}的群`;
+  const created = await createGroupThroughUi(page, groupTitle, `${term}的目标`);
+  const groupId = created.group.group_id;
+
+  // 父项走真 HTTP 灌：本轮改的是拆分弹窗，不在建待办的界面上绕路。
+  const seeded = (await page.evaluate(
+    async (args: { title: string; groupId: string; due: number }) => {
+      const res = await fetch("/api/v1/backlog", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          title: args.title,
+          detail: `${args.title}的详情`,
+          group_id: args.groupId,
+          due_at: args.due,
+        }),
+      });
+      const body = (await res.json()) as { item?: { id?: string } };
+      return { status: res.status, id: body.item?.id ?? "" };
+    },
+    { title: parentTitle, groupId, due },
+  )) as { status: number; id: string };
+  expect(seeded.status).toBe(201);
+  expect(seeded.id).not.toBe("");
+
+  await page.locator('[data-nav="backlog"]').click();
+  await page.locator("#listToolbar input[type=search]").fill(term);
+  const card = page.locator(".task-card").filter({ hasText: parentTitle });
+  await expect(card).toHaveCount(1);
+
+  // 每发 /split 的请求体都留档：判据落在「这一发自己带没带」，不是页面内存态。
+  const splitBodies: string[] = [];
+  page.on("request", (request) => {
+    const url = new URL(request.url());
+    if (!url.pathname.endsWith("/split") || request.method() !== "POST") return;
+    splitBodies.push(request.postData() ?? "");
+  });
+
+  await card.getByRole("button", { name: "拆分", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "拆分待办" });
+  await expect(dialog).toBeVisible();
+
+  // 线 0（期限格子在弹窗里，且预填的就是父项那条期限）：延期弹窗早就用
+  // datetime-local + dateInputValue(item.due_at)，拆分是同一个 item 进的第二扇门。
+  const due1 = dialog.locator('input[name="child1_due"]');
+  const due2 = dialog.locator('input[name="child2_due"]');
+  await expect(due1).toHaveCount(1);
+  await expect(due2).toHaveCount(1);
+  // 值比的是「解析回那一刻」，不比字符串：datetime-local 填的是本地时间，
+  // 而 new Date(本地串) 按同一时区解析回去 —— 字符串比对会把本机时区写进判据里。
+  await expect
+    .poll(async () => new Date(await due1.inputValue()).getTime())
+    .toBe(due);
+  await expect
+    .poll(async () => new Date(await due2.inputValue()).getTime())
+    .toBe(due);
+
+  await dialog.locator('input[name="child1"]').fill(`${term}子项一`);
+  await dialog.locator('input[name="child2"]').fill(`${term}子项二`);
+  await dialog.getByRole("button", { name: "拆分", exact: true }).click();
+  await expect(dialog).toBeHidden();
+  await expect.poll(() => splitBodies.length).toBe(1);
+
+  // 线 1（一发带着两枚期限）：children 各带一枚 due_at，值等于父项那一刻的期限。
+  const sent = JSON.parse(splitBodies[0] ?? "{}") as {
+    children?: { title?: string; due_at?: number | null }[];
+  };
+  const byTitle = new Map(
+    (sent.children ?? []).map((child) => [child.title, child.due_at]),
+  );
+  expect(byTitle.get(`${term}子项一`)).toBe(due);
+  expect(byTitle.get(`${term}子项二`)).toBe(due);
+
+  // 落库以服务端为准（不是刷新后的卡片）：证明带上去的不是 UI 内存态而真进了行。
+  const readBack = await page.evaluate(async (id: string) => {
+    const res = await fetch(`/api/v1/backlog?limit=200`);
+    const body = (await res.json()) as {
+      items?: { id: string; title: string; due_at: number | null }[];
+    };
+    const items = body.items ?? [];
+    return {
+      parent: items.find((item) => item.id === id)?.due_at ?? "missing",
+      children: items
+        .filter((item) => item.title.includes("子项"))
+        .map((item) => item.due_at),
+    };
+  }, seeded.id);
+  expect(readBack.children).toHaveLength(2);
+  // 线 2（两枚都真落库）。
+  for (const value of readBack.children) expect(value).toBe(due);
+  // 线 3（拆完父项仍带着那条期限）。
+  expect(readBack.parent).toBe(due);
+
+  // 线 4（留空 = 子项没有期限，不是被预填悄悄塞回）：清空第二枚再拆一发。
+  await card.getByRole("button", { name: "拆分", exact: true }).click();
+  await dialog.locator('input[name="child1"]').fill(`${term}子项三`);
+  await dialog.locator('input[name="child2"]').fill(`${term}子项四`);
+  await due2.fill("");
+  await dialog.getByRole("button", { name: "拆分", exact: true }).click();
+  await expect(dialog).toBeHidden();
+  await expect.poll(() => splitBodies.length).toBe(2);
+  const cleared = JSON.parse(splitBodies[1] ?? "{}") as {
+    children?: { title?: string; due_at?: number | null }[];
+  };
+  const clearedByTitle = new Map(
+    (cleared.children ?? []).map((child) => [child.title, child.due_at]),
+  );
+  expect(clearedByTitle.get(`${term}子项三`)).toBe(due);
+  expect(clearedByTitle.get(`${term}子项四`)).toBeUndefined();
+
+  // 线 5（卡片上看得见）：拆出的子项各挂上 <time>，父项那条也还在。
+  await page.locator("#listToolbar input[type=search]").fill(term);
+  for (const childTitle of [`${term}子项一`, `${term}子项二`]) {
+    await expect(
+      page
+        .locator(".task-card")
+        .filter({ hasText: childTitle })
+        .locator("time"),
+    ).toHaveCount(1);
+  }
+  await expect(card.locator("time")).toHaveCount(1);
+
+  // 线 6（无期限的父项：期限格是空的）：new Date(null) 是纪元 0 时刻而不是 Invalid，
+  // 少了 dateInputValue 的 null 挡，预填会得到 "1970-01-01T08:00" —— 于是「拆分」和
+  // 「延期」（同一条取值路径）都会把一条本无期限的待办写成 1970 年到期。
+  const noDueTitle = `${term}无期限的父项`;
+  const seeded2 = (await page.evaluate(
+    async (args: { title: string; groupId: string }) => {
+      const res = await fetch("/api/v1/backlog", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ title: args.title, group_id: args.groupId }),
+      });
+      return { status: res.status };
+    },
+    { title: noDueTitle, groupId },
+  )) as { status: number };
+  expect(seeded2.status).toBe(201);
+
+  const noDueCard = page.locator(".task-card").filter({ hasText: noDueTitle });
+  await expect(noDueCard.locator("time")).toHaveCount(0);
+  await noDueCard.getByRole("button", { name: "拆分", exact: true }).click();
+  await expect(dialog).toBeVisible();
+  await expect(dialog.locator('input[name="child1_due"]')).toHaveValue("");
+  await expect(dialog.locator('input[name="child2_due"]')).toHaveValue("");
+  // 同一条取值路径的另一扇门：延期弹窗拿的也是 item.due_at，null 时同样不许预填 1970。
+  await dialog.getByRole("button", { name: "取消", exact: true }).click();
+  const deferDialog = page.getByRole("dialog", { name: "延期或清除期限" });
+  await noDueCard.getByRole("button", { name: "延期", exact: true }).click();
+  await expect(deferDialog.locator('input[name="due_at"]')).toHaveValue("");
+  await deferDialog.getByRole("button", { name: "取消", exact: true }).click();
+
+  expectNoBrowserErrors(browserErrors);
+});
+
 /** 读服务端该成员的技能 skill_id 列表（不是本页内存态）：加/删是否真落库以此为准。 */
 async function readMemberSkills(
   page: Page,

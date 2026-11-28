@@ -2,9 +2,9 @@
 
 **日期。** 2026-11-28（round396）。
 **落地。** `packages/web/public/group.js`：`state.backlogFilter` 从裸字符串升格为与 `docFilter`
-同形的 `{ q, group }`（`packages/web/public/group.js:624`），`renderBacklogList` 在搜索框之后
-追加一枚「所属群」下拉（`packages/web/public/group.js:1693`），`paintBacklogRows` 的谓词改成
-两维 AND（`packages/web/public/group.js:1719`）；服务端零改动 —— `group_id` 本来就认。守卫
+同形的 `{ q, group }`（`packages/web/public/group.js:627`），`renderBacklogList` 在搜索框之后
+追加一枚「所属群」下拉（`packages/web/public/group.js:1696`），`paintBacklogRows` 的谓词改成
+两维 AND（`packages/web/public/group.js:1722`）；服务端零改动 —— `group_id` 本来就认。守卫
 `test/web/list-filter-repaint.test.ts` 的待办 vm 一发扩成群+词双维（含节点同一性），paint
 计数一发由「一个待办 handler」改钉「两个」；新链路用例 `test/e2e/group-workbench.spec.ts` +1
 （8 根线：下拉存在且只有一份 / 关键词与群 AND / 换群不换掉正在用的搜索框 / 清词后群维度单独
@@ -40,18 +40,18 @@ e2e 不响（既有的待办用例都在全量态断言内容，从没写过第�
 0079 定盘的拆法在这里直接兑现了红利：控件在 `renderBacklogList` 建一次、行区在
 `paintBacklogRows` 重画，所以「加一维筛选」= state 加一格 + 控件加一枚 + 谓词加一个合取项，
 三处互不越界。两发 handler（搜索框 `oninput`、下拉 `onchange`）各自只写自己那一格 state、
-都只叫 `paintBacklogRows(content)`；AND 语义住在谓词里（`packages/web/public/group.js:1718`），
+都只叫 `paintBacklogRows(content)`；AND 语义住在谓词里（`packages/web/public/group.js:1721`），
 不住在任何 handler 里 —— 谁也不许顺手清对方。这一格有专门的变异：N3 把下拉 `onchange` 改成
 同时 `state.backlogFilter.q = ""`（用户选个群，刚敲的关键词凭空蒸发），实测红在线 1。
 
-`selected:` 写在 option 上（`packages/web/public/group.js:1705`）而不是构建后赋 `select.value`：
+`selected:` 写在 option 上（`packages/web/public/group.js:1708`）而不是构建后赋 `select.value`：
 下拉的选项表跟着 `state.groups` 走，切栏重建时当前选中值要能原样长回来 —— 这和 0079 §4 里
 文档栏「所属群」下拉是同一个写法，两栏同形本身就是守卫钉的形状（vm 那发的每次快照都读
 `selects`）。
 
 ## 4. 刻意留在内存筛，不发 group_id —— 与 0079 §7 分页同案
 
-界面仍是 `request("/backlog?limit=200")`（`packages/web/public/group.js:969`）整份拉回、
+界面仍是 `request("/backlog?limit=200")`（`packages/web/public/group.js:972`）整份拉回、
 `paintBacklogRows` 内存里 AND。把 `group_id` 拼进请求串在这条链路上是**一行字的事**，本轮故意
 不做：文档栏的 `kind`/`group` 两维同样是内存筛，只把待办一侧切到服务端筛会让两栏对 limit
 边界的语义分叉（待办 200 条之后的条目会「筛着筛着凭空消失」，文档栏则永远全量可见）。limit
