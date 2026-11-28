@@ -21,7 +21,7 @@
    `sha256` 找旧行，而库里那道索引（0012）也真是全表唯一 —— 于是**同一份字节只要曾以
    `attachment` 用途传过，再以 `avatar` 传就拿回附件那一行**；随后头像门
    （`SELECT 1 … WHERE asset_id = ? AND purpose = 'avatar'`，两处：
-   `packages/hub/src/members/service.ts:265` 与 `packages/hub/src/http/people.ts:440`）
+   `packages/hub/src/members/service.ts:268` 与 `packages/hub/src/http/people.ts:440`）
    按用途拒 ⇒ 绑定必拒 `asset_not_found`。**方向 B 更阴**：先当头像传、再当附件传同一份字节，
    拿回的是头像行与头像的 mime —— 不报错，静默串数据。
 3. **两个字段可以同时提交。** `updateAvatar` 把 `avatar_asset_id` 与 `avatar_seed`

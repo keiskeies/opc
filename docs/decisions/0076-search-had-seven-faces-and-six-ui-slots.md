@@ -43,12 +43,12 @@
 
 - **徽标**：`packages/web/public/group.js:140` 补 `group: "群"`，键序与 `SEARCH_FACES`
   逐一对齐（守卫把顺序也钉住：同一时刻的命中按面归组时，键序就是阅读顺序）。
-- **落点**：`packages/web/public/group.js:9340` 直接调 `selectGroup(hit.id)`。
+- **落点**：`packages/web/public/group.js:9344` 直接调 `selectGroup(hit.id)`。
   第一版我写的是自己找会话（`state.conversations.find(...)`）+ 找不到再落群详情 ——
   那是把 `selectGroup` 内部已经有的那一步（`packages/web/public/group.js:6590`）
   抄了一遍：既有函数本来就会「找群会话并进去，没有会话才落群详情」。抄一遍得到的是
   同一段逻辑有两个答案（侧栏点群和搜索点群各走一份），所以改成复用。
-- **身份属性**：`packages/web/public/group.js:9289` 与 `packages/web/public/group.js:9290`
+- **身份属性**：`packages/web/public/group.js:9293` 与 `packages/web/public/group.js:9294`
   给每行加 `data-face` / `data-id`。这一条不是为测试加的装饰，是 e2e 第一次真点搜索行时
   当场暴露的：群的章程文档标题 == 群名（建群时服务端一并建章程），所以按标题文本挑行会
   挑到**文档那一面**的那一行 —— 首跑就是红在徽标读出「文档」。同一时刻屏幕上可以同时
@@ -99,7 +99,7 @@
 
 ## 7. 记下来但没动的
 
-- **`task` 那一面的落点仍然是 `location.href = "/"`**（`packages/web/public/group.js:9343`）：
+- **`task` 那一面的落点仍然是 `location.href = "/"`**（`packages/web/public/group.js:9347`）：
   命中里有 task id，落点丢掉它跳到首页。真正的任务看板在控制室（`app.js` 的 `renderBoard`
   + `openDrawer`，hash 协议 `#/admin/board`、抽屉靠 `?id=` 的是回放页而不是看板页），
   要让搜索命中的任务落进看板，需要给看板页加一枚「按 id 直接开抽屉」的 query 语义 +

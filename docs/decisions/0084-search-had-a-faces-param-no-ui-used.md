@@ -37,7 +37,7 @@
 **空集不是「一面都不搜」**。用户把七枚芯片全点掉，界面不许发 `faces=`（空串过不了
 `z.array(...).min(1)` ⇒ 422），也不许发「七面」（那等于替他改主意）。它要发的是
 **不带 `faces`** —— 服务端的缺省就是七面全搜，与「没有筛」是同一件事。所以勾选集先过一道
-归一化（`packages/web/public/group.js:9208`）：全集与空集都归成「不上 `faces`」。
+归一化（`packages/web/public/group.js:9212`）：全集与空集都归成「不上 `faces`」。
 
 这条还牵住 e2e 的生死：`watchBrowserErrors` 那对助手断言 `failedResponses` 必须是 `[]`，
 所以只要 UI 在任何一步发出空 `faces`，那发 422 会当场把用例判红 —— **契约的 422 就是这条
@@ -49,7 +49,7 @@
 
 - **勾选集**：`packages/web/public/group.js:623` 的 `searchFaces: new Set(Object.keys(faceLabels))`
   —— 初值直接由 `faceLabels` 的键生成，不在第二处抄一遍七面。
-- **芯片由 `faceLabels` 生成**：`renderSearchFaces`（`packages/web/public/group.js:9216`）遍历
+- **芯片由 `faceLabels` 生成**：`renderSearchFaces`（`packages/web/public/group.js:9220`）遍历
   `Object.keys(faceLabels)` 建按钮。这不是省事，是让**契约加一面时不可能漏掉筛选条** ——
   `test/web/search-face-parity.test.ts:68` 已经判死 `faceLabels` 的键必须逐面等于
   `SEARCH_FACES`，于是新面会自动长出一枚芯片，漏不掉。
@@ -61,9 +61,9 @@
   键盘 ArrowDown 也按这个顺序跳）。芯片挂进去 ⇒ 选项数凭空多七条、方向键得先跳遍芯片。
   所以 HTML 里是一层不带 `role` 的壳装两行：`.search-faces` + `.search-results`。
 
-`toggleSearchFace`（`packages/web/public/group.js:9240`）在全不勾时把集合**复位成全集**
+`toggleSearchFace`（`packages/web/public/group.js:9244`）在全不勾时把集合**复位成全集**
 （点它等于点「全要」，界面不许停在一枚都不亮的状态上），然后拿当前输入重跑一次
-`globalSearch`（`packages/web/public/group.js:9249`）。
+`globalSearch`（`packages/web/public/group.js:9253`）。
 
 CSS 一处教训：芯片内距我第一版写的是 `gap: 5px`，被 `space-scale` 守卫判红 ——
 那根的硬门是「豁免值必须 < `var(--space-1)`=4px」，5px 压根不具备入册资格，round377

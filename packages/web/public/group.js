@@ -6650,6 +6650,10 @@ function memberDetail(member) {
           ? `${member.voice.lang} · 语速 ${member.voice.rate} · 音高 ${member.voice.pitch}`
           : "未配置",
       }),
+      h("dt", { text: "入职于" }),
+      h("dd", { text: fmtDateTime(member.hired_at) }),
+      h("dt", { text: "最近更新" }),
+      h("dd", { text: fmtDateTime(member.updated_at) }),
     ),
     h("h3", { text: "技能" }),
     h(

@@ -638,6 +638,183 @@ describe("setMemberSkills / setMemberExecutors：set 语义", () => {
   });
 });
 
+/**
+ * updated_at 正向断言（0067 §5b：「随写而变」的字段要有一条正面断言承重）。
+ *
+ * members.updated_at 的语义是「这个成员的档案最后一次变」，而挂载（技能/执行器）
+ * 是档案的一部分 —— 此前只有 updateMember 与 setAvatar 写这一列，两个挂载函数
+ * 一次都没写过。反向断言（≠ / toBeLessThan）全绿推不出它有写入方，所以这里
+ * 每条都钉「等于本次 nowMs」这一枚具体钟。
+ */
+describe("挂载替换与 updated_at：档案真的变了才前进", () => {
+  async function hired(q: WriteQueue, id = "m-clock"): Promise<void> {
+    expect(
+      (await hireMember(q, { req: req(), nowMs: NOW, newId: () => id })).ok,
+    ).toBe(true);
+  }
+
+  /** 绕开视图直接读列 —— 视图读错列时这一发要跟着红。 */
+  function rawUpdatedAt(db: AnyDb, id: string): number {
+    const row = db
+      .prepare("SELECT updated_at FROM members WHERE member_id = ?")
+      .get(id) as { updated_at: number | bigint };
+    return Number(row.updated_at);
+  }
+
+  /**
+   * 写结果回给调用方的那一枚钟（HTTP 直接把它编成响应体）。
+   * 视图若在加钟之前取，库里那列照写、返回体给的是旧值 —— 界面立刻显示旧时刻。
+   */
+  function resultUpdatedAt(
+    r: Awaited<ReturnType<typeof setMemberSkills>>,
+  ): number {
+    if (!r.ok) throw new Error("写被守卫拒了，读不到返回体");
+    return r.member.updated_at;
+  }
+
+  it("换技能 ⇒ updated_at 前进到本次 nowMs，hired_at 纹丝不动", async () => {
+    const { q, db } = await newQ();
+    await hired(q);
+    const r = await setMemberSkills(q, {
+      memberId: "m-clock",
+      skills: [{ skill_id: "go-v1", name: "Go" }],
+      nowMs: NOW + 1,
+    });
+    expect(r.ok).toBe(true);
+    const view = getMember(db as never, "m-clock");
+    expect(view?.hired_at).toBe(NOW);
+    expect(view?.updated_at).toBe(NOW + 1);
+    expect(rawUpdatedAt(db, "m-clock")).toBe(NOW + 1);
+    expect(resultUpdatedAt(r)).toBe(NOW + 1);
+  });
+
+  it("同一份技能列表再存一次 ⇒ 档案没变，updated_at 也不前进", async () => {
+    const { q, db } = await newQ();
+    await hired(q);
+    const one = [{ skill_id: "go-v1", name: "Go" }];
+    expect(
+      (
+        await setMemberSkills(q, {
+          memberId: "m-clock",
+          skills: one,
+          nowMs: NOW + 1,
+        })
+      ).ok,
+    ).toBe(true);
+    expect(
+      (
+        await setMemberSkills(q, {
+          memberId: "m-clock",
+          skills: one,
+          nowMs: NOW + 2,
+        })
+      ).ok,
+    ).toBe(true);
+    // 同值写不落台账（文件头口径）——同一把尺子量时刻：变了才算变更，没变就不许动钟。
+    expect(listHireEvents(db as never, "m-clock").map((e) => e.action)).toEqual(
+      ["hired", "skills_changed"],
+    );
+    expect(getMember(db as never, "m-clock")?.updated_at).toBe(NOW + 1);
+    expect(rawUpdatedAt(db, "m-clock")).toBe(NOW + 1);
+  });
+
+  it("被守卫拒掉的挂载 ⇒ 档案没变，updated_at 不前进也不留下半次写", async () => {
+    const { q, db } = await newQ();
+    await hired(q);
+    const dup = await setMemberSkills(q, {
+      memberId: "m-clock",
+      skills: [
+        { skill_id: "go-v1", name: "Go" },
+        { skill_id: "go-v1", name: "Go 重复" },
+      ],
+      nowMs: NOW + 9,
+    });
+    expect(dup.ok).toBe(false);
+    if (!dup.ok) {
+      expect(dup.code).toBe("duplicate_skill_id");
+    }
+    const empty = await setMemberExecutors(q, {
+      memberId: "m-clock",
+      executors: [],
+      nowMs: NOW + 9,
+    });
+    expect(empty.ok).toBe(false);
+    const ghost = await setMemberSkills(q, {
+      memberId: "ghost",
+      skills: SKILLS,
+      nowMs: NOW + 9,
+    });
+    expect(ghost.ok).toBe(false);
+    // 招聘那一刻写下的 updated_at 就是现在的值：三发被拒的写一次都没碰到这一列。
+    expect(getMember(db as never, "m-clock")?.updated_at).toBe(NOW);
+    expect(rawUpdatedAt(db, "m-clock")).toBe(NOW);
+  });
+
+  it("换执行器 ⇒ updated_at 前进；同一串再存一次不动（与技能同形）", async () => {
+    const { q, db } = await newQ();
+    await hired(q);
+    const swapped = [
+      {
+        seq: 1,
+        kind: "pure-model",
+        config: { kind: "pure-model" },
+        enabled: true,
+      },
+    ] as MemberExecutor[];
+    const r = await setMemberExecutors(q, {
+      memberId: "m-clock",
+      executors: swapped,
+      nowMs: NOW + 3,
+    });
+    expect(r.ok).toBe(true);
+    expect(getMember(db as never, "m-clock")?.updated_at).toBe(NOW + 3);
+    expect(rawUpdatedAt(db, "m-clock")).toBe(NOW + 3);
+    expect(resultUpdatedAt(r)).toBe(NOW + 3);
+    expect(
+      (
+        await setMemberExecutors(q, {
+          memberId: "m-clock",
+          executors: swapped,
+          nowMs: NOW + 4,
+        })
+      ).ok,
+    ).toBe(true);
+    expect(getMember(db as never, "m-clock")?.updated_at).toBe(NOW + 3);
+    expect(rawUpdatedAt(db, "m-clock")).toBe(NOW + 3);
+  });
+
+  it("旧形态反证：整删整插本身不算变更 —— 只改 enabled 才算", async () => {
+    const { q, db } = await newQ();
+    await hired(q);
+    // 关掉 seq=2：形状真的变了 ⇒ 钟前进。
+    const off = EXECUTORS.map((e) =>
+      e.seq === 2 ? { ...e, enabled: false } : e,
+    ) as MemberExecutor[];
+    expect(
+      (
+        await setMemberExecutors(q, {
+          memberId: "m-clock",
+          executors: off,
+          nowMs: NOW + 5,
+        })
+      ).ok,
+    ).toBe(true);
+    expect(getMember(db as never, "m-clock")?.updated_at).toBe(NOW + 5);
+    // 重排 + 换插入序：规范化后同一串 ⇒ 档案没变，钟不许动。
+    const shuffled = [...off].reverse();
+    expect(
+      (
+        await setMemberExecutors(q, {
+          memberId: "m-clock",
+          executors: shuffled,
+          nowMs: NOW + 6,
+        })
+      ).ok,
+    ).toBe(true);
+    expect(getMember(db as never, "m-clock")?.updated_at).toBe(NOW + 5);
+  });
+});
+
 describe("ensureCosMember：全库唯一的特助", () => {
   it("首次孵化：成员+执行器+台账+审计(system 标记)，二次调用复用同一行", async () => {
     const { q, db } = await newQ();

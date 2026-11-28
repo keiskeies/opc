@@ -147,7 +147,7 @@ paint；`packages/web/public/group.css` 不动；新守卫 `test/web/list-filter
   服务端 `listDocuments(deps.db, req.query, BOSS)` 认查询参数、界面一个都不发 ⇒ 100 篇之后的文档
   搜不到。这就是 0077 那个游标形状换了个面重复。
 - 搜索命中 `task` 面仍旧 `location.href = "/"`
-  （`packages/web/public/group.js:9343`），0076 §记下来但没动的 里就挂着，仍未接。
+  （`packages/web/public/group.js:9347`），0076 §记下来但没动的 里就挂着，仍未接。
 - 全站 grep `X-Content-Type-Options` / `nosniff` 命中 **0** —— 资产读取没有这个响应头。
 - `docs/review/check-gate.mjs` 的 C7 存量分布扫的是 `git ls-files docs` ⇒ **未跟踪的新台账压根不进
   那份计数**（本轮实测：本篇有 6 处轮次相对说法，而它没出现在 0079 之前的分布里）。C7 判失败只看

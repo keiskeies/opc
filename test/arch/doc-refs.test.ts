@@ -1306,7 +1306,7 @@ const SNAP: Record<string, string> = {
   // ── 0074（头像上传链路：两道用途门 + 界面上传器本体）───────────────────
   // 三条都是活坐标：门被放宽（不再判 purpose）或上传器被摘掉，0074 钉的
   // 「同字节换用途拿不到别人的行」与「界面上有生产者」同时失去物证。
-  "0074-avatar-upload-never-worked-a-dedupe-key-one-dimension-short-and-a-ui-with-no-uploader.md>packages/hub/src/members/service.ts:265": `"SELECT 1 AS ok FROM assets WHERE asset_id = ? AND purpose = 'avatar'";`,
+  "0074-avatar-upload-never-worked-a-dedupe-key-one-dimension-short-and-a-ui-with-no-uploader.md>packages/hub/src/members/service.ts:268": `"SELECT 1 AS ok FROM assets WHERE asset_id = ? AND purpose = 'avatar'";`,
   "0074-avatar-upload-never-worked-a-dedupe-key-one-dimension-short-and-a-ui-with-no-uploader.md>packages/hub/src/http/people.ts:440": `"SELECT 1 AS ok FROM assets WHERE asset_id = ? AND purpose = 'avatar'";`,
   "0074-avatar-upload-never-worked-a-dedupe-key-one-dimension-short-and-a-ui-with-no-uploader.md>packages/web/public/group.js:6398":
     "function avatarImagePicker() {",
@@ -1320,7 +1320,7 @@ const SNAP: Record<string, string> = {
     '"/charter/" + encodeURIComponent(charterRole),',
   "0075-template-library-had-a-display-and-no-producer.md>packages/web/public/group.js:4319":
     'button("新建模板", () => templateCreateModal(), "small"),',
-  "0075-template-library-had-a-display-and-no-producer.md>packages/web/public/group.js:8905":
+  "0075-template-library-had-a-display-and-no-producer.md>packages/web/public/group.js:8909":
     "function templateCreateModal() {",
   "0075-template-library-had-a-display-and-no-producer.md>packages/hub/src/http/documents.ts:429":
     "async function createTemplateRoute(",
@@ -1348,13 +1348,13 @@ const SNAP: Record<string, string> = {
     'group: "群",',
   "0076-search-had-seven-faces-and-six-ui-slots.md>packages/web/public/group.js:6590":
     "(entry) => entry.group_id === id,",
-  "0076-search-had-seven-faces-and-six-ui-slots.md>packages/web/public/group.js:9289":
+  "0076-search-had-seven-faces-and-six-ui-slots.md>packages/web/public/group.js:9293":
     '"data-face": hit.face,',
-  "0076-search-had-seven-faces-and-six-ui-slots.md>packages/web/public/group.js:9290":
+  "0076-search-had-seven-faces-and-six-ui-slots.md>packages/web/public/group.js:9294":
     '"data-id": hit.id,',
-  "0076-search-had-seven-faces-and-six-ui-slots.md>packages/web/public/group.js:9340":
+  "0076-search-had-seven-faces-and-six-ui-slots.md>packages/web/public/group.js:9344":
     "await selectGroup(hit.id);",
-  "0076-search-had-seven-faces-and-six-ui-slots.md>packages/web/public/group.js:9343":
+  "0076-search-had-seven-faces-and-six-ui-slots.md>packages/web/public/group.js:9347":
     'location.href = "/";',
   "0076-search-had-seven-faces-and-six-ui-slots.md>test/e2e/group-workbench.spec.ts:2518":
     'test("全局搜索群命中：徽标是「群」且点击真落到该群会话", async ({ page }) => {',
@@ -1469,7 +1469,7 @@ const SNAP: Record<string, string> = {
     'request("/backlog?limit=200"),',
   "0079-middle-column-filters-rebuilt-their-own-controls-on-keystroke.md>packages/web/public/group.js:997":
     'request("/documents?limit=100"),',
-  "0079-middle-column-filters-rebuilt-their-own-controls-on-keystroke.md>packages/web/public/group.js:9343":
+  "0079-middle-column-filters-rebuilt-their-own-controls-on-keystroke.md>packages/web/public/group.js:9347":
     'location.href = "/";',
   "0079-middle-column-filters-rebuilt-their-own-controls-on-keystroke.md>test/e2e/group-workbench.spec.ts:3268":
     'test("中栏筛选器：逐字符敲不累加控件、不重复列表，焦点/取值/滚动留在原处", async ({',
@@ -1524,39 +1524,39 @@ const SNAP: Record<string, string> = {
     '"DELETE /api/v1/members/:id/skills/:skillId",',
   "0081-member-settings-panel-had-no-way-to-add-or-remove-skills-and-executors.md>packages/hub/src/http/people.ts:871":
     '"DELETE /api/v1/members/:id/executors/:seq",',
-  "0081-member-settings-panel-had-no-way-to-add-or-remove-skills-and-executors.md>packages/hub/src/members/service.ts:897":
+  "0081-member-settings-panel-had-no-way-to-add-or-remove-skills-and-executors.md>packages/hub/src/members/service.ts:915":
     '"empty_executor_chain",',
-  "0081-member-settings-panel-had-no-way-to-add-or-remove-skills-and-executors.md>packages/web/public/group.js:6843":
+  "0081-member-settings-panel-had-no-way-to-add-or-remove-skills-and-executors.md>packages/web/public/group.js:6847":
     "function bindExecutorKind(kind, config) {",
-  "0081-member-settings-panel-had-no-way-to-add-or-remove-skills-and-executors.md>packages/web/public/group.js:6845":
+  "0081-member-settings-panel-had-no-way-to-add-or-remove-skills-and-executors.md>packages/web/public/group.js:6849":
     'kind.addEventListener("change", () => {',
-  "0081-member-settings-panel-had-no-way-to-add-or-remove-skills-and-executors.md>packages/web/public/group.js:6858":
+  "0081-member-settings-panel-had-no-way-to-add-or-remove-skills-and-executors.md>packages/web/public/group.js:6862":
     "function skillSettingsRow(skill = {}, remove = null) {",
-  "0081-member-settings-panel-had-no-way-to-add-or-remove-skills-and-executors.md>packages/web/public/group.js:6877":
+  "0081-member-settings-panel-had-no-way-to-add-or-remove-skills-and-executors.md>packages/web/public/group.js:6881":
     'row.append(iconButton("close", remove.label, () => remove.onClick(row)));',
-  "0081-member-settings-panel-had-no-way-to-add-or-remove-skills-and-executors.md>packages/web/public/group.js:6882":
+  "0081-member-settings-panel-had-no-way-to-add-or-remove-skills-and-executors.md>packages/web/public/group.js:6886":
     "function executorSettingsRow(executor, remove = null) {",
-  "0081-member-settings-panel-had-no-way-to-add-or-remove-skills-and-executors.md>packages/web/public/group.js:6912":
+  "0081-member-settings-panel-had-no-way-to-add-or-remove-skills-and-executors.md>packages/web/public/group.js:6916":
     'row.append(iconButton("close", remove.label, () => remove.onClick(row)));',
-  "0081-member-settings-panel-had-no-way-to-add-or-remove-skills-and-executors.md>packages/web/public/group.js:7084":
+  "0081-member-settings-panel-had-no-way-to-add-or-remove-skills-and-executors.md>packages/web/public/group.js:7088":
     'button("添加技能", () => addSkill(), "small"),',
-  "0081-member-settings-panel-had-no-way-to-add-or-remove-skills-and-executors.md>packages/web/public/group.js:7095":
+  "0081-member-settings-panel-had-no-way-to-add-or-remove-skills-and-executors.md>packages/web/public/group.js:7099":
     'button("添加执行器", () => addExecutor(), "small"),',
-  "0081-member-settings-panel-had-no-way-to-add-or-remove-skills-and-executors.md>packages/web/public/group.js:8423":
+  "0081-member-settings-panel-had-no-way-to-add-or-remove-skills-and-executors.md>packages/web/public/group.js:8427":
     "skillsEditor.insertBefore(",
-  "0081-member-settings-panel-had-no-way-to-add-or-remove-skills-and-executors.md>packages/web/public/group.js:8442":
+  "0081-member-settings-panel-had-no-way-to-add-or-remove-skills-and-executors.md>packages/web/public/group.js:8446":
     "member.executors.length > 1",
-  "0081-member-settings-panel-had-no-way-to-add-or-remove-skills-and-executors.md>packages/web/public/group.js:8460":
+  "0081-member-settings-panel-had-no-way-to-add-or-remove-skills-and-executors.md>packages/web/public/group.js:8464":
     "const nextSeq = Math.max(0, ...rows.map((el) => Number(el.value))) + 1;",
-  "0081-member-settings-panel-had-no-way-to-add-or-remove-skills-and-executors.md>packages/web/public/group.js:8616":
+  "0081-member-settings-panel-had-no-way-to-add-or-remove-skills-and-executors.md>packages/web/public/group.js:8620":
     "async function updateSkills(event) {",
-  "0081-member-settings-panel-had-no-way-to-add-or-remove-skills-and-executors.md>packages/web/public/group.js:8623":
+  "0081-member-settings-panel-had-no-way-to-add-or-remove-skills-and-executors.md>packages/web/public/group.js:8627":
     '...(note === "" ? {} : { note }),',
-  "0081-member-settings-panel-had-no-way-to-add-or-remove-skills-and-executors.md>packages/web/public/group.js:8644":
+  "0081-member-settings-panel-had-no-way-to-add-or-remove-skills-and-executors.md>packages/web/public/group.js:8648":
     'kind: $("[name=executor_kind]", row).value,',
-  "0081-member-settings-panel-had-no-way-to-add-or-remove-skills-and-executors.md>packages/web/public/group.js:8660":
+  "0081-member-settings-panel-had-no-way-to-add-or-remove-skills-and-executors.md>packages/web/public/group.js:8664":
     "async function removeSkill(memberId, skillId) {",
-  "0081-member-settings-panel-had-no-way-to-add-or-remove-skills-and-executors.md>packages/web/public/group.js:8673":
+  "0081-member-settings-panel-had-no-way-to-add-or-remove-skills-and-executors.md>packages/web/public/group.js:8677":
     "async function removeExecutor(memberId, seq) {",
   "0081-member-settings-panel-had-no-way-to-add-or-remove-skills-and-executors.md>test/arch/ui-caller-roster.ts:242":
     "export const NO_UI_CALLER_ROSTER: readonly NoUiCallerEntry[] = [",
@@ -1568,16 +1568,16 @@ const SNAP: Record<string, string> = {
     ".superRefine((data, ctx) => {",
   "INDEX.md>packages/hub/src/http/people.ts:871":
     '"DELETE /api/v1/members/:id/executors/:seq",',
-  "INDEX.md>packages/hub/src/members/service.ts:897": '"empty_executor_chain",',
-  "INDEX.md>packages/web/public/group.js:6843":
+  "INDEX.md>packages/hub/src/members/service.ts:915": '"empty_executor_chain",',
+  "INDEX.md>packages/web/public/group.js:6847":
     "function bindExecutorKind(kind, config) {",
-  "INDEX.md>packages/web/public/group.js:6858":
+  "INDEX.md>packages/web/public/group.js:6862":
     "function skillSettingsRow(skill = {}, remove = null) {",
-  "INDEX.md>packages/web/public/group.js:6882":
+  "INDEX.md>packages/web/public/group.js:6886":
     "function executorSettingsRow(executor, remove = null) {",
-  "INDEX.md>packages/web/public/group.js:7084":
+  "INDEX.md>packages/web/public/group.js:7088":
     'button("添加技能", () => addSkill(), "small"),',
-  "INDEX.md>packages/web/public/group.js:7095":
+  "INDEX.md>packages/web/public/group.js:7099":
     'button("添加执行器", () => addExecutor(), "small"),',
   "INDEX.md>packages/contracts/src/rhythm.ts:58":
     "export const listResearchQuerySchema = z",
@@ -1689,7 +1689,7 @@ const SNAP: Record<string, string> = {
     "...(faces === undefined ? {} : { faces }),",
   "INDEX.md>packages/web/public/group.js:623":
     "searchFaces: new Set(Object.keys(faceLabels)),",
-  "INDEX.md>packages/web/public/group.js:9216":
+  "INDEX.md>packages/web/public/group.js:9220":
     "function renderSearchFaces() {",
   "INDEX.md>test/web/search-face-parity.test.ts:68":
     "expect(faceLabelKeys(groupSrc)).toEqual([...SEARCH_FACES]);",
@@ -1707,13 +1707,13 @@ const SNAP: Record<string, string> = {
     "...(faces === undefined ? {} : { faces }),",
   "0084-search-had-a-faces-param-no-ui-used.md>packages/web/public/group.js:623":
     "searchFaces: new Set(Object.keys(faceLabels)),",
-  "0084-search-had-a-faces-param-no-ui-used.md>packages/web/public/group.js:9208":
+  "0084-search-had-a-faces-param-no-ui-used.md>packages/web/public/group.js:9212":
     "function normalizedSearchFaces() {",
-  "0084-search-had-a-faces-param-no-ui-used.md>packages/web/public/group.js:9216":
+  "0084-search-had-a-faces-param-no-ui-used.md>packages/web/public/group.js:9220":
     "function renderSearchFaces() {",
-  "0084-search-had-a-faces-param-no-ui-used.md>packages/web/public/group.js:9240":
+  "0084-search-had-a-faces-param-no-ui-used.md>packages/web/public/group.js:9244":
     "function toggleSearchFace(face) {",
-  "0084-search-had-a-faces-param-no-ui-used.md>packages/web/public/group.js:9249":
+  "0084-search-had-a-faces-param-no-ui-used.md>packages/web/public/group.js:9253":
     "async function globalSearch(query) {",
   "0084-search-had-a-faces-param-no-ui-used.md>test/web/search-face-parity.test.ts:68":
     "expect(faceLabelKeys(groupSrc)).toEqual([...SEARCH_FACES]);",
@@ -1784,6 +1784,78 @@ const SNAP: Record<string, string> = {
     "\" status = 'concluded', concluded_at = ?, next_speaker_member_id = NULL\" +",
   "INDEX.md>packages/web/public/group.js:3024":
     'h("dt", { text: concluded ? "散会于" : "取消于" }),',
+  "0087-member-profile-had-two-clocks-one-never-written-and-one-never-read.md>packages/contracts/src/member.ts:205":
+    "hired_at: z.number().int(),",
+  "0087-member-profile-had-two-clocks-one-never-written-and-one-never-read.md>packages/contracts/src/member.ts:206":
+    "updated_at: z.number().int(),",
+  "0087-member-profile-had-two-clocks-one-never-written-and-one-never-read.md>packages/hub/resources/migrations/0013_members.sql:30":
+    "member_id       TEXT PRIMARY KEY,",
+  "0087-member-profile-had-two-clocks-one-never-written-and-one-never-read.md>packages/hub/resources/migrations/0013_members.sql:54":
+    "PRIMARY KEY (member_id, skill_id)",
+  "0087-member-profile-had-two-clocks-one-never-written-and-one-never-read.md>packages/hub/src/members/service.ts:253":
+    '"tone = ?, voice_json = COALESCE(?, voice_json), status = ?, updated_at = ? " +',
+  "0087-member-profile-had-two-clocks-one-never-written-and-one-never-read.md>packages/hub/src/members/service.ts:257":
+    'const BUMP_MEMBER_SQL = "UPDATE members SET updated_at = ? WHERE member_id = ?";',
+  "0087-member-profile-had-two-clocks-one-never-written-and-one-never-read.md>packages/hub/src/members/service.ts:491":
+    "function bumpMemberUpdatedAt(",
+  "0087-member-profile-had-two-clocks-one-never-written-and-one-never-read.md>packages/hub/src/members/service.ts:542":
+    "function skillsKey(skills: readonly MemberSkill[]): string {",
+  "0087-member-profile-had-two-clocks-one-never-written-and-one-never-read.md>packages/hub/src/members/service.ts:550":
+    "function executorsKey(executors: readonly MemberExecutor[]): string {",
+  "0087-member-profile-had-two-clocks-one-never-written-and-one-never-read.md>packages/hub/src/members/service.ts:865":
+    "if (skillsKey(before.skills) !== skillsKey(after.skills)) {",
+  "0087-member-profile-had-two-clocks-one-never-written-and-one-never-read.md>packages/hub/src/members/service.ts:936":
+    "if (executorsKey(before.executors) !== executorsKey(after.executors)) {",
+  "0087-member-profile-had-two-clocks-one-never-written-and-one-never-read.md>packages/hub/test/members/service.test.ts:675":
+    'it("换技能 ⇒ updated_at 前进到本次 nowMs，hired_at 纹丝不动", async () => {',
+  "0087-member-profile-had-two-clocks-one-never-written-and-one-never-read.md>packages/hub/test/members/service.test.ts:691":
+    'it("同一份技能列表再存一次 ⇒ 档案没变，updated_at 也不前进", async () => {',
+  "0087-member-profile-had-two-clocks-one-never-written-and-one-never-read.md>packages/hub/test/members/service.test.ts:721":
+    'it("被守卫拒掉的挂载 ⇒ 档案没变，updated_at 不前进也不留下半次写", async () => {',
+  "0087-member-profile-had-two-clocks-one-never-written-and-one-never-read.md>packages/hub/test/members/service.test.ts:753":
+    'it("换执行器 ⇒ updated_at 前进；同一串再存一次不动（与技能同形）", async () => {',
+  "0087-member-profile-had-two-clocks-one-never-written-and-one-never-read.md>packages/hub/test/members/service.test.ts:786":
+    'it("旧形态反证：整删整插本身不算变更 —— 只改 enabled 才算", async () => {',
+  "0087-member-profile-had-two-clocks-one-never-written-and-one-never-read.md>packages/web/public/group.js:80":
+    "const fmtDateTime = (value) =>",
+  "0087-member-profile-had-two-clocks-one-never-written-and-one-never-read.md>packages/web/public/group.js:6604":
+    "function memberDetail(member) {",
+  "0087-member-profile-had-two-clocks-one-never-written-and-one-never-read.md>packages/web/public/group.js:6653":
+    'h("dt", { text: "入职于" }),',
+  "0087-member-profile-had-two-clocks-one-never-written-and-one-never-read.md>packages/web/public/group.js:6655":
+    'h("dt", { text: "最近更新" }),',
+  "0087-member-profile-had-two-clocks-one-never-written-and-one-never-read.md>test/e2e/group-workbench.spec.ts:4746":
+    'test("成员档案的时刻：换技能与换执行器算不算档案变了", async ({ page }) => {',
+  "0087-member-profile-had-two-clocks-one-never-written-and-one-never-read.md>test/e2e/group-workbench.spec.ts:4756":
+    'await page.route("**/api/events**", (route) =>',
+  "0087-member-profile-had-two-clocks-one-never-written-and-one-never-read.md>test/e2e/group-workbench.spec.ts:4880":
+    "const settlePastSecond = async (since: number) => {",
+  "0087-member-profile-had-two-clocks-one-never-written-and-one-never-read.md>test/e2e/group-workbench.spec.ts:4888":
+    'await expect(view.locator(".detail-list dt")).toHaveText([',
+  "0087-member-profile-had-two-clocks-one-never-written-and-one-never-read.md>test/e2e/group-workbench.spec.ts:4897":
+    "// 线 2（行里读的是服务端那一枚 epoch）：换成 fmtDate 或写死当天都照样绿，",
+  "0087-member-profile-had-two-clocks-one-never-written-and-one-never-read.md>test/e2e/group-workbench.spec.ts:4902":
+    "// 线 3（换技能 = 档案变了）：真 UI 加一行再提交，服务端 updated_at 得前进。",
+  "0087-member-profile-had-two-clocks-one-never-written-and-one-never-read.md>test/e2e/group-workbench.spec.ts:4928":
+    "// 线 3b（技能保存后不整页重载，详情自己也带上新钟）：SSE 已掐断，把 state 拉新的只剩",
+  "0087-member-profile-had-two-clocks-one-never-written-and-one-never-read.md>test/e2e/group-workbench.spec.ts:4935":
+    "// 线 4（摘一行技能也算变更）：DELETE 走的是同一条挂载替换 ⇒ 响应体与库内同读一枚新钟。",
+  "0087-member-profile-had-two-clocks-one-never-written-and-one-never-read.md>test/e2e/group-workbench.spec.ts:4962":
+    'await expect(skillsCard.locator(".skill-row")).toHaveCount(2);',
+  "0087-member-profile-had-two-clocks-one-never-written-and-one-never-read.md>test/e2e/group-workbench.spec.ts:4964":
+    "// 线 5（同一份档案再存一次 ⇒ 不算变更 ⇒ 钟不许动）：与台账「同值写不记一条」同一把尺。",
+  "0087-member-profile-had-two-clocks-one-never-written-and-one-never-read.md>test/e2e/group-workbench.spec.ts:4978":
+    "// 线 6（执行器同形）：换一档 ⇒ 前进，且返回体读到的是加钟后的那一枚；原样再存 ⇒ 不动。",
+  "0087-member-profile-had-two-clocks-one-never-written-and-one-never-read.md>test/e2e/group-workbench.spec.ts:5005":
+    "// 线 7（整页重载后界面读的是最新那一枚）：抓「详情读的是缓存里那枚旧档案」。",
+  "0087-member-profile-had-two-clocks-one-never-written-and-one-never-read.md>test/e2e/group-workbench.spec.ts:5013":
+    "// 线 8（执行器那一支自己那一次动作）：上面 线 3b 已经为技能那一支的 loadCore 站过岗，",
+  "INDEX.md>packages/hub/src/members/service.ts:257":
+    'const BUMP_MEMBER_SQL = "UPDATE members SET updated_at = ? WHERE member_id = ?";',
+  "INDEX.md>packages/web/public/group.js:6656":
+    'h("dd", { text: fmtDateTime(member.updated_at) }),',
+  "INDEX.md>test/e2e/group-workbench.spec.ts:4746":
+    'test("成员档案的时刻：换技能与换执行器算不算档案变了", async ({ page }) => {',
 };
 
 describe("决策文档里的「文件:行号」引用不漂移", () => {

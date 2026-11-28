@@ -4734,3 +4734,310 @@ test("散会的时刻：详情只写开场于，散会/取消那刻既不进结�
 
   expectNoBrowserErrors(browserErrors);
 });
+
+// 0087 红探针 —— members.updated_at 的语义是「这个成员的档案最后一次变」，而挂载
+// （技能/执行器）是档案的一部分：packages/hub/src/members/service.ts 在 setMemberSkills
+// 上方自己写了这条主张，函数体却一次都没碰过那一列（只有 updateMember 与 people.ts 的
+// setAvatar 写）。界面这头 memberDetail 的 dl 只渲染五格 persona，hired_at/updated_at
+// 两个响应字段一个都没落地（round406 零读候选里 memberViewSchema::hired_at 至今在册）。
+// 本用例自己招一个人（同 0081 的立场），不写脏别人的档案；每根线各自对应一次真动作。
+const CLOCK_MEMBER_NAME = "时刻验收成员";
+
+test("成员档案的时刻：换技能与换执行器算不算档案变了", async ({ page }) => {
+  const browserErrors = watchBrowserErrors(page);
+  const view = page.locator("#view");
+
+  // 掐掉这一页的 SSE 推送：`MemberUpdated` 在 `snapshotEventKinds` 里，任何一次挂载写
+  // 都会让客户端在约 140ms 后自己 `refreshAll()` —— 那是把 state 拉新的【第二条线】。
+  // 不挡它，剪掉存档回调里那句 `loadCore()` 也照样绿（0087 变异机 M15/M16 就是这么活
+  // 的），线 8 就永远没有自己的目击者。这里回一发【立刻结束的空流】而不是 abort：链接
+  // 随之落到 down（正是 loadCore 唯一承重的那种时刻），而业务接口一律放行，页面不产生
+  // 任何失败请求或控制台报错。
+  await page.route("**/api/events**", (route) =>
+    route.fulfill({
+      status: 200,
+      headers: { "content-type": "text/event-stream" },
+      body: "",
+    }),
+  );
+
+  // 先起页面：招聘那一发是页面里的 fetch，同 0081 一样不写脏别人的档案。
+  await page.goto(`${webOrigin}/`);
+  const hired = await page.evaluate(async (name) => {
+    const res = await fetch("/api/v1/members", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        name,
+        role_id: "product_director",
+        model_tier: "execution",
+        persona: {
+          style: "先看证据再下结论",
+          values: ["可复现"],
+          honesty: "不确定就说明",
+        },
+        skills: [
+          { skill_id: "clock-skill-a", name: "时刻技能甲" },
+          { skill_id: "clock-skill-b", name: "时刻技能乙" },
+        ],
+        executors: [
+          {
+            seq: 1,
+            kind: "pure-model",
+            config: { kind: "pure-model" },
+            enabled: true,
+          },
+        ],
+        tone: "direct",
+        seat_group_ids: [],
+      }),
+    });
+    const body = (await res.json()) as {
+      member?: { member_id?: string; hired_at?: number; updated_at?: number };
+    };
+    return {
+      status: res.status,
+      memberId: body.member?.member_id ?? "",
+      hiredAt: Number(body.member?.hired_at ?? 0),
+      updatedAt: Number(body.member?.updated_at ?? 0),
+    };
+  }, CLOCK_MEMBER_NAME);
+  expect(hired.status).toBe(201);
+  expect(hired.memberId).not.toBe("");
+  expect(hired.hiredAt).toBeGreaterThan(0);
+  expect(hired.updatedAt).toBe(hired.hiredAt);
+  const memberId = hired.memberId;
+
+  /** 服务端那一枚钟：DOM 判据的对照组，两侧各证各的。 */
+  const readClock = async (): Promise<{ hired: number; updated: number }> =>
+    page.evaluate(async (id) => {
+      const res = await fetch(`/api/v1/members/${id}`);
+      const body = (await res.json()) as {
+        member?: { hired_at?: number; updated_at?: number };
+      };
+      return {
+        hired: Number(body.member?.hired_at ?? 0),
+        updated: Number(body.member?.updated_at ?? 0),
+      };
+    }, memberId);
+
+  /**
+   * 通讯录左侧组织架构是可折叠的 details 树（buildRoleTree 逐档按「这一档有没有人」
+   * 决定 open，父档没人就整棵收起）。所以逐次点开【还关着的】那一档直到没有 ——
+   * 选择器带 `:not([open])`，已展开的不会被点回去。
+   */
+  const expandOrgTree = async () => {
+    const closed = page.locator("#view .org-group:not([open]) > summary");
+    for (let i = 0; i < 40 && (await closed.count()) > 0; i += 1) {
+      await closed.first().click();
+    }
+  };
+  const openClockDetail = async () => {
+    await page.locator('.nav-item[data-nav="contacts"]').click();
+    await expandOrgTree();
+    const row = page
+      .locator("#view .org-members .member-row")
+      .filter({ hasText: CLOCK_MEMBER_NAME });
+    await expect(row).toHaveCount(1);
+    await expect(row).toBeVisible();
+    await row.click();
+    await expect(view.locator(".detail-hero h2")).toHaveText(CLOCK_MEMBER_NAME);
+  };
+
+  /**
+   * 进设置面板并展开这一位的档案卡。#view 是单一路由容器：切到通讯录（或整页重载回到
+   * 默认路由）后 settings 的卡片根本不在 DOM 里，要用就得重新走一遍这条路径。
+   */
+  const openClockSettings = async () => {
+    await page.locator('.nav-item[data-nav="settings"]').click();
+    const memberRow = page
+      .locator("#listContent [data-member-row]")
+      .filter({ has: page.locator("strong", { hasText: CLOCK_MEMBER_NAME }) });
+    await expect(memberRow).toHaveCount(1);
+    await memberRow.click();
+    const skillsCard = page
+      .locator("#view section.card")
+      .filter({ hasText: "技能配置" });
+    const executorsCard = page
+      .locator("#view section.card")
+      .filter({ hasText: "执行器配置" });
+    await expect(skillsCard).toHaveCount(1);
+    await expect(executorsCard).toHaveCount(1);
+    return { skillsCard, executorsCard };
+  };
+
+  /** dt 之后紧跟的那一格 dd —— 标签与值必须是一对，读错格要红。 */
+  const detailLine = (label: string) =>
+    view
+      .locator(".detail-list dt")
+      .filter({ hasText: label })
+      .locator("xpath=following-sibling::dd[1]");
+
+  /**
+   * 把两刻拉开到 1 秒以上：`fmtDateTime` 只到秒，入职与变更挤在同一秒时「读对列」
+   * 与「读错列」渲染成同一个字符串，判据就成了看运气（0086 的 M4 就是这么活的）。
+   */
+  const settlePastSecond = async (since: number) => {
+    while (Date.now() - since < 1100) await page.waitForTimeout(100);
+  };
+
+  await page.goto(`${webOrigin}/`);
+  await openClockDetail();
+
+  // 线 1（两行进结论区）：未修时这一发红 —— dl 里压根没有时刻这一格。
+  await expect(view.locator(".detail-list dt")).toHaveText([
+    "口头禅 / 风格",
+    "价值观",
+    "诚实边界",
+    "语气",
+    "语音",
+    "入职于",
+    "最近更新",
+  ]);
+  // 线 2（行里读的是服务端那一枚 epoch）：换成 fmtDate 或写死当天都照样绿，
+  // 所以判据是 fmtDateTime(hired_at) 的同一个字符串。
+  await expect(detailLine("入职于")).toHaveText(fmtLocal(hired.hiredAt));
+  await expect(detailLine("最近更新")).toHaveText(fmtLocal(hired.updatedAt));
+
+  // 线 3（换技能 = 档案变了）：真 UI 加一行再提交，服务端 updated_at 得前进。
+  // 先等过一秒再动第一次写：页面跑得快时（机器空载约 900ms 走完全部）这次提交会与
+  // `hired_at` 挤进同一秒，下面那发尺子自证（两刻的 fmtDateTime 必须分得开）就看运气。
+  await settlePastSecond(hired.hiredAt);
+  const skillsCard = (await openClockSettings()).skillsCard;
+  await skillsCard
+    .getByRole("button", { name: "添加技能", exact: true })
+    .click();
+  await skillsCard.locator('[name="skill_id"]').nth(2).fill("clock-skill-c");
+  await skillsCard.locator('[name="skill_name"]').nth(2).fill("时刻技能丙");
+  const savedSkills = page.waitForResponse(
+    (response) =>
+      response.request().method() === "POST" &&
+      new URL(response.url()).pathname === `/api/v1/members/${memberId}/skills`,
+  );
+  await skillsCard
+    .getByRole("button", { name: "保存技能列表", exact: true })
+    .click();
+  expect((await savedSkills).ok()).toBe(true);
+  await expect(page.locator("#toastRegion")).toContainText("技能已保存");
+  const afterSkill = await readClock();
+  expect(afterSkill.hired).toBe(hired.hiredAt);
+  expect(afterSkill.updated).toBeGreaterThan(hired.hiredAt);
+  // 尺子自证：fmtDateTime 只到秒，两刻挤进同一秒时「前进没前进」渲染成同一个串。
+  expect(fmtLocal(afterSkill.updated)).not.toBe(fmtLocal(hired.hiredAt));
+
+  // 线 3b（技能保存后不整页重载，详情自己也带上新钟）：SSE 已掐断，把 state 拉新的只剩
+  // 存档回调里那句 loadCore —— 剪掉它（变异机 M15），这一发就从旧 state 渲染出入职那刻
+  // 的旧钟。没有这一发，技能侧那根 loadCore 在「保存 → 重载」之间没有任何 DOM 读者。
+  await openClockDetail();
+  await expect(detailLine("最近更新")).toHaveText(fmtLocal(afterSkill.updated));
+  await openClockSettings();
+
+  // 线 4（摘一行技能也算变更）：DELETE 走的是同一条挂载替换 ⇒ 响应体与库内同读一枚新钟。
+  // 设置页句柄是开进来时拿的，期间没重载所以照用。
+  const skillDelete = skillsCard.getByRole("button", {
+    name: "删除这一件技能",
+    exact: true,
+  });
+  await expect(skillDelete).toHaveCount(3);
+  const deleted = page.waitForResponse(
+    (response) =>
+      response.request().method() === "DELETE" &&
+      new URL(response.url()).pathname ===
+        `/api/v1/members/${memberId}/skills/clock-skill-a`,
+  );
+  await skillDelete.first().click();
+  const deletedBody = (await (await deleted).json()) as {
+    member?: { updated_at?: number };
+  };
+  const afterDelete = await readClock();
+  expect(Number(deletedBody.member?.updated_at ?? 0)).toBe(afterDelete.updated);
+  expect(afterDelete.updated).toBeGreaterThanOrEqual(afterSkill.updated);
+  expect(await readMemberSkills(page, memberId)).toEqual([
+    "clock-skill-b",
+    "clock-skill-c",
+  ]);
+  // 线 4 的另一半（删除回调自己那一句 loadCore）：卡片是从 state 渲染的，state 没拉新
+  // 就还挂着那一行（变异机 M21 剪掉 removeSkill 里的 loadCore ⇒ 这里仍是 3 行）。
+  // 放在线 5 那次「保存」之前 —— 提交也会重绘卡片，晚一步就分不清是谁拉的。
+  await expect(skillsCard.locator(".skill-row")).toHaveCount(2);
+
+  // 线 5（同一份档案再存一次 ⇒ 不算变更 ⇒ 钟不许动）：与台账「同值写不记一条」同一把尺。
+  // 这一发是「判定恒真」这类实现的唯一目击者 —— 前进方向的断言全都抓不住它。
+  const resaved = page.waitForResponse(
+    (response) =>
+      response.request().method() === "POST" &&
+      new URL(response.url()).pathname === `/api/v1/members/${memberId}/skills`,
+  );
+  await skillsCard
+    .getByRole("button", { name: "保存技能列表", exact: true })
+    .click();
+  expect((await resaved).ok()).toBe(true);
+  const afterResave = await readClock();
+  expect(afterResave.updated).toBe(afterDelete.updated);
+
+  // 线 6（执行器同形）：换一档 ⇒ 前进，且返回体读到的是加钟后的那一枚；原样再存 ⇒ 不动。
+  const cliKind = (await openClockSettings()).executorsCard
+    .locator('[name="executor_kind"]')
+    .nth(0);
+  await cliKind.selectOption("claude-cli");
+  const savedExecutors = page.waitForResponse(
+    (response) =>
+      response.request().method() === "POST" &&
+      new URL(response.url()).pathname ===
+        `/api/v1/members/${memberId}/executors`,
+  );
+  await page
+    .locator("#view section.card")
+    .filter({ hasText: "执行器配置" })
+    .getByRole("button", { name: "保存执行器列表", exact: true })
+    .click();
+  expect((await savedExecutors).ok()).toBe(true);
+  const executorBody = (await (await savedExecutors).json()) as {
+    member?: { updated_at?: number };
+  };
+  const afterExecutor = await readClock();
+  expect(Number(executorBody.member?.updated_at ?? 0)).toBe(
+    afterExecutor.updated,
+  );
+  expect(afterExecutor.updated).toBeGreaterThan(afterResave.updated);
+  await expect(page.locator("#toastRegion")).toContainText("执行器已保存");
+
+  // 线 7（整页重载后界面读的是最新那一枚）：抓「详情读的是缓存里那枚旧档案」。
+  await page.reload();
+  await openClockDetail();
+  await expect(detailLine("入职于")).toHaveText(fmtLocal(hired.hiredAt));
+  await expect(detailLine("最近更新")).toHaveText(
+    fmtLocal(afterExecutor.updated),
+  );
+
+  // 线 8（执行器那一支自己那一次动作）：上面 线 3b 已经为技能那一支的 loadCore 站过岗，
+  // 这一发要的是执行器保存后回调里那一句 —— 两支各自独立，剪掉一支另一支全绿抓不住。
+  // SSE 已在用例开头掐断，这里再【不 reload】：详情读的是 state，而 state 只可能由
+  // 执行器存档成功后那句 loadCore 拉新（readClock 走接口，抓不到这一格）。
+  await settlePastSecond(afterExecutor.updated);
+  const thirdSettings = await openClockSettings();
+  await thirdSettings.executorsCard
+    .locator('[name="executor_kind"]')
+    .nth(0)
+    .selectOption("qoder-cli");
+  const savedThird = page.waitForResponse(
+    (response) =>
+      response.request().method() === "POST" &&
+      new URL(response.url()).pathname ===
+        `/api/v1/members/${memberId}/executors`,
+  );
+  await thirdSettings.executorsCard
+    .getByRole("button", { name: "保存执行器列表", exact: true })
+    .click();
+  expect((await savedThird).ok()).toBe(true);
+  const afterNoReload = await readClock();
+  expect(afterNoReload.updated).toBeGreaterThan(afterExecutor.updated);
+  expect(afterNoReload.hired).toBe(hired.hiredAt);
+  await openClockDetail();
+  await expect(detailLine("入职于")).toHaveText(fmtLocal(hired.hiredAt));
+  await expect(detailLine("最近更新")).toHaveText(
+    fmtLocal(afterNoReload.updated),
+  );
+
+  expectNoBrowserErrors(browserErrors);
+});

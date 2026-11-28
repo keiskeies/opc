@@ -253,6 +253,9 @@ const UPDATE_MEMBER_SQL =
   "tone = ?, voice_json = COALESCE(?, voice_json), status = ?, updated_at = ? " +
   "WHERE member_id = ?";
 
+/** 挂载变更加钟：只推 updated_at，档案数据列一个字都不动（数据列由整删整插自己写）。 */
+const BUMP_MEMBER_SQL = "UPDATE members SET updated_at = ? WHERE member_id = ?";
+
 /** 挂载替换（set 语义）：整删整插，差集计算留给调用方 —— 台账只认「最终形状变了没」。 */
 const DELETE_SKILLS_SQL = "DELETE FROM member_skills WHERE member_id = ?";
 
@@ -482,6 +485,18 @@ function writeExecutors(
     assertParamCount(INSERT_EXECUTOR_SQL, params);
     db.prepare(INSERT_EXECUTOR_SQL).run(...(params as never[]));
   }
+}
+
+/** 档案真的变了才加钟：updated_at 语义是「这个成员的档案最后一次变」，挂载是档案的一部分。 */
+function bumpMemberUpdatedAt(
+  db: DbLike,
+  memberId: string,
+  nowMs: number,
+): void {
+  const params: unknown[] = [nowMs, memberId];
+  assertSingleStatement(BUMP_MEMBER_SQL);
+  assertParamCount(BUMP_MEMBER_SQL, params);
+  db.prepare(BUMP_MEMBER_SQL).run(...(params as never[]));
 }
 
 function appendHireEvent(
@@ -810,8 +825,9 @@ export async function updateMember(
 
 /**
  * 替换技能挂载（set 语义）。台账只在最终形状真的变了时记一条 skills_changed ——
- * 文件头「同值写不记台账」。挂载替换不影响 members 行的 updated_at？影响：
- * updated_at 语义是「这个成员的档案最后一次变」，挂载是档案的一部分。
+ * 文件头「同值写不记台账」。同一判定也决定 members.updated_at 加不加钟（0067 §5b：
+ * 「随写而变」的字段要有正向断言承重）：挂载是档案的一部分，变了就加钟，
+ * 同值写连钟都不许动，否则「最近更新」会被无效写刷成假新。
  */
 export async function setMemberSkills(
   w: Writer,
@@ -845,8 +861,10 @@ export async function setMemberSkills(
     db.prepare(DELETE_SKILLS_SQL).run(...(delParams as never[]));
     writeSkills(db, o.memberId, o.skills);
 
-    const after = mustView(db, o.memberId);
+    let after = mustView(db, o.memberId);
     if (skillsKey(before.skills) !== skillsKey(after.skills)) {
+      bumpMemberUpdatedAt(db, o.memberId, o.nowMs);
+      after = mustView(db, o.memberId);
       appendHireEvent(db, o.memberId, "skills_changed", before, after, o.nowMs);
     }
     const auditSeq = appendAudit(
@@ -914,8 +932,10 @@ export async function setMemberExecutors(
     db.prepare(DELETE_EXECUTORS_SQL).run(...(delParams as never[]));
     writeExecutors(db, o.memberId, o.executors);
 
-    const after = mustView(db, o.memberId);
+    let after = mustView(db, o.memberId);
     if (executorsKey(before.executors) !== executorsKey(after.executors)) {
+      bumpMemberUpdatedAt(db, o.memberId, o.nowMs);
+      after = mustView(db, o.memberId);
       appendHireEvent(
         db,
         o.memberId,
